@@ -39,8 +39,10 @@ A touched .py adds one `git cat-file --batch`. A removed path or name adds `ls-t
 --batch`, so 5 at most. Each tracked .md is read once, only when something was removed. A touched .py also
 loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
 The report adds, for a changed non-Markdown file, one `ls-tree` of docs/decisions and the mechanisms file (none when
-the run already listed the whole tree) and the `cat-file --batch`, which reads each decision's Home line and the
-mechanisms file once. A changed RULE_FILES file adds its base and head blobs and the mechanisms file to that read.
+the run already listed the whole tree) and the `cat-file --batch`, which reads each decision record whole (a regex
+then takes its Home line) and the mechanisms file once. A changed RULE_FILES file adds its base and head blobs and
+the mechanisms file to that read. A guard row's anchor edit adds the head blob of each hooks/guard*.py, and one
+`ls-tree` of hooks/ when the run listed no whole tree, to find the module that holds the rule.
 """
 import argparse
 import ast
@@ -54,7 +56,7 @@ import sys
 sys.dont_write_bytecode = True  # the cost contract: a run writes no file, so no .pyc for the import below
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
-from rule_audit import ANCHOR_RE, RULE_FILES  # noqa: E402  the one home of the anchor pattern and the rule files
+from rule_audit import ANCHOR_RE, RULE_FILES, guard_rule_names  # noqa: E402  the one home of the anchor pattern, the rule files and the rule ids a guard module names
 
 RECORDS_PAGE = "docs/records.md"
 RUN = r"[\w./@+~-]+"  # a run of path characters; a cite is one whole run, so a `-` or `.` before a path is no boundary
@@ -265,6 +267,7 @@ class Range:
         self.base, self.head, self.removed, self.renamed, self.batch = base, head, removed, renamed, batch
         self.unknowns = []
         self.tree = None  # the head tree entries once a read listed the whole tree; the report reuses it
+        self.guard_ids = None  # {guard module: rule ids it passes to refuse/record}, read once by the report
         self.changed = set(removed) | set(renamed) | set(renamed.values()) | set(modified) | set(added)
         self.py_files = {p: p for p in modified if p.endswith(".py")}
         self.py_files.update({old: new for old, new in renamed.items() if old.endswith(".py") and new.endswith(".py")})
@@ -431,22 +434,51 @@ def decisions_dir():
 
 
 def mechanism_rows(rng):
-    """The `rules` object of lint/rule_mechanisms.json at head, or None for a repo that has none. One read."""
+    """{slug: row} of lint/rule_mechanisms.json at head, or None for a repo that has none. One read. A file that
+    is not JSON, or whose rules or rows are not objects with a `mechanism` object, raises Unknown naming the file:
+    a row's fields are read as a dict afterwards."""
     blob = rng.batch.get("%s:%s" % (rng.head, MECHANISMS))
     if blob is None:
         return None
-    rules = json.loads(blob.decode("utf-8", "replace")).get("rules")
+    try:
+        rules = json.loads(blob.decode("utf-8", "replace"))
+    except ValueError as exc:
+        raise Unknown("%s is not JSON (%s)" % (MECHANISMS, exc))
+    rules = rules.get("rules") if isinstance(rules, dict) else None
     if not isinstance(rules, dict):
         raise Unknown("%s holds no rules object" % MECHANISMS)
+    for slug, row in rules.items():
+        if not isinstance(row, dict) or not isinstance(row.get("mechanism"), dict):
+            raise Unknown("%s: the row for %s is not an object with a mechanism object" % (MECHANISMS, slug))
     return rules
+
+
+def guard_holders(rng, ref):
+    """The guard modules at head (hooks/guard*.py) whose refuse(), record() or ask_command() call names `ref`, as
+    rule_audit.guard_rule_names reads them. The module list reuses the whole-tree listing, else one `ls-tree` of
+    hooks/ (a guard row's anchor edit only). A module that does not parse is no holder."""
+    if rng.guard_ids is None:
+        entries = rng.tree if rng.tree is not None else head_tree(rng.head, "hooks/")
+        rng.guard_ids = {}
+        for path in sorted(p for p in tree_paths(entries) if GUARD_MODULE.match(p)):
+            blob = rng.batch.get("%s:%s" % (rng.head, path))
+            try:
+                rng.guard_ids[path] = guard_rule_names((blob or b"").decode("utf-8", "replace"), path)
+            except (SyntaxError, ValueError):
+                rng.guard_ids[path] = set()
+    return [path for path, ids in rng.guard_ids.items() if ref in ids]
 
 
 def holder_note(rng, mechanism):
     """The holder of a mechanism row and whether the range touched it, as one phrase."""
     kind, ref = mechanism.get("kind"), mechanism.get("ref")
     if kind == "guard":
-        hit = sorted(p for p in rng.changed if GUARD_MODULE.match(p))
-        return "holder %s %s" % (", ".join(hit) if hit else "hooks/guard*.py", "touched" if hit else "untouched")
+        held = guard_holders(rng, ref) if isinstance(ref, str) else []
+        if not held:
+            hit = sorted(p for p in rng.changed if GUARD_MODULE.match(p))
+            return "holder not identified; %s" % ("guard modules changed: " + ", ".join(hit) if hit
+                                                  else "hooks/guard*.py untouched")
+        return "holder " + ", ".join("%s %s" % (p, "touched" if p in rng.changed else "untouched") for p in held)
     if kind == "check" and isinstance(ref, str):
         return "holder %s %s" % (ref, "touched" if ref in rng.changed else "untouched")
     if kind == "ci":
@@ -513,8 +545,13 @@ def report(rng):
     if code:
         entries = rng.tree if rng.tree is not None else head_tree(rng.head, decisions_dir() + "/", MECHANISMS)
     present = entries is None or any(e.split("\t", 1)[1] == MECHANISMS for e in entries)
-    rules = mechanism_rows(rng) if present else None
-    lines = anchor_report(rng, rules) if rules is not None else []
+    rules = None
+    if present:
+        try:
+            rules = mechanism_rows(rng)
+        except Unknown as exc:  # the Home half still prints, without rows
+            rng.unknowns.append(str(exc))
+    lines =anchor_report(rng, rules) if rules is not None else []
     return lines + (home_report(rng, rules, entries) if code else [])
 
 
