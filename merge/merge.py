@@ -50,6 +50,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
     raise ImportError(_why) from e  # an importer, such as the merge guard, must see a failed load, not a process exit
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
+from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -1378,7 +1379,7 @@ def records_proof(wt, base_ref):
 
 CI_JOB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "ci-job")  # the lint steps of a job, read from the workflow; the tool brings it
 CI_SCOPE = ".github/scripts/ci-scope.sh"  # the repo's one home of which jobs read which paths; a repo without it never takes a small move
-DRAFT_SKIP_CHECK = "all-jobs-passed"  # the one required check a draft run skips (actions/all-jobs-passed): its skip means the ready run is still to come, not green
+DRAFT_SKIP_CHECK = REQUIRED_CHECK  # the one required check a draft run skips (actions/all-jobs-passed): its skip means the ready run is still to come, not green
 LINT_SECONDS = 1200  # the bound on the lint run of the merge result, and again on the suites it hits; the lock is extended to cover each
 SUITE_LINE = re.compile(r"(python3|node|bash) ([\w./-]+\.(?:py|mjs|sh))(?: [^|&;`<>$(){}]*)?")  # a suite line run as written: no shell syntax
 

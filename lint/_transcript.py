@@ -97,6 +97,16 @@ def tool_uses(rec):
             yield b
 
 
+def tool_results(rec):
+    msg = rec.get("message") or {}
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return
+    for b in content:
+        if isinstance(b, dict) and b.get("type") == "tool_result":
+            yield b
+
+
 def records_after_last_human(records):
     last_human_idx = None
     for i, rec in enumerate(records):
@@ -266,11 +276,14 @@ def last_incoming_index(records, acks=None):
 
     `acks` maps a sender id to the send targets that reach it. A peer message from that sender, after a
     send of the same turn to one of those targets, is the ack of that send: it starts no turn, and the
-    sends before it stay in the turn."""
+    sends before it stay in the turn. The ack uses up that sender's targets, so only its first reply is an
+    ack; a later message from it starts a turn."""
     found, sent = None, set()
     for i, rec in enumerate(records):
         if is_incoming(rec):
-            if acks and acks.get(peer_sender(rec), set()) & sent:
+            reach = acks.get(peer_sender(rec), set()) if acks else set()
+            if reach & sent:
+                sent -= reach
                 continue
             found, sent = i, set()
         elif acks and not rec.get("isSidechain"):
@@ -290,13 +303,17 @@ def _is_write(d):
     return not isinstance(verb, str) or verb in WRITE_VERBS
 
 
+def is_n(v, n):
+    """True when the field value v is the item number n: an int (not a bool) or a digit string."""
+    return (isinstance(v, int) and not isinstance(v, bool) and v == int(n)) or (
+        isinstance(v, str) and v.isdigit() and int(v) == int(n))
+
+
 def _has_n(node, n):
     if isinstance(node, dict):
         if not _is_write(node):
             return False
-        v = node.get("n")
-        if (isinstance(v, int) and not isinstance(v, bool) and v == int(n)) or (
-                isinstance(v, str) and v.isdigit() and int(v) == int(n)):
+        if is_n(node.get("n"), n):
             return True
         return any(_has_n(c, n) for c in node.values())
     return isinstance(node, list) and any(_has_n(c, n) for c in node)

@@ -11,8 +11,10 @@ CMD = [os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "ve
 UTF8 = {"PYTHONIOENCODING": "utf-8"}  # the child prints the real \u2714/\u2718 marks; a cp1252 stdout cannot
 HB_FORMAT = re.compile(r"^verdict: still running, [0-9][0-9.]*s?, log=")
 
-def run(code, log=None, extra=None, timeout=None, launcher=None, shell=None):
-    """`shell` is an sh -c line in which {cmd} stands for the verdict command, e.g. a pipe or a redirect."""
+def run(code=None, log=None, extra=None, timeout=None, launcher=None, shell=None, argv=None, shim=None):
+    """`shell` is an sh -c line in which {cmd} stands for the verdict command, e.g. a pipe or a redirect.
+    `argv` runs `verdict <argv...>` in place of the script. `shim` is (name, body): a fake executable `name`
+    in a folder that comes first on PATH, so verdict sees argv[0] as that fake."""
     env = dict(os.environ)
     env.pop("VERDICT_LOG", None)
     env.pop("VERDICT_HEARTBEAT", None)
@@ -20,9 +22,19 @@ def run(code, log=None, extra=None, timeout=None, launcher=None, shell=None):
     if log: env["VERDICT_LOG"] = log
     env.update(extra or {})
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
-        script = os.path.join(d, "fx.py")
-        open(script, "w").write(code)
-        cmd = (launcher or [sys.executable, V]) + [sys.executable, script]
+        if shim:
+            bindir = os.path.join(d, "bin")
+            os.mkdir(bindir)
+            fake = os.path.join(bindir, shim[0])
+            with open(fake, "w") as g: g.write(shim[1])
+            os.chmod(fake, 0o755)
+            env["PATH"] = bindir + os.pathsep + env.get("PATH", "")
+        if argv is not None:
+            cmd = [sys.executable, V] + argv
+        else:
+            script = os.path.join(d, "fx.py")
+            open(script, "w").write(code)
+            cmd = (launcher or [sys.executable, V]) + [sys.executable, script]
         if shell: cmd = ["sh", "-c", shell.replace("{cmd}", " ".join(shlex.quote(p) for p in cmd))]
         return subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout)
 
@@ -688,6 +700,142 @@ class Skips(unittest.TestCase):
         self.assertEqual(r.returncode, 0, (r.stdout[:300], r.stderr[-300:]))
         self.assertNotIn("log unreadable", first, r.stdout[:300])
         self.assertEqual(first.split()[:1], ["SKIP"], r.stdout[:300])
+
+
+def shim_script(*lines):
+    """A POSIX shell fake: it prints the token SHIM-RAN, then each line, and exits 0."""
+    return "#!/bin/sh\necho SHIM-RAN\n" + "".join("echo '%s'\n" % s for s in lines) + "exit 0\n"
+
+SHIM_SKIP = "the fake is a POSIX shell script; verdict names a Windows .cmd shim differently"
+
+class NoTestCount(unittest.TestCase):
+    """A run with no test count is unknown, so it is never PASS (verification-report-unknown-reads).
+    FAIL for a success marker with no count, and for a test command by argv with no count. PASS for a
+    run that is no counted test, and for a counted run wherever its count sits."""
+    BUILD_OK = "** BUILD SUCCEEDED **"
+    ST_PASS = "Test run with 3 tests passed after 0.001 seconds."  # Swift Testing's summary, no XCTest line
+    XCT_12 = "Executed 12 tests, with 0 failures (0 unexpected) in 1.2 (1.3) seconds"
+    assert_pass = Skips.assert_pass  # one home for the PASS check
+
+    def run_case(self, code=None, argv=None, shim=None):
+        """Run one case with its log in this run's folder. Returns the run and the log's text."""
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            log = os.path.join(d, "v.log")
+            r = run(code, log, argv=argv, shim=shim, timeout=120)
+            with open(log, encoding="utf-8", errors="replace") as f: full = f.read()
+        return r, full
+
+    def assert_no_count_fail(self, r):
+        first = r.stdout.splitlines()[0] if r.stdout.strip() else ""
+        self.assertEqual(r.returncode, 1, (r.stdout[:300], r.stderr[-300:]))
+        self.assertTrue(first.startswith("FAIL "), r.stdout[:300])
+        self.assertIn("no test count", first, first)
+
+    def test_success_marker_with_no_count_is_fail(self):
+        """Case 1: exit 0, a success marker, and no Executed line or Swift Testing line."""
+        for marker in ("** TEST SUCCEEDED **", "** TEST EXECUTE SUCCEEDED **"):
+            with self.subTest(marker=marker):
+                r, full = self.run_case(code=printing("Test Suite All tests started\n%s\n" % marker))
+                self.assert_no_count_fail(r)
+
+    def test_success_marker_in_full_size_output_with_no_count_is_fail(self):
+        """The marker is early in 2 MiB of output with no count: the whole run is read, and still no count."""
+        code = ("import sys\n"
+                "sys.stdout.write('** TEST SUCCEEDED **\\n')\n"
+                "line = 'x' * 1023 + '\\n'\n"
+                "for _ in range(2048):\n"
+                "    sys.stdout.write(line)\n")
+        r, full = self.run_case(code=code)
+        self.assert_no_count_fail(r)
+
+    @unittest.skipIf(os.name == "nt", SHIM_SKIP)
+    def test_xcodebuild_test_by_argv_with_no_count_is_fail(self):
+        """Case 2: argv[0] is xcodebuild or xcodebuild.exe, and test or test-without-building is an argument."""
+        commands = (
+            ["xcodebuild", "test", "-scheme", "App"],
+            ["xcodebuild", "test-without-building", "-scheme", "App"],
+            ["xcodebuild", "-scheme", "App", "test"],
+            ["xcodebuild.exe", "test", "-scheme", "App"],
+        )
+        for argv in commands:
+            with self.subTest(argv=" ".join(argv)):
+                r, full = self.run_case(argv=argv, shim=(argv[0], shim_script("Running tests")))
+                self.assertIn("SHIM-RAN", full, "the fake never ran, so this run proves nothing")
+                self.assert_no_count_fail(r)
+
+    @unittest.skipIf(os.name == "nt", SHIM_SKIP)
+    def test_swift_test_by_argv_with_no_count_is_fail(self):
+        """Case 2: argv[0] is swift and argv[1] is test."""
+        r, full = self.run_case(argv=["swift", "test"], shim=("swift", shim_script("Running tests")))
+        self.assertIn("SHIM-RAN", full, "the fake never ran, so this run proves nothing")
+        self.assert_no_count_fail(r)
+
+    def test_build_marker_and_plain_runs_stay_pass(self):
+        """Case 3: a build-for-testing marker, a Swift Testing pass line and a command with no output are PASS."""
+        cases = {
+            "TEST BUILD SUCCEEDED, no tests expected": printing("** TEST BUILD SUCCEEDED **\n"),
+            "Swift Testing pass line alone": printing(self.ST_PASS + "\n"),
+            "plain command, no output": "pass\n",
+        }
+        for name, code in cases.items():
+            with self.subTest(name):
+                r, full = self.run_case(code=code)
+                self.assert_pass(r)
+
+    @unittest.skipIf(os.name == "nt", SHIM_SKIP)
+    def test_xcodebuild_build_and_swift_build_by_argv_stay_pass(self):
+        """Case 3: a build is not a test run, so it needs no count. Each fake prints its own success line."""
+        for name, body in (("xcodebuild", shim_script(self.BUILD_OK)), ("swift", shim_script("Build complete!"))):
+            with self.subTest(name):
+                r, full = self.run_case(argv=[name, "build"], shim=(name, body))
+                self.assertIn("SHIM-RAN", full, "the fake never ran, so this run proves nothing")
+                self.assert_pass(r)
+
+    @unittest.skipIf(os.name == "nt", SHIM_SKIP)
+    def test_xcodebuild_test_by_argv_with_count_stays_pass(self):
+        """Case 3: the argv route alone never fails a run; a count that is read passes it."""
+        r, full = self.run_case(argv=["xcodebuild", "test", "-scheme", "App"],
+                                shim=("xcodebuild", shim_script(self.XCT_12, "** TEST SUCCEEDED **")))
+        self.assertIn("SHIM-RAN", full, "the fake never ran, so this run proves nothing")
+        self.assert_pass(r)
+
+    def test_count_more_than_1_mib_before_the_marker_stays_pass(self):
+        """Case 3: the count may sit anywhere in the run. Here it is 2 MiB before the marker, past any tail read."""
+        code = ("import sys\n"
+                "sys.stdout.write(%s + '\\n')\n"
+                "line = 'x' * 1023 + '\\n'\n"
+                "for _ in range(2048):\n"
+                "    sys.stdout.write(line)\n"
+                "sys.stdout.write('** TEST SUCCEEDED **\\n')\n") % ascii(self.XCT_12)
+        r, full = self.run_case(code=code)
+        self.assert_pass(r)
+
+    def test_echoed_marker_inside_a_line_with_no_count_is_pass(self):
+        """Case 1, echoed marker: a grep hit or a source line that holds the marker mid-line is not the runner's
+        marker, so the run is no test run and needs no count."""
+        for line in ("bin/verdict:114:    if b\"** TEST SUCCEEDED **\" in buf",
+                     "foo: ** TEST SUCCEEDED **",
+                     "log.txt:3:** TEST EXECUTE SUCCEEDED **"):
+            with self.subTest(line=line):
+                r, full = self.run_case(code=printing(line + "\n"))
+                self.assertIn(line, full, "the echoed line never reached the log")
+                self.assert_pass(r)
+
+    def test_marker_at_line_start_after_space_or_colour_with_no_count_is_fail(self):
+        """Case 1 keeps its FAIL: a marker that starts a line, after spaces, a tab or a colour code, is the runner's marker."""
+        for line in ("  ** TEST SUCCEEDED **", "\t** TEST EXECUTE SUCCEEDED **", "\x1b[1m** TEST SUCCEEDED **\x1b[0m"):
+            with self.subTest(line=ascii(line)):
+                r, full = self.run_case(code=printing(line + "\n"))
+                self.assert_no_count_fail(r)
+
+    @unittest.skipIf(os.name == "nt", SHIM_SKIP)
+    def test_swift_test_info_flags_by_argv_with_no_count_are_pass(self):
+        """Case 2: swift test with an info flag runs no tests, so it needs no count and reads PASS."""
+        for flag in ("--list-tests", "-l", "--help", "-h", "--show-codecov-path", "--show-bin-path"):
+            with self.subTest(flag=flag):
+                r, full = self.run_case(argv=["swift", "test", flag], shim=("swift", shim_script("AppTests.testFoo")))
+                self.assertIn("SHIM-RAN", full, "the fake never ran, so this run proves nothing")
+                self.assert_pass(r)
 
 
 def tearDownModule():
