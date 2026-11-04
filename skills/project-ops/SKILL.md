@@ -68,7 +68,7 @@ publishes nothing: the waiting-page writer splices the block into the repo's one
 publishes it (skill `waiting-page`). At triage start, when the repo has no waiting page, triage makes
 it, with no separate grant (skill `waiting-page`, "Make a repo's page"). The scaffolded `roadmap/README.md`
 (`templates/record-branch/roadmap/README.md.tmpl`) holds the step file shape.
-An adopting repo keeps its record in `roadmap/data/` on the record branch, and the builder
+An adopting repo keeps its record in `roadmap/data/` on the record branch, and the roadmap build script
 reads it there.
 
 ## Shared resources

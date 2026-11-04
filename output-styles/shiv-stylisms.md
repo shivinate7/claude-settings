@@ -72,7 +72,7 @@ Short and plain are one goal. Never trade one for the other.
   field as `{powershell, mac}`, and the step says "paste the command below".<!-- rule:style-command-in-item -->
 - A table that compares things carries a column for what good looks like: the gold standard or
   the target. Each row then shows its gap.<!-- rule:style-table-gold-column -->
-- Give times in US Central, 24-hour clock, with the zone named once, such as 21:40 CDT. Never
+- Give times in US Central, 24-hour clock, with the zone on every time, such as 21:40 CDT. Never
   show me UTC.<!-- rule:style-time-central-24h -->
 - Give no time estimate for agent work. State a time only from a measured range of the same
   kind, with its sample count, such as "PR CI 8-10 min, 13 runs". With no measure, give

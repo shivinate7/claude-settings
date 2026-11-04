@@ -14339,6 +14339,7 @@ WP_WRITER = os.path.join(WP_DIR, "writer.html")    # main's page with the writer
 WP_DESIGN_LIVE = os.path.join(WP_DIR, "design-live.html")    # main's page with only the designData block live
 WP_ROADMAP_LIVE = os.path.join(WP_DIR, "roadmap-live.html")  # main's page with only the roadmap block live
 WP_TITLED_EMPTY = os.path.join(WP_DIR, "titled-empty.html")  # main's page with its own title and both blocks empty
+WP_QUEUE_EMPTY = os.path.join(WP_DIR, "queue-empty.html")    # main's page titled with the old name Queue, both blocks empty
 WP_SPACED = os.path.join(WP_DIR, "spaced-empty.html")        # main's raw page with designData written as "{ }"
 WP_SOURCE = os.path.join(REPO, "skills", "waiting-page", "page.html")  # read at run time, not a fixed text
 WP_STAMP = "waiting-page-built"
@@ -14396,7 +14397,8 @@ def wp_write_pages():
     pages = ((WP_CURRENT, template), (WP_BEHIND, behind), (WP_WRITER, wp_writer(template)),
              (WP_DESIGN_LIVE, wp_writer(template, roadmap=False, title=False)),
              (WP_ROADMAP_LIVE, wp_writer(template, design=False, title=False)),
-             (WP_TITLED_EMPTY, wp_writer(template, design=False, roadmap=False, title_text="claude-settings Queue")),
+             (WP_TITLED_EMPTY, wp_writer(template, design=False, roadmap=False, title_text="claude-settings Cockpit")),
+             (WP_QUEUE_EMPTY, wp_writer(template, design=False, roadmap=False, title_text="Queue")),
              (WP_SPACED, wp_writer(template, roadmap=False, title=False, design_text="{ }")))
     for path, text in pages:
         wp_put(path, text)
@@ -14464,7 +14466,7 @@ def build_page_nomain():
 
 
 lazy_fixture([WP_GUARD, WP_CURRENT, WP_BEHIND, WP_WRITER, WP_DESIGN_LIVE, WP_ROADMAP_LIVE, WP_TITLED_EMPTY,
-              WP_SPACED], build_page_checkout)
+              WP_QUEUE_EMPTY, WP_SPACED], build_page_checkout)
 lazy_fixture([WP_GUARD_NOMAIN], build_page_nomain)
 
 
@@ -14492,6 +14494,10 @@ wp_publish("main's page with designData written as a space-padded empty object i
            rule="page-stale")
 wp_publish("main's page as a first publish, with no url, is allowed", "allow", WP_CURRENT, url=None)
 wp_publish("a page with its own title and empty blocks, as a --write builds it, is allowed", "allow", WP_TITLED_EMPTY)
+# Main's page with the old title and both blocks empty: its text matches main, so only its title differs. The
+# title text alone must not count as data, or the empty page passes the rule main applies to its own page.
+wp_publish("an untouched page titled Queue with empty blocks is refused, as main's page is", "deny", WP_QUEUE_EMPTY,
+           rule="page-stale")
 wp_publish("a page with live designData and an empty roadmap is allowed", "allow", WP_DESIGN_LIVE)
 wp_publish("a page with an empty designData and a live roadmap is allowed", "allow", WP_ROADMAP_LIVE)
 wp_publish("a page the writer's --write builds is allowed", "allow", WP_WRITER)
@@ -14537,6 +14543,28 @@ def wp_stamp_case():
 
 FIXTURELESS_CHECKS.add(wp_stamp_case)  # builds only the copy it runs, so a family run does not build every fixture
 LOG_CHECKS_EXTRA.append(("page-stale: an allowed publish of a page with live data writes the stamp", wp_stamp_case))
+
+
+def page_empty_reason_names_the_page_case():
+    """The remedy PAGE_EMPTY_REASON gives names the page "<repo> <page name>", the name in skills/waiting-page/splice.py
+    The old "<repo> Queue" is checked first, so a failure names the old text, not a missing name."""
+    guard = _load_guard_module()
+    reason = guard.PAGE_EMPTY_REASON
+    if "<repo> Queue" in reason:
+        return False, "PAGE_EMPTY_REASON still tells the writer to title the page \"<repo> Queue\""
+    with open(os.path.join(REPO, "skills", "waiting-page", "splice.py"), encoding="utf-8") as handle:
+        found = re.search(r'^PAGE_NAME = "([^"]*)"', handle.read(), re.M)
+    if not found:
+        return False, "skills/waiting-page/splice.py has no PAGE_NAME line"
+    want = "<repo> " + found.group(1)
+    if want not in reason:
+        return False, "PAGE_EMPTY_REASON does not name the page %r" % want
+    return True, "PAGE_EMPTY_REASON names the page %r" % want
+
+
+FIXTURELESS_CHECKS.add(page_empty_reason_names_the_page_case)  # loads the guard and reads one file, builds no fixture
+LOG_CHECKS_EXTRA.append(("page-stale: the empty-page remedy names the page <repo> and the page name",
+                         page_empty_reason_names_the_page_case))
 
 
 # --------------------------------------------------------------------------- a design picture is checked at write
@@ -17452,30 +17480,253 @@ add("floor: create_session with no model is allowed", "allow", tool=CREATE_SESSI
 # command. So a create_session that tags a lane must carry that prompt alone. Calls without the
 # lane tag are not judged by this rule.
 LANE_TOOL = "mcp__claude-code-remote__create_session"
+# A lane call also tags the repo it works on (rule lane-repo-tag). Each lane case names its checkout by
+# `cwd`, and carries the origin repo's tag, so this rule judges only the effort pin.
+LANE_REPO = os.path.join(ROOT, "lanerepo")      # a checkout whose origin is claude-settings on GitHub
+LANE_PROXY = os.path.join(ROOT, "laneproxy")    # the same repo, its origin behind the agent proxy's host
+LANE_GIT = os.path.join(ROOT, "lanegit")        # the same repo, its origin with a `.git` suffix
+LANE_LOCAL = os.path.join(ROOT, "lanelocal")    # the same repo, its origin a local path with no scheme
+LANE_SCP = os.path.join(ROOT, "lanescp")        # the same repo, its origin in scp form
+LANE_SSH = os.path.join(ROOT, "lanessh")        # the same repo, its origin an ssh URL with a port
+LANE_ORIGINS = {
+    LANE_REPO: "https://github.com/shivinate7/claude-settings",
+    LANE_PROXY: "http://local_proxy@127.0.0.1:1234/git/shivinate7/claude-settings",
+    LANE_GIT: "https://github.com/shivinate7/claude-settings.git",
+    LANE_LOCAL: "/srv/repos/shivinate7/claude-settings.git",
+    LANE_SCP: "git@github.com:shivinate7/claude-settings.git",
+    LANE_SSH: "ssh://git@github.com:22/shivinate7/claude-settings",
+}
+# The container's global git config rewrites an scp origin to https, through GIT_CONFIG_* in the environment.
+# A case that pins the scp parse arm clears those variables for its own guard run, so the raw origin is read.
+RAW_ORIGIN_ENV = {name: None for name in os.environ if name.startswith("GIT_CONFIG_")}
+OWN_LANE_TAGS = ["cs-build:lane", "cs-repo:shivinate7/claude-settings"]
+
+
+def _build_lane_origins():
+    """Three real checkouts, each with the origin LANE_ORIGINS names. A lane case names one by `cwd`."""
+    for where, url in LANE_ORIGINS.items():
+        make_repo(where, {"README.md": "# r\n"})
+        added = run_vcs(where, "remote", "add", "origin", url)
+        if added.returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: `remote add origin` failed in %r. stderr: %s"
+                     % (where, added.stderr.strip()))
+
+
+lazy_fixture(list(LANE_ORIGINS), _build_lane_origins)
 add("lane-effort-pin: lane tag with a brief after the effort command is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort medium\nbrief")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium\nbrief")
 add("lane-effort-pin: lane tag with a prompt that is not the effort command is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="do the task")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="do the task")
 add("lane-effort-pin: lane tag with /effort high is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort high")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort high")
 add("lane-effort-pin: lane tag with no prompt is denied", "deny", "lane-effort-pin",
-    tool=LANE_TOOL, tags=["cs-build:lane"])
+    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS)
 add("lane-effort-pin: lane tag with the exact effort command is allowed", "allow",
-    tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort medium")
+    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium")
 add("lane-effort-pin: lane tag with the effort command padded by space and a newline is denied",
-    "deny", "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="  /effort medium\n")
+    "deny", "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="  /effort medium\n")
 add("lane-effort-pin: lane tag with the effort command and a trailing newline is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane"], prompt="/effort medium\n")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium\n")
 add("lane-effort-pin: lane tag with a trailing space and a wrong prompt is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["cs-build:lane "], prompt="do the task")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO,
+    tags=["cs-build:lane ", "cs-repo:shivinate7/claude-settings"], prompt="do the task")
 add("lane-effort-pin: upper-case lane tag with a wrong prompt is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags=["CS-BUILD:LANE"], prompt="do the task")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO,
+    tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"], prompt="do the task")
 add("lane-effort-pin: lane tag given as a string with a wrong prompt is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, tags="cs-build:lane", prompt="do the task")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags="cs-build:lane", prompt="do the task")
 add("lane-effort-pin: triage tag with any prompt is allowed", "allow",
     tool=LANE_TOOL, tags=["cs-build:triage"], prompt="do the task")
 add("lane-effort-pin: create_session with no tags is allowed", "allow",
     tool=LANE_TOOL, prompt="do the task")
+
+# ---- Lane repo tag. A lane call tags the repo it works on: `cs-repo:<owner>/<name>`, equal (casefolded) to
+# the calling checkout's origin repo. The origin repo is the last two segments of the origin's PATH, `.git`
+# stripped; the host is never read, so the proxy's URL names the same repo. A lane call with no such tag is
+# denied, whatever its other tags. Each case names its checkout by `cwd`, never the runner's own checkout.
+# The proxy and `.git` origins each pair an allow with a deny for another repo, so a rule that fails open
+# on an origin it cannot parse turns a case red.
+add("lane-repo-tag: lane tag with no repo tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane"])
+add("lane-repo-tag: lane tag with the short repo form is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
+add("lane-repo-tag: lane tag with only another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+add("lane-repo-tag: lane tag given as a string with no repo tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags="cs-build:lane")
+add("lane-repo-tag: origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: origin repo tag in other case is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:Shivinate7/Claude-Settings"])
+add("lane-repo-tag: roll-out lane with its target repo and the origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: non-lane call with no repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:triage"])
+add("lane-repo-tag: proxy-host origin, origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_PROXY, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: proxy-host origin, another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_PROXY, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+add("lane-repo-tag: origin with a .git suffix, origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_GIT, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: origin with a .git suffix, another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_GIT, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+
+# No readable origin: a git checkout with no origin remote, and a folder that is no checkout at all (NOGIT).
+# With no origin to compare to, a full `cs-repo:<owner>/<name>` tag passes; the short form and no repo tag
+# are denied. Three cases per checkout: the full tag, the short form, and no repo tag.
+LANE_NO_ORIGIN = os.path.join(ROOT, "lanenoorigin")  # a git checkout with no origin remote
+
+
+def _build_lane_no_origin():
+    """A real checkout that holds no `origin` remote. A lane case names it by `cwd`."""
+    make_repo(LANE_NO_ORIGIN, {"README.md": "# r\n"})
+
+
+lazy_fixture([LANE_NO_ORIGIN], _build_lane_no_origin)
+add("lane-repo-tag: a checkout with no origin, full repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: a checkout with no origin, short repo form is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
+add("lane-repo-tag: a checkout with no origin, no repo tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium", tags=["cs-build:lane"])
+add("lane-repo-tag: a folder that is not a checkout, full repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: a folder that is not a checkout, short repo form is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
+add("lane-repo-tag: a folder that is not a checkout, no repo tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium", tags=["cs-build:lane"])
+
+# Strict tag reading, the one the roadmap uses (repo_tag_names): the exact prefix, no strip, owner/name
+# without case. A stray space or an upper-case prefix names no repo, so it is denied, even the origin's own.
+add("lane-repo-tag: origin repo tag with a trailing space is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings "])
+add("lane-repo-tag: origin repo tag with a leading space is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", " cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: origin repo tag with an upper-case prefix is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-build:lane", "CS-REPO:shivinate7/claude-settings"])
+add("lane-repo-tag: origin repo tag with a trailing space is denied, from a checkout with no origin", "deny",
+    "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings "])
+
+# A local-path origin, with no scheme, names its repo by the path itself. Its own tag passes; another's does not.
+add("lane-repo-tag: a local-path origin, origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_LOCAL, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: a local-path origin, another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_LOCAL, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+
+# The origin forms that the parse arms read. Each pins its arm with the raw origin: see RAW_ORIGIN_ENV.
+add("lane-repo-tag: an scp origin, origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_SCP, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: an scp origin, another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_SCP, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+add("lane-repo-tag: an ssh origin with a port, origin repo tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_SSH, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+add("lane-repo-tag: an ssh origin with a port, another repo's tag is denied", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_SSH, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+
+# An extras file names the GitHub repo: the roadmap reads its "roadmap" object's "github" first (skills/roadmap/build.py
+# extras() and github_slug()), so that name wins over the origin's path. The origin here is not a GitHub URL.
+LANE_EXTRAS = os.path.join(ROOT, "laneextras")  # a non-GitHub origin, and an extras file that names org/name
+
+
+def _build_lane_extras():
+    """A real checkout whose extras file names org/name, with a non-GitHub origin. A lane case names it by `cwd`."""
+    make_repo(LANE_EXTRAS, {"README.md": "# r\n",
+                            ".claude/layout-extras.json": json.dumps({"roadmap": {"github": "org/name"}}) + "\n"})
+    added = run_vcs(LANE_EXTRAS, "remote", "add", "origin", "https://git.example.com/x/y")
+    if added.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: `remote add origin` failed in %r. stderr: %s"
+                 % (LANE_EXTRAS, added.stderr.strip()))
+
+
+lazy_fixture([LANE_EXTRAS], _build_lane_extras)
+add("lane-repo-tag: an extras file names the GitHub repo, its tag is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:org/name"])
+add("lane-repo-tag: an extras file names the GitHub repo, the origin's path is no repo tag", "deny",
+    "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt="/effort medium",
+    tags=["cs-build:lane", "cs-repo:x/y"])
+
+# A denial names the tag the call must carry, so the agent can add it.
+add("lane-repo-tag: a denied lane names the expected repo tag in its reason", "deny", "lane-repo-tag",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane"],
+    carries="cs-repo:shivinate7/claude-settings")
+
+
+# ---- Cost. The rule starts one git process for a lane create_session, to read the origin, and none for any
+# other call. The probe counts each child process the judge starts (CountingPopen and the os seams). A child whose
+# argv starts with git is the rule's read of the origin.
+def lane_cost_run(body):
+    """(children, decision, reason, probe error) of one judge run on `body`, judged in the probe with its own folders."""
+    os.makedirs(LB_DIR, exist_ok=True)
+    run = tempfile.mkdtemp(dir=LB_DIR)
+    try:
+        side_file = os.path.join(run, "probe.json")
+        cfg = os.path.join(run, "cfg")
+        os.makedirs(cfg)
+        env = dict(os.environ)
+        env["CLAUDE_CONFIG_DIR"] = cfg
+        env.pop("CLAUDE_CODE_SESSION_ID", None)
+        env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+        spec = {"mode": "judge", "reading": LB_NORMAL}
+        done = subprocess.run([sys.executable, "-c", LB_PROBE, GUARD, side_file, json.dumps(spec)],
+                              input=json.dumps(body), capture_output=True, text=True, env=env, timeout=120)
+        try:
+            with open(side_file, "r", encoding="utf-8") as handle:
+                side = json.load(handle)
+        except Exception:
+            return [], "", "", "the probe wrote nothing: " + done.stderr.strip()[-160:]
+        decision, reason = read_decision(done.stdout)
+        return side.get("children", []), decision, reason, side.get("probe_error", "")
+    finally:
+        shutil.rmtree(run, ignore_errors=True)
+
+
+def is_git_child(child):
+    return child.lstrip("[").lstrip("'\"").startswith("git")
+
+
+def lane_cost_check(label, body, want_git, want_decision):
+    def check():
+        children, decision, _reason, error = lane_cost_run(body)
+        if error:
+            return False, "the probe failed: " + error
+        git = [c for c in children if is_git_child(c)]
+        if len(git) != want_git:
+            return False, "%d git process(es), want %d: %s" % (len(git), want_git, (git or children)[:3])
+        if decision != want_decision:
+            return False, "decided %s, want %s" % (decision, want_decision)
+        return True, "%d git process(es), decided %s" % (len(git), decision)
+    LOG_CHECKS_EXTRA.append((label, check))
+
+
+lane_cost_check("lane-repo-tag: a lane create_session starts one git process, to read the origin",
+                {"tool_name": LANE_TOOL, "session_id": "lane-cost-lane", "cwd": LANE_REPO,
+                 "tool_input": {"prompt": "/effort medium", "tags": OWN_LANE_TAGS}}, 1, "allow")
+lane_cost_check("lane-repo-tag: a non-lane create_session starts no git process",
+                {"tool_name": LANE_TOOL, "session_id": "lane-cost-triage", "cwd": LANE_REPO,
+                 "tool_input": {"prompt": "/effort medium", "tags": ["cs-build:triage"]}}, 0, "allow")
+lane_cost_check("lane-repo-tag: a Read call starts no git process",
+                {"tool_name": "Read", "session_id": "lane-cost-read", "cwd": LANE_REPO,
+                 "tool_input": {"file_path": os.path.join(LANE_REPO, "README.md")}}, 0, "allow")
 
 # ---- Rule 9, Workflow script. A role named in a string or label is no role;
 # a quoted key is still a key; a haiku named in a string or comment is no model.

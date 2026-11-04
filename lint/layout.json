@@ -66,6 +66,10 @@
     "shots": {
       "path": "shots",
       "set": "screens"
+    },
+    "waiting-data": {
+      "path": "waiting",
+      "set": "waiting"
     }
   },
   "legacy": {
