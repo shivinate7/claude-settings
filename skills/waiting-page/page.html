@@ -856,7 +856,9 @@ const validKeys = (it, l) => Array.isArray(l) && l.length > 0 && new Set(l).size
 const pickKeys = (it) => (isMulti(it) ? (validKeys(it, it.pick) ? (it.ranked === true ? it.pick : (it.options || []).map((o) => o.key).filter((k) => it.pick.includes(k))) : null) : typeof it.pick === "string" && (it.options || []).some((o) => o.key === it.pick) ? [it.pick] : null);
 const pickChoice = (it) => (isMulti(it) ? pickKeys(it).slice() : it.pick);
 // "A", "A and B", "A, B and C"; a ranked list is an order, so it reads "A, B, C".
-const namesOf = (it, l) => { const n = l.map((k) => pickName(it, k)); return it.ranked === true || n.length < 2 ? n.join(", ") : n.slice(0, -1).join(", ") + " and " + n[n.length - 1]; };
+// A ready line names an option by its title, or by its letter when the title is missing, as its chip does. The none-key block keeps pickName's "".
+const optName = (it, key) => pickName(it, key) || letterOf(it, key);
+const namesOf = (it, l) => { const n = l.map((k) => optName(it, k)); return it.ranked === true || n.length < 2 ? n.join(", ") : n.slice(0, -1).join(", ") + " and " + n[n.length - 1]; };
 const ordinal = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10 < 4 ? n % 10 : 0]);
 function h(tag, attrs, ...kids) {
   const n = document.createElement(tag);
@@ -1195,7 +1197,7 @@ function readyText(it) {
   if (!d.choice) return (d.note || "").trim() ? "Ready to send: none of these, with your note." : "";
   if (d.choice === NONE) return (d.note || "").trim() ? "Ready to send: none of these." : "Say what you want instead.";
   if (isMulti(it)) return validKeys(it, d.choice) ? "Ready to send: " + namesOf(it, d.choice) + (it.ranked === true ? ", your order." : ", your choice.") : "";
-  return "Ready to send: " + pickName(it, d.choice) + ", your choice.";
+  return "Ready to send: " + optName(it, d.choice) + ", your choice.";
 }
 // The longest lines a multi item's ready line can show: every option ticked, with each ending, and the lines with no tick.
 function readyFits(it) {
@@ -1797,6 +1799,8 @@ function renderBar() {
 // SKILL.md forbids a session to reply in a comment thread, so neither line sends the owner there.
 const TOLD = "A wake was sent.";
 const NOT_TOLD = () => "No session was told. It waits for " + askWriter() + "'s next wake or turn start.";
+// An answer is read by each item's owner, not by the writer, so its unsent line names no writer.
+const ANSWER_NOT_TOLD = "No session was told. Each owner reads its answer at its next wake or turn start.";
 const MAX_BYTES = 4096, MAX_NOTE = 500, MAX_OWNER = 80, CAN_WAIT_MS = 3000, UNDO_S = 8;
 const plain = (t) => String(t || "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
 // Owners come first so a cut at the byte cap never drops them.
@@ -1864,7 +1868,7 @@ async function sendAll() {
     render();
     if (entries.length) {
       const told = await notifyClaude(noticeText(entries, "Saved on the waiting page."), can);
-      setSentStatus(told ? TOLD : NOT_TOLD());
+      setSentStatus(told ? TOLD : ANSWER_NOT_TOLD);
     }
   } finally { state.sending = false; renderBar(); }
 }
