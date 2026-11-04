@@ -199,6 +199,12 @@ Other tools, in `judge` order:
                        the host is never read. With no readable repo, any tag `cs-repo:<owner>/<name>`
                        passes. The deny reason names the tag to add.
                        Runs after lane-effort-pin. An override lifts it. (agent-model-cap, session-tiers)
+  load-brake           deny. On a local session, a lane-start call, an agent's shell or file write, or a lane
+                       session's own shell or file write, when the machine is busy (lane starts only) or full. A
+                       lane session is one whose own newest get_session record carries `cs-build:lane` and no other
+                       `cs-build:` tag; the coordinator, triage and the batch runner are never braked on their own
+                       calls. The transcript is read only at full. A cloud session skips it. An override lifts it.
+                       (machine-load-brake)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-bypass
@@ -2706,7 +2712,8 @@ def load_hit(tool: str, tool_input) -> tuple:
 # A RUNNING LANE (decision machine-load-brake, "Running lanes"). An agent's own call that can fill a disk (a shell or
 # a file write) reads the load once, inside this hook that already runs for the call. Full refuses it, so a lane
 # stops even while its orchestrator waits on the owner. Busy lets it run. The orchestrator's own calls read nothing,
-# so the session that frees the disk is never braked by the full disk.
+# so the session that frees the disk is never braked by the full disk. A lane session (a session whose own record
+# carries the lane tag, lane_session_hit) is braked the same way on its own calls, since it is a lane too.
 RUNNING_LANE_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
 LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this lane now: end your turn and report the reading to "
                          "your orchestrator, which frees space or waits for the load to drop. " + LOAD_LANE_CITE)
@@ -2714,7 +2721,8 @@ LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this lane now: end your
 
 def running_lane_hit(payload, tool: str) -> tuple:
     """(rule reason, matched) when an agent's disk-filling call meets a full machine, else ("", ""). One read
-    per such call; none for the orchestrator, and none for a lane-start call, which load_hit reads."""
+    per such call; none for the orchestrator or a lane session (lane_session_hit judges that), and none for a
+    lane-start call, which load_hit reads."""
     agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
     if is_cloud() or tool not in RUNNING_LANE_TOOLS or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
         return "", ""
@@ -2724,6 +2732,36 @@ def running_lane_hit(payload, tool: str) -> tuple:
         return "", ""
     full = load_full(reading)
     return (LOAD_LANE_FULL_REASON % ", ".join(full), ", ".join(full)) if full else ("", "")
+
+
+LOAD_SESSION_FULL_REASON = ("the machine is full (%s). You are a lane session: end your turn now and send this "
+                            "reading to your parent with send_message to @parent, which frees space or waits for the "
+                            "load to drop. " + LOAD_LANE_CITE)
+
+
+def lane_session_hit(payload, tool: str) -> tuple:
+    """(rule reason, matched) when a lane session's own disk-filling call meets a full machine, else ("", "").
+    A call with an agent_id is an agent's (running_lane_hit). The load is read once; the transcript is read only
+    at full, and an unread record or any error counts as no lane."""
+    if not isinstance(payload, dict) or is_cloud() or tool not in RUNNING_LANE_TOOLS or payload.get("agent_id"):
+        return "", ""
+    import override
+    own_id = override.remote_session_id()
+    if own_id is None:
+        return "", ""
+    try:
+        full = load_full(read_load())
+        transcript = payload.get("transcript_path")
+        if not full or not isinstance(transcript, str) or not transcript:
+            return "", ""
+        import own_session
+        tags, tagged_after, _parent = own_session.own_session_read(transcript, own_id)
+        names = [t.strip().casefold() for t in tags if isinstance(t, str)] if isinstance(tags, list) else []
+        if tagged_after or LANE_TAG not in names or any(n.startswith("cs-build:") and n != LANE_TAG for n in names):
+            return "", ""
+    except Exception:
+        return "", ""
+    return LOAD_SESSION_FULL_REASON % ", ".join(full), ", ".join(full)
 
 
 def load_full(reading) -> list:
@@ -4343,11 +4381,13 @@ def judge(payload) -> None:
     if role_reason:
         refuse(tool, "deny", "agent-role-model", role_reason, role_matched)
 
-    # 9c. The machine-load brake: one read on a lane-start call, and one on an agent's shell or file write.
+    # 9c. The machine-load brake: one read on a lane-start call, and one on an agent's or a lane session's shell or file write.
     # It runs before the Opus refusal, because a lifted refusal exits refuse() at once and would skip this deny.
     load_reason, load_matched = load_hit(tool, tool_input)
     if not load_reason:
         load_reason, load_matched = running_lane_hit(payload, tool)
+    if not load_reason:
+        load_reason, load_matched = lane_session_hit(payload, tool)
     if load_reason:
         refuse(tool, "deny", "load-brake", load_reason, load_matched)
 
