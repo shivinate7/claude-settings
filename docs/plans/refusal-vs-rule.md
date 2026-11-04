@@ -184,7 +184,7 @@ Notes: batch_running (726-753) computes the blockers; area F rows its refusal. T
 | `merge-role-proof` | session-tiers | "allows `merge --role T` only when the session's own newest `get_session` result ... lists the tag `cs-build:T`" | exact | exact | a lane runs `merge --role coordinator`: denied | - |
 | `trust-card-in-build` | session-tiers | "allows the calls only when the session's own newest `get_session` record shows no `cs-build:` tag" | exact | exact | a cs-build session opens the trust card: denied | - |
 | `merge:dropped-lane-unread` | silent-undo-check-design | "`merge.py` refuses on unknown, because its merge cannot be taken back." | exact | exact | git log fails; --undo-check-unknown-ok lifts it (1761) | - |
-| `merge:dropped-lane-reverted` | git-integration-branch-merge | "rebuild the branch from main without them, never revert" | exact | exact | a batch holds a net-reverted lane (1764) | - |
+| `merge:dropped-lane-reverted` | `ci-hygiene` step 8 | "Rebuild the branch from main without them. Never revert." | exact | exact | a batch holds a net-reverted lane (1764) | - |
 | `merge:default-branch-unread` | verification-report-unknown-reads | "Report a read that could not run as unknown, never as clear or broken." | exact | exact | the repo read fails (1921, 1924) | - |
 | `merge:base-workflows-unread` | none | - | uncited | exact | the base workflow files cannot be read (1970, 1979) | - |
 | `merge:config-unread` | none | - | uncited | exact | the base stamp.json cannot be read or is not an object (1989-2005) | - |

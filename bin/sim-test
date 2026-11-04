@@ -11,6 +11,10 @@
 # with no boot and no xcodebuild. A dead holder: the folder is renamed to a name unique to this run (one rename
 # wins), removed, and the mkdir retried. A lock folder with no pid file counts as held for 60 s, then as dead. A reused
 # pid reads as a live holder.
+# Lease: the own-boot path only. After the lock and the cap check and before `simctl boot`, it runs
+# `sim-lease take --device pro --pid $$` (bin/sim-lease, beside this script). That is the one Mac-wide queue and load
+# limit for phone simulators. A refusal exits 1 with no boot and no xcodebuild. The lease is given back after the
+# shutdown and before the lock is freed, on every exit, INT and TERM too. The reuse path takes no lease.
 # Crash stop: xcodebuild runs as this tool's own background child, and this loop lists SIM_TEST_CRASH_DIR (default
 # $HOME/Library/Logs/DiagnosticReports) every poll until it exits. Files there before the watch starts do not count,
 # nor does a new file whose text names another simulator (CoreSimulator/Devices/<UUID> other than this run's UDID).
@@ -19,7 +23,8 @@
 # UDID to stderr, and exits 1. INT, TERM, HUP and QUIT stop the child too.
 # Cost per run: child processes xcrun, sed, grep, head, mkdir, cat, rm and rmdir; after its own boot only, python3
 # (hooks/sim_boot_record.py --record: one simctl list and two ps, one line appended to sim-boots.jsonl); mv and find on a takeover; one sleep
-# per poll; one grep per new SpringBoard report; and xcodebuild. One folder listing per poll while xcodebuild runs
+# per poll; one grep per new SpringBoard report; and xcodebuild. An own boot adds two sim-lease processes (take, give);
+# a waiting take costs one sysctl and one ps per poll there, and writes leases.json (see the header of sim-lease). One folder listing per poll while xcodebuild runs
 # (a waiting run also reads the lock every poll). It writes no file beyond the lock's pid file, and no log.
 # It adds `-collect-test-diagnostics never` unless the caller sets that flag: a failed test then starts no simctl diagnose.
 # The exit code is otherwise xcodebuild's.
@@ -33,6 +38,7 @@ CRASH_DIR=${SIM_TEST_CRASH_DIR:-$HOME/Library/Logs/DiagnosticReports}
 STATE_DIR=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state
 LOCK=$STATE_DIR/sim-test.lock
 booted_by_me=
+have_lease=
 have_lock=
 child=
 
@@ -50,6 +56,7 @@ cleanup() {
   trap '' INT TERM HUP QUIT
   if [ -n "$child" ] && kill -0 "$child" 2>/dev/null; then stop_child; fi
   [ -n "$booted_by_me" ] && xcrun simctl shutdown "$SHARED"
+  [ -n "$have_lease" ] && "$(dirname "$0")/sim-lease" give --pid $$
   if [ -n "$have_lock" ]; then rm -f "$LOCK/pid"; rmdir "$LOCK" 2>/dev/null; fi
 }
 trap cleanup EXIT
@@ -114,6 +121,8 @@ if [ -z "$udid" ]; then
     exit 1
   fi
   udid=$SHARED
+  have_lease=1 # set first: an INT or TERM during the take still gives the place back
+  "$(dirname "$0")/sim-lease" take --device pro --pid $$ >/dev/null || exit 1
   xcrun simctl boot "$udid" || exit 1
   booted_by_me=1
   python3 "$(dirname "$0")/../hooks/sim_boot_record.py" --record "$udid" >/dev/null 2>&1 || true

@@ -35,7 +35,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       hooks/test_mutate_shared.py|hooks/test_mutate_report.py|hooks/test_mutate_js.py|hooks/test_mutate_replay.py|hooks/mutate_js.mjs) on="$on code guard " ;;
       # Hook modules and suites that run on the rest and macOS jobs.
       # guard_log_report.py: decision_watch imports it at run time, as it does _transcript.py.
-      hooks/*|lint/_transcript.py|lint/guard_log_report.py|lint/ste_lint.py|lint/ui_suffixes.py|lint/report_guard.py|lint/ruling_census.py|lint/test_report_guard.py|lint/test_report_guard_route.py|lint/test_ruling_census.py|lint/check_unknown_reads_contract.py)
+      hooks/*|lint/_transcript.py|lint/guard_log_report.py|lint/ste_lint.py|lint/ui_suffixes.py|lint/report_guard.py|lint/ruling_census.py|lint/test_report_guard.py|lint/test_report_guard_route.py|lint/test_report_guard_landing.py|lint/test_ruling_census.py|lint/check_unknown_reads_contract.py)
         on="$on $R $Z $X code guard "; case "$f" in lint/_transcript.py|lint/guard_log_report.py) on="$on $M " ;; esac ;;
       # bin/claude-janitor: test_install_src reads it.
       bin/claude-janitor) on="$on $W $S $R $Z $X code guard sweep " ;;
@@ -48,8 +48,9 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       bin/ci-job) on="$on code " ;;
       # bin/ios-ship: macOS only. Its suite runs in the shell-macos job, under /bin/bash 3.2.
       bin/ios-ship|lint/test_ios_ship.sh) on="$on $S code " ;;
-      # bin/sim-test: macOS only, like bin/ios-ship. Its suite runs in the shell-macos job.
-      bin/sim-test|lint/test_sim_test.sh) on="$on $S code " ;;
+      # bin/sim-test: macOS only, like bin/ios-ship. Its suite runs in the shell-macos job, and runs the real bin/sim-lease
+      # beside the script, so an edit to bin/sim-lease turns the same job on.
+      bin/sim-test|lint/test_sim_test.sh|bin/sim-lease) on="$on $S code " ;;
       # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it.
       bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs) on="$on code shoot " ;;
       # actions/playwright-setup has two callers: checks-shoot (shoot) and checks-guard (checks_guard). checks-guard also
