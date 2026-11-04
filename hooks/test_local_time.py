@@ -714,14 +714,17 @@ def opus_type(prompt, answer=None, error=None, at=OV_NOW, transcript=None, remot
     return cfg, stub.calls, out.getvalue(), err.getvalue()
 
 
-def transcript_record(kind, content, is_meta=False, origin=None):
+def transcript_record(kind, content, is_meta=False, origin=None, prompt_source=None):
     """One transcript line in the shape Claude Code writes: a `type`, and `message.content` as a string or blocks.
-    `is_meta` adds isMeta, and `origin` adds the record's origin dict, each only when given."""
+    `is_meta` adds isMeta, `origin` adds the record's origin dict, and `prompt_source` adds promptSource, each only
+    when given."""
     rec = {"type": kind, "message": {"role": kind, "content": content}}
     if is_meta:
         rec["isMeta"] = True
     if origin is not None:
         rec["origin"] = origin
+    if prompt_source is not None:
+        rec["promptSource"] = prompt_source
     return json.dumps(rec)
 
 
@@ -1242,6 +1245,105 @@ def case_opus_ask_owner_turn_after_effort_records_still_grants():
           got is not None and got[2] is None, "got %r" % (got,))
 
 
+# The seed prompt of a cloud session and the timed check-in a local session fires are not the owner's own turn. T2 is
+# the Claude-written Opus ask either can carry. The cases below stand the prompt's own record in the transcript, with
+# promptSource "system" or without it, so each one shows which record the grant reads.
+T2 = CLAUDE_WRITTEN_ASKS[1]
+SYSTEM_SOURCE = "system"  # the promptSource of a record the harness wrote
+FULL_SIZE_FILLER = 2200  # assistant lines of about half a kilobyte: the file runs past override.SEED_READ_MAX
+
+
+def refusal_checks(label, calls, cfg):
+    """Two checks for a prompt that must reach neither the judge nor an Opus override. The judge call is checked first:
+    it is the cause, and the override file is the effect."""
+    check("opus ask: %s makes no judge call" % label, calls == [], "judge calls %d" % len(calls))
+    check("opus ask: %s writes no Opus override" % label,
+          opus_override(cfg) is None and not ov_pass_files(cfg), "files %r" % ov_files(cfg))
+
+
+def fixture_checks(label, path, records, full):
+    """Scope before subject: the fixture holds `records` lines, and a full-size one is past override.SEED_READ_MAX."""
+    check("opus ask: %s, the fixture holds %d record(s)" % (label, records), transcript_lines(path) == records,
+          "records %d" % transcript_lines(path))
+    if full:
+        override, _ = hooks_modules()
+        check("opus ask: %s, the file is past override.SEED_READ_MAX bytes" % label,
+              os.path.getsize(path) > override.SEED_READ_MAX, "bytes %d" % os.path.getsize(path))
+
+
+def full_size_transcript(first, last):
+    """`first`, then assistant filler past override.SEED_READ_MAX bytes, then `last`. A reader that scans only from the
+    top, within the cap, never reaches `last`."""
+    return transcript_file([first] + [assistant_turn("filler " * 60)] * FULL_SIZE_FILLER + [last])
+
+
+def case_opus_ask_seed_record_equal_to_prompt_is_not_an_owner_turn():
+    # The seed is the only record in the transcript, and it equals the prompt. That record is the prompt itself, not an
+    # earlier owner turn, so the seed makes no judge call and writes no grant.
+    path = transcript_file([owner_turn(T2)])
+    fixture_checks("a seed whose one transcript record equals the prompt", path, 1, False)
+    cfg, calls, _, _ = opus_type(T2, answer={"ok": True}, transcript=path, remote="cse_seed0001")
+    refusal_checks("a seed prompt whose one transcript record equals it,", calls, cfg)
+
+
+def case_opus_ask_system_record_is_never_an_owner_turn():
+    # A record with promptSource "system" is harness text, even when it is plain and reads like an owner's words. The
+    # system record alone fails a fix that skips only the record equal to the prompt. The control is the same first
+    # record without promptSource: it is an owner turn, so the prompt reaches the judge once.
+    system_first = transcript_record("user", "set up the lane", prompt_source=SYSTEM_SOURCE)
+    path = transcript_file([system_first, owner_turn(T2)])
+    fixture_checks("a system record, then the prompt's own record", path, 2, False)
+    cfg, calls, _, _ = opus_type(T2, answer={"ok": True}, transcript=path, remote="cse_system0001")
+    refusal_checks("a system record, then the prompt's own record,", calls, cfg)
+
+    path = transcript_file([system_first])
+    fixture_checks("a system record alone", path, 1, False)
+    cfg, calls, _, _ = opus_type(T2, answer={"ok": True}, transcript=path, remote="cse_system0001")
+    refusal_checks("a system record alone, with the prompt not in the transcript,", calls, cfg)
+
+    path = transcript_file([transcript_record("user", "set up the lane"), owner_turn(T2)])
+    fixture_checks("control, a plain owner record, then the prompt's own record", path, 2, False)
+    cfg, calls, _, _ = opus_type(T2, answer={"ok": True}, transcript=path, remote="cse_system0001")
+    check("opus ask: control, a plain owner record, then the prompt's own record, reaches the judge once",
+          len(calls) == 1, "judge calls %d" % len(calls))
+
+
+def case_opus_ask_local_timed_check_in_is_not_an_owner_turn():
+    # A local session runs no seed check. A timed check-in fires as the prompt, and its record carries promptSource
+    # "system", so the refusal rests on that source alone. Each shape has a control: the same record without
+    # promptSource, which reaches the judge once. The full-size shape puts the record at the bottom of a file past the
+    # reader's cap.
+    check_in = transcript_record("user", T2, prompt_source=SYSTEM_SOURCE)
+    plain = transcript_record("user", T2)
+    for label, full in (("a short transcript", False), ("a full-size transcript", True)):
+        first = owner_turn("set up the lane")
+        path = full_size_transcript(first, check_in) if full else transcript_file([first, check_in])
+        fixture_checks("a local timed check-in in %s" % label, path, FULL_SIZE_FILLER + 2 if full else 2, full)
+        cfg, calls, _, _ = opus_type(T2, answer={"ok": True}, transcript=path, remote=None)
+        refusal_checks("a local timed check-in in %s," % label, calls, cfg)
+
+        path = full_size_transcript(first, plain) if full else transcript_file([first, plain])
+        fixture_checks("control, the same record without promptSource, in %s" % label, path,
+                       FULL_SIZE_FILLER + 2 if full else 2, full)
+        cfg, calls, _, _ = opus_type(T2, answer={"ok": True}, transcript=path, remote=None)
+        check("opus ask: control, the same record without promptSource, in %s, reaches the judge once" % label,
+              len(calls) == 1, "judge calls %d" % len(calls))
+
+
+def case_opus_ask_prompt_record_after_an_owner_turn_still_grants():
+    # The control for case_opus_ask_seed_record_equal_to_prompt_is_not_an_owner_turn: an owner turn "hi" first, then the
+    # prompt's own record at the end. The earlier owner turn counts, so `send opus judges` reaches the judge once and
+    # writes the every-role override. It fails a fix that refuses whenever the transcript holds the prompt's text.
+    path = transcript_file([owner_turn("hi"), owner_turn("send opus judges")])
+    fixture_checks("an owner turn 'hi', then the prompt's own record", path, 2, False)
+    cfg, calls, _, _ = opus_type("send opus judges", answer={"ok": True}, transcript=path, remote="cse_seed0001")
+    got = opus_override(cfg)
+    check("opus ask: after 'hi' and the prompt's own record, `send opus judges` reaches the judge once",
+          len(calls) == 1, "judge calls %d" % len(calls))
+    check("opus ask: after 'hi' and the prompt's own record, `send opus judges` writes the every-role override",
+          got is not None and got[2] is None, "got %r" % (got,))
+
+
 def main():
     try:
         case_table_in_process()
@@ -1293,6 +1395,10 @@ def main():
         case_opus_ask_scheduled_reminder_is_not_the_owner_turn()
         case_opus_ask_peer_and_task_notification_origins_are_not_the_owner_turn()
         case_opus_ask_owner_turn_after_effort_records_still_grants()
+        case_opus_ask_seed_record_equal_to_prompt_is_not_an_owner_turn()
+        case_opus_ask_system_record_is_never_an_owner_turn()
+        case_opus_ask_local_timed_check_in_is_not_an_owner_turn()
+        case_opus_ask_prompt_record_after_an_owner_turn_still_grants()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:
