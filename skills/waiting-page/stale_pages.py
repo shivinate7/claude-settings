@@ -7,14 +7,22 @@ A script cannot call the Artifact tool, so the session fetches first. For each p
 (lint/layout.py `live_pages`, from the `waiting-page` key of each repo's extras file; with no root
 given, the claude-settings checkout and every sibling folder of it that has one), the session reads
 the page with Artifact `read` and saves the text to <fetched-dir>/<artifact id>.html. A page it
-could not read gets an empty file <artifact id>.unreadable instead. A page with neither file is
-unknown too.
+could not read gets an empty file <artifact id>.unreadable instead. A page that Artifact read
+reports as not found, and that this account's Artifact list (scope all) holds no id for, gets an empty
+<artifact id>.notfound. A page with no file is unknown too.
 
 Verdict, one line per page, then a total line:
   current  the fetched page holds page.html (white space, the designData mockups, the roadmap block and the document <title> text ignored)
   behind   the fetched page differs: republish it (SKILL.md, "Update a repo's pages")
-  unknown  the page was not read: another account, a missing file, an empty file
-Exit 0 only when every page is current. A behind or unknown page exits 1: an unread page is never
+  unknown  the page was not read: another account, a missing file, an empty file, an .unreadable marker
+  not-found  the page has a .notfound marker: not found from this account (deleted, or another account's).
+           The line says to re-file the repo's items on the claude-settings waiting page: the URL recorded in the
+           extras file of the claude-settings checkout that holds this script, not fetched. That target reads
+           "the claude-settings waiting page is unknown" when the checkout has no page, its extras file cannot be
+           read, or its page has a .notfound or .unreadable marker in <fetched-dir> (so a not-found page that is
+           the claude-settings page names no target). The check never repoints a page.
+The total line reads `waiting pages: N current, N behind, N unknown, N not-found`.
+Exit 0 only when every page is current. A behind, unknown or not-found page exits 1: an unread page is never
 counted current. A host wrapper is tolerated, in both modes: the template must appear inside the
 page. The text before it may hold only a document skeleton (doctype, html, head, meta, title and
 body tags, white space) and style elements inside the leading head, before body opens. The text
@@ -141,16 +149,46 @@ def carries_data(template, live):
     return False
 
 
-def page_id(url):
-    # Not layout.artifact_id: this module imports no lint/ at load, so the guard and --page mode run without it.
-    return url.rstrip("/").rsplit("/", 1)[-1]
+def hub_clone():
+    """The claude-settings checkout that holds this script: the one home of the clone that default_roots() starts from."""
+    return os.path.abspath(os.path.join(HERE, "..", ".."))
+
+
+def marker(url, fetched):
+    """"notfound" or "unreadable" when <fetched>/<artifact id> has that marker, else None. The file name is
+    layout.artifact_id(url), the one home of "same artifact", so a query string names the same file."""
+    import layout  # batch mode only
+    name = os.path.join(fetched, layout.artifact_id(url))
+    for kind in ("notfound", "unreadable"):
+        if os.path.isfile(name + "." + kind):
+            return kind
+    return None
+
+
+def refile_target(fetched):
+    """The claude-settings waiting page URL, as its extras file records it, or "unknown" when that checkout has
+    no page, its extras file cannot be read, or the page has a marker in `fetched`. A not-found page that is
+    the claude-settings page has its own marker, so it never names itself."""
+    import layout  # batch mode only
+    try:
+        url = layout.waiting_page(hub_clone())
+    except layout.LayoutError:
+        return "unknown"
+    return "unknown" if url == "unknown" or marker(url, fetched) else url
 
 
 def verdict(url, fetched, template):
-    """(word, why) for one page: current, behind or unknown."""
-    name = os.path.join(fetched, page_id(url))
-    if os.path.isfile(name + ".unreadable"):
-        return "unknown", "the read failed (another account or not found)"
+    """(word, why) for one page: current, behind, unknown or not-found."""
+    import layout  # batch mode only
+    found = marker(url, fetched)
+    if found == "notfound":
+        target = refile_target(fetched)
+        where = ("re-file its items on the claude-settings waiting page %s" % target if target != "unknown"
+                 else "no place to re-file its items: the claude-settings waiting page is unknown")
+        return "not-found", "not found from this account (deleted, or another account's); %s" % where
+    if found == "unreadable":
+        return "unknown", "the read failed"
+    name = os.path.join(fetched, layout.artifact_id(url))
     if not os.path.isfile(name + ".html"):
         return "unknown", "no fetched file"
     with open(name + ".html", encoding="utf-8", errors="replace") as f:
@@ -162,7 +200,7 @@ def verdict(url, fetched, template):
 
 def default_roots():
     import layout  # batch mode only: single-page mode must run without lint/
-    clone = os.path.abspath(os.path.join(HERE, "..", ".."))
+    clone = hub_clone()
     parent = os.path.dirname(clone)
     extras = layout.layout()["extras"]
     return [clone] + sorted(os.path.join(parent, d) for d in os.listdir(parent)
@@ -417,13 +455,14 @@ def main(argv):
         pages = layout.live_pages(roots)
     except layout.LayoutError as err:
         sys.exit("stale_pages: %s" % err)
-    counts = {"current": 0, "behind": 0, "unknown": 0}
+    counts = {"current": 0, "behind": 0, "unknown": 0, "not-found": 0}
     for owner, url in pages:
         word, why = verdict(url, fetched, template)
         counts[word] += 1
         print("%s: %s%s (%s)" % (word, owner, " - " + why if why else "", url))
-    print("waiting pages: %d current, %d behind, %d unknown" % (counts["current"], counts["behind"], counts["unknown"]))
-    return 0 if counts["behind"] == 0 and counts["unknown"] == 0 else 1
+    print("waiting pages: %d current, %d behind, %d unknown, %d not-found"
+          % (counts["current"], counts["behind"], counts["unknown"], counts["not-found"]))
+    return 0 if counts["current"] == len(pages) else 1
 
 
 if __name__ == "__main__":

@@ -53,7 +53,8 @@ Each entry exports the collections it lists to its export path under RECORD_WORK
 waiting-data folder; any other artifact: `artifacts/<id>/`), with the same scan and mirror as one export. Any role's
 `<id>/page.html` lands at `page/page.html` there, and `<id>/files/<path>` at `page/files/<path>`; a waiting-page entry
 also exports its designData block. A supporting file no longer fetched stays in the copy; history is the delete.
-Each artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
+An entry with `"export": false` prints `<id>: skipped - no export`, needs no folder in DIR, writes nothing and
+counts as exit 0. Each other artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
 unknown leaves its own folder as it was and holds back no other. Exit: 0 when every artifact is changed or same; else
 the worst of 1 (refused), 2 (unknown: also a registry that is missing, empty or unreadable) and 3 (a crash).
 
@@ -348,6 +349,9 @@ def export_all(root, fetched, worktree, allow_empty):
     worst = 0
     for entry in entries:
         name = entry["id"]
+        if entry["export"] is False:  # held in the registry, never exported: no folder needed, nothing written
+            print("%s: skipped - no export" % name)
+            continue
         folder = os.path.join(fetched, name)
         page = os.path.join(folder, PAGE_FILE)
         files = os.path.join(folder, FILES_FOLDER)
