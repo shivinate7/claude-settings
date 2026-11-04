@@ -89,7 +89,7 @@ FAMILIES = {
     "worktree-home": "rule 0: an agent's shell call outside its recorded home, and the path forms it reads",
     "session-home": "rule session-home: a session whose worktree is gone is refused a write into the primary checkout; its record and its cost",
     "pointer": "the pointer HEAD checkout",
-    "hand-made-worktree": "a lane worktree made by hand outside the agent home folder",
+    "hand-made-worktree": "a worktree made by hand outside the agent home folder",
     "kill": "machine-wide kills and detached launches",
     "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
@@ -133,7 +133,7 @@ FAMILIES = {
     "override": "the owner override: one act or a timed override, one session, the exclusions it never lifts",
     "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
-    "load-brake": "the machine-load brake: busy and full on lane-start calls, full on an agent's shell or file write, the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
+    "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's shell or file write, the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -3632,7 +3632,7 @@ sh("pointer: no global rules file at all fires nothing",
 # =========================================================================== 1c. hand-made worktree
 FAMILY = "hand-made-worktree"
 #
-# A lane tree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool
+# A worktree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool
 # (debt agents-write-main-clone; decision predicate-is-the-act). The act refused is a real
 # `git worktree add` whose NEW TREE path resolves outside `<primary>/.claude/worktrees/`. The
 # primary is the one of the repo the call acts on. A repo that sits under the guard's temp folder is
@@ -16913,7 +16913,7 @@ def decide(case):
     guard_file = case.get("guard") or GUARD
     command = [sys.executable, guard_file]
     if case.get("tool") in dict(LB_TOOLS).values():
-        # A lane-start call makes the guard read the machine's load. A case about another rule must
+        # A start call makes the guard read the machine's load. A case about another rule must
         # not meet this host's load, or a busy host turns it red (the load brake refuses a
         # background lane). The lane call runs in the load-brake probe with a neutral reading, unless
         # the case names one (`load`). Only the load-brake family sets a busy or full reading.
@@ -22752,7 +22752,7 @@ def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agen
             temp=None, env=None, load=None):
     """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
     reads as the system temp: a git write under it is a throwaway, and silent-write skips it. `env`
-    adds variables to this one guard run. `load` is the machine reading a lane-start call meets
+    adds variables to this one guard run. `load` is the machine reading a start call meets
     (LB_NORMAL when None)."""
     fixed = {"LOCAL_TIME_NOW": ov_clock(seconds)}
     fixed.update(env or {})
@@ -23495,7 +23495,7 @@ for _label, _check in GS_CHECKS:
 # The brake applies to every lane start, lifted or not. LB_ALL_HIGH is a full machine: memory and disk both
 # over the full line, and the case's `load` key is that reading.
 def gl_check(name, tool_input, config_name, session_name, typed=None, grant=None, load=None, want="deny"):
-    """One lane-start call on a machine with the given reading. `grant` is the step's grant list, when the
+    """One start call on a machine with the given reading. `grant` is the step's grant list, when the
     lane is bound to a step; `typed` is an owner prompt typed before the call. Returns the verdict wanted."""
     config, session = ov_config(config_name), session_name
     if grant is not None:
@@ -24514,7 +24514,7 @@ for _label, _check in (
 # suite drops it here, and a cloud case passes its own value to lb_decision_check (`remote`). No other case reads it.
 os.environ.pop("CLAUDE_CODE_REMOTE", None)
 FAMILY = "load-brake"
-# The machine-load brake. On a lane-start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
+# The machine-load brake. On a start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
 # the guard reads the machine's load once: memory in use as a share of this machine's memory, and disk free on
 # the home drive in GB against the drive's size. CPU is not read (decision machine-load-brake): a 200 ms CPU
 # sample is noise, and memory and disk are what stall a machine. It counts no claude process and no running
@@ -24548,7 +24548,7 @@ FAMILY = "load-brake"
 #                  folder. Neither reads the CPU ticks, the load average, or waits.
 # The judge must call it by its bare name, so the probe's patch (set on every guard module that
 # holds the name) is the function that runs. A function the probe cannot replace fails every case.
-# The reading of a call is one read_load() per lane-start call, and none on any other call.
+# The reading of a call is one read_load() per start call, and none on any other call.
 # THE FAKE HOST. A case with a `fake` spec runs the real read_load under fakes, in the probe, and judges the
 # call on what it read. The fake sets sys.platform, ctypes.CDLL and ctypes.cdll, os.getloadavg (the load
 # average, which no reading uses), shutil.disk_usage, and the /proc/stat file (builtins.open and io.open).
@@ -24781,7 +24781,7 @@ def lb_reading(**changes):
 
 
 def lb_lane_input(tool, background=None):
-    """The input of a lane-start call. `background` is run_in_background: True, False, or None to
+    """The input of a start call. `background` is run_in_background: True, False, or None to
     leave it out. Only Agent and Task take it."""
     given = dict(LB_LANE_INPUT[tool])
     if background is not None and tool in dict(LB_SPAWNS).values():
@@ -24854,7 +24854,7 @@ def lb_names(word, *numbers, percent=True):
 
 def lb_decision_check(tool, reading, want, names=(), background=None, tool_input=None, reads=1, lacks=(),
                       fake=None, agent=None, remote=None):
-    """A lane-start call under a forced reading, or under THE FAKE HOST when `fake` is given (then `reading`
+    """A start call under a forced reading, or under THE FAKE HOST when `fake` is given (then `reading`
     is unused and the real read_load runs). `background` is the call's run_in_background: True, False, or
     None to leave it out. `tool_input` replaces the whole input. `remote` is CLAUDE_CODE_REMOTE (see lb_run)."""
     def check():
@@ -24901,7 +24901,7 @@ def lb_no_read_check(tool, tool_input=None, event=None, agent=None, remote=None)
 
 
 def lb_real_children_check(tool, background=None):
-    """A lane-start call with the real reader starts no child process, whatever the machine reads
+    """A start call with the real reader starts no child process, whatever the machine reads
     and whatever the call is then judged."""
     def check():
         got, reason, side = lb_run(tool, {"mode": "judge"}, lb_lane_input(tool, background))
@@ -25056,7 +25056,7 @@ if __name__ == "__main__":
 
 
 def lb_neutral_default_check():
-    """decide() gives a lane-start call a neutral load unless the case names one (`load`), so a case about
+    """decide() gives a start call a neutral load unless the case names one (`load`), so a case about
     another rule never meets the host's load. A call that starts no lane runs the guard file itself."""
     global GUARD
     folder = os.path.join(ROOT, "neutral-load")
@@ -25315,7 +25315,7 @@ lb_add("an agent's session tool that writes nothing reads no load under the wors
 lb_add("a Bash call whose agent_id is malformed reads no load under the worst reading",
        lb_no_read_check("Bash", {"command": "echo hi"}, agent="not an id!"))
 
-# CLOUD. decision session-tiers: the load brake is local-only. With CLAUDE_CODE_REMOTE=true a lane-start call is
+# CLOUD. decision session-tiers: the load brake is local-only. With CLAUDE_CODE_REMOTE=true a start call is
 # allowed at busy and full. These run end to end, so an allowed call's file writes are checked too (nothing reaches
 # guard.log). The section below already holds an Agent with run_in_background true, a Workflow and the writes at full,
 # so those are not repeated here.
@@ -25485,7 +25485,7 @@ lb_add("the real reader returns readings in range, and on Windows and Mac reads 
 
 
 def lb_live_waits_check(tool):
-    """A lane-start call on the live judge, with no stub reading, makes no sleep: the CPU read's 200 ms wait."""
+    """A start call on the live judge, with no stub reading, makes no sleep: the CPU read's 200 ms wait."""
     def check():
         got, reason, side = lb_run(tool, {"mode": "judge"}, lb_lane_input(tool))
         if got == "error":
@@ -25499,7 +25499,7 @@ def lb_live_waits_check(tool):
 
 
 def lb_live_times_check():
-    """On Windows, no lane-start call on the live judge makes a GetSystemTimes call, the CPU tick read."""
+    """On Windows, no start call on the live judge makes a GetSystemTimes call, the CPU tick read."""
     if sys.platform != "win32":
         return SKIP, "GetSystemTimes is the Windows CPU tick read, so this runs on Windows only"
     for _short, tool in LB_TOOLS:
@@ -25510,13 +25510,13 @@ def lb_live_times_check():
             return False, "the guard has no read_load, so no real reading was taken"
         if side.get("GetSystemTimes"):
             return False, "%s made %d GetSystemTimes call(s), want none" % (_short, side["GetSystemTimes"])
-    return True, "no GetSystemTimes call on any lane-start call"
+    return True, "no GetSystemTimes call on any start call"
 
 
 for _short, _tool in LB_TOOLS:
     lb_add("%s on the live judge makes no sleep, so no 200 ms CPU wait" % _short,
            lb_live_waits_check(_tool), real=True)
-lb_add("Windows: no lane-start call on the live judge makes a GetSystemTimes call", lb_live_times_check, real=True)
+lb_add("Windows: no start call on the live judge makes a GetSystemTimes call", lb_live_times_check, real=True)
 
 
 def shard_split_check():
