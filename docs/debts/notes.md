@@ -1175,3 +1175,5 @@
 - text-only-decision-wrapping-wide: `docs/decisions/design-agents.md` says the design reviewer catches "wrapping" unqualified, while `agents/design-reviewer.md`, the file the reviewer reads, narrows it to a label, button or heading that newly wraps. Decision: design-agents
 - text-only-overflow-css-fix: in a text-only lane, an overflow fix routes to the builder (skill design-review step 5), and only the "edits more than copy" bullet, read at fix time, sends a CSS fix to a designer. Decision: design-agents
 - lockfail1-catch-text: lockfail1's catch says "could not hold settings.json open" but also catches a throw from the install run; it still counts a FAIL, so only the text misleads (install.test.ps1). Decision: copy-mode-overwrites-no-backup
+- opus-plain-ask: `<child-session-event>`, `<standing_owner_message>`, `<channel>`, `<message>` and `<event>` frames are not cut before the plain Opus ask judge (`hooks/shared_names.py` `NOTICE_FRAMES`). Their text is rarely an Opus ask.
+- opus-plain-ask: `ASK_LENGTH` in `hooks/override.py` reads `1:30h` as 30h, and "an hour" as the 2h default. These are the owner's own words, so no hole.
