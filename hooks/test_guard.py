@@ -9371,6 +9371,20 @@ sh("roadmap-one-writer: local tier: the refusal of a local lane does not send it
 role_refuse("local tier: a local triage session's tier file does not lift merge-role-proof",
             MERGE_SHIM + " --role batch-runner", role_path("local-triage"), env=None,
             session=LOCAL_TRIAGE_ID, config=TIER_CFG)
+# The tier file never lifts a cloud session: no cloud env id, or a malformed one, is still cloud (is_cloud reads
+# CLAUDE_CODE_REMOTE). The green control for both is the local_allow above, the same push with no cloud env.
+record_refuse("local tier: a cloud session with no cloud env id under a triage tier file is refused",
+              VCS + " push origin roadmap", role_path("local-triage"), env={"CLAUDE_CODE_REMOTE": "true"},
+              session=LOCAL_TRIAGE_ID, config=TIER_CFG)
+record_refuse("local tier: a cloud session with a malformed cloud env id under a triage tier file is refused",
+              VCS + " push origin roadmap", role_path("local-triage"),
+              env={"CLAUDE_CODE_REMOTE": "true", "CLAUDE_CODE_REMOTE_SESSION_ID": "cse-0b6c1d2e"},
+              session=LOCAL_TRIAGE_ID, config=TIER_CFG)
+# The tier file proves the session's own call only. An agent's call (payload agent_id) is refused beside it, as
+# the cloud refuses it: an agent's transcript holds no get_session record of its own.
+local_refuse("an agent's call in a local triage session is refused",
+             VCS + " push origin roadmap", role_path("local-triage"), LOCAL_TRIAGE_ID,
+             agent_id="7f8091a2b3c4d5e6f")
 
 
 def record_push_cost_case():
@@ -23111,6 +23125,31 @@ def ov_no_module_check():
     return True, "a copy with no override.py refuses the call"
 
 
+def tier_off_push_check():
+    """The owner's `tier triage` lets a local triage session push roadmap, and `tier off` ends that: the same push
+    is refused after it. The allow comes first, so the refusal after `tier off` is not a push that was never
+    allowed. Both words go through override.grant in a child, as the owner's prompt does."""
+    config, session = ov_config("tier-off-push"), LOCAL_TRIAGE_ID
+    push = VCS + " push origin roadmap"
+
+    def push_at(seconds):
+        return ov_call("Bash", {"command": push}, PUSHFEAT, config, session, seconds)
+
+    note = ov_type(config, session, "tier triage")
+    if note:
+        return False, "the owner's `tier triage` did not reach override.grant: %s" % note
+    problem = ov_want(*push_at(30), "allow", RECORD_RULE)
+    if problem:
+        return False, "after `tier triage`: %s" % problem
+    note = ov_type(config, session, "tier off", 60)
+    if note:
+        return False, "the owner's `tier off` did not reach override.grant: %s" % note
+    problem = ov_want(*push_at(90), "deny", RECORD_RULE)
+    if problem:
+        return False, "after `tier off`: %s" % problem
+    return True, "the push is allowed under `tier triage` and refused after `tier off`"
+
+
 for _label, _check in (
     ("override: a one-act override that nothing uses ends after 10 minutes", ov_once_expiry_check),
     ("override: an unreadable override file is no override, and garbage text logs override-unread",
@@ -23154,6 +23193,8 @@ for _label, _check in (
     ("override: a lifted act writes one log line naming override and its rule", ov_log_check),
     ("override: a guard copy that cannot import override never allows on an override",
      ov_no_module_check),
+    ("roadmap-one-writer: local tier: a local session's push is refused after the owner types tier off",
+     tier_off_push_check),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
 
