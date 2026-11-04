@@ -91,6 +91,7 @@ MACHINE_BLOCKS = "|".join(
      for name in sorted({m for tag in NOTICE_TAGS for m in re.findall(r"<([\w-]+)", tag)})]
     + [re.escape(tag) + ".*" for tag in NOTICE_TAGS if not tag.startswith("<")])
 BLOCKS = re.compile(PASTED + "|" + MACHINE_BLOCKS, re.I | re.S)
+OPUS_ASK_SOURCES = (None, "user")  # the payload `source` values a plain ask may carry: absent, null or the owner
 ROLE_WORDS = re.compile(r"[A-Za-z][\w\u2019'-]*")
 NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t"}
 NEGATION_SPAN = 3  # a negation within this many words before a role word negates it
@@ -325,16 +326,17 @@ def _system_prompt_last(transcript, prompt):
     return bool(found) and found[-1][1].get("promptSource") == "system" and _text_of(found[-1][1]).strip() == prompt.strip()
 
 
-def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None):
+def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=None):
     """The owner's plain Opus ask (`send opus judges`): an Opus override written when the model says the prompt is the
     owner's own present request to run Opus agents (decision owner-override). `judge` is call_judge.opus_ask unless a
     caller passes another. Returns ("opus", until, role) for a new override, else None. The module docstring holds
-    the rules of the words. The judge is not called for a non-string, a fired-task block in the prompt, an id that cannot name a file, a machine-tag
+    the rules of the words. Rule: `source`, the payload's field, must be in OPUS_ASK_SOURCES; any other value,
+    an unknown one too, grants nothing. Cost: none (a tuple test). The judge is not called for a non-string, a fired-task block in the prompt, an id that cannot name a file, a machine-tag
     start, a keyword form, text with no whole word `opus` left after _strip_blocks, or a cloud session's seed prompt
     (no owner turn in the transcript at path `transcript`), or a prompt whose own record, last in the transcript, has
     promptSource "system". The guard.log line
     `opus-grant` holds the words that were judged."""
-    if not isinstance(prompt, str):
+    if not isinstance(prompt, str) or source not in OPUS_ASK_SOURCES:
         return None
     path = _path(session_id, "opus")
     if path is None or not NOTICE_TAGS or prompt.lstrip().startswith(NOTICE_TAGS):
