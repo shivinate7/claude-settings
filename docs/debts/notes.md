@@ -1317,3 +1317,5 @@
 - export-scan-telegram-width: the `telegram-bot-token` shape takes 8 to 10 digits before the colon, after degen's rule; an id of 7 or 11 digits passes. Real id widths unmeasured. Decision: waiting-data-in-repo.
 - export-scan-encoded-tokens: a Telegram token with its colon URL-encoded (`%3A`) or HTML-escaped (`&#58;`) passes the scan, and so does `@<digits>:<tail>` in page text, since the version-pin blank eats `@<digits>`. Decision: waiting-data-in-repo.
 - export-scan-red-checks-verdict: `assert_refused` in `test_export_page.py` checks the refused verdict, not the kind, so a case can stay red through the wrong shape. Each case hits only its own shape today. Decision: waiting-data-in-repo.
+- merge-body-unlink-untested: no test fails if `Host.api` stops deleting its `--input` temp file (merge/merge.py `Host.api`). Decision: none yet.
+- gh-cmd-shim-claim-split: the `Host.api` docstring says gh on Windows runs through a `.cmd` wrapper, but the GhLockTest skip says real gh.exe is native. If the wrapper is real, `GhLock.api` still sends the lock's two-line message as `-f`. Decision: none yet.
