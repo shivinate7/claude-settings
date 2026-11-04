@@ -33,7 +33,7 @@ worktree (`parallelism-each-own-checkout`).
 Per screen: two blind lanes, one informed lane, two directed lanes. The mix is a default. A brief or
 the owner may change it, but a run keeps at least one blind lane unless the owner asks for none. Then
 each informed and directed brief carries `Blind lanes: none, owner: "<the owner's words>"`. A small change to an existing screen skips this skill and gets one informed
-designer.
+designer. A text-only change gets none (decision `design-agents`).
 
 ## Procedure
 

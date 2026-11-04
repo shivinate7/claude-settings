@@ -650,6 +650,8 @@ def case_nudge_reads_messages_not_total():
         check("messages: the text names the total and the messages",
               "Context is about 334k tokens, messages about 249k." in reason,
               "reason: %r" % reason)
+        check("messages: the text cites decision precompact-handoff",
+              "decision precompact-handoff" in reason, "reason: %r" % reason)
     finally:
         c.cleanup()
 

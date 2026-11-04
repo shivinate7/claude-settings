@@ -129,6 +129,16 @@ class GuardTreeTests(unittest.TestCase):
         self.assertEqual(read_file(self.dest, "git_reads.py"), "BROKEN\n")
         self.assertEqual(read_file(self.dest, "guard.py"), "alpha\n")
 
+    def test_a_mutant_anchored_in_own_session_mutates_own_session(self):
+        # The own get_session read lives in own_session.py, the one home that guard_merge.py and
+        # lint/report_guard.py both import. A roadmap-one-writer mutant aimed at it must land there.
+        write_files(self.src, {"own_session.py": "own-record-anchor\n"})
+        mutate_shared.guard_tree(self.dest)
+        where = mutate_shared.apply_mutant(self.dest, "own-record-anchor", "BROKEN")
+        self.assertEqual(os.path.basename(where), "own_session.py")
+        self.assertEqual(read_file(self.dest, "own_session.py"), "BROKEN\n")
+        self.assertEqual(read_file(self.dest, "guard.py"), "alpha\n")
+
     def test_one_match_in_a_sibling_mutates_the_sibling(self):
         mutate_shared.guard_tree(self.dest)
         where = mutate_shared.apply_mutant(self.dest, "beta-anchor", "BROKEN")
