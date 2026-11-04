@@ -18,6 +18,7 @@ Owner, 2026-11-01 16:30 CST, in chat to triage: "make it a standing thing that s
 - Findings have their own exit path. The STE split script makes a finding on an untouched line report-only, and every stale line is untouched by design.
 - A touched `.py` file that does not parse at base or head is unknown the same way: `stale-cites: unknown, <file> ...`, and it alone keeps the exit 0.
 - Cost, per ste-lint changed-scope run (each PR CI run and each `bin/ste-changed` call): one `python3` start. Git starts 3 (`rev-parse`, `merge-base`, `diff`) when the range removes or renames no path and touches no `.py` file. A touched `.py` file adds one `git cat-file --batch`. A removed path or name adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked Markdown file is read once, and only when something was removed. A touched `.py` file also loads the py-facts script once, in-process (importlib, no start, no `.pyc`). It writes no file and starts no lasting process. `CostTests` in `lint/test_stale_cites.py` proves it.
+- An opt-in whole-tree mode is in stale-cites-whole-tree. The range check here is unchanged.
 
 ## Kind of staleness
 
