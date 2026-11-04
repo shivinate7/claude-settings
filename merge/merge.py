@@ -71,6 +71,17 @@ RECORDS_CITE = "(decision records-index-at-merge, only the merge tool rebuilds t
 UNDO_CITE = "(decision silent-undo-check-design, a branch that silently undoes earlier work does not merge)"
 RED_CITE = "(decision no-merge-onto-red-main, no batch merges onto a red base)"
 
+def red_way_out(verdict, preview=False):
+    """The way out of a red base, in order: re-run each red run once, then --base-red-ok (decision no-merge-onto-red-main). One home for the refusal and the preview clause.
+    An UNKNOWN verdict names no red run, so it names only the flag. The re-run is named in words and by command; the run ids stay in the detail (rerun_once)."""
+    flag = '--base-red-ok "<reason>"'
+    if preview:
+        return (f"until each red run is re-run once (`gh run rerun`, as named above), unless {flag} is given" if verdict == "red"
+                else f"unless {flag} is given")
+    if verdict == "red":
+        return f"first re-run each red run once with `gh run rerun`, as named above, then, if this batch carries the fix, give the reason flag {flag}"
+    return f"give the reason flag {flag} if the owner accepts the unknown"
+
 def rerun_once(run_id, failed=True):
     """The one-time re-run named for a red run (decision no-merge-onto-red-main). `--failed` re-runs the red jobs; a run with no red job has none to name, so it is re-run whole."""
     return f"re-run it once: gh run rerun {run_id}" + (" --failed" if failed else "")
@@ -2328,7 +2339,7 @@ def red_base(root, host, base, red_ok=""):
     if red_ok.strip():
         say(f"merge: {what}. --base-red-ok, reason: {red_ok.strip()}")
         return
-    raise Liftable(f"{what}\nNo batch merges onto a red {base}. If this batch carries the fix, or the owner accepts the unknown, run again with the reason flag --base-red-ok \"<reason>\". {RED_CITE}")
+    raise Liftable(f"{what}\nNo batch merges onto a red {base}. To go on, {red_way_out(verdict)}. {RED_CITE}")
 
 def batch_refusal(host, n, base, head):
     """The batch brake (rule git-no-merge-during-batch-ci): -> the refusal while another ready PR on `base` has a workflow run or a required check pending
@@ -2381,7 +2392,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         "  lock:   " + (holder_text(base, held, lock.now()) if held and held[1] > lock.now() else "free"),
         f"  head checks: {host.head_state(n)}",
         "  batch:  " + batch,
-        f"  {base} run: {verdict}" + (f": {detail}. --confirm refuses it unless --base-red-ok \"<reason>\" is given." if verdict != "green" else ""),
+        f"  {base} run: {verdict}" + (f": {detail}. --confirm refuses it {red_way_out(verdict, preview=True)}." if verdict != "green" else ""),
         "  base:   " + (current or f"holds {base}'s tip"),
         "  claim:  " + (f"already claimed ({resumed}); " + ("--confirm on the draft refuses this head, so mark it ready by hand" if info["draft"] else "a run resumes at the wait")
                         if resumed else trailer or "nothing to claim"),
