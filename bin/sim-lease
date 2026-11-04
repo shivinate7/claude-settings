@@ -2,12 +2,12 @@
 """sim-lease: the one Mac-wide queue and lease for phone simulators (decision sim-lease-tool).
 
 Usage:
-  sim-lease take --device duo|pro --pid PID [--session ID] [--wait S]
+  sim-lease take --device duo|pro --pid PID [--session ID] [--wait S] [--udid]
   sim-lease give --pid PID
   sim-lease status
 
-take  queues PID and waits for its turn. Granted: prints the slot, `1`, `2` or `pro`,
-      and exits 0. Not granted within the wait: one stderr line with the holders and the load, exit 1, and PID leaves
+take  queues PID and waits for its turn. Granted: prints the slot, `1`, `2` or `pro`, and exits 0. With --udid it
+      prints that slot's device UDID (SLOT_UDID) instead; the callers that boot by role (bin/sim-test) keep no UDID. Not granted within the wait: one stderr line with the holders and the load, exit 1, and PID leaves
       the queue. The wait is --wait, else SIM_LEASE_WAIT (default 300) seconds. The state is read again every
       SIM_LEASE_POLL (default 2) seconds. --pid is required on take and give: without it, or with any other bad argument, one usage line goes to stderr and the
       exit is 2. --session defaults to $CLAUDE_CODE_SESSION_ID.
@@ -21,7 +21,7 @@ The queue is strict FIFO: only its head is granted, so a later take never passes
 Reaping, on every call: a lease or waiter whose pid is dead, or whose `ps -o lstart=` start time differs from the one
 recorded at take, is dropped. A holder that dies therefore never needs to give.
 Load: `sysctl -n vm.loadavg` only. No-op: when `uname -s` is not Darwin, or CI or GITHUB_ACTIONS equals `true`,
-take prints `none` and exits 0, give exits 0, and no file is written. On Darwin, a no-op take also prints one stderr
+take prints `none` (with --udid too) and exits 0, give exits 0, and no file is written. On Darwin, a no-op take also prints one stderr
 line saying no lease was taken. Any other CI value, such as `false` or empty, is not a no-op.
 Start times: `ps` runs with TZ=UTC, so a start time recorded under one TZ matches the same process read under another.
 
@@ -49,9 +49,9 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 MAX_5MIN = 100.0   # a grant needs the 5-minute load under this
 MAX_1MIN = 60.0    # a grant needs the 1-minute load under this
 SLOT2_5MIN = 60.0  # slot 2 needs the 5-minute load under this
-# The device each slot boots: the one home of the map (skills/ios-apps/SKILL.md, Phone simulators). The guard reads
-# it to match a lease to the device an MCP launch names (hooks/guard.py sim_boot_refusal). bin/sim-test's SHARED
-# repeats the pro UDID, because bash cannot import it without a python start per run.
+# The device each slot boots: the one home of the device IDs (skills/ios-apps/SKILL.md, Phone simulators). The guard
+# reads it to match a lease to the device an MCP launch names (hooks/guard.py sim_boot_refusal); `take --udid` prints
+# it, so bin/sim-test keeps no UDID.
 SLOT_UDID = {
     "1": "3553660D-315C-4B9C-8614-039D7A5B637E",    # Duo 1
     "2": "801F55F4-F666-4C6D-AB04-7DF77C953974",    # Duo 2
@@ -198,6 +198,11 @@ def describe(data, load):
     return "holders: %s; waiting: %s; load %s" % (holders, waiters, shown)
 
 
+def shown(slot, args):
+    """What a granted take prints: the slot, or with --udid the slot's device UDID."""
+    return SLOT_UDID[slot] if args.udid else slot
+
+
 def cmd_take(args):
     pid = args.pid
     wait = args.wait if args.wait is not None else float(os.environ.get("SIM_LEASE_WAIT") or 300)
@@ -224,7 +229,7 @@ def cmd_take(args):
                 held = st.lease_of(pid)
                 if held:
                     granted = True
-                    print(held["slot"])
+                    print(shown(held["slot"], args))
                     return 0
                 if not any(e["pid"] == pid for e in st.data["queue"]):
                     st.data["queue"].append(entry)
@@ -234,7 +239,7 @@ def cmd_take(args):
                     st.data["queue"] = [e for e in st.data["queue"] if e["pid"] != pid]
                     st.data["leases"].append(dict(entry, slot=slot))
                     granted = True
-                    print(slot)
+                    print(shown(slot, args))
                     return 0
                 last = describe(st.data, load)
             now = time.monotonic()
@@ -277,7 +282,7 @@ class OneLineParser(argparse.ArgumentParser):
     """A bad argument prints one usage line on stderr and exits 2 (argparse's own text is two lines)."""
 
     def error(self, message):
-        print("usage: sim-lease take --device duo|pro --pid PID [--session ID] [--wait S] | give --pid PID | status;"
+        print("usage: sim-lease take --device duo|pro --pid PID [--session ID] [--wait S] [--udid] | give --pid PID | status;"
               " %s" % message.replace("\n", " "), file=sys.stderr)
         sys.exit(2)
 
@@ -290,6 +295,7 @@ def main():
     t.add_argument("--pid", type=int, required=True)
     t.add_argument("--session")
     t.add_argument("--wait", type=float)
+    t.add_argument("--udid", action="store_true")
     g = sub.add_parser("give")
     g.add_argument("--pid", type=int, required=True)
     sub.add_parser("status")
