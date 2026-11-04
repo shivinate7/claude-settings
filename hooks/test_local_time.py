@@ -611,6 +611,213 @@ def case_override_fail_open():
                                          proc and proc.stderr[-120:]))
 
 
+# OWNER TIER. The owner types `tier triage` or `tier off` as the whole prompt. override.grant writes
+# <config dir>/state/tier/<session_id>.json as {"tier": "triage"}, removes that file on `tier off`, and grants
+# nothing for any other text after `tier`. override.local_tier(session_id) reads the file: "triage", or None
+# when it is missing, unreadable or corrupt. roadmap-one-writer reads it for a local session (decision
+# session-tiers). A tier file is no override: `tier triage` writes no file under state/override.
+OV_OTHER = "ov-session-0002"  # a second session, for the case that reads another session's file
+TIER_CONTROLS = (  # prompts that grant nothing
+    ("`tier` alone", "tier"),
+    ("`tier lane`: a tier the guard does not read", "tier lane"),
+    ("`tier triage now`: text after the word", "tier triage now"),
+    ("`tier triage 2h`: a length after the word", "tier triage 2h"),
+    ("`tier: triage`: a colon before the tier", "tier: triage"),
+    ("`tier triagers`: a longer word", "tier triagers"),
+    ("`run tier triage`: the word is not first", "run tier triage"),
+    ("`tier off now`: text after off", "tier off now"),
+)
+
+
+def tier_override():
+    """hooks/override.py, imported into this process. Its paths read CLAUDE_CONFIG_DIR at each call."""
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    import override
+    return override
+
+
+def tier_call(cfg, action):
+    """action(override) with CLAUDE_CONFIG_DIR set to cfg. Returns (its value, the error text or "")."""
+    saved = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = cfg
+    try:
+        return action(tier_override()), ""
+    except Exception as e:
+        return None, "raised %s: %s" % (type(e).__name__, e)
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved
+
+
+def tier_path(cfg, session=OV_SESSION):
+    return os.path.join(cfg, "state", "tier", session + ".json")
+
+
+def tier_text(cfg, session=OV_SESSION):
+    """The tier file's text, or None when it is missing or cannot be read."""
+    try:
+        with open(tier_path(cfg, session), encoding="utf-8") as handle:
+            return handle.read()
+    except (OSError, UnicodeError):
+        return None
+
+
+def tier_body(cfg, session=OV_SESSION):
+    """The tier file parsed as JSON, or None when it is missing or not JSON."""
+    text = tier_text(cfg, session)
+    try:
+        return json.loads(text) if text is not None else None
+    except ValueError:
+        return None
+
+
+def tier_files(cfg):
+    """Every file under state/tier/, as paths relative to the config directory."""
+    return [f for f in ov_files(cfg) if f.startswith(os.path.join("state", "tier") + os.sep)]
+
+
+def write_tier(cfg, data, session=OV_SESSION):
+    os.makedirs(os.path.dirname(tier_path(cfg, session)), exist_ok=True)
+    with open(tier_path(cfg, session), "wb") as handle:
+        handle.write(data)
+
+
+def case_tier_grant_word():
+    cfg = ov_cfg()
+    got, err = tier_call(cfg, lambda m: m.grant(OV_SESSION, "tier triage", OV_NOW))
+    check("tier: `tier triage` grants the triage tier", got == ("tier", "triage"), "got %r %s" % (got, err))
+    check("tier: `tier triage` writes state/tier/<session>.json as {\"tier\": \"triage\"}",
+          tier_body(cfg) == {"tier": "triage"}, "file text %r" % (tier_text(cfg),))
+    check("tier: `tier triage` writes no override file", not ov_pass_files(cfg),
+          "files %r" % (ov_pass_files(cfg),))
+
+
+def case_tier_off():
+    cfg = ov_cfg()
+    write_tier(cfg, b'{"tier": "triage"}')
+    got, err = tier_call(cfg, lambda m: m.grant(OV_SESSION, "tier off", OV_NOW))
+    check("tier: `tier off` returns ('tier-off', None)", got == ("tier-off", None), "got %r %s" % (got, err))
+    check("tier: `tier off` removes the tier file", tier_text(cfg) is None,
+          "file text %r" % (tier_text(cfg),))
+
+
+def case_tier_grants_nothing():
+    for name, prompt in TIER_CONTROLS:
+        cfg = ov_cfg()
+        got, err = tier_call(cfg, lambda m: m.grant(OV_SESSION, prompt, OV_NOW))
+        check("tier: grants nothing for " + name, got is None and err == "" and not tier_files(cfg),
+              "grant %r %s; files %r" % (got, err, tier_files(cfg)))
+    cfg = ov_cfg()
+    write_tier(cfg, b'{"tier": "triage"}')
+    got, err = tier_call(cfg, lambda m: m.grant(OV_SESSION, "tier off now", OV_NOW))
+    check("tier: `tier off now` removes nothing", got is None and tier_text(cfg) == '{"tier": "triage"}',
+          "grant %r %s; file text %r" % (got, err, tier_text(cfg)))
+
+
+def case_tier_session_stays_inside():
+    for session in ("../escape", "a/b"):
+        cfg = ov_cfg()
+        tier_call(cfg, lambda m: m.grant(session, "tier triage", OV_NOW))
+        stray = [f for f in ov_files(cfg) if os.path.dirname(f) != os.path.join("state", "tier")]
+        check("tier: session id %r writes no file outside state/tier" % session, not stray,
+              "files %r" % (ov_files(cfg),))
+
+
+def damaged(data):
+    """A damage step: the granted tier file's bytes become `data`."""
+    return lambda cfg: write_tier(cfg, data)
+
+
+def tier_off_step(cfg):
+    tier_call(cfg, lambda m: m.grant(OV_SESSION, "tier off", OV_NOW))
+
+
+def tier_folder_step(cfg):
+    """A damage step: the tier file is replaced by a folder of the same name, so it cannot be read."""
+    os.remove(tier_path(cfg))
+    os.makedirs(tier_path(cfg))
+
+
+def tier_reader_case(name, want, damage=None, session=OV_SESSION):
+    """The owner's `tier triage` grants the file, `damage` changes it, and local_tier reads it for `session`.
+    local_tier is called only after the grant came back as triage, so on a tree with no tier grant this case
+    is red on the grant, never on a missing name."""
+    cfg = ov_cfg()
+    granted, err = tier_call(cfg, lambda m: m.grant(OV_SESSION, "tier triage", OV_NOW))
+    if granted != ("tier", "triage"):
+        check(name, False, "the grant of `tier triage` came back %r %s, so there is no file to read" % (granted, err))
+        return
+    if damage is not None:
+        damage(cfg)
+    got, err = tier_call(cfg, lambda m: m.local_tier(session))
+    check(name, got == want, "local_tier gave %r, want %r %s" % (got, want, err))
+
+
+def case_local_tier_reader():
+    tier_reader_case("local_tier: a granted `tier triage` reads as triage", "triage")
+    tier_reader_case("local_tier: after `tier off` it reads as None", None, tier_off_step)
+    tier_reader_case("local_tier: a corrupt tier file reads as None", None, damaged(b"not json {"))
+    tier_reader_case("local_tier: an empty tier file reads as None", None, damaged(b""))
+    tier_reader_case("local_tier: a tier file that is a list, not an object, reads as None", None,
+                     damaged(b'["triage"]'))
+    tier_reader_case("local_tier: a tier file that names lane reads as None", None, damaged(b'{"tier": "lane"}'))
+    tier_reader_case("local_tier: a tier file that cannot be read, being a folder, reads as None", None,
+                     tier_folder_step)
+    tier_reader_case("local_tier: another session's tier file reads as None", None, session=OV_OTHER)
+
+
+def case_tier_hook_writes_the_file():
+    # The owner's prompt reaches override.grant through the prompt hook, which writes the file and prints no error.
+    cfg = ov_cfg()
+    proc = ov_type(cfg, "tier triage")
+    check("tier: the prompt hook writes the tier file for `tier triage`",
+          proc is not None and proc.returncode == 0 and tier_body(cfg) == {"tier": "triage"},
+          "rc %s; file text %r" % (proc and proc.returncode, tier_text(cfg)))
+    check("tier: the prompt hook reports no error for a tier grant",
+          proc is not None and "local_time: override" not in proc.stderr and "Traceback" not in proc.stderr,
+          "stderr %r" % (proc and proc.stderr[-200:],))
+
+
+def case_tier_context_line():
+    # Each tier word prints one line that names the tier and its end. `tier off` names the tier's end and
+    # never the override's: a session that reads "Override: ended." after `tier off` is told the wrong thing.
+    cfg = ov_cfg()
+    proc = ov_type(cfg, "tier triage")
+    lines = proc.stdout.splitlines() if proc else []
+    tier_lines = [l for l in lines if l.startswith("Tier:")]
+    check("tier: `tier triage` prints one Tier line that names the triage tier",
+          len(tier_lines) == 1 and "triage" in tier_lines[0] and any(LINE_FULL.fullmatch(l) for l in lines),
+          "stdout=%r" % (proc.stdout[-200:] if proc else "timed out"))
+    proc = ov_type(cfg, "tier off")
+    lines = proc.stdout.splitlines() if proc else []
+    check("tier: `tier off` prints `Tier: ended.`", "Tier: ended." in lines,
+          "stdout=%r" % (proc.stdout[-200:] if proc else "timed out"))
+    check("tier: `tier off` prints no Override line", not any(l.startswith("Override") for l in lines),
+          "stdout=%r" % (proc.stdout[-200:] if proc else "timed out"))
+
+
+def tier_log_words(cfg):
+    """(decision, rule) of each guard.log line that holds a tier word's record, in order."""
+    return [tuple(line.split("\t")[2:4]) for line in ov_log(cfg) if len(line.split("\t")) >= 4]
+
+
+def case_tier_logs_the_word():
+    # Each tier word writes one guard.log line: decision tier-grant or tier-off, under roadmap-one-writer
+    # (decision session-tiers). A grant is logged once, and so is the `tier off` that ends it.
+    cfg = ov_cfg()
+    ov_type(cfg, "tier triage")
+    grants = [w for w in tier_log_words(cfg) if w[0] == "tier-grant"]
+    check("tier: `tier triage` writes one guard.log line, tier-grant under roadmap-one-writer",
+          grants == [("tier-grant", "roadmap-one-writer")], "log words %r" % (tier_log_words(cfg),))
+    ov_type(cfg, "tier off")
+    offs = [w for w in tier_log_words(cfg) if w[0] == "tier-off"]
+    check("tier: `tier off` writes one guard.log line, tier-off under roadmap-one-writer",
+          offs == [("tier-off", "roadmap-one-writer")], "log words %r" % (tier_log_words(cfg),))
+
+
 def main():
     try:
         case_table_in_process()
@@ -632,6 +839,14 @@ def main():
         case_override_corrupt_file_replaced()
         case_override_session_id_stays_inside()
         case_override_fail_open()
+        case_tier_grant_word()
+        case_tier_off()
+        case_tier_grants_nothing()
+        case_tier_session_stays_inside()
+        case_local_tier_reader()
+        case_tier_hook_writes_the_file()
+        case_tier_context_line()
+        case_tier_logs_the_word()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:

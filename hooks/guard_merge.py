@@ -10,7 +10,7 @@ import re
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
-    git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    git_calls, inline_script, inner_commands, is_cloud, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from guard_pointer import (
@@ -565,13 +565,42 @@ RECORD_REASON = (
     "cs-build:triage, same cs-repo). If this session is triage: run get_session (no argument) alone in its "
     "own turn, then retry. (decision session-tiers, the triage session is the only writer of the record branch)"
 )
+RECORD_LOCAL_REASON = (
+    "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this local session "
+    "is not proved triage. If this session is triage: ask the owner to type `tier triage` as a whole prompt, "
+    "then retry. Otherwise send the step change to the triage session. An agent's call is never proved "
+    "by the tier file. "
+    "(decision session-tiers, the triage session is the only writer of the record branch)"
+)
 
 
-def _own_tier_proved(transcript: str, tier: str) -> bool:
-    """True when the own newest get_session record lists cs-build:<tier> and no set_session_tags call
-    follows it. Fails closed: no env id, no transcript or any read error is False."""
+def _local_session() -> bool:
+    """True for a local session: not a cloud session (guard_core.is_cloud) and no cloud env id. A cloud
+    session with no or a malformed id is not local, so it never reads the tier file."""
+    from override import remote_session_id
+    return not is_cloud() and remote_session_id() is None
+
+
+def record_reason() -> str:
+    """The refusal text for this session: the local remedy for a local session, else the cloud one. A
+    read error means the cloud text."""
     try:
-        from override import remote_session_id
+        return RECORD_LOCAL_REASON if _local_session() else RECORD_REASON
+    except Exception:
+        return RECORD_REASON
+
+
+def _own_tier_proved(transcript: str, tier: str, session_id: str = "", agent: bool = False) -> bool:
+    """True when the session is proved `tier`. A cloud session (CLAUDE_CODE_REMOTE, or a cloud env id): its
+    own newest get_session record lists cs-build:<tier> and no set_session_tags call follows it (tags
+    only; the tier file is never read). A local session: the owner's tier file for the payload's session
+    id names `tier` (override.local_tier), for the session's own call only: an agent's call is refused, as
+    in the cloud, where an agent's transcript holds no get_session record. Fails closed: any read error
+    is False."""
+    try:
+        from override import local_tier, remote_session_id
+        if _local_session():
+            return not agent and local_tier(session_id) == tier
         own_id = remote_session_id()
         if own_id and transcript:
             tags, tagged_after = _own_session_read(transcript, own_id)
@@ -614,9 +643,11 @@ def _push_calls(segment: str, script: str, cwd: str):
                 yield from _push_calls(part, text, inner_cwd)
 
 
-def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb) -> str:
+def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb,
+                      session_id: str = "", agent: bool = False) -> str:
     """Return the matched push when a segment pushes to the checkout's record branch, or to the default
-    name `roadmap`, and the own record does not prove the triage tier, else ''. `record_branch_of(root)`
+    name `roadmap`, and the session is not proved the triage tier (own record in the cloud, the owner's tier file for
+    `session_id` locally), else ''. `record_branch_of(root)`
     reads the checkout's branch (lint/layout.py); a read error means the default. `read_verb(subcommand,
     args)` is guard.py's own test for a dry run, which moves nothing. The proof is read only after a push
     reaches the branch."""
@@ -631,7 +662,7 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
             except Exception:
                 record = DEFAULT_RECORD_BRANCH
             if {record, DEFAULT_RECORD_BRANCH} & set(push_destinations(args, where, overrides)) and (
-                    not _own_tier_proved(transcript, RECORD_WRITER_TIER)):
+                    not _own_tier_proved(transcript, RECORD_WRITER_TIER, session_id, agent)):
                 return "git push to the record branch"
     return ""
 
