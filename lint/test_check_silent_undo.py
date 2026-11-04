@@ -780,6 +780,8 @@ class LaneUndo(unittest.TestCase):
     CASE = "".join("card test case line %d\n" % i for i in range(1, 7))  # a 6-line test case the lane adds
     BLOCK = "".join("incident test line %d\n" % i for i in range(1, 50))  # 49 lines: a full-size drop the read must flag
     EIGHT = "".join("eight test line %d\n" % i for i in range(1, 9))  # an 8-line block the lane adds
+    TOP = "".join("line %d\n" % i for i in range(1, 7))  # the first six lines of BODY: app.txt lines main holds before the lane
+    REST = BODY[len(TOP):] + "function Card() {}\n"  # app.txt without TOP: the file after a lane commit drops those six lines
 
     def setUp(self):
         self.r = base_repo()
@@ -965,6 +967,49 @@ class LaneUndo(unittest.TestCase):
         c = r.commit("C: the pre-E copy plus one new line", app_txt=self.CARD + "one new line\n")
         self.assertEqual(self.lane(), [e, c])
         assert_finding(self, r.verdict(), "app.txt", c, e)
+
+    def test_a_lane_rename_of_a_test_file_then_a_drop_of_a_pre_lane_test_is_green(self):
+        r = self.r
+        kept = "".join("card test kept line %d\n" % i for i in range(1, 7))
+        dropped = "".join("card test dropped line %d\n" % i for i in range(1, 7))
+        third = "".join("card test third line %d\n" % i for i in range(1, 7))
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds three test blocks", tests__card_txt=kept + dropped + third)
+        r.push()
+        r.sh("checkout", "-q", "-B", "lane", "origin/main")  # the lane starts from the main that holds the file
+        r.sh("mv", "tests/card.txt", "tests/card2.txt")
+        e = r.commit("E: rename the test file")
+        d = r.commit("D: drop a test that main had before the lane", tests__card2_txt=kept + third)
+        self.assertEqual(self.lane(), [e, d])  # scope: the lane is the rename, then the drop
+        self.assertEqual(r.sh("diff", "-M", "--name-status", e + "^", e), "R100\ttests/card.txt\ttests/card2.txt")  # scope: E is a pure rename
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_block_moved_from_one_file_to_another_with_one_line_reworded_is_green(self):
+        r = self.r
+        pre = r.sh("rev-parse", "HEAD:app.txt")
+        a = r.commit("A: add eight lines to app.txt", app_txt=self.CARD + self.EIGHT)
+        reworded = self.EIGHT.replace("eight test line 3\n", "eight test lines 3\n")
+        b = r.commit("B: move the block to g.txt, one line reworded", app_txt=self.CARD, g_txt=reworded)
+        self.assertEqual(self.lane(), [a, b])
+        self.assertEqual(r.sh("rev-parse", b + ":app.txt"), pre)  # scope: app.txt is back to its pre-lane blob, the whole-file read's trigger
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_line_main_had_before_the_lane_dropped_put_back_and_dropped_again_is_green(self):
+        r = self.r
+        a = r.commit("A: drop the first six lines of app.txt", app_txt=self.REST)
+        b = r.commit("B: put the six lines back", app_txt=self.CARD)
+        c = r.commit("C: drop the six lines again", app_txt=self.REST)
+        self.assertEqual(self.lane(), [a, b, c])  # scope: three commits, and C drops what B restored
+        self.assertEqual(r.sh("rev-parse", b + ":app.txt"), r.sh("rev-parse", "origin/main:app.txt"))  # scope: B puts main's blob back, byte for byte
+        self.assertEqual(r.verdict(), [])
+
+    def test_a_reflow_of_two_test_lines_into_one_with_a_word_changed_is_green(self):
+        r = self.r
+        a = r.commit("A: add two test assertions", tests__card_txt="assert card renders the title\nassert card renders the footer\n")
+        b = r.commit("B: join them into one line and change a word", tests__card_txt="assert card renders the title and footer\n")
+        self.assertEqual(self.lane(), [a, b])  # scope: B reflows A's two lines into one
+        self.assertEqual(r.sh("show", b + ":tests/card.txt"), "assert card renders the title and footer")  # scope: the one line B holds
+        self.assertEqual(r.verdict(), [])
 
 
 class IntegrationBase(unittest.TestCase):
