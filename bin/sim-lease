@@ -28,7 +28,7 @@ Start times: `ps` runs with TZ=UTC, so a start time recorded under one TZ matche
 State: ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-lease/leases.json, written through a temp file and os.replace
 under an fcntl.flock on the file lock in the same folder. The lock is held for one read-decide-write step, never
 while sleeping.
-Cost: per call, one `uname`, one `ps` per recorded pid, and one `sysctl` (take: one `sysctl` per poll). Files written:
+Cost: per call, one `uname`, one `ps` per recorded pid, and one `sysctl` on take and status (take: one `sysctl` per poll). Files written:
 leases.json, only when its content changes, plus the empty lock file. No daemon, no log.
 macOS only in effect; it runs under python3's standard library alone.
 """
