@@ -17754,6 +17754,11 @@ repo_case("--repo-dir naming this checkout is allowed from another directory", "
           f"{MERGE_SHIM} --repo-dir {REPO_A} 5 --confirm", REPO_B, TX_A)
 repo_case("a cd into this checkout is allowed from another directory", "allow", f"cd {REPO_A} && {MERGE_SHIM} 5 --confirm", REPO_B, TX_A)
 repo_case("no flag and this working directory is allowed", "allow", f"{MERGE_SHIM} 5 --confirm", REPO_A, TX_A)
+# A redirect or pipe on the merge belongs to the shell, not to the merge tool's arguments. The control above has none.
+repo_case("a merge piped to tee with 2>&1 is allowed", "allow", f"{MERGE_SHIM} 5 --confirm 2>&1 | tee run.out", REPO_A, TX_A)
+repo_case("a merge with a > file and 2>&1 is allowed", "allow", f"{MERGE_SHIM} 5 --confirm > run.log 2>&1", REPO_A, TX_A)
+repo_case("a merge with a > file and 2>&1 that names another checkout is denied", "deny",
+          f"{MERGE_SHIM} -C {REPO_B} 5 --confirm > run.log 2>&1", REPO_A, TX_A)
 repo_case("a path with a hash names its checkout whole and is allowed", "allow", f"{MERGE_SHIM} --repo-dir {REPO_HASH} 5 --confirm",
           REPO_B, TX_A)
 repo_case("a runner that names claude-settings is allowed through the proxy's origin", "allow", f"{MERGE_SHIM} 5 --confirm", LANE_PROXY,
@@ -17771,6 +17776,14 @@ repo_case("a git -C of this checkout, then a cd into another checkout and a merg
 repo_case("a merge before a cd into another checkout is allowed", "allow", f"{MERGE_SHIM} 5 --confirm; cd {REPO_B}", REPO_A, TX_A)
 repo_case("a git -C of another checkout before a merge does not move the shell, so it is allowed", "allow",
           f"git -C {REPO_B} fetch && {MERGE_SHIM} 5 --confirm", REPO_A, TX_A)
+# A cd the guard cannot follow (a variable, a missing folder) leaves no checkout, so the merge is denied. A fallback to the working
+# directory would allow it. The -C cases read the value against the folder the cd leaves.
+repo_case("a cd to a variable, then a merge, is denied", "deny", f"cd $X && {MERGE_SHIM} 5 --confirm", REPO_A, TX_A)
+repo_case("a cd to a missing folder, then a merge, is denied", "deny", f"cd {NO_CHECKOUT} && {MERGE_SHIM} 5 --confirm", REPO_A, TX_A)
+repo_case("a cd to the parent of this checkout, then -C naming this checkout, is allowed from another checkout", "allow",
+          f"cd {os.path.dirname(REPO_A)} && {MERGE_SHIM} -C {os.path.basename(REPO_A)} 5 --confirm", REPO_B, TX_A)
+repo_case("a cd to the parent of this checkout, then -C naming another checkout, is denied from this one", "deny",
+          f"cd {os.path.dirname(REPO_A)} && {MERGE_SHIM} -C {os.path.basename(REPO_B)} 5 --confirm", REPO_A, TX_A)
 # Not judged: a merge named in quoted text, --lane-lint (no lock, no merge), and any session outside the cloud.
 repo_case("a merge named in a quoted echo is not judged", "allow", f"echo '{MERGE_SHIM} --repo-dir {REPO_B} 5 --confirm'", REPO_A, TX_A)
 repo_case("--lane-lint is not judged, whatever the record", "allow", f"{MERGE_SHIM} --lane-lint --repo-dir {REPO_B} 5", REPO_A, TX_NONE)
