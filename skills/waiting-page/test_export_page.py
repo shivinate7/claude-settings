@@ -110,6 +110,10 @@ RED = [
     ("personal name in the ssh form of a public git host", "jane" + "@" + "github.com:x", "jane@github.com:x"),
     ("no-reply name before a personal name", "noreply-jane" + "@" + "x.com", "noreply-jane@x.com"),
     ("no-reply name after a personal name", "jane.noreply" + "@" + "x.com", "jane.noreply@x.com"),
+    # A plain word is no secret only as the whole value. A secret after one, with or without a comma or quotes, is one.
+    ("password with a plain word before a secret", "password: " + "none hunter2", "hunter2"),
+    ("password with a plain word and a comma before a secret", "password: " + "none, hunter2", "hunter2"),
+    ("password with a quoted plain word before a secret", "password: " + '"none" hunter2', "hunter2"),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
