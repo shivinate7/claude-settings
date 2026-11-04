@@ -203,7 +203,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
 
 ## Cost
 
-About six git processes and one file written per build. With `--live`, the publisher's reads add
+About six git processes, plus up to four when a step cites a mockup, and one file written per build. With `--live`, the publisher's reads add
 one `list_threads` walk and one or two GitHub list calls, and one file it writes and the roadmap build script
 reads. The stale-step row adds one more `list_sessions` walk inside that publish, and three more
 fields per session in the file. The page-ruling row adds one `ArtifactData list items` read (every

@@ -17,7 +17,7 @@ Git is each artifact's home (owner ruling fb-1458-1, 2026-11-02 14:58 CST, optio
   - Guard: pure Python on an item write that carries `designs`. Reads the layout and extras files of the checkout. No process, no file written, no log line except one `noted` line when the layout cannot be read.
   - Build: at most four git processes per build, however many entries and origin refs (the ref listing, the shallow check, one batched type read, and one batched link read when a ref holds a blob at an entry's path). Check: `test_five_entries_over_fifty_origin_refs_start_at_most_four_git_processes` in `skills/roadmap/test_build.py`. No file, no log.
   - Every other call: nothing.
-- Known limit: the guard judges shape, not existence. A design-folder path to a file never written passes at write. The build reads it as a miss once origin lacks the file.
+- Known limit: the guard judges shape, not existence. A design-folder path to a file never written passes at write. The build reads it as a miss once origin lacks the file. A link whose target file holds the link's own target-path text reads as ok.
 
 Kind: process
 Home: rule:questions-go-to-owner
