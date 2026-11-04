@@ -2,7 +2,7 @@
 # Decides which checks jobs and suites a run needs. Writes name=<bool> lines to $GITHUB_OUTPUT:
 #   per job: checks_guard (set when code and guard are both set, or directly by a path the checks-guard job installs from: actions/playwright-setup, .github/shoot), checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep (the janitor sweep suites, set with checks_windows_rest) checks_macos shell_macos pointer_windows, and shoot (below)
 #   per suite: code (any non-docs file changed), mods (a path under mods/, or a .md path under skills/plain-english-map/: the mod tests and the
-#   map skill tests, one CI step in each of the `checks`, `checks-windows` and `checks-macos` jobs), guard (guard mutation test), sweep (janitor mutation test), shoot (the checks-shoot job: the bin/shoot suite, which installs a browser). The `checks` lint job always runs, so it has no flag.
+#   map skill tests, one CI step in each of the `checks`, `checks-windows` and `checks-macos` jobs), guard (guard mutation test), sweep (janitor mutation test), shoot (the checks-shoot job: the bin/shoot suite, which installs a browser). The `checks` lint job and the checks-merge-install job always run, so they have no flag (their suites carry `code`). checks_macos gates both checks-macos and checks-macos-b.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
 # BASE_SHA.
@@ -48,8 +48,9 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       bin/ci-job) on="$on code " ;;
       # bin/ios-ship: macOS only. Its suite runs in the shell-macos job, under /bin/bash 3.2.
       bin/ios-ship|lint/test_ios_ship.sh) on="$on $S code " ;;
-      # bin/sim-test: macOS only, like bin/ios-ship. Its suite runs in the shell-macos job.
-      bin/sim-test|lint/test_sim_test.sh) on="$on $S code " ;;
+      # bin/sim-test: macOS only, like bin/ios-ship. Its suite runs in the shell-macos job, and runs the real bin/sim-lease
+      # beside the script, so an edit to bin/sim-lease turns the same job on.
+      bin/sim-test|lint/test_sim_test.sh|bin/sim-lease) on="$on $S code " ;;
       # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it.
       bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs) on="$on code shoot " ;;
       # actions/playwright-setup has two callers: checks-shoot (shoot) and checks-guard (checks_guard). checks-guard also

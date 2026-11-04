@@ -499,16 +499,16 @@ body.sheet-open { overflow: hidden; }
 .prail { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
 .prail button { display: grid; gap: 6px; min-width: 0; min-height: 44px; padding: 8px 10px; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; color: var(--ink); cursor: pointer; }
 .prail button[aria-pressed="true"] { border-color: var(--acc); box-shadow: inset 0 3px 0 var(--acc); }
-.prail .nm { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font: 600 14px/1.25 var(--body); white-space: nowrap; }
-.prail .nm .num { font-weight: 400; font-size: 13px; color: var(--muted); }
+.prail .nm { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font: 600 14px/1.25 var(--body); flex-wrap: wrap; white-space: normal; }
+.prail .nm > span:first-child { overflow-wrap: anywhere; }
+.prail .nm .num { font-weight: 400; font-size: 13px; color: var(--muted); white-space: nowrap; }
 .prail .here { display: inline-block; width: 7px; height: 7px; margin-left: 5px; border-radius: 50%; background: var(--acc); vertical-align: 2px; }
 @container (max-width: 639px) {
   .prail { gap: 4px; }
   .prail button { padding: 6px 5px; }
-  .prail .nm { flex-direction: column; gap: 0; font-size: 12.5px; white-space: normal; }
-  .prail .nm > span:first-child { overflow-wrap: anywhere; }
+  .prail .nm { flex-direction: column; gap: 0; font-size: 12.5px; }
 }
-/* Five chips keep each phase name and the current-phase dot on one line from a 452px box in DejaVu Sans, a wide fallback if the web font fails, and from a 410px box in the web font (Organize current is the widest). Five columns start at 464px, a 12px margin over the wide font. Below that the rail wraps to three columns. */
+/* Five chips keep each phase name and the current-phase dot on one line from a 452px box in DejaVu Sans, a wide fallback if the web font fails, and from a 410px box in the web font (Organize current is the widest). Five columns start at 464px, a 12px margin over the wide font. Below that the rail wraps to three columns. A longer name, such as a repo's own phase name, wraps at its spaces. */
 @container (max-width: 463px) { .prail { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
 .cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
@@ -852,7 +852,8 @@ const choiceText = (k) => (k === NONE ? "none of these" : k === OVERTURN ? "over
 // The page never prints a raw option key: a chip shows the option's letter by position, a pick shows the option's title.
 const letterOf = (it, key) => { const i = (it.options || []).findIndex((o) => o.key === key); return i < 0 ? "" : String.fromCharCode(65 + i % 26); };
 const shorten = (t, n) => (t.length > n ? t.slice(0, n - 1).trimEnd() + "…" : t);
-const pickName = (it, key) => { const o = (it.options || []).find((x) => x.key === key); return o ? shorten(String(o.label), 28) : ""; };
+// A missing or blank label gives "", never "undefined", so a caller names the letter only.
+const pickName = (it, key) => { const o = (it.options || []).find((x) => x.key === key); return o && o.label != null && String(o.label).trim() ? shorten(String(o.label), 28) : ""; };
 // A multi item takes a list of option keys: `multi`, or `ranked`, which also orders them. A list is valid when it holds distinct keys of the item's options.
 const isMulti = (it) => it.kind === "decision" && (it.multi === true || it.ranked === true);
 const validKeys = (it, l) => Array.isArray(l) && l.length > 0 && new Set(l).size === l.length && l.every((k) => (it.options || []).some((o) => o.key === k));
@@ -860,7 +861,9 @@ const validKeys = (it, l) => Array.isArray(l) && l.length > 0 && new Set(l).size
 const pickKeys = (it) => (isMulti(it) ? (validKeys(it, it.pick) ? (it.ranked === true ? it.pick : (it.options || []).map((o) => o.key).filter((k) => it.pick.includes(k))) : null) : typeof it.pick === "string" && (it.options || []).some((o) => o.key === it.pick) ? [it.pick] : null);
 const pickChoice = (it) => (isMulti(it) ? pickKeys(it).slice() : it.pick);
 // "A", "A and B", "A, B and C"; a ranked list is an order, so it reads "A, B, C".
-const namesOf = (it, l) => { const n = l.map((k) => pickName(it, k)); return it.ranked === true || n.length < 2 ? n.join(", ") : n.slice(0, -1).join(", ") + " and " + n[n.length - 1]; };
+// A ready line names an option by its title, or by its letter when the title is missing, as its chip does. The none-key block keeps pickName's "".
+const optName = (it, key) => pickName(it, key) || letterOf(it, key);
+const namesOf = (it, l) => { const n = l.map((k) => optName(it, k)); return it.ranked === true || n.length < 2 ? n.join(", ") : n.slice(0, -1).join(", ") + " and " + n[n.length - 1]; };
 const ordinal = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10 < 4 ? n % 10 : 0]);
 function h(tag, attrs, ...kids) {
   const n = document.createElement(tag);
@@ -1107,7 +1110,11 @@ function problem(it) {
     if (ks.some((k) => !k)) return { text: "An option of this decision has no key, so it cannot be answered." + fix, blocks: true };
     const dup = ks.find((k, i) => ks.indexOf(k) !== i);
     if (dup !== undefined) return { text: "Two options of this decision share the key " + dup + ", so it cannot be answered." + fix, blocks: true };
-    if (ks.includes(NONE)) return { text: "An option of this decision uses the key none, so it cannot be answered." + fix, blocks: true };
+    if (ks.includes(NONE)) {
+      // Name the option so the owner knows which one to send back for a fix. The letter is the one its card shows.
+      const lab = pickName(it, NONE), who = "Option " + letterOf(it, NONE) + (lab ? ', "' + lab + '",' : "");
+      return { text: who + ' has the key none. The page keeps that key for "None of these", so this decision cannot be answered.' + fix, blocks: true };
+    }
     const pic = pictureProblem(it); if (pic) return { text: pic + fix, blocks: true };
   }
   // Last on purpose: a hard defect above blocks first, and its warning is the one shown.
@@ -1212,7 +1219,7 @@ function readyText(it) {
   if (!d.choice) return (d.note || "").trim() ? "Ready to send: none of these, with your note." : "";
   if (d.choice === NONE) return (d.note || "").trim() ? "Ready to send: none of these." : "Say what you want instead.";
   if (isMulti(it)) return validKeys(it, d.choice) ? "Ready to send: " + namesOf(it, d.choice) + (it.ranked === true ? ", your order." : ", your choice.") : "";
-  return "Ready to send: " + pickName(it, d.choice) + ", your choice.";
+  return "Ready to send: " + optName(it, d.choice) + ", your choice.";
 }
 // The longest lines a multi item's ready line can show: every option ticked, with each ending, and the lines with no tick.
 function readyFits(it) {
@@ -1556,7 +1563,7 @@ async function withdrawAll() {
       const ref = state.db.collection("answers").doc(it.id), cur = await ref.get();
       if (cur.exists && (cur.data() || {}).at !== prior.at) { state.notice[it.id] = "This answer changed since this page read it. Reload before you withdraw it."; continue; }
       await ref.delete();
-    } catch (e) { state.notice[it.id] = "Not withdrawn (" + (e && e.code || "error") + "). Reply in the thread instead: " + it.n + " withdraw"; continue; }
+    } catch (e) { state.notice[it.id] = "Not withdrawn (" + (e && e.code || "error") + "). Paste it in chat instead: " + it.n + " withdraw"; continue; }
     delete state.answers[it.id]; delete state.changing[it.id]; delete state.notice[it.id];
     done.push({ it, prior, draft: null, changing: false, withdrawn: true, act: prior.act });
   }
@@ -1717,7 +1724,7 @@ function answeredEl(items, place) {
 function renderList() {
   const list = $("list"), by = sorted(), want = [];
   if (!state.items.length) {
-    want.push(h("div", { class: "empty" }, !state.loaded ? "Loading the items waiting on you…" : state.db === false ? "This view cannot reach the page's store. Reply in the thread with your answers instead." : "Nothing on this page waits on you. Sessions add an item here when they need your word."));
+    want.push(h("div", { class: "empty" }, !state.loaded ? "Loading the items waiting on you…" : state.db === false ? "This view cannot reach the page's store. Paste your answers in chat instead." : "Nothing on this page waits on you. Sessions add an item here when they need your word."));
   }
   const live = new Set();
   let wordsShown = false;
@@ -1758,7 +1765,7 @@ function renderList() {
 }
 const ACT_NAME = { unpark: "Unpark", drop: "Drop" }, ACT_SENT = { unpark: "Unpark sent", drop: "Drop sent" }, ACT_DONE = { unpark: "Unparked", drop: "Dropped" };
 // Only a line with no id is off. A view with no store has no meta/page, so it draws no parked block.
-const WHY_NOID = "The page's writer has not prepared this line yet. Reply in the thread instead.";
+const WHY_NOID = "The page's writer has not prepared this line yet. Paste your answer in chat instead.";
 // Every parked DOM id is "pk-<part>-<key>". The key is the entry's id, or "_<index>" for a line that is not live: a slug holds no underscore, so two keys never meet.
 // No page id has the form "pk-<part>-<key>", so a parked id such as "h" meets no id of the page.
 function pkToggle(p, it, act, why, key) {
@@ -1854,8 +1861,13 @@ function renderBar() {
   $("copy").hidden = !(state.db === false || state.copyOffer);
 }
 
-const TOLD = "Claude was told.";
-const NOT_TOLD = "No session was told; reply in the thread to wake one.";
+// Each says only what the page knows. The comment send is "a wake was sent": no session is known to have woken, and only a
+// record's `read` confirms a read. The writer reads asks/ at each wake and turn start (SKILL.md), so the unsent case says that.
+// SKILL.md forbids a session to reply in a comment thread, so neither line sends the owner there.
+const TOLD = "A wake was sent.";
+const NOT_TOLD = () => "No session was told. It waits for " + askWriter() + "'s next wake or turn start.";
+// An answer is read by each item's owner, not by the writer, so its unsent line names no writer.
+const ANSWER_NOT_TOLD = "No session was told. Each owner reads its answer at its next wake or turn start.";
 const MAX_BYTES = 4096, MAX_NOTE = 500, MAX_OWNER = 80, CAN_WAIT_MS = 3000, UNDO_S = 8;
 const plain = (t) => String(t || "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
 // Owners come first so a cut at the byte cap never drops them.
@@ -1912,7 +1924,7 @@ async function sendAll() {
     for (const it of st) {
       const d = eff(it), prior = state.answers[it.id] || null, body = answerBody(it, d, at);
       try { await state.db.collection("answers").doc(it.id).set(body); }
-      catch (e) { state.barNote = "Not saved (" + (e && e.code || "error") + ")" + (wrote.length ? " from " + nList([it.n]) : "") + ". Copy the answers and reply in the thread."; state.copyOffer = true; break; }
+      catch (e) { state.barNote = "Not saved (" + (e && e.code || "error") + ")" + (wrote.length ? " from " + nList([it.n]) : "") + ". Copy the answers and paste them in chat."; state.copyOffer = true; break; }
       wrote.push({ it, prior, draft: state.draft[it.id] || null, changing: !!state.changing[it.id], act: body.act });
       state.answers[it.id] = body; delete state.draft[it.id]; delete state.changing[it.id]; delete state.notice[it.id];
       entries.push(it.park ? { n: it.n, choice: body.act, owner: it.owner } : { n: it.n, choice: body.choice, done: body.done, note: body.note, owner: it.owner });
@@ -1923,7 +1935,7 @@ async function sendAll() {
     render();
     if (entries.length) {
       const told = await notifyClaude(noticeText(entries, "Saved on the waiting page."), can);
-      setSentStatus(told ? TOLD : NOT_TOLD);
+      setSentStatus(told ? TOLD : ANSWER_NOT_TOLD);
     }
   } finally { state.sending = false; renderBar(); }
 }
@@ -2013,7 +2025,7 @@ function answerLine() {
 async function copyText(text) { try { await navigator.clipboard.writeText(text); return true; } catch (e) { return false; } }
 $("copy").addEventListener("click", async () => {
   const text = answerLine() || "No answers yet.", box = $("copyBox");
-  if (await copyText(text)) { state.barNote = "Copied. Paste it in the thread."; box.hidden = true; }
+  if (await copyText(text)) { state.barNote = "Copied. Paste it in chat."; box.hidden = true; }
   else { box.hidden = false; box.value = text; box.select(); state.barNote = "Select and copy the text below."; }
   renderBar();
 });
@@ -2134,7 +2146,7 @@ async function sendAsk() {
   const sent = s.sent;
   const cut = plain(text);
   const told = await notifyClaude("Asked on the waiting page. Writer: " + askWriter() + ". Ask " + id + ": " + cut.slice(0, ASK_NOTICE) + (cut.length > ASK_NOTICE ? "…" : "") + ".", can);
-  if (s.sent === sent) { sent.told = told ? TOLD : NOT_TOLD; renderAskForm(); }
+  if (s.sent === sent) { sent.told = told ? TOLD : NOT_TOLD(); renderAskForm(); }
 }
 // Undo deletes the record and puts the words back in the box, ahead of anything typed since. The window is read from the clock, as undoLeft does.
 async function undoAsk() {
@@ -2377,8 +2389,13 @@ const D = window.ROADMAP_DATA, B = window.ROADMAP_BUILD;
 const hasData = !!D && typeof D === "object";
 const root = $("sView");
 
-/* The five phases, in the order the work happens. Steps carry one of these ids in their `phase` field. */
-const PH = [{ k: "cleanup", n: "Clean up" }, { k: "organize", n: "Organize" }, { k: "design", n: "Design" }, { k: "rollout", n: "Roll out" }, { k: "later", n: "Later" }];
+/* The phases a repo's plan can carry as known names. Steps name their phase in `phase`; the list the tab draws is built
+   from the steps (phaseList), so a repo's own phase ids, and steps with none, are drawn and not left out. */
+const KNOWN_PH = [{ k: "cleanup", n: "Clean up" }, { k: "organize", n: "Organize" }, { k: "design", n: "Design" }, { k: "rollout", n: "Roll out" }];
+const LATER_PH = { k: "later", n: "Later" };
+/* The key of the "No phase" group. It is a character no phase id is written with, so a step's own phase id cannot
+   collide with it, and it survives an HTML attribute (a NUL would not). */
+const NO_PHASE = "\u2400none";
 const ORDER = ["todo", "active", "done", "blocked"];
 const LBL = { todo: "To do", active: "In progress", done: "Done", blocked: "Blocked" };
 const CULL_KEYS = [{ k: "debts", n: "Debt files" }, { k: "decisions", n: "Decision files" }, { k: "hooks", n: "Hook lines" }, { k: "words", n: "CLAUDE.md words" }];
@@ -2400,6 +2417,7 @@ const fresh = (iso) => { const d = when(iso); return !!d && dayKey(d) === dayKey
 const firstSentence = (t) => { if (!t) return ""; const m = String(t).match(/^.*?[.!?](\s|$)/); return (m ? m[0] : String(t)).trim(); };
 const pct = (a, b) => (a - b) / b * 100;
 const pctS = (v) => (v > 0 ? "+" : "") + v.toFixed(1) + "%";
+const phaseKey = (s) => (typeof s.phase === "string" && s.phase ? s.phase : NO_PHASE);
 const phaseName = (k) => (PH.find((p) => p.k === k) || {}).n || k;
 const unknownRead = (r) => String(r).startsWith("unknown");
 // "unknown (why)" shows as its why, so the word "unknown" appears once on the screen, at the plan.
@@ -2425,10 +2443,31 @@ const steps = listOf("steps").map((s) => ({ ...s, status: ORDER.includes(s.statu
 const topics = hasData ? listOf("topics") : null;
 const meta = bag("meta");
 const phases = meta.phases && typeof meta.phases === "object" ? meta.phases : null;
+/* A phase id is repo text, so it can spell an Object.prototype member ("constructor", "toString", "__proto__"). Every
+   map keyed by a phase id has no prototype, and meta.phases is read by own key only. */
+const phaseMap = () => Object.create(null);
+const phaseMeta = (k) => (phases && Object.prototype.hasOwnProperty.call(phases, k) ? phases[k] : null);
+
+/* The phases the steps use, in the order the work happens: the known four that hold a step, then each other phase id
+   by its smallest step order (then by id), then Later, then "No phase" for steps with no phase. A name is
+   meta.phases.<id>.name when that is a non-empty string, else the known name, else the id. An empty plan keeps Later,
+   so the tab still has a phase to draw. */
+function phaseList() {
+  const used = new Set(steps.map(phaseKey)), first = phaseMap();
+  for (const s of steps) { const k = phaseKey(s), o = isNum(s.order) ? s.order : 1e9; if (first[k] == null || o < first[k]) first[k] = o; }
+  const name = (k, known) => { const pm = phaseMeta(k), n = pm && pm.name; return typeof n === "string" && n.trim() ? n : known || k; };
+  const fixed = new Set([...KNOWN_PH.map((p) => p.k), LATER_PH.k, NO_PHASE]);
+  const others = [...used].filter((k) => !fixed.has(k)).sort((a, b) => first[a] - first[b] || String(a).localeCompare(String(b)));
+  const out = [...KNOWN_PH.filter((p) => used.has(p.k)), ...others.map((k) => ({ k })), ...(used.has(LATER_PH.k) || !steps.length ? [LATER_PH] : [])]
+    .map((p) => ({ k: p.k, n: name(p.k, p.n) }));
+  if (used.has(NO_PHASE)) out.push({ k: NO_PHASE, n: "No phase", none: true });
+  return out;
+}
+const PH = phaseList();
 const cull = meta.cull && typeof meta.cull === "object" ? meta.cull : null;
 const advisor = meta.advisor && typeof meta.advisor === "object" ? meta.advisor : null;
 
-const ui = { view: "plan", phase: null, page: {}, donePage: {}, logPage: 0, open: new Set(), tiles: new Set(), folds: new Set(), notes: new Set(), tps: new Set(), how: false };
+const ui = { view: "plan", phase: null, page: phaseMap(), donePage: phaseMap(), logPage: 0, open: new Set(), tiles: new Set(), folds: new Set(), notes: new Set(), tps: new Set(), how: false };
 try { const r = JSON.parse(localStorage.getItem("rm-view") || "null"); if (r && typeof r === "object") { if (["plan", "log", "ref", "rec"].includes(r.v)) ui.view = r.v; if (PH.some((p) => p.k === r.p)) ui.phase = r.p; } } catch (e) { /* nothing remembered */ }
 const saveView = () => { try { localStorage.setItem("rm-view", JSON.stringify({ v: ui.view, p: ui.phase })); } catch (e) { /* not kept */ } };
 
@@ -2444,12 +2483,15 @@ function measureRows() {
   rowH = hgt; return true;
 }
 
-const byPhase = (k) => steps.filter((s) => s.phase === k);
+const byPhase = (k) => steps.filter((s) => phaseKey(s) === k);
 /* Work order: active steps first, then everything else by its `order` field. */
 const workOrder = (list) => [...list.filter((s) => s.status === "active").sort(byOrder), ...list.filter((s) => s.status !== "active").sort(byOrder)];
 const openList = (k) => workOrder(byPhase(k).filter((s) => s.status !== "done"));
 const doneList = (k) => byPhase(k).filter((s) => s.status === "done").sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")) || byOrder(a, b));
-function curPhase() { for (const p of PH) if (byPhase(p.k).some((s) => s.status !== "done")) return p; return PH[PH.length - 1]; }
+/* The current phase is the first numbered phase with a step left, else the last numbered one. "No phase" is current only
+   when it is the only phase there is. */
+const numbered = () => PH.filter((p) => !p.none);
+function curPhase() { const ns = numbered(); for (const p of ns) if (byPhase(p.k).some((s) => s.status !== "done")) return p; return ns.length ? ns[ns.length - 1] : PH[0]; }
 const nextUp = () => workOrder(byPhase(curPhase().k)).filter((s) => s.status === "todo").slice(0, 3);
 const shownPhase = () => (ui.phase && PH.some((p) => p.k === ui.phase) ? ui.phase : curPhase().k);
 
@@ -2537,7 +2579,7 @@ function renderNow() {
   const tot = steps.length, tdone = steps.filter((s) => s.status === "done").length;
   const active = workOrder(steps.filter((s) => s.status === "active")), nu = nextUp(), off = offTrack();
   $("svNow").innerHTML = `
-  <div><h3>Phase <span class="num">${PH.indexOf(cur) + 1}/${PH.length}</span></h3><div class="ph">${esc(cur.n)}</div>
+  <div><h3>Phase${cur.none ? "" : ` <span class="num">${numbered().indexOf(cur) + 1}/${numbered().length}</span>`}</h3><div class="ph">${esc(cur.n)}</div>
     <div class="lead"><span class="num">${done}</span> of <span class="num">${ss.length}</span> done${act ? `, <span class="num">${act}</span> in progress` : ""}</div>
     <div class="segbar" aria-hidden="true">${segs(done, act, 0, ss.length)}</div>
     <div class="lead">Whole plan <span class="num">${tdone}/${tot}</span> done</div></div>
@@ -2545,7 +2587,7 @@ function renderNow() {
   <div><h3>Up next <span style="font-weight:400">in work order</span></h3><ol>${nu.map((s, i) => `<li><span class="ix">${i + 1}</span><span class="id">${esc(s.id)}</span><button class="tx" type="button" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join("") || '<li class="none">Nothing left to start in this phase.</li>'}</ol></div>
   <div class="offt"><h3>Off track <span class="num" style="color:${off.length ? "var(--holds)" : "var(--muted)"}">${off.length}</span></h3><ul>${off.map((o) => {
     const s = steps.find((x) => x.id === o.id);
-    if (o.blocked) return `<li>${rgl("blocked")}<button class="tx" type="button" data-go="${esc(s.id)}">In ${esc(phaseName(s.phase))}: <span class="id">${esc(s.id)}</span> ${esc(s.title)}</button></li>`;
+    if (o.blocked) return `<li>${rgl("blocked")}<button class="tx" type="button" data-go="${esc(s.id)}">In ${esc(phaseName(phaseKey(s)))}: <span class="id">${esc(s.id)}</span> ${esc(s.title)}</button></li>`;
     return `<li><span class="ic">${esc(o.k)}</span><span>${esc(o.t)}${s ? ` <button class="tx" type="button" data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> ${esc(s.title)}</button>` : ""}</span></li>`;
   }).join("") || '<li class="none">Nothing off track.</li>'}</ul></div>`;
 }
@@ -2554,7 +2596,7 @@ function renderRail() {
   const cur = curPhase(), shown = shownPhase();
   $("svRail").innerHTML = PH.map((p) => {
     const ss = byPhase(p.k), d = ss.filter((s) => s.status === "done").length, a = ss.filter((s) => s.status === "active").length, b = ss.filter((s) => s.status === "blocked").length;
-    return `<button type="button" data-phase="${p.k}" aria-pressed="${p.k === shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${p === cur ? ", current phase" : ""}"><span class="nm"><span>${esc(p.n)}${p === cur ? '<span class="here" title="Current phase: the first with work left"></span>' : ""}</span><span class="num" aria-hidden="true">${d}/${ss.length}</span></span><span class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</span></button>`;
+    return `<button type="button" data-phase="${esc(p.k)}" aria-pressed="${p.k === shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${p === cur && !p.none ? ", current phase" : ""}"><span class="nm"><span>${esc(p.n)}${p === cur && !p.none ? '<span class="here" title="Current phase: the first with work left"></span>' : ""}</span><span class="num" aria-hidden="true">${d}/${ss.length}</span></span><span class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</span></button>`;
   }).join("");
 }
 
@@ -2577,7 +2619,7 @@ function cullTiles(ci) {
   }).join("");
 }
 function metaTiles(k) {
-  const data = phases && phases[k], list = data && Array.isArray(data.metrics) ? data.metrics.filter((m) => m && typeof m === "object") : [];
+  const data = phaseMeta(k), list = data && Array.isArray(data.metrics) ? data.metrics.filter((m) => m && typeof m === "object") : [];
   if (!list.length) return '<div class="none">No numbers saved for this phase yet.</div>';
   return list.map((m, i) => {
     const of = typeof m.value === "string" && m.value.match(/^\s*(\d+)\s+of\s+(\d+)\s*$/);
@@ -2639,11 +2681,12 @@ function renderPhase() {
     if (ci) asof = ["Clean-up numbers", cull.closed ? "cull ended " + cull.closed : "", ci.batches.length ? "latest reading: " + ci.last.label : "no batch reported yet"].filter(Boolean).map(esc).join(" · ")
       + (cull.note ? ` <button type="button" class="howto" data-how aria-expanded="${ui.how}">${ui.how ? "Hide how these are counted" : "How these are counted"}</button>` : "");
   } else {
-    const pd = phases && phases[k]; tiles = metaTiles(k); asof = pd && pd.asOf ? esc(pd.asOf) : ""; foot = pd && pd.foot ? esc(pd.foot) : "";
+    const pd = phaseMeta(k); tiles = metaTiles(k); asof = pd && pd.asOf ? esc(pd.asOf) : ""; foot = pd && pd.foot ? esc(pd.foot) : "";
   }
-  const n = PH.indexOf(p) + 1;
-  $("svPhases").innerHTML = `<section class="box phase" id="p-${k}" aria-label="Phase ${n}, ${esc(p.n)}">
-    <div class="ph-head"><h3>Phase ${n}<span class="sr">, ${esc(p.n)}</span></h3><div class="prog"><span class="num" aria-hidden="true">${d}/${ss.length}</span><span class="sr">${d} of ${ss.length} steps done</span><div class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</div></div></div>
+  // "Phase 13" for steps with no phase would be false, so that group is headed by its name alone.
+  const n = numbered().indexOf(p) + 1;
+  $("svPhases").innerHTML = `<section class="box phase" id="p-${p.none ? "none" : esc(k)}" aria-label="${p.none ? "No phase" : `Phase ${n}, ${esc(p.n)}`}">
+    <div class="ph-head"><h3>${p.none ? "No phase" : `Phase ${n}<span class="sr">, ${esc(p.n)}</span>`}</h3><div class="prog"><span class="num" aria-hidden="true">${d}/${ss.length}</span><span class="sr">${d} of ${ss.length} steps done</span><div class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</div></div></div>
     ${asof ? `<div class="asof">${asof}</div>` : ""}
     ${k === "cleanup" && ui.how && cull && cull.note ? `<div class="howbody">${esc(cull.note)}</div>` : ""}
     <div class="tiles">${tiles}</div>
@@ -2651,7 +2694,7 @@ function renderPhase() {
     <div class="hint"><span>${open.length} open step${open.length === 1 ? "" : "s"}, in work order</span><span>Read only</span></div>
     <ul class="rsteps">${open.slice(pg * size, (pg + 1) * size).map((s) => stepRow(s, nextIds)).join("") || `<li class="noneyet">${ss.length ? "Every step in this phase is done." : "No steps in this phase yet."}</li>`}</ul>
     ${pager("open", pg, pages, open.length, "open steps")}
-    ${d ? `<div class="donefold${ui.folds.has(k) ? " open" : ""}"><button type="button" class="fold" data-fold="${k}" aria-expanded="${ui.folds.has(k)}"><span class="chev" aria-hidden="true">▶</span><span><span class="num">${d}</span> done</span></button>
+    ${d ? `<div class="donefold${ui.folds.has(k) ? " open" : ""}"><button type="button" class="fold" data-fold="${esc(k)}" aria-expanded="${ui.folds.has(k)}"><span class="chev" aria-hidden="true">▶</span><span><span class="num">${d}</span> done</span></button>
       <div class="fb"><ul class="rsteps">${done.slice(dpg * size, (dpg + 1) * size).map((s) => stepRow(s, nextIds)).join("")}</ul>${pager("done", dpg, dPages, d, "done")}</div></div>` : ""}
   </section>`;
 }
@@ -2804,10 +2847,11 @@ function copyText(txt, btn, fallback) {
 }
 function goStep(id) {
   const s = steps.find((x) => x.id === id); if (!s) return;
-  if (PH.some((p) => p.k === s.phase)) ui.phase = s.phase;
+  const k = phaseKey(s);
+  if (PH.some((p) => p.k === k)) ui.phase = k;
   const size = pageSize();
-  if (s.status === "done") { ui.folds.add(s.phase); ui.donePage[s.phase] = Math.floor(doneList(s.phase).findIndex((x) => x.id === id) / size); }
-  else ui.page[s.phase] = Math.floor(openList(s.phase).findIndex((x) => x.id === id) / size);
+  if (s.status === "done") { ui.folds.add(k); ui.donePage[k] = Math.floor(doneList(k).findIndex((x) => x.id === id) / size); }
+  else ui.page[k] = Math.floor(openList(k).findIndex((x) => x.id === id) / size);
   ui.open.add(id);
   setView("plan"); renderPlan();
   const li = document.getElementById("s-" + id);
@@ -2822,7 +2866,7 @@ root.addEventListener("click", (e) => {
   if ((n = hit("[data-go]"))) { goStep(n.dataset.go); return; }
   if ((n = hit("[data-view-go]"))) { setView(n.dataset.viewGo); window.scrollTo({ top: 0 }); return; }
   if ((n = hit("[data-view]"))) { setView(n.dataset.view); return; }
-  if ((n = hit("[data-phase]"))) { ui.phase = n.dataset.phase; setView("plan"); renderPlan(); const f = root.querySelector(`[data-phase="${ui.phase}"]`); if (f) f.focus(); return; }
+  if ((n = hit("[data-phase]"))) { ui.phase = n.dataset.phase; setView("plan"); renderPlan(); const f = [...root.querySelectorAll("[data-phase]")].find((b) => b.dataset.phase === ui.phase); if (f) f.focus(); return; }
   if ((n = hit("[data-pg]"))) {
     const sc = n.dataset.scope, dir = n.dataset.pg === "next" ? 1 : -1, k = shownPhase();
     if (sc === "log") ui.logPage += dir; else if (sc === "done") ui.donePage[k] = (ui.donePage[k] || 0) + dir; else ui.page[k] = (ui.page[k] || 0) + dir;
@@ -2855,8 +2899,8 @@ root.addEventListener("pointermove", (e) => { if (!tip.classList.contains("on"))
 // Rows are measured once they show, so the first draw may change the page size: draw again then.
 let built = false;
 function shown() {
-  if (!built) { built = true; build(); if (hasData && measureRows()) { ui.page = {}; renderPlan(); } return; }
-  if (hasData && measureRows()) { ui.page = {}; renderPlan(); }
+  if (!built) { built = true; build(); if (hasData && measureRows()) { ui.page = phaseMap(); renderPlan(); } return; }
+  if (hasData && measureRows()) { ui.page = phaseMap(); renderPlan(); }
 }
 document.addEventListener("statusshown", shown);
 let lastSize = pageSize(), sizeT = null;
@@ -2864,7 +2908,7 @@ window.addEventListener("resize", () => {
   clearTimeout(sizeT);
   sizeT = setTimeout(() => {
     if (!built || $("sPanel").hidden || !hasData) return;
-    measureRows(); const n = pageSize(); if (n === lastSize) return; lastSize = n; ui.page = {}; renderPlan();
+    measureRows(); const n = pageSize(); if (n === lastSize) return; lastSize = n; ui.page = phaseMap(); renderPlan();
   }, 150);
 });
 })();
