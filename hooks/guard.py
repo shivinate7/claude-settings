@@ -751,7 +751,7 @@ def in_throwaway(segments, number: int, cwd: str, ends=()) -> bool:
     return all(folder and path_is_inside(folder, tempfile.gettempdir()) for folder in judged)
 
 
-# decision lanes-start-in-tool-worktrees: a lane tree comes only from the tool's own isolation.
+# decision lanes-start-in-tool-worktrees: a worktree comes only from the tool's own isolation.
 HAND_MADE_VALUE_OPTIONS = ("-b", "-B", "--reason")
 
 
@@ -815,10 +815,10 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
 
 
 WORKTREE_HAND_MADE_REASON = (
-    "Rule (hand-made worktree): a lane tree comes only from the Agent tool's isolation "
+    "Rule (hand-made worktree): a worktree comes only from the Agent tool's isolation "
     "'worktree' option or from the EnterWorktree tool, never from a tree made by hand. "
-    "A hand-made tree sends a lane to work in the main clone and loses the isolation. "
-    "Remedy: start the lane with one of those two tools. Call EnterWorktree with a `name` and no "
+    "A hand-made tree sends an agent or a session to work in the main clone and loses the isolation. "
+    "Remedy: start the work with one of those two tools. Call EnterWorktree with a `name` and no "
     "`path`. If the tool's isolation was refused, "
     "make no tree by hand: stop and report to the owner which layer refused and its exact "
     "message. A guard refusal starts \"Rule (\" and names its rule. Any other refusal is the "
@@ -2589,7 +2589,7 @@ def role_model_one(tool_input):
 # run_in_background out or sets it false. (In the desktop harness a left-out call still runs in the background
 # and the field is not offered, so busy does not slow an Agent lane there.) Full (memory over 95%, disk free
 # under the smaller of 5% of the disk and 5 GB) refuses every lane. A reading that cannot be read counts as normal. Only an
-# agent's shell or file write also reads load (RUNNING_LANE_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
+# agent's shell or file write also reads load (RUNNING_AGENT_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
 # "true") skips the brake and reads nothing, because the brake guards the owner's own machine.
 LANE_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
 LOAD_BUSY_MEMORY = 85.0
@@ -2597,12 +2597,12 @@ LOAD_FULL_MEMORY = 95.0
 LOAD_BUSY_DISK_SHARE, LOAD_BUSY_DISK_GB = 10.0, 15.0   # busy: free under the smaller of the two
 LOAD_FULL_DISK_SHARE, LOAD_FULL_DISK_GB = 5.0, 5.0
 GIB = 2 ** 30
-LOAD_CITE = "(decision machine-load-brake, a busy or full machine starts no new lane)"
-LOAD_LANE_CITE = "(decision machine-load-brake, a full machine stops a running lane at its next shell or file write)"
+LOAD_CITE = "(decision machine-load-brake, a busy or full machine starts no new lane or agent)"
+LOAD_LANE_CITE = "(decision machine-load-brake, a full machine stops a running agent at its next shell or file write)"
 LOAD_BUSY_REASON = "the machine is busy (%s). %s " + LOAD_CITE
-LOAD_BUSY_AGENT_FORM = ", or start this lane as an Agent call that leaves run_in_background out or sets it false"
+LOAD_BUSY_AGENT_FORM = ", or make this an Agent call that leaves run_in_background out or sets it false"
 LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
-LOAD_FULL_REASON = "the machine is full (%s). No new lane starts until the load drops. Wait, then retry. " + LOAD_CITE
+LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. Wait, then retry. " + LOAD_CITE
 
 
 def _read_memory():
@@ -2703,20 +2703,20 @@ def load_hit(tool: str, tool_input) -> tuple:
     return "", ""
 
 
-# A RUNNING LANE (decision machine-load-brake, "Running lanes"). An agent's own call that can fill a disk (a shell or
-# a file write) reads the load once, inside this hook that already runs for the call. Full refuses it, so a lane
+# A RUNNING AGENT (decision machine-load-brake, "Running agents"). An agent's own call that can fill a disk (a shell or
+# a file write) reads the load once, inside this hook that already runs for the call. Full refuses it, so an agent
 # stops even while its orchestrator waits on the owner. Busy lets it run. The orchestrator's own calls read nothing,
 # so the session that frees the disk is never braked by the full disk.
-RUNNING_LANE_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
-LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this lane now: end your turn and report the reading to "
+RUNNING_AGENT_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
+LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this agent now: end your turn and report the reading to "
                          "your orchestrator, which frees space or waits for the load to drop. " + LOAD_LANE_CITE)
 
 
-def running_lane_hit(payload, tool: str) -> tuple:
+def running_agent_hit(payload, tool: str) -> tuple:
     """(rule reason, matched) when an agent's disk-filling call meets a full machine, else ("", ""). One read
     per such call; none for the orchestrator, and none for a lane-start call, which load_hit reads."""
     agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
-    if is_cloud() or tool not in RUNNING_LANE_TOOLS or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
+    if is_cloud() or tool not in RUNNING_AGENT_TOOLS or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
         return "", ""
     try:
         reading = read_load()
@@ -3031,7 +3031,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                    reason.format(command=live.index(number) + 1, total=len(live), kind=kind,
                                  program=kind if " " in kind else "git " + kind), matched)
 
-    # 1c2. A lane worktree made by hand, outside the tool's own folder.
+    # 1c2. A worktree made by hand, outside the tool's own folder.
     for number, segment in enumerate(segments):
         if segment.strip():
             matched = hand_made_worktree_hit(segments, number, cwd, ends)
@@ -4347,7 +4347,7 @@ def judge(payload) -> None:
     # It runs before the Opus refusal, because a lifted refusal exits refuse() at once and would skip this deny.
     load_reason, load_matched = load_hit(tool, tool_input)
     if not load_reason:
-        load_reason, load_matched = running_lane_hit(payload, tool)
+        load_reason, load_matched = running_agent_hit(payload, tool)
     if load_reason:
         refuse(tool, "deny", "load-brake", load_reason, load_matched)
 

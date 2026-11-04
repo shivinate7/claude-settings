@@ -2,7 +2,7 @@
 
 Ruling: the owner, 2026-11-02 11:12 CST: "can you ensure the artifact that our repos all build is
 just called '<Repo Name> Cockpit'". Base: main 62bdb8a6.
-Lane kind: informed. No mockup: no visible text changes (items 2 and 4).
+Designer kind: informed. No mockup: no visible text changes (items 2 and 4).
 
 ## Per page
 

@@ -78,9 +78,9 @@ The owner may use any word for a thing (`speak-one-name-per-thing`); the glossar
 | designer | An agent that draws an HTML mockup of each changed screen before the builder starts, except on a text-only change (decision `design-agents`). It writes only in the design folder. | `agents/designer.md` | — |
 | design reviewer | An agent that judges built screens against the mockup (or, for a text-only change, main's screenshots) and the repo's design rules, with a verdict per screen. It is not blind, and it never edits. | `agents/design-reviewer.md` | — |
 | mockup | One HTML page in the design folder that draws a screen at every size and theme, with a notes file beside it. | `agents/designer.md` | — |
-| blind lane | A designer lane whose brief names only the screen's job, users, data shapes and the house UX rules. Its brief withholds the current screen and the repo's design spec, and it is told not to read them. | `skills/design-explore/SKILL.md` | — |
-| informed lane | A designer lane whose brief gives the current screen, its mockups, spec and tokens. | `skills/design-explore/SKILL.md` | — |
-| directed lane | An informed lane plus one named direction, such as denser or phone first. | `skills/design-explore/SKILL.md` | — |
+| blind designer | A designer whose brief names only the screen's job, users, data shapes and the house UX rules. Its brief withholds the current screen and the repo's design spec, and it is told not to read them. | `skills/design-explore/SKILL.md` | `blind lane` |
+| informed designer | A designer whose brief gives the current screen, its mockups, spec and tokens. | `skills/design-explore/SKILL.md` | `informed lane` |
+| directed designer | An informed designer plus one named direction, such as denser or phone first. | `skills/design-explore/SKILL.md` | `directed lane` |
 | fact line | An indented list line under a map line. Its prose ends with ` — ` and one backtick cite of a code symbol's value or of a `uses` relation. | `skills/plain-english-map/SKILL.md` | — |
 | Red-run trailer | A commit-message line on the commit that adds test lines: `Red-run: <command> -> <N> failed on <sha>`, or `Red-run: none: <reason>`. It records that each new case failed on the old code. | `docs/decisions/red-run-trailer-on-test-commits.md` | — |
 | Unvetted | A question that reaches the owner with no past-ruling check, because the check could not run. Its text carries the line `Unvetted: <reason>`, so he reads it as unchecked. | `docs/decisions/question-form.md` | — |

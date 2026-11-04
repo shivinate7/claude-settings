@@ -22,7 +22,7 @@ Named limits, each a form Claude rarely writes:
 
 Which layer refused on 2026-10-19, by reading, unmeasured live: the harness. That day `hooks/guard.py` judged an orchestrator's Agent call by model rules only, and each of their refusals names a model; `worktree-home` reads only an agent's call. The Agent prompt hook in `settings.json` judges brief contents, and its refusal names a rule id. This repo had no `WorktreeCreate` hook. The harness's message was not recorded. The next refusal's layer and message are still owed: the refusal text asks the session to report both.
 
-Risk kind: incident, per `building-guard-needs-incident`: 2026-10-20 16:53 CDT, two lane agents wrote into the main clone. Landed 2026-10-26.
+Risk kind: incident, per `building-guard-needs-incident`: 2026-10-20 16:53 CDT, two agents wrote into the main clone. Landed 2026-10-26.
 
 Cost, per `outcomes-mechanize-rules`: process starts, one `git` read per `git worktree add` call, none on any other call. Files written: none on an allowed call; a refusal adds one line to `guard.log`, which `lint/guard_log_report.py` reads.
 
