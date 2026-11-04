@@ -2,7 +2,7 @@
     {
         "id": "oq-mcp-launch-full-refusal",
         "kind": "decision",
-        "status": "open",
+        "status": "answered",
         "title": "Refuse every booting MCP launch, or only under the sim-test lock?",
         "short": "MCP launch refusal scope",
         "owner": "session_013NEJKzhGfPvj1DTXeyBnFT",
@@ -24,6 +24,7 @@
                 "lose": "Viewing an app on a simulator needs you to boot one first, and the cap and reuse rules no longer judge MCP launches."
             }
         ],
-        "repo": "shivinate7/claude-settings"
+        "repo": "shivinate7/claude-settings",
+        "answer": "b: refuse every booting MCP launch. Coordinator, 2026-11-03 19:36 CST, applying Degen rule shared-sim-lease (owner, 2026-11-02). Built in PR #1178."
     }
 ]
