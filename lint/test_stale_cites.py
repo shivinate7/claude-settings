@@ -171,30 +171,38 @@ def paths_loaded_by_path(path):
     return found
 
 
-def binding_kind(source, name):
-    """How a Python source binds `name` at module level, also under a module-level if or try: "def" for a def
-    or class, "assign", "import", or None. Read with ast, never imported. A case asserts this on its fixtures
-    before it probes the check on the name."""
+SCOPES = (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)  # names inside are not module level
+
+
+def module_bindings(source):
+    """(kind, name) for each name a Python source binds at module level, under any statement that is no def or
+    class: "def" for a def or class, "import", or "assign" for each name stored. Read with ast, never imported."""
     found = []
 
-    def visit(body):
-        for node in body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                if node.name == name:
-                    found.append("def")
-            elif isinstance(node, ast.Assign):
-                if any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
-                    found.append("assign")
-            elif isinstance(node, (ast.Import, ast.ImportFrom)):
-                if any((alias.asname or alias.name.split(".")[0]) == name for alias in node.names):
-                    found.append("import")
-            elif isinstance(node, (ast.If, ast.Try)):
-                for field in ("body", "orelse", "finalbody"):
-                    visit(getattr(node, field, None) or [])
-                for handler in getattr(node, "handlers", None) or []:
-                    visit(handler.body)
-    visit(ast.parse(source).body)
-    return found[-1] if found else None
+    def visit(node):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                found.append(("def", child.name))
+            elif isinstance(child, (ast.Import, ast.ImportFrom)):
+                found.extend(("import", alias.asname or alias.name.split(".")[0]) for alias in child.names)
+            elif isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
+                found.append(("assign", child.id))
+            elif not isinstance(child, SCOPES):
+                visit(child)
+    visit(ast.parse(source))
+    return found
+
+
+def binding_kind(source, name):
+    """How a Python source binds `name` at module level: "def", "assign", "import", or None. The last binding
+    counts. A case asserts this on its fixtures before it probes the check on the name."""
+    kinds = [kind for kind, bound in module_bindings(source) if bound == name]
+    return kinds[-1] if kinds else None
+
+
+def unknown_lines(out):
+    """Each line the check printed as unknown."""
+    return [line for line in out.splitlines() if line.startswith("stale-cites: unknown, ")]
 
 
 class StaleCase(unittest.TestCase):
@@ -576,6 +584,46 @@ class SymbolTests(StaleCase):
             commit(repo)
         self.assert_passes(self.make_range(base_files(notes, extra={"hooks/out.py": base_out}), change))
 
+    def assert_bound_name_not_flagged(self, path, name, base_src, head_src):
+        """Base and head both bind `name` at module level, so a note that cites it in `path` passes."""
+        self.assertIsNotNone(binding_kind(base_src, name), "scope: base does not bind %s" % name)
+        self.assertIsNotNone(binding_kind(head_src, name), "scope: head does not bind %s" % name)
+        notes = "# Notes\n\n- `%s` `%s`\n" % (path, name)
+
+        def change(repo):
+            write(repo, path, head_src)
+            commit(repo)
+        self.assert_passes(self.make_range(base_files(notes, extra={path: base_src}), change))
+
+    def test_a_name_moved_under_any_module_level_compound_statement_is_not_flagged(self):
+        base_mod = "X = 1\n\n\ndef keep():\n    return 1\n"
+        blocks = {
+            "with": "with open(path) as fh:\n    X = 1\n",
+            "for": "for item in items:\n    X = 1\n",
+            "while": "while running:\n    X = 1\n",
+            "match": "match mode:\n    case 1:\n        X = 1\n",
+            "except": "try:\n    pass\nexcept ValueError:\n    X = 1\n",
+            "for else": "for item in items:\n    pass\nelse:\n    X = 1\n",
+            "finally": "try:\n    pass\nfinally:\n    X = 1\n",
+        }
+        for kind, block in blocks.items():
+            with self.subTest(kind=kind):
+                self.assert_bound_name_not_flagged("hooks/mod.py", "X", base_mod,
+                                                   block + "\n\ndef keep():\n    return 1\n")
+
+    def test_a_name_still_bound_by_a_tuple_for_with_or_walrus_target_is_not_flagged(self):
+        base_mod = "X = 1\n\n\ndef keep():\n    return 1\n"
+        forms = {
+            "tuple": "X, Y = 1, 2\n",
+            "for": "for X in range(2):\n    pass\n",
+            "with": "with open(path) as X:\n    pass\n",
+            "walrus": "(X := 3)\n",
+        }
+        for form, statement in forms.items():
+            with self.subTest(form=form):
+                self.assert_bound_name_not_flagged("hooks/mod.py", "X", base_mod,
+                                                   statement + "\n\ndef keep():\n    return 1\n")
+
 
 class StepTests(StaleCase):
     def test_code_only_pr_fails_the_step_on_the_stale_line(self):
@@ -707,6 +755,16 @@ class CostTests(StaleCase):
         # ls-tree lists the tracked Markdown, so a run without it reads no .md.
         self.assertNotIn("ls-tree", subs, subs)
 
+    def test_a_lone_touched_mjs_starts_three_git_processes_and_prints_no_unknown_line(self):
+        def change(repo):
+            write(repo, "hooks/lib.mjs", LIB + "export const more = 1;\n")
+            commit(repo)
+        rng = self.make_range(base_files("# Notes\n\n- `hooks/lib.mjs` `refusals`\n"), change)
+        rc, out, subs = self.run_traced(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(unknown_lines(out), [], out)
+        self.assertEqual(sorted(subs), ["diff", "merge-base", "rev-parse"], subs)
+
     def test_a_range_that_removes_a_path_starts_at_most_five_git_processes(self):
         def change(repo):
             move(repo, "hooks/lib.mjs", MOVED)
@@ -745,6 +803,32 @@ class CostTests(StaleCase):
         out = done.stdout + done.stderr
         self.assertIn(done.returncode, (0, 1), out)
         self.assertEqual((paths_under(rng.repo), paths_under(scripts)), before, out)
+
+
+class ForeignFileTests(StaleCase):
+    """A cite of a JavaScript or shell name is unknown, never a pass. The unknown line prints once Markdown is read."""
+
+    def mjs_and_removal(self, notes):
+        def change(repo):
+            write(repo, "hooks/lib.mjs", LIB + "export const more = 1;\n")
+            os.remove(os.path.join(repo, "hooks", "guard_core.py"))  # a second removal, so Markdown is read
+            commit(repo)
+        return self.make_range(base_files(notes), change)
+
+    def test_a_touched_mjs_cited_beside_another_removal_prints_one_unknown_line(self):
+        rng = self.mjs_and_removal("# Notes\n\n- `hooks/lib.mjs` `refusals`\n")
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(unknown_lines(out), [
+            "stale-cites: unknown, docs/debts/notes.md:3: hooks/lib.mjs refusals: "
+            "JavaScript and shell names are not checked",
+        ], out)
+
+    def test_a_line_marked_ste_disable_line_stale002_prints_no_unknown_line(self):
+        rng = self.mjs_and_removal("# Notes\n\n- `hooks/lib.mjs` `refusals` <!-- ste-disable-line STALE002 -->\n")
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(unknown_lines(out), [], out)
 
 
 class UnknownFileTests(StaleCase):
