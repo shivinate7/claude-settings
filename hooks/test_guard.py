@@ -11944,6 +11944,65 @@ sh("cap comment: a python heredoc whose only spot is a comment naming a cap writ
    "[comment false alarm, main allows]",
    "python3 - <<'PY'\n# os.system('" + CAP_ECHO_LOCAL + "')\nPY", "allow", cwd=PROJ)
 
+# Python file operations, node aliases, os.path imports and written-then-run scripts. Each case names a write
+# the way a probe would: CAP_ECHO_LOCAL is the cap write, CFG_HOOK the hook path a frozen write lands on, ENV
+# the env file.
+sh("frozen python: a heredoc copying onto the hook path with shutil.copy denies",
+   "python3 - <<'PY'\nimport shutil; shutil.copy('src','" + CFG_HOOK + "')\nPY", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen python: a heredoc moving onto the hook path with shutil.move denies",
+   "python3 - <<'PY'\nimport shutil; shutil.move('src','" + CFG_HOOK + "')\nPY", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen python: a heredoc copying onto the hook path through shutil as sh denies",
+   "python3 - <<'PY'\nimport shutil as sh; sh.copy('src','" + CFG_HOOK + "')\nPY", "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen python: a heredoc changing the mode of the hook path with os.chmod denies",
+   "python3 - <<'PY'\nimport os; os.chmod('" + CFG_HOOK + "', 0o755)\nPY", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen python: a python -c copying onto the hook path with shutil.copy denies",
+   "python3 -c \"import shutil; shutil.copy('src','" + CFG_HOOK + "')\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen python: a body written to x.py, copying onto the hook path with shutil.copy, then run, denies",
+   "cat > x.py <<'PY'\nimport shutil; shutil.copy('src','" + CFG_HOOK + "')\nPY\npython3 x.py",
+   "deny", "frozen-path", cwd=NOGIT)
+
+sh("cap node: a node heredoc calling a cap write through childProcess.exec asks",
+   "node - <<'J'\nconst childProcess=require('child_process'); childProcess.exec('" + CAP_ECHO_LOCAL + "')\nJ",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap node: a node heredoc calling a cap write through a destructured execSync renamed e asks",
+   "node - <<'J'\nconst {execSync: e}=require('child_process'); e('" + CAP_ECHO_LOCAL + "')\nJ",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap node: a node import of execSync as e calling a cap write asks",
+   "node - <<'J'\nimport {execSync as e} from 'child_process'; e('" + CAP_ECHO_LOCAL + "')\nJ",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap node: a node heredoc calling a cap write through cp.execSync held in run asks",
+   "node - <<'J'\nconst cp=require('child_process');\nconst run=cp.execSync;\nrun('" + CAP_ECHO_LOCAL + "')\nJ",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap node: a node heredoc calling a cap write through promisified exec asks",
+   "node - <<'J'\nconst {exec}=require('child_process');\nconst execAsync=require('util').promisify(exec);\n"
+   "await execAsync('" + CAP_ECHO_LOCAL + "')\nJ", "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap node: a node -e calling a cap write through cp.execSync asks",
+   "node -e \"const cp=require('child_process'); cp.execSync('" + CAP_ECHO_LOCAL + "')\"",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("frozen node: a node heredoc copying onto the hook path through childProcess.exec denies",
+   "node - <<'J'\nconst childProcess=require('child_process'); childProcess.exec('cp x " + CFG_HOOK + "')\nJ",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("env node: a node heredoc reading the env file in a template string through cp.execSync denies",
+   "node - <<'J'\nconst cp=require('child_process'); cp.execSync(`cat " + ENV + "`)\nJ",
+   "deny", "env-file", cwd=PROJ)
+
+sh("cap import: a python heredoc importing os.path, then os.system on a cap write, asks",
+   "python3 - <<'PY'\nimport os.path\nos.system('" + CAP_ECHO_LOCAL + "')\nPY",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap import: a python -c importing os.path, then os.system on a cap write, asks",
+   "python3 -c \"import os.path; os.system('" + CAP_ECHO_LOCAL + "')\"",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+
+chained_ask("cap script: a body written to x.py that runs a cap write with subprocess run and shell=True, then run, "
+   "denies as a chained ask command [main's verdict]",
+   "cat > x.py <<'PY'\nfrom subprocess import run\ncmd='" + CAP_ECHO_LOCAL + "'\nrun(cmd, shell=True)\nPY\n"
+   "python3 x.py", cwd=PROJ, carries=("agent-model-cap",))
+chained_ask("cap script: a body written to x.py that runs a cap write with os as o system, then run, "
+   "denies as a chained ask command [main's verdict]",
+   "cat > x.py <<'PY'\nimport os as o\ncmd='" + CAP_ECHO_LOCAL + "'\no.system(cmd)\nPY\npython3 x.py",
+   cwd=PROJ, carries=("agent-model-cap",))
+
 # Scanner cases (building-scanner-respects-strings): a comment opener, a lone apostrophe and a
 # multi-line template literal inside the body. None of them hides the prune or adds a command.
 sh("ask-alone: a # line with a lone apostrophe in a python body holds no quote, so the prune asks",
