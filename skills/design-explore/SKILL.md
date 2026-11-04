@@ -40,8 +40,8 @@ designer.
 
 ## Procedure
 
-1. **Write the briefs.** A brief names a target repo only when its screen belongs to another repo;
-   otherwise the target is the spawning repo. A blind brief that names one does so in the first sentence
+1. **Write the briefs.** When a screen belongs to another repo, its brief names that repo as the target.
+   Otherwise the target is the spawning repo. A blind brief that names one does so in the first sentence
    of its Job section, by name and with no path. Use the lane kinds above. The first line of each brief is
    `Lane kind: blind|informed|directed`. A directed brief adds its direction. The skill always names
    the kind; a designer reads a brief with no kind as informed. The brief gives the lane its `<n>`.
