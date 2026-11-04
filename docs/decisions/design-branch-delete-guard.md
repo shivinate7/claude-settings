@@ -14,7 +14,7 @@ Home: hooks/guard_branch_worktree.py
 
 ### A remote delete
 
-`git push origin --delete <b>` and `git push origin :<b>` remove origin's copy. Origin only, tags skipped: a delete pushed to another remote keeps the other push rules, and a name that is only a local tag is not judged. The guard reads the branch tip: the remote-tracking ref, else the local branch. It denies the delete when all of these hold:
+`git push origin --delete <b>` and `git push origin :<b>` remove origin's copy. Origin only, tags skipped: a delete pushed to another remote keeps the other push rules, and a name that is only a local tag is not judged. The guard reads the branch tip: the remote-tracking ref, else the local branch. It refuses the delete when all of these hold:
 
 - The tip is not an ancestor of origin's default branch.
 - The tip holds a file under the layout's `design` folder that the default branch lacks.
