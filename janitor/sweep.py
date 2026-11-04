@@ -2249,7 +2249,16 @@ def _removed_count(decisions):
 # one-off roots would never shrink.
 MAX_RUN_LOG_LINES = 2000
 MAX_RUN_LOG_ROOTS = 200
-_RUN_LOG_LOCK = threading.Lock()  # `_pmap` workers append concurrently; the trim rewrites the file
+# Guards one append-then-trim (read the file, rewrite it) against another thread of this process doing
+# the same, so a trim never drops a line a second append just wrote. A sweep run does not contend:
+# `_pmap` with acts runs its roots one at a time.
+_RUN_LOG_LOCK = threading.Lock()
+
+
+def run_log_key(root: str) -> str:
+    """One spelling of a root for the run log: the writer's trim, the preview's reader and its lookup all
+    compare roots through this, so a symlinked or differently cased path finds its line."""
+    return os.path.normcase(os.path.realpath(root))
 
 
 def append_run_log(path: str, results):
@@ -2277,9 +2286,16 @@ def append_run_log(path: str, results):
                 kept = handle.readlines()
             if len(kept) > MAX_RUN_LOG_LINES:
                 temp = "%s.%d.tmp" % (path, os.getpid())
-                with open(temp, "w", encoding="utf-8") as handle:
-                    handle.writelines(_trim_run_log(kept))
-                os.replace(temp, path)
+                try:
+                    with open(temp, "w", encoding="utf-8") as handle:
+                        handle.writelines(_trim_run_log(kept))
+                    os.replace(temp, path)
+                except OSError as exc:  # the log stays as it was, untrimmed
+                    try:
+                        os.remove(temp)
+                    except OSError:
+                        pass
+                    print("janitor: run log not trimmed (%s)" % exc)
     except (OSError, ValueError) as exc:
         print("janitor: run log not written (%s)" % exc)
 
@@ -2290,26 +2306,33 @@ def _trim_run_log(lines):
     root that has not run lately keeps its line. The result never exceeds the two bounds added."""
     cut = len(lines) - MAX_RUN_LOG_LINES
     newest = {}
+    keys = {}
     for number, text in enumerate(lines):
         try:
-            newest[json.loads(text)["root"]] = number
-        except (ValueError, KeyError, TypeError):
+            root = json.loads(text)["root"]
+            if root not in keys:
+                keys[root] = run_log_key(root)
+            newest[keys[root]] = number
+        except (ValueError, KeyError, TypeError, OSError):
             continue
     keep = set(sorted(number for number in newest.values() if number < cut)[-MAX_RUN_LOG_ROOTS:])
     return [text for number, text in enumerate(lines) if number >= cut or number in keep]
 
 
 def read_last_runs(path: str):
-    """The newest run-log line for each root, as {root: line}. One read of PATH. A missing file is {}.
-    An unreadable file raises OSError; a line that is not JSON is skipped."""
+    """The newest run-log line for each root, as {run_log_key(root): line}. One read of PATH.
+    A missing file is {}. An unreadable file raises OSError; a line that is not JSON is skipped."""
     last = {}
+    keys = {}
     try:
         with open(path, encoding="utf-8") as handle:
             for text in handle:
                 try:
                     row = json.loads(text)
-                    last[row["root"]] = row
-                except (ValueError, KeyError, TypeError):
+                    if row["root"] not in keys:
+                        keys[row["root"]] = run_log_key(row["root"])
+                    last[keys[row["root"]]] = row
+                except (ValueError, KeyError, TypeError, OSError):
                     continue
     except FileNotFoundError:
         pass
@@ -2321,7 +2344,7 @@ def last_run_line(last, root: str, path: str) -> str:
     exception that read raised."""
     if isinstance(last, Exception):
         return "last --confirm run: unknown (%s)" % type(last).__name__
-    row = last.get(root)
+    row = last.get(run_log_key(root))
     if row is None:
         return "last --confirm run: none in %s" % path
     try:
