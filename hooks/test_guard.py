@@ -9573,6 +9573,127 @@ def record_push_cost_case():
                  "the transcript is read only at the record branch"
 
 
+# The two push-read cases judge payloads in one fresh interpreter, as main() does. The driver is a string.
+# A stand-in guard_core sits in guard_push_delete's name for it, so only the push path's git reads meet it,
+# and the driver counts the symbolic-ref reads that path makes and the None answers it gives.
+PUSH_READ_DRIVER = r'''
+import contextlib, importlib.util, io, json, subprocess, sys
+guard_path, plan = sys.argv[1], json.loads(sys.argv[2])
+spec = importlib.util.spec_from_file_location("guard_under_test", guard_path)
+guard = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(guard)
+push_delete = sys.modules["guard_push_delete"]
+real_core = push_delete.guard_core
+stats = {"symbolic_ref_reads": 0, "none_answers": 0}
+
+
+class PushCore:
+    def __getattr__(self, name):
+        return getattr(real_core, name)
+
+    def _git(self, cwd, *args):
+        if args[:1] == ("symbolic-ref",):
+            stats["symbolic_ref_reads"] += 1
+            if plan["fail_first_symbolic_ref"] and not stats["none_answers"]:
+                stats["none_answers"] += 1
+                return None
+        return real_core._git(cwd, *args)
+
+
+push_delete.guard_core = PushCore()
+results, memo_holds_head = [], []
+for step in plan["steps"]:
+    if "git" in step:
+        subprocess.run([plan["vcs"], "-C", step["cwd"]] + step["git"], check=True, capture_output=True)
+        continue
+    payload = step["judge"]
+    guard.guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"), payload.get("cwd"))
+    out, error = io.StringIO(), None
+    with contextlib.redirect_stdout(out):
+        try:
+            guard.judge(payload)
+        except SystemExit:
+            pass
+        except Exception as exc:
+            error = type(exc).__name__ + ": " + str(exc)
+    memo_holds_head.append(any(tuple(key[1:]) == ("symbolic-ref", "-q", "HEAD") for key in push_delete.PUSH_READS))
+    if error:
+        results.append(["crash", error])
+        continue
+    text = out.getvalue().strip()
+    if text:
+        block = json.loads(text)["hookSpecificOutput"]
+        results.append([block["permissionDecision"], block["permissionDecisionReason"]])
+    else:
+        results.append(["allow", ""])
+print(json.dumps({"results": results, "memo_holds_head": memo_holds_head, "stats": stats}))
+'''
+
+
+def _push_read_run(steps, fail_first):
+    """Run PUSH_READ_DRIVER over `steps` in a fresh interpreter, with GUARD as the guard under test. Returns
+    (report, None), or (None, why) when the run did not finish. The run's config folder is CFG, never the
+    runner's own, so a refusal writes its log under the run folder."""
+    env = dict(os.environ)
+    for name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR"):
+        env.pop(name, None)
+    env.update(ROLE_ENV)
+    env["CLAUDE_CONFIG_DIR"] = CFG
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    plan = {"vcs": VCS, "fail_first_symbolic_ref": fail_first, "steps": steps}
+    done = subprocess.run([sys.executable, "-c", PUSH_READ_DRIVER, GUARD, json.dumps(plan)],
+                          capture_output=True, text=True, env=env, timeout=120)
+    lines = done.stdout.strip().splitlines()
+    if done.returncode != 0 or not lines:
+        return None, "the guard run did not finish: %s" % done.stderr.strip()[-200:]
+    return json.loads(lines[-1]), None
+
+
+def _show(entry):
+    return "%s %r" % (entry[0], entry[1][:90])
+
+
+def _denied_by_record_rule(entry):
+    return entry[0] == "deny" and "roadmap-one-writer" in entry[1]
+
+
+def record_failed_read_case():
+    """roadmap-one-writer: a failed first git read is no answer, so the record-branch rule reads the branch again.
+
+    A HEAD push reads its checkout's branch twice in one call: push_verdict reads it first, then the record-branch
+    rule reads it again. The first read here answers None, as a timeout does. The second must still answer roadmap,
+    so the push is denied. A memo that kept the None would give the record-branch rule None, and the push would pass.
+    The control is the same push with no failed read: it is denied too, so the deny is the rule's, not the flake's.
+    Why: decision session-tiers, the record branch has one writer.
+    """
+    materialize(RECROADMAP)
+    materialize(LANE_TRANSCRIPT)
+    push = {"tool_name": "Bash", "tool_input": {"command": VCS + " push origin HEAD"}, "cwd": RECROADMAP,
+            "transcript_path": LANE_TRANSCRIPT}
+    steps = [{"judge": push}]
+    control, why = _push_read_run(steps, False)
+    if control is None:
+        return False, why
+    if control["results"][0][0] == "crash":
+        return False, "control: judge raised %s" % control["results"][0][1]
+    if not _denied_by_record_rule(control["results"][0]):
+        return False, ("control with no failed read: a HEAD push from the roadmap checkout got %s, "
+                       "want deny under roadmap-one-writer" % _show(control["results"][0]))
+    run, why = _push_read_run(steps, True)
+    if run is None:
+        return False, why
+    if run["stats"]["none_answers"] != 1:
+        return False, ("scope: the first symbolic-ref read on the push path did not answer None (%d reads), "
+                       "so no failed read was tested" % run["stats"]["symbolic_ref_reads"])
+    got = run["results"][0]
+    if got[0] == "crash":
+        return False, "judge raised %s" % got[1]
+    if not _denied_by_record_rule(got):
+        return False, ("after a failed first read, a HEAD push from the roadmap checkout got %s, "
+                       "want deny under roadmap-one-writer" % _show(got))
+    return True, "a failed first read is no answer: the second read names roadmap, and the push is denied"
+
+
 # =========================================================================== 5f. the trust card in a cs-build session
 #
 # Rule trust-card-in-build, decision session-tiers. A session whose own newest get_session record carries a
@@ -20496,6 +20617,8 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_cost_case),
     ("roadmap-one-writer: a push starts one rev-parse, symbolic-ref for HEAD and bare, push.default for bare "
      "only, and reads the transcript only at the record branch", record_push_cost_case),
+    ("roadmap-one-writer: a failed first git read is no answer, so a HEAD push from the record branch still denies",
+     record_failed_read_case),
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
      "a write or a mkdir, from a lane or the primary, and names no path",
      worktree_home_cd_into_other_checkout_case),
