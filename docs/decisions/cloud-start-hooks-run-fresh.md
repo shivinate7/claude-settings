@@ -27,7 +27,8 @@ So `hooks/daily_note.py` ran the snapshot's stale `hooks/precompact_handoff.py` 
 
 ## Limits
 
-- The fix lands in a container only once its snapshot holds the new `settings.json`. An older snapshot still runs its stale startup hooks, and then `install.sh` runs the fresh ones too, so a stale line can show beside the fresh one until the environment's snapshot is rebuilt.
+- The fix lands in a container only once its snapshot holds the new `settings.json`. An older snapshot still runs its stale startup hooks, and then `install.sh` runs the fresh ones too.
+  A stale line can show beside the fresh one until the environment's snapshot is rebuilt.
 - Cost: no new process type. The startup hooks start once per session start, as before, from inside the refresh hook.
 
 Kind: build
