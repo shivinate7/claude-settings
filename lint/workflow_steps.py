@@ -6,6 +6,9 @@ bin/ci-job runs a job's steps locally with it. It reads the layout checks.yml ke
 """
 import re
 
+# The Linux jobs that hold the suites of the one old `checks` job, split for wall time. merge/merge.py reads suites from each.
+CHECKS_SUITE_JOBS = ("checks", "checks-merge-install")
+
 
 def job_block(text, name):
     """Raw text of one job: from its `  name:` line to the next job line. None when the job is absent."""
