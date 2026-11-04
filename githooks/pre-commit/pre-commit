@@ -9,6 +9,9 @@ at a mirror that a later clean deletes through the link.
 
 Reads: the staged paths (added, copied, modified, renamed, type-changed) and the index modes. Staged deletions
 are never read, so a file committed earlier can still be removed.
+When the repo root holds githooks/main-ref/install.sh, it runs `sh <it> --check`: a commit is refused
+while the armed reference-transaction copy is missing or behind main, and allowed with an "unknown" line
+when the check cannot read. Cost: one sh and about 3 git reads per commit, no files written.
 Env: CLAUDE_HOOKS_DIR (default ~/.claude/hooks) holds guard_env, the one home of the env-file
 name rule. PRE_COMMIT_GUARD=off is the escape hatch. A guard_env that cannot be imported refuses,
 because a hook that waves everything through on its own fault guards nothing.
@@ -21,6 +24,7 @@ import sys
 
 HATCH = "PRE_COMMIT_GUARD=off"
 SYMLINK_MODE = "120000"
+MAIN_REF_INSTALLER = "githooks/main-ref/install.sh"
 
 
 def git(*args):
@@ -75,9 +79,32 @@ def symlink_fault(path):
     return None
 
 
+def check_armed_copy():
+    """Hold a repo that ships githooks/main-ref to main: refuse a missing or stale armed copy."""
+    try:
+        root = git("rev-parse", "--show-toplevel").strip()
+    except (subprocess.CalledProcessError, OSError):
+        return
+    installer = os.path.join(root, MAIN_REF_INSTALLER)
+    if not os.path.isfile(installer):
+        return
+    try:
+        run = subprocess.run(["sh", installer, "--check"], cwd=root, capture_output=True)
+        code, err = run.returncode, run.stderr.decode("utf-8", "surrogateescape")
+    except OSError as fault:
+        code, err = 2, f"main-ref check: unknown: cannot run {installer} ({fault})\n"
+    lines = [line for line in err.splitlines() if line.strip()]
+    if code == 1:
+        refuse(lines)
+    if code != 0 and not any("unknown" in line for line in lines):
+        lines.append(f"main-ref check: unknown: the check exited {code}.")
+    sys.stderr.write("".join(f"{line}\n" for line in lines))
+
+
 def main():
     if os.environ.get("PRE_COMMIT_GUARD") == "off":
         return
+    check_armed_copy()
     names_env_file = load_name_rule()
     try:
         paths = staged_paths()

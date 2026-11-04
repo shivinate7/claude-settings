@@ -202,7 +202,9 @@ The seven opt-in templates of that decision:
 - `claude-md-cites`: fails a run when a unit of the caller's `CLAUDE.md` files or `.claude/**/*.md` copies
   claude-settings record text instead of naming the record. The caller needs checkout first.
 - `githooks/main-ref`: refuses a local move of main to a commit that origin lacks. Run
-  `sh githooks/main-ref/install.sh` in each clone.
+  `sh githooks/main-ref/install.sh` in each clone. `sh githooks/main-ref/install.sh --check` writes
+  nothing and compares each armed copy to main; the shared pre-commit runs it and refuses a commit
+  while a copy is missing or behind main.
 - `testing/skip-locally-fail-in-ci.mjs`: wrap an env-dependent probe in `needEnv`. It skips locally,
   and fails when `CI` is set.
 
