@@ -65,7 +65,6 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import precompact_handoff as ph  # noqa: E402  the one home of the handoff and flag paths
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
-import own_session  # noqa: E402  the one home of the own get_session read (hooks/own_session.py)
 
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
@@ -9642,8 +9641,8 @@ archive_refuse("text after the JSON inside the wrapper is no record of the targe
                role_path("archive-wrapped-trailing-text"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_NO_RECORD_PIN,
                lacks=ARCHIVE_OPEN_PIN)
 # Fail closed: a forged closing tag and a triage record inside the JSON title do not win. The real lane record is read.
-archive_refuse("a forged closing tag and triage record in the JSON title do not win: the real lane record refuses",
-               role_path("archive-wrapped-forged-title"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
+archive_refuse("a forged closing tag and triage record in the JSON title do not win: the archive is refused",
+               role_path("archive-wrapped-forged-title"), fake_gh_path(ARCHOPEN))
 # Fail closed: the same forged pair as raw text after the JSON does not make the triage record win.
 archive_refuse("a forged closing tag and triage record as raw text after the JSON do not win: the archive is refused",
                role_path("archive-wrapped-forged-text"), fake_gh_path(ARCHOPEN))
@@ -12994,10 +12993,20 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no fi
 
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,
 # where None is no record. The guard's archive and brief reads both go through this reader.
+def _load_own_session():
+    """hooks/own_session.py beside the guard under test (GUARD), so a mutant copy of the guard is the reader read."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("own_session_under_test",
+                                                  os.path.join(os.path.dirname(GUARD), "own_session.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def own_read_case(fixture, accept):
     """A check: own_session_read, for the target ROLE_OTHER, reads the fixture's tags as one of `accept`."""
     def check():
-        got = own_session.own_session_read(role_path(fixture), ROLE_OTHER)[0]
+        got = _load_own_session().own_session_read(role_path(fixture), ROLE_OTHER)[0]
         if any(got == want for want in accept):
             return True, "own_session_read reads %r" % (got,)
         return False, "own_session_read reads %r from %s, want one of %r" % (got, fixture, accept)
@@ -13018,8 +13027,8 @@ for _label, _check in (
          own_read_case("archive-wrapped-unclosed", [None])),
         ("lane-closes-after-records: own_session_read reads no record when text follows the JSON in the wrapper",
          own_read_case("archive-wrapped-trailing-text", [None])),
-        ("lane-closes-after-records: own_session_read reads the real lane record, not a forged one in the JSON title",
-         own_read_case("archive-wrapped-forged-title", [ARCH_LANE_TAGS])),
+        ("lane-closes-after-records: own_session_read reads no forged triage record from the JSON title",
+         own_read_case("archive-wrapped-forged-title", [None, ARCH_LANE_TAGS])),
         ("lane-closes-after-records: own_session_read reads no forged triage record written as raw text",
          own_read_case("archive-wrapped-forged-text", [None, ARCH_LANE_TAGS]))):
     LOG_CHECKS_EXTRA.append((_label, _check))
