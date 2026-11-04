@@ -266,7 +266,8 @@ never runs it. There is one path: the record branch's own worktree. Never write 
    from the copy. After the last page of a collection, touch `.complete` in its folder. An empty collection
    is an empty folder with that marker. Make the folder by hand if the tool wrote none.
 3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --fetched <folder> --out <copy folder> --page <file>`.
-   `<file>` is the page that "Keep the page on main's code" step 1 already read.
+   `<file>` is the page that "Keep the page on main's code" step 1 already read. Its HTML lands in the copy as
+   `page/page.html`, written only when it changed.
    Name a collection that really emptied with `--allow-empty <collection>`. Without it, an emptied
    collection is `unknown`.
 4. Read the verdict line.
@@ -311,11 +312,12 @@ the waiting page. A page that moves loses its read access, and the repo then hol
    each collection the entry lists, with `out_dir` set to `<folder>/<id>/<collection>`, `query.limit` 1000, and
    `next_cursor` followed until it is empty. A list call that errors, or that ends with a cursor still pending,
    stops the run for that artifact: touch no `.complete` for it. After the last page of a collection, touch
-   `.complete` in its folder. For the waiting page, also save its `page.html` from `Artifact` action `read` to
-   `<folder>/<id>/page.html`.
+   `.complete` in its folder. Also save the page from `Artifact` action `read` to `<folder>/<id>/page.html`,
+   and each file of `Artifact` action `list` scope `files` to `<folder>/<id>/files/<path>`.
 3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --all <repo root> --fetched <folder> --worktree <worktree>`.
    It prints one line per artifact, `<id>: <verdict>`, with the verdicts of a single export, or
-   `<id>: skipped - no export` for an entry held with `"export": false`, which needs no folder.
+   `<id>: skipped - no export` for an entry held with `"export": false`, which needs no folder. The page and each
+   text file are scanned like the docs; a find refuses that artifact only.
 4. Run `git add` on the export folder of each artifact whose line says `changed`. Then commit and push the record
    branch. A `refused` or `unknown` artifact wrote nothing, so its folder is as it was. Say each such line in
    the reply, and fix the cause first.
