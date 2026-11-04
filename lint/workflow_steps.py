@@ -24,23 +24,45 @@ def step_key(step, key):
     return m.group(1) if m else None
 
 
-def block_scalar(style, lines, indent):
-    """The text of a block scalar whose header is `style` (`|` or `>`, with an optional `+` or `-`) and whose body is
-    `lines`, the lines after the header. The body is every following line indented `indent` spaces or deeper, or blank;
-    the indent is removed. A literal block (`|`, `|-`, `|+`) keeps its lines. A folded block (`>`, `>-`, `>+`) joins
-    each paragraph's lines with a space, as YAML folds them. None when `style` is not a block header."""
-    kind = re.fullmatch(r"([|>])[+-]?", style)
+def block_scalar(style, lines, floor):
+    """The text of a block scalar whose header is `style` (`|` or `>`, with an optional `-` or `+`) and whose body is
+    `lines`, the lines after the header. The body is the blank lines and the lines indented `floor` spaces or deeper;
+    its indent is that of its first non-blank line, as in YAML, and is removed. A literal block keeps its lines. A folded
+    block joins the lines of a paragraph with a space; a blank line between two lines is a newline, and a line indented
+    deeper than the body keeps its own line. `-` drops the final newline and `+` keeps the blank lines at the end;
+    otherwise the text ends in one newline. None when `style` is not a block header."""
+    kind = re.fullmatch(r"([|>])([+-]?)", style)
     if not kind:
         return None
     body = []
     for ln in lines:
-        if ln.strip() and not ln.startswith(" " * indent):
+        if ln.strip() and len(ln) - len(ln.lstrip(" ")) < floor:
             break
-        body.append(ln[indent:] if ln.strip() else "")
-    text = "\n".join(body).strip("\n")
+        body.append(ln)
+    first = next((ln for ln in body if ln.strip()), None)
+    if first is None:
+        return ""
+    indent = len(first) - len(first.lstrip(" "))
+    body = [ln[indent:] if ln.strip() else "" for ln in body]
+    trailing = 0
+    while not body[-1]:
+        body.pop()
+        trailing += 1
+    while not body[0]:
+        body.pop(0)
     if kind.group(1) == ">":
-        text = "\n".join(" ".join(p.split("\n")) for p in re.split(r"\n\s*\n", text))
-    return text + "\n"
+        text, gap, prev = "", 0, None
+        for ln in body:
+            if not ln:
+                gap += 1
+                continue
+            if prev is not None:
+                deeper = ln.startswith(" ") or prev.startswith(" ")
+                text += "\n" * (gap + 1 if deeper else gap) if (gap or deeper) else " "
+            text, gap, prev = text + ln, 0, ln
+    else:
+        text = "\n".join(body)
+    return text + {"-": "", "": "\n", "+": "\n" * (1 + trailing)}[kind.group(2)]
 
 
 def run_body(step):
