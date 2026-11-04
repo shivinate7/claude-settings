@@ -673,7 +673,8 @@ def shell_write_hit(raw: str, cwd: str, predicate, holds=None) -> str:
     shell spots (`script_spots`: os.system, subprocess, `%x`, a backtick in ruby). A crash of that reading
     falls back to reading every body, which refuses more and never less."""
     try:
-        hit = _shell_write_hit(strip_heredoc_bodies(raw, shells_only=True), cwd, predicate, holds, script_data=True)
+        hit = _shell_write_hit(strip_heredoc_bodies(raw, shells_only=True, per_body=True), cwd, predicate, holds,
+                           script_data=True)
         texts = []
         for lang, body, quote in interpreter_bodies(raw):
             texts += script_spots(body, lang)

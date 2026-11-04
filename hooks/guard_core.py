@@ -845,11 +845,14 @@ def _runs_written_file(text: str, headers, runner=_RUNNER) -> bool:
     return False
 
 
-def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
-    """Drop the body of every heredoc, and keep every header line. A body stays in view when its own header
-    runs it: a header that names an interpreter, a shell that its pipe feeds, or a file it writes that a later
-    segment runs. `shells_only` keeps a body only when a shell reads it, for a rule that judges shell lines:
-    a file that python, perl, ruby or node runs holds a script, read by `interpreter_bodies`."""
+def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = False) -> str:
+    """Drop the body of every heredoc, and keep every header line. `shells_only` keeps a body
+    only when a shell reads it, for a rule that judges shell lines. By default one body that runs keeps
+    every body in view. With `per_body` a body stays in view only when its own header runs it: a header that
+    names an interpreter, a shell its pipe feeds, or a file it writes that a later segment runs. Then a file
+    that python, perl, ruby or node runs is no shell file under `shells_only`: it holds a script, which
+    `interpreter_bodies` gives to a rule that reads its shell spots. A caller that maps the returned lines
+    back to the command (`heredoc_offsets`) takes the default."""
     if "<<" not in cmd:
         return cmd  # no heredoc: nothing to drop
     walks, bodies, unclosed = _heredoc_walks(cmd)
@@ -858,13 +861,12 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     # The header test reads the command with its bodies gone: a `bash <<EOF` line inside a data body
     # is text, and no body line may make another body look run.
     text = _without_message_values(_drop_heredoc_bodies(cmd, walks=walks))
-    runner = _SHELL_RUNNER if shells_only else _RUNNER
+    runner = _SHELL_RUNNER if per_body and shells_only else _RUNNER
     headers = [_without_message_values(header) for _, _, header in bodies]
-    if walks[0] != walks[1]:
-        # The two walks read these headers differently, so no body can be told apart from another: one
-        # header that runs its body keeps every body in view.
+    if not per_body or walks[0] != walks[1]:
+        # With the two walks reading these headers differently, no body can be told apart from another.
         if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(text, headers, runner):
-            return cmd
+            return cmd  # the body may be executed, so keep it under inspection
         keep = []
     elif _FED_SHELL(text):
         return cmd   # a heredoc that eval or source runs may open on a line before its header
