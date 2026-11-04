@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-11-04 07:56 CST, waiting-page item 168 (what a lane is), pick a: a lane is a session everywhere. The same team of sessions (coordinator, triage, batch runner, lane sessions) runs all on the owner's Mac or all in the cloud, as one concept. The owner's words, 2026-11-03 22:26 CST: "why do you think i cant have an all local run of coordinator triage batch merger and lane sessions and an all cloud variant of the same concept? what makes u think cloud vs local environment means different situations".
+Owner, 2026-11-04 07:56 CST, waiting-page item 168 (what a lane is), pick a: a lane is a session everywhere. The same team of sessions (coordinator, triage, batch runner, lane sessions) runs all on the owner's Mac or all in the cloud, as one concept. The owner asked (2026-11-03 22:26 CST) why an all-local run and an all-cloud run of the same sessions could not share one concept. The owner saw no reason for the cloud and the Mac to mean different things.
 
 - **A lane is the unit of work.** It has its own branch, worktree and lane PR. A lane session runs it, local and cloud alike. The GLOSSARY lane row defines it.
 - **The coordinator starts each lane session.** Inside a standing build the owner started, it needs no further owner grant (record `session-tiers`, A coordinator starts lane sessions).
