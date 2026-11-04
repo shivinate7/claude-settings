@@ -612,9 +612,9 @@ case6() {
   mkdir -p "$outside" "$cfg"
   printf '@%s/CLAUDE.md\n' "$work/case6-checkout" > "$cfg/CLAUDE.md"
 
-  # CLAUDE_CODE_REMOTE unset: a cloud session prints its session-tier line by design.
+  # CLAUDE_CODE_REMOTE and CLAUDE_CODE_REMOTE_SESSION_ID unset: a cloud session prints its session-tier line by design.
   out=$(cd "$outside" && CLAUDE_CONFIG_DIR="$cfg" GIT_CEILING_DIRECTORIES="$outside" \
-        env -u CLAUDE_CODE_REMOTE sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/c6err)
+        env -u CLAUDE_CODE_REMOTE -u CLAUDE_CODE_REMOTE_SESSION_ID sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/c6err)
   rc=$?
   errsize=$(wc -c < /tmp/c6err | tr -d '[:space:]'); rm -f /tmp/c6err
 
@@ -2868,9 +2868,9 @@ caseF5() {
   mkdir -p "$outside"
   # No CLAUDE_CONFIG_DIR contents at all: the pointer file itself is missing.
 
-  # CLAUDE_CODE_REMOTE unset: a cloud session prints its session-tier line by design.
+  # CLAUDE_CODE_REMOTE and CLAUDE_CODE_REMOTE_SESSION_ID unset: a cloud session prints its session-tier line by design.
   out=$(cd "$outside" && CLAUDE_CONFIG_DIR="$cfg" GIT_CEILING_DIRECTORIES="$outside" \
-        env -u CLAUDE_CODE_REMOTE sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF5err)
+        env -u CLAUDE_CODE_REMOTE -u CLAUDE_CODE_REMOTE_SESSION_ID sh "$SESSION_START_SH_DEFAULT" < /dev/null 2>/tmp/cF5err)
   rc=$?
   errsize=$(wc -c < /tmp/cF5err | tr -d '[:space:]'); rm -f /tmp/cF5err
 
