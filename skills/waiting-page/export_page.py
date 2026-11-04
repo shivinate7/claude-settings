@@ -24,7 +24,7 @@ Verdict, one line, then exit:
   unknown    the run crashed (one line, nothing written); exit 3
 Every doc is scanned, as parsed JSON, before the first write: each string value, each key, each doc id and each
 10 or 11 digit number (a phone). Only the shape counts: words such as "token budget" or "password manager" pass. So do a password word with a
-placeholder, a mask or a plain word as its value, `PWD=<path>`, a no-reply address and an ssh remote of a public git host.
+placeholder, a mask or a plain word as the whole rest of its line, `PWD=<path>`, a no-reply address and an ssh remote of a public git host.
 A personal fact in plain words passes too.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
 longer fetched is deleted from its collection folder; a truncated fetch deletes docs, and git history keeps them.
@@ -92,12 +92,14 @@ SECRET_SHAPES = (
     ("email", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
 )
 # A value after a password word that names no secret: a word, a mask, a template placeholder or (after PWD) a path. Each
-# must be the whole value, after one pair of wrapping quotes or brackets is taken off. Anything else is refused.
+# must be the whole rest of its line, after one pair of wrapping quotes or brackets and trailing `.,;` are taken off:
+# a word after it on the same line may be the secret (`none hunter2`). Anything else is refused.
 PLAIN_VALUES = frozenset(("optional", "required", "none", "null", "empty", "unset", "hidden", "redacted", "omitted"))
 MASK_VALUE = re.compile(r"[*•#]{3,}|[xX]{3,}")
 # `<placeholder words>` has no digits. A variable reference has an ALL_CAPS name, so `$Tr0ub4dor` and `${hunter2}` refuse.
 PLACEHOLDER_VALUE = re.compile(
     r"<[A-Za-z_ -]+>|\$\{[A-Z][A-Z_]*\}|\{\{[A-Z][A-Z_]*\}\}|\$[A-Z][A-Z_]*|%[A-Z][A-Z_]*%")
+REST_OF_LINE = re.compile(r"[^\r\n]*")  # the text after a password value, up to its line end
 WRAP_PAIRS = frozenset(('""', "''", "[]", "()"))  # one pair around the value is no part of it
 SHELL_PATH = re.compile(r"[~/][\w./~-]*")  # path characters only: no `;`, `&`, `=` or space can hide a second keyword
 SHELL_PWD = "PWD"  # the shell's working-directory variable; with a path value it is no password
@@ -144,8 +146,10 @@ def bare_value(value):
 
 
 def password_is_no_secret(found):
-    """True when the whole value after a password word is a plain word, a mask or a placeholder, or `found` is
-    `PWD=<path>`."""
+    """True when the value after a password word is a plain word, a mask or a placeholder, or `found` is
+    `PWD=<path>`, and nothing but blanks follows it on its line."""
+    if REST_OF_LINE.match(found.string, found.end()).group(0).strip():
+        return False
     value = bare_value(found.group(2))
     if found.group(1) == SHELL_PWD and SHELL_PATH.fullmatch(value):
         return True
