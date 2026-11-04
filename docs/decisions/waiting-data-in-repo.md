@@ -13,7 +13,7 @@ Git is each artifact's home. The claude.ai link is one account's view of it.
 - Degen moves its copy to its record branch and retires its own export. It calls this repo's export (fb-1512-1).
 - A cite names the artifact's id, as `artifact:<id>`. It never names the link. `lint/check_artifact_cites.py` refuses a bare link and an unregistered id.
 - The 14 roadmap step links become `artifact:<id>` cites (fb-1458-2). Open: the links are still bare. Until they are fixed, the check runs with `--steps list`, which prints each step link and fails no step. Once they are fixed, the guard that checks page writes refuses a bare link at each write to the record branch.
-- Owner, 2026-11-02 11:00 CST (waiting-page gripe, via the coordinator): the waiting page keeps a copy of its data in the repo, so a lost page loses no item. The owner did not take the ask verbatim. The gripe is real.
+- Owner, 2026-11-02 11:00 CST (waiting-page gripe, through the coordinator): the waiting page keeps a copy of its data in the repo, so a lost page loses no item. The owner did not take the ask verbatim. The gripe is real.
 - The id `waiting-data-in-repo` names this decision. The writer's step lives in the waiting-page skill, not in a rule.
 - The waiting page's copy is folder `waiting/` on the record branch. It holds five collections: `items`, `answers`, `groups`, `asks` and `meta`. Each document is one file, `waiting/<collection>/<doc_id>.json` (rule `git-record-own-file-per-kind`, one file per kind).
 - The mockups live in the page's `designData` block. The export saves that block as `waiting/page/designData.json`.
