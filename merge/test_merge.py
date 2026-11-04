@@ -299,6 +299,10 @@ class Env(unittest.TestCase):
     def lock_ref(self):
         return "refs/heads/merge-lock/main" in self.refs()
 
+    def lock_text(self):
+        sh(self.co, "git", "fetch", "-q", "origin", "refs/heads/merge-lock/main")
+        return sh(self.co, "git", "log", "-1", "--format=%B", "FETCH_HEAD")
+
     def worktrees(self):
         return sh(self.co, "git", "worktree", "list").count("\n") + 1
 
@@ -314,6 +318,14 @@ class Env(unittest.TestCase):
         p = os.path.join(self.t, "hook.sh")
         put(p, fn_script)
         os.environ["MERGE_TEST_HOOK"] = p
+
+    PUSH_REFUSAL = "refused by the test"  # the text the refusing pre-receive hook prints on stderr
+
+    def refuse_pushes(self, text=PUSH_REFUSAL):
+        """Every ref update to the origin is refused from here on: a pre-receive hook that prints `text` and exits 1."""
+        hook = os.path.join(self.bare, "hooks", "pre-receive")
+        put(hook, f"#!/bin/sh\necho '{text}' >&2\nexit 1\n")
+        os.chmod(hook, 0o755)
 
 class Flow(Env):
     def test_preview_presses_nothing(self):
@@ -794,7 +806,13 @@ class Race(Env):
         # Both runs read "no lock" before either wrote. Only the create-only push can tell them apart.
         self.lock.acquire("main", 600)
         lock2 = merge.GitLock(self.other, now=lambda: self.now)
-        lock2.read = lambda b, ref=None: None
+        real_read, stale = lock2.read, [True]
+        def stale_first_read(b, ref=None):  # the stale view answers the first read of the main ref only; the re-read after the push is real
+            if stale and ref is None:
+                stale.clear()
+                return None
+            return real_read(b, ref)
+        lock2.read = stale_first_read
         with self.assertRaises(merge.Held):
             lock2.acquire("main", 600)
 
@@ -825,10 +843,6 @@ class CloudProxy(Env):
                   "  case $ref in refs/heads/*) ;; *) echo 'proxy: 403 ref' >&2; exit 1;; esac\n"
                   "done\n")
         os.chmod(hook, 0o755)
-
-    def lock_text(self):
-        sh(self.co, "git", "fetch", "-q", "origin", "refs/heads/merge-lock/main")
-        return sh(self.co, "git", "log", "-1", "--format=%B", "FETCH_HEAD")
 
     def test_a_full_merge_through_the_proxy_lands_and_leaves_an_expired_lock(self):
         rc, out = self.run_merge("7", "--confirm")
@@ -2793,10 +2807,7 @@ class Unlock(Env):
     def test_an_unlock_that_the_remote_refuses_stops_and_names_the_push(self):
         sha = sh(self.co, "git", "commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "held, not ours")
         sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/heads/merge-lock/main")
-        hook = os.path.join(self.bare, "hooks", "pre-receive")  # every ref update to the origin is refused from here on
-        with open(hook, "w") as f:
-            f.write("#!/bin/sh\necho 'refused by the test' >&2\nexit 1\n")
-        os.chmod(hook, 0o755)
+        self.refuse_pushes()
         with self.assertRaises(merge.Stop) as caught:
             self.lock.unlock("main")
         assert_cites(self, "unlock-failed", str(caught.exception))
