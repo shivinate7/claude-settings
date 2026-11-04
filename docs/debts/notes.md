@@ -1264,3 +1264,6 @@
 - map-stale-drops-untracked-cite: map-stale (skills/plain-english-map/scripts/map-stale.mjs) skips a map line whose cited file is untracked or renamed away, and still prints "nothing stale". MAP1 or the not-tracked check fails the same line, so the map check catches it first. Decision: none yet.
 - map-stale-own-page-list: map-stale lists map pages with its own readdir, beside `mapFilePaths` in map-check.mjs. Same result today. Decision: none yet.
 - map-stale-cost-posix-only: the git call count test (ST9) skips on Windows, so the cost of 4 git calls is proven on Linux and macOS only. Decision: none yet.
+- armed-copy-branch-behind-main: `install.sh --check` reads any HEAD hook blob that differs from main as "this branch edits the hook", so a branch cut before main's hook update passes a stale armed copy with a NOTE. A missing copy still refuses. A `git merge-base main HEAD` baseline would close it. Step: hook-installer-armed-copy
+- armed-copy-untested-unknowns: no test drives the `git config` failure, `git worktree list` failure or `--git-common-dir` failure branches of `install.sh --check`; a change that dropped them turns nothing red. Step: hook-installer-armed-copy
+- armed-copy-dangling-link: a dangling symlink at the armed path reads unknown and the commit lands; the check compares content, not the executable bit. Step: hook-installer-armed-copy
