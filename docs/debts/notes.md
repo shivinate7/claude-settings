@@ -1178,3 +1178,5 @@
 - lockfail1-catch-text: lockfail1's catch says "could not hold settings.json open" but also catches a throw from the install run; it still counts a FAIL, so only the text misleads (install.test.ps1). Decision: copy-mode-overwrites-no-backup
 - lane-one-topic-slug-dots: rule lane-one-topic reads step and topic slugs as letters, digits, `_` and `-`; a dotted slug such as `v1.2` reads as no topic and is refused (hooks/guard_merge.py brief_hit). Decision: session-tiers
 - lane-one-topic-new-step-reread: adding a cs-step tag by set_session_tags before a brief makes the brief refused once as stale; one get_session clears it (hooks/guard_merge.py brief_hit). Decision: session-tiers
+- step-home-any-ref: a `step:<slug>` home passes when any branch holds roadmap/data/steps/<slug>.json, not only the record branch, so a retired step on an old branch still counts (`Homes._held`, hooks/feedback_guard.py). Closed notes resolve the same way. Decision: owner-feedback-inbox
+- step-dir-spelled-twice: the step folder is spelled in `STEP_PATH` (hooks/feedback_guard.py) and in override.py's step folder constant. Decision: owner-feedback-inbox

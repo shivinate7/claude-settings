@@ -53,7 +53,8 @@ Inbox: <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.inbox.md, outside git. Format:
     Opener and closer are bare backtick lines. Lines inside a fence are never headers or items.
   - An item line starts with `- fb-` and follows its block's closer, before the next header.
     Shape: `- <id> [<kind>] -> <home>`. kind is one of ruling, task, question, note, standing, page, repo.
-    home is any non-empty text after `->`. For ruling and task, the home's first word is a path.
+    home is any non-empty text after `->`. For ruling and task, the home's first word is a path, except
+    that a task may name `step:<slug>` (see Tracked homes).
     For page, the home is `page:<digits>`: the number of the waiting-page item the owner answers.
     For repo, the home is `repo:<owner>/<name>`: the repo the owner's feedback is about.
 
@@ -94,6 +95,11 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     debt-notes. Some branch's tree in that file's repo holds it. Else the reason names the id. The
     handoff never counts for these two kinds. A repo with no home of the kind gets a reason that
     names the layout keys, todo first for a task.
+  - Step homes. A task item, open or closed, may instead name `step:<slug>`: it passes when
+    roadmap/data/steps/<slug>.json is a blob on some ref, read as a closed note's step home is. A step
+    home with no such blob blocks, and the reason names the item. A ruling never names a step: steps
+    hold tasks, not rulings, so `[ruling] -> step:<slug>` blocks even when the step file exists. The home
+    is cleaned as a ruling home is: one pair of backticks or quotes comes off, and a trailing `:,;.` strips.
   - A ruling whose tracked file sits outside the ruling homes is blocked with the reason
     `<path> is not a tracked ruling home`, and the reason names the repo's ruling homes.
   - Fail open: when the cwd is not in a git repo, or the layout or the repo's extras file cannot
@@ -1597,13 +1603,18 @@ def grant_repo():
         "grant-homes", tracked=("settings.json", ".claude/CLAUDE.md", "decisions/a-ruling.md")))
 
 
-def step_repo():
-    """A repo whose step file sits on a lane branch only: some branch's tree holds it, main's does not."""
+def step_repo(debts=True):
+    """A repo whose step file sits on a lane branch only: some branch's tree holds it, main's does not. With
+    `debts` it tracks a debt, so the repo has a task home of its own, and a task's refusal then comes from its
+    step home. Without it, the repo has no todo, debts or debt-notes home at all."""
+    key = "steps" if debts else "steps-bare"
+
     def build():
-        root = make_repo("steps", tracked=("decisions/a-ruling.md",))
+        tracked = ("decisions/a-ruling.md",) + (("debts/a-task.md",) if debts else ())
+        root = make_repo(key, tracked=tracked)
         lane_file(root, "roadmap/data/steps/%s.json" % STEP_SLUG)
         return root
-    return shared_repo("steps", build)
+    return shared_repo(key, build)
 
 
 def names_number(reason, n):
@@ -1852,6 +1863,109 @@ def case_closed_note_with_a_home_passes():
     expect_silent("close home: a closed question homed to answered stays green", p)
     p = homed(new_cfg(), "open-note", ("- fb-0958-4 [note] -> noted",))
     expect_silent("close home: an open note homed to noted stays green", p)
+
+
+# Task homes: a task may name a step, as a closed note may. A ruling may not: steps hold tasks, not rulings.
+
+def expect_step_on_lane_only(name, root):
+    """The scope of the step cases: the step file is a blob on a lane branch and not in main's work tree. A
+    pass then proves the branch read, not a file on main."""
+    rel = "roadmap/data/steps/%s.json" % STEP_SLUG
+    check(name + ": the step file is a blob on the lane branch",
+          rel in git(root, "ls-tree", "-r", "--name-only", "lane").split("\n"), root)
+    check(name + ": the step file is not in main's work tree",
+          not os.path.exists(os.path.join(root, *rel.split("/"))), root)
+
+
+def case_task_open_step_home_passes():
+    """An open task whose home is `step:<slug>` passes when the step file is a blob on a lane branch. Red
+    today: a task's home is read as a path under todo, debts or debt-notes, so the step home is refused as
+    not a tracked task home. The step is on a lane branch only, so the pass proves the branch read."""
+    repo = step_repo()
+    expect_step_on_lane_only("task step home", repo)
+    p = homed(new_cfg(), "task-step", ("- fb-0958-7 [task] -> step:%s" % STEP_SLUG,), cwd=repo)
+    expect_silent("task step home: an open task homed to a step on a lane branch passes", p)
+
+
+def case_task_closed_step_home_passes():
+    """A closed task whose home is `step:<slug>` passes on the same lane-branch step. Red today, as the open
+    task is: a closed task is checked against the same task homes."""
+    repo = step_repo()
+    expect_step_on_lane_only("closed task step home", repo)
+    p = homed(new_cfg(), "task-step-closed", ("- fb-0958-7 [task] -> step:%s [closed]" % STEP_SLUG,), cwd=repo)
+    expect_silent("task step home: a closed task homed to a step on a lane branch passes", p)
+
+
+def case_task_missing_step_home_blocks():
+    """An open or closed task whose home is `step:<slug>` with no step file on any branch blocks, and the
+    reason names the item. Green today: the guard refuses a step home for a task whether or not the file
+    exists. It guards a fix that lets a step home through without the file."""
+    repo = step_repo()
+    p = homed(new_cfg(), "task-step-missing", ("- fb-0958-7 [task] -> step:no-such-step",), cwd=repo)
+    expect_block("task step home: an open task homed to a step with no file on any branch blocks", p,
+                 named=("fb-0958-7",))
+    p = homed(new_cfg(), "task-step-missing-closed", ("- fb-0958-7 [task] -> step:no-such-step [closed]",),
+              cwd=repo)
+    expect_block("task step home: a closed task homed to a step with no file on any branch blocks", p,
+                 named=("fb-0958-7",))
+
+
+def case_ruling_step_home_still_blocks():
+    """An open or closed ruling whose home is `step:<slug>` blocks, though the step file is on a lane branch.
+    Green today. It guards a fix that lets a step home through for every kind, not only tasks."""
+    repo = step_repo()
+    expect_step_on_lane_only("ruling step home", repo)
+    p = homed(new_cfg(), "ruling-step", ("- fb-0958-8 [ruling] -> step:%s" % STEP_SLUG,), cwd=repo)
+    expect_block("ruling step home: an open ruling homed to an existing step still blocks", p, named=("fb-0958-8",))
+    p = homed(new_cfg(), "ruling-step-closed", ("- fb-0958-8 [ruling] -> step:%s [closed]" % STEP_SLUG,), cwd=repo)
+    expect_block("ruling step home: a closed ruling homed to an existing step still blocks", p, named=("fb-0958-8",))
+
+
+def case_task_backtick_step_home_passes():
+    """A task whose home is a backticked step, `step:<slug>`, passes when the step file is a blob on a lane
+    branch. Red today: the task check reads the raw first word, so the backticks stay on and the step home is
+    refused as not a tracked task home."""
+    repo = step_repo()
+    expect_step_on_lane_only("backtick task step home", repo)
+    p = homed(new_cfg(), "task-step-ticks", ("- fb-0958-7 [task] -> `step:%s`" % STEP_SLUG,), cwd=repo)
+    expect_silent("task step home: a task homed to a backticked step on a lane branch passes", p)
+
+
+def case_task_trailing_dot_step_home_passes():
+    """A task whose home is a step with a sentence period after it, `step:<slug>.`, passes when the step file is
+    a blob on a lane branch. Red today: the raw first word keeps the period, so the step home is refused."""
+    repo = step_repo()
+    expect_step_on_lane_only("trailing-dot task step home", repo)
+    p = homed(new_cfg(), "task-step-dot", ("- fb-0958-7 [task] -> step:%s." % STEP_SLUG,), cwd=repo)
+    expect_silent("task step home: a task homed to a step with a trailing period passes", p)
+
+
+def case_closed_note_backtick_step_home_passes():
+    """A closed note whose home is a backticked step, `step:<slug>` [closed], passes when the step file is a blob
+    on a lane branch. Red today: the closed note check reads the raw first word, so the backticks stay on and the
+    step home is refused."""
+    repo = step_repo()
+    expect_step_on_lane_only("backtick closed note step home", repo)
+    p = homed(new_cfg(), "close-step-ticks", ("- fb-0958-4 [note] -> `step:%s` [closed]" % STEP_SLUG,), cwd=repo)
+    expect_silent("close home: a closed note homed to a backticked step on a lane branch passes", p)
+
+
+def case_task_step_home_without_a_task_layout_passes():
+    """A task whose home is `step:<slug>` passes in a repo with no todo, debts or debt-notes home, when the step
+    file is a blob on a lane branch. Green control: the step file is read before the layout's task homes."""
+    repo = step_repo(debts=False)
+    expect_step_on_lane_only("bare task step home", repo)
+    p = homed(new_cfg(), "task-step-bare", ("- fb-0958-7 [task] -> step:%s" % STEP_SLUG,), cwd=repo)
+    expect_silent("task step home: a task homed to a step passes in a repo with no task layout home", p)
+
+
+def case_task_malformed_step_homes_refuse():
+    """`step:..`, `step:a/../b` and a bare `step:` name no step file, so a task homed to one blocks and the reason
+    names the item. Green control: each is refused today, and must stay refused."""
+    repo = step_repo()
+    for home in ("step:..", "step:a/../b", "step:"):
+        p = homed(new_cfg(), "task-step-bad", ("- fb-0958-7 [task] -> %s" % home,), cwd=repo)
+        expect_block("task step home: a task homed to %r blocks" % home, p, named=("fb-0958-7",))
 
 
 # Cost: the transcript is read only for a pick block in a repo with a waiting page, or for an open page item.
@@ -3238,6 +3352,15 @@ CASES = (
     case_grant_act_words_narrowed_passes,
     case_closed_note_without_a_home_blocks,
     case_closed_note_with_a_home_passes,
+    case_task_open_step_home_passes,
+    case_task_closed_step_home_passes,
+    case_task_missing_step_home_blocks,
+    case_ruling_step_home_still_blocks,
+    case_task_backtick_step_home_passes,
+    case_task_trailing_dot_step_home_passes,
+    case_closed_note_backtick_step_home_passes,
+    case_task_step_home_without_a_task_layout_passes,
+    case_task_malformed_step_homes_refuse,
     case_page_check_reads_no_transcript_for_other_blocks,
     case_run_folder_sweep_removes_old_siblings_keeps_new,
     table_reorient_forms,

@@ -19,8 +19,12 @@ a turn end in these cases:
     (HOME_KINDS, paths from lint/layout.py for the repo of the hook's cwd) that some branch's tree
     holds (ruling_home.value_resolves). Memory and the handoff hold only in-flight notes, so they
     never count for these two kinds (rule building-memory-is-short-term). A home outside them is
-    reported as "<path> is not a tracked <kind> home", with the homes listed (kind_homes). When the cwd is in no git
-    repo, or the layout cannot be read, these homes pass unchecked and a systemMessage says so;
+    reported as "<path> is not a tracked <kind> home", with the homes listed (kind_homes). A task item,
+    open or closed, may instead name `step:<slug>`: it passes when roadmap/data/steps/<slug>.json is a blob
+    on some ref, resolved as a closed note's step home is (Homes._held). A ruling never names a step. Cost:
+    the rev-parse, for-each-ref and cat-file reads a closed note runs, inside the Stop process, once per
+    task item homed to a step. When the cwd is in no git repo, or the layout cannot be read, these homes
+    pass unchecked and a systemMessage says so;
   - an open page item (`[page] -> page:<n>`: the owner answers waiting-page item n; checked in
     every block that holds one, burst or not; a `[closed]` one is never checked) has a home that is not
     `page:<digits>`, or the session's transcript shows no send after the owner's message: send_message
@@ -282,6 +286,12 @@ def home_path(rest):
     return word.rstrip(":,;.")
 
 
+def step_home(rest):
+    """The STEP_HOME match of the item's home, read as home_path reads a path (unwrapped, no trailing
+    punctuation), so a wrapped or punctuated `step:<slug>` is the step home it names; else None."""
+    return STEP_HOME.fullmatch(home_path(rest)) if home_word(rest) else None
+
+
 class Homes:
     """Checks ruling and task homes against the layout. `skip` holds the reason the check stood
     down, once, for the systemMessage line."""
@@ -309,6 +319,15 @@ class Homes:
             return None, None, None
         return root, os.path.normpath(found).replace(os.sep, "/"), None
 
+    def _held(self, path, closed=False):
+        """(error, held) for a repo-relative or absolute path: `held` is true when some branch's tree holds
+        it, or when the check stood down. `error` is set when an absolute path is in no git repo. The one
+        read behind a task's or a closed note's `step:<slug>` home and a closed note's file home."""
+        root, rel, err = self._locate(path, closed)
+        if err:
+            return err, False
+        return None, root is None or ruling_home.value_resolves(rel, root)
+
     def problem(self, item_id, kind, rest, grant=False):
         """None when the home is good or the check stood down, else the reason text. `grant` is true in a
         block that holds a grant word: a ruling may then name a GRANT_ROOT_HOMES file, if git tracks it."""
@@ -317,6 +336,13 @@ class Homes:
         except ImportError as e:
             return self._stand_down(e)
         try:
+            step = step_home(rest) if kind == "task" else None
+            if step:  # steps hold tasks, so only a task may name one; the step file is the proof
+                err, held = self._held(STEP_PATH % step.group(1))
+                if held:
+                    return None
+                return "%s [task] %s" % (item_id, err) if err else (
+                    "%s [task]: `step:%s` is no task home, as no branch holds its step file" % (item_id, step.group(1)))
             root, rel, err = self._locate(home_path(rest))
             if err:
                 return "%s [%s] %s" % (item_id, kind, err)
@@ -329,8 +355,9 @@ class Homes:
                     return ("%s [%s]: this repo has no %s home; none of the layout keys %s is in it"
                             % (item_id, kind, kind, keys))
                 if not any(rel == h or rel.startswith(h + "/") for h in homes):
-                    return ("%s [%s]: %s is not a tracked %s home. %s homes: %s. The handoff and memory are no home"
-                            % (item_id, kind, rel, kind, kind.capitalize(), ", ".join(homes)))
+                    return ("%s [%s]: %s is not a tracked %s home. %s homes: %s. The handoff and memory are no home%s"
+                            % (item_id, kind, rel, kind, kind.capitalize(), ", ".join(homes),
+                               ". A task may instead name `step:<slug>`" if kind == "task" else ""))
             if not ruling_home.value_resolves(rel, root):
                 return "%s [%s]: its home is not a file that git tracks on any branch" % (item_id, kind)
             return None
@@ -345,12 +372,12 @@ class Homes:
             return None
         if ruling_home._unwrap(word) == ruling_home.PROCESS_ONLY:  # value_resolves accepts it; a close needs a file
             return self._closed_reason(item_id)
-        step = STEP_HOME.fullmatch(word)
+        step = step_home(rest)
         try:
-            root, rel, err = self._locate(STEP_PATH % step.group(1) if step else home_path(rest), True)
+            err, held = self._held(STEP_PATH % step.group(1) if step else home_path(rest), True)
             if err:
                 return "%s [note] %s" % (item_id, err)
-            if root is None or ruling_home.value_resolves(rel, root):
+            if held:
                 return None
         except ruling_home._GitFailure as e:
             return self._stand_down(e, True)
@@ -391,8 +418,9 @@ class Homes:
                     found = {k: kind_homes(layout, root, k) for k in HOME_KINDS}
             except (layout.LayoutError, ruling_home._GitFailure):
                 found = {}
-        return "; ".join("%s -> %s" % (k, KIND_WORDS[k] if k in KIND_WORDS
-                                       else ", ".join(found.get(k) or ()) or "a tracked file") for k in KINDS)
+        return "; ".join("%s -> %s%s" % (k, KIND_WORDS[k] if k in KIND_WORDS
+                                         else ", ".join(found.get(k) or ()) or "a tracked file",
+                                         ", step:<slug>" if k == "task" else "") for k in KINDS)
 
     def _stand_down(self, e, closed=False):
         """Records why a check stood down, once per check: the ruling and task homes, or the closed note homes."""
