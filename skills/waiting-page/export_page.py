@@ -23,7 +23,8 @@ Verdict, one line, then exit:
              page has no or two designData blocks; nothing is written; exit 2
   unknown    the run crashed (one line, nothing written); exit 3
 Every doc is scanned, as parsed JSON, before the first write: each string value, each key, each doc id and each
-10 or 11 digit number (a phone). Only the shape counts: words such as "token budget" or "password manager" pass.
+10 or 11 digit number (a phone). Only the shape counts: words such as "token budget" or "password manager" pass. So do a password word with a
+placeholder, a mask or a plain word as its value, `PWD=<path>`, a no-reply address and an ssh remote of a public git host.
 A personal fact in plain words passes too.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
 longer fetched is deleted from its collection folder; a truncated fetch deletes docs, and git history keeps them.
@@ -87,9 +88,16 @@ SECRET_SHAPES = (
     ("cookie-header", re.compile(r"\bCookie:\s*[^\s=;]+=\S+", re.I)),
     ("session-cookie", re.compile(r"(?<![A-Za-z0-9_.])connect\.sid=\S+")),
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
-    ("password", re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9_]*(?:password|passwd|pwd)[ \t]*[=:][ \t]*\S+", re.I)),
+    ("password", re.compile(r"(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(\S+)", re.I)),
     ("email", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
 )
+# A value after a password word that names no secret: a word, a mask or a template placeholder. Anything else is refused.
+PLAIN_VALUES = frozenset(("optional", "required", "none", "null", "empty", "unset", "hidden", "redacted", "omitted"))
+MASK_VALUE = re.compile(r"[*•#]{3,}|[xX]{3,}")
+PLACEHOLDER_VALUE = re.compile(r"<[^<>\n]*>|\$\{[^}\n]*\}|\{\{[^}\n]*\}\}|\$[A-Za-z_]\w*|%[A-Za-z_]\w*%")
+SHELL_PWD = "PWD"  # the shell's working-directory variable; with a path value it is no password
+NO_REPLY_NAME = re.compile(r"(?:do[-_.]?not[-_.]?|no[-_.]?)reply", re.I)  # a mailbox that names no person
+PUBLIC_GIT_HOSTS = frozenset(("github.com", "gitlab.com", "bitbucket.org"))  # `git@host:` is their ssh remote, no person
 # A phone in a string has a country code and separated groups, or the "(xxx) xxx-xxxx" form, or groups of 3, 3 and 4
 # digits joined by one separator. A bare run of digits is never one: a PO number or a timestamp is not a phone.
 PHONE_COUNTRY = re.compile(r"(?<![\w+])\+\d{1,3}[\s.\-]*\(?\d{1,4}\)?(?:[\s.\-]+\d{2,4}){1,4}(?!\d)")
@@ -119,9 +127,32 @@ def is_phone(text):
     return any(shape.search(text) for shape in PHONE_OTHER)
 
 
+def password_is_no_secret(found):
+    """True when the value after a password word is a plain word, a mask or a placeholder, or `found` is `PWD=<path>`."""
+    value = found.group(2).rstrip(".,;")
+    if found.group(1) == SHELL_PWD and value.startswith(("/", "~")):
+        return True
+    return (value.lower() in PLAIN_VALUES or bool(MASK_VALUE.fullmatch(value))
+            or bool(PLACEHOLDER_VALUE.match(found.string, found.start(2))))
+
+
+def email_is_no_person(found):
+    """True when the address is a no-reply mailbox, or `git@<public git host>` in an ssh remote."""
+    local, _, host = found.group(0).rpartition("@")
+    if NO_REPLY_NAME.fullmatch(local):
+        return True
+    return (local == "git" and host.lower() in PUBLIC_GIT_HOSTS
+            and found.string[found.end():found.end() + 1] in (":", "/"))
+
+
+# A match of these shapes can still name no secret and no person. Every other shape refuses on any match.
+NO_SECRET_MATCH = {"password": password_is_no_secret, "email": email_is_no_person}
+
+
 def kinds_in(text):
     """The kinds of secret or personal data that `text` has the shape of, each once."""
-    found = [name for name, shape in SECRET_SHAPES if shape.search(text)]
+    found = [name for name, shape in SECRET_SHAPES
+             if any(not NO_SECRET_MATCH.get(name, lambda match: False)(m) for m in shape.finditer(text))]
     if is_phone(text):
         found.append("phone")
     return found
