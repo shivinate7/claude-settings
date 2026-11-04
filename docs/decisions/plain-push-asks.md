@@ -2,8 +2,8 @@
 
 ## The ruling
 
-Two pushes that are not forced ask. The click in the prompt is the grant, and the owner's typed
-override lets each through (`owner-override`). Owner rulings, Cockpit, 2026-11-03 22:23 CST.
+Two pushes that are not forced ask. Approving the prompt lets one push through; it is not a grant.
+The owner's typed override lets each through (`owner-override`). Owner rulings, Cockpit, 2026-11-03 22:23 CST.
 
 | Push | Outcome | Rule id |
 |---|---|---|
@@ -19,8 +19,9 @@ override lets each through (`owner-override`). Owner rulings, Cockpit, 2026-11-0
 - Silent:
   - a push to the branch's own upstream;
   - a first push with no upstream;
-  - a `-u` push whose destination is the local branch's own name, which sets the new upstream on
-    purpose (a lane stacked on another lane);
+  - by this lane's reading, from the coordinator's brief: a `-u` push whose destination is the
+    local branch's own name, which sets the new upstream on purpose (a lane stacked on another
+    lane). No owner ruling covers it yet;
   - an explicit `HEAD:<branch>` (agents push this way);
   - `archive/*`, and `--tags`;
   - a push to another remote than the upstream's;
@@ -36,6 +37,11 @@ override lets each through (`owner-override`). Owner rulings, Cockpit, 2026-11-0
   otherwise ask on every lane.
 - Silent: a bare push under `push.default=simple` with a mismatched upstream. Git refuses it
   itself.
+
+Cost: no new process or file. Per push, in the guard's own run: a literal destination reads
+nothing new; a refspec push such as `origin lane/foo` adds one `symbolic-ref`; a `HEAD` push or a
+bare push adds one `symbolic-ref` and one `config`. `record_push_cost_case` in
+`hooks/test_guard.py` proves the counts.
 
 ## The mistakes
 
