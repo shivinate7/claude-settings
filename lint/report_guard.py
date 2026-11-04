@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""At Stop, after a turn that ran git commit, git push or git merge, blocks once unless the reply ends with the report: the bold labels Done, Deviations, Input Needed, Next, in order. Fails open on any error.
+"""At Stop, after a turn that landed (git commit, push, merge, revert or cherry-pick, gh pr merge or create, or a GitHub MCP write tool), blocks once unless the reply ends with the report: the bold labels Done, Deviations, Input Needed, Next, in order. Fails open on any error.
 
 Reads the hook JSON on stdin. Always exits 0. Fails open on bad input, a missing
 transcript, or a parse error.
 
-Stop: when this turn ran `git commit`, `git push`, `git merge`, or a GitHub MCP write tool
-after the last human message, block once unless the reply ends with one blockquote holding
+Stop: when this turn ran `git commit`, `git push`, `git merge`, `git revert` or `git cherry-pick`
+(not with --abort, --quit, -n, --no-commit, -h or --help; --skip and --continue commit), `gh pr merge`,
+`gh pr create` or `gh pr update-branch` (not with --help or -h, nor `--disable-auto` on merge or `--web` on create),
+or a landing GitHub MCP tool (LANDING_TOOLS, which includes delete_file, update_pull_request_branch
+and enable_pr_auto_merge) after the last human message, block once unless the reply ends with one blockquote holding
 the bold labels Done, Deviations, Input Needed, Next, in that order (CLAUDE.md, "Reports, in
 order"; the blockquote and no-fence rule lives in the `shiv-stylisms` output style). Prose may sit above the report on any turn. Nothing may follow the report.
 When stop_hook_active is set, the reply is already a rewrite, so the guard stays quiet, with one
@@ -119,11 +122,33 @@ def _load_guard():
     guard = loaded
 
 GIT_LANDING_SUBCOMMANDS = {"commit", "push", "merge"}
+# These two make a commit unless the call carries a flag from the two tables below, which
+# `_stops_before_a_commit` reads.
+GIT_PICK_SUBCOMMANDS = {"revert", "cherry-pick"}
+# (full flag, shortest prefix git's parse-options accepts for it: no other option of revert or
+# cherry-pick shares it). `--skip` and `--continue` are absent on purpose: both commit.
+# `--help` prints and stops, as `-h` does (the short-letter read below).
+PICK_NO_COMMIT_FLAGS = (("--abort", "--ab"), ("--quit", "--q"), ("--no-commit", "--no-c"),
+                        ("--help", "--help"))
+# Short options of revert and cherry-pick that take a value, glued or as the next word: the rest of
+# a cluster after one of them is its value, never more flags (`-Xignore-space-change` holds an n).
+PICK_SHORT_VALUE_FLAGS = "mXS"
+# `update-branch` merges the base into the PR branch: a commit on the remote.
+GH_LANDING_PR_VERBS = {"merge", "create", "update-branch"}
+# Per verb, the flags that make the call write nothing. `gh pr create --dry-run` is absent on
+# purpose: it may still push the branch.
+GH_NO_WRITE_FLAGS = {
+    "merge": {"--disable-auto"},
+    "create": {"--web", "-w"},
+}
 LANDING_TOOLS = {
     "mcp__github__merge_pull_request",
     "mcp__github__create_pull_request",
     "mcp__github__push_files",
     "mcp__github__create_or_update_file",
+    "mcp__github__delete_file",
+    "mcp__github__update_pull_request_branch",
+    "mcp__github__enable_pr_auto_merge",
 }
 LABEL_ORDER = ["Done", "Deviations", "Input Needed", "Next"]
 # A bold "**Departs from:**" starts a line of the item (rule `question-departs`), and a bold
@@ -163,8 +188,41 @@ UNSTARTED_REASON = (
 # is_last_human and tool_uses live in lint/_transcript.py, imported above.
 
 
+def _stops_before_a_commit(args):
+    """True when a `git revert` or `git cherry-pick` call carries a flag that makes no commit:
+    `--abort` and `--quit` clear the sequence, `-n` and `--no-commit` stage the change only.
+    Words after `--` are paths. Short options read letter by letter, so `-nx` counts and
+    `-m 1` does not read its value as flags."""
+    for arg in args:
+        if arg == "--":
+            return False
+        if arg.startswith("--"):
+            if any(guard.guard_core.long_flag_abbrev(arg, full, shortest)
+                   for full, shortest in PICK_NO_COMMIT_FLAGS):
+                return True
+        elif arg.startswith("-"):
+            for letter in arg[1:]:
+                if letter in "nh":
+                    return True
+                if letter in PICK_SHORT_VALUE_FLAGS:
+                    break
+    return False
+
+
+def _segment_lands_a_gh_write(segment):
+    """True when the segment's command word is `gh` and the call is `pr merge`, `pr create` or
+    `pr update-branch` without a flag that writes nothing (GH_NO_WRITE_FLAGS, `--help`, `-h`). `guard.gh_call_of` reads the
+    command word past wrappers and a subshell, the same read the merge guard takes."""
+    rest = guard.gh_call_of(segment)
+    if rest is None or rest[:1] != ["pr"] or rest[1:2] == [] or rest[1] not in GH_LANDING_PR_VERBS:
+        return False
+    no_write = GH_NO_WRITE_FLAGS.get(rest[1], set()) | {"--help", "-h"}
+    return not any(arg in no_write for arg in rest[2:])
+
+
 def _segment_lands_a_git_write(segment):
-    """True when one of the segment's own `git` calls resolves to `commit`, `push`, or `merge`.
+    """True when one of the segment's own `git` calls resolves to `commit`, `push`, or `merge`,
+    or to a `revert` or `cherry-pick` that makes its commit (`_stops_before_a_commit`).
 
     `guard.git_calls` is the parser every git rule in guard.py already trusts: it walks past
     `sudo`, and past the pre-subcommand options that take a value (`-C <dir>`,
@@ -173,8 +231,10 @@ def _segment_lands_a_git_write(segment):
     `git -C /path commit` counted as a landing. `git merge-base` resolves to the subcommand
     `merge-base`, a different word than `merge`, and never matches.
     """
-    for subcommand, _args in guard.git_calls(segment):
+    for subcommand, args in guard.git_calls(segment):
         if subcommand in GIT_LANDING_SUBCOMMANDS:
+            return True
+        if subcommand in GIT_PICK_SUBCOMMANDS and not _stops_before_a_commit(args):
             return True
     return False
 
@@ -196,7 +256,7 @@ def turn_landed(records):
                     continue
                 stripped = guard.strip_heredoc_bodies(cmd)
                 for segment in guard.split_segments(stripped):
-                    if _segment_lands_a_git_write(segment):
+                    if _segment_lands_a_git_write(segment) or _segment_lands_a_gh_write(segment):
                         return True
             elif name in LANDING_TOOLS:
                 return True

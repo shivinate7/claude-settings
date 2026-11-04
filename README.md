@@ -140,6 +140,11 @@ merge <pr>              preview: what it would claim and merge. Presses nothing.
 merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, move the local main, clean up.
                         NAME shows in the lock to a waiting run.
 merge --unlock [BRANCH] remove the merge lock on BRANCH (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
+merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...] [--net-value V]
+                        print the review record for the head SHA that was reviewed. Exit 1 when the PR's live head is another sha.
+                        Posts nothing: the lane posts it as a PR comment.
+merge --reviewed        one line per open PR that has a review record comment: its state (bad when the newest does not parse) and live CI.
+                        Then the PRs with no record.
 merge --dev ...         run the checkout's own tree, not origin main
 ```
 
@@ -287,7 +292,7 @@ On its own boot it first takes the pro lease from `bin/sim-lease`, the Mac-wide 
 
 The `project-ops` skill packages how the claude-settings project on claude.ai runs. It holds the
 session tiers (a coordinator that starts triage and the batch runner, then lane sessions), one roster,
-rotation of the standing sessions by a usage tally, and autopilot deferral. It also holds a record branch for the roadmap data, briefs and role handoff notes. Its
+rotation of the standing sessions, and autopilot deferral. It also holds a record branch for the roadmap data, briefs and role handoff notes. Its
 `scripts/scaffold.py` writes the record-branch skeleton. Its `templates/` hold the operating model,
 the roster, a brief and a role handoff note. A repo adopts it only on the owner's grant. See
 `skills/project-ops/SKILL.md`.

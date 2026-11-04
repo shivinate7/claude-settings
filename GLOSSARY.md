@@ -25,7 +25,7 @@ The owner may use any word for a thing (`speak-one-name-per-thing`); the glossar
 | lane | The unit of work. One isolated piece of work, with its own branch, worktree and lane PR. Its branch slug is its name. In a coordinator build a lane session runs it. In a solo or one-lane session an agent runs it. | `rule:parallelism-own-lane-orchestrator`, `docs/decisions/lane-by-slug.md` | `workstream` |
 | batch | The lane PRs that join one integration branch and merge to main together. | `rule:git-integration-branch-merge` | — |
 | integration branch | The branch that holds the commit of each lane in a batch. | `rule:git-integration-branch-merge` | `batch branch` |
-| integration PR | The one PR of a batch that goes ready. Its CI run is the only CI run for the batch. A lone lane is its own integration PR. | `rule:git-integration-branch-merge` | — |
+| integration PR | The one PR of a batch that goes ready. Its CI run is the only CI run for the batch. A lone lane is its own integration PR. | `rule:git-integration-branch-merge`, `skills/ci-hygiene/SKILL.md` | — |
 | worktree | A linked git working tree under `.claude/worktrees/`, for one agent. The Agent tool's isolation or the EnterWorktree tool makes it. | `docs/decisions/lanes-start-in-tool-worktrees.md` | — |
 | handoff | Notes one holder writes so the next reader can continue. Two cases: a session's notes file, outside git, at `~/.claude/handoffs/<session_id>.md`, rewritten whole at each checkpoint and read by the session itself after a compaction; and a project-ops role's note to its successor. | `docs/decisions/precompact-handoff.md`, `skills/project-ops/SKILL.md` | `handover` |
 | ruling | The owner's answer to a question, or an arbiter's inside its own repo. | `rule:output-answer-has-a-home` | — |
@@ -35,6 +35,7 @@ The owner may use any word for a thing (`speak-one-name-per-thing`); the glossar
 | guard | A hook rule that refuses, or asks about, one act before the act runs. It stops Claude's mistakes, not an attacker. | `hooks/guard.py`, `docs/decisions/guard-guards-mistakes-only.md` | `gate` |
 | check | A lint, test or CI job that passes or fails a change. A check never asks. `lint/rule_audit.py` gives a rule that a check holds the kind `check`. | `docs/decisions/guard-guards-mistakes-only.md` | `gate`, `merge gate` |
 | record | One file in `docs/decisions/`, `docs/debts/` or `docs/plans/`, or one rule in `CLAUDE.md`. Its slug is its id. | `rule:git-record-own-file-per-kind`, `rule:git-one-record-per-question` | `entry (this sense)` |
+| review record | A comment on a PR that holds the review rounds, verdicts and net value for one head sha. It is a PR comment and never a file, so it is not a `record`. | `docs/decisions/pr-review-record.md` | — |
 | finding | Anything a reviewer or an audit reports. An open finding becomes a debt or a note. | `rule:roles-findings-are-debts-or-notes` | `issue (this sense)` |
 | defect | Wrong behaviour in code or a check. | `rule:outcomes-tests-are-statements` | `bug` |
 | round | One review and the fix after it. A change gets at most three. The builder brief for the fix after review round N-1 still carries the marker `Round N of 3`, which the guard reads on a line that starts with it, or as the leftmost marker in a first line that starts with none. | `rule:roles-review-cap-three`, `rule:roles-third-round-steps-up` | — |

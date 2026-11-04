@@ -352,6 +352,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 /* Answer bar: what is ready, then one Send. The stamp and Undo sit above it after a Send. */
 .bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
 .bar .in { padding-block: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.bar .brow { flex: 1 1 100%; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; } /* the status and its buttons; the read-only copy box sits below the row */
 .bar .st { flex: 1 1 0; font-size: 14.5px; color: var(--muted); min-width: 0; }
 .bar .st b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .bar textarea { flex: 1 1 100%; font: 13px var(--mono); background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
@@ -374,6 +375,8 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .sent .row { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 16rem; margin-inline-start: auto; } /* a fixed width, so the bar wraps the same with or without Undo */
 #undoBtn { font-variant-numeric: tabular-nums; }
 @media (max-width: 520px) { .bar .st { flex-basis: 0; font-size: 13.5px; } .btn.send { padding-inline: 12px; } }
+/* With Copy answers shown on a phone, two buttons leave the status too narrow to read, so it takes its own row. */
+@media (max-width: 520px) { .bar .brow:has(> #copy:not([hidden])) > .st { flex-basis: 100%; } }
 
 /* Designs: a mockup shows in a sandboxed frame on its card, and a sheet pages through all of them. */
 .dprev { display: grid; gap: 8px; }
@@ -722,24 +725,62 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .askform > label { font-weight: 600; }
 .askform textarea { width: 100%; min-height: 88px; resize: vertical; padding: 8px 12px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--ground); }
 .askform textarea:focus-visible { border-color: var(--acc); }
-/* The hint and the buttons keep one grid: Send ask never moves when Undo or Copy ask shows beside it. Each keeps its own
-   column, so a hidden slot leaves its track empty and Send ask stays flush with the box's right edge. */
-.askrow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px 12px; }
+/* The hint and the buttons keep one grid: Send never moves when Copy ask shows beside it. Each keeps its own column, so a hidden
+   slot leaves its track empty and Send stays flush with the box's right edge. */
+.askrow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 8px 12px; }
 .askrow .slot { min-width: 0; grid-column: 2; }
 .askrow .slot:empty { display: none; }
-.askrow .btn.askgo { grid-column: 3; }
+.askrow .btn.askadd { grid-column: 3; }
+.askrow .btn.askgo { grid-column: 4; }
 .askhint { margin: 0; min-height: 44px; display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
-.askhint.ok b { color: var(--good); }
 .askhint.bad { color: var(--due); font-weight: 600; }
-.btn.askgo { min-height: 48px; white-space: nowrap; }
-/* Off, it keeps its box and label, marked by a dashed edge as .btn.mv is at an end of the order; the hint beside it says why. */
-.btn.askgo:disabled { opacity: 1; background: transparent; border-style: dashed; border-color: var(--faint); color: var(--muted); }
+.btn.askgo, .btn.askadd { min-height: 48px; white-space: nowrap; }
+/* Off, they keep their box and label, marked by a dashed edge as .btn.mv is at an end of the order; the hint beside them says why. */
+.btn.askgo:disabled, .btn.askadd:disabled { opacity: 1; background: transparent; border-style: dashed; border-color: var(--faint); color: var(--muted); }
+/* A label that changes keeps the box of its widest form: the shown label and a hidden sizer share one grid cell. */
+.btn.fixw { display: inline-grid; justify-items: center; }
+.btn.fixw > span { grid-area: 1 / 1; }
+.btn.fixw > .sz { visibility: hidden; }
 @media (pointer: coarse) { .askhint .kbd { display: none; } }
 @media (max-width: 520px) {
   .askrow { grid-template-columns: minmax(0, 1fr) auto; }
-  .askrow .askhint { grid-column: 1 / -1; }
-  .askrow .slot { grid-column: 1; justify-self: end; }
-  .askrow .btn.askgo { grid-column: 2; }
+  /* Three lines reserved, so typing or a new count never moves the buttons under the hint. */
+  .askrow .askhint { grid-column: 1 / -1; min-height: 66px; }
+  .askrow .btn.askadd { grid-column: 1; grid-row: 2; justify-self: start; }
+  .askrow .btn.askgo { grid-column: 2; grid-row: 2; }
+  .askrow .slot { grid-column: 1 / -1; grid-row: 3; justify-self: start; }
+}
+/* The tray under the row: the line that answers Send or Undo, then the asks not sent yet. */
+.tray { display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.tray[hidden], .tray > div:empty { display: none; }
+.tray > div { display: grid; gap: 8px; }
+.sline { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; min-height: 44px; font-size: 14.5px; }
+.sline b { color: var(--good); }
+.sline .bad { color: var(--due); font-weight: 600; }
+.sline .btn { font-variant-numeric: tabular-nums; }
+/* When the count ends the Undo keeps its box, hidden, so the line does not move. */
+.sline .btn.spent { visibility: hidden; }
+@media (max-width: 520px) { .sline { grid-template-columns: auto minmax(0, 1fr); } .sline .btn { grid-column: 2; justify-self: start; } }
+.stackh { margin: 0; font-size: 14px; font-weight: 600; color: var(--muted); }
+.stack { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+/* A stacked ask is not in the store yet: a dashed edge, the look the page gives a thing not yet sent. */
+.stack > li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: start; gap: 4px 12px; padding: 8px 8px 8px 12px; border: 1.5px dashed var(--faint); border-radius: var(--r); background: var(--ground); }
+.stack .sn { font: 600 13px/44px var(--mono); color: var(--muted); text-align: end; }
+.stack .stext { margin: 0; min-width: 0; padding-block: 10px; white-space: pre-line; overflow-wrap: anywhere; }
+.stack .stext.sedit { padding-block: 0; }
+.stack .sacts { display: flex; gap: 4px; justify-content: flex-end; }
+.stack .sacts .btn { min-height: 44px; }
+.stack .sstate { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding-inline: 10px; font-size: 14px; color: var(--muted); white-space: nowrap; }
+.stack .sstate.ok { color: var(--good); font-weight: 600; }
+.stack textarea, .askform textarea.copybox { width: 100%; min-height: 66px; resize: vertical; padding: 8px 12px; border: 1.5px solid var(--acc); border-radius: var(--r); background: var(--surface); font: inherit; color: var(--ink); }
+.stack .serr { grid-column: 2 / -1; margin: 0; font-size: 14.5px; font-weight: 600; color: var(--due); }
+.stack > li.failed { border-color: var(--due); }
+.stack > li.gone { background: transparent; }
+.stack > li.gone .stext { color: var(--muted); }
+@media (max-width: 520px) {
+  .stack > li { grid-template-columns: 24px minmax(0, 1fr); }
+  .stack .sacts { grid-column: 2; justify-content: flex-start; }
+  .stack .serr { grid-column: 2; }
 }
 #askList { display: grid; gap: 8px; }
 .asklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
@@ -794,7 +835,10 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
     <form class="askform" id="askForm" onsubmit="return false">
       <label for="askText">Your ask</label>
       <textarea id="askText" rows="3" aria-describedby="askHint"></textarea>
-      <div class="askrow"><p class="askhint" id="askHint" aria-live="polite"></p><span class="slot" id="askSlot"></span><button class="btn askgo" type="button" id="askSend" disabled>Send ask</button></div>
+      <div class="askrow"><p class="askhint" id="askHint" aria-live="polite"></p><span class="slot" id="askSlot"></span>
+        <button class="btn alt askadd" type="button" id="askAdd" disabled>Add to list</button>
+        <button class="btn askgo fixw" type="button" id="askSend" disabled><span id="askSendLbl">Send ask</span><span class="sz" aria-hidden="true">Send 99 asks</span></button></div>
+      <div class="tray" id="askTray" hidden><div id="askLine" role="status"></div><div id="askStack"></div></div>
     </form>
     <div id="askList"></div>
   </div>
@@ -803,9 +847,9 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 <div class="bar" id="bar">
   <div class="sent" id="sent" hidden><div class="in" id="sentIn"></div></div>
   <div class="in">
-    <span class="st" id="barStatus"></span>
-    <button class="btn quiet" type="button" id="copy" hidden>Copy answers</button>
-    <button class="btn send" type="button" id="send" disabled>Send answers</button>
+    <div class="brow"><span class="st" id="barStatus"></span>
+      <button class="btn quiet" type="button" id="copy" hidden>Copy answers</button>
+      <button class="btn send" type="button" id="send" disabled>Send answers</button></div>
     <textarea id="copyBox" rows="2" hidden readonly></textarea>
   </div>
 </div>
@@ -831,7 +875,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
      Add a field here when the page draws it. A key inside options or steps is not listed. -->
 <script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "lastAnswer", "lane"]</script>
 
-<!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The waiting-page writer replaces it on each publish
+<!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The page writer replaces it on each publish
      (splice.py) and keeps designData. Empty, the Status tab says the plan is unknown. -->
 <!-- roadmap:data -->
 <!-- /roadmap:data -->
@@ -1865,13 +1909,16 @@ const plain = (t) => String(t || "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]
 // Owners come first so a cut at the byte cap never drops them.
 // "No. 1", "No. 1 and No. 2", "No. 1, No. 2 and No. 3".
 const nList = (ns) => { const a = ns.slice().sort((x, y) => x - y).map((n) => typeof n === "number" ? "No. " + n : n); return a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1]; };
-function noticeText(entries, head, tail) {
-  const owners = [...new Set(entries.map((e) => plain(e.owner).slice(0, MAX_OWNER) || "?"))].join(", ");
-  const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + (tail ? "" : " " + (e.choice ? choiceText(e.choice) : e.done ? "done" : "note, not done") + (note ? " (" + note + ")" : "")); }).join(", ");
-  let text = head + " Owners: " + owners + ". Items: " + line + (tail || ".");
+// A comment is cut at MAX_BYTES, with a mark where it was cut.
+function fitBytes(text) {
   const enc = new TextEncoder();
   while (enc.encode(text).length > MAX_BYTES) text = text.slice(0, Math.floor(text.length * 0.9)) + "…";
   return text;
+}
+function noticeText(entries, head, tail) {
+  const owners = [...new Set(entries.map((e) => plain(e.owner).slice(0, MAX_OWNER) || "?"))].join(", ");
+  const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + (tail ? "" : " " + (e.choice ? choiceText(e.choice) : e.done ? "done" : "note, not done") + (note ? " (" + note + ")" : "")); }).join(", ");
+  return fitBytes(head + " Owners: " + owners + ". Items: " + line + (tail || "."));
 }
 // Asked before the answer write, so only the write and the send sit between the click and the send.
 // The platform wants the send to follow the viewer's own gesture. How long that holds on a slow store is unmeasured.
@@ -2018,7 +2065,7 @@ async function copyText(text) { try { await navigator.clipboard.writeText(text);
 $("copy").addEventListener("click", async () => {
   const text = answerLine() || "No answers yet.", box = $("copyBox");
   if (await copyText(text)) { state.barNote = "Copied. Paste it in chat."; box.hidden = true; }
-  else { box.hidden = false; box.value = text; box.select(); state.barNote = "Select and copy the text below."; }
+  else { box.hidden = false; box.value = text; box.select(); state.barNote = "Select and copy the text in the box."; }
   renderBar();
 });
 $("send").addEventListener("click", sendAll);
@@ -2026,9 +2073,14 @@ $("send").addEventListener("click", sendAll);
 /* ---------- Ask box: the owner's free text; a session answers under it (asks/<id>). Never mixed with Send answers. ---------- */
 // The page writes id, text and at once, at Send. Sessions write only owner, read, reply, answered, home, filed (SKILL.md, "The database").
 const ASK_MAX = 4000, ASK_NOTICE = 500, ASK_SHOWN = 3, ASK_NEW_MS = 864e5;
-const askState = { map: null, bad: false, sent: null, failed: "", note: "", busy: false, open: {}, older: false };
-let askTimer;
-const askId = () => "ask-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 4).padEnd(2, "0");
+// sent: the batch the Undo covers. line: what the line under the buttons says in place of it (undone, allfail, undofail).
+// stack: the asks not sent yet, each { k, text, edit?, editErr?, gone?, state?, err? }. copyBox: words a refused clipboard leaves to select.
+const askState = { map: null, bad: false, sent: null, line: null, note: "", copyBox: "", keepFail: false, busy: false, busyN: 0, stack: [], focus: null, open: {}, older: false };
+let askTimer, askStamp = 0, askRowN = 0;
+// Ids made in one batch rise in the order made: askAll breaks the tie of a shared `at` by id, so the last-typed ask sorts on top.
+const askId = () => { askStamp = Math.max(Date.now(), askStamp + 1); return "ask-" + askStamp.toString(36) + Math.random().toString(36).slice(2, 4).padEnd(2, "0"); };
+const asksN = (n) => n + (n === 1 ? " ask" : " asks");
+const stackLive = () => askState.stack.filter((r) => !r.gone);
 const askWriter = () => { const w = state.meta && state.meta.writer; return typeof w === "string" && w.trim() ? w.trim().slice(0, MAX_OWNER) : "triage"; };
 const askReply = (a) => (typeof a.reply === "string" ? a.reply.trim() : "");
 const askOwner = (a) => (typeof a.owner === "string" && a.owner.trim() ? a.owner.trim().slice(0, MAX_OWNER) : askWriter());
@@ -2049,33 +2101,146 @@ document.addEventListener("visibilitychange", () => { if (document.hidden) markA
 window.addEventListener("pagehide", markAsksSeen);
 const saveAskDraft = () => { try { const v = $("askText").value; if (v) localStorage.setItem("waiting.askDraft", v); else localStorage.removeItem("waiting.askDraft"); } catch (e) {} };
 try { $("askText").value = localStorage.getItem("waiting.askDraft") || ""; } catch (e) {}
+// The stack is kept beside the draft, so a reload shows it again. An ask already written to the store is not kept. An edit left open keeps its words.
+// A browser that refuses the write sets keepFail while the list has rows, and the hint says so: the list would not come back after a reload.
+// An empty list has nothing to lose, so keepFail clears with it.
+const saveAskStack = () => {
+  const t = askState.stack.filter((r) => !r.gone && r.state !== "saved").map((r) => (r.edit != null ? { text: r.text, edit: r.edit } : r.text));
+  try {
+    if (t.length) localStorage.setItem("waiting.askStack", JSON.stringify(t)); else localStorage.removeItem("waiting.askStack");
+    askState.keepFail = false;
+  } catch (e) { askState.keepFail = t.length > 0; }
+};
+try {
+  const t = JSON.parse(localStorage.getItem("waiting.askStack") || "[]");
+  if (Array.isArray(t)) askState.stack = t.map((x) => (typeof x === "string" ? { text: x } : x && typeof x.text === "string" ? { text: x.text, edit: typeof x.edit === "string" ? x.edit : null } : null))
+    .filter((x) => x && x.text.trim()).map((x) => { const r = { k: ++askRowN, text: x.text }; if (x.edit != null) r.edit = x.edit; return r; });
+} catch (e) {}
 
 function askRailRow() {
   const n = askWaiting();
   return h("div", { class: "ov-tier" + (n ? "" : " zero") }, h("a", { class: "ov-head", href: "#asks", "aria-label": (n === null ? "Asks not read" : n + (n === 1 ? " ask waiting" : " asks waiting") + " for an answer") + ", Ask", onclick: (e) => { e.preventDefault(); jump("asks"); } }, glyph("wait"), "Ask", h("span", { class: "ct" }, n === null ? "—" : String(n))));
 }
-// The hint row: the words say why Send ask is off, what was saved, or what failed. The Undo sits here, at the box.
+// The hint row: the words say why Send is off, or what Send takes. The result of a send or an Undo is on the line under the buttons.
 function renderAskForm() {
   const s = askState, a = s.sent, typed = $("askText").value.trim(), hint = $("askHint"), slot = $("askSlot");
   let cls = "askhint", kids, live = "polite", slotKids = [];
-  const left = a ? undoLeft(a) : 0;
-  // A note on a view that cannot save is the result of Copy ask, so it outranks the words that told the owner to copy.
-  if (s.note && (state.db === false || s.failed)) kids = [s.note];
+  // Send waits for the count, and for an Undo whose delete is still awaited, though its window has passed.
+  const counting = !!a && undoLeft(a) > 0 && !a.busy, holding = counting || (!!a && !!a.busy), rows = stackLive().filter((r) => !r.state), failed = rows.filter((r) => r.err).length;
+  const n = rows.length + (typed ? 1 : 0), over = typed.length > ASK_MAX;
+  const words = (t) => [h("span", {}, t, h("span", { class: "kbd" }, " Ctrl+Enter sends."))];
+  if (s.note) kids = [s.note];
   else if (state.db === false) { cls += " bad"; kids = ["This view cannot reach the page's store, so an ask cannot be saved here. Copy it and paste it in chat."]; }
-  else if (s.failed) { cls += " bad"; live = "assertive"; kids = ["Not saved (" + s.failed + "). Your ask is still in the box: copy it and paste it in chat."]; }
-  else if (typed.length > ASK_MAX) { cls += " bad"; kids = ["Your ask is " + typed.length + " characters. The limit is " + ASK_MAX + ". Shorten it, then send. Nothing was cut."]; }
-  else if (s.note) kids = [s.note];
-  else if (a) { cls += " ok"; kids = [glyph("done"), h("span", {}, h("b", {}, "Sent " + fmt(a.at, false) + "."), " " + a.told)]; }
-  else kids = [h("span", {}, typed ? "" : "Send ask turns on once you type. ", "It goes to " + askWriter() + ", which answers here or passes it on.", h("span", { class: "kbd" }, " Ctrl+Enter sends."))];
+  else if (over) { cls += " bad"; kids = ["Your ask is " + typed.length + " characters. The limit is " + ASK_MAX + ". Shorten it, then send. Nothing was cut."]; }
+  else if (s.keepFail) { cls += " bad"; kids = ["This browser would not keep your list, so a reload would lose it. Send it, or copy it and paste it in chat."]; }
+  // Add to list is on only with words in the box, so its clause is said only then.
+  // Past the window, Send waits for Undo's deletes, not for a count.
+  else if (holding) { const when = counting ? "when the Undo count ends." : "when Undo is done."; kids = words((failed ? "Send ask tries " + (failed === 1 ? "the one" : "the " + failed) + " not saved again " + when : "Send turns on " + when) + (typed ? " Add to list stays on." : "")); }
+  else if (failed) kids = words("Send ask tries " + (failed === 1 ? "the one" : "the " + failed) + " not saved again.");
+  else if (rows.length && typed) kids = words("Send takes the " + rows.length + " in the list and the one in the box.");
+  else if (rows.length) kids = words(rows.length === 1 ? "Add more, or send it." : "Add more, or send them together.");
+  else kids = words((typed ? "" : "Add to list and Send ask turn on once you type. ") + "Asks go to " + askWriter() + ", which answers here or passes them on.");
   // The hint is rewritten only when its words change, so the live region announces once and not at each tick of the Undo count.
   const sig = cls + "|" + live + "|" + kids.map((k) => (k && k.nodeType ? k.textContent : k)).join("");
   if (hint.dataset.sig !== sig) { hint.dataset.sig = sig; hint.className = cls; hint.setAttribute("aria-live", live); hint.replaceChildren(...kids); }
-  if (a && !s.failed && left > 0) slotKids = [$("askUndo") || h("button", { class: "btn alt", type: "button", id: "askUndo", onclick: undoAsk }, "")];
-  else if (state.db === false || s.failed) slotKids = [$("askCopy") || h("button", { class: "btn alt", type: "button", id: "askCopy", onclick: copyAsk }, "Copy ask")];
-  if (slotKids[0] && slotKids[0].id === "askUndo") slotKids[0].textContent = "Undo send (" + left + ")";
+  if (state.db === false || (s.line && s.line.kind === "allfail") || (s.keepFail && stackLive().length)) slotKids = [$("askCopy") || h("button", { class: "btn alt", type: "button", id: "askCopy", onclick: () => copyAsk() }, "Copy ask")];
   // A button already there stays, so a press that is under way is not lost to a repaint each second.
   if (slotKids.length !== slot.children.length || slotKids[0] !== slot.firstElementChild) slot.replaceChildren(...slotKids);
-  $("askSend").disabled = !state.db || s.busy || !typed || typed.length > ASK_MAX;
+  $("askAdd").disabled = state.db === false || !typed || over;
+  $("askSend").disabled = !state.db || s.busy || holding || !n || over;
+  const lbl = $("askSendLbl"), want = n > 1 ? "Send " + n + " asks" : "Send ask";
+  if (lbl.textContent !== want) lbl.textContent = want;
+}
+// The line under the buttons answers Send and Undo where they were pressed. It holds the told fact once for the batch.
+function renderLine() {
+  const s = askState, a = s.sent, ln = s.line, box = $("askLine"), left = a ? undoLeft(a) : 0;
+  let g = "done", cls = "", words = null, undo = false;
+  if (s.busy) { g = "wait"; words = ["Saving " + asksN(s.busyN) + "… Keep typing: the box does not wait for the send."]; }
+  else if (ln && ln.kind === "undone") { g = "wait"; words = ["Undone. Your " + asksN(ln.n) + (ln.n === 1 ? " is" : " are") + " back in the list, not sent."]; }
+  else if (ln && ln.kind === "allfail") { g = "due"; cls = "bad"; words = ["Not saved (" + ln.code + "). Your " + asksN(ln.n) + (ln.n === 1 ? " is" : " are") + " kept in the list: copy " + (ln.n === 1 ? "it" : "them") + " and paste " + (ln.n === 1 ? "it" : "them") + " in chat."]; }
+  else if (a && a.busy) { g = "wait"; undo = true; words = ["Taking back " + asksN(a.ids.length) + "…"]; }
+  else if (ln && ln.kind === "late" && a) { g = "due"; cls = "bad"; words = ["Too late to undo " + asksN(ln.n) + ". " + (ln.n === 1 ? "It stays" : "They stay") + " sent."]; }
+  else if (ln && ln.kind === "undofail" && a) { g = "due"; cls = "bad"; undo = true; words = ["Undo failed (" + ln.code + "). " + asksN(a.ids.length) + (a.ids.length === 1 ? " stays" : " stay") + " sent."]; }
+  else if (a) { undo = true; words = [h("b", {}, a.total > a.texts.length ? a.texts.length + " of " + a.total + " sent " + fmt(a.at, false) + "." : "Sent " + fmt(a.at, false) + ". " + asksN(a.texts.length) + "."), " " + a.told]; }
+  const sig = words ? g + "|" + cls + "|" + undo + "|" + words.map((k) => (k && k.nodeType ? k.textContent : k)).join("") : "";
+  if (box.dataset.sig !== sig) {
+    const fa = document.activeElement, hadUndo = fa && fa.id === "askUndo";
+    box.dataset.sig = sig;
+    box.replaceChildren(...(words ? [h("p", { class: "sline" }, glyph(g), h("span", { class: cls }, ...words), undo ? h("button", { class: "btn alt", type: "button", id: "askUndo", onclick: undoAsk }, "") : null)] : []));
+    if (hadUndo && $("askUndo")) $("askUndo").focus({ preventScroll: true });
+  }
+  syncUndo();
+  showTray();
+}
+// The count and the hidden state are set in place each second, so the button under the pointer is never rebuilt.
+function syncUndo() {
+  const b = $("askUndo"), a = askState.sent; if (!b) return;
+  const left = a ? undoLeft(a) : 0;
+  // While Undo's deletes run, the button is spent as after the count, so a second press cannot start.
+  if (left > 0 && !a.busy) { b.textContent = "Undo send (" + left + ")"; b.classList.remove("spent"); b.removeAttribute("aria-hidden"); b.removeAttribute("tabindex"); }
+  else if (!b.classList.contains("spent")) {
+    // Read focus before .spent hides the button: hiding it can drop focus to the body first.
+    if (document.activeElement === b) $("askText").focus({ preventScroll: true });
+    b.classList.add("spent"); b.tabIndex = -1; b.setAttribute("aria-hidden", "true"); b.textContent = "Undo send";
+  }
+}
+const showTray = () => { $("askTray").hidden = !$("askLine").firstChild && !$("askStack").firstChild; };
+// One ask not sent yet: idle, in edit, removed, in flight, saved, or not saved.
+function stackRow(r, i) {
+  const n = i + 1, k = String(r.k), s = askState;
+  const btn = (act, label, cls, aria) => h("button", { class: "btn " + cls, type: "button", "data-sk": k, "data-act": act, "aria-label": aria, onclick: () => stackAct(r, act) }, label);
+  const num = h("span", { class: "sn", "aria-hidden": "true" }, String(n));
+  const edit = btn("edit", "Edit", "quiet", "Edit ask " + n), rm = btn("rm", "Remove", "quiet", "Remove ask " + n);
+  if (r.state === "saving") return h("li", {}, num, h("p", { class: "stext" }, r.text), h("span", { class: "sacts" }, h("span", { class: "sstate" }, "Saving…")));
+  if (r.state === "undoing") return h("li", {}, num, h("p", { class: "stext" }, r.text), h("span", { class: "sacts" }, h("span", { class: "sstate" }, "Taking back…")));
+  if (r.state === "saved") return h("li", {}, num, h("p", { class: "stext" }, r.text), h("span", { class: "sacts" }, h("span", { class: "sstate ok" }, glyph("done"), "Saved")));
+  if (r.gone) return h("li", { class: "gone" }, num, h("p", { class: "stext" }, "Removed: “" + r.text + "”"), h("span", { class: "sacts" }, btn("undo", "Undo remove", "alt")));
+  if (r.edit != null) {
+    const ta = h("textarea", { rows: 2, "aria-label": "Ask " + n, "data-sk": k, "data-act": "text", oninput: (e) => { r.edit = e.target.value; saveAskStack(); } });
+    ta.value = r.edit;
+    return h("li", {}, num, h("div", { class: "stext sedit" }, ta), h("span", { class: "sacts" }, btn("done", "Done", "alt"), rm), r.editErr ? h("p", { class: "serr", role: "alert" }, r.editErr) : null);
+  }
+  return h("li", { class: r.err ? "failed" : "" }, num, h("p", { class: "stext" }, r.text),
+    h("span", { class: "sacts" }, r.err ? btn("copy", "Copy ask", "alt") : null, edit, rm),
+    r.err ? h("p", { class: "serr", role: "alert" }, "Not saved (" + r.err + "). Your words are kept here.") : null);
+}
+function renderStack() {
+  const s = askState, box = $("askStack"), want = s.focus;
+  const sig = s.busy + "|" + s.copyBox + "|" + JSON.stringify(s.stack.map((r) => [r.k, r.text, r.edit != null, r.editErr, r.gone, r.state, r.err]));
+  if (box.dataset.sig === sig && !want) { showTray(); return; }
+  box.dataset.sig = sig;
+  const fa = document.activeElement, keep = fa && box.contains(fa) && fa.dataset.sk ? [fa.dataset.sk, fa.dataset.act] : null;
+  const caret = keep && fa.tagName === "TEXTAREA" ? [fa.selectionStart, fa.selectionEnd] : null;
+  box.replaceChildren(...(s.stack.length || s.copyBox ? [
+    s.stack.length ? h("p", { class: "stackh", id: "stackH" }, s.busy ? "Sending" : "Not sent yet") : null,
+    s.stack.length ? h("ol", { class: "stack", "aria-labelledby": "stackH" }, s.stack.map(stackRow)) : null,
+    s.copyBox ? h("p", { class: "stackh", role: "status" }, "Select and copy the text below.") : null,
+    s.copyBox ? h("textarea", { class: "copybox", id: "askCopyBox", readonly: true, rows: 3, "aria-label": "Your asks, to copy" }) : null].filter(Boolean) : []));
+  const cb = $("askCopyBox"); if (cb) cb.value = s.copyBox;
+  const at = want || (keep && { k: keep[0], act: keep[1] });
+  const f = at && box.querySelector('[data-sk="' + at.k + '"][data-act="' + at.act + '"]');
+  if (f) { f.focus({ preventScroll: true }); if (caret && !want) f.setSelectionRange(caret[0], caret[1]); }
+  s.focus = null;
+  showTray();
+}
+// The words in an open edit go to their rows, as Done does. One that cannot (empty, over the limit) stays open and says why.
+function commitEdits() {
+  askState.stack.forEach((r) => {
+    if (r.edit == null) return;
+    const v = r.edit.trim();
+    if (!v) r.editErr = "An ask cannot be empty. Remove it instead.";
+    else if (v.length > ASK_MAX) r.editErr = "Your ask is " + v.length + " characters. The limit is " + ASK_MAX + ". Shorten it. Nothing was cut.";
+    else { r.text = v; delete r.edit; delete r.editErr; delete r.err; }
+  });
+}
+function stackAct(r, act) {
+  const s = askState; if (r.state) return;
+  if (act === "edit") { r.edit = r.text; s.focus = { k: String(r.k), act: "text" }; }
+  else if (act === "done") { commitEdits(); s.focus = { k: String(r.k), act: r.edit == null ? "edit" : "text" }; }
+  else if (act === "rm") { r.gone = true; delete r.edit; delete r.editErr; s.focus = { k: String(r.k), act: "undo" }; }
+  else if (act === "undo") { delete r.gone; s.focus = { k: String(r.k), act: "edit" }; }
+  else if (act === "copy") { copyAsk(r.text); return; }
+  saveAskStack(); renderAskForm(); renderStack();
 }
 function renderAskList() {
   const root = $("askList"), s = askState, fa = document.activeElement, keep = fa && root.contains(fa) ? fa.dataset.ask || fa.id : "";
@@ -2118,49 +2283,99 @@ function askItem(a) {
     ? h("p", { class: "astate" }, "Read by " + askOwner(a) + " ", h("span", { class: "t" }, fmt(a.read, false)), ". Waiting for its answer.")
     : h("p", { class: "astate" }, "Waiting for " + askWriter() + " to read it."));
 }
-function renderAsks() { renderAskForm(); renderAskList(); renderRail(); }
+function renderAsks() { renderAskForm(); renderLine(); renderStack(); renderAskList(); renderRail(); }
 
-async function sendAsk() {
-  const s = askState, box = $("askText"), text = box.value.trim();
-  if (!state.db || s.busy || !text) return;
-  if (text.length > ASK_MAX) { renderAskForm(); return; } // the hint says why; the words stay in the box
-  s.busy = true; s.failed = ""; s.note = ""; renderAskForm();
-  const can = await canTell();
-  const id = askId(), at = new Date().toISOString();
-  try { await state.db.collection("asks").doc(id).set({ id, text, at }); }
-  catch (e) { s.failed = (e && e.code) || "error"; s.busy = false; renderAskForm(); return; }
-  (askState.map = askState.map || {})[id] = { id, text, at };
-  clearInterval(askTimer);
-  s.sent = { id, text, at, told: "Telling Claude…" }; s.busy = false;
-  if (box.value.trim() === text) box.value = "";
-  saveAskDraft(); renderAsks();
-  askTimer = setInterval(() => { if (!s.sent || undoLeft(s.sent) <= 0) clearInterval(askTimer); renderAskForm(); }, 1000);
-  const sent = s.sent;
-  const cut = plain(text);
-  const told = await notifyClaude("Asked on the waiting page. Writer: " + askWriter() + ". Ask " + id + ": " + cut.slice(0, ASK_NOTICE) + (cut.length > ASK_NOTICE ? "…" : "") + ".", can);
-  if (s.sent === sent) { sent.told = told ? TOLD : NOT_TOLD(); renderAskForm(); }
+// Typing, Add to list and Send clear the last result: a note, a result line that is not a count, a count that has ended, the words to select.
+function clearAskNotes() {
+  const s = askState;
+  s.note = ""; s.copyBox = "";
+  if (s.sent && !s.sent.busy && undoLeft(s.sent) <= 0) s.sent = null; // an Undo still awaiting a delete keeps its state
+  if (s.line && !(s.line.kind === "undofail" && s.sent)) s.line = null;
 }
-// Undo deletes the record and puts the words back in the box, ahead of anything typed since. The window is read from the clock, as undoLeft does.
+// Add to list moves the typed words into the stack. Nothing is written to the store.
+function addAsk() {
+  const s = askState, box = $("askText"), text = box.value.trim();
+  if (!text || text.length > ASK_MAX) return;
+  clearAskNotes();
+  s.stack = s.stack.filter((r) => !r.gone);
+  s.stack.push({ k: ++askRowN, text });
+  box.value = ""; saveAskDraft(); saveAskStack(); renderAsks(); box.focus({ preventScroll: true });
+}
+// Send writes every ask in the list, and the typed box as the last one, with one `at`, in order. Each is tried: one that fails stays in the list.
+async function sendAsk() {
+  const s = askState, box = $("askText");
+  if (!state.db || s.busy || (s.sent && (undoLeft(s.sent) > 0 || s.sent.busy))) return;
+  commitEdits();
+  const text = box.value.trim();
+  if (text.length > ASK_MAX) { renderAskForm(); return; } // the hint says why; the words stay in the box
+  s.stack = s.stack.filter((r) => !r.gone);
+  if (text) { s.stack.push({ k: ++askRowN, text }); box.value = ""; saveAskDraft(); }
+  const batch = s.stack.filter((r) => !r.state && r.edit == null);
+  if (!batch.length) { renderAsks(); return; }
+  clearAskNotes(); s.sent = null; s.busy = true; s.busyN = batch.length;
+  batch.forEach((r) => { r.state = "saving"; delete r.err; });
+  saveAskStack(); renderAsks();
+  const can = await canTell();
+  const at = new Date().toISOString(), wrote = [];
+  for (const r of batch) {
+    const id = askId();
+    try { await state.db.collection("asks").doc(id).set({ id, text: r.text, at }); }
+    catch (e) { delete r.state; r.err = (e && e.code) || "error"; renderStack(); continue; }
+    (s.map = s.map || {})[id] = { id, text: r.text, at };
+    r.state = "saved"; wrote.push({ id, text: r.text }); saveAskStack(); renderStack(); // kept at once, so a reload now does not write this ask again
+  }
+  s.stack = s.stack.filter((r) => r.state !== "saved");
+  s.busy = false; s.busyN = 0; saveAskStack(); clearInterval(askTimer);
+  const sent = wrote.length ? { ids: wrote.map((w) => w.id), texts: wrote.map((w) => w.text), at, total: batch.length, told: "Telling Claude…" } : null;
+  if (sent) {
+    s.sent = sent;
+    askTimer = setInterval(() => { if (!s.sent || undoLeft(s.sent) <= 0) clearInterval(askTimer); renderAskForm(); syncUndo(); }, 1000);
+  } else s.line = { kind: "allfail", code: batch.find((r) => r.err).err, n: batch.length };
+  renderAsks();
+  if (!sent) return;
+  const cut = (t) => { const c = plain(t); return c.slice(0, ASK_NOTICE) + (c.length > ASK_NOTICE ? "…" : ""); };
+  const head = "Asked on the waiting page. Writer: " + askWriter() + ". ";
+  const told = await notifyClaude(fitBytes(wrote.length === 1 ? head + "Ask " + wrote[0].id + ": " + cut(wrote[0].text) + "." : head + wrote.length + " asks: " + wrote.map((w) => w.id + ": " + cut(w.text)).join("; ") + "."), can);
+  if (s.sent === sent) { sent.told = told ? TOLD : NOT_TOLD(); renderLine(); }
+}
+// Undo deletes each record of the batch and puts the asks back in the list, in their order, ahead of any stacked since. The box is never written.
+// Each ask goes into the kept list before its delete, so a reload between the two loses none. The window is read from the clock before each delete, as undoLeft does.
+// A delete that fails, or a window that has passed, stops there: the asks from it on stay sent.
 async function undoAsk() {
   const s = askState, a = s.sent; if (!a || a.busy || undoLeft(a) <= 0) return;
-  a.busy = true;
-  try { await state.db.collection("asks").doc(a.id).delete(); }
-  catch (e) { a.busy = false; s.note = "Undo failed (" + ((e && e.code) || "error") + ")."; renderAskForm(); return; }
-  if (s.map) delete s.map[a.id];
-  clearInterval(askTimer);
-  const box = $("askText"); box.value = box.value.trim() ? a.text + "\n\n" + box.value : a.text;
-  s.sent = null; s.note = "Undone. Your ask is back in the box.";
-  saveAskDraft(); renderAsks(); box.focus({ preventScroll: true });
-  notifyClaude("Undone on the waiting page. Ask " + a.id + " is withdrawn.", await canTell());
+  a.busy = true; renderAskForm(); renderLine();
+  const ids = a.ids.slice(), texts = a.texts.slice(), gone = [], mine = [];
+  let code = "", late = false;
+  for (let i = 0; i < ids.length; i++) {
+    if (undoLeft(a) <= 0) { late = true; break; }
+    const row = { k: ++askRowN, text: texts[i], state: "undoing" };
+    s.stack.splice(mine.length ? s.stack.indexOf(mine[mine.length - 1]) + 1 : 0, 0, row); mine.push(row); saveAskStack(); renderStack();
+    try { await state.db.collection("asks").doc(ids[i]).delete(); }
+    catch (e) { code = (e && e.code) || "error"; s.stack = s.stack.filter((r) => r !== row); saveAskStack(); break; }
+    delete row.state;
+    if (s.map) delete s.map[ids[i]];
+    gone.push({ id: ids[i], text: texts[i] });
+    saveAskStack();
+  }
+  a.busy = false;
+  a.ids = a.ids.slice(gone.length); a.texts = a.texts.slice(gone.length);
+  s.note = ""; s.copyBox = "";
+  if (a.ids.length) { s.line = late ? { kind: "late", n: a.ids.length } : { kind: "undofail", code: code || "error" }; if (late) $("askText").focus({ preventScroll: true }); }
+  else if (s.sent === a) { clearInterval(askTimer); s.sent = null; s.line = { kind: "undone", n: gone.length }; $("askText").focus({ preventScroll: true }); }
+  saveAskStack(); renderAsks();
+  if (gone.length) notifyClaude(fitBytes("Undone on the waiting page. " + (gone.length === 1 ? "Ask " + gone[0].id + " is withdrawn." : "Asks " + gone.map((g) => g.id).join(", ") + " are withdrawn.")), await canTell());
 }
-// The words stay in the box, so a refused clipboard falls back to selecting them.
-async function copyAsk() {
-  const box = $("askText"), s = askState;
-  if (await copyText(box.value)) s.note = "Copied. Paste it in chat."; else { box.focus(); box.select(); s.note = "Select and copy the text in the box."; }
-  renderAskForm();
+// Copy ask copies the words of one row, or every ask in the list and the box. A refused clipboard leaves them in a box to select.
+async function copyAsk(only) {
+  // With no store, a stacked ask is not this view's to copy: only the box is.
+  const s = askState, rowsText = state.db === false ? [] : stackLive().map((r) => r.text), words = typeof only === "string" ? only : [...rowsText, $("askText").value.trim()].filter(Boolean).join("\n\n");
+  if (await copyText(words)) { s.note = "Copied. Paste it in chat."; s.copyBox = ""; } else { s.copyBox = words; s.note = ""; } // the words to select are told above the box, not in the hint
+  renderAskForm(); renderStack();
+  const cb = $("askCopyBox"); if (cb) { cb.focus(); cb.select(); }
 }
+$("askAdd").addEventListener("click", addAsk);
 $("askSend").addEventListener("click", sendAsk);
-$("askText").addEventListener("input", () => { askState.failed = ""; askState.note = ""; if (askState.sent && undoLeft(askState.sent) <= 0) askState.sent = null; saveAskDraft(); renderAskForm(); });
+$("askText").addEventListener("input", () => { clearAskNotes(); saveAskDraft(); renderAskForm(); renderLine(); renderStack(); });
 
 /* ---------- Designs: each mockup is stored whole in this page and shown in a sandboxed frame ---------- */
 let DESIGN_HTML = {};
@@ -2794,7 +3009,7 @@ function renderRec() {
 // The repo's name is the page's identity name (meta/page); with none, "this repo".
 const askText = () => {
   const id = (state.meta && state.meta.identity) || {}, name = typeof id.name === "string" ? id.name.trim().slice(0, 40) : "";
-  return "Start a roadmap for " + (name || "this repo") + ", as the roadmap skill says. Then have the waiting-page writer put its roadmap block on this repo's waiting page.";
+  return "Start a roadmap for " + (name || "this repo") + ", as the roadmap skill says. Then have the page writer put its roadmap block on this repo's waiting page.";
 };
 function noRoadmap() {
   const steps0 = B && Array.isArray(B.panels) ? B.panels.find((p) => p.name === "Steps") : null;
