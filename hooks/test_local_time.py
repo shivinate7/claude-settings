@@ -714,9 +714,15 @@ def opus_type(prompt, answer=None, error=None, at=OV_NOW, transcript=None, remot
     return cfg, stub.calls, out.getvalue(), err.getvalue()
 
 
-def transcript_record(kind, content):
-    """One transcript line in the shape Claude Code writes: a `type`, and `message.content` as a string or blocks."""
-    return json.dumps({"type": kind, "message": {"role": kind, "content": content}})
+def transcript_record(kind, content, is_meta=False, origin=None):
+    """One transcript line in the shape Claude Code writes: a `type`, and `message.content` as a string or blocks.
+    `is_meta` adds isMeta, and `origin` adds the record's origin dict, each only when given."""
+    rec = {"type": kind, "message": {"role": kind, "content": content}}
+    if is_meta:
+        rec["isMeta"] = True
+    if origin is not None:
+        rec["origin"] = origin
+    return json.dumps(rec)
 
 
 def owner_turn(text):
@@ -1122,6 +1128,121 @@ def case_opus_ask_no_problem_grants_builder():
           got is not None and got[2] == "builder", "got %r" % (got,))
 
 
+# THE SCHEDULED TEXT AND THE COMMAND RECORDS (debt opus-ask-scheduled-text; owner ruling, cockpit item 225, pick a,
+# 2026-11-03 22:31 CST). A `/effort` command record, a session-start (seed) prompt and a scheduled reminder never count
+# as the owner's turn. Each fixture below is a made-up record in a measured shape; no real transcript text is copied.
+# The three texts are Claude-written asks that the real judge passed.
+CLAUDE_WRITTEN_ASKS = (
+    "Resume: dispatch the opus judges on the integration branch once CI is green.",
+    "Review the diff on this branch. Use opus for the reviewers.",
+    "Check the batch. The judges should run on opus this time, 2h.",
+)
+EFFORT_CAVEAT = ("<local-command-caveat>Fixture caveat: the command below was run directly, "
+                 "not typed by the owner.</local-command-caveat>")
+EFFORT_COMMAND = ("<command-name>/effort</command-name>\n<command-message>effort</command-message>\n"
+                  "<command-args>medium</command-args>")
+EFFORT_STDOUT = "<local-command-stdout>Fixture stdout: effort set.</local-command-stdout>"
+# The block the harness adds to a fired scheduled task's prompt, in the measured shape.
+FIRED_REMINDER = ("<system-reminder>This task fired at Wed 2026-11-04 04:35:32 UTC. Treat this as the current date "
+                  "and time. Fired by routine \"Fixture reminder\" (trigger_id: trig_fixture0000).</system-reminder>")
+
+
+def effort_turns():
+    """The three records a `/effort` command leaves at a cloud lane's start: the caveat (isMeta), the command and its
+    stdout. Each is one transcript line."""
+    return [transcript_record("user", EFFORT_CAVEAT, is_meta=True),
+            transcript_record("user", EFFORT_COMMAND),
+            transcript_record("user", EFFORT_STDOUT)]
+
+
+def fired_reminder_prompt(text):
+    """A fired scheduled reminder as the prompt: its stored text, then the fired-task block."""
+    return text + "\n" + FIRED_REMINDER
+
+
+def transcript_lines(path):
+    """How many records the transcript file at `path` holds. A case asserts this before its subject, so a fixture that
+    came out empty or short cannot pass by accident."""
+    with open(path, encoding="utf-8") as handle:
+        return sum(1 for line in handle if line.strip())
+
+
+def case_opus_ask_effort_records_are_not_the_owner_turn():
+    # A cloud lane runs `/effort` at start. Its records are not the owner's words, so with only them in the transcript,
+    # the first prompt is a seed: no judge call and no grant. Each record also runs alone, so a fix that skips only the
+    # isMeta caveat stays red on the command and stdout records.
+    records = effort_turns()
+    variants = (("the caveat record alone", records[:1]), ("the command record alone", records[1:2]),
+                ("the stdout record alone", records[2:]), ("all three /effort records", records))
+    for name, lines in variants:
+        path = transcript_file(lines)
+        check("opus ask: %s, the transcript fixture holds %d record(s)" % (name, len(lines)),
+              transcript_lines(path) == len(lines), "records %d" % transcript_lines(path))
+        for text in CLAUDE_WRITTEN_ASKS:
+            cfg, calls, _, _ = opus_type(text, answer={"ok": True}, transcript=path, remote="cse_effort0001")
+            check("opus ask: after %s, the prompt %r makes no judge call" % (name, text), calls == [],
+                  "judge calls %d" % len(calls))
+            check("opus ask: after %s, the prompt %r writes no Opus override" % (name, text),
+                  opus_override(cfg) is None and not ov_pass_files(cfg), "files %r" % ov_files(cfg))
+
+
+def case_opus_ask_scheduled_reminder_is_not_the_owner_turn():
+    # A fired scheduled reminder's prompt is its stored text plus the fired-task block. The stored text is not the
+    # owner's present request, so it makes no judge call, even with an earlier owner turn in the transcript. The control
+    # is the same text with no block: it reaches the judge once, so the block is the cause. The block named here is the
+    # fired-task one only: a generic system-reminder after the owner's words still reaches the judge (see
+    # case_opus_ask_reminder_and_unclosed_paste_never_reach_the_judge).
+    long_path = transcript_file([owner_turn("set up the lane")] + [assistant_turn("filler " * 60)] * 2000)
+    short_path = transcript_file([owner_turn("set up the lane"), assistant_turn("ready")])
+    for name, path, lines in (("a short transcript", short_path, 2), ("a full-size transcript", long_path, 2001)):
+        check("opus ask: a scheduled reminder with %s, the fixture holds an earlier owner turn in %d record(s)"
+              % (name, lines), transcript_lines(path) == lines, "records %d" % transcript_lines(path))
+        for text in CLAUDE_WRITTEN_ASKS:
+            cfg, calls, _, _ = opus_type(fired_reminder_prompt(text), answer={"ok": True}, transcript=path,
+                                         remote="cse_remind0001")
+            check("opus ask: a fired reminder with %r, %s, makes no judge call" % (text, name), calls == [],
+                  "judge calls %d" % len(calls))
+            check("opus ask: a fired reminder with %r, %s, writes no Opus override" % (text, name),
+                  opus_override(cfg) is None and not ov_pass_files(cfg), "files %r" % ov_files(cfg))
+            cfg, calls, _, _ = opus_type(text, answer={"ok": True}, transcript=path, remote="cse_remind0001")
+            check("opus ask: control, %r with no fired block, %s, reaches the judge once" % (text, name),
+                  len(calls) == 1, "judge calls %d" % len(calls))
+
+
+def case_opus_ask_peer_and_task_notification_origins_are_not_the_owner_turn():
+    # A record whose origin is a peer or a task notification is not the owner's, even with no isMeta and plain text.
+    # The peer record is already left out by is_last_human, so it is a green pin. The task-notification record is the
+    # one that is red. The transcript holds only these records, so the seed check decides alone.
+    peer = transcript_record("user", "Fixture peer text, plain.", origin={"kind": "peer"})
+    notice = transcript_record("user", "Fixture notice text, plain.", origin={"kind": "task-notification"})
+    variants = (("a peer record", [peer]), ("a task-notification record", [notice]), ("both records", [peer, notice]))
+    for name, lines in variants:
+        path = transcript_file(lines)
+        check("opus ask: %s, the transcript fixture holds %d record(s)" % (name, len(lines)),
+              transcript_lines(path) == len(lines), "records %d" % transcript_lines(path))
+        for text in CLAUDE_WRITTEN_ASKS:
+            cfg, calls, _, _ = opus_type(text, answer={"ok": True}, transcript=path, remote="cse_origin0001")
+            check("opus ask: after %s, the prompt %r makes no judge call" % (name, text), calls == [],
+                  "judge calls %d" % len(calls))
+            check("opus ask: after %s, the prompt %r writes no Opus override" % (name, text),
+                  opus_override(cfg) is None and not ov_pass_files(cfg), "files %r" % ov_files(cfg))
+
+
+def case_opus_ask_owner_turn_after_effort_records_still_grants():
+    # The control for the /effort case: the same three records, then one plain owner record before the prompt (no
+    # isMeta, no origin, plain text). The owner's record counts, so `send opus judges` reaches the judge once and writes
+    # the every-role override.
+    path = transcript_file(effort_turns() + [owner_turn("set up the lane")])
+    check("opus ask: after the /effort records and one plain owner record, the fixture holds 4 record(s)",
+          transcript_lines(path) == 4, "records %d" % transcript_lines(path))
+    cfg, calls, _, _ = opus_type("send opus judges", answer={"ok": True}, transcript=path, remote="cse_effort0001")
+    got = opus_override(cfg)
+    check("opus ask: after the /effort records and one plain owner record, `send opus judges` reaches the judge once",
+          len(calls) == 1, "judge calls %d" % len(calls))
+    check("opus ask: after the /effort records and one plain owner record, `send opus judges` writes the every-role override",
+          got is not None and got[2] is None, "got %r" % (got,))
+
+
 def main():
     try:
         case_table_in_process()
@@ -1169,6 +1290,10 @@ def main():
         case_opus_ask_decimal_and_compound_lengths_grant_nothing()
         case_opus_ask_minute_length_grants_ninety_minutes()
         case_opus_ask_no_problem_grants_builder()
+        case_opus_ask_effort_records_are_not_the_owner_turn()
+        case_opus_ask_scheduled_reminder_is_not_the_owner_turn()
+        case_opus_ask_peer_and_task_notification_origins_are_not_the_owner_turn()
+        case_opus_ask_owner_turn_after_effort_records_still_grants()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:
