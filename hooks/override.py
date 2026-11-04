@@ -25,8 +25,16 @@ rule's settings-write ask, and it reaches agents.
   `opus off` ends it. The same whole-prompt rule holds: any other text after `opus` grants nothing.
   A plain ask (`send opus judges`, `use opus reviewers for 30m`) writes the same file when a model judges the
   prompt to be the owner's own present request (grant_opus_ask, call_judge.opus_ask). Cost: one model call for an
-  owner prompt that carries the whole word `opus` and starts with neither keyword; none for any other prompt, and
-  none for a machine-tag prompt. It fails closed: an error or an odd answer grants nothing.
+  owner prompt that carries the whole word `opus` and takes the plain path; none for any other prompt. It fails
+  closed: an error or an odd answer grants nothing. The plain path's rules:
+    - Strip every MACHINE_TAGS block anywhere, and a pasted block (an unclosed one runs to the end), first.
+    - A first word `opus` keeps the keyword path only when the rest starts with `off`, a length, or a role then a
+      length. Any other first `opus` is a plain ask.
+    - `claude` is never a role word here. The keyword form `opus claude 2h` keeps it.
+    - Two or more distinct roles, or a role word with not, no, don't, never, except or without just before it:
+      no grant.
+    - Two or more lengths: no grant. One length sets the time: `<n>m`, `<n>h`, or spelled: hour(s), hr(s),
+      min(s), minute(s). None: DEFAULT_ASK_LENGTH.
 A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
 roadmap step (decision agent-model-cap). take() reads it only on an Opus spawn refusal that no Opus override
 lifted, from the local ref origin/roadmap in the call's cwd, never fetched: one git grep for the lane id,
@@ -64,12 +72,21 @@ PROMPT = re.compile(
 WORD = re.compile(r"(?:(off)|(\d+)([mh])?)", re.I)  # `off` or a length, as the whole rest
 OPUS_PROMPT = re.compile(r"\s*opus(?=\s|$)(.*)", re.I | re.S)  # the Opus word, then the rest
 OPUS_LENGTH = re.compile(r"(\d+)([mh])", re.I)  # an Opus override needs its unit
-# The plain ask (grant_opus_ask): the whole word, a pasted block, a word that may name a role, a length anywhere in the
-# words (bounded by non-word characters, so `12 mhz` is none), and the length when the words give none.
+# The plain ask (grant_opus_ask): the whole word, the blocks that are not the owner's words, a word that may name a
+# role, and a length (bounded by non-word characters, so `12 mhz` is none).
 OPUS_WORD = re.compile(r"\bopus\b", re.I)
-PASTED = re.compile(r"<pasted_content\b[^>]*>.*?</pasted_content>", re.I | re.S)
-ROLE_WORDS = re.compile(r"[A-Za-z][\w-]*")
-ASK_LENGTH = re.compile(r"(?<![\w-])" + OPUS_LENGTH.pattern + r"(?![\w-])", re.I)
+PASTED = r"<pasted_content\b[^>]*>.*?</pasted_content>|<pasted_content\b.*"  # an unclosed block runs to the end
+# One block per tag name in MACHINE_TAGS, so the list stays the one home; an unclosed block runs to the end.
+MACHINE_BLOCKS = "|".join(
+    r"<{0}[\s>].*?(?:</{0}>|$)".format(name)
+    for name in sorted({m for tag in MACHINE_TAGS for m in re.findall(r"<([\w-]+)", tag)}))
+BLOCKS = re.compile(PASTED + "|" + MACHINE_BLOCKS, re.I | re.S)
+ROLE_WORDS = re.compile(r"[A-Za-z][\w\u2019'-]*")
+NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t"}
+NEGATION_SPAN = 3  # a negation within this many words before a role word negates it
+ASK_LENGTH = re.compile(
+    r"(?<![\w-])(\d+)(?:([mh])|\s?(h(?:ours?|rs?)|m(?:ins?|inutes?)))(?![\w-])", re.I)
+KEYWORD_REST = re.compile(r"\s*off(?![\w-])", re.I)
 DEFAULT_ASK_LENGTH = ("2", "h")
 OPUS_RULE = "agent-model-cap"  # the one rule an Opus override lifts, and only its spawn refusal
 # The roles an Opus spawn can ask for: the agents/ roles and the built-in ones, less Plan, which runs Opus by standing
@@ -177,40 +194,69 @@ def _write_opus(session_id, path, at, length, role, said=None):
     return "opus", until, role
 
 
-def _strip_pasted(prompt):
-    """The prompt with each pasted block replaced by a marker: pasted text is not the owner's own words."""
-    return PASTED.sub("[pasted text]", prompt)
+def _strip_blocks(prompt):
+    """The prompt with each pasted or machine-tag block replaced by a marker: that text is not the owner's words."""
+    return BLOCKS.sub("[pasted text]", prompt)
+
+
+def _keyword_rest(rest):
+    """True when the text after a first word `opus` is a keyword form: `off`, a length, or a role then a length."""
+    words = rest.split()
+    if KEYWORD_REST.match(rest) or (words and OPUS_LENGTH.match(words[0])):
+        return True
+    return len(words) > 1 and opus_role(words[0]) is not None and OPUS_LENGTH.match(words[1]) is not None
+
+
+def _ask_scope(text):
+    """(length, role) a plain ask names, or None when the words are unclear: two lengths, two roles, or a negated
+    role. The role is None for every role."""
+    lengths = ASK_LENGTH.findall(text)
+    if len(lengths) > 1:
+        return None
+    words = ROLE_WORDS.findall(text)
+    roles = set()
+    for at, word in enumerate(words):
+        role = opus_role(word)
+        if role is None or role == "claude":
+            continue
+        if NEGATIONS & {w.lower() for w in words[max(0, at - NEGATION_SPAN):at]}:
+            return None
+        roles.add(role)
+    if len(roles) > 1:
+        return None
+    length = DEFAULT_ASK_LENGTH
+    if lengths:
+        number, short, spelled = lengths[0]
+        length = (number, (short or spelled)[0])
+    return length, roles.pop() if roles else None
 
 
 def grant_opus_ask(session_id, prompt, at, judge=None):
     """The owner's plain Opus ask (`send opus judges`): an Opus override written when the model says the prompt is the
     owner's own present request to run Opus agents (decision owner-override). `judge` is call_judge.opus_ask unless a
-    caller passes another. Returns ("opus", until, role) for a new override, else None.
-
-    The judge is not called, and nothing is granted, when: the prompt is no string; the session id cannot name a
-    file; the prompt starts with a machine tag (an agent's text, a notice); its first word is `opus` or `override`
-    (the keyword forms keep the whole-prompt rule of grant()); or no whole word `opus` stays once the pasted blocks
-    are removed. Cost: one model call for an owner prompt that carries the word, none for any other.
-    The role is the one OPUS_ROLES role the words name (none or several: every role). The length is the first
-    `<n>m` or `<n>h` in the words, else DEFAULT_ASK_LENGTH. The guard.log line `opus-grant` holds the owner's words."""
+    caller passes another. Returns ("opus", until, role) for a new override, else None. The module docstring holds
+    the rules of the words. The judge is not called for a non-string, an id that cannot name a file, a machine-tag
+    start, a keyword form, or text with no whole word `opus` left after _strip_blocks. The guard.log line
+    `opus-grant` holds the words that were judged."""
     if not isinstance(prompt, str):
         return None
     path = _path(session_id, "opus")
     if path is None or prompt.lstrip().startswith(MACHINE_TAGS):
         return None
-    if OPUS_PROMPT.match(prompt) or PROMPT.match(prompt):
+    first = OPUS_PROMPT.match(prompt)
+    if PROMPT.match(prompt) or (first and _keyword_rest(first.group(1))):
         return None
-    text = _strip_pasted(prompt)
+    text = _strip_blocks(prompt)
     if not OPUS_WORD.search(text):
         return None
     if judge is None:
         from call_judge import opus_ask as judge
     if judge(text) is not True:
         return None
-    roles = {opus_role(word) for word in ROLE_WORDS.findall(text)} - {None}
-    found = ASK_LENGTH.search(text)
-    return _write_opus(session_id, path, at, found.groups() if found else DEFAULT_ASK_LENGTH,
-                       roles.pop() if len(roles) == 1 else None, " ".join(text.split()))
+    scope = _ask_scope(text)
+    if scope is None:
+        return None
+    return _write_opus(session_id, path, at, scope[0], scope[1], " ".join(text.split()))
 
 
 def grant(session_id, prompt, at):
