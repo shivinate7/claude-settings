@@ -848,6 +848,103 @@ def _py_hit(body: str, cwd: str, predicate) -> str:
     return ""
 
 
+# A python script reaches a shell only at a call of os or subprocess. `py_spots` reads that with `ast`, so an
+# import alias (`import subprocess as sp`, `from os import system`) is the call it names, and a comment or a
+# plain string is text.
+_OS_SPOT = re.compile(r"system|popen|startfile|exec\w*|spawn\w*|posix_spawn\w*")
+_SUBPROCESS_SPOTS = ("run", "call", "check_call", "check_output", "Popen", "getoutput", "getstatusoutput")
+_PY_DYNAMIC = ("eval", "exec", "compile", "__import__", "import_module", "globals", "vars")
+
+
+def _py_spot_name(module: str, name: str) -> str:
+    """`module.name` when that call hands its text to a shell, else ''."""
+    if module == "os":
+        return "os." + name if _OS_SPOT.fullmatch(name) else ""
+    return "subprocess." + name if module == "subprocess" and name in _SUBPROCESS_SPOTS else ""
+
+
+def _py_literal(node) -> bool:
+    import ast
+    if isinstance(node, ast.Constant):
+        return True
+    return isinstance(node, (ast.List, ast.Tuple)) and all(_py_literal(each) for each in node.elts)
+
+
+def _py_aliases(tree):
+    """(modules, functions) as {name: canonical}: the names an `import` binds to `os` or `subprocess`, and the
+    names a `from` import binds to a call of theirs that reaches a shell. None for a `from` import of every
+    name, which binds names that cannot be told."""
+    import ast
+    modules, functions = {}, {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for each in node.names:
+                if each.name in ("os", "subprocess"):
+                    modules[each.asname or each.name] = each.name
+        elif isinstance(node, ast.ImportFrom) and node.module in ("os", "subprocess") and not node.level:
+            for each in node.names:
+                if each.name == "*":
+                    return None
+                if _py_spot_name(node.module, each.name):
+                    functions[each.asname or each.name] = node.module + "." + each.name
+    return modules, functions
+
+
+def py_spots(script: str):
+    """The shell text of each call of a python script that hands a string to a shell, as `os.system('...')`,
+    or None when the script cannot be told: it reaches such a call by another route (the name passed on,
+    `getattr`, `eval`), or a call takes an argument that is no literal. The caller then reads the whole script
+    as shell. A script that does not parse raises SyntaxError or ValueError: python runs none of it."""
+    import ast
+    import textwrap
+    source = textwrap.dedent(script)
+    tree = ast.parse(source)
+    aliases = _py_aliases(tree)
+    if aliases is None:
+        return None
+    modules, functions = aliases
+    calls, callee_names, parents = [], set(), {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[id(child)] = node
+        if isinstance(node, ast.Name) and node.id in _PY_DYNAMIC:
+            return None
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in modules:
+            spot = _py_spot_name(modules[func.value.id], func.attr)
+            base = func.value
+        elif isinstance(func, ast.Name) and func.id in functions:
+            spot, base = functions[func.id], func
+        else:
+            continue
+        if spot:
+            calls.append((node, spot))
+            callee_names.add(id(base))
+    for node in ast.walk(tree):
+        # A name bound to os, subprocess or a shell call of theirs is read only as the callee of a spot call,
+        # or as the base of an attribute that is no such call (`os.path`, `subprocess.PIPE`). Any other use
+        # hands the call on (`map(os.system, ...)`, `getattr(os, name)`), where this reading cannot follow it.
+        if not isinstance(node, ast.Name) or id(node) in callee_names:
+            continue
+        if node.id in functions:
+            return None
+        if node.id in modules:
+            parent = parents.get(id(node))
+            if not (isinstance(parent, ast.Attribute) and parent.value is node
+                    and not _py_spot_name(modules[node.id], parent.attr)):
+                return None
+    out = []
+    for node, spot in calls:
+        args = list(node.args) + [kw.value for kw in node.keywords if kw.arg == "args"]
+        if (not args or not all(_py_literal(arg) for arg in args) or any(kw.arg is None for kw in node.keywords)
+                or any(isinstance(arg, ast.Starred) for arg in node.args)):
+            return None
+        out.append(spot + "(" + ", ".join(ast.get_source_segment(source, arg) or "" for arg in args) + ")")
+    return out
+
+
 _JS_STR = r"""(?:'([^'\n]*)'|"([^"\n]*)"|`([^`$]*)`|([A-Za-z_$][\w$]*)|path\s*\.\s*(?:join|resolve)\s*\(([^()]*)\))"""
 _JS_ONE = re.compile(
     r"\b(?:writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream)\s*\(\s*" + _JS_STR)

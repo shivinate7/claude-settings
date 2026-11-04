@@ -352,10 +352,24 @@ def _command_spans(script: str):
 def script_spots(script: str, lang: str = ""):
     """The shell text of each spot of a script where it hands a string to a shell: the call text of each shell
     call, and the command of each perl or ruby backtick span, `qx` and `%x`. `lang` is "py", "js", "perl" or
-    "ruby", or '' for a script of unknown language (every language is tried). A call whose arguments hold no
-    quote, a variable handed to a shell, reads the whole script: the string it holds cannot be told."""
+    "ruby", or '' for a script of unknown language (every language is tried). Python is read with `ast`
+    (`guard_frozen.py_spots`): an alias resolves, a comment and a plain string are text, and a script it cannot
+    tell reads whole. In the other languages, a call whose arguments hold no quote, a variable handed to a
+    shell, reads the whole script: the string it holds cannot be told."""
     langs = [lang] if lang else list(_SPOT_CALLS)
     out = []
+    if lang in ("", "py"):
+        from guard_frozen import py_spots   # the home of the ast reading; it imports this module
+        try:
+            found = py_spots(script)
+        except (SyntaxError, ValueError):
+            pass   # python runs no line of it, so the pattern reader below only tries a literal name
+        else:
+            if found is None and lang:
+                return [script]
+            if found is not None:
+                out += found
+                langs = [each for each in langs if each != "py"]
     for each in langs:
         tail = _SPOT_PAREN + (_SPOT_BARE if each in ("perl", "ruby") else "")
         for call in re.finditer("(?:" + _SPOT_CALLS[each] + ")(?:" + tail + ")", script):
