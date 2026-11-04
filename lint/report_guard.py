@@ -971,7 +971,8 @@ def refusal_reason(tools):
     return (
         "Refusal guard: the auto-mode classifier refused %s this session, and the reply does not "
         "raise it with the owner. Add an Input Needed line \"allow `<tool_name>`?\" for each tool, "
-        "and a line in the repo's debt notes file (notes.md) that names it." % names)
+        "and a line in the repo's debt notes file (notes.md) that names it "
+        "(decision refusals-reach-the-owner)." % names)
 
 
 def _marker_path(hook):
@@ -1255,11 +1256,12 @@ def main():
         pass
 
     # Every Stop, landed or not, settles the refusals file; the reason joins whichever block follows.
-    refusal = refusal_reason(pending_refusals(hook, last_reply(hook)))
+    pending = pending_refusals(hook, last_reply(hook))
+    refusal = refusal_reason(pending)
 
     def stop_for_refusal():
         if refusal:
-            print(json.dumps({"decision": "block", "reason": refusal + " (decision refusals-reach-the-owner)"}))
+            print(json.dumps({"decision": "block", "reason": refusal_reason(pending)}))
 
     path = hook.get("transcript_path")
     if not path or not os.path.exists(path):
