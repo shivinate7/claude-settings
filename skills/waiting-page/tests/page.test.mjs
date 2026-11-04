@@ -43,7 +43,8 @@ const ASKED_AFTER_SEND = "2026-10-30T00:00:00Z";
 // meta docs, which the status part must never read. window.__reads lists every read as
 // [collection, id or null]; window.__uses lists every window.claude.use(capability) call.
 // noStore: the page gets no database (a view that cannot reach the store), so use("db") gives null.
-function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, holdReceipts, dbExtra = {}, noStore = false }) {
+// failSetText: a write to asks whose text holds it is refused with code denied, so one ask of a batch fails and the rest save.
+function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText = "", comments, meta, groups, receipts, holdReceipts, dbExtra = {}, noStore = false }) {
   const { meta: metaExtra, ...otherExtra } = dbExtra;
   const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: { ...(meta ? { page: meta } : {}), ...metaExtra }, groups: { ...groups }, receipts: { ...receipts }, ...otherExtra };
   window.__reads = []; window.__uses = [];
@@ -57,7 +58,9 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
   };
   window.__answers = () => data.answers;
   // Pushes one item through the items listener, as a session adding an item after the page loaded would.
-  window.__putItem = (it) => { data.items[it.id] = it; fire("items", it.id); };
+  // Writes one document as the store holds it, and tells its listeners: a session's write after the page loaded.
+  window.__putDoc = (name, id, body) => { (data[name] = data[name] || {})[id] = body; fire(name, id); };
+  window.__putItem = (it) => window.__putDoc("items", it.id, it);
   // holdReceipts: the receipts' first snapshot waits for window.__releaseReceipts(), so a case can act before receipts arrive.
   const listen = (name, cb) => { window.__reads.push([name, null]); (subs[name] = subs[name] || []).push(cb); if (holdReceipts && name === "receipts") window.__releaseReceipts = () => cb(snap(name)); else setTimeout(() => cb(snap(name)), 0); return () => {}; };
   const db = {
@@ -67,7 +70,7 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
       orderBy: () => ({ onSnapshot: (cb) => listen(name, cb) }),
       doc: (id) => ({
         get: async () => { window.__reads.push([name, id]); return dsnap(name, id); },
-        set: async (body) => { if (failSet) throw { code: "denied" }; window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; setTimeout(() => fire(name, id), 0); },
+        set: async (body) => { if (failSet || (name === "asks" && failSetText && String(body.text).includes(failSetText))) throw { code: "denied" }; window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; setTimeout(() => fire(name, id), 0); },
         delete: async () => { if (failDelete || failDeleteIn === name) throw { code: "denied" }; window.__log.push(["delete", name, id]); delete (data[name] || {})[id]; setTimeout(() => fire(name, id), 0); },
         onSnapshot: (cb) => { window.__reads.push([name, id]); (docSubs[name + "/" + id] = docSubs[name + "/" + id] || []).push(cb); setTimeout(() => cb(dsnap(name, id)), 0); return () => {}; },
       }),
@@ -100,7 +103,7 @@ function pageName() {
 }
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null, noStore = false } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null, noStore = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport });
@@ -114,7 +117,7 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
-  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, holdReceipts, dbExtra, noStore });
+  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText, comments, meta, groups, receipts, holdReceipts, dbExtra, noStore });
   await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
@@ -2291,6 +2294,40 @@ async function shownBox(page, text) {
   return loc.boundingBox();
 }
 
+// The stack under the box, from the design (docs/design/page-ask-queue-notes.md): Add to list is #askAdd, Undo is #askUndo,
+// Send stays #askSend, the list is ol.stack under the heading "Not sent yet", and the line under the buttons is .sline.
+// A row's buttons are found by the names the design gives them: "Edit ask N", "Remove ask N", "Done", "Undo remove".
+const ASK = { box: "#askText", add: "#askAdd", send: "#askSend", undo: "#askUndo", rows: "ol.stack > li", words: "ol.stack > li .stext", ask: "li.askc" };
+const stackWords = (page) => page.locator(ASK.words).allInnerTexts();
+const askWrites = (page) => page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").map((l) => l[3]));
+// Each waits, up to 1.5 s, for the store to hold n writes or deletes. The caller asserts the count, so a wait that gives up fails by name.
+const waitAskWrites = (page, n) => page.waitForFunction((k) => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").length >= k, n, { timeout: 1500 }).catch(() => {});
+const waitAskDeletes = (page, n) => page.waitForFunction((k) => window.__log.filter((l) => l[0] === "delete" && l[1] === "asks").length >= k, n, { timeout: 1500 }).catch(() => {});
+// Whether the line under the buttons holds the words, once it shows them or at 3 s. Never throws, so a missing line fails by name.
+const lineHas = (page, words) => page.waitForFunction((w) => { const l = document.querySelector("#asks .sline"); return !!l && l.textContent.includes(w); }, words, { timeout: 3000 }).then(() => true, () => false);
+// A button found by its accessible name. A missing one fails by name, as mustHave does.
+async function mustHaveNamed(scope, name, what) {
+  const n = await scope.getByRole("button", { name, exact: true }).first().waitFor({ state: "attached", timeout: 3000 }).then(() => 1, () => 0);
+  assert.equal(n, 1, `no ${what}: no button named "${name}"`);
+}
+// Types an ask and presses Add to list: the words leave the box and wait in the list, and nothing is written.
+async function addToList(page, text) {
+  await mustHave(page, ASK.box, "Ask box");
+  await page.fill(ASK.box, text);
+  await mustHave(page, ASK.add, "Add to list button");
+  await page.click(ASK.add);
+}
+// Types an ask and presses Send, then waits for its write. The button must be on, so a press that cannot go fails by name.
+async function sendTyped(page, text) {
+  await mustHave(page, ASK.box, "Ask box");
+  await page.fill(ASK.box, text);
+  await mustHave(page, ASK.send, "Send ask button");
+  assert.equal(await page.locator(ASK.send).isDisabled(), false, `Send ask is off with "${text}" typed`);
+  const before = (await askWrites(page)).length;
+  await page.click(ASK.send);
+  await waitAskWrites(page, before + 1);
+}
+
 test("Send ask writes asks/<id> with only the id, the text and the time", async (t) => {
   const page = await open(t); if (!page) return;
   await mustHave(page, "#askText", "Ask box");
@@ -2310,7 +2347,7 @@ test("Send ask writes asks/<id> with only the id, the text and the time", async 
   assert.deepEqual(log.filter((l) => l[0] === "set" && l[1] !== "asks"), [], "Send wrote another collection");
 });
 
-test("Undo deletes asks/<id> and puts the text back in the box", async (t) => {
+test("Undo deletes asks/<id> and puts the ask back in the list, and the box keeps what was typed", async (t) => {
   const page = await open(t); if (!page) return;
   await mustHave(page, "#askText", "Ask box");
   await page.fill("#askText", ASK_TEXT);
@@ -2323,7 +2360,9 @@ test("Undo deletes asks/<id> and puts the text back in the box", async (t) => {
   await page.waitForFunction(() => window.__log.some((l) => l[0] === "delete" && l[1] === "asks"));
   const dels = await page.evaluate(() => window.__log.filter((l) => l[0] === "delete" && l[1] === "asks").map((l) => l[2]));
   assert.deepEqual(dels, [key], "Undo deleted " + JSON.stringify(dels) + ", not " + key);
-  assert.equal(await page.inputValue("#askText"), ASK_TEXT, "Undo did not put the text back in the box");
+  // Undo puts the ask back in the list; the box is the owner's and Undo never writes it.
+  assert.equal(await page.inputValue("#askText"), "", "Undo put the text back in the box, not the list: " + JSON.stringify(await page.inputValue("#askText")));
+  assert.deepEqual(await stackWords(page), [ASK_TEXT], "Undo did not put the ask back in the list");
 });
 
 test("the asks list is newest first by at, whatever order the records came in", async (t) => {
@@ -2383,7 +2422,7 @@ test("the Ask section never shows the text null, in the waiting, answered and se
   await mustHave(page, "#askSend", "Send ask button");
   await page.click("#askSend");
   await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
-  await page.waitForFunction(() => document.getElementById("askHint").textContent.includes("Sent"));
+  assert.ok(await lineHas(page, "Sent"), "the sent state shows no line under the buttons");
   const sent = await stray();
   assert.equal(sent, "", "the sent state shows the text null: " + JSON.stringify(sent));
 });
@@ -2437,8 +2476,7 @@ test("Send ask never cuts a text over 4000 characters: it stores the full text, 
   assert.ok(hint && hint !== short.trim() && await page.locator("#askHint").isVisible(), "Send ask wrote nothing and showed no notice");
 });
 
-test("Undo after more typing in the 8-second window never restores a box over 4000 characters without a notice", async (t) => {
-  const UNDO_NOTE = "Undone. Your ask is back in the box.";
+test("Undo after more typing in the 8-second window keeps the typed words in the box and puts the whole ask back in the list", async (t) => {
   const page = await open(t); if (!page) return;
   const sent = "0123456789".repeat(395); // 3950 characters: under the limit, so Send takes it whole
   await mustHave(page, "#askText", "Ask box");
@@ -2451,10 +2489,10 @@ test("Undo after more typing in the 8-second window never restores a box over 40
   await page.fill("#askText", typed);
   await page.click("#askUndo");
   await page.waitForFunction(() => window.__log.some((l) => l[0] === "delete" && l[1] === "asks"));
-  const value = await page.inputValue("#askText");
-  const hint = (await page.textContent("#askHint")).trim();
-  const noticed = !!hint && hint !== UNDO_NOTE && await page.locator("#askHint").isVisible();
-  assert.ok(value.length <= 4000 || noticed, `Undo restored ${value.length} characters, over 4000, with no notice`);
+  // Undo never writes the box, so the typed words stay as typed, and the whole 3950-character ask is back in the list.
+  assert.equal(await page.inputValue("#askText"), typed, "Undo changed the typed words in the box");
+  const back = await stackWords(page);
+  assert.deepEqual(back.map((w) => w.length), [sent.length], `Undo put back ${JSON.stringify(back.map((w) => w.length))} characters in the list, not ${sent.length}`);
 });
 
 test("Ctrl+Enter with focus on Send ask writes no answer while an answer is staged", async (t) => {
@@ -2511,13 +2549,158 @@ test("Copy ask after a failed write changes the hint to the copy result", async 
   await page.fill("#askText", ASK_TEXT);
   await mustHave(page, "#askSend", "Send ask button");
   await page.click("#askSend");
-  await page.locator("#askHint", { hasText: "Not saved" }).waitFor();
+  assert.ok(await lineHas(page, "Not saved"), "the not-saved words are not on the line under the buttons");
   await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async (s) => { window.__copied = s; } } }); });
   await mustHave(page, "#askCopy", "Copy ask button");
   await page.click("#askCopy");
   await page.waitForFunction(() => /Copied\. Paste it in chat\.|Select and copy the text in the box\./.test(document.getElementById("askHint").textContent), null, { timeout: 1500 }).catch(() => {});
   const hint = (await page.textContent("#askHint")).trim();
   assert.match(hint, /Copied\. Paste it in chat\.|Select and copy the text in the box\./, "after Copy ask the hint still says: " + JSON.stringify(hint));
+});
+
+// ---------------------------------------------------------------- the ask stack: Add to list, one Send, one Undo for the batch
+
+// The reach line of the ask row that holds the text, or "" when no row holds it. Reads the page, never waits.
+const reachOf = (page, text) => page.evaluate(([sel, t]) => { const li = [...document.querySelectorAll(sel)].find((c) => c.textContent.includes(t)); const s = li && li.querySelector(".astate"); return s ? s.textContent.trim() : ""; }, [ASK.ask, text]);
+
+test("Add to list stacks asks in typed order, past three, and nothing reaches the store until Send", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, ASK.box, "Ask box");
+  await mustHave(page, ASK.add, "Add to list button");
+  assert.equal(await page.locator(ASK.add).isDisabled(), true, "Add to list is on with the box empty");
+  // Twelve asks, past the design's three: the stack has no cap, and each row keeps its place in typed order.
+  const words = Array.from({ length: 12 }, (_, i) => `Stacked ask number ${i + 1}`);
+  for (const w of words) await addToList(page, w);
+  assert.equal(await page.inputValue(ASK.box), "", "Add to list left the words in the box");
+  assert.deepEqual(await stackWords(page), words, "the stack is not the 12 asks in typed order");
+  const writes = (await askWrites(page)).length;
+  assert.equal(writes, 0, `Add to list wrote ${writes} asks records before Send`);
+});
+
+test("Edit keeps a stacked ask's place and number, Remove keeps its place, and Send writes the edited and kept asks only", async (t) => {
+  const page = await open(t); if (!page) return;
+  for (const w of ["Edit me first", "Remove me second", "Keep me third"]) await addToList(page, w);
+  assert.deepEqual(await stackWords(page), ["Edit me first", "Remove me second", "Keep me third"], "the stack is not the three asks in typed order");
+  // Edit opens the row in place under its number. Done closes it with the new words, and no row moves.
+  await mustHaveNamed(page, "Edit ask 1", "Edit control on ask 1");
+  await page.getByRole("button", { name: "Edit ask 1", exact: true }).click();
+  await page.getByRole("textbox", { name: "Ask 1", exact: true }).fill("Edited first");
+  await page.locator(ASK.rows).nth(0).getByRole("button", { name: "Done", exact: true }).click();
+  assert.deepEqual(await stackWords(page), ["Edited first", "Remove me second", "Keep me third"], "Edit did not keep ask 1 in its place");
+  // Remove keeps the row where it was, marked as removed.
+  await mustHaveNamed(page, "Remove ask 2", "Remove control on ask 2");
+  await page.getByRole("button", { name: "Remove ask 2", exact: true }).click();
+  assert.match(await page.locator(ASK.rows).nth(1).textContent(), /Removed: .*Remove me second/, "Remove did not mark ask 2 as removed in its place");
+  // Send writes what is left, and never the removed ask: the store is the proof.
+  assert.equal(await page.locator(ASK.send).isDisabled(), false, "Send is off with two asks left in the stack");
+  await page.click(ASK.send);
+  await waitAskWrites(page, 2);
+  const sent = (await askWrites(page)).map((b) => b.text);
+  assert.deepEqual(sent, ["Edited first", "Keep me third"], "Send wrote " + JSON.stringify(sent) + ", not the edited and kept asks");
+});
+
+test("the stack survives a reload: stacked asks show under Not sent yet again, and the box stays empty", async (t) => {
+  const page = await open(t); if (!page) return;
+  await addToList(page, "Survives the reload, first");
+  await addToList(page, "Survives the reload, second");
+  assert.equal((await stackWords(page)).length, 2, "the stack did not hold both asks before the reload");
+  await page.reload();
+  await page.waitForFunction("state.items.length > 0");
+  await page.waitForSelector(`#item-${DECISION.id}`);
+  await page.waitForFunction((sel) => document.querySelectorAll(sel).length > 0, ASK.rows, { timeout: 3000 }).catch(() => {});
+  await shownBox(page, "Not sent yet");
+  const after = await stackWords(page);
+  assert.deepEqual(after, ["Survives the reload, first", "Survives the reload, second"], "after a reload the stack shows " + JSON.stringify(after));
+  assert.equal(await page.inputValue(ASK.box), "", "after a reload the box holds words that were only stacked");
+  assert.equal((await askWrites(page)).length, 0, "the stack reached the store on reload");
+});
+
+test("Send writes every stacked ask and the typed box, each with one shared at", async (t) => {
+  const page = await open(t); if (!page) return;
+  await addToList(page, "Batch ask one");
+  await addToList(page, "Batch ask two");
+  await page.fill(ASK.box, "Batch ask three, typed");
+  assert.equal(await page.locator(ASK.send).isDisabled(), false, "Send is off with two asks stacked and one typed");
+  await page.click(ASK.send);
+  await waitAskWrites(page, 3);
+  const sets = await askWrites(page);
+  assert.equal(sets.length, 3, `Send wrote ${sets.length} asks records, not the 3 in the list and the box`);
+  assert.deepEqual(sets.map((b) => b.text), ["Batch ask one", "Batch ask two", "Batch ask three, typed"], "Send wrote the wrong asks");
+  const ats = new Set(sets.map((b) => b.at));
+  assert.equal(ats.size, 1, `the asks of one Send carry ${ats.size} times, not one shared at`);
+});
+
+test("one 8-second Undo takes back the send and puts the ask back in the list, and the box keeps what was typed", async (t) => {
+  const page = await open(t); if (!page) return;
+  await sendTyped(page, "Undo batch ask");
+  await mustHave(page, ASK.undo, "Undo control");
+  // Typing inside the window keeps the count on view: 7 s in, about one second is left.
+  await jump(page, 7000);
+  await page.fill(ASK.box, "Typed after the send");
+  await mustHave(page, ASK.undo, "Undo control 7 s in");
+  await page.click(ASK.undo);
+  await waitAskDeletes(page, 1);
+  const [written] = await askWrites(page);
+  const deleted = await page.evaluate(() => window.__log.filter((l) => l[0] === "delete" && l[1] === "asks").map((l) => l[2]));
+  assert.deepEqual(deleted, [written.id], "Undo deleted " + JSON.stringify(deleted) + ", not " + written.id);
+  const box = await page.inputValue(ASK.box);
+  assert.equal(box, "Typed after the send", "Undo changed the box: " + JSON.stringify(box));
+  assert.deepEqual(await stackWords(page), ["Undo batch ask"], "Undo did not put the ask back in the list");
+});
+
+test("Send stays off while the Undo count runs, so a second send cannot end the first Undo", async (t) => {
+  const page = await open(t); if (!page) return;
+  await sendTyped(page, "First ask, in the Undo window");
+  await page.fill(ASK.box, "Second ask, typed while Undo counts");
+  // Scope first: the Undo is still counting, so the Send button is the subject.
+  await mustHave(page, ASK.undo, "Undo control while typing");
+  assert.equal(await page.locator(ASK.send).isDisabled(), true, "Send is on while Undo counts, so a second send would end the first Undo");
+  await jump(page, 9000);
+  await page.fill(ASK.box, "Second ask, after the window");
+  assert.equal(await page.locator(ASK.send).isDisabled(), false, "Send stays off after the Undo count has ended");
+  assert.equal((await askWrites(page)).length, 1, "a second Send wrote while Undo counted");
+});
+
+test("each sent ask shows its own reach, and the told fact shows once on the line under the buttons, not on each row", async (t) => {
+  const page = await open(t, { meta: { writer: WRITER } }); if (!page) return;
+  await sendTyped(page, "Reach ask one");
+  await jump(page, 9000);
+  await sendTyped(page, "Reach ask two");
+  const [one] = await askWrites(page);
+  // A session reads the first ask. Nothing reads the second.
+  await page.evaluate((body) => window.__putDoc("asks", body.id, { ...body, owner: "lane status-fold", read: "2026-11-03T17:44:00Z" }), one);
+  await page.waitForFunction(([sel, w]) => [...document.querySelectorAll(sel)].some((c) => c.textContent.includes(w) && c.textContent.includes("Read by")), [ASK.ask, "Reach ask one"], { timeout: 3000 }).catch(() => {});
+  assert.match(await reachOf(page, "Reach ask one"), /^Read by lane status-fold /, "the first ask does not show its own reach");
+  assert.equal(await reachOf(page, "Reach ask two"), `Waiting for ${WRITER} to read it.`, "the second ask does not show its own reach");
+  const line = await page.evaluate(() => { const l = document.querySelector("#asks .sline"); return l ? l.textContent.trim() : ""; });
+  assert.match(line, /A wake was sent\./, "the told fact is not on the line under the buttons: " + JSON.stringify(line));
+  const repeats = await page.evaluate((sel) => [...document.querySelectorAll(sel)].filter((c) => /wake was sent|No session was told/.test(c.textContent)).length, ASK.ask);
+  assert.equal(repeats, 0, `${repeats} ask row(s) repeat the told fact`);
+});
+
+test("a failed ask stays in the list with its words and Copy ask, and the other asks are sent", async (t) => {
+  const page = await open(t, { failSetText: "Denied ask two" }); if (!page) return;
+  await addToList(page, "Saved ask one");
+  await addToList(page, "Denied ask two");
+  await page.fill(ASK.box, "Saved ask three");
+  await page.click(ASK.send);
+  await waitAskWrites(page, 2);
+  await page.waitForFunction((sel) => [...document.querySelectorAll(sel)].some((li) => li.textContent.includes("Not saved")), ASK.rows, { timeout: 3000 }).catch(() => {});
+  const sets = (await askWrites(page)).map((b) => b.text);
+  assert.deepEqual(sets, ["Saved ask one", "Saved ask three"], "the other asks were not all sent: " + JSON.stringify(sets));
+  const failed = page.locator(ASK.rows, { hasText: "Denied ask two" });
+  assert.equal(await failed.count(), 1, "the failed ask is not in the list");
+  assert.match(await failed.textContent(), /Not saved \([\w-]*denied\)/, "the failed row does not say it was not saved, and why");
+  assert.equal(await failed.getByRole("button", { name: "Copy ask", exact: true }).count(), 1, "the failed row has no Copy ask");
+});
+
+test("asks made in one batch get ids that sort in the order they were made, so the last-typed ask sorts on top", async (t) => {
+  const page = await open(t); if (!page) return;
+  // A batch shares one at, so the list breaks the tie by id, newest id first (askAll). The ids must rise in the order they are made.
+  const made = await page.evaluate(() => (typeof askId === "function" ? Array.from({ length: 50 }, () => askId()) : null));
+  assert.ok(made, "the page has no askId(), so the ids of a batch cannot be checked");
+  const bad = made.findIndex((id, i) => i > 0 && !(made[i - 1] < id));
+  assert.equal(bad, -1, bad < 0 ? "" : `ask ${made[bad]} was made after ${made[bad - 1]} but does not sort after it`);
 });
 
 async function openCap(t, labels, width, design) {
@@ -5195,29 +5378,30 @@ const NOT_TOLD_TEXT = "No session was told. It waits for " + WRITER + "'s next w
 // An answer is read by each item's owner, not by the writer, so its unsent line names no writer.
 const ANSWER_NOT_TOLD = "No session was told. Each owner reads its answer at its next wake or turn start.";
 // The ask hint says "Telling Claude…" while the wake result is pending. A test waits for that result, not for a clock.
-const askHintSettled = (page) => page.waitForFunction(() => { const h = document.getElementById("askHint").textContent; return h.includes("Sent") && !h.includes("Telling"); });
-// Types an ask and sends it, then returns the hint once the wake result has landed.
-async function askFrom(page, text) {
+// The told words sit on the line under the buttons, so a test waits for that line's result, not for a clock.
+const sentLineSettled = (page) => page.waitForFunction(() => { const l = document.querySelector("#asks .sline"); const s = l ? l.textContent : ""; return s.includes("Sent") && !s.includes("Telling"); }, null, { timeout: 3000 }).catch(() => {});
+// Types an ask and sends it, then returns the line under the buttons once the wake result has landed. "" when the page has no such line.
+async function sentLine(page, text) {
   await mustHave(page, "#askText", "Ask box");
   await page.fill("#askText", text);
   await mustHave(page, "#askSend", "Send ask button");
   await page.click("#askSend");
-  await askHintSettled(page);
-  return (await page.textContent("#askHint")).trim();
+  await sentLineSettled(page);
+  return page.evaluate(() => { const l = document.querySelector("#asks .sline"); return l ? l.textContent.trim() : ""; });
 }
 
 test("an ask sent while a session can take a comment says a wake was sent, never that Claude was told", async (t) => {
   const page = await open(t, { meta: { writer: WRITER }, comments: { can: "available" } }); if (!page) return;
-  const hint = await askFrom(page, ASK_TEXT);
-  assert.match(hint, /A wake was sent\./, "the ask hint does not say a wake was sent: " + JSON.stringify(hint));
-  assert.doesNotMatch(hint, /Claude was told/, "the ask hint still says Claude was told: " + JSON.stringify(hint));
+  const line = await sentLine(page, ASK_TEXT);
+  assert.match(line, /A wake was sent\./, "the line under the buttons does not say a wake was sent: " + JSON.stringify(line));
+  assert.doesNotMatch(line, /Claude was told/, "the line under the buttons still says Claude was told: " + JSON.stringify(line));
 });
 
 test("an ask sent with no session to tell says what happens next, and names no thread", async (t) => {
   const page = await open(t, { meta: { writer: WRITER }, comments: { can: "no_session" } }); if (!page) return;
-  const hint = await askFrom(page, ASK_TEXT);
-  assert.ok(hint.includes(NOT_TOLD_TEXT), "the ask hint does not say what happens next: " + JSON.stringify(hint));
-  assert.doesNotMatch(hint, NO_THREAD, "the ask hint names a thread: " + JSON.stringify(hint));
+  const line = await sentLine(page, ASK_TEXT);
+  assert.ok(line.includes(NOT_TOLD_TEXT), "the line under the buttons does not say what happens next: " + JSON.stringify(line));
+  assert.doesNotMatch(line, NO_THREAD, "the line under the buttons names a thread: " + JSON.stringify(line));
 });
 
 test("an answer sent with no session to tell says each owner reads it at its next wake, and names no thread or writer", async (t) => {
