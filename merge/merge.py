@@ -71,6 +71,7 @@ STAMP_CITE = "(decision one-shared-record-stamp, the claim runs only on the defa
 RECORDS_CITE = "(decision records-index-at-merge, only the merge tool rebuilds the records page, before the branch goes ready)"
 UNDO_CITE = "(decision silent-undo-check-design, a branch that silently undoes earlier work does not merge)"
 RED_CITE = "(decision no-merge-onto-red-main, no batch merges onto a red base)"
+RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-run with it; red_base reads it back to give the re-run its own headline
 DROP_CITE = "(decision merge-deletes-batch-lanes, a batch that drops a lane by a revert of its merge does not merge)"
 BATCH_CITE = "(decision no-merge-during-batch-ci, nothing merges while another ready pull request's CI runs, and the required checks are never empty)"
 STAMP_RUN_CITE = "(decision one-shared-record-stamp, the claim runs before the merge, on the pull request branch, in the merge tool)"
@@ -1040,12 +1041,13 @@ class Host:
     def base_state(self, base, flows):
         """-> (verdict, detail) for the red-main check (decision no-merge-onto-red-main): green, red, or unknown.
         Judged: per workflow file in `flows` (the paths on the base) and per event group (BASE_EVENTS maps an event to its group; an event
-        not in it is never judged), the newest completed run on `base`. A dispatch clears an older failed push (one group). A failed run R
+        not in it is never judged), the newest completed run on `base`, or a re-run in flight (not completed, `run_attempt` above 1) when one is newer: it
+        makes the verdict unknown, never green, since the older run under it is the one being re-run. A dispatch clears an older failed push (one group). A failed run R
         with at least one red job is cleared by a run N of the same file and another group only when N is newer than R, is the newest completed
         run of its own group, concluded success, and every job name in R's jobs is in N's jobs, compared exactly, each with conclusion success (a
         skipped job is no pass). So a green nightly that ran other jobs never clears a failed push. An R with no red job (no jobs, all passed,
         cancelled or skipped jobs only) is never cleared by the failed-run rule; an unknown R stays unknown, except a cancelled R with jobs (below). N's jobs are read only
-        when R has a red job or is cancelled with no red job, and such an N exists (one read each, cached); a failed read is unknown. A newer run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
+        when R has a red job or is cancelled with no red job, and such an N exists (one read each, cached); a failed read is unknown. A newer first-attempt run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
         Red: a job whose bucket is a fail, or one gh adds later (classify). A cancelled or skipped job is not red, nor one timed out at its cap.
         A run that did not succeed with no red job: a timed-out job explains it; else a cancelled run R is unknown, never swapped for an older
         run (the twin rule of judge_runs would reach across commits here), unless a run N clears it. R is then on a commit older than the base's
@@ -1057,16 +1059,16 @@ class Host:
             c, out = self.api("actions/runs", fields={"branch": base, "per_page": 50})
             if c:
                 raise Stop(out)
-            done = [r for r in json.loads(out)["workflow_runs"] if r["status"] == "completed" and r["event"] in self.BASE_EVENTS
-                    and r["name"] not in self.ignore and r["path"].split("@")[0] in flows]
+            judged = [r for r in json.loads(out)["workflow_runs"] if (r["status"] == "completed" or (r.get("run_attempt") or 1) > 1)
+                    and r["event"] in self.BASE_EVENTS and r["name"] not in self.ignore and r["path"].split("@")[0] in flows]
             red, unknown, read = [], [], {}
 
             def jobs_of(r):  # a run's jobs, read once per call
                 if r["id"] not in read:
                     read[r["id"]] = self.pages(f"actions/runs/{r['id']}/jobs", "jobs")
                 return read[r["id"]]
-            newest = {(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(done)}
-            age = {r["id"]: i for i, r in enumerate(done)}  # `done` is newest first
+            newest = {(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(judged)}
+            age = {r["id"]: i for i, r in enumerate(judged)}  # `judged` is newest first
 
             def cleared(r, cancelled=False):
                 """True when a newer, newest-of-its-group, successful run of another group of r's file passed every job name of r. Call it only for an r with a red job,
@@ -1086,6 +1088,9 @@ class Host:
                         return True
                 return False
             for r in newest.values():
+                if r["status"] != "completed":  # a re-run in flight: its jobs are mid-change, so none are read
+                    unknown.append(f"run {r['id']} of {r['name']} {RERUN_IN_FLIGHT} (attempt {r['run_attempt']}, {r['status']}) at {str(r.get('head_sha'))[:9]} ({r.get('html_url')})")
+                    continue
                 if r["conclusion"] in ("success", "skipped", "neutral"):
                     continue
                 got = self.buckets([self.run_row(j, j.get("html_url")) for j in jobs_of(r)], warn=False)
@@ -2321,11 +2326,14 @@ def red_base(root, host, base, red_ok=""):
     verdict, detail = base_verdict(root, host, base)
     if verdict == "green":
         return
-    what = f"{base}'s latest completed run is red: {detail}" if verdict == "red" else f"{base}'s runs are UNKNOWN, the read failed: {detail}"
+    rerun = verdict == "unknown" and RERUN_IN_FLIGHT in detail
+    what = (f"{base}'s latest completed run is red: {detail}" if verdict == "red" else f"{base}'s runs are UNKNOWN, a re-run is still running: {detail}" if rerun
+            else f"{base}'s runs are UNKNOWN, the read failed: {detail}")
     if red_ok.strip():
         say(f"merge: {what}. --base-red-ok, reason: {red_ok.strip()}")
         return
-    raise Liftable(f"{what}\nNo batch merges onto a red {base}. If this batch carries the fix, or the owner accepts the unknown, run again with the reason flag --base-red-ok \"<reason>\". {RED_CITE}")
+    way = ("Wait for the re-run to finish, then run again. Or, " if rerun else "") + ("if this batch carries the fix, or the owner accepts the unknown, run again with the reason flag --base-red-ok \"<reason>\".")
+    raise Liftable(f"{what}\nNo batch merges onto a red {base}. {way[0].upper() + way[1:]} {RED_CITE}")
 
 def batch_refusal(host, n, base, head):
     """The batch brake (rule git-no-merge-during-batch-ci): -> the refusal while another ready PR on `base` has a workflow run or a required check pending
