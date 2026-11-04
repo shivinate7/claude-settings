@@ -1,0 +1,9 @@
+{
+ "title": "Close PRs replaced by merged batches: joyous #67, #68, #69, #70; claude-settings #1108, #1113",
+ "phase": "cleanup",
+ "status": "todo",
+ "order": 526,
+ "why": "joyous #71 merged as 5c36e982c (Nov 3 18:02 CST) carrying joyous #67-#70; claude-settings batch 1 (PR #1117, 72034d9a) carried #1108 and #1113. The cloud refuses PR closes.",
+ "note": "For a session on the owner's computer, under the standing grant 'Acts the cloud refuses' (.claude/CLAUDE.md, owner 2026-10-30), which covers closing PRs the coordinator names as replaced. Named by the coordinator Nov 3 18:05 CST.",
+ "updatedAt": "2026-11-04T00:06:00Z"
+}
