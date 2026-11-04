@@ -15016,6 +15016,10 @@ mh_case("a closed item with a design that has no file is untouched",
         "mh-closed", pd_item(status="closed", designs=[mh_design(file=None)]), "allow", checker=0)
 mh_case("a write with no designs is untouched by the file rule",
         "mh-plain", pd_plain(), "allow", checker=0)
+mh_case("a design whose file is a folder is denied, since a folder holds no mockup",
+        "mh-folder", pd_item(designs=[mh_design(file="docs/design/item48/")]), "deny", checker=0)
+mh_case("a Windows-form design path inside the design folder is allowed, as it is today",
+        "mh-win-design", pd_item(designs=[mh_design(file="docs\\design\\a.html")]), "allow", checker=1)
 
 
 # --------------------------------------------------------------------------- a pick never widens a shared tool

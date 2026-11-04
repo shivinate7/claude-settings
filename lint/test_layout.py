@@ -1345,6 +1345,15 @@ class MockupHomes(Tree):
         self.assertIn(self.layout.path(self.tree, "design"), problem, "the refusal does not name the design folder")
         self.assertNotIn(MACHINE, problem, "the refusal names the machine home, which no longer holds a mockup")
 
+    def test_a_folder_path_with_a_trailing_slash_is_refused(self):
+        self.refuses("docs/design/item48/")
+
+    def test_a_folder_path_with_a_trailing_backslash_is_refused(self):
+        self.refuses("docs\\design\\item48\\")
+
+    def test_the_design_folder_itself_is_refused(self):
+        self.refuses("docs/design")
+
 
 if __name__ == "__main__":
     unittest.main()

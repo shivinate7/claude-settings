@@ -2087,6 +2087,10 @@ MUTATIONS = [
      '        return handoff if os.path.isfile(handoff) else ""',
      '        return handoff',
      "guard", "handoff-unread: a call is allowed when the flag is set and the handoff is missing"),
+    ("mockup-home: the refuse arm is dropped, so a design whose file sits under the machine home is allowed",
+     "            if unhomed:",
+     "            if False:",
+     "guard", "mockup-home: a design with a file under the machine home is denied"),
 ]
 
 
