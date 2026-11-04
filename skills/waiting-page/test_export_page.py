@@ -100,6 +100,11 @@ RED = [
     ("API_SECRET assignment", "API_SECRET=" + API_VALUE, API_VALUE),
     ("SESSION_TOKEN assignment", "SESSION_TOKEN=" + SESSION_VALUE, SESSION_VALUE),
     ("CLIENT_SECRET assignment with a colon", "CLIENT_SECRET: " + CLIENT_VALUE, CLIENT_VALUE),
+    ("cf_clearance cookie value", "cf_clearance=" + "c3c3c3c3" + "c3c3c3c3", "c3c3c3c3" + "c3c3c3c3"),
+    ("sessionid cookie value", "sessionid=" + "abcdef0123" + "456789abcd", "abcdef0123" + "456789abcd"),
+    ("SESSION_COOKIE assignment", "SESSION_COOKIE=" + "abcdefgh" + "12345678", "abcdefgh" + "12345678"),
+    ("bare Bearer token with no header name", "Bearer " + "abcdefghijkl" + "mnopqrstuvwx", "abcdefghijkl" + "mnopqrstuvwx"),
+    ("TCG_TRACKING_KEY assignment", "TCG_TRACKING_KEY=" + "k9Qx7vLm" + "2Npw4Rt8", "k9Qx7vLm" + "2Npw4Rt8"),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
@@ -143,6 +148,10 @@ GREEN = [
     ("a CI secret reference", "GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}"),
     ("an env-var reference in a secret name", "API_SECRET=$API_SECRET"),
     ("a rule anchor name", "rule roles-review-cap-three"),
+    ("a count of records", "3 records in place"),
+    ("a count of cards", "5 cards in this lane"),
+    ("a join key label with a colon", "join key:"),
+    ("a JSX key prop", "key={item.id}"),
 ]
 
 
