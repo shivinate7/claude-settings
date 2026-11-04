@@ -11,7 +11,7 @@ Reads: the staged paths (added, copied, modified, renamed, type-changed) and the
 are never read, so a file committed earlier can still be removed.
 When the repo root holds githooks/main-ref/install.sh, it runs `sh <it> --check`: a commit is refused
 while the armed reference-transaction copy is missing or behind main, and allowed with an "unknown" line
-when the check cannot read. Cost: one sh and about 3 git reads per commit, no files written.
+when the check cannot read. Cost: one sh and 5 git reads plus one per armed copy per commit, no files written.
 Env: CLAUDE_HOOKS_DIR (default ~/.claude/hooks) holds guard_env, the one home of the env-file
 name rule. PRE_COMMIT_GUARD=off is the escape hatch. A guard_env that cannot be imported refuses,
 because a hook that waves everything through on its own fault guards nothing.

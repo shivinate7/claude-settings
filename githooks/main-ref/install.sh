@@ -13,7 +13,7 @@
 # main-ref-check: 1   (the pre-commit hook runs --check only on an installer that carries this marker)
 # Exit 0: current, or this branch edits the hook (a NOTE, no remedy). Exit 1: a copy is missing or
 # behind main (stderr names the remedy). Exit 2: a read failed (stderr says "unknown").
-# Cost: the shared pre-commit hook runs it once per commit: one sh, about 3 git reads, no files written.
+# Cost: the shared pre-commit hook runs it once per commit: one sh, 5 git reads plus one per armed copy (one more for a relative hooksPath), no files written.
 set -eu
 here="$(cd "$(dirname "$0")" && pwd)"
 mode=install
