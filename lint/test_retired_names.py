@@ -8,7 +8,7 @@ message of groups 1 and 5 to 9 of the plan: guard and check, grant and override,
 safety hole, refuse, round.
 Each is distinctive, so a whole-word match in a tracked file is the old name coming back. This
 file, GLOSSARY.md, whose "Not" cells list them, and the generated docs/records.md are the exceptions. A HISTORY
-file may keep its name only on a line that holds the opt-out marker. A retired word in plain
+file may keep its name only on a line whose comment holds the opt-out marker. A retired word in plain
 prose ("the test will pass") is a reviewer's call, not this test's. The widened glossary check will replace this list.
 """
 import os
@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tokenize
 import unittest
 
 import _test_temp  # test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
@@ -63,28 +64,42 @@ RETIRED = {
     "Lane kind:": "Designer kind:",
 }
 
-# old name -> the tracked file that may keep it, on each line that holds the opt-out marker. The one home of the
-# marker is lint/check_glossary.py, which skips the same line. The fixtures quote the old header to refuse it.
+# old name -> the tracked file that may keep it, on each line whose comment holds the opt-out marker. The one home of
+# the marker is lint/check_glossary.py, which skips the same line. The fixtures quote the old header to refuse it.
 # Any other file, or an unmarked line, that holds a retired name is a hit.
 HISTORY = {
     "Lane kind:": ("hooks/test_blind_brief.py",),
 }
 
 
+def marked_lines(path):
+    """Line numbers of the comments in a Python file that hold OPT_OUT, read by the tokenizer, so a marker inside a
+    string marks nothing. A file the tokenizer cannot read has none."""
+    try:
+        with open(path, "rb") as handle:
+            return {tok.start[0] for tok in tokenize.tokenize(handle.readline)
+                    if tok.type == tokenize.COMMENT and OPT_OUT in tok.string}
+    except (OSError, tokenize.TokenError, SyntaxError):
+        return set()
+
+
 def hits(repo, name):
     """Tracked files that hold name as a whole word, any case, less the exceptions. None when git
-    cannot run. A HISTORY file's line that holds OPT_OUT is not a hit."""
+    cannot run. A HISTORY file's line is not a hit when its comment holds OPT_OUT."""
     run = subprocess.run(["git", "-C", repo, "grep", "-n", "-i", "-w", "-F", "-e", name, "--", ".", ":!" + SELF,
                           ":!" + GLOSSARY, ":!" + RECORDS_PAGE],
                          capture_output=True, encoding="utf-8", errors="replace")
     if run.returncode not in (0, 1):  # 1 means no match; anything else is no reading
         return None
-    found = []
+    marks, found = {}, []
     for line in run.stdout.splitlines():  # path:number:text
         path, _, rest = line.partition(":")
-        text = rest.partition(":")[2]
-        if path in HISTORY.get(name, ()) and OPT_OUT in text:
-            continue
+        number = rest.partition(":")[0]
+        if path in HISTORY.get(name, ()):
+            if path not in marks:
+                marks[path] = marked_lines(os.path.join(repo, path))
+            if number.isdigit() and int(number) in marks[path]:
+                continue
         if path not in found:
             found.append(path)
     return found
