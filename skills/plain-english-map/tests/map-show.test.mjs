@@ -408,3 +408,22 @@ test('22b. an absolute path outside the root prints no map line and exits 1', ()
   assert.equal(r.stdout.trim(), '', 'a path outside the root prints nothing on stdout');
   assert.equal(stderrOf(r).trim(), `no map line for ${outside}`, `stderr must hold one line: no map line for ${outside}`);
 });
+
+test('22c. an absolute path through a symlink to the root prints the same output as the relative path', () => {
+  const dir = scratchRepo();
+  const plain = show(['src/home.ts'], dir);
+  // The scope first: the relative path must resolve, or equal output proves nothing.
+  assert.equal(plain.status, 0, `the relative path must exit 0\n${dump(plain)}`);
+  assert.ok(plain.stdout.includes(HOME_LINE), `the relative path must print the map line\n${dump(plain)}`);
+  // The link must reach the root, and its typed path must differ from its real path (checked by `junction`).
+  const link = junction(dir);
+  const viaLink = `${link}/src/home.ts`;
+  // The cwd is the link. The command sees its real root, and the arg names the link.
+  const fromLink = show([viaLink], link);
+  assert.equal(fromLink.status, 0, `with the cwd at a symlink to the root, an absolute path through that link must exit 0\n${dump(fromLink)}`);
+  assert.equal(fromLink.stdout, plain.stdout, `with the cwd at a symlink to the root, an absolute path through that link must print the same output as src/home.ts\n${dump(fromLink)}`);
+  // The cwd is the real root. The arg names the link.
+  const toLink = show([viaLink], dir);
+  assert.equal(toLink.status, 0, `with the cwd at the real root, an absolute path through a symlink to the root must exit 0\n${dump(toLink)}`);
+  assert.equal(toLink.stdout, plain.stdout, `with the cwd at the real root, an absolute path through a symlink to the root must print the same output as src/home.ts\n${dump(toLink)}`);
+});
