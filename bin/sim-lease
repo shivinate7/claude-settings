@@ -38,6 +38,9 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+
 MAX_5MIN = 100.0   # a grant needs the 5-minute load under this
 MAX_1MIN = 60.0    # a grant needs the 1-minute load under this
 SLOT2_5MIN = 60.0  # slot 2 needs the 5-minute load under this
@@ -51,7 +54,7 @@ def state_dir():
 def out(cmd):
     """The stdout of a command, stripped; '' when it fails or is missing."""
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        r = _nowindow.run(cmd, capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError):
         return ""
     return r.stdout.strip() if r.returncode == 0 else ""
