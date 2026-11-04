@@ -26305,8 +26305,8 @@ def sim_boot_by_destination(udid):
     return "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + udid + "'"
 
 
-def make_fake_xcrun(folder, rows, pid_starts=None):
-    """A stand-in `xcrun` that answers every call with the device list in ROWS. PID_STARTS is make_fake_ps's.
+def make_fake_xcrun(folder, rows, pid_starts=None, ps_log=None):
+    """A stand-in `xcrun` that answers every call with the device list in ROWS. PID_STARTS and PS_LOG are make_fake_ps's.
 
     ROWS are (udid, name, state, deviceTypeIdentifier, runtime). The fake prints with the shell's
     printf builtin, so it needs no other program on the PATH. Windows has no xcrun, so no case
@@ -26325,7 +26325,7 @@ def make_fake_xcrun(folder, rows, pid_starts=None):
     # A quiet process table beside it: readable, with each booted device's launchd_sim and no holder.
     make_fake_ps(folder, [("1", "0", "0", "/sbin/launchd")] + [
         (str(LAUNCHD_PID[udid]), "1", "0", LAUNCHD_CMD + " " + udid)
-        for udid, _, state, _, _ in rows if state == "Booted"], pid_starts=pid_starts)
+        for udid, _, state, _, _ in rows if state == "Booted"], pid_starts=pid_starts, ps_log=ps_log)
     return folder
 
 
@@ -26703,13 +26703,14 @@ def folder_path(name):
     return os.path.join(ROOT, "sim_" + name) + os.pathsep + PY_PATH
 
 
-def make_fake_ps(folder, rows, rc=0, pid_starts=None):
+def make_fake_ps(folder, rows, rc=0, pid_starts=None, ps_log=None):
     """Replace the quiet `ps` in FOLDER with one that answers the process table ROWS, (pid, ppid,
     uid, command), or fails with RC. A row carries no single quote.
 
     PID_STARTS, when given, maps a pid to the start text its `-o lstart=` read answers, or to None for a
     dead pid. A pid that is not a key is dead too, so a fixture's shape never decides a liveness case. A
-    read that names `pid=` gets "PID START", as the launchd reads do. Without it, the launchd answers stand."""
+    read that names `pid=` gets "PID START", as the launchd reads do. Without it, the launchd answers stand.
+    PS_LOG, when given, is a file that each call appends its argv to, one line per call."""
     if rc:
         body = "exit %d\n" % rc
     else:
@@ -26740,6 +26741,9 @@ def make_fake_ps(folder, rows, rc=0, pid_starts=None):
                     "  esac; done; exit 1 ;;\n"
                     "  *) printf '%s' '" + table + "' ;;\n"
                     "esac\n")
+    if ps_log:
+        assert "'" not in ps_log, "the log path is single-quoted"
+        body = "printf '%%s\\n' \"$*\" >> '%s'\n" % ps_log + body
     ps = os.path.join(folder, "ps")
     write(ps, "#!/bin/sh\n" + body)
     os.chmod(ps, 0o755)
@@ -26941,15 +26945,16 @@ def lease_entry(slot, pid=LEASE_PID, start=LEASE_START, session=LEASE_OWN):
             "session": session, "slot": slot}
 
 
-def lease_fixture(name, rows, pid_starts, leases=None, queue=(), raw=None, as_dir=False, records=None):
+def lease_fixture(name, rows, pid_starts, leases=None, queue=(), raw=None, as_dir=False, records=None, ps_log=False):
     """A case folder of its own: a fake xcrun that lists ROWS and a fake ps that answers PID_STARTS (a booted
     device's launchd_sim is always alive, as on the Mac). The config dir holds leases.json as LEASES with QUEUE,
-    as RAW text, as a directory (AS_DIR), or as no file at all. Returns (PATH, config dir)."""
+    as RAW text, as a directory (AS_DIR), or as no file at all. PS_LOG logs each fake ps call to ps.log in the
+    config dir. Returns (PATH, config dir)."""
     folder = os.path.join(ROOT, "simlease_" + name)
     starts = {LAUNCHD_PID[udid]: LSTART for udid, _, state, _, _ in rows if state == "Booted" and udid in LAUNCHD_PID}
     starts.update(pid_starts)
-    make_fake_xcrun(folder, rows, pid_starts=starts)
     cfg = os.path.join(ROOT, "simlease_cfg_" + name)
+    make_fake_xcrun(folder, rows, pid_starts=starts, ps_log=os.path.join(cfg, "ps.log") if ps_log else None)
     lease_file = os.path.join(cfg, "state", "sim-lease", "leases.json")
     os.makedirs(cfg, exist_ok=True)
     if as_dir:
@@ -26977,6 +26982,32 @@ def lease_launch(name, expected, fixture, device=None, udid=None, session=LEASE_
     add(name, expected, rule=rule, tool=SIM_MCP, env_path=env_path, config=config, session=session,
         carries=carries, env=LEASE_ENV, raw=raw, **tool_input)
     return CASES[-1]
+
+
+# The one liveness read of a lease: bin/sim-lease's start_time runs `ps -o lstart= -p PID`. The table read and
+# the launchd read carry other argv, so this form counts only the lease reads.
+LEASE_PS_READ = re.compile(r"-o lstart= -p \d+")
+
+
+def lease_ps_count_check(case, want):
+    """The held-lease read costs one `ps` per lease (decision sim-test-is-the-one-boot-path, ruling 7). CASE runs
+    under a fake ps that logs each call, and the check counts the lease reads among them. It does not judge the
+    decision, which the case asserts itself. Returns the check."""
+    log = os.path.join(case["config"], "ps.log")
+
+    def check():
+        if os.path.exists(log):
+            os.remove(log)
+        decide(case)
+        calls = []
+        if os.path.exists(log):
+            with open(log) as handle:
+                calls = handle.read().splitlines()
+        reads = [c for c in calls if LEASE_PS_READ.fullmatch(c)]
+        if len(reads) != want:
+            return False, "the launch made %d lease reads (ps -o lstart= -p PID), want %d" % (len(reads), want)
+        return True, "the launch made %d lease reads, one per lease" % len(reads)
+    return check
 
 
 def lease_no_write_check(case):
@@ -27032,7 +27063,8 @@ def lease_fake_ps_check():
 
 
 def register_simulator_lease_cases():
-    """The lease allow and its controls. Returns the dead-lease case, which lease_no_write_check runs."""
+    """The lease allow and its controls. Returns the dead-lease case, which lease_no_write_check runs, and the
+    lease read counts as (label, check) pairs for LOG_CHECKS."""
     rows = [(LEASE_DUO1, "iPhone Duo A", "Shutdown", SIM_TYPE_MINI, SIM_RT),
             (LEASE_DUO2, "iPhone Duo B", "Shutdown", SIM_TYPE_MINI, SIM_RT),
             (LEASE_PRO, "iPhone 18 Pro", "Shutdown", SIM_TYPE_PRO, SIM_RT),
@@ -27099,6 +27131,21 @@ def register_simulator_lease_cases():
     lease_launch("lease: the decoy's udid is refused by this session's slot 1 lease", "deny",
                  own1, udid=LEASE_DECOY, rule=LEASE_RULE)
 
+    # A name that two shut-down devices share resolves to both UDIDs. The launch is allowed only when this
+    # session's live leases hold every one of them (sim_lease_holds is all, not any). Duo 2 is on the older runtime.
+    shared = [(LEASE_DUO1, "iPhone Duo", "Shutdown", SIM_TYPE_MINI, SIM_RT),
+              (LEASE_DUO2, "iPhone Duo", "Shutdown", SIM_TYPE_MINI, SIM_RT_OLD)] + rows[2:]
+    lease_launch("lease: a shared name, this session's slot 1 lease alone is refused: Duo 2 is not held",
+                 "deny", lease_fixture("shared_slot1", shared, live, slot1), device="iPhone Duo", rule=LEASE_RULE)
+    lease_launch("lease: a shared name, this session's slot 2 lease alone is refused: Duo 1 is not held",
+                 "deny", lease_fixture("shared_slot2", shared, live, [lease_entry("2")]),
+                 device="iPhone Duo", rule=LEASE_RULE)
+    both = lease_fixture("shared_slot12", shared, live, [lease_entry("1"), lease_entry("2")], ps_log=True)
+    shared_case = lease_launch("control: a shared name, this session's slot 1 and slot 2 leases together are allowed",
+                               "allow", both, device="iPhone Duo")
+    booted_case = lease_launch("control: a booted device under this session's slot 1 and slot 2 leases is allowed",
+                               "allow", both, device="Beta Air")
+
     # An empty session never matches: on the lease side, on the payload side, or on both.
     blank = lease_fixture("blank_session", rows, live, [lease_entry("1", session="")])
     lease_launch("lease: a lease with an empty session does not match a payload that names a session", "deny",
@@ -27132,7 +27179,11 @@ def register_simulator_lease_cases():
                                        records=[sim_boot_record(SIM_UT0, "Idle Pro", SIM_TYPE_PRO, SIM_RT,
                                                                 2 * 3600)]),
                  device=duo1, rule="simulator-boot-twin", carries=(SIM_UT0,))
-    return dead_case
+    ps_counts = [("simulator: a held-lease allow of two leases makes two lease reads, one ps per lease (ruling 7)",
+                  lease_ps_count_check(shared_case, 2)),
+                 ("simulator: a launch of a booted device makes no lease read (ruling 7)",
+                  lease_ps_count_check(booted_case, 0))]
+    return dead_case, ps_counts
 
 
 # The simulator cases need a POSIX shell for the fake xcrun and ps. Windows has neither to fake, so
@@ -27155,10 +27206,13 @@ if os.name != "nt":
     sim_lease_label = "simulator: an owner override lifts an MCP launch of a shut-down device (simulator-boot-lease)"
     LOG_FAMILY[sim_lease_label] = FAMILY
     LOG_CHECKS = LOG_CHECKS + ((sim_lease_label, sim_lease_override_check()),)
-    lease_dead_case = register_simulator_lease_cases()
+    lease_dead_case, lease_ps_counts = register_simulator_lease_cases()
     lease_write_label = "simulator: the lease read writes nothing: a dead lease is refused and sim-lease's files keep their bytes"
     LOG_FAMILY[lease_write_label] = FAMILY
     LOG_CHECKS = LOG_CHECKS + ((lease_write_label, lease_no_write_check(lease_dead_case)),)
+    for ps_count_label, ps_count_check in lease_ps_counts:
+        LOG_FAMILY[ps_count_label] = FAMILY
+        LOG_CHECKS = LOG_CHECKS + ((ps_count_label, ps_count_check),)
     lease_ps_label = "simulator: the lease fixtures' fake ps answers each named pid's start and no other"
     LOG_FAMILY[lease_ps_label] = FAMILY
     LOG_CHECKS = LOG_CHECKS + ((lease_ps_label, lease_fake_ps_check()),)
