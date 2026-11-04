@@ -2898,6 +2898,8 @@ class GhLockTest(unittest.TestCase):
 #     whole). `--slurp` (needs `--paginate`, refuses `--jq`) prints the pages as one array of pages.
 #   - `--jq` knows only: `.`  `.a.b`  `.a[]`  `.[]`  `.a[].b`  (applied to each page).
 #   - an argument holding `&` is refused: the Windows `.cmd` shim of this suite lets cmd.exe split the command there. Send query values with `-f`.
+#   - an argument holding a newline (`\n` or `\r`), a `-f` value included, is refused for the same reason: cmd.exe cuts the command at it. Send a multi-line value as JSON with `--input <file>`.
+#   - `--input <file>` reads a JSON object and merges its keys into the fields (gh's own body-from-file rule, so a PUT or POST sends it). `--input -` (stdin) is refused.
 #   - GraphQL (`gh pr ...`, `gh repo view`, `gh api graphql`, any other gh command) answers the HTTP 403 a Claude Code cloud session gives.
 GH_REST_LIB = r'''
 import json, re
@@ -2917,8 +2919,11 @@ def api_error(code, message):
     return "%sgh: %s (HTTP %d)" % (body, message, code)
 
 def parse(argv):
-    """The args after `gh api` -> (method, path, params, flags, jq). Query values in the path and -f/-F fields land in params."""
-    method, path, params, flags, jq, typed = None, None, {}, set(), None, False
+    """The args after `gh api` -> (method, path, params, flags, jq). Query values in the path and -f/-F fields land in params. --input FILE merges its JSON object into params."""
+    for x in argv:  # every argument, a -f value too: cmd.exe cuts any argument at a newline
+        if "\n" in x or "\r" in x:
+            raise Refused("fake gh api: an argument holds a newline (%r). The Windows .cmd shim of this suite lets cmd.exe cut the command there. Send a multi-line value as JSON with --input <file>." % x)
+    method, path, params, flags, jq, typed, body = None, None, {}, set(), None, False, None
     argv = [part for x in argv for part in (x.split("=", 1) if x.startswith("--") and "=" in x else [x])]  # --method=PUT is --method PUT
     i = 0
     while i < len(argv):
@@ -2931,6 +2936,10 @@ def parse(argv):
             k, _, v = argv[i + 1].partition("="); params[k] = v; typed = True; i += 2
         elif x in ("-q", "--jq"):
             jq = argv[i + 1]; i += 2
+        elif x == "--input":
+            if argv[i + 1] == "-":
+                raise Refused("fake gh api: --input - (stdin) is not supported by this fake: give a file path")
+            body = argv[i + 1]; typed = True; i += 2
         elif x in ("-H", "--header"):
             i += 2
         elif x in ("-i", "--include"):
@@ -2948,6 +2957,15 @@ def parse(argv):
     path, _, query = path.lstrip("/").partition("?")
     for pair in filter(None, query.split("&")):
         k, _, v = pair.partition("="); params.setdefault(k, v)
+    if body is not None:
+        try:
+            with open(body, encoding="utf-8") as f:
+                obj = json.load(f)
+        except (OSError, ValueError) as e:
+            raise Refused("fake gh api: --input %s is not a readable JSON file (%s)" % (body, e))
+        if not isinstance(obj, dict):
+            raise Refused("fake gh api: --input %s holds JSON that is not an object" % body)
+        params.update(obj)
     if "slurp" in flags and "paginate" not in flags:
         raise Refused("the `--slurp` option requires `--paginate`")
     if "slurp" in flags and jq:
