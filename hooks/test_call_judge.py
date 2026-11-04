@@ -47,6 +47,11 @@ Interface the hook must match:
   holds call_judge.NONE_DIRECTION_RULE exactly once when a write in the call is a re-ask (a batch too), and not at
   all otherwise. The cases read the constant with load_file_module, never a copy of its text. A missing constant
   fails those checks, with no crash.
+- The widening rule (decision uniform-over-variants, a shared tool never grows a second accepted form): call_judge.WIDENING_RULE
+  is appended to the formatted PAGE_PROMPT exactly once when a judged waiting-page write (question_form.judged_item_writes) is a
+  set or update whose data has non-empty `options`, and never otherwise, never on AskUserQuestion or Agent. question_form.WIDENS_KEY
+  is the one home of the mark's key, "widens", and WIDENING_RULE contains it. The cases read both with load_file_module, never a
+  copy, and a missing name fails its checks with a named cause, never a crash.
 - settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` runs call_judge.py with a timeout
   above the longest model call (60 s). No `prompt` or `agent` hook is left on any of the three tools.
 - Past rulings (spec past-rulings): a judged AskUserQuestion or waiting-page item write also carries the decision
@@ -1008,6 +1013,181 @@ def case_none_choice_with_note_holds_rule_once():
           bool(rule) and prompt.count(rule) == 1, rule_detail(rule, r))
 
 
+# ------------------------------------------------------------------ the widening rule (decision uniform-over-variants)
+#
+# The owner's ruling (2026-11-03 22:28 CST): an option that widens what a shared tool accepts is marked `widens: true`,
+# and an unmarked widening option is refused. The judge is told in call_judge.WIDENING_RULE, appended once to the
+# formatted PAGE_PROMPT for a judged write that sets or updates options. The mark's key is question_form.WIDENS_KEY.
+# A build without that name gets the sentinel, so a marked option carries no mark and the scope check fails on its cause.
+WIDENS_SENTINEL = "__no-WIDENS_KEY-in-question_form__"
+QF_PATH = os.path.join(HERE, "question_form.py")
+WIDENING_FLAG = '{"ok": false, "reason": "option `b` widens a shared tool; mark it widens: true"}'
+
+
+def widening_rule():
+    """WIDENING_RULE's text, read from call_judge.py. "" when the constant is missing or blank."""
+    value = getattr(load_file_module(HOOK, "call_judge_widen_probe"), "WIDENING_RULE", "")
+    return value if isinstance(value, str) and value.strip() else ""
+
+
+def widens_key():
+    """question_form.WIDENS_KEY, the one home of the mark's key. "" when the constant is missing or blank."""
+    value = getattr(load_file_module(QF_PATH, "question_form_widen_probe"), "WIDENS_KEY", "")
+    return value if isinstance(value, str) and value.strip() else ""
+
+
+def hook_template(name):
+    """A prompt template of call_judge.py (PAGE_PROMPT, QUESTION_PROMPT or SPAWN_PROMPT), read at test time."""
+    value = getattr(load_file_module(HOOK, "call_judge_widen_probe"), name, "")
+    return value if isinstance(value, str) else ""
+
+
+def widening_region(prompt, template_name):
+    """The text a judged prompt adds after its formatted template and before the past-ruling tail, where the widening
+    rule goes. None when the prompt does not hold the template formatted with the call's JSON."""
+    head, mark, suffix = hook_template(template_name).partition("%s")
+    if not mark or not prompt.startswith(head) or suffix not in prompt:
+        return None
+    after = prompt[prompt.index(suffix) + len(suffix):]
+    import question_form  # the one home of the past-ruling tail (candidates_block)
+    return after.split(question_form.candidates_block([], []).split("(none found)", 1)[0], 1)[0]
+
+
+def rule_once(prompt, rule):
+    """(ok, cause) for one judged item prompt: WIDENING_RULE is in it exactly once, after the question-format prompt.
+    The cause names one thing: no text in that slot, a missing constant, or a count other than one."""
+    region = widening_region(prompt, "PAGE_PROMPT")
+    if region is None:
+        return False, "the judge's prompt is not the question-format prompt"
+    if not region.strip():
+        return False, "no text after the question-format prompt: the judge is not told the widening mark"
+    if not rule:
+        return False, "WIDENING_RULE is not defined in call_judge.py"
+    count = prompt.count(rule)
+    return count == 1, "WIDENING_RULE is in the judge's prompt %d times, not once" % count
+
+
+def no_widening_rule(prompt, template_name):
+    """(ok, cause) for a prompt that must carry no widening rule: nothing in its widening slot."""
+    region = widening_region(prompt, template_name)
+    if region is None:
+        return False, "the prompt is not %s formatted with the call" % template_name
+    return region.strip() == "", "%s carries text in the widening slot with no widening option: %r" % (
+        template_name, region.strip()[:60])
+
+
+def case_widening_set_holds_rule_once():
+    # Case 1: a set with options, none marked, makes one model call, and the one prompt holds the rule once.
+    rule = widening_rule()
+    r = run_hook(page_input("set", good_page_item()), answer=ALLOW)
+    check("widening set: one model call, and no deny", len(r.calls) == 1 and r.code == 0 and r.out == ""
+          and "\tdeny\t" not in r.log, detail(r))
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    ok, cause = rule_once(prompt, rule)
+    check("widening set: the one prompt holds WIDENING_RULE exactly once, after the question-format prompt", ok, cause)
+
+
+def case_widening_batch_holds_rule_once():
+    # Case 2: two option writes in one batch make one model call, and the one prompt holds the rule exactly once.
+    rule = widening_rule()
+    writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item(PAGE_MARK)},
+              {"op": "update", "collection": PAGE_ITEMS, "doc_id": "p2",
+               "data": {"options": good_page_item(PAGE_MARK_B)["options"]}}]
+    r = run_hook(page_batch_input(writes), answer=ALLOW)
+    check("widening batch: two option writes make one model call, and no deny", len(r.calls) == 1 and r.code == 0
+          and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("widening batch: the one prompt carries both writes", PAGE_MARK in prompt and PAGE_MARK_B in prompt,
+          prompt[:160])
+    ok, cause = rule_once(prompt, rule)
+    check("widening batch: the one prompt holds WIDENING_RULE exactly once, after the question-format prompt", ok, cause)
+
+
+def case_widening_absent_without_options():
+    # Case 3: a write with no options, a write with an empty options list, a box and a spawn get no widening rule. Each
+    # absence first asserts that its call was made, so an early exit cannot pass it. The box has options and still gets none.
+    context = good_page_item()["context"]
+    for label, inp, template in (
+        ("a context-only update", page_input("update", {"context": context}), "PAGE_PROMPT"),
+        ("an update with context and empty options", page_input("update", {"context": context, "options": []}),
+         "PAGE_PROMPT"),
+        ("an AskUserQuestion box with options", question_input(), "QUESTION_PROMPT"),
+        ("an Agent spawn", spawn_input("builder", model="sonnet"), "SPAWN_PROMPT"),
+    ):
+        r = run_hook(inp, answer=ALLOW)
+        check("widening absent: %s is judged once, and no deny" % label, len(r.calls) == 1 and r.code == 0
+              and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+        prompt = r.calls[0]["prompt"] if r.calls else ""
+        ok, cause = no_widening_rule(prompt, template)
+        check("widening absent: %s gets no widening rule" % label, ok, cause)
+
+
+def case_widening_refusal_names_the_option():
+    # Case 4: an unmarked option that widens a shared tool is refused, and the refusal names its key. The model is faked,
+    # so the deny is the hook passing the reason through. The rule check reads what the judge is told before it answers.
+    import question_form  # the one form check (hooks/question_form.py)
+    rule = widening_rule()
+    item = good_page_item(PAGE_MARK)
+    item["options"][1]["label"] = "Accept a second accepted form"
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": item})
+    check("widening refusal fixture: the item passes question_form.item_hit, so a refusal below is the judge's",
+          got == ("", ""), got)
+    r = run_hook(page_input("set", item), answer=WIDENING_FLAG)
+    d = r.deny() or {}
+    check("widening refusal: the unmarked option is denied, rule question-judge, and the reason names its key",
+          r.code == 0 and d.get("permissionDecision") == "deny" and r.reason().startswith("question-judge: ")
+          and "option `b`" in r.reason() and r.log.count("\tdeny\tquestion-judge\t") == 1 and len(r.calls) == 1,
+          detail(r))
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    ok, cause = rule_once(prompt, rule)
+    check("widening refusal: the judge's prompt holds WIDENING_RULE exactly once, after the question-format prompt",
+          ok, cause)
+
+
+def case_widening_fair_label_is_not_refused():
+    # Case 5: a fair option whose label only names a repo, and a marked option that is not the pick. The model allows, and
+    # the guard path (question_form.page_item_hit, the filter guard.py reads) does not refuse the write either. The scope
+    # check proves the mark is read: the same marked option, picked, is refused as uniform-pick.
+    import question_form  # the one form check (hooks/question_form.py)
+    rule, key = widening_rule(), widens_key()
+    mark_key = key or WIDENS_SENTINEL
+    fair = {"key": "a", "label": "Keep the change in claude-settings",
+            "gain": "The change lands in the repo today. " + PAGE_MARK, "lose": "The shared tool keeps its one form."}
+    marked = {"key": "b", "label": "Accept a second accepted form", "gain": "Other repos read the shared tool alike.",
+              "lose": "The shared tool takes a second form.", mark_key: True}
+    item = good_page_item(PAGE_MARK, pick="a", options=[fair, marked])
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": item})
+    check("fair label fixture: the item passes question_form.item_hit with the pick on the fair option",
+          got == ("", ""), got)
+    tool_input = {"action": "set", "url": PAGE_URL, "collection": PAGE_ITEMS, "doc_id": "p1", "data": item}
+    hit, _writes = question_form.page_item_hit(tool_input, PAGE_REPO)
+    check("fair label guard path: question_form.page_item_hit does not refuse it", hit == ("", ""), hit)
+    r = run_hook(page_input("set", item), answer=ALLOW)
+    check("fair label: the judge allows it, one model call and no deny", len(r.calls) == 1 and r.code == 0
+          and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    picked = dict(item, pick="b")
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": picked})
+    check("widening scope: the marked option, picked, is refused as uniform-pick, so the mark is read",
+          got[0] == "uniform-pick", "the marked option carries no mark: question_form.WIDENS_KEY is not defined"
+          if not key else got)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    ok, cause = rule_once(prompt, rule)
+    check("fair label: the judge's prompt holds WIDENING_RULE exactly once, after the question-format prompt", ok, cause)
+
+
+def case_widening_rule_names_the_mark():
+    # Case 6: WIDENING_RULE contains question_form.WIDENS_KEY. Each name is its own check, so a missing name fails with
+    # its own cause, and a blank key cannot pass the containment check.
+    rule, key = widening_rule(), widens_key()
+    check("widening key: call_judge.WIDENING_RULE is defined as non-blank text", bool(rule),
+          "WIDENING_RULE is not defined in call_judge.py")
+    check("widening key: question_form.WIDENS_KEY is defined as non-blank text", bool(key),
+          "WIDENS_KEY is not defined in question_form.py")
+    cause = ("WIDENING_RULE is not defined" if not rule else "WIDENS_KEY is not defined" if not key
+             else "WIDENING_RULE does not contain WIDENS_KEY")
+    check("widening key: WIDENING_RULE contains WIDENS_KEY", bool(rule) and bool(key) and key in rule, cause)
+
+
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
@@ -1350,6 +1530,9 @@ def main():
                  case_options_without_note_lacks_rule, case_blank_note_lacks_rule,
                  case_context_only_note_lacks_rule, case_reask_batch_one_call_rule_once, case_reask_refusal_denies,
                  case_picked_choice_with_note_lacks_rule, case_none_choice_with_note_holds_rule_once,
+                 case_widening_set_holds_rule_once, case_widening_batch_holds_rule_once,
+                 case_widening_absent_without_options, case_widening_refusal_names_the_option,
+                 case_widening_fair_label_is_not_refused, case_widening_rule_names_the_mark,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
