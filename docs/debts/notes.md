@@ -1151,3 +1151,7 @@
 - clause-start-noun-verb: a clause after a new break that starts with the noun "merge", "hit" or "approve" ("…, but merge stays manual.") is refused, though main allowed it. Decision: act-in-place
 - close-paren-no-break: ")" is no clause break, so "(The session reruns CI) Mark the PR ready." with no link passes. Decision: act-in-place
 - classifier-force-push-lane: the auto-mode classifier refused Bash `git push --force-with-lease` of a rebased lane branch (lane-undo-check, 2026-11-03). The refusal is correct, not a gap: a force push rewrites history, which rule shared-trees-no-destructive-git (no destructive git) forbids. A lane told to rebase merges the base in instead. Decision: git-integration-branch-merge
+- undo-move-reword-shared: the one-reworded-line move allowance in `moved` (lint/check_silent_undo.py) also loosens the upstream reversal read and `healed`; a lane flag would keep it to the lane read. Decision: silent-undo-check-design
+- undo-moved-renumbered-case: a moved block whose case number changed stays red and needs a Drops-lines line. Decision: silent-undo-check-design
+- undo-syspath-repeat: merge/merge.py `silent_undo()` adds to sys.path on each call; the duplicates are harmless. Decision: silent-undo-check-design
+- undo-moved-difflib-cost: `moved` runs difflib on every gained line when one line is short and 6+ are gone; the lane's own run takes 3.8 s. Decision: silent-undo-check-design
