@@ -4989,6 +4989,8 @@ test("a stored park draft whose entry is gone is pruned on load, and a later ent
 const NO_THREAD = /thread/i;
 const WRITER = "home-triage-4";
 const NOT_TOLD_TEXT = "No session was told. It waits for " + WRITER + "'s next wake or turn start.";
+// An answer is read by each item's owner, not by the writer, so its unsent line names no writer.
+const ANSWER_NOT_TOLD = "No session was told. Each owner reads its answer at its next wake or turn start.";
 // The ask hint says "Telling Claude…" while the wake result is pending. A test waits for that result, not for a clock.
 const askHintSettled = (page) => page.waitForFunction(() => { const h = document.getElementById("askHint").textContent; return h.includes("Sent") && !h.includes("Telling"); });
 // Types an ask and sends it, then returns the hint once the wake result has landed.
@@ -5015,13 +5017,14 @@ test("an ask sent with no session to tell says what happens next, and names no t
   assert.doesNotMatch(hint, NO_THREAD, "the ask hint names a thread: " + JSON.stringify(hint));
 });
 
-test("an answer sent with no session to tell says what happens next, and names no thread", async (t) => {
+test("an answer sent with no session to tell says each owner reads it at its next wake, and names no thread or writer", async (t) => {
   const page = await open(t, { meta: { writer: WRITER }, comments: { can: "no_session" } }); if (!page) return;
   await takePick(page, DECISION); await send(page);
   await told(page, "No session was told");
   const status = (await page.textContent("#sentStatus")).trim();
-  assert.ok(status.includes(NOT_TOLD_TEXT), "the sent panel does not say what happens next: " + JSON.stringify(status));
+  assert.ok(status.includes(ANSWER_NOT_TOLD), "the sent panel does not say each owner reads its answer at its next wake: " + JSON.stringify(status));
   assert.doesNotMatch(status, NO_THREAD, "the sent panel names a thread: " + JSON.stringify(status));
+  assert.ok(!status.includes(WRITER), "the sent panel names the writer, but each owner reads its own answer: " + JSON.stringify(status));
 });
 
 test("a failed Send tells the owner to paste the copied answers in chat, and names no thread", async (t) => {
