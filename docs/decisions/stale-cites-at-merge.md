@@ -2,7 +2,7 @@
 
 ## The ruling
 
-The ste-lint CI step refuses a pull request that leaves stale prose of one kind. The kind is a tracked Markdown line that names a repo file or a Python name bound at module level that the same PR deleted, renamed or moved, or a `script --flag` cite of a flag the same PR removed from that script. `lint/stale_cites.py` is the check. `actions/ste-lint/run.sh` runs it in scope `changed`, before the markdown-only exit, so a code-only PR is checked too. Every repo that pins the ste-lint action gets it when its pin moves.
+The ste-lint CI step refuses a pull request that leaves stale prose of one kind. The kind is a tracked Markdown line that names a repo file or a Python name bound at module level that the same PR deleted, renamed or moved. A line that cites a script flag the same PR removed from that script is stale too. `lint/stale_cites.py` is the check. `actions/ste-lint/run.sh` runs it in scope `changed`, before the markdown-only exit, so a code-only PR is checked too. Every repo that pins the ste-lint action gets it when its pin moves.
 
 Owner, 2026-11-01 16:30 CST, in chat to triage: "make it a standing thing that stale prose never makes it anymore".
 
