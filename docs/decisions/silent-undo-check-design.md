@@ -22,9 +22,10 @@
   the commit removes more of E's lines than it adds in the same hunk, so a reworded line is an edit.
   A line is E's work only when no earlier state of the branch held it, so a restore is never an undo.
   A line that head holds again in any file, as often as before, is moved, not lost. A merge of main that drops the branch's own lines counts too: a
-  conflict fix keeps both sides. A branch of one commit has nothing to read. Reason for two shapes: on
-  the 31 batches merged 2026-10-31 to 2026-11-02, they go red on 9, with 4 real undos in 10 findings
-  (coordinator, 2026-11-02 11:26 CST; owner's grant pending). Incident (owner, 2026-11-02 10:41 CST, fb-1041-1): 19 restore commits from 2026-10-31 to
+  conflict fix keeps both sides. A branch of one commit has nothing to read. Two shapes, not any line
+  a lane added (owner, 2026-11-03 18:16 CST, page item 167, no-undo-check-scope, pick a). Measured on
+  the 31 batches merged 2026-10-31 to 2026-11-02: any line goes red on 22, with 84 findings; the two
+  shapes go red on 16, with 62 findings (7 whole files, 55 test net losses). Incident (owner, 2026-11-02 10:41 CST, fb-1041-1): 19 restore commits from 2026-10-31 to
   2026-11-02, such as 3297d8fa, which undid 091c8708, and df25a68d, which dropped 49 test lines. Each
   cost a review round. Builders now edit in place, and a round 2 or 3 brief has a `Keep:` line
   (`agents/builder.md`, `roles-brief-contents`).
