@@ -1718,7 +1718,7 @@ class LooseProcessTests(unittest.TestCase):
         stubs = {
             (os, "kill"): lambda pid, sig: sent.append(pid),
             (sweep, "reap_listener"): lambda d: sent.append(d["pid"]),
-            (sweep, "find_dead_rooted"): lambda: [],
+            (sweep, "find_dead_rooted"): lambda *a, **k: [],  # any signature: the daily read may pass checkout_paths
         }
         real = {key: getattr(*key) for key in stubs}
         repo = os.path.join(self.home, "repo")
