@@ -743,6 +743,16 @@ class LintTools(Job):
         self.assertEqual(argv[0], "run", out)
         self.assertEqual(argv[2:], [".github/", "actions/"], out)
 
+    def test_a_zizmor_paths_block_passes_each_path_to_pipx(self):
+        # paths: | over two lines, as a repo that lists its paths one a line writes it. The stub pipx records its argv.
+        block = ("      - name: %s\n        uses: $/actions/zizmor\n        with:\n"
+                 "          paths: |\n            a/\n            b/\n\n") % ZIZMOR
+        rc, lines, out, argv = self.run_with_stub_pipx(block)
+        self.assertIsNotNone(argv, "pipx was never called, so the action did not run zizmor\n" + out)
+        self.assertEqual(argv, ["run", "zizmor==1.30.1", "a/", "b/"],
+                         "with: paths: | over two lines reached pipx as its marker, not as the two paths\n" + out)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+
     def test_an_unpinned_or_chained_pipx_run_is_not_a_lint_step(self):
         code, lines, out = plan_lint(self.root, workflow(step("loose", "pipx run zizmor .github/"),
                                                          step("chained", "pipx run zizmor==1.0 . && rm -rf x"),
