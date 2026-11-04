@@ -1604,7 +1604,7 @@ class FileReadingScope:
         return self.answer
 
 
-def grant_direct(cfg, prompt, transcript, judge, scope):
+def grant_direct(cfg, prompt, transcript, judge, scope, remote=None):
     """grant_opus_ask for `prompt` in the config dir `cfg` at OV_NOW, with the judge and the scope read stood in. The scope
     read is passed only when grant_opus_ask takes it: a build without it runs the plain path, and the case fails on the
     file that path wrote, not on a TypeError. Returns what grant_opus_ask returns."""
@@ -1612,11 +1612,11 @@ def grant_direct(cfg, prompt, transcript, judge, scope):
     kwargs = {"judge": judge, "transcript": transcript}
     if "scope_judge" in inspect.signature(override.grant_opus_ask).parameters:
         kwargs["scope_judge"] = scope
-    with config_dir_env(cfg), remote_env(None):
+    with config_dir_env(cfg), remote_env(remote):  # `remote` is CLAUDE_CODE_REMOTE_SESSION_ID for the grant, unset when None
         return override.grant_opus_ask(OV_SESSION, prompt, OV_NOW, **kwargs)
 
 
-def scope_grant(prompt, lines, scope, judge_answer=True, cfg=None):
+def scope_grant(prompt, lines, scope, judge_answer=True, cfg=None, remote=None):
     """The plain ask `prompt` after the transcript `lines`, which the harness writes with the ask as its last record.
     `lines` None means no transcript_path, and `cfg` names the config dir (a new one when None). Returns (config dir,
     judge, scope, exception or None): a raise is returned, so the case names it instead of crashing. A kill is returned
@@ -1624,7 +1624,7 @@ def scope_grant(prompt, lines, scope, judge_answer=True, cfg=None):
     cfg, judge = cfg or ov_cfg(), JudgeRecorder(judge_answer)
     path = transcript_file(lines + [owner_turn(prompt)]) if lines is not None else None
     try:
-        grant_direct(cfg, prompt, path, judge, scope)
+        grant_direct(cfg, prompt, path, judge, scope, remote)
     except (Exception, KeyboardInterrupt, SystemExit) as exc:
         return cfg, judge, scope, exc
     return cfg, judge, scope, None
@@ -2000,6 +2000,57 @@ def case_opus_scope_returns_the_models_raw_role_strings():
           got == ["Builder", "wizard"], "got %r" % (got,))
 
 
+# EXCLUSION WORDS AND CLOUD SEEDS (decision owner-override). Words that exclude a role negate it, and two roles name both
+# only when a plain list (commas, and, or, &, plus) joins them. In a cloud session the first owner record is the seed
+# brief, and the scope read skips it, as the seed check does.
+def case_opus_ask_exclusion_words_grant_nothing():
+    for prompt in ("send opus builders, excluding reviewers", "send opus for builders instead of reviewers",
+                   "send opus builders, skip reviewers", "send opus builders only, leave reviewers out",
+                   "send opus builders and ignore the reviewers", "send opus judges, skip reviewers"):
+        cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
+        check("opus ask: %r reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
+        check("opus ask: %r excludes a role and writes no Opus override" % prompt, opus_override(cfg) is None,
+              "files %r" % ov_files(cfg))
+
+
+def case_opus_ask_plain_lists_still_grant_both():
+    # Guard, passes on the build too: a plain list (and, a comma, or) between two roles names both roles.
+    for prompt, minutes in (("send opus builders and reviewers", 120), ("send opus builders, reviewers", 120),
+                            ("use opus for builders or reviewers for 30m", 30)):
+        cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
+        got = opus_override(cfg)
+        check("opus ask: %r reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
+        check("opus ask: %r names builder and reviewer, as the sorted list" % prompt,
+              got is not None and got[2] == ["builder", "reviewer"], "got %r" % (got,))
+        check("opus ask: %r ends %d minutes after the grant" % (prompt, minutes),
+              got is not None and abs((got[1] - (OV_NOW + timedelta(minutes=minutes))).total_seconds()) <= 1,
+              "got %r" % (got,))
+
+
+def case_opus_scope_cloud_seed_record_is_not_context():
+    # In a cloud session the first owner record is the seed brief. The scope read skips it, so the seed's reviewers never
+    # reach the read, and the later plain prompt names no role: every role.
+    lines = [owner_turn("reviewers please audit"), owner_turn("the refactor is next")]
+    cfg, judge, scope, _ = scope_grant("send opus now", lines, ScopeStub(reads=True), remote="cse_seed0001")
+    ran = len(scope.calls) == 1
+    check("opus scope: in a cloud session the read runs once", ran, "read calls %d" % len(scope.calls))
+    if ran:
+        check("opus scope: the read skips the seed record and holds the later prompt alone",
+              scope.calls[0][1] == ["the refactor is next"], "context %r" % (scope.calls[0][1],))
+    got = opus_override(cfg)
+    check("opus scope: in a cloud session the seed's reviewers do not grant the reviewer role",
+          got is not None and got[2] is None, "got %r" % (got,))
+
+
+def case_opus_scope_seed_record_names_reviewer_outside_a_cloud_session():
+    # Guard, passes on the build too: the same transcript with no cloud session names reviewer from the first record.
+    lines = [owner_turn("reviewers please audit"), owner_turn("the refactor is next")]
+    cfg, judge, scope, _ = scope_grant("send opus now", lines, ScopeStub(reads=True))
+    got = opus_override(cfg)
+    check("opus scope: outside a cloud session the first record's reviewers grant the reviewer role",
+          got is not None and got[2] == "reviewer", "got %r" % (got,))
+
+
 def main():
     try:
         case_table_in_process()
@@ -2087,6 +2138,10 @@ def main():
         case_opus_scope_override_filter_ignores_case()
         case_opus_scope_model_roles_narrow_case_insensitively()
         case_opus_scope_returns_the_models_raw_role_strings()
+        case_opus_ask_exclusion_words_grant_nothing()
+        case_opus_ask_plain_lists_still_grant_both()
+        case_opus_scope_cloud_seed_record_is_not_context()
+        case_opus_scope_seed_record_names_reviewer_outside_a_cloud_session()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:
