@@ -420,6 +420,7 @@ SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktr
 SUBJDIRTY = os.path.join(ROOT, "subjdirty")  # a real checkout with real uncommitted work
 SUBJSTASH = os.path.join(ROOT, "subjstash")  # a clean tree carrying one real stash entry
 SUBJSTASHWT = os.path.join(ROOT, "subjstashlane")  # a linked worktree of it: same stack
+SUBJSTAGED = os.path.join(ROOT, "subjstaged")  # a real checkout: a staged edit, a staged new file
 GITBLIND = os.path.join(ROOT, "gitblind")  # a git that answers the repo test and no status read
 # A repository under a scratchpad named after one session. ROOT already sits under the system
 # temporary directory, which is the other half of the path test.
@@ -860,6 +861,27 @@ def _real_process_start_ms(pid):
     parts = [0] * (3 - len(parts)) + parts
     elapsed = int(days or 0) * 86400 + parts[0] * 3600 + parts[1] * 60 + parts[2]
     return int(now_ms - elapsed * 1000)
+
+
+def _require_staged(where, tracked, untracked):
+    """Stop the suite unless `where` holds a STAGED edit to `tracked` (index column M, worktree
+    column clean) and a STAGED new file `untracked` (index column A).
+
+    The `--merge` cases that use SUBJSTAGED depend on exactly this state: git reverts the staged
+    edit and deletes the staged new file. Unstaged work would pass them for the wrong reason, so
+    both are read back with git itself.
+    """
+    lines = _porcelain(where)
+    if not any(line[:2] == "M " and line[3:].strip() == tracked for line in lines):
+        sys.exit(
+            "fixture setup failed in _build_subject: %r is not staged as modified in %r. git "
+            "status --porcelain shows: %r" % (tracked, where, lines)
+        )
+    if not any(line[:2] == "A " and line[3:].strip() == untracked for line in lines):
+        sys.exit(
+            "fixture setup failed in _build_subject: %r is not staged as new in %r. git status "
+            "--porcelain shows: %r" % (untracked, where, lines)
+        )
 
 
 def make_repo(where, files):
@@ -1435,7 +1457,8 @@ def _build_gitmain():
 
 
 def _build_subject():
-    """SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH and SUBJSTASHWT: the subject-read repos."""
+    """The subject-read repos: SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT and
+    SUBJSTAGED."""
     # THE SUBJECT READ. Each arm gets both sides, built with real state: a real clean tree, a
     # real uncommitted edit, a real untracked file, a real one-entry stash stack.
     make_repo(SUBJCLEAN, {"f.txt": "base\n", "keep.txt": "base\n"})
@@ -1464,6 +1487,14 @@ def _build_subject():
     # worktree sees the same one-entry stack, and a drop there destroys the primary's entry.
     run_vcs(SUBJSTASH, "worktree", "add", "-q", SUBJSTASHWT, "-b", "stashlane")
     _require_stash(SUBJSTASHWT, 1)
+
+    # A STAGED edit to a tracked file and a STAGED new file: the state `reset --merge HEAD` reverts
+    # and deletes (MEASURED 2026-11-04). The tree is dirty, and its work is all in the index.
+    make_repo(SUBJSTAGED, {"f.txt": "base\n", "keep.txt": "base\n"})
+    write(os.path.join(SUBJSTAGED, "f.txt"), "staged\n")
+    write(os.path.join(SUBJSTAGED, "new.txt"), "staged new\n")
+    run_vcs(SUBJSTAGED, "add", "f.txt", "new.txt")
+    _require_staged(SUBJSTAGED, "f.txt", "new.txt")
 
 def _build_privrepo():
     """PRIVREPO: a dirty repository under a scratchpad named after one session."""
@@ -2127,7 +2158,8 @@ lazy_fixture([CTXREPO], _build_ctxrepo)
 lazy_fixture([CURREPO], _build_currepo)
 lazy_fixture([GHDEV], _build_ghdev)
 lazy_fixture([GITMAIN, GITWT, AGENTWT, FARWT, SYMWT, DECOYMAIN], _build_gitmain)
-lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT], _build_subject)
+lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT, SUBJSTAGED],
+             _build_subject)
 lazy_fixture([PRIVREPO], _build_privrepo)
 lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, PTRNOORIGIN,
               PTRNOORIGINCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
@@ -2234,20 +2266,20 @@ sh("stash: branch consumes the entry it builds from", VCS + " stash branch lane"
 sh("reset: throws the tree away", VCS + " reset --hard origin/main", "deny", "shared-tree",
    cwd=NOGIT)
 sh("reset: --hard with no argument", VCS + " reset --hard", "deny", "shared-tree", cwd=NOGIT)
-# A bare reset, and every flag except `--hard`, leaves the working tree alone, or aborts rather
-# than overwrite a local change (MEASURED against a real uncommitted change, 2026-09-17: `--keep`
-# and `--merge` both stopped with "Entry not up to date. Cannot merge." and the change survived).
-# Only `--hard` rewrites the tree unconditionally, so it alone stays denied.
+# A bare reset, `--soft` and `--mixed` leave the working tree alone, and `--hard` rewrites it.
+# `--merge` rewrites it too: it reverts a staged edit and deletes a staged new file (MEASURED
+# 2026-11-04, scratch repo). `--keep` and `--merge` both move the branch at another commit, so
+# they take `--hard`'s verdict (the staged-form block below cites the ruling).
 sh("reset: a plain reset only unstages, the working tree is untouched", VCS + " reset HEAD~1",
    "allow", cwd=NOGIT)
 sh("reset: a bare reset with no argument", VCS + " reset", "allow", cwd=NOGIT)
 sh("reset: an explicit mixed reset", VCS + " reset --mixed HEAD~1", "allow", cwd=NOGIT)
 sh("reset: a soft reset moves the branch and touches nothing else", VCS + " reset --soft HEAD~1",
    "allow", cwd=NOGIT)
-sh("reset: --keep aborts rather than overwrite a local change", VCS + " reset --keep HEAD~1",
-   "allow", cwd=NOGIT)
-sh("reset: --merge aborts rather than overwrite a local change", VCS + " reset --merge HEAD~1",
-   "allow", cwd=NOGIT)
+sh("reset: --keep at another commit denies where there is no git tree",
+   VCS + " reset --keep HEAD~1", "deny", "shared-tree", cwd=NOGIT)
+sh("reset: --merge at another commit denies where there is no git tree",
+   VCS + " reset --merge HEAD~1", "deny", "shared-tree", cwd=NOGIT)
 sh("reset: a reset naming a path only touches the index",
    VCS + " reset -- app/src/50_engine.js", "allow", cwd=NOGIT)
 sh("reset: a reset at a commit naming a path only touches the index",
@@ -2329,6 +2361,31 @@ sh("subject: a hard reset at a raw sha in a clean worktree asks",
    cwd=SUBJCLEANWT)
 sh("subject: a quiet hard reset at HEAD is still a pass in a clean tree",
    VCS + " reset -q --hard HEAD", "allow", cwd=SUBJCLEAN)
+# THE `--merge` AND `--keep` FORMS TAKE `--hard`'s VERDICT. Owner ruling: Cockpit item 214 a
+# (2026-11-04 07:56 CST). Each form has its own deny or ask line, so dropping either flag alone
+# turns a line red. SUBJSTAGED holds a staged edit and a staged new file, so any change denies.
+sh("reset: --merge at HEAD over a staged edit and a staged new file denies",
+   VCS + " reset --merge HEAD", "deny", "shared-tree", cwd=SUBJSTAGED)
+sh("reset: a bare --merge over a staged edit denies", VCS + " reset --merge", "deny",
+   "shared-tree", cwd=SUBJSTAGED)
+sh("reset: --merge at HEAD in a clean tree takes nothing", VCS + " reset --merge HEAD", "allow",
+   cwd=SUBJCLEAN)
+sh("reset: --keep at HEAD in a clean tree takes nothing", VCS + " reset --keep HEAD", "allow",
+   cwd=SUBJCLEAN)
+sh("reset: --keep at another commit moves the branch, so a shared checkout denies",
+   VCS + " reset --keep HEAD~1", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("reset: --keep at another commit asks in a clean worktree", VCS + " reset --keep HEAD~1",
+   "ask", "shared-tree", cwd=SUBJCLEANWT)
+sh("reset: --merge at another commit asks in a clean worktree", VCS + " reset --merge HEAD~1",
+   "ask", "shared-tree", cwd=SUBJCLEANWT)
+sh("reset: a flag after the commit still counts, --merge denies", VCS + " reset HEAD~1 --merge",
+   "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("reset: --merge aimed at a dirty checkout with -C denies",
+   VCS + " -C " + slash(SUBJSTAGED) + " reset --merge", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("reset: an echo that quotes a merge reset is not a call", 'echo "git reset --merge"', "allow",
+   cwd=SUBJSTAGED)
+sh("reset: a soft reset over a staged edit stays allowed", VCS + " reset --soft HEAD~1", "allow",
+   cwd=SUBJSTAGED)
 sh("subject: setting aside a clean tree takes nothing", VCS + " stash push -u -m lane", "allow",
    cwd=SUBJCLEAN)
 sh("subject: setting aside real uncommitted work still denies", VCS + " stash push -u -m lane",
