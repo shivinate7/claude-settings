@@ -31,7 +31,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from workflow_steps import job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
+from workflow_steps import CHECKS_SUITE_JOBS, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
 CHECKS = os.environ.get("CHECKS_YML") or os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 MIN_JOBS = 3
 
@@ -67,8 +67,9 @@ REQUIRED = [
 
 # The suites the single `checks` job ran (Linux) and the single `checks-macos` job ran (macOS) before the split, each with
 # its step's `if:` and `shell:`. checks-merge-install and checks-macos-b took some of them, so each suite runs in exactly one
-# job of its split. A suite is a run of a test file, a mutation test or the mod tests. This is the one home of these lists.
-LINUX_SPLIT = ("checks", "checks-merge-install")
+# job of its split. A suite is a run of a test file, a mutation test or the mod tests. The Linux pair is CHECKS_SUITE_JOBS,
+# its one home in lint/workflow_steps.py; the macOS lists stay here.
+LINUX_SPLIT = CHECKS_SUITE_JOBS
 LINUX_CODE = "needs.scope.outputs.code == 'true'"
 LINUX_CODE_SWEEP = f"{LINUX_CODE} && needs.scope.outputs.sweep == 'true'"
 LINUX_SWEEP = "needs.scope.outputs.sweep == 'true'"
