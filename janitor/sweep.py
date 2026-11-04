@@ -1710,17 +1710,12 @@ def _project_ancestor(path: str):
         probe = parent
 
 
-def find_dead_rooted(checkout_paths=None):
+def find_dead_rooted():
     """Return one decision dict per process whose argv names a script file
     (`DEAD_ROOTED_EXTENSIONS`) that no longer exists, whose parent directory is also
     missing, and whose nearest existing ancestor carries `.git` or `.claude` (a deleted
     checkout or worktree). `None` when the machine pid enumeration failed.
     Decision: {"pid", "command", "missing", "home", "action": "reap"|"keep", "reason"}.
-
-    CHECKOUT_PATHS limits the read to the checkouts of one repository run: a process stays only
-    when its MISSING SCRIPT path sits under one of them (`_matching_checkout`). `home` is never
-    the test, because `_project_ancestor` can answer a folder above the checkout, such as `~`.
-    An empty list keeps nothing. `None` is the machine-wide read.
     Reap only when `is_orphan` and `is_current_user_process` both answer a confirmed yes;
     `None` from either is `unreadable-subject`, keep.
 
@@ -1740,8 +1735,7 @@ def find_dead_rooted(checkout_paths=None):
         for raw in _ARGV_PATH_RE.findall(command):
             if raw.lower().endswith(DEAD_ROOTED_EXTENSIONS) and not os.path.exists(raw):
                 home = _project_ancestor(raw)
-                if home and (checkout_paths is None
-                             or _matching_checkout(raw, checkout_paths) is not None):
+                if home:
                     hit = (raw, home)
                     break
         if hit is None:
@@ -2865,7 +2859,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     if mode == "tier1":
         confirm = True
     result = {"root": root, "refused": None, "branches": [], "worktrees": [], "listeners": [],
-              "pruned": None, "husks": [], "strays": [], "trash": [], "listed": []}
+              "pruned": None, "husks": [], "strays": [], "trash": []}
 
     optout = read_optout(root)  # once: protected prefixes and huskNames both come from it
     sweep_enabled, protected_prefixes, optout_ok = _optout_fields(optout)
@@ -2891,12 +2885,6 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     # decision to ask git for itself, except in "fast", which keeps what it cannot prove.
     batch = None if mode == "tier1" else merged_batch(root, base)
 
-    # Read before the prune and the repo reaper, which remove trees from the list: `listed` names
-    # every tree git knew at the start, so a tree they remove still scopes the SessionEnd read of
-    # dead-rooted servers. Empty when git could not answer.
-    start_entries = parse_worktree_list(root)
-    result["listed"] = [e["path"] for e in start_entries or []]
-
     # Before the worktree list is read, so a pruned registration is not judged as a worktree.
     # "branches" and "fast" prune nothing: a stale registration then keeps its branch held.
     if mode not in ("branches", "fast"):
@@ -2920,10 +2908,7 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
             else:
                 result["reaper"] = "would run"
 
-    # The start read stands unless a real prune or a reaper run may have changed the list.
-    changed = confirm and ((result["pruned"] and result["pruned"]["names"])
-                           or result.get("reaper", "none") != "none")
-    entries = parse_worktree_list(root) if changed or start_entries is None else start_entries
+    entries = parse_worktree_list(root)
     if entries is None:
         result["refused"] = "unreadable-worktree-list"
         return result
@@ -3268,12 +3253,9 @@ def main(argv=None) -> int:
                          help="sweep the one repository PATH belongs to (PATH may be a linked "
                               "worktree or a folder inside it); adds to any ROOT given")
     parser.add_argument("--session-end", action="store_true", dest="session_end",
-                         help="the SessionEnd run only: stops the dead-rooted servers that "
-                              "this run's own repository left: its checkouts and every "
-                              "worktree git listed at the start of this run, removed or pruned "
-                              "ones included. It scans no loose processes, and a run past its "
-                              "deadline stops no dead-rooted server. The scheduled job and a "
-                              "person's run read the whole machine")
+                         help="the SessionEnd run only: judges branches and worktrees in its "
+                              "own repository only, stops proven orphans machine-wide like the "
+                              "scheduled job, and skips the loose-process report")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--tier1", action="store_true",
                        help="only stale registrations and husks. The one mode that acts "
@@ -3375,17 +3357,10 @@ def _sweep_roots(args, roots, restore_log_path, mode):
         print("\njanitor: past the time budget; dead-rooted, loose-process and simulator "
               "reads not run (the next run does them)")
         return 0
-    # SessionEnd reads only this repository's checkouts, every worktree git listed at the start of
-    # this run (removed or pruned ones too: their folders are gone but their servers are not),
-    # and no loose processes. Machine-wide reads belong to the scheduled job.
-    session_end = getattr(args, "session_end", False)
-    scope = None
-    if session_end:
-        scope = list(roots) + [path for r in results for path in r.get("listed", [])
-                               + [w["path"] for w in r["worktrees"]]]
-    dead = find_dead_rooted(scope)
+    dead = find_dead_rooted()
     print_dead_rooted_report(dead)
-    if not session_end and not _past_deadline():
+    # SessionEnd skips the loose-process report: the hook discards its output.
+    if not getattr(args, "session_end", False) and not _past_deadline():
         print_loose_processes_report(find_loose_processes())
     if args.confirm:
         reaped = reaped_listener_decisions(results)
