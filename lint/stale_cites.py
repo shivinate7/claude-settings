@@ -14,18 +14,21 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
   STALE004  the line holds a value cite, `file.py: NAME = literal` in one backtick span, and the range changed that
             value, or removed NAME from the file, while the cite still equals the base value; or the range added the
             line and the cite is not the value at head. A second copy of a line that was already wrong at base is an
-            added line. The value is the module-level literal py-facts reads. A line already wrong at base and left
-            alone never fires.
+            added line. The value is the module-level literal py-facts `answer` reads: a value `ast.literal_eval`
+            accepts and JSON can hold. A line already wrong at base and left alone never fires.
   Unknown   the line cites `<file.mjs> <name>` (also .js, .cjs, .ts, .sh) in the same two forms, or a value cite of
             such a file or of a .json file, and the range touched that file. Those names and values are not read,
             so the line prints `stale-cites: unknown, <path>:<line> ...` and never fails the run. Only a run that
-            already reads Markdown prints it; touching such a file never starts that read.
+            already reads Markdown prints it; touching such a file never starts that read. A pair cite's unknown
+            has code STALE002 and a value cite's has STALE004, so the mark for that code leaves it out.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
 `<!-- ste-disable-line STALE001 -->` (or STALE002, STALE004). Fenced blocks count as prose.
 Each Markdown file is read as committed at head, never from the working tree. Which files: every tracked one when
-the range removed a path or name, or changed a .py module-level literal; else only the Markdown the range
-touched, which is where a new wrong value cite can sit.
+the range removed a path or name, or changed a literal; else only the Markdown the range touched, which is where
+a new wrong value cite can sit. A changed literal is a module-level name of a touched .py that holds a literal at
+base and, at head, holds a different literal or is gone. A change to or from a call, or any value that is no
+literal, is no literal change.
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
 2 a read that could not run, except a base that does not resolve (a shallow clone): that prints
 `stale-cites: unknown, ...` naming fetch-depth 0 and exits 0, so a repo that pins the ste-lint action and
@@ -313,19 +316,20 @@ def same_value(lit, actual):
 GONE = "gone"  # `file_value` answer: the file parses and binds no such module-level name
 
 
-def file_value(blob, symbol):
-    """`(value,)` the module-level literal `symbol` holds in the bytes of a .py file, read through py-facts `answer`,
-    the same reader MAP9 uses. GONE when the file parses and no longer binds the name. None when it cannot be read:
-    no file, no parse, or a value that is no literal."""
-    if blob is None:
-        return None
-    tree = parse_python(blob)
-    if tree is None:
-        return None
+def tree_value(tree, symbol):
+    """`(value,)` the module-level literal `symbol` holds in a parsed .py file, read through py-facts `answer`, the
+    same reader MAP9 uses: a value `ast.literal_eval` accepts and JSON can hold. GONE when the module assigns no such
+    name. None when the value is no literal, such as a call, or the name has no value."""
     found = py_facts().answer({"file": "", "symbol": symbol}, tree, [])
     if found["ok"]:
         return (found["value"],)
     return GONE if found.get("gone") else None
+
+
+def file_value(blob, symbol):
+    """`tree_value` of the bytes of a .py file. None when there is no file or it does not parse."""
+    tree = parse_python(blob) if blob is not None else None
+    return None if tree is None else tree_value(tree, symbol)
 
 
 def disabled(line):
@@ -448,9 +452,7 @@ class ForeignReader(Reader):
     unknown = True
 
     def prepare(self, rng):
-        # A touched .json is listed for its value cites only: a JSON value is read by no reader. FOREIGN_PAIR_RES
-        # matches no .json path, so a pair cite of one is never read.
-        return rng.foreign_files | rng.json_files or None
+        return rng.foreign_files or None
 
     def line(self, state, text, claimed):
         messages = []
@@ -460,6 +462,20 @@ class ForeignReader(Reader):
                 text_ = "%s %s: JavaScript and shell names are not checked" % (path, name)
                 if path in state and path not in claimed and text_ not in messages:
                     messages.append(text_)
+        return messages
+
+
+class ForeignValueReader(Reader):
+    """STALE004 unknown: a value cite of a JavaScript, shell or JSON file the range touched. Those values are not
+    read, so the line is reported as unknown. Its code is STALE004, so the STALE004 mark leaves the line out."""
+    code = "STALE004"
+    unknown = True
+
+    def prepare(self, rng):
+        return rng.foreign_files | rng.json_files or None
+
+    def line(self, state, text, claimed):
+        messages = []
         for path, symbol, _ in value_cites(text):
             text_ = "%s %s: JavaScript, shell and JSON values are not checked" % (path, symbol)
             if path in state and text_ not in messages:
@@ -480,27 +496,33 @@ class ValueReader(Reader):
             self.values = {}
 
     def prepare(self, rng):
-        """None when the range changed no literal and touched no Markdown. `changed` is true when a module-level
-        literal of a touched .py differs between base and head, or is gone: every Markdown file is then read, since any line
-        may cite it. A touched .json never counts: a JSON value is read by no reader."""
+        """None when the range changed no literal and touched no Markdown. `changed` is true when a touched .py has
+        a changed literal: every Markdown file is then read, since any line may cite it. A touched .json never
+        counts: a JSON value is read by no reader."""
         changed = False
         for path, new in sorted(rng.py_files.items()):
             if path != new or changed:
                 continue
-            before, after = (self._literals(rng.blob("%s:%s" % (rev, path))) for rev in (rng.base, rng.head))
             # A source that does not parse is reported by NameReader, so it is skipped here.
-            # A literal that is gone from head counts as changed: a cite of it is judged here, not by STALE002.
-            changed = before is not None and after is not None and any(
-                after.get(name) != node for name, node in before.items())
+            trees = [parse_python(src) if src is not None else None
+                     for src in (rng.blob("%s:%s" % (rev, path)) for rev in (rng.base, rng.head))]
+            changed = None not in trees and self._literal_changed(*trees)
         return self.State(rng, changed) if changed or rng.touched_md else None
 
     @staticmethod
-    def _literals(source):
-        """{name: dump of the value node} for each module-level assignment of the source, or None when it does not parse."""
-        tree = parse_python(source)
-        if tree is None:
-            return None
-        return {name: ast.dump(node) for name, node in py_facts().assigned(tree).items() if node is not None}
+    def _literal_changed(before, after):
+        """True when a module-level name holds a literal at base, as `tree_value` reads it, and at head holds a
+        different literal or is gone. A literal is what py-facts `answer` reads: a value `ast.literal_eval` accepts
+        and JSON can hold. A change to or from a call, or any other value that is no literal, is no literal change:
+        a cite of it is never judged. A gone name counts: a cite of it is judged here, not by STALE002."""
+        for name in py_facts().assigned(before):
+            was = tree_value(before, name)
+            if was in (None, GONE):
+                continue
+            now = tree_value(after, name)
+            if now == GONE or (now is not None and not strict_equal(was[0], now[0])):
+                return True
+        return False
 
     def all_markdown(self, state):
         return state.changed
@@ -540,9 +562,11 @@ class ValueReader(Reader):
             base = self.value(state, "base", path, symbol) if touched else head
             quotes_base = base not in (None, GONE) and same_value(lit, base[0])
             if head == GONE:
-                # A removed name: a value cite is no pair cite, so STALE002 never reads it, and this reader owns it.
-                if quotes_base or added:
+                # A gone name: a value cite is no pair cite, so STALE002 never reads it, and this reader owns it.
+                if touched and base != GONE and (quotes_base or added):
                     messages.append("%s no longer defines %s at head; this range removed it" % (path, symbol))
+                elif added:
+                    messages.append("%s assigns no module-level %s at head" % (path, symbol))
             elif quotes_base and not strict_equal(base[0], head[0]):
                 messages.append("%s says %s = %s, the value at base; this range changed it to %s"
                                 % (path, symbol, literal, json.dumps(head[0])))
@@ -554,8 +578,9 @@ class ValueReader(Reader):
 # One entry per code. A reader has `code`, `prepare(rng)` (its state, or None when the range gives it nothing to
 # check) and `line(state, text, claimed)` (messages for one Markdown line; `claimed` holds the paths an earlier
 # reader already cited there). A reader with `unknown = True` reports its messages as unknown, not as findings.
+# A code may have one judging reader and one unknown reader, so its mark leaves out both.
 # `Reader` holds the optional hooks: `all_markdown(state)` and `begin(state, md, rng)`. A new check adds one entry.
-READERS = (PathReader(), NameReader(), ForeignReader(), ValueReader())
+READERS = (PathReader(), NameReader(), ForeignReader(), ForeignValueReader(), ValueReader())
 
 
 def scan(range_text):
