@@ -962,6 +962,12 @@ fi
 # ---- ~/.claude/settings.json ------------------------------------------------------------------
 TARGET_JSON="$CLAUDE_DIR/settings.json"
 
+# jq: true when a SessionStart entry fires for session source $s. A matcher of "", "*" or none fires for every
+# source; any other matcher is an anchored regex, as Claude Code reads it. A matcher that is no valid regex fires
+# for none. The one home of the rule: the cloud settings.json and the startup entries run below both use it.
+FIRES_JQ='def fires($s): (.matcher // "") as $m
+  | if $m == "" or $m == "*" then true else (try ($s | test("^(" + $m + ")$")) catch false) end;'
+
 if [ "$CLOUD" = 1 ]; then
   # Cloud: generate a real file (not a symlink) whose startup SessionStart entry is a hook that
   # refreshes ~/.claude by re-running install.sh from GitHub. Claude Code runs the entries of one
@@ -979,7 +985,7 @@ if [ "$CLOUD" = 1 ]; then
     [ -f "$ALLOW_FILE" ] || ALLOW_FILE=/dev/null   # a source without the file adds no rules
     SRC_SHA=$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null) || SRC_SHA="no git"
     if jq --arg cmd "$HOOK_CMD" --slurpfile extra "$ALLOW_FILE" \
-      '.hooks.SessionStart = ([(.hooks.SessionStart // [])[] | select((.matcher // "") | test("startup") | not)] + [{"matcher":"startup|resume","hooks":[{"type":"command","command":$cmd,"timeout":60}]}])
+      "$FIRES_JQ"'.hooks.SessionStart = ([(.hooks.SessionStart // [])[] | select(fires("startup") | not)] + [{"matcher":"startup|resume","hooks":[{"type":"command","command":$cmd,"timeout":60}]}])
        | .permissions.allow = ((.permissions.allow // []) + ($extra[0].permissions.allow // []))' \
       "$SRC/settings.json" > "$TARGET_JSON.tmp" && mv "$TARGET_JSON.tmp" "$TARGET_JSON"; then
       n=$(jq -s '[.[0].permissions.allow[]?] | length' "$ALLOW_FILE" 2>/dev/null)
@@ -1031,29 +1037,45 @@ fi
 
 # ---- cloud startup entries ---------------------------------------------------------------------
 # Decision cloud-start-hooks-run-fresh. The cloud settings.json above dropped each SessionStart entry
-# that matches startup. Run those here, from "$SRC/settings.json" in file order, now that the hooks they
-# call are the fresh copies. An entry runs only when its matcher matches the session source that the
-# refresh hook passed in CS_HOOK_INPUT; no readable source means startup. The matcher is anchored, as
-# Claude Code anchors it. Stdin is /dev/null: this script may itself be the stdin of `bash -s`, and a
-# child that read it would eat the rest of the script. CLAUDE_CODE_REMOTE=true keeps the repo's pull
-# hook on its own cloud exit. A failing command is logged and never fails the install. Without jq, the
-# settings block above copied the file whole and dropped nothing, so there is nothing to run here.
+# that fires on startup. Run those here, from "$SRC/settings.json" in file order, now that the hooks they
+# call are the fresh copies. An entry runs only when it also fires for the session source that the
+# refresh hook passed in CS_HOOK_INPUT; no readable source means startup. Stdin is that same text,
+# or empty when unset, as Claude Code gives a hook its input; it is never this script, which may be the
+# stdin of `bash -s` and would lose its rest to a child that read it. Each entry is bounded by its own
+# timeout field (default 10 seconds), as Claude Code bounds it, so a hung hook cannot hold the refresh.
+# CLAUDE_CODE_REMOTE=true keeps the repo's pull hook on its own cloud exit. A failing or cut command is
+# logged and never fails the install. Without jq, the settings block above copied the file whole and
+# dropped nothing, so there is nothing to run here.
 if [ "$CLOUD" = 1 ] && command -v jq >/dev/null 2>&1 && [ -f "$SRC/settings.json" ]; then
   START_SRC=$(printf '%s' "${CS_HOOK_INPUT:-}" \
     | jq -r 'if (.source | type) == "string" then .source else empty end' 2>/dev/null)
   [ -n "$START_SRC" ] || START_SRC=startup
-  START_CMDS=$(jq -c --arg src "$START_SRC" \
-    '[(.hooks.SessionStart // [])[]
-      | select((.matcher // "") | test("startup"))
-      | select(.matcher | . as $m | try ($src | test("^(" + $m + ")$")) catch false)
-      | .hooks[]? | select(.type == "command") | .command]' \
-    "$SRC/settings.json" 2>/dev/null) || START_CMDS='[]'
-  START_N=$(printf '%s' "$START_CMDS" | jq 'length' 2>/dev/null) || START_N=0
+  if START_CMDS=$(jq -c --arg src "$START_SRC" "$FIRES_JQ"'
+      [(.hooks.SessionStart // [])[] | select(fires("startup") and fires($src))
+       | .hooks[]? | select(.type == "command")
+       | {command, timeout: (if (.timeout | type) == "number" and .timeout > 0 then .timeout else 10 end)}]' \
+      "$SRC/settings.json" 2>/dev/null) \
+     && START_N=$(printf '%s' "$START_CMDS" | jq 'length' 2>/dev/null); then
+    :
+  else
+    log "WARNING: could not read the startup entries from $SRC/settings.json, so none ran"
+    START_CMDS='[]'; START_N=0
+  fi
   START_I=0
-  while [ "$START_I" -lt "${START_N:-0}" ]; do
-    START_CMD=$(printf '%s' "$START_CMDS" | jq -r --argjson i "$START_I" '.[$i]')
-    CLAUDE_CODE_REMOTE=true sh -c "$START_CMD" </dev/null \
-      || log "WARNING: a startup entry from $SRC/settings.json exited $? and was skipped: $START_CMD"
+  while [ "$START_I" -lt "$START_N" ]; do
+    START_CMD=$(printf '%s' "$START_CMDS" | jq -r --argjson i "$START_I" '.[$i].command')
+    START_TMO=$(printf '%s' "$START_CMDS" | jq -r --argjson i "$START_I" '.[$i].timeout')
+    START_RC=0
+    if command -v timeout >/dev/null 2>&1; then
+      printf '%s' "${CS_HOOK_INPUT:-}" | CLAUDE_CODE_REMOTE=true timeout "$START_TMO" sh -c "$START_CMD" || START_RC=$?
+    else
+      printf '%s' "${CS_HOOK_INPUT:-}" | CLAUDE_CODE_REMOTE=true sh -c "$START_CMD" || START_RC=$?
+    fi
+    if [ "$START_RC" = 124 ] && command -v timeout >/dev/null 2>&1; then
+      log "WARNING: a startup entry from $SRC/settings.json was cut after ${START_TMO}s, and the next one runs: $START_CMD"
+    elif [ "$START_RC" != 0 ]; then
+      log "WARNING: a startup entry from $SRC/settings.json exited $START_RC and was skipped: $START_CMD"
+    fi
     START_I=$((START_I + 1))
   done
 fi
