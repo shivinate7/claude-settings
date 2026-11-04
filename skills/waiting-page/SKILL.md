@@ -595,7 +595,7 @@ holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another arti
 
 ## Update the roadmap block
 
-The roadmap build makes the Status tab's data, the roadmap block. The waiting-page writer alone
+The roadmap build makes the Status tab's data, the roadmap block. The page writer alone
 publishes the page file, so the repo has one page and one publisher. The skill roadmap publishes nothing.
 
 1. Build the roadmap block: `python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out <block file>`

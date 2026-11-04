@@ -3,24 +3,24 @@
     python3 ~/.claude/skills/roadmap/build.py --repo <checkout> [--record-branch NAME] [--out FILE] [--block]
 
 The steps, topics and numbers come from the repo's record branch, under roadmap/data/. In a
-checkout that stands on the record branch, the builder reads the working tree and writes
+checkout that stands on the record branch, this script reads the working tree and writes
 roadmap/roadmap.html there. In any other checkout it reads the branch through git (origin's copy
 first, else the local one) and writes to --out. The record homes (decisions, debts, plans and the
 rest) come from the checkout itself, at the paths lint/layout.py gives. Without --record-branch the
 branch is the one the checkout's extras file names ("record-branch", a fork worktree's own), else
 "roadmap"; the flag wins.
 
-With --block the builder writes only the marked data block (window.ROADMAP_DATA and window.ROADMAP_BUILD,
+With --block the build writes only the marked data block (window.ROADMAP_DATA and window.ROADMAP_BUILD,
 never ROADMAP_DB) to --out. The one page of a repo is the waiting page: its writer splices that block into
-the live page and alone publishes (skills/waiting-page/splice.py). The builder publishes nothing.
+the live page and alone publishes (skills/waiting-page/splice.py). The build publishes nothing.
 
 The viewer in page/index.html reads its data through the artifact database (window.claude.use('db')).
-The builder puts a small read-only stand-in for that database (window.ROADMAP_DB), holding every JSON
+The build puts a small read-only stand-in for that database (window.ROADMAP_DB), holding every JSON
 file, in front of the page's own script, so the same viewer runs from disk and as the published
 artifact. It also writes window.ROADMAP_BUILD: the commit each panel read, or "unknown" and why.
 
 Live work (step o8, option a) comes from --live FILE: the project threads and the open pull requests
-and branches, which the publisher reads with its own tools just before the build. The builder cannot
+and branches, which the publisher reads with its own tools just before the build. This script cannot
 reach either itself, so it only checks the file's shape and bakes it in.
 
 After the build it prints an upkeep list for the triage thread (step c55): open-step notes over
@@ -79,7 +79,7 @@ Cost per build: about six git processes, one read of each scanned file, one page
 watcher, no timer, no log. The stale-step row adds no git process, file, timer or log to the build. It
 adds to triage's publish, already running: one more list_sessions walk (every page) and three more
 fields (id, session_status, tags) per session in the live file it already writes. The page-ruling row adds
-one read of the waiting page's items (n, status, home) to that same publish. The builder adds no git
+one read of the waiting page's items (n, status, home) to that same publish. The build adds no git
 process, file, timer or log for it. The dated-claim row adds no git process, file, timer or log: it reads
 the notes already loaded.
 The red line and the two stale-ready rows add no process, file, timer or log: they read the live file the
@@ -110,7 +110,7 @@ FUTURE_MINUTES = 5
 KNOWN_STATUS = ("todo", "doing", "active", "done")
 TOP = 5
 DATA = "roadmap/data"
-# roadmap.html is left out: the builder rewrites it, so a conflict there is resolved by building.
+# roadmap.html is left out: the build rewrites it, so a conflict there is resolved by building.
 SCANNED = ("roadmap", "briefs", "plans", "handoffs")
 OUTPUT = "roadmap/roadmap.html"
 # The layout kinds whose homes the page reads, with the panel name each one gets.
@@ -696,7 +696,7 @@ MARK_OPEN, MARK_CLOSE = "<!-- roadmap:data -->", "<!-- /roadmap:data -->"
 
 def render_block(data, info):
     """Only the marked data block of the one page: the two globals the Status tab reads, never ROADMAP_DB.
-    The waiting-page writer splices it into the live page (skills/waiting-page/splice.py)."""
+    The page writer splices it into the live page (skills/waiting-page/splice.py)."""
     return "%s\n<script>window.ROADMAP_DATA = %s; window.ROADMAP_BUILD = %s;</script>\n%s\n" % (
         MARK_OPEN, as_script(data), as_script(info), MARK_CLOSE)
 
@@ -710,7 +710,7 @@ def main(argv=None):
     ap.add_argument("--live", help="the publisher's live-work file: project threads, open pull requests and branches")
     ap.add_argument("--out", help="the page to write; needed unless the checkout stands on the record branch")
     ap.add_argument("--block", action="store_true",
-                    help="write only the roadmap data block (needs --out), for the waiting-page writer to splice in")
+                    help="write only the roadmap data block (needs --out), for the page writer to splice in")
     args = ap.parse_args(argv)
     repo = pathlib.Path(args.repo).resolve()
     if args.record_branch is None:
