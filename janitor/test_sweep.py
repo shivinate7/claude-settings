@@ -17,10 +17,12 @@ Destructive git calls this suite drives (`git branch -D`, `git worktree remove`,
 itself, never typed by hand through a shell, the same way hooks/test_guard.py drives its own
 fixtures.
 """
+import argparse
 import concurrent.futures
 import contextlib
 import gc
 import hashlib
+import inspect
 import io
 import json
 import os
@@ -1733,6 +1735,366 @@ class LooseProcessTests(unittest.TestCase):
                 setattr(key[0], key[1], fn)
         self.assertNotIn(self.marked, sent)
         self.assertIsNone(self.procs[0].poll())
+
+
+# ------------------------------------------------ the SessionEnd run's scope (janitor/sweep.py)
+#
+# The SessionEnd run passes `--session-end` (`args.session_end`). It limits the dead-rooted read to
+# the primary checkout and every worktree the run's results name, and scans no loose processes.
+# Every machine read below is answered from a fixture table by `fake_process_table`, so a case
+# decides the scope rule and not this machine's processes. Each missing script path is real, under
+# real folders, so `sweep._project_ancestor` decides exactly as it does on a live machine.
+
+SCOPE_PIDS = {"primary": 900101, "removed": 900102, "other": 900103, "ancestor": 900104,
+              "sibling": 900105, "loose": 900106}
+
+
+def build_scope_fixture(name):
+    """One base folder under ROOT, holding:
+      proj          this session's primary checkout, a real repository
+      other         another repository, never a root of the run
+      wt-gone       a worktree the run removed: a sibling of proj, outside it, and absent now
+      proj-sibling  a folder that starts with proj's name and is no checkout
+      .claude       so a missing script directly under base resolves to base as its project ancestor
+    Every script is missing under a missing folder, so each is a dead-rooted candidate on a live
+    machine. Returns the paths and `rows` (pid -> argv) for `fake_process_table`."""
+    base = os.path.join(ROOT, "scope-" + name)
+    os.makedirs(os.path.join(base, ".claude"))
+    proj, other = os.path.join(base, "proj"), os.path.join(base, "other")
+    make_repo(proj, {"f.txt": "x\n"})
+    make_repo(other, {"f.txt": "x\n"})
+    wt_gone = os.path.join(base, "wt-gone")
+    require(not os.path.exists(wt_gone), "fixture: the removed worktree folder is absent")
+    rows = {
+        SCOPE_PIDS["primary"]: "sh " + os.path.join(proj, "tools", "serve.sh"),
+        SCOPE_PIDS["removed"]: "sh " + os.path.join(wt_gone, "serve.sh"),
+        SCOPE_PIDS["other"]: "sh " + os.path.join(other, "tools", "serve.sh"),
+        SCOPE_PIDS["ancestor"]: "sh " + os.path.join(base, "elsewhere", "x.sh"),
+        SCOPE_PIDS["sibling"]: "sh " + os.path.join(base, "proj-sibling", "tools", "serve.sh"),
+        SCOPE_PIDS["loose"]: "zsh -c source %s && true" % os.path.join(
+            base, ".claude", "shell-snapshots", "snapshot-zsh-1"),
+    }
+    return {"base": base, "proj": proj, "other": other, "wt_gone": wt_gone, "rows": rows}
+
+
+@contextlib.contextmanager
+def fake_process_table(rows):
+    """The machine's process reads, answered from `rows` (pid -> argv): the pid list, each command,
+    and orphan and owner (every listed process is an orphan of this user). `send_signal` records
+    each pid it is asked to signal. `os.kill` is a net: a signal that bypassed `send_signal` is
+    recorded too, and never sent. Yields a record: `pid_reads` (pid-list reads), `signals`, `kills`,
+    and `reset()`, which zeroes the reads and both lists."""
+    table = types.SimpleNamespace(pid_reads=0, signals=[], kills=[])
+
+    def reset():
+        table.pid_reads, table.signals, table.kills = 0, [], []
+
+    def pids():
+        table.pid_reads += 1
+        return list(rows)
+
+    def signal_pid(pid):
+        table.signals.append(pid)
+        return True
+
+    def kill(pid, sig):
+        table.kills.append(pid)
+
+    table.reset = reset
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(mock.patch.object(sweep, "list_all_pids", pids))
+        stack.enter_context(mock.patch.object(sweep, "process_command", lambda pid: rows.get(pid)))
+        stack.enter_context(mock.patch.object(sweep, "is_orphan", lambda pid: True))
+        stack.enter_context(mock.patch.object(sweep, "is_current_user_process", lambda pid: True))
+        stack.enter_context(mock.patch.object(sweep, "send_signal", signal_pid))
+        stack.enter_context(mock.patch.object(os, "kill", kill))
+        yield table
+
+
+def scoped_dead_rooted(checkout_paths):
+    """`sweep.find_dead_rooted` with `checkout_paths`. A tree that has no such parameter answers with
+    its machine-wide read, which a scoped case must refuse: the case fails on the scope, not on a
+    TypeError."""
+    if "checkout_paths" in inspect.signature(sweep.find_dead_rooted).parameters:
+        return sweep.find_dead_rooted(checkout_paths=checkout_paths)
+    return sweep.find_dead_rooted()
+
+
+def pids_of(decisions):
+    return {d["pid"] for d in decisions or []}
+
+
+def fake_result(root, removed=()):
+    """One repository's result with every key `sweep_repo` returns. `removed` are the worktree
+    paths this run removed: each names a `reap` decision, as a removal in the run would."""
+    return {"root": root, "refused": None, "branches": [], "listeners": [], "pruned": None,
+            "husks": [], "strays": [], "trash": [], "reaper": "none",
+            "worktrees": [{"path": path, "action": "reap", "reason": "removable"}
+                          for path in removed]}
+
+
+def sweep_over_fixture(fx, session_end, removed=(), before=None):
+    """One `sweep._sweep_roots` run over the fixture machine, the way `main` calls it for the
+    SessionEnd hook (`session_end`) or the daily job (not `session_end`). `before`, when given, is
+    called first, inside the same stubs, to read the scope the case starts from; its value comes
+    back as `before`. Returns what the run read and signalled."""
+    seen = {"loose": 0, "sim": 0, "temp": 0, "before": None}
+    real_loose = sweep.find_loose_processes
+
+    def loose():
+        seen["loose"] += 1
+        return real_loose()
+
+    def sim(confirm, record_path=None):
+        seen["sim"] += 1
+        return []
+
+    def temp(confirm):
+        seen["temp"] += 1
+        return 0
+
+    args = argparse.Namespace(confirm=True, attended=False, session_end=session_end)
+    log = os.path.join(fx["base"], "restore.log")
+    env = {"HOME": fx["base"], "USERPROFILE": fx["base"],
+           "JANITOR_RUN_LOG": os.path.join(fx["base"], "run.log")}
+    with fake_process_table(fx["rows"]) as table, contextlib.ExitStack() as stack:
+        stack.enter_context(mock.patch.dict(os.environ, env))
+        stack.enter_context(mock.patch.object(
+            sweep, "sweep_repo", lambda root, *a, **k: fake_result(root, removed)))
+        stack.enter_context(mock.patch.object(sweep, "find_loose_processes", loose))
+        stack.enter_context(mock.patch.object(sweep, "sim_tier", sim))
+        stack.enter_context(mock.patch.object(sweep, "temp_tier", temp))
+        stack.enter_context(mock.patch.object(sweep, "find_swept_listeners", lambda paths: []))
+        stack.enter_context(mock.patch.object(sweep, "print_grace_period_report",
+                                              lambda *a, **k: None))
+        if before is not None:
+            seen["before"] = before()
+            table.reset()
+        with contextlib.redirect_stdout(io.StringIO()):
+            seen["code"] = sweep._sweep_roots(args, [fx["proj"]], log, "full")
+        seen["signals"] = list(table.signals)
+        seen["kills"] = list(table.kills)
+        seen["pid_reads"] = table.pid_reads
+    return seen
+
+
+class SessionEndScopeTests(unittest.TestCase):
+    """`sweep._sweep_roots` for the SessionEnd run. The daily run (no flag) on the same fixture is
+    the control: the machine-wide sweep, which signals another repository's orphan."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.fx = build_scope_fixture("session-end-run")
+
+    def test_the_session_end_run_signals_the_orphan_under_its_primary_checkout(self):
+        seen = sweep_over_fixture(self.fx, session_end=True)
+        self.assertIn(SCOPE_PIDS["primary"], seen["signals"],
+                      "the orphan under this repository's primary checkout was not signalled")
+
+    def test_the_session_end_run_signals_the_orphan_under_a_worktree_it_removed(self):
+        """The worktree is outside the primary checkout, so only the run's own worktree paths can
+        keep its orphan."""
+        seen = sweep_over_fixture(self.fx, session_end=True, removed=[self.fx["wt_gone"]])
+        self.assertIn(SCOPE_PIDS["removed"], seen["signals"],
+                      "the orphan under a worktree this run removed was not signalled")
+
+    def test_the_session_end_run_leaves_another_repos_orphan_alone(self):
+        seen = sweep_over_fixture(self.fx, session_end=True,
+                                  before=lambda: sweep.find_dead_rooted())
+        self.assertIn(SCOPE_PIDS["other"], pids_of(seen["before"]),
+                      "precondition: the machine-wide read did not see the other repository's "
+                      "orphan, so this case proves nothing")
+        self.assertNotIn(SCOPE_PIDS["other"], seen["signals"],
+                         "the session-end run signalled another repository's orphan")
+
+    def test_the_session_end_run_leaves_an_orphan_whose_project_ancestor_is_its_parent_alone(self):
+        seen = sweep_over_fixture(self.fx, session_end=True,
+                                  before=lambda: sweep.find_dead_rooted())
+        self.assertIn(SCOPE_PIDS["ancestor"], pids_of(seen["before"]),
+                      "precondition: the machine-wide read did not see the parent-ancestor orphan")
+        self.assertNotIn(SCOPE_PIDS["ancestor"], seen["signals"],
+                         "the session-end run signalled an orphan that sits outside its checkout")
+
+    def test_the_session_end_run_scans_no_loose_processes(self):
+        seen = sweep_over_fixture(self.fx, session_end=True)
+        self.assertEqual(seen["loose"], 0,
+                         "the session-end run scanned loose processes %d time(s)" % seen["loose"])
+
+    def test_the_session_end_run_reads_the_machine_pid_list_once(self):
+        """Cost: one machine pid-list read per session end (the dead-rooted read). The old run
+        reads it twice, once more for the loose-process scan."""
+        seen = sweep_over_fixture(self.fx, session_end=True)
+        self.assertEqual(seen["pid_reads"], 1,
+                         "the session-end run read the machine pid list %d times" % seen["pid_reads"])
+
+    def test_the_session_end_run_still_runs_the_simulator_and_temp_tiers(self):
+        seen = sweep_over_fixture(self.fx, session_end=True)
+        self.assertEqual(seen["sim"], 1, "the session-end run did not run the simulator tier")
+        self.assertEqual(seen["temp"], 1, "the session-end run did not run the temp-folder tier")
+
+    def test_the_daily_run_still_signals_another_repos_orphan(self):
+        """Control: without the flag the run is machine-wide, as the daily job is."""
+        seen = sweep_over_fixture(self.fx, session_end=False)
+        self.assertIn(SCOPE_PIDS["other"], seen["signals"])
+
+    def test_the_daily_run_still_scans_loose_processes_and_reads_the_pid_list_twice(self):
+        """Control: the daily run keeps the dead-rooted read and the loose-process scan."""
+        seen = sweep_over_fixture(self.fx, session_end=False)
+        self.assertEqual(seen["loose"], 1)
+        self.assertEqual(seen["pid_reads"], 2)
+
+    def test_main_accepts_the_session_end_flag_in_full_mode(self):
+        """Flag parsing only. Old code rejects the flag at argparse, which is the one red a
+        main-level case can give; the scope cases above are the behavioural reds."""
+        seen = {}
+
+        def fake_roots(args, roots, restore_log_path, mode):
+            seen.update(session_end=getattr(args, "session_end", None), mode=mode, roots=roots)
+            return 0
+
+        argv = ["--confirm", "--session-end", "--restore-log",
+                os.path.join(self.fx["base"], "restore.log"), self.fx["proj"]]
+        with mock.patch.object(sweep, "_sweep_roots", fake_roots), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            try:
+                code = sweep.main(argv)
+            except SystemExit as exit_:
+                code = None
+                refused = exit_.code
+        if code is None:
+            self.fail("sweep.main rejected --session-end (exit %r), so the SessionEnd run cannot "
+                      "be scoped" % (refused,))
+        self.assertEqual(code, 0)
+        self.assertEqual(seen["mode"], "full", "--session-end changed the mode to %r" % seen["mode"])
+        self.assertIs(seen["session_end"], True)
+
+
+class DeadRootedCheckoutScopeTests(unittest.TestCase):
+    """`sweep.find_dead_rooted(checkout_paths=...)`. A candidate is kept when its MISSING SCRIPT
+    PATH sits under one of the checkout paths (`_matching_checkout`), never when its project
+    ancestor (the `home` field) does: `_project_ancestor` accepts a folder that carries `.claude`,
+    so a home can be a parent of the checkout. Every case runs on the fake process table."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.fx = build_scope_fixture("dead-rooted-scope")
+
+    def read(self, checkout_paths, rows=None):
+        with fake_process_table(self.fx["rows"] if rows is None else rows):
+            return pids_of(scoped_dead_rooted(checkout_paths))
+
+    def machine_wide(self, rows=None):
+        with fake_process_table(self.fx["rows"] if rows is None else rows):
+            return pids_of(sweep.find_dead_rooted())
+
+    def test_a_checkout_keeps_the_orphan_under_it(self):
+        found = self.read([self.fx["proj"]])
+        self.assertIn(SCOPE_PIDS["primary"], found)
+
+    def test_a_checkout_refuses_another_repos_orphan(self):
+        self.assertIn(SCOPE_PIDS["other"], self.machine_wide(),
+                      "precondition: the machine-wide read did not see the other repository's orphan")
+        self.assertNotIn(SCOPE_PIDS["other"], self.read([self.fx["proj"]]))
+
+    def test_a_checkout_refuses_an_orphan_whose_project_ancestor_is_its_parent(self):
+        self.assertIn(SCOPE_PIDS["ancestor"], self.machine_wide(),
+                      "precondition: the machine-wide read did not see the parent-ancestor orphan")
+        self.assertNotIn(SCOPE_PIDS["ancestor"], self.read([self.fx["proj"]]))
+
+    def test_a_checkout_refuses_a_folder_that_only_starts_with_its_name(self):
+        self.assertIn(SCOPE_PIDS["sibling"], self.machine_wide(),
+                      "precondition: the machine-wide read did not see the sibling-folder orphan")
+        self.assertNotIn(SCOPE_PIDS["sibling"], self.read([self.fx["proj"]]))
+
+    def test_a_removed_worktree_path_keeps_its_orphan(self):
+        found = self.read([self.fx["proj"], self.fx["wt_gone"]])
+        self.assertIn(SCOPE_PIDS["removed"], found)
+
+    def test_an_empty_checkout_list_keeps_nothing(self):
+        """An empty list is a scope with no checkouts, not the machine-wide read."""
+        self.assertIn(SCOPE_PIDS["other"], self.machine_wide(),
+                      "precondition: the machine-wide read did not see the other repository's orphan")
+        self.assertEqual(self.read([]), set())
+
+    def test_none_is_the_machine_wide_read(self):
+        found = self.read(None)
+        self.assertIn(SCOPE_PIDS["primary"], found)
+        self.assertIn(SCOPE_PIDS["other"], found)
+
+    def test_a_full_size_machine_keeps_exactly_the_scoped_orphans(self):
+        """Fixture at full size: 150 orphans under another repository and 50 under this one, plus the
+        fixture's own rows. The scope keeps the 50 and the primary's own orphan."""
+        rows = dict(self.fx["rows"])
+        expected = {SCOPE_PIDS["primary"]}
+        for n in range(50):
+            pid = 910000 + n
+            rows[pid] = "sh " + os.path.join(self.fx["proj"], "tools", "p%d" % n, "serve.sh")
+            expected.add(pid)
+        for n in range(150):
+            rows[920000 + n] = "sh " + os.path.join(self.fx["other"], "tools", "o%d" % n, "serve.sh")
+        found = self.read([self.fx["proj"]], rows=rows)
+        self.assertEqual(found, expected, "scoped read returned %d orphans, expected %d; the extra "
+                         "ones are another repository's" % (len(found), len(expected)))
+
+    def test_a_checkout_reached_through_a_symlink_keeps_its_orphan(self):
+        """macOS shows /var as /private/var: the checkout's spelling and the script's spelling can
+        name one folder through a link. Both are realpath'd before the match."""
+        if os.name == "nt":
+            self.skipTest("a folder symlink needs a privilege Windows cases do not have")
+        base = os.path.join(ROOT, "scope-symlink-keep")
+        real = os.path.join(base, "real")
+        os.makedirs(os.path.join(base, ".claude"))
+        make_repo(real, {"f.txt": "x\n"})
+        link = os.path.join(base, "link")
+        os.symlink(real, link)
+        rows = {900201: "sh " + os.path.join(real, "tools", "serve.sh")}
+        self.assertIn(900201, pids_of_rows_machine_wide(rows),
+                      "precondition: the machine-wide read did not see the orphan")
+        self.assertIn(900201, self.read([link], rows=rows))
+
+    def test_a_symlinked_checkout_refuses_a_folder_beside_it(self):
+        if os.name == "nt":
+            self.skipTest("a folder symlink needs a privilege Windows cases do not have")
+        base = os.path.join(ROOT, "scope-symlink-refuse")
+        real = os.path.join(base, "real")
+        os.makedirs(os.path.join(base, ".claude"))
+        make_repo(real, {"f.txt": "x\n"})
+        link = os.path.join(base, "link")
+        os.symlink(real, link)
+        rows = {900301: "sh " + os.path.join(base, "link-beside", "tools", "serve.sh")}
+        self.assertIn(900301, pids_of_rows_machine_wide(rows),
+                      "precondition: the machine-wide read did not see the beside-link orphan")
+        self.assertNotIn(900301, self.read([link], rows=rows))
+
+    def test_a_case_folded_spelling_keeps_its_orphan_where_case_does_not_matter(self):
+        """Case folding is simulated on every platform by making normcase lower-case, the way a
+        case-blind file system folds it. The real Windows spelling case is the next arm."""
+        rows = {900401: "sh " + os.path.join(self.fx["base"], "PROJ", "tools", "serve.sh"),
+                900402: "sh " + os.path.join(self.fx["base"], "PROJ-SIBLING", "tools", "serve.sh")}
+        with mock.patch.object(os.path, "normcase", lambda p: p.lower()):
+            self.assertIn(900401, pids_of_rows_machine_wide(rows),
+                          "precondition: the machine-wide read did not see the case-variant orphan")
+            self.assertIn(900401, self.read([self.fx["proj"]], rows=rows))
+
+    def test_a_case_folded_checkout_refuses_a_case_variant_sibling(self):
+        rows = {900402: "sh " + os.path.join(self.fx["base"], "PROJ-SIBLING", "tools", "serve.sh")}
+        with mock.patch.object(os.path, "normcase", lambda p: p.lower()):
+            self.assertIn(900402, pids_of_rows_machine_wide(rows),
+                          "precondition: the machine-wide read did not see the case-variant sibling")
+            self.assertNotIn(900402, self.read([self.fx["proj"]], rows=rows))
+
+    @unittest.skipUnless(os.name == "nt", "Windows spellings: NTFS folds case and accepts / for \\")
+    def test_on_windows_a_spelling_that_differs_by_case_and_separator_keeps_its_orphan(self):
+        spelled = self.fx["proj"].upper().replace("\\", "/") + "/tools/serve.sh"
+        rows = {900501: "sh " + spelled}
+        self.assertIn(900501, pids_of_rows_machine_wide(rows))
+        self.assertIn(900501, self.read([self.fx["proj"]], rows=rows))
+
+
+def pids_of_rows_machine_wide(rows):
+    with fake_process_table(rows):
+        return pids_of(sweep.find_dead_rooted())
 
 
 class PrimaryCheckoutExclusionTests(unittest.TestCase):
