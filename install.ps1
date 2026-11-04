@@ -286,7 +286,7 @@ put() {
   return 1
 }
 # land_guard_set SRC DEST: the guard files, as one set (owner ruling 2026-10-15, install-set). Step 1
-# writes every guard file, stamped with this run's id, and shared_names.py, git_reads.py, question_form.py and precompact_handoff.py, which the guard imports,
+# writes every guard file, stamped with this run's id, and shared_names.py, git_reads.py, question_form.py, own_session.py and precompact_handoff.py, which the guard imports,
 # into DEST/guard.d/<id>/, where no guard reads it
 # yet. Step 2 replaces DEST/guard.py, the one landing that switches: a stamped guard.py loads
 # guard.d/<its id>/. Step 3 lands the flat guard_*.py. The folder of the set before this one stays;
@@ -295,7 +295,7 @@ land_guard_set() {
   gdir="`$2/guard.d/`$id"
   prev=`$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "`$2/guard.py" 2>/dev/null | head -n1)
   mkdir -p "`$gdir" || { failed=1; return 1; }
-  for gf in "`$1"/guard.py "`$1"/guard_*.py "`$1"/shared_names.py "`$1"/git_reads.py "`$1"/question_form.py "`$1"/precompact_handoff.py; do
+  for gf in "`$1"/guard.py "`$1"/guard_*.py "`$1"/shared_names.py "`$1"/git_reads.py "`$1"/question_form.py "`$1"/own_session.py "`$1"/precompact_handoff.py; do
     [ -f "`$gf" ] || continue
     put "`$gf" "`$gdir/`$(basename "`$gf")" || { rm -rf "`$gdir"; return 1; }
   done
@@ -747,8 +747,8 @@ function Test-LinksWork([string]$AnySrc) {
 function Install-GuardSet([string]$SrcDir, [string]$DestDir) {
     $names = @(Get-ChildItem -LiteralPath $SrcDir -File -ErrorAction SilentlyContinue | Where-Object { Test-StampTarget $_.Name })
     if ($names.Count -eq 0 -or (Test-LinksWork $names[0].FullName)) { return }
-    # shared_names.py, git_reads.py, question_form.py and precompact_handoff.py, which the guard imports, ride in the set unstamped (no stamp target).
-    foreach ($shared in 'shared_names.py', 'git_reads.py', 'question_form.py', 'precompact_handoff.py') {
+    # shared_names.py, git_reads.py, question_form.py, own_session.py and precompact_handoff.py, which the guard imports, ride in the set unstamped (no stamp target).
+    foreach ($shared in 'shared_names.py', 'git_reads.py', 'question_form.py', 'own_session.py', 'precompact_handoff.py') {
         $names += @(Get-ChildItem -LiteralPath $SrcDir -File -Filter $shared -ErrorAction SilentlyContinue)
     }
     $script:GuardSetMode = $true
@@ -981,13 +981,29 @@ if ($item -and $item.LinkType -eq 'SymbolicLink' -and $item.Target -eq $SrcJson)
     Exit-Install $(if ($StillFailed.Count -gt 0) { 1 } else { 0 })
 }
 
-# A real file here: on the first local install ever, it is a person's own settings.json,
-# backed up. After that, it is this same installer's own earlier copy, from a
-# no-symlink-rights machine where the symlink attempt below fell back to Copy-Item:
-# replace it, no backup (D: copy-mode-overwrites-no-backup).
-if ($item -and -not $item.LinkType -and $FirstLocalRun) {
-    $bak = "$TargetJson.bak.$(Get-Date -Format yyyyMMddHHmmss)"
-    Copy-Item $TargetJson $bak
+# A real file here is backed up before Install-File replaces it, whether it is a person's own
+# settings.json or this installer's earlier copy (a no-symlink-rights machine). On the first local
+# run, with no settings.json.orig yet, the backup is settings.json.orig: kept for good, never
+# pruned. Any other backup is settings.json.bak.<time>.<pid>, and only the newest of those stays;
+# a no-pid settings.json.bak.<time> from an older installer stays too. The backup is a copy, not a
+# move, so settings.json is never absent during the swap. If the copy fails, nothing is replaced.
+# This is the one exception to D: copy-mode-overwrites-no-backup.
+if ($item -and -not $item.LinkType) {
+    $keep = $false
+    $bak  = "$TargetJson.bak.$(Get-Date -Format yyyyMMddHHmmss).$PID"
+    if ($FirstLocalRun -and -not (Test-Path -LiteralPath "$TargetJson.orig")) { $keep = $true; $bak = "$TargetJson.orig" }
+    try { Copy-Item -LiteralPath $TargetJson -Destination $bak -ErrorAction Stop }
+    catch {
+        Log "ERROR: cannot copy $TargetJson to ${bak}: $($_.Exception.Message); nothing replaced"
+        Exit-Install 1
+    }
+    if (-not $keep) {
+        # Match on Name, not a -Filter wildcard: in PS 5.1 `.*.*` can match an empty part, which would prune the no-pid backups.
+        foreach ($old in @(Get-ChildItem -LiteralPath (Split-Path $TargetJson -Parent) -Force | Where-Object { $_.Name -match '^settings\.json\.bak\.\d{14}\.\d+$' -and $_.Name -ne (Split-Path $bak -Leaf) })) {
+            try { Remove-Item -LiteralPath $old.FullName -Force -ErrorAction Stop }
+            catch { Log "could not remove the older backup $($old.FullName) ($($_.Exception.Message)); left behind" }
+        }
+    }
     Log "existing $TargetJson backed up to $bak; merge any keys you want (permissions, etc.) into $SrcJson"
 }
 

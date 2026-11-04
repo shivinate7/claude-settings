@@ -12,7 +12,8 @@ Also asserts a zizmor pin, `claude-settings/actions/zizmor@<sha>`, is read with 
 actions/zizmor/run.sh, one line per action, and that a workflow pinning both actions at one commit keeps both lines.
 Also asserts the installed copy: install.sh run into a temp HOME, in cloud (copy) mode and in local (symlink) mode, lands
 bin/ste-changed where its own folder holds no actions/. The command still finds the claude-settings checkout the global
-CLAUDE.md names, reads the pin check from it, and with no checkout prints one line, never a traceback."""
+CLAUDE.md names, reads the pin check from it, and with no checkout prints one line, never a traceback.
+Also asserts the tree-cites input: off by default, passed to the step as TREE_CITES, and on, the step checks the whole tree."""
 import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -34,7 +35,7 @@ BASH = "/bin/bash" if os.path.exists("/bin/bash") else (
 LONG = " ".join(["word"] * 40) + " end."
 BASE_FILES = {"a.md": "# T\n\nShort line.\n"}
 STEP_ENV = ("EVENT_NAME", "BASE_REF", "DEFAULT_BRANCH", "REF_NAME", "SCOPE", "FAIL", "PATHS_GLOB",
-            "EXCLUDE", "CHANGED_PATHS_GLOB", "DECISIONS_DIR", "STE_EXCLUDE_FILE")
+            "EXCLUDE", "CHANGED_PATHS_GLOB", "DECISIONS_DIR", "STE_EXCLUDE_FILE", "TREE_CITES")
 FINDING = re.compile(r"^\S.*:\d+: [A-Z]+\d+ ")
 
 # Test temp files (decision test-temp-standard): one run folder for this run, from the repo's one helper.
@@ -112,7 +113,7 @@ def run_step(d, work, env):
 def run(scope, fail="true", base=BASE_FILES, change=default_change, on_main=False, **over):
     """Build a bare remote, commit `base` on main, branch to topic (or stay on main when
     on_main), apply `change(work)`, then run the step script. `over` overrides env vars."""
-    with tempfile.TemporaryDirectory() as d:
+    with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:  # test-temp-standard: the run folder, never the system temp
         work = make_repo(d, base, change, on_main)
         env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main",
                    REF_NAME="topic", SCOPE=scope, FAIL=fail, PATHS_GLOB="**/*.md", EXCLUDE="",
@@ -142,7 +143,7 @@ def run_pair(change, base=BASE_FILES, exclude=EXCLUDE_TEXT, command_env=None, su
     files = dict(base)
     if exclude is not None:
         files[".ste-lint-exclude"] = exclude
-    with tempfile.TemporaryDirectory() as d:
+    with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:  # test-temp-standard: the run folder, never the system temp
         work = make_repo(d, files, change)
         env = {k: v for k, v in os.environ.items() if k not in STEP_ENV}
         env.update(EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main",
@@ -817,4 +818,47 @@ else:
           r["install_rc"] == 0 and r["is_link"]
           and r["real"] == os.path.join(r["live"], "bin", "ste-changed"), shown(r) + "\nlinks to " + r["real"])
     check("installed copy, local: a drifted pin exits 3 with the pin message", drifted_from_checkout(r), shown(r))
+# The tree-cites input (decision stale-cites-at-merge): off by default. When "true", the step runs `--tree` in both
+# scopes, so a stale cite in any tracked file fails the step. The cite sits in a file this PR does not touch.
+STALE_TREE_BASE = {"a.md": "# T\n\nShort line.\n", "docs/old.md": "# Old\n\n- see `hooks/gone.py`\n",
+                   "hooks/keep.py": "X = 1\n"}  # hooks/ is a tracked top folder, so hooks/gone.py is a dead path
+
+
+def edit_a(work):
+    write(work, "a.md", "# T\n\nShort line, edited.\n", "w")
+    git(work, "commit", "-qam", "edit")
+
+
+def action_yml():
+    with open(os.path.join(HERE, "action.yml"), encoding="utf-8") as f:
+        return f.read()
+
+
+def tree_cites_default():
+    """The default of the tree-cites input, read from action.yml. None when the input is not declared."""
+    head = action_yml().split("\n  tree-cites:\n", 1)
+    if len(head) < 2:
+        return None
+    block = re.split(r"\n  [\w-]+:\n|\nruns:", head[1], 1)[0]
+    found = re.search(r'default: "([^"]*)"', block)
+    return found.group(1) if found else None
+
+
+check('tree-cites: the input is declared with default "false"', tree_cites_default() == "false",
+      "default: %r" % tree_cites_default())
+check("tree-cites: the step passes the input to run.sh as TREE_CITES",
+      "TREE_CITES: ${{ inputs.tree-cites }}" in action_yml(), "")
+rc, out = run("changed", base=STALE_TREE_BASE, change=edit_a, TREE_CITES="false")
+check("tree-cites off: a stale tree passes the step and no tree finding prints",
+      rc == 0 and "STALE003" not in out, out)
+rc, out = run("changed", base=STALE_TREE_BASE, change=edit_a, TREE_CITES="true")
+check("tree-cites on: the step fails on the stale cite in the untouched file",
+      rc == 1 and "docs/old.md:3: STALE003 " in out, out)
+rc, out = run("changed", "false", base=STALE_TREE_BASE, change=edit_a, TREE_CITES="true")
+check("tree-cites on, fail=false: the finding prints and the step exits 0",
+      rc == 0 and "docs/old.md:3: STALE003 " in out, out)
+rc, out = run("all", base=STALE_TREE_BASE, change=edit_a, TREE_CITES="true")
+check("tree-cites on, scope all: the step checks the whole tree",
+      rc == 1 and "docs/old.md:3: STALE003 " in out, out)
+
 sys.exit(1 if failed else 0)
