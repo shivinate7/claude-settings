@@ -1144,10 +1144,11 @@ def case_widening_refusal_names_the_option():
           ok, cause)
 
 
-def case_widening_fair_label_is_not_refused():
-    # Case 5: a fair option whose label only names a repo, and a marked option that is not the pick. The model allows, and
+def case_widening_fair_option_passes_code_path():
+    # Case 5: a fair option whose label only names a repo, and a marked option that is not the pick. The fake model allows, and
     # the guard path (question_form.page_item_hit, the filter guard.py reads) does not refuse the write either. The scope
     # check proves the mark is read: the same marked option, picked, is refused as uniform-pick.
+    # The model's false-flag rate on real items is unmeasured, since the model is faked.
     import question_form  # the one form check (hooks/question_form.py)
     rule, key = widening_rule(), widens_key()
     mark_key = key or WIDENS_SENTINEL
@@ -1157,13 +1158,13 @@ def case_widening_fair_label_is_not_refused():
               "lose": "The shared tool takes a second form.", mark_key: True}
     item = good_page_item(PAGE_MARK, pick="a", options=[fair, marked])
     got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": item})
-    check("fair label fixture: the item passes question_form.item_hit with the pick on the fair option",
+    check("fair option fixture: the item passes question_form.item_hit with the pick on the fair option",
           got == ("", ""), got)
     tool_input = {"action": "set", "url": PAGE_URL, "collection": PAGE_ITEMS, "doc_id": "p1", "data": item}
     hit, _writes = question_form.page_item_hit(tool_input, PAGE_REPO)
-    check("fair label guard path: question_form.page_item_hit does not refuse it", hit == ("", ""), hit)
+    check("fair option code path: question_form.page_item_hit does not refuse it", hit == ("", ""), hit)
     r = run_hook(page_input("set", item), answer=ALLOW)
-    check("fair label: the judge allows it, one model call and no deny", len(r.calls) == 1 and r.code == 0
+    check("fair option code path: one judge call and no deny from call_judge", len(r.calls) == 1 and r.code == 0
           and r.out == "" and "\tdeny\t" not in r.log, detail(r))
     picked = dict(item, pick="b")
     got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": picked})
@@ -1172,7 +1173,8 @@ def case_widening_fair_label_is_not_refused():
           if not key else got)
     prompt = r.calls[0]["prompt"] if r.calls else ""
     ok, cause = rule_once(prompt, rule)
-    check("fair label: the judge's prompt holds WIDENING_RULE exactly once, after the question-format prompt", ok, cause)
+    check("fair option code path: the judge's prompt holds WIDENING_RULE exactly once, after the question-format prompt",
+          ok, cause)
 
 
 def case_widening_rule_names_the_mark():
@@ -1532,7 +1534,7 @@ def main():
                  case_picked_choice_with_note_lacks_rule, case_none_choice_with_note_holds_rule_once,
                  case_widening_set_holds_rule_once, case_widening_batch_holds_rule_once,
                  case_widening_absent_without_options, case_widening_refusal_names_the_option,
-                 case_widening_fair_label_is_not_refused, case_widening_rule_names_the_mark,
+                 case_widening_fair_option_passes_code_path, case_widening_rule_names_the_mark,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
