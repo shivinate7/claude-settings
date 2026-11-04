@@ -787,11 +787,11 @@ PUSH_REASON = (
 )
 PUSH_MAIN_REASON = (
     "Rule (Git): this push writes the default branch, main or master. Main moves only by pull request "
-    "(rule git-main-only-by-pr). The click in this prompt is the grant."
+    "(rule git-main-only-by-pr, decision plain-push-asks). The click in this prompt is the grant."
 )
 PUSH_STRAY_REASON = (
     "Rule (Git): this push writes a branch name other than the one this branch tracks (its upstream), "
-    "so it may land on a stray branch. Check the destination (rule shared-trees-confirm-before-write). "
+    "so it may land on a stray branch. Check the destination (decision plain-push-asks). "
     "The click in this prompt is the grant."
 )
 PUSH_ASK_REASON = (
