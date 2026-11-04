@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-10-21: refuse the hand-made lane worktree fully, and record which layer refused isolation. A lane tree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool. `hooks/guard.py` rule `hand-made-worktree` refuses the workaround.
+Owner, 2026-10-21: refuse the hand-made worktree fully, and record which layer refused isolation. A worktree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool. `hooks/guard.py` rule `hand-made-worktree` refuses the workaround.
 
 - **The act.** A shell call (Bash or PowerShell) that holds a real `git worktree add`, read with `git_calls`, whose new tree resolves outside `<primary>/.claude/worktrees/`. `<primary>` is the primary checkout of the repo the call runs in: its last `cd`, its `-C`, or the payload cwd. A relative path resolves against that folder. A Windows path counts.
 - **Passes.** A new tree under `.claude/worktrees/`. A repo under the temp folder, such as a test fixture: the rule judges the repo, not the target, so a real repo that adds a tree into a scratchpad is refused. Every other `worktree` subcommand, `--help`, and text that only mentions the command. A non-git folder or an unreadable primary is unknown, and allows (`verification-report-unknown-reads`).

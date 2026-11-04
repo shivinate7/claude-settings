@@ -51,12 +51,15 @@ FIXED = ("House rules", "Deliver")
 KIND_HEADER = "Designer kind:"
 DESIGNER_HEADER = "Designer:"
 COUNT_HEADER = "Blind designers:"
-KIND_LINE = re.compile(r"^" + re.escape(KIND_HEADER) + r"\s*(blind|informed|directed)\b", re.I)
+# `\s*:` lets a space come before the colon, `\**` lets bold close after it: `**Designer kind:** blind`.
+KIND_LINE = re.compile(r"^designer\s+kind\s*:\**\s*(blind|informed|directed)\b", re.I)
 BLIND_KIND_ONLY = re.compile(r"^" + re.escape(KIND_HEADER) + r"\s*blind\s*$", re.I)
+# Leading markdown marks a model writes before a header: list dashes and stars, heading hashes, quote marks.
+LEADING_MARKS = re.compile(r"^[\s>*#-]+")
 LANE_LINE = re.compile(r"^" + re.escape(DESIGNER_HEADER) + r"\s*[A-Za-z0-9][\w-]*-blind-[1-9][0-9]*\s*$")
 BLIND_COUNT = re.compile(r"^" + re.escape(COUNT_HEADER) + r"\s*(.*?)\s*$", re.I | re.M)
 # The kind header before the rename. kind_of never reads it; the spawn hook refuses it and names KIND_HEADER.
-OLD_KIND_LINE = re.compile(r"^lane\s+kind:", re.I)
+OLD_KIND_LINE = re.compile(r"^lane\s+kind\s*:", re.I)
 OWNER_NONE = re.compile(r"^none,\s*owner:\s*\"[^\"]*\w[^\"]*\"$", re.I)
 HEADING = re.compile(r"^##\s+(.*?)\s*$")
 PLACEHOLDER = re.compile(r"<[A-Za-z][^<>\n]{2,}>")
@@ -146,7 +149,7 @@ def kind_of(text):
     a preamble, so a preamble hides no kind; brief_faults still refuses a blind brief whose first line
     is not the kind."""
     for line in text.splitlines():
-        m = KIND_LINE.match(line.strip())
+        m = KIND_LINE.match(LEADING_MARKS.sub("", line))
         if m:
             return m.group(1).lower()
     return None
@@ -290,7 +293,7 @@ def brief_faults(text, current=(), template=None, devices=None):
     if not lines or not KIND_LINE.match(lines[0]) or kind_of(text) != "blind":
         faults.append(("kind", "first line", lines[0] if lines else ""))
     if not any(LANE_LINE.match(line) for line in lines):
-        faults.append(("lane", "header", "no %s line" % DESIGNER_HEADER.rstrip(":")))
+        faults.append(("designer", "header", "no %s line" % DESIGNER_HEADER.rstrip(":")))
     for index, line in enumerate(lines):
         if KIND_LINE.match(line):
             # The kind line holds the kind and nothing else, and only once: text after it hides a value.
@@ -371,7 +374,7 @@ def run_faults(texts, owner_none="", current=(), template=None, devices=None):
     if not texts:
         faults.append(("no-brief", "run", ""))
     elif blind == 0 and not owner_none.strip():
-        faults.append(("no-blind-lane", "run", "no blind designer, and no grant for none"))  # glossary-ok: the fault code is pinned by test_blind_brief
+        faults.append(("no-blind-designer", "run", "no blind designer, and no grant for none"))
     return faults
 
 
@@ -430,7 +433,7 @@ def hook(stdin):
         return
     kind = kind_of(prompt)
     if kind is None:
-        if any(OLD_KIND_LINE.match(line.strip()) for line in prompt.splitlines()):
+        if any(OLD_KIND_LINE.match(LEADING_MARKS.sub("", line)) for line in prompt.splitlines()):
             refuse(payload, payload["tool_name"], REFUSE_OLD_KIND, "old kind header")
         return
     cwd = payload.get("cwd")

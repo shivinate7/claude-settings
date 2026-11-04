@@ -2582,16 +2582,16 @@ def role_model_one(tool_input):
     return ROLE_NO_MODEL_REASON % ("" if row == ROLE_MODEL_RANK[0] else " (%s)" % row), ROLE_NO_MODEL_MATCH + role, False
 
 
-# THE MACHINE-LOAD BRAKE (decision machine-load-brake). A lane-start call reads the machine's load once. Memory in
+# THE MACHINE-LOAD BRAKE (decision machine-load-brake). A start call (a call that starts a lane or an agent) reads the machine's load once. Memory in
 # use is a share of this machine's memory; disk free on the home drive is in GB (2**30 bytes) against the drive's
 # size. Busy (memory over 85%, or disk free under the smaller of 10% of the disk and 15 GB) refuses a Workflow and an
 # explicit background Agent or Task call. An Agent or Task call passes at busy only when it leaves
 # run_in_background out or sets it false. (In the desktop harness a left-out call still runs in the background
-# and the field is not offered, so busy does not slow an Agent lane there.) Full (memory over 95%, disk free
-# under the smaller of 5% of the disk and 5 GB) refuses every lane. A reading that cannot be read counts as normal. Only an
+# and the field is not offered, so busy does not slow an Agent call there.) Full (memory over 95%, disk free
+# under the smaller of 5% of the disk and 5 GB) refuses every start call. A reading that cannot be read counts as normal. Only an
 # agent's shell or file write also reads load (RUNNING_AGENT_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
 # "true") skips the brake and reads nothing, because the brake guards the owner's own machine.
-LANE_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
+START_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
 LOAD_BUSY_MEMORY = 85.0
 LOAD_FULL_MEMORY = 95.0
 LOAD_BUSY_DISK_SHARE, LOAD_BUSY_DISK_GB = 10.0, 15.0   # busy: free under the smaller of the two
@@ -2665,9 +2665,9 @@ def _load_value(reading: dict, key: str):
 
 
 def load_hit(tool: str, tool_input) -> tuple:
-    """(rule reason, matched) when the machine's load refuses this lane-start call, else ("", ""). The one
+    """(rule reason, matched) when the machine's load refuses this start call, else ("", ""). The one
     read of the call: a failed read or an unread value counts as normal. A cloud session is never braked."""
-    if tool not in LANE_TOOLS or is_cloud():
+    if tool not in START_TOOLS or is_cloud():
         return "", ""
     try:
         reading = read_load()
@@ -2714,7 +2714,7 @@ LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this agent now: end you
 
 def running_agent_hit(payload, tool: str) -> tuple:
     """(rule reason, matched) when an agent's disk-filling call meets a full machine, else ("", ""). One read
-    per such call; none for the orchestrator, and none for a lane-start call, which load_hit reads."""
+    per such call; none for the orchestrator, and none for a start call, which load_hit reads."""
     agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
     if is_cloud() or tool not in RUNNING_AGENT_TOOLS or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
         return "", ""
@@ -4343,7 +4343,7 @@ def judge(payload) -> None:
     if role_reason:
         refuse(tool, "deny", "agent-role-model", role_reason, role_matched)
 
-    # 9c. The machine-load brake: one read on a lane-start call, and one on an agent's shell or file write.
+    # 9c. The machine-load brake: one read on a start call, and one on an agent's shell or file write.
     # It runs before the Opus refusal, because a lifted refusal exits refuse() at once and would skip this deny.
     load_reason, load_matched = load_hit(tool, tool_input)
     if not load_reason:

@@ -44,7 +44,7 @@ exact has a gap.
 | `subject-unread` | verification-report-unknown-reads | "Report a read that could not run as unknown, never as clear or broken." | exact | exact | when git cannot answer, `git reset --hard` passes with one note; cite-by-id also logs this id for an unread record folder | - |
 | `pointer-head` | recovery-independent-of-state | "The rule refuses a command that moves HEAD off `main` in the pointer checkout." | stricter | exact | `git switch -C main origin/main` is refused, though HEAD stays on main | tool fix: pass -C and -B when the target branch is main |
 | `silent-write` | git-never-discard-output | "Never silence a git write's output. Discarded output hides failures from the reader." | looser | exact | `git branch -D x >/dev/null` and `git update-ref -d refs/heads/x >/dev/null` pass. The guard reads seven git subcommands (commit, push, merge, tag, rebase, cherry-pick, pull), a `fetch` with a `src:dst` refspec to a branch, `gh pr merge` and `make merge`; a bare `fetch` is a read. A silenced non-git command passes, as the rule allows (owner, item 177 a, 2026-11-03 22:31 CST: "Narrow the rule to git writes") | tool fix: read every git write that moves a ref, such as `branch -D` |
-| `hand-made-worktree` | lanes-start-in-tool-worktrees | "A lane tree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool." | exact | exact | `git worktree add ../x` is denied; `.claude/worktrees/x` passes | - |
+| `hand-made-worktree` | lanes-start-in-tool-worktrees | "A worktree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool." | exact | exact | `git worktree add ../x` is denied; `.claude/worktrees/x` passes | - |
 | `force-push` | stale-safe-force-push | "Any forced push whose destination is the default branch: ask" | exact | exact | `--force` is denied; a lease with --force-if-includes passes | - |
 | `rm-var-unguarded` | rm-on-a-variable-needs-a-guard | "refuses a recursive `rm` only in the shape Claude Code prompts on" | exact | exact | a recursive delete of `"$D"/*` is denied; `"$ROOT/dist"` passes | rule rewrite: the CLAUDE.md line still says "quoted-variable path"; say "a guarded variable path" |
 | `rm-after-cd` | shared-trees-delete-names-absolute-path | "A delete names its target as an absolute or quoted-variable path, never after a cd." | exact | exact | a cd, then a recursive delete of a relative folder, is denied | - |
@@ -78,10 +78,10 @@ Notes: the shared-tree gaps `git update-ref -d`, `git rm -rf .` and `git read-tr
 | `cite-by-id` | git-cite-by-id | "Ids, not paths. A path breaks when its file moves." | exact | exact | a commit message "see docs/decisions/foo.md" is denied | - |
 | `lane-by-slug` | lane-by-slug | "the guard refuses a session number that names a lane, such as `N20` or `(N16)`" | exact | exact | `N20` in a commit message is denied | - |
 | `draft-pr` | draft-until-reviewed | "refuses `gh pr create` without `--draft` or `-d`." | exact | exact | `gh pr create --fill` is denied | - |
-| `load-brake` | machine-load-brake | "a lane-start call reads the machine's load, and a busy or full machine refuses new lanes" | exact | exact | a busy machine refuses a background Agent | - |
+| `load-brake` | machine-load-brake | "a call that starts a lane or an agent reads the machine's load. A busy or full machine refuses new lanes and agents" | exact | exact | a busy machine refuses a background Agent | - |
 | `guard-crash` | guard-hooks-fail-closed | "a guard that times out or crashes does not ... except a missing guard module, which refuses" | exact | exact | a raise is allowed and logged; a missing module is denied | rule rewrite: the guard index line says only "allowed"; add the missing-module deny |
 
-Notes: create_session is not a lane-start tool for load-brake, so a lane session starts on a full machine; the decision names start_session only (owner question). `narrated-tail` logs as live-stream with no index line.
+Notes: create_session is not a start tool for load-brake, so a lane session starts on a full machine; the decision names start_session only (owner question). `narrated-tail` logs as live-stream with no index line.
 
 ## C. Agents, models, roles and worktrees
 
