@@ -38,9 +38,9 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
 - Silent: a bare push under `push.default=simple` with a mismatched upstream. Git refuses it
   itself.
 
-Cost: no new process or file. Per push, in the guard's own run: a literal destination reads
-nothing new; a refspec push such as `origin lane/foo` adds one `symbolic-ref`; a `HEAD` push or a
-bare push adds one `symbolic-ref` and one `config`. `record_push_cost_case` in
+Cost: no new process or file. The reads run per push, in the guard's own run. A literal
+destination reads nothing new. A refspec push such as `origin lane/foo` adds one `symbolic-ref`.
+A `HEAD` push or a bare push adds one `symbolic-ref` and one `config`. `record_push_cost_case` in
 `hooks/test_guard.py` proves the counts.
 
 ## The mistakes
