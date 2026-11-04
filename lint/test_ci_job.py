@@ -603,6 +603,22 @@ class LintTools(Job):
         self.git("add", ".")
         self.git("commit", "-qm", "change")
 
+    def run_with_stub_pipx(self, *steps):
+        """Runs one job under --lint with a stub pipx first on PATH. The stub writes its argv, one word a line, to a file.
+        Returns (rc, lines, out, argv): argv is None when pipx was never called."""
+        bin_dir = tempfile.mkdtemp(prefix="pipx_", dir=RUN_FOLDER)
+        argv_file = os.path.join(bin_dir, "argv.txt")
+        with open(os.path.join(bin_dir, "pipx"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("#!/bin/sh\nprintf '%%s\\n' \"$@\" > '%s'\n" % argv_file)
+        os.chmod(os.path.join(bin_dir, "pipx"), 0o755)
+        env = {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}
+        rc, lines, out = self.run_job(*steps, args=("--lint",), env=env)
+        argv = None
+        if os.path.exists(argv_file):
+            with open(argv_file, encoding="utf-8") as f:
+                argv = f.read().splitlines()
+        return rc, lines, out, argv
+
     @unittest.skipUnless(shutil.which("pipx"), "pipx is absent: code_check.py runs its pinned ruff through pipx")
     def test_an_f541_in_a_tracked_py_fails_the_code_check(self):
         self.lane({"a.py": 'print(f"no placeholders")\n'})
@@ -655,21 +671,13 @@ class LintTools(Job):
     def test_the_zizmor_action_under_lint_runs_with_no_base(self):
         # A literal uses: step, not checks_step(ZIZMOR): checks.yml's step has the run: form on this branch, and the
         # old run: path needs no base, so it could not show red here. The fixture has no origin/main, so no base resolves.
-        bin_dir = tempfile.mkdtemp(prefix="pipx_", dir=RUN_FOLDER)
-        argv_file = os.path.join(bin_dir, "argv.txt")
-        with open(os.path.join(bin_dir, "pipx"), "w", encoding="utf-8", newline="\n") as f:
-            f.write("#!/bin/sh\nprintf '%%s\\n' \"$@\" > '%s'\n" % argv_file)
-        os.chmod(os.path.join(bin_dir, "pipx"), 0o755)
-        env = {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}
         no_main = subprocess.run(["git", "-C", self.root, "rev-parse", "--verify", "-q", "origin/main"],
                                  env=ENV, capture_output=True)
         self.assertNotEqual(no_main.returncode, 0, "the fixture must have no origin/main, so no base resolves")
-        rc, lines, out = self.run_job(step(ZIZMOR, uses="$/actions/zizmor", **{"with": {"paths": ".github/ actions/"}}),
-                                      args=("--lint",), env=env)
+        rc, lines, out, argv = self.run_with_stub_pipx(
+            step(ZIZMOR, uses="$/actions/zizmor", **{"with": {"paths": ".github/ actions/"}}))
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
-        self.assertTrue(os.path.exists(argv_file), "pipx was never called, so the action did not run zizmor\n" + out)
-        with open(argv_file, encoding="utf-8") as f:
-            argv = f.read().splitlines()
+        self.assertIsNotNone(argv, "pipx was never called, so the action did not run zizmor\n" + out)
         self.assertEqual(argv[0], "run", out)
         self.assertEqual(argv[2:], [".github/", "actions/"], out)
 
