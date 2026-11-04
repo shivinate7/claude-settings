@@ -564,6 +564,8 @@ console.log('test/b.test.mjs');
 """
 LATER_IMPORTS = {"harness/tests-for.mjs": SELECTOR_IMPORTS_LISTS, "harness/lists.mjs": LISTS_MODULE}
 LATER_BOTH = {"harness/tests-for.mjs": SELECTOR_LISTS_BOTH}
+# A root file named node at HEAD. The select argv's `node` is a command PATH resolves, never this file.
+LATER_BARE_NODE = dict(LATER_IMPORTS, node="not a program\n")
 
 
 def select_fixture(name, selector=SELECTOR_LISTS, pr_deletes_selector=False, later=None):
@@ -1467,6 +1469,17 @@ class SelectTests(unittest.TestCase):
         notes = repr(row.get("notes"))
         self.assertIn("harness/tests-for.mjs", notes, "the row must name the selector it read from HEAD")
         self.assertNotIn("every changed suite runs", notes, "the row fell back to every changed suite")
+
+    def test_a_bare_command_name_is_never_served_from_head(self):
+        """A select argv part with no slash is a command PATH resolves. A root file named node at HEAD is not that
+        command: the run keeps `node`, each suite runs on its own file's mutants, and no note names node."""
+        row, runs, fixture = select_run("bare-node", selector=None, later=LATER_BARE_NODE)
+        self.assert_per_file_runs(row, runs, fixture)
+        notes = row.get("notes") or []
+        self.assertFalse([note for note in notes if re.search(r"\bnode\b", note)],
+                         "a note names the bare command node: %r" % notes)
+        self.assertTrue(any("harness/tests-for.mjs" in note for note in notes),
+                        "the note for the selector read from HEAD is missing: %r" % notes)
 
     def test_a_selector_at_the_pr_commit_wins_over_a_later_one_at_head(self):
         """Passes on the old code too: the commit's own selector is read first, so the later one at HEAD never runs.
