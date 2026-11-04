@@ -111,6 +111,17 @@ RED = [
     ("bare Basic credential", "Basic " + "abcdefghij" + "klmnopqrst", "abcdefghij" + "klmnopqrst"),
     ("csrftoken cookie value", "csrftoken=" + "a1b2c3d4" + "e5f6g7h8", "a1b2c3d4" + "e5f6g7h8"),
     ("sid cookie value", "sid=" + "a1b2c3d4" + "e5f6g7h8", "a1b2c3d4" + "e5f6g7h8"),
+    ("apiKey camelCase name", "apiKey: " + "abcd1234" + "efgh5678", "abcd1234" + "efgh5678"),
+    ("clientSecret camelCase name", "clientSecret: " + CLIENT_VALUE, CLIENT_VALUE),
+    ("apikey with no separator", "apikey=" + API_VALUE, API_VALUE),
+    ("authtoken with a colon", "authtoken: " + SESSION_VALUE, SESSION_VALUE),
+    ("SECRET_KEY_BASE assignment", "SECRET_KEY_BASE=" + "w8Kd2Lp9" + "Vx4Qz7Mn", "w8Kd2Lp9" + "Vx4Qz7Mn"),
+    ("API_KEY_V2 assignment", "API_KEY_V2=" + "Hk3Lm9Qp" + "Wz7Rt2Yc", "Hk3Lm9Qp" + "Wz7Rt2Yc"),
+    ("clientSecret as a JSON pair", '"clientSecret": "' + CLIENT_VALUE + '"', CLIENT_VALUE),
+    ("street with the suffix Park", "1400 Lakeshore Park", "1400 Lakeshore Park"),
+    ("street with the suffix Trail", "2500 Maple Trail", "2500 Maple Trail"),
+    ("street with the suffix Cir", "1200 Oak Cir", "1200 Oak Cir"),
+    ("street with the suffix Ter", "400 Pine Ter", "400 Pine Ter"),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
@@ -164,6 +175,12 @@ GREEN = [
     ("the word sid in prose", "sid is the session id"),
     ("a token budget label with a number", "token budget: 200000"),
     ("a KEY label with prose", "KEY: see the record"),
+    # Prose with a time or a number before a street word or a key word is no address and no credential name, so it passes.
+    ("a time and a street word in prose", "Meeting 13:44 CDT. Lane 2 is open"),
+    ("a time with PM and a street word in prose", "Due 5 PM. Way forward is clear"),
+    ("a number before the word Park in prose", "Phase 2 Park the lane"),
+    ("a key inside a longer word", "turnkey solution"),
+    ("a keyboard label with a number", "keyboard: 104 keys"),
 ]
 
 
