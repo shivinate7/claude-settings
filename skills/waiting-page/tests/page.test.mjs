@@ -2918,8 +2918,10 @@ test("the clipboard fallback note for Copy answers does not sit beside the read-
   await mustHave(page, "#copy", "Copy answers button");
   await page.click("#copy");
   await page.waitForFunction(() => !document.getElementById("copyBox").hidden, null, { timeout: 3000 }).catch(() => {});
-  const beside = await page.evaluate(() => document.getElementById("barStatus").parentElement === document.getElementById("copyBox").parentElement);
-  assert.equal(beside, false, "the clipboard note sits beside the read-only copy box, not in a hint row");
+  assert.equal(await page.evaluate(() => !document.getElementById("copyBox").hidden), true, "Copy answers did not show the read-only copy box");
+  const rows = await page.evaluate(() => { const s = document.getElementById("barStatus").getBoundingClientRect(), c = document.getElementById("copyBox").getBoundingClientRect(); return { status: [s.top, s.bottom], box: [c.top, c.bottom] }; });
+  const sameRow = rows.status[0] < rows.box[1] && rows.box[0] < rows.status[1];
+  assert.equal(sameRow, false, "the clipboard note shares a row with the read-only copy box: " + JSON.stringify(rows));
 });
 
 test("Undo counting with one ask not saved and the box empty: the hint says Send ask tries it again, not Add to list", async (t) => {
@@ -2944,6 +2946,104 @@ test("Undo counting with the box empty: the hint gives the counting words, with 
   assert.doesNotMatch(hint, /Add to list|once you type/, "the hint offers Add to list or says once you type, while Add is off and Send waits: " + JSON.stringify(hint));
   assert.match(hint, /Send turns on when the Undo count ends\./, "the hint is not the counting hint: " + JSON.stringify(hint));
 });
+
+// Storage refused: every write to the browser's storage throws, as in a window that blocks it. Set once the page has loaded.
+const refuseStorage = (page) => page.evaluate(() => { const no = () => { throw new Error("denied"); }; Storage.prototype.setItem = no; Storage.prototype.removeItem = no; });
+// Sends the asks, then presses Undo with its first delete held. The 8 s window passes while that delete waits, so it lands
+// after the window and the asks after it are late. Returns the page once the late line shows.
+async function lateUndo(t, texts) {
+  const page = await open(t, { hold: { delete: 0 } }); if (!page) return null;
+  for (const w of texts) await addToList(page, w);
+  await page.click(ASK.send);
+  await waitAskWrites(page, texts.length);
+  await sendDone(page);
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.click(ASK.undo);
+  await page.waitForFunction(() => window.__held >= 1);
+  await jump(page, 9000);
+  await page.evaluate(() => window.__release());
+  await waitAskDeletes(page, 1);
+  await lineHas(page, "Too late to undo");
+  return page;
+}
+
+test("the late line pins its words for one ask and for more than one", async (t) => {
+  const one = await lateUndo(t, ["Late ask one", "Late ask two"]); if (!one) return;
+  const oneLine = await lineWords(one);
+  const many = await lateUndo(t, ["Late ask three", "Late ask four", "Late ask five"]); if (!many) return;
+  const manyLine = await lineWords(many);
+  assert.equal(oneLine, "Too late to undo 1 ask. It stays sent.", "the one-ask late line is " + JSON.stringify(oneLine));
+  assert.equal(manyLine, "Too late to undo 2 asks. They stay sent.", "the plural late line is " + JSON.stringify(manyLine));
+});
+
+test("after the late line, focus is on the ask text box, as after an Undo that finishes", async (t) => {
+  const page = await lateUndo(t, ["Focus ask one", "Focus ask two"]); if (!page) return;
+  const focused = await page.evaluate(() => (document.activeElement && document.activeElement.id) || "");
+  assert.equal(focused, "askText", "after the late line focus is on " + JSON.stringify(focused) + ", not on the ask box");
+});
+
+test("while Undo's deletes run, the line says Taking back and the Undo control has the spent look, with no count", async (t) => {
+  const page = await open(t, { hold: { delete: 0 } }); if (!page) return;
+  for (const w of ["Taking ask one", "Taking ask two", "Taking ask three"]) await addToList(page, w);
+  await page.click(ASK.send);
+  await waitAskWrites(page, 3);
+  await sendDone(page);
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.click(ASK.undo);
+  await page.waitForFunction(() => window.__held >= 1); // the first delete waits at the hold, inside the window
+  await lineHas(page, "Taking back");
+  const line = await lineWords(page);
+  assert.match(line, /^Taking back 3 asks…/, "the line while Undo's deletes run is " + JSON.stringify(line));
+  const undo = await page.evaluate(() => { const b = document.getElementById("askUndo"); if (!b) return { gone: true }; return { gone: false, spent: b.classList.contains("spent"), visibility: getComputedStyle(b).visibility }; });
+  assert.ok(undo.gone || (undo.spent && undo.visibility === "hidden"), "Undo is not off with no count while its deletes run: " + JSON.stringify(undo));
+  await page.evaluate(() => window.__release());
+});
+
+test("while Undo's delete runs after its 8 s window, the hint says Send turns on when Undo is done", async (t) => {
+  const page = await open(t, { hold: { delete: 0 } }); if (!page) return;
+  await sendTyped(page, "Done hint ask");
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.click(ASK.undo);
+  await page.waitForFunction(() => window.__held >= 1);
+  await jump(page, 9000); // the window passes while the delete waits
+  await page.waitForFunction(() => document.getElementById("askHint").textContent.includes("Undo is done"), null, { timeout: 3000 }).catch(() => {});
+  const hint = await hintText(page);
+  assert.match(hint, /Send turns on when Undo is done\./, "the hint while Undo runs after its window is " + JSON.stringify(hint));
+  await page.evaluate(() => window.__release());
+});
+
+test("with storage refused, a Send that empties the list and the box shows no hint about a lost list", async (t) => {
+  const page = await open(t); if (!page) return;
+  await refuseStorage(page);
+  await sendTyped(page, "Refused storage ask");
+  await mustHave(page, ASK.undo, "Undo control");
+  assert.equal(await page.locator(ASK.rows).count(), 0, "the list has rows after Send, so this is not the empty case");
+  assert.equal(await page.inputValue(ASK.box), "", "the box is not empty after Send");
+  const hint = await hintText(page);
+  assert.doesNotMatch(hint, /would not keep your list/, "the hint says a reload would lose the list, with the list and the box empty: " + JSON.stringify(hint));
+});
+
+test("with storage refused and an ask in the list, Copy ask shows in the slot", async (t) => {
+  const page = await open(t); if (!page) return;
+  await refuseStorage(page);
+  await addToList(page, "Refused list ask");
+  await mustHave(page, ASK.rows, "the list row");
+  assert.match(await hintText(page), /would not keep your list/, "precondition: the page did not find the list unkeepable");
+  assert.equal(await page.locator("#askSlot #askCopy").count(), 1, "Copy ask is not in the slot while a reload would lose the list");
+});
+
+for (const width of [360, 390]) {
+  test(`with Copy answers shown at ${width} wide, the bar status sits on its own full-width row`, async (t) => {
+    const page = await open(t, { noStore: true, viewport: { width, height: 800 } }); if (!page) return;
+    await stubClipboard(page, true);
+    await mustHave(page, "#copy", "Copy answers button");
+    await page.click("#copy");
+    await page.waitForFunction(() => !document.getElementById("copyBox").hidden, null, { timeout: 3000 }).catch(() => {});
+    assert.equal(await page.evaluate(() => !document.getElementById("copyBox").hidden), true, "Copy answers did not show the copy box");
+    const m = await page.evaluate(() => ({ bar: document.querySelector("#bar > .in").getBoundingClientRect().width, status: document.getElementById("barStatus").getBoundingClientRect().width }));
+    assert.ok(m.status >= m.bar * 0.9, `the bar status is ${Math.round(m.status)} px wide in a ${Math.round(m.bar)} px bar; it should sit on its own full-width row`);
+  });
+}
 
 test("an edit still open when the page reloads comes back open, with the words typed in it", async (t) => {
   const page = await open(t); if (!page) return;
