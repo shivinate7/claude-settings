@@ -3773,7 +3773,8 @@ const railNames = (page) => page.locator(".prail > button .nm > span:first-child
 const listedIds = (page) => page.locator("#svPhases [data-row]").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-row")));
 // Presses each rail button in turn, and returns the step ids the phase list drew under each button's name.
 async function listedByPhase(page) {
-  const out = {};
+  // A null prototype: a phase named __proto__ would otherwise set the prototype of a plain object, not a key.
+  const out = Object.create(null);
   const count = await page.locator(".prail > button").count();
   for (let i = 0; i < count; i++) {
     const button = page.locator(".prail > button").nth(i);
