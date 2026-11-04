@@ -962,12 +962,21 @@ fi
 # ---- ~/.claude/settings.json ------------------------------------------------------------------
 TARGET_JSON="$CLAUDE_DIR/settings.json"
 
+# jq: true when a SessionStart entry fires for session source $s. A matcher of "", "*" or none fires for every
+# source; any other matcher is an anchored regex, as Claude Code reads it. A matcher that is no valid regex fires
+# for none. The one home of the rule: the cloud settings.json and the startup entries run below both use it.
+FIRES_JQ='def fires($s): (.matcher // "") as $m
+  | if $m == "" or $m == "*" then true else (try ($s | test("^(" + $m + ")$")) catch false) end;'
+
 if [ "$CLOUD" = 1 ]; then
-  # Cloud: generate a real file (not a symlink) and append a SessionStart hook that refreshes
-  # it at every session start/resume by re-running install.sh from GitHub. The repo's own
-  # SessionStart hooks come first in the list.
+  # Cloud: generate a real file (not a symlink) whose startup SessionStart entry is a hook that
+  # refreshes ~/.claude by re-running install.sh from GitHub. Claude Code runs the entries of one
+  # event in parallel, so a repo entry that matches startup would run the snapshot's stale hooks
+  # before the refresh replaced them. The generated file therefore drops those entries, and the
+  # install runs them itself once the hooks are copied (see "cloud startup entries" below).
+  # The refresh hook hands its stdin to install.sh, which reads the session source from it.
   # Locals get no refresh hook: their settings.json is a symlink into the clone.
-  HOOK_CMD="curl -fsSL ${RAW}/install.sh | bash -s -- --cloud"
+  HOOK_CMD='i=$(cat); curl -fsSL '"${RAW}"'/install.sh | CS_HOOK_INPUT="$i" bash -s -- --cloud'
   if command -v jq >/dev/null 2>&1; then
     # merge/cloud_allow.json: the `merge --confirm` and `merge --role` allow rules only a cloud session gets (a local settings.json links to the repo's, which has none).
     # Read from the source checkout, never from main: launch.py's fallback and --dev run the checkout's own merge.py, and
@@ -976,7 +985,7 @@ if [ "$CLOUD" = 1 ]; then
     [ -f "$ALLOW_FILE" ] || ALLOW_FILE=/dev/null   # a source without the file adds no rules
     SRC_SHA=$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null) || SRC_SHA="no git"
     if jq --arg cmd "$HOOK_CMD" --slurpfile extra "$ALLOW_FILE" \
-      '.hooks.SessionStart = ((.hooks.SessionStart // []) + [{"matcher":"startup|resume","hooks":[{"type":"command","command":$cmd,"timeout":60}]}])
+      "$FIRES_JQ"'.hooks.SessionStart = ([(.hooks.SessionStart // [])[] | select(fires("startup") | not)] + [{"matcher":"startup|resume","hooks":[{"type":"command","command":$cmd,"timeout":60}]}])
        | .permissions.allow = ((.permissions.allow // []) + ($extra[0].permissions.allow // []))' \
       "$SRC/settings.json" > "$TARGET_JSON.tmp" && mv "$TARGET_JSON.tmp" "$TARGET_JSON"; then
       n=$(jq -s '[.[0].permissions.allow[]?] | length' "$ALLOW_FILE" 2>/dev/null)
@@ -1024,6 +1033,73 @@ case "${SHELL:-}" in *zsh) RC="$HOME/.zshrc" ;; *) RC="$HOME/.bashrc" ;; esac
 if [ "$CLOUD" != 1 ] && ! grep -qsF '# claude-settings: ~/.claude/bin on PATH' "$RC"; then
   printf '\n# claude-settings: ~/.claude/bin on PATH\nexport PATH="$HOME/.claude/bin:$PATH"\n' >> "$RC"
   log "added ~/.claude/bin to PATH in $RC; a new session picks it up"
+fi
+
+# Runs one startup entry bounded to $1 seconds where there is no `timeout` binary (macOS). The entry and a
+# sleeper each start under job control, so each leads its own process group (`set +m` inside keeps a
+# pipeline from splitting off into a group of its own): the sleeper's TERM then reaches
+# the entry and every grandchild it started, and a hook that forked cannot outlive the cut. The job-control
+# messages go to /dev/null. A TERM or KILL death status (143, 137) is returned as 124, the status `timeout`
+# gives, so the caller logs a cut the same way on both paths.
+start_entry_watchdog() {
+  sw_tmo=$1; sw_cmd=$2
+  set -m 2>/dev/null || :
+  ( set +m; printf '%s' "${CS_HOOK_INPUT:-}" | CLAUDE_CODE_REMOTE=true sh -c "$sw_cmd" ) &
+  sw_pid=$!
+  ( set +m; sleep "$sw_tmo"; kill -TERM -"$sw_pid" 2>/dev/null || kill -TERM "$sw_pid" 2>/dev/null ) >/dev/null 2>&1 &
+  sw_dog=$!
+  set +m 2>/dev/null || :
+  sw_rc=0
+  { wait "$sw_pid"; } 2>/dev/null || sw_rc=$?
+  kill -TERM -"$sw_dog" 2>/dev/null || kill -TERM "$sw_dog" 2>/dev/null
+  { wait "$sw_dog"; } 2>/dev/null || :
+  case "$sw_rc" in 143|137) sw_rc=124 ;; esac
+  return "$sw_rc"
+}
+
+# ---- cloud startup entries ---------------------------------------------------------------------
+# Decision cloud-start-hooks-run-fresh. The cloud settings.json above dropped each SessionStart entry
+# that fires on startup. Run those here, from "$SRC/settings.json" in file order, now that the hooks they
+# call are the fresh copies. An entry runs only when it also fires for the session source that the
+# refresh hook passed in CS_HOOK_INPUT; no readable source means startup. Stdin is that same text,
+# or empty when unset, as Claude Code gives a hook its input; it is never this script, which may be the
+# stdin of `bash -s` and would lose its rest to a child that read it. Each entry is bounded by its own
+# timeout field (default 10 seconds), as Claude Code bounds it, so a hung hook cannot hold the refresh.
+# CLAUDE_CODE_REMOTE=true keeps the repo's pull hook on its own cloud exit. A failing or cut command is
+# logged and never fails the install. Without jq, the settings block above copied the file whole and
+# dropped nothing, so there is nothing to run here.
+if [ "$CLOUD" = 1 ] && command -v jq >/dev/null 2>&1 && [ -f "$SRC/settings.json" ]; then
+  START_SRC=$(printf '%s' "${CS_HOOK_INPUT:-}" \
+    | jq -r 'if (.source | type) == "string" then .source else empty end' 2>/dev/null)
+  [ -n "$START_SRC" ] || START_SRC=startup
+  if START_CMDS=$(jq -c --arg src "$START_SRC" "$FIRES_JQ"'
+      [(.hooks.SessionStart // [])[] | select(fires("startup") and fires($src))
+       | .hooks[]? | select(.type == "command")
+       | {command, timeout: (if (.timeout | type) == "number" and .timeout > 0 then .timeout else 10 end)}]' \
+      "$SRC/settings.json" 2>/dev/null) \
+     && START_N=$(printf '%s' "$START_CMDS" | jq 'length' 2>/dev/null); then
+    :
+  else
+    log "WARNING: could not read the startup entries from $SRC/settings.json, so none ran"
+    START_CMDS='[]'; START_N=0
+  fi
+  START_I=0
+  while [ "$START_I" -lt "$START_N" ]; do
+    START_CMD=$(printf '%s' "$START_CMDS" | jq -r --argjson i "$START_I" '.[$i].command')
+    START_TMO=$(printf '%s' "$START_CMDS" | jq -r --argjson i "$START_I" '.[$i].timeout')
+    START_RC=0
+    if command -v timeout >/dev/null 2>&1; then
+      printf '%s' "${CS_HOOK_INPUT:-}" | CLAUDE_CODE_REMOTE=true timeout "$START_TMO" sh -c "$START_CMD" || START_RC=$?
+    else
+      start_entry_watchdog "$START_TMO" "$START_CMD" || START_RC=$?
+    fi
+    if [ "$START_RC" = 124 ]; then
+      log "WARNING: a startup entry from $SRC/settings.json was cut after ${START_TMO}s, and the next one runs: $START_CMD"
+    elif [ "$START_RC" != 0 ]; then
+      log "WARNING: a startup entry from $SRC/settings.json exited $START_RC and was skipped: $START_CMD"
+    fi
+    START_I=$((START_I + 1))
+  done
 fi
 
 # Marks a local install has landed here, so the NEXT local run treats a real file/dir at a

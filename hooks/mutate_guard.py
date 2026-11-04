@@ -1212,24 +1212,24 @@ MUTATIONS = [
      "guard", "pointer: checkout of a branch in the pointer checkout is refused"),
 
     # RULE 0, worktree-home. Each mutant breaks one clause of
-    # docs/decisions/an-agent-outside-its-home-tree-must-stop.md; all are caught by the single case
-    # that exercises the whole sequence, `worktree_home_case`.
+    # docs/decisions/an-agent-outside-its-home-tree-must-stop.md. Each names the one case that kills it,
+    # mostly `worktree_home_case`, the whole sequence: the bare family prefix ran every worktree-home case, 40 s a mutant.
     ("worktree-home: the first call from inside the worktree never writes the home record",
      '    if path_is_inside(cwd, candidate) is True:\n        write_agent_home(cwd, agent_id, candidate)',
      '    if path_is_inside(cwd, candidate) is False:\n        write_agent_home(cwd, agent_id, candidate)',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: the candidate worktree path drops the agent- prefix, so it never matches",
      'candidate = os.path.join(primary, ".claude", "worktrees", "agent-" + agent_id)',
      'candidate = os.path.join(primary, ".claude", "worktrees", agent_id)',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: AGENT_ID rejects a letter, so every real agent id reads as an orchestrator",
      'AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")',
      'AGENT_ID = re.compile(r"^[0-9_-]{1,64}$")',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: a shell call outside its recorded home is judged as inside it",
      '        if (path_is_inside(home_cwd, home) is False\n',
      '        if (path_is_inside(home_cwd, home) is None\n',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: a write outside the recorded home, inside the clone, is allowed through",
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
      '                    and path_is_inside(resolved_target, home) is False\n'
@@ -1237,7 +1237,7 @@ MUTATIONS = [
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
      '                    and path_is_inside(resolved_target, home) is None\n'
      '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: a /c/ cwd inside the home is inside"),
     # The next two anchors sit in worktree_home_hit, which returns a log detail and lets judge()
     # refuse; a mutant that returns a detail for a status that allows is a deny.
     ("worktree-home: an unreadable home record denies instead of allowing",
@@ -1247,7 +1247,7 @@ MUTATIONS = [
      '    if home_status == "unknown":\n'
      '        return "unreadable state"\n'
      '    if home_status != "home":',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: a non-isolated agent with no record is denied instead of allowed",
      '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
      '    if home_status != "home":',
@@ -1255,7 +1255,7 @@ MUTATIONS = [
      '    if home_status == "no-record":\n'
      '        return "no record"\n'
      '    if home_status != "home":',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: a relative write target drops the join onto the payload's own cwd",
      '            try:\n                resolved_target = _resolved(write_target, home_cwd)\n'
      '            except Exception:\n                resolved_target = write_target\n'
@@ -1266,7 +1266,7 @@ MUTATIONS = [
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
      '                    and path_is_inside(resolved_target, home) is False\n'
      '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: the write-target loop judges only the first path field",
      '        for write_target in (write_targets(tool_input) if home_primary else ()):',
      '        for write_target in (write_targets(tool_input)[:1] if home_primary else ()):',
@@ -1533,8 +1533,8 @@ MUTATIONS = [
      'MERGE_VALUE_FLAGS = {"-R", "--repo", "--body",', "guard",
      'merge-checks: a flag value is no pull request'),
     ("merge-checks: any word that spells gh is the command word",
-     '    index = resolve_command(tokens)\n    if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):\n        return None\n    return tokens[index + 1:]',
-     '    index = next((i for i, t in enumerate(tokens) if basename(t) in ("gh", "gh.exe")), None)\n    if index is None:\n        return None\n    return tokens[index + 1:]',
+     '    index = resolve_command(tokens)\n    if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):\n        return None\n    rest, root = tokens[index + 1:], []',
+     '    index = next((i for i, t in enumerate(tokens) if basename(t) in ("gh", "gh.exe")), None)\n    if index is None:\n        return None\n    rest, root = tokens[index + 1:], []',
      "guard", 'merge-checks: the words of a merge in an echo are no merge'),
     ("merge-checks: the read has no time limit",
      '            module.SH_TIMEOUT = MERGE_READ_TIMEOUT',
@@ -2127,6 +2127,12 @@ MUTATIONS = [
      '        return handoff if os.path.isfile(handoff) else ""',
      '        return handoff',
      "guard", "handoff-unread: a call is allowed when the flag is set and the handoff is missing"),
+    # gh_call_of (hooks/guard_merge.py) is the one home every gh reader shares. Unread, a repo flag before
+    # the verb hides `pr merge` and `pr create` from the merge guard, the draft read, ci_wake and the report guard.
+    ("gh-root-flag: a repo flag before the pr verb goes unread",
+     '    while rest and _gh_root_repo_flag(rest, 0):',
+     '    while False and _gh_root_repo_flag(rest, 0):',
+     "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
 ]
 
 
@@ -2136,6 +2142,7 @@ MUTATIONS = [
 # Add a verdict-deciding file here, with the suites that name it, to put it in the report.
 REPORT_TARGETS = [
     ("lint/report_guard.py", ["lint/test_report_guard.py", "lint/test_report_guard_route.py",
+                             "lint/test_report_guard_landing.py",
                              "hooks/test_reply_judge.py", "hooks/test_wrappers.py",
                              "lint/test_rule_audit.py", "lint/test_settings_matcher.py"]),
     ("hooks/feedback_guard.py", ["hooks/test_feedback_inbox.py", "lint/test_settings_matcher.py"]),
