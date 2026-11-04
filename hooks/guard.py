@@ -91,7 +91,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   push-stray-branch    ask. A push with an implied destination (bare, `HEAD`, `@`, or a colon-less
                        refspec naming the current branch) that writes a name other than the branch's
                        upstream. Only with an upstream on the pushed remote that is not main or master.
-  env-file            deny. Any read or write of an environment file.
+  env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
