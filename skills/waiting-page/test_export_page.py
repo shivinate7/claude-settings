@@ -17,10 +17,14 @@ Contract the page cases assume (the builder builds to it):
     A page with no designData block, or two, stays `unknown`, exit 2.
   --all. Each entry folder's page.html, for any role, lands at <export path>/page/page.html. Its files/<path>
     land byte-identical at <export path>/page/files/<path>. The waiting page exports to waiting/, any other
-    artifact to artifacts/<id>/. Each file written counts one in `changed N`. A find in an artifact's page
-    refuses only that artifact: exit 1, its copy unchanged, and the other artifacts still export.
+    artifact to artifacts/<id>/. Each file written counts one in `changed N`. A find in an artifact's page, or in a
+    supporting file's name or text, refuses only that artifact: exit 1, its copy unchanged, and the other artifacts
+    still export. A supporting file that is not UTF-8 is scanned as cp1252 text, so a cp1252 note holding an email
+    refuses; a binary file with no shape in it exports.
+  Retina names are not emails: `logo@2x.png`, as a file name or in page text, exports; `jane@2x.com` refuses.
+  Digit-led domains are emails: jane@1st.example.com, jane@12.34.example.com and jane@1.2.3.com refuse in page text.
   Verdict words: `changed N`, `same`, `refused` (exit 1), `unknown` (exit 2), and a crash (exit 3, one line).
-  Not pinned here: whether supporting files are scanned, and whether a supporting file no longer fetched is deleted.
+  Not pinned here: whether a supporting file no longer fetched is deleted.
 """
 import collections
 import glob
@@ -50,6 +54,7 @@ META = {"title": "Queue", "version": 1}
 DEEP = "[" * 5000 + "]" * 5000  # nests past the interpreter's recursion limit: a crash, not a verdict
 RUN_FOLDER = None  # made in setUpModule
 TOKEN = "ghp_" + TAIL  # a GitHub-token shape, built at run time
+MAIL = "person.name" + "@" + "example.com"  # a personal-email shape, built at run time
 
 with open(os.path.join(HERE, "page.html"), encoding="utf-8") as f:
     PAGE = f.read()
@@ -179,7 +184,6 @@ def page_with(snippet):
 def page_snippets():
     """(label, snippet, secret): a secret-shaped value in page text outside designData, at each shape of text a scanner
     could misread: a comment opener inside a string, a multi-line template literal, a lone quote, and an email."""
-    mail = "person.name" + "@" + "example.com"
     return (
         ("token in a paragraph", "<p>Token: %s</p>\n" % TOKEN, TOKEN),
         ("token after a comment opener in a CSS string", '<style>.x::before { content: "/* %s"; }</style>\n' % TOKEN, TOKEN),
@@ -187,7 +191,7 @@ def page_snippets():
         ("token in a multi-line template literal", "<script>\nconst t = `first line\nsecond line %s\nthird line`;\n</script>\n" % TOKEN,
          TOKEN),
         ("token after a lone quote in text", "<p>Don't paste %s</p>\n" % TOKEN, TOKEN),
-        ("email address in text", "<p>Contact %s</p>\n" % mail, mail),
+        ("email address in text", "<p>Contact %s</p>\n" % MAIL, MAIL),
     )
 
 
@@ -627,6 +631,38 @@ class PageScan(Base):
                 self.assertVerdict(r, "changed")
                 self.assertEqual(r.returncode, 0, "%s: a non-secret page failed. Output:\n%s" % (label, shown(r)))
 
+    def test_digit_led_email_domains_in_the_page_text_still_refuse(self):
+        for index, address in enumerate(("jane@1st.example.com", "jane@12.34.example.com", "jane@1.2.3.com")):
+            with self.subTest(address=address):
+                page = write_text(os.path.join(self.tmp.name, "digit-%d.html" % index), page_with("<p>Contact %s</p>\n" % address))
+                out = self.out("digit-%d" % index)
+                r = self.export(self.fetch(meta={"page": META}), out, page=page)
+                self.assertVerdict(r, "refused", [address])
+                self.assertEqual(r.returncode, 1, "%s: a personal email was not refused. Output:\n%s" % (address, shown(r, [address])))
+                self.assertNotIn(address, r.stdout + r.stderr, "%s: the address was printed" % address)
+                self.assertEqual(snapshot(out), {}, "%s: a refused page wrote into the copy" % address)
+
+    def test_retina_names_in_the_page_text_are_not_emails(self):
+        srcset = '<img srcset="logo@2x.png 2x" src="icon@3x.png" alt="">\n'
+        want = page_with(srcset).encode("utf-8")
+        page = write_bytes(os.path.join(self.tmp.name, "page-retina.html"), want)
+        out = self.out()
+        r = self.export(self.fetch(meta={"page": META}), out, page=page)
+        self.assertFalse(says(r, "refused"), "retina names in the page text were refused as emails. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.assertVerdict(r, "changed")
+        self.assertEqual(read_bytes(os.path.join(out, "page", "page.html")), want, "the page with retina names is not byte-identical")
+
+    def test_an_email_at_a_retina_looking_domain_still_refuses(self):
+        address = "jane@2x.com"
+        page = write_text(os.path.join(self.tmp.name, "page-2x.html"), page_with("<p>Contact %s</p>\n" % address))
+        out = self.out()
+        r = self.export(self.fetch(meta={"page": META}), out, page=page)
+        self.assertVerdict(r, "refused", [address])
+        self.assertEqual(r.returncode, 1, "jane@2x.com was not refused as an email. Output:\n" + shown(r, [address]))
+        self.assertNotIn(address, r.stdout + r.stderr, "the address was printed")
+        self.assertEqual(snapshot(out), {}, "a refused page wrote into the copy")
+
 
 class Rebuild(Base):
     def batch_entries(self, batches):
@@ -903,6 +939,53 @@ class All(Base):
         self.assertVerdictOf(r, self.WAIT, r"changed\s+1\b")
         self.assertTrue(os.path.isfile(os.path.join(self.export_folder(worktree, self.WAIT), "items", "fresh.json")),
                         "the clean artifact was held back by the refused page")
+
+    def assert_supporting_file_refused(self, label, rel, data, secrets):
+        """A clean run first. Then a run whose QUEUE supporting file is `rel` with `data`: QUEUE is refused, exits 1,
+        prints no secret and changes nothing; WAIT still exports its new doc."""
+        root, worktree = self.repo(), self.out("worktree-" + label)
+        pages = {self.WAIT: PAGE_BYTES, self.QUEUE: QUEUE_PAGE}
+        clean = self.run_all(root, self.fetched_all(self.docs(), pages=pages), worktree)
+        self.assertEqual(clean.returncode, 0, "%s: the clean first run failed. Output:\n%s" % (label, shown(clean)))
+        before = snapshot(self.export_folder(worktree, self.QUEUE))
+        docs = self.docs()
+        docs[self.WAIT]["items"]["fresh"] = item(10)  # the clean artifact has a new doc, so it must still export
+        r = self.run_all(root, self.fetched_all(docs, pages=pages, files={self.QUEUE: {rel: data}}), worktree)
+        self.assertVerdictOf(r, self.QUEUE, r"\brefused\b")
+        self.assertEqual(r.returncode, 1, "%s: a find in a supporting file must exit 1. Output:\n%s" % (label, shown(r, secrets)))
+        for secret in secrets:
+            self.assertNotIn(secret, r.stdout + r.stderr, "%s: the matched value was printed" % label)
+        self.assertEqual(snapshot(self.export_folder(worktree, self.QUEUE)), before, "%s: a refused artifact changed its copy" % label)
+        self.assertVerdictOf(r, self.WAIT, r"changed\s+1\b")
+
+    def test_a_token_or_email_in_a_supporting_text_file_refuses_that_artifact(self):
+        cases = (("token-text", b"token: " + TOKEN.encode("ascii"), [TOKEN]),
+                 ("email-text", b"mail: " + MAIL.encode("ascii"), [MAIL]))
+        for label, data, secrets in cases:
+            with self.subTest(label=label):
+                self.assert_supporting_file_refused(label, "notes.txt", data, secrets)
+
+    def test_a_token_or_email_in_a_supporting_file_name_refuses_that_artifact(self):
+        cases = (("token-name", "assets/" + TOKEN + ".txt", [TOKEN]),
+                 ("email-name", "assets/" + MAIL + ".txt", [MAIL]))
+        for label, rel, secrets in cases:
+            with self.subTest(label=label):
+                self.assert_supporting_file_refused(label, rel, b"fine\n", secrets)
+
+    def test_a_cp1252_supporting_text_file_with_an_email_refuses_that_artifact(self):
+        self.assert_supporting_file_refused("cp1252-email", "notes/cafe.txt", b"caf\xe9 " + MAIL.encode("ascii"), [MAIL])
+
+    def test_a_retina_file_name_is_not_an_email(self):
+        png = b"\x89PNG\r\n\x1a\n"  # not UTF-8, so the file is binary and its name is the only text to scan
+        worktree = self.out("worktree")
+        files = {self.QUEUE: {"img/logo@2x.png": png}}
+        r = self.run_all(self.repo(), self.fetched_all(self.docs(), pages={self.QUEUE: QUEUE_PAGE}, files=files), worktree)
+        self.assertEqual(r.returncode, 0, "img/logo@2x.png was refused as an email. Output:\n" + shown(r))
+        self.verdict_of(r, self.QUEUE)  # the scope: the artifact's own verdict line
+        landed = os.path.join(self.export_folder(worktree, self.QUEUE), "page", "files", "img", "logo@2x.png")
+        self.assertTrue(os.path.isfile(landed), "img/logo@2x.png was not exported under page/files/. Output:\n" + shown(r))
+        self.assertEqual(read_bytes(landed), png, "img/logo@2x.png is not byte-identical")
+        self.assertVerdictOf(r, self.QUEUE, r"changed\s+3\b")  # one item, the page, and the file
 
 
 if __name__ == "__main__":
