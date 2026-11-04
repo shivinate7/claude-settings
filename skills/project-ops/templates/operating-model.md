@@ -22,7 +22,7 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   and `--live`. The `--live` file carries a `sessions` key: each `list_sessions` row (every page) with
   `id`, `session_status` and `tags`. The roadmap build script reads it to list steps in progress with no live lane.
   Each pull row carries `createdAt`, so the roadmap build script can list a stale draft.
-  Triage, as the waiting-page writer, splices it into the repo's one page and
+  Triage, as the page writer, splices it into the repo's one page and
   publishes it (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
   asks. At each review, triage reads standing sessions' `Recovered:` lines, counts their `Handoff gave:` lines, and brings the no-limit
   rotation ruling (claude-settings decision `session-tiers`) back to the owner if losses repeat.

@@ -62,7 +62,7 @@ that triage or the batch runner writes for its successor.
 
 `skills/roadmap` is the one home for building the roadmap block, for any checkout. This skill
 keeps no copy. Its `SKILL.md` says how to build (`--block`) and what `--live` passes. The build
-publishes nothing: the waiting-page writer splices the block into the repo's one page and alone
+publishes nothing: the page writer splices the block into the repo's one page and alone
 publishes it (skill `waiting-page`). At triage start, when the repo has no waiting page, triage makes
 it, with no separate grant (skill `waiting-page`, "Make a repo's page"). The scaffolded `roadmap/README.md`
 (`templates/record-branch/roadmap/README.md.tmpl`) holds the step file shape.

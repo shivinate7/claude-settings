@@ -4,7 +4,7 @@ description: Use when a session builds a repo's roadmap block, or the user says 
 ---
 
 A repo has one page: the waiting page. Its Status tab shows the repo's plan from its homes. This
-skill publishes no page. The build makes one marked roadmap block, and the waiting-page writer splices
+skill publishes no page. The build makes one marked roadmap block, and the page writer splices
 it into the live page (see "Publish the roadmap block"). The old roadmap URL retires: it gets no more
 publishes. The page's URL is the `waiting-page` key of the layout extras file. The `roadmap` key there
 is the `{map, github}` object the build reads, never a URL. The tab stores
@@ -36,7 +36,7 @@ The record homes (decisions, debts, debt notes, plans, specs) come from the chec
 
 ## Publish the roadmap block
 
-The waiting-page writer alone publishes the page (skill waiting-page, "Update the roadmap block").
+The page writer alone publishes the page (skill waiting-page, "Update the roadmap block").
 It reads the live page first, splices this roadmap block in with `splice.py`, and publishes one at a time,
 never with `force`, with the capabilities `db` and `{comments: {}}`. This skill never calls
 `Artifact` for a page.
