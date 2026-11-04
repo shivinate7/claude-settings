@@ -4,6 +4,6 @@
 
 **Where.** `lint/report_guard.py`, `tool_use_sources` through `pending_refusals`.
 
-**Decision.** `refusals-reach-the-owner`, a refused tool call reaches the owner (the subagent rule and the cost section).
+**Decision.** `refusals-reach-the-owner`, a refused tool call reaches the owner (the agent rule and the cost section).
 
 **Retire.** Measure the read on a real session with refusals and many agents. If it costs more than the false blocks it stops, read only the files whose agent id matches a row's `agent_id`, or stop at the first match. Closed when a test counts the files read and the decision's cost section states the measured cost.
