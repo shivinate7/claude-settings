@@ -82,9 +82,10 @@
     },
     "roles-sonnet-is-the-ceiling": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "The owner ruled on 2026-09-28 that prose alone enforces the ceiling and that no forcing returns, so no hook or setting blocks a model above Sonnet."
-      }
+        "kind": "guard",
+        "ref": "agent-model-cap"
+      },
+      "test": "hooks/test_guard.py::floor: Agent Explore with model opus and no Audit: marker is denied (item 137)"
     },
     "roles-opus-shaped-say-so": {
       "mechanism": {
