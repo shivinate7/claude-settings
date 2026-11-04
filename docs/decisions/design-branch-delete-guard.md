@@ -14,7 +14,7 @@ Home: hooks/guard_branch_worktree.py
 
 ### A remote delete
 
-`git push origin --delete <b>` and `git push origin :<b>` remove origin's copy. The guard reads the branch tip: the remote-tracking ref, else the local branch. It denies the delete when all of these hold:
+`git push origin --delete <b>` and `git push origin :<b>` remove origin's copy. Origin only, tags skipped: a delete pushed to another remote keeps the other push rules, and a name that is only a local tag is not judged. The guard reads the branch tip: the remote-tracking ref, else the local branch. It denies the delete when all of these hold:
 
 - The tip is not an ancestor of origin's default branch.
 - The tip holds a file under the layout's `design` folder that the default branch lacks.
@@ -30,10 +30,10 @@ It asks, never allows, when a read cannot answer: no tip resolves (no tracking r
 
 A call that deletes nothing runs none of this.
 
-A remote delete of one design branch, with the remote named in the command, measured 10 git starts. The push verdict takes 3 (the reviewer's count). The design check takes 7, measured here: tip lookup 1, default-branch read 2, ancestor read 2, design-file read 1, archive-ref read 1. The ancestor read is 1 start when it answers "yes": the shallow-clone probe runs only on "no", and a "yes" ends the check. A name with no tip costs 2 starts, because the default branch is read at the first tip that resolves. A local delete adds nothing unless its subject read is unreadable.
+A remote delete of one design branch, with the remote named in the command, measured 10 git starts. The push verdict takes 3 (the reviewer's count). The design check takes 7, measured here: tip lookup 1, default-branch read 2, ancestor read 2, design-file read 1, archive-ref read 1. The ancestor read is 1 start when it answers "yes": the shallow-clone probe runs only on "no", and a "yes" ends the check. A name with no tip costs 3 starts: tip lookup 2, tag read 1. That holds because the default branch is read at the first tip that resolves. A local delete adds nothing unless its subject read is unreadable.
 
 ## Known limits
 
 - The tip is the last-fetched tracking ref, not origin's live tip. A commit pushed to the branch after this clone's last fetch is not read, so a design file on it is not judged. Lane ruling, 2026-11-03 18:55 CST: accepted. An `ls-remote` per delete costs a network call and more than it saves.
-- A plain name that is a tag, `git push origin --delete <tag>`, has no branch tip, so it asks. A `refs/tags/` spelling is skipped.
+- A plain name with no branch tip that is a local tag is skipped, as is a `refs/tags/` spelling. A design branch on origin that this clone never fetched, and that shares a local tag's name, is not judged.
 - A local-only design branch is refused by the only-copy rule (`shared-tree`), not by this one.

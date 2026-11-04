@@ -87,6 +87,12 @@ def _tip_of(where: str, *refs):
     return None
 
 
+def _is_tag(where: str, name: str) -> bool:
+    """True when `refs/tags/<name>` resolves. False when it does not, or git cannot answer."""
+    answer = _git(where, "rev-parse", "--verify", "--quiet", "refs/tags/" + name)
+    return answer is not None and answer.returncode == 0
+
+
 def design_branch_delete_ask(args, where: str, folder) -> bool:
     """True when a `git branch -d/-D` names a branch whose tip holds a design file, no remote ref
     holds that tip, and the default branch is unreadable. Callers send only a call whose subject
@@ -109,15 +115,19 @@ def design_push_delete_verdict(where: str, remote: str, names, folder) -> str:
     under `folder` that the default branch lacks, and no `archive/*` ref on the remote holds the
     tip. A tip that does not resolve, a failed read of the design files or of the archive refs, and
     an unreadable default branch each ask: the delete removes origin's copy, so an unread tip never
-    allows. The default branch is read at the first resolved tip, so a name with no tip starts no
-    git beyond the tip lookup."""
-    if not folder:
+    allows. Only a delete pushed to `origin` is judged; another remote keeps the other push rules.
+    A name with no tip that is a local tag is skipped: a tag is not a branch. The default branch is
+    read at the first resolved tip, so a name with no tip starts no git beyond the tip and tag
+    lookups."""
+    if not folder or remote != "origin":
         return ""
     base = None
     base_read = False
     verdict = ""
     for name in names:
         tip = _tip_of(where, "refs/remotes/%s/%s" % (remote, name), "refs/heads/" + name)
+        if tip is None and _is_tag(where, name):
+            continue
         if tip is None:
             verdict = "ask"
             continue
