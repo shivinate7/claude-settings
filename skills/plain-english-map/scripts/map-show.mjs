@@ -7,7 +7,7 @@
 // A path may be absolute: under the repository root it is read as its relative form.
 // Nothing found: `no map line for <arg>` on stderr, exit 1. No arg: a usage line, exit 2.
 // A map the skill cannot read (a bad config, or a page that is tracked and not on disk): one plain stderr line, exit 3.
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { extRe, factLines, gitLsFiles, homeLines, mapFilePaths, mapLines, TRACE_PAGE_RE, traceStepItems } from './map-check.mjs';
 import { repoMapConfig } from './lib/map-config.mjs';
@@ -38,8 +38,25 @@ try {
   fail(e.message.replace(/\s*\n\s*/g, ' '), 3);
 }
 
+// The real form of a path that may not exist: the real form of its longest existing prefix, plus the rest.
+// Two spellings of one folder differ on Windows (an 8.3 short name or the drive-letter case) and anywhere a symlink
+// is on the path. `path.relative` compares text only, so it needs both sides in their real form.
+const realPath = (p) => {
+  const rest = [];
+  for (let cur = p; ; cur = path.dirname(cur)) {
+    try { return path.join(realpathSync.native(cur), ...rest.reverse()); } catch {
+      if (path.dirname(cur) === cur) return p;
+      rest.push(path.basename(cur));
+    }
+  }
+};
 // An absolute path under the root is its relative form. One outside the root stays absolute, and no map line names it.
-const rel = path.isAbsolute(arg) ? path.relative(root, arg) : arg;
+// `path.relative` drops a trailing separator, and a folder arg needs it, so it is put back.
+const relOf = (a) => {
+  const r = path.relative(realPath(root), realPath(a));
+  return r && /[\\/]$/.test(a) ? `${r}/` : r;
+};
+const rel = path.isAbsolute(arg) ? relOf(arg) : arg;
 // Backslashes and a leading `./` name the same path: Windows and shell completion type them.
 const want = path.posix.normalize(rel.replace(/\\/g, '/'));
 const row = (l) => `${l.path} — ${l.sentence}`;
