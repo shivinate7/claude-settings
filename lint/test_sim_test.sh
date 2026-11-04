@@ -14,6 +14,9 @@
 #  - One Mac-wide lock, state/sim-test.lock under the config dir, held for the whole run and freed on every exit,
 #    SIGHUP too. A live holder is waited for (SIM_TEST_LOCK_WAIT seconds, then refused). A dead holder is taken over.
 #    A lock folder with no pid file counts as held for 60 s, then it is taken over.
+#  - Its own boot takes the pro lease of bin/sim-lease (the sibling of the script) before simctl boot. At a 5-minute load
+#    of 100 or a 1-minute load of 60 it waits, then exits 1 with no boot. The lease is released on every exit, INT and
+#    TERM too. The reuse path takes no lease.
 #  - Every xcodebuild call carries `-collect-test-diagnostics never`, so a failed UI test starts no simctl diagnose
 #    (up to 10 minutes). A caller's own `-collect-test-diagnostics VALUE` wins: its value stays, with no second copy.
 #  - A SpringBoard crash loop (3 new SpringBoard-*.ips reports during the run that name this run's UDID, or no device
@@ -76,6 +79,8 @@ if [ -d "$lock" ]; then
   p=$(cat "$lock/pid" 2>/dev/null)
   if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then : > "$RUN/lock_alive"; fi
 fi
+lease="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-lease/leases.json"
+[ -f "$lease" ] && cp "$lease" "$RUN/lease_at_xc"
 n=${STUB_CRASH:-0}
 if [ "$n" -gt 0 ]; then
   sleep 1
@@ -97,11 +102,12 @@ cat > "$stubs/xcrun" <<'SH'
 shift
 echo "simctl $*" >> "$RUN/calls"
 lock="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-test.lock"
+lease="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-lease/leases.json"
 held=no; [ -d "$lock" ] && held=yes
 echo "$1 $held" >> "$RUN/lock_simctl"
 case "$1" in
   list) echo "== Devices =="; echo "-- iOS 27.0 --"; cat "$RUN/booted" ;;
-  boot) [ -n "${STUB_BOOT_RC:-}" ] && exit "$STUB_BOOT_RC"; echo "    iPhone 18 Pro ($2) (Booted) " > "$RUN/booted" ;;
+  boot) cp -f "$lease" "$RUN/lease_at_boot" 2>/dev/null; [ -n "${STUB_BOOT_RC:-}" ] && exit "$STUB_BOOT_RC"; echo "    iPhone 18 Pro ($2) (Booted) " > "$RUN/booted" ;;
   shutdown) : > "$RUN/booted" ;;
 esac
 exit 0
@@ -117,6 +123,18 @@ cat > "$stubs/top" <<'SH'
 #!/bin/sh
 echo "top $*" >> "$RUN/topcalls"
 echo "CPU usage: 30.00% user, 5.00% sys, 90.00% idle"
+SH
+# sysctl: the load line sim-lease reads (`sysctl -n vm.loadavg`). A case writes $RUN/loadavg; with none the load is idle.
+# Each read is logged to $RUN/load_reads, so a case can count the polls of a waiting take.
+cat > "$stubs/sysctl" <<'SH'
+#!/bin/sh
+echo read >> "$RUN/load_reads"
+if [ -f "$RUN/loadavg" ]; then cat "$RUN/loadavg"; else echo "{ 0.50 0.50 0.50 }"; fi
+SH
+# uname: sim-lease reads `uname -s` and does nothing unless it is Darwin, so the suite runs on any host.
+cat > "$stubs/uname" <<'SH'
+#!/bin/sh
+echo Darwin
 SH
 # mkreport FILE UDID: writes a SpringBoard report whose text names the device folder of UDID. UDID - names no device.
 cat > "$stubs/mkreport" <<'SH'
@@ -137,14 +155,17 @@ fresh() {
   rm -f "$work/topcalls" "$work/started" "$work/xc_finished" "$work/watchdog_fired" "$work/lock_during" \
     "$work/lock_alive" "$work/lock_pid_seen" "$work/lock_simctl"
   rm -rf "$work/home/.claude" "$crashdir" "$work/sweep_root"
+  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/loadavg" "$work/load_reads"
   /bin/mkdir -p "$crashdir" "$work/home"
 }
 # start_tool [VAR=value...]: starts the tool in its own process group, behind a hard timeout. Its stdout and stderr go
 # to run.std and run.err. Defaults: a temp HOME, no CLAUDE_CONFIG_DIR, the crash dir in the run folder, a 1 s poll and
-# a 2 s lock wait, and reports that name SHARED. Sets tool_pid and wd_pid. ARGS holds the tool's own arguments.
+# a 2 s lock wait, a 1 s lease poll, CI and GITHUB_ACTIONS unset (sim-lease does nothing under them), and reports that
+# name SHARED. Sets tool_pid and wd_pid. ARGS holds the tool's own arguments.
 start_tool() {
   set -m
-  env -u CLAUDE_CONFIG_DIR HOME="$work/home" SIM_TEST_CRASH_DIR="$crashdir" SIM_TEST_POLL=1 SIM_TEST_LOCK_WAIT=2 \
+  env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" SIM_TEST_CRASH_DIR="$crashdir" SIM_TEST_POLL=1 \
+    SIM_TEST_LOCK_WAIT=2 SIM_LEASE_POLL=1 \
     STUB_CRASH_UDID="$SHARED" "$@" \
     "$script" "${ARGS[@]}" > "$work/run.std" 2> "$work/run.err" &
   tool_pid=$!
@@ -187,6 +208,35 @@ lock_gone() { test ! -e "$lockdir"; }
 lock_at() { grep -Fxq "$1 yes" "$work/lock_simctl"; }
 lock_at_every_simctl() { [[ -s $work/lock_simctl ]] && ! grep -Eq ' no$' "$work/lock_simctl"; }
 lock_pid_is_tool() { [[ "$(cat "$work/lock_pid_seen" 2>/dev/null)" == "$tool_pid" ]]; }
+# lease checks: sim-lease keeps its state under this run's HOME. lease_holds FILE PID exits 0 when the JSON in FILE holds PID
+# as a value anywhere (no field name is assumed), 1 when it does not or FILE is missing, 2 when FILE is not JSON. The
+# compare is on the whole value, so pid 12 does not match 123.
+lease_file=$work/home/.claude/state/sim-lease/leases.json
+LEASE_CHECK='import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        state = json.load(f)
+except FileNotFoundError:
+    sys.exit(1)
+except ValueError:
+    sys.exit(2)
+def holds(v):
+    if isinstance(v, dict):
+        return any(holds(x) for x in v.values())
+    if isinstance(v, list):
+        return any(holds(x) for x in v)
+    return str(v) == sys.argv[2]
+sys.exit(0 if holds(state) else 1)'
+lease_holds() { python3 -I -c "$LEASE_CHECK" "$1" "$2"; }
+lease_at_boot_holds() { lease_holds "$work/lease_at_boot" "$tool_pid"; }
+lease_at_xc_holds() { lease_holds "$work/lease_at_xc" "$tool_pid"; }
+lease_not_held_at_xc() { ! lease_at_xc_holds; }
+# lease_released: the state after the run holds no lease of this tool. Exit 1 is the only pass, so a broken file fails.
+lease_released() { lease_holds "$lease_file" "$tool_pid"; [ $? -eq 1 ]; }
+# set_load LINE: the load line the sysctl stub prints, as `sysctl -n vm.loadavg` prints it.
+set_load() { printf '%s\n' "$1" > "$work/loadavg"; }
+# load_polls_at_least N: the sysctl stub logs each read, so a take that waits reads the load at least N times.
+load_polls_at_least() { [ "$(cat "$work/load_reads" 2>/dev/null | wc -l | tr -d ' ')" -ge "$1" ]; }
 # mkdir_lock_first: one mkdir of the lock folder (no -p) is in the call log, before the first simctl call.
 mkdir_lock_first() {
   local m s
@@ -483,6 +533,32 @@ sweep_case() {
   need "new run folder kept" test -d "$new"
 }
 sweep_case; end_case "41 sweep: a run folder older than a day goes, a newer one stays"
+
+# Lease: the own-boot path takes the pro lease from bin/sim-lease, the sibling of the script under test.
+fresh; run
+need "exit code" rc_is 0
+need "lease held at the boot" lease_at_boot_holds
+need "lease released after the run" lease_released
+end_case "47 own boot: the pro lease is held while simctl boot runs, and released after the run"
+
+fresh; set_load "{ 0.50 100.00 0.50 }"; run SIM_LEASE_WAIT=2
+need "no boot" test "$(grep -c '^simctl boot' "$calls")" -eq 0
+need "no xcodebuild call" test "$(grep -c ^xcodebuild "$calls")" -eq 0
+need "waited: the load was read at least twice" load_polls_at_least 2
+need "exit code is 1" rc_is 1
+need "stderr names the load" grep -Fq 100 "$work/run.err"
+end_case "48 own boot over a 5-minute load of 100: waits, exits 1, no boot, no xcodebuild"
+
+sig_case TERM
+need "lease held during xcodebuild" lease_at_xc_holds
+need "lease released after TERM" lease_released
+end_case "49 TERM during an own-boot run: the pro lease is held during xcodebuild, and released after"
+
+fresh; booted "iPhone 18 Pro" $SHARED; run
+need "exit code" rc_is 0
+need "steps are run only" steps_are "run "
+need "no lease held during xcodebuild" lease_not_held_at_xc
+end_case "50 reuse path: takes no lease"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
