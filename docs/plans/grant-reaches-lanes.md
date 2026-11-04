@@ -134,9 +134,14 @@ The static rule is today's tool (decision auto-mode-owner-acts, `add_repo` and `
 It cannot scope to one session or expire, so it is the baseline only.
 
 `merge/cloud_allow.json` already holds such a rule in the cloud:
-`Bash(~/.claude/bin/merge * --confirm)`, for every PR. Batch runner 8 was still refused "Merge
-Without Review". Why: unknown. If a static allow rule did not skip the classifier there, a hook
-`allow` may not either, and the probe may end Design A. The probe of step 1 reads it first. The `merge <pr>` act is narrower
+`Bash(~/.claude/bin/merge * --confirm)` and `Bash(~/.claude/bin/merge * --confirm *)`, for every PR.
+Decision auto-mode-owner-acts says the classifier does not judge a call that rule matches. Batch
+runner 8 was still refused "Merge Without Review" (coordinator-reported, 2026-11-01). The refused
+command is unknown: a search of the newest 115 events of runner 8's transcript (2026-11-03 18:24
+CST) did not reach it. A command outside the rule's form, such as an absolute path or `--confirm`
+before the PR, would explain the refusal and leave the record true. If the rule matched and the
+classifier still refused, a hook `allow` may not skip it either, and the probe may end Design A.
+The probe of step 1 reads which holds first. The `merge <pr>` act is narrower
 than that rule, so it adds nothing while the rule stands. Question 7 asks whether to narrow the rule.
 
 Build step 1 of any design is a probe in one session. A hook returns `allow` on one act the
