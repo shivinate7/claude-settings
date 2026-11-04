@@ -2292,7 +2292,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     finally:
         drop_worktree(root, tmp, wt)
     lines = out.splitlines()
-    log = [l for l in lines if l.startswith("log=")][-1:]  # ci-job's log line, the last one: the FAIL lines name it too, but a heartbeat can follow it
+    log = [l for l in lines if l.startswith("log=")][-1:]  # ci-job's log line, the last one: the FAIL lines name it too
     fails = [l.rstrip() for l in lines if l.startswith("FAIL")]
     unknown = [l.rstrip() for l in lines if l.startswith("unknown")]
     short = head[:9]

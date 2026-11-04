@@ -34,7 +34,8 @@
 # key is `bash -e`, `shell: bash` is `bash --noprofile --norc -eo pipefail`, `shell: pwsh` is pwsh.
 # GH_TOKEN and GITHUB_TOKEN are unset unless the step's env: sets them, as on the runner (a session token would
 # turn zizmor's offline audits online). Multi-line `run: |` steps run whole. Verdicts: PASS, SKIP (the step ran and skipped tests, exit 0), FAIL, unknown (tool missing, or an expression it
-# cannot read), not run locally (a `uses:` action), skipped (a pull-request step with no base).
+# cannot read), not run locally (a `uses:` action), skipped (a pull-request step with no base). Under --lint, a step
+# it leaves out prints `not run`, which is no verdict.
 # A step's `if:` reads every needs.scope.outputs flag (== 'true' or != 'false') as true, !cancelled(), always() and success() as true,
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
 # its remote; ${{ github.event.pull_request.head.sha }} is HEAD. Any other expression makes the step unknown.
@@ -49,7 +50,7 @@
 # stderr as it arrives, so a quiet step still feeds the stall watch (decision stall-watch: a quiet tool prints a
 # line at least every 120 s).
 # Cost: one process per step (bin/verdict and the step's shell), one log file; no timer, no lasting process. Under
-# --lint each install CI step adds its processes, plus network and disk only when a job has one. Each `not run` line,
+# --lint each install CI step adds its processes, plus network and disk only when a job has one; a pip install writes to the active Python. Each `not run` line,
 # the summary and each step's `start: <name>` line on stderr (before it runs, so a caller sees which step is running)
 # are one print.
 import os, re, shutil, subprocess, sys, tempfile
