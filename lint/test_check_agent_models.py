@@ -20,8 +20,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import check_agent_models as C  # noqa: E402
-sys.path.insert(0, os.path.join(ROOT, "hooks", "test_support"))
-from tool_lists import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/test_support/tool_lists.py)
+sys.path.insert(0, os.path.join(ROOT, "hooks"))
+from tool_lists_test import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/tool_lists_test.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 RUN_FOLDER = _test_temp.run_folder()
 
