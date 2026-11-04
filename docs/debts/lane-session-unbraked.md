@@ -6,4 +6,4 @@
 
 **Decision.** `machine-load-brake` (the load brake). `lanes-start-as-agents` (a lane is a session).
 
-**Retire.** On a local session, a lane session's own write reads the load once and is refused at full. A guard test shows that refusal red before the fix and green after it.
+**Retire.** On a local session, a lane session's own write reads the load once and is refused at full. A guard test shows that refusal red before the fix and green after it. The fix still lets a lane session free its own disk (`verification-recovery-independent-of-state`, a recovery control must not depend on the state it recovers).
