@@ -571,6 +571,18 @@ PUSHUP = os.path.join(ROOT, "pushup")
 PUSHUPSELF = os.path.join(ROOT, "pushupself")
 PUSHNOUP = os.path.join(ROOT, "pushnoup")
 PUSHMATCH = os.path.join(ROOT, "pushmatch")
+# Owner rulings 206 a and 207 a (2026-11-03 22:23 CST). PUSHSTRAY sits on `mylocal`, which tracks
+# origin/lane/x, with a `fork` remote the upstream does not name and push.default simple. PUSHLANE and
+# PUSHLANEMASTER sit on lanes cut from origin/main and origin/master: their upstreams are inherited, so
+# the stray-branch rule stays silent there. PUSHSELF sits on `feat`, which tracks origin/feat.
+PUSHSTRAY = os.path.join(ROOT, "pushstray")
+PUSHLANE = os.path.join(ROOT, "pushlane")
+PUSHLANEMASTER = os.path.join(ROOT, "pushlanemaster")
+PUSHSELF = os.path.join(ROOT, "pushself")
+PUSHMAINUP = os.path.join(ROOT, "pushmainup")  # main itself, tracking origin/main
+# The rule ids the two new asks name. Each is the one home for its id in this file.
+PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
+PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
 # roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
 # and its extras file names that branch as the record branch, so `roadmap` is not its record.
 RECROADMAP = os.path.join(ROOT, "recroadmap")
@@ -1774,6 +1786,48 @@ def _build_push():
         if run_vcs(where, "config", "--get", "push.default").stdout.strip() != mode:
             sys.exit("fixture setup failed in build_fixtures: push.default in %r" % where)
 
+    # The upstream shapes of rulings 206 a and 207 a. Each upstream is set by git itself (--track and
+    # --set-upstream-to), then read back, so a case never judges a fixture that lacks its upstream.
+    make_repo(PUSHSTRAY, {"base.txt": "base\n"})
+    run_vcs(PUSHSTRAY, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHSTRAY, "remote", "add", "fork", slash(BRANCHREMOTE))
+    run_vcs(PUSHSTRAY, "update-ref", "refs/remotes/origin/lane/x", "HEAD")
+    run_vcs(PUSHSTRAY, "checkout", "-q", "-b", "mylocal")
+    run_vcs(PUSHSTRAY, "branch", "--set-upstream-to=origin/lane/x", "mylocal")
+    run_vcs(PUSHSTRAY, "config", "push.default", "simple")
+
+    make_repo(PUSHSELF, {"base.txt": "base\n"})
+    run_vcs(PUSHSELF, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHSELF, "update-ref", "refs/remotes/origin/feat", "HEAD")
+    run_vcs(PUSHSELF, "checkout", "-q", "--track", "-b", "feat", "origin/feat")
+
+    for where, lane, base in ((PUSHLANE, "lane/foo", "main"), (PUSHLANEMASTER, "lane/bar", "master")):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "update-ref", "refs/remotes/origin/" + base, "HEAD")
+        run_vcs(where, "checkout", "-q", "--track", "-b", lane, "origin/" + base)
+
+    make_repo(PUSHMAINUP, {"base.txt": "base\n"})
+    run_vcs(PUSHMAINUP, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHMAINUP, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHMAINUP, "branch", "--set-upstream-to=origin/main", "main")
+
+    for where, upstream in ((PUSHSTRAY, "origin/lane/x"), (PUSHSELF, "origin/feat"),
+                            (PUSHLANE, "origin/main"), (PUSHLANEMASTER, "origin/master"),
+                            (PUSHMAINUP, "origin/main")):
+        got = run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip()
+        if got != upstream:
+            sys.exit("fixture setup failed in build_fixtures: %r needs upstream %s, reads %r"
+                     % (where, upstream, got))
+    # The no-upstream cases ride on these two checkouts, so each must read back with no upstream.
+    for where in (PUSHFEAT, PUSHMAIN):
+        if run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
+            sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % where)
+    if (sorted(run_vcs(PUSHSTRAY, "remote").stdout.split()) != ["fork", "origin"]
+            or run_vcs(PUSHSTRAY, "config", "--get", "push.default").stdout.strip() != "simple"):
+        sys.exit("fixture setup failed in build_fixtures: PUSHSTRAY needs remotes fork and origin "
+                 "and push.default simple")
+
 def _build_worktrees():
     """The worktree remove and prune repos: locked, live, dead, stale and clean linked trees."""
     # ----------------------------------------------------------------- worktree remove/prune
@@ -2072,7 +2126,8 @@ lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
-              PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK],
+              PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
+              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -6668,10 +6723,12 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
 REMEDY = "retry with --force-with-lease --force-if-includes"
 
 
-def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash"):
+def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=()):
+    """One `git push` case. An ask names `rule` when one is given (rulings 206 a and 207 a), else
+    force-push. `silent` marks an allow that must print nothing."""
     sh("push: " + name, VCS + " push " + tail, expected,
-       "force-push" if expected != "allow" else None, cwd=cwd, tool=tool,
-       carries=REMEDY if expected == "deny" else ())
+       rule or ("force-push" if expected != "allow" else None), cwd=cwd, tool=tool,
+       carries=REMEDY if expected == "deny" else (), silent=silent, lacks=lacks)
 
 
 # ALLOW: a lease that cannot overwrite newer work, off the default branch.
@@ -6849,8 +6906,10 @@ sh("push: lease with -c push.default=matching asks",
    VCS + " -c push.default=matching push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
 
 # FALSE ALARMS: a guard that cries wolf is spent.
-push_case("a non-forced push of main", "origin main", "allow", cwd=PUSHMAIN)
-push_case("a non-forced bare push on main", "", "allow", cwd=PUSHMAIN)
+# Re-pointed from allow by ruling 207 a (2026-11-03 22:23 CST): a non-forced push of main asks.
+push_case("a non-forced push of main asks, on main", "origin main", "ask", cwd=PUSHMAIN, rule=PUSH_MAIN_RULE)
+# PUSHMAIN has no upstream, so git refuses a bare push itself ("has no upstream branch"): no ask is needed.
+push_case("a bare push on main with no upstream is git's refusal, allows", "", "allow", cwd=PUSHMAIN)
 push_case("a non-forced push with -u of the current branch", "-u origin HEAD", "allow")
 push_case("a non-forced push with -u where git cannot be read", "-u origin HEAD", "allow", cwd=NOGIT)
 push_case("a push of a branch whose name holds force", "origin force-fix", "allow")
@@ -6870,6 +6929,92 @@ sh("false alarm: a lease to main-fix", VCS + " push --force-with-lease --force-i
 sh("push: a force push inside a loop's do-block still counts",
    "while true; do " + VCS + " push --force; done", "deny", "force-push", cwd=PUSHFEAT,
    carries=REMEDY)
+
+# ASK, ruling 206 a (owner, 2026-11-03 22:23 CST). An implied destination (a bare push, HEAD, @, or a
+# colon-less refspec naming the current branch) that lands off the branch's upstream asks. PUSHSTRAY is
+# `mylocal`, whose upstream is origin/lane/x.
+push_case("stray branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
+push_case("stray branch, @ asks", "origin @", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
+push_case("stray branch, the current branch named by its colon-less refspec asks", "origin mylocal", "ask",
+          cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
+push_case("stray branch, -u with HEAD asks", "-u origin HEAD", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
+push_case("stray branch, HEAD with an output tail is one clean ask", "origin HEAD 2>&1 | tail -1", "ask",
+          cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE, lacks=(CHAIN_ASK,))
+# Two refspecs: the explicit one is fine, the second is implied, so the call still asks.
+push_case("stray branch, a second refspec that names the current branch asks",
+          "origin HEAD:push-guard-asks mylocal", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
+sh("push: stray branch, a bare push under push.default current asks",
+   VCS + " -c push.default=current push", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
+
+# ASK, ruling 207 a (owner, 2026-11-03 22:23 CST). A non-forced push whose destination is the literal
+# name main or master asks. The name is literal: origin/HEAD does not decide it.
+push_case("main, HEAD:main from a feature branch asks", "origin HEAD:main", "ask", rule=PUSH_MAIN_RULE)
+push_case("main, a push of main from a feature branch asks", "origin main", "ask", rule=PUSH_MAIN_RULE)
+push_case("main, a full ref to refs/heads/main asks", "origin x:refs/heads/main", "ask", rule=PUSH_MAIN_RULE)
+push_case("master, a push to master asks", "origin master", "ask", rule=PUSH_MAIN_RULE)
+push_case("main, a second refspec that reaches main asks", "origin HEAD:push-guard-asks HEAD:main", "ask",
+          rule=PUSH_MAIN_RULE)
+push_case("main, --all reaches main and asks", "--all origin", "ask", rule=PUSH_MAIN_RULE)
+push_case("main, HEAD:main asks where origin/HEAD names trunk", "origin HEAD:main", "ask", cwd=PUSHTRUNK,
+          rule=PUSH_MAIN_RULE)
+# A branch that tracks main writes main on a bare push. The upstream is main, so 206 a stays silent here.
+push_case("main tracking origin/main, a bare push asks", "", "ask", cwd=PUSHMAINUP, rule=PUSH_MAIN_RULE)
+push_case("main tracking origin/main, HEAD asks", "origin HEAD", "ask", cwd=PUSHMAINUP, rule=PUSH_MAIN_RULE)
+sh("push: main, a bare push under push.default current on main asks",
+   VCS + " -c push.default=current push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
+sh("push: main, a bare push under push.default upstream from a branch tracking main asks",
+   VCS + " push", "ask", PUSH_MAIN_RULE, cwd=PUSHUP)
+
+# SILENT, the false alarms of both rulings. Each is an allow that prints nothing.
+# Inherited and own upstreams: a lane cut from main or master, and a branch that tracks its own name.
+push_case("lane from main, -u HEAD is silent", "-u origin HEAD", "allow", cwd=PUSHLANE, silent=True)
+push_case("lane from main, HEAD is silent", "origin HEAD", "allow", cwd=PUSHLANE, silent=True)
+push_case("lane from master, HEAD is silent", "origin HEAD", "allow", cwd=PUSHLANEMASTER, silent=True)
+push_case("own upstream, HEAD is silent", "origin HEAD", "allow", cwd=PUSHSELF, silent=True)
+# No upstream yet: the first push of a branch.
+push_case("first push with no upstream, -u HEAD is silent", "-u origin HEAD", "allow", silent=True)
+push_case("first push with no upstream, HEAD is silent", "origin HEAD", "allow", silent=True)
+# Explicit destinations, the form agents push by, from a branch whose upstream differs.
+push_case("explicit destination from a mismatched upstream is silent", "origin HEAD:push-guard-asks", "allow",
+          cwd=PUSHSTRAY, silent=True)
+push_case("archive, feat named to archive/feat is silent", "origin feat:archive/feat", "allow", silent=True)
+push_case("archive, HEAD to archive/x from a mismatched upstream is silent", "origin HEAD:archive/x", "allow",
+          cwd=PUSHSTRAY, silent=True)
+# A bare push that git itself refuses: push.default simple, the upstream names another branch.
+push_case("push.default simple, a bare push with a mismatched upstream is git's refusal, silent", "", "allow",
+          cwd=PUSHSTRAY, silent=True)
+# Another remote than the upstream's remote: the rule reads only branch.<cur>.remote.
+push_case("another remote than the upstream's is silent", "fork HEAD", "allow", cwd=PUSHSTRAY, silent=True)
+# A push that moves no branch: tags are not a branch destination, even on main.
+push_case("--tags on main is silent", "origin --tags", "allow", cwd=PUSHMAIN, silent=True)
+push_case("a tag name on main is silent", "origin v1.0", "allow", cwd=PUSHMAIN, silent=True)
+# The main rule reads literal names. trunk is the default here, so a push to it is ordinary.
+push_case("trunk, named by origin/HEAD, is ordinary for the main rule", "origin HEAD:trunk", "allow",
+          cwd=PUSHTRUNK, silent=True)
+# A plain push whose destination cannot be resolved stays allowed, as it is today.
+push_case("a plain push, detached HEAD, no destination to read, stays allowed", "origin HEAD", "allow",
+          cwd=PUSHDETACHED, silent=True)
+push_case("a plain bare push, push.default matching, no destination to read, stays allowed", "", "allow",
+          cwd=PUSHMATCH, silent=True)
+push_case("a plain push where git cannot be read stays allowed", "origin HEAD", "allow", cwd=NOGIT, silent=True)
+
+# Quoted and heredoc push text is data, never a push. The rules judge the command, not its text.
+sh("push: text, a commit message that names a push to main, is silent",
+   VCS + ' commit -m "git push origin main"', "allow", cwd=PUSHFEAT, silent=True)
+sh("push: text, an echo that names a push of HEAD:main, is silent",
+   'echo "' + VCS + ' push origin HEAD:main"', "allow", cwd=PUSHFEAT, silent=True)
+sh("push: text, a heredoc body naming a push to main, is silent",
+   "cat <<'EOF'\n" + VCS + " push origin main\nEOF", "allow", cwd=PUSHFEAT, silent=True)
+sh("push: text, a multi-line quoted string naming a push to main, is silent",
+   'echo "one line\n' + VCS + ' push origin main"', "allow", cwd=PUSHFEAT, silent=True)
+# A comment opener inside a string does not hide the real push after it, and a lone quote in a message
+# does not either (building-scanner-respects-strings). The push is a second command, so it denies alone.
+chained_ask("push: a comment opener inside a string does not hide a push to main that follows it",
+            'echo "#" && ' + VCS + " push origin main", cwd=PUSHMAIN)
+chained_ask("push: a lone quote in a commit message does not hide a push to main that follows it",
+            VCS + ' commit -m "don\'t" && ' + VCS + " push origin main", cwd=PUSHFEAT)
+chained_ask("push: a lone quote in a commit message does not hide a stray push that follows it",
+            VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHSTRAY)
 
 sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", cwd=NOGIT)
 
@@ -22421,6 +22566,11 @@ OV_ACTS = (
      "kill %d" % FOREIGN, NOGIT, "deny", "machine-wide-kill", None),
     ("ask-linked-discard", "a hard reset in a linked worktree, which asks",
      VCS + " reset --hard", GITWT, "ask", "shared-tree", None),
+    # The two new asks of rulings 206 a and 207 a (2026-11-03 22:23 CST) are lifted by an owner override like any ask.
+    ("push-stray", "a non-forced push that lands on a stray branch",
+     VCS + " push origin HEAD", PUSHSTRAY, "ask", PUSH_STRAY_RULE, None),
+    ("push-main", "a non-forced push of main",
+     VCS + " push origin main", PUSHMAIN, "ask", PUSH_MAIN_RULE, None),
 )
 
 
