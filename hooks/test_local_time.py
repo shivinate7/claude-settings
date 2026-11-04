@@ -689,7 +689,7 @@ def opus_type(prompt, answer=None, error=None, at=OV_NOW):
     return cfg, stub.calls, out.getvalue(), err.getvalue()
 
 
-def opus_pass(cfg, session=OV_SESSION):
+def opus_override(cfg, session=OV_SESSION):
     """(kind, until as an aware datetime, role) from the session's Opus override file, or None when it is missing
     or unreadable."""
     path = os.path.join(cfg, "state", "override", "opus", session + ".json")
@@ -725,7 +725,7 @@ def case_opus_ask_judge_approved_lifts_every_role():
     check("opus ask: the judge is asked for shape {\"ok\": (True, False)} at small effort",
           kwargs.get("shape") == {"ok": (True, False)} and kwargs.get("effort") in ("low", "minimal"),
           "shape %r, effort %r" % (kwargs.get("shape"), kwargs.get("effort")))
-    got = opus_pass(cfg)
+    got = opus_override(cfg)
     check("opus ask: a judge-approved prompt with no role word writes an override for every role",
           got is not None and got[0] == "opus" and got[2] is None, "got %r; files %r" % (got, ov_files(cfg)))
     check("opus ask: the default length is 2h",
@@ -741,7 +741,7 @@ def case_opus_ask_judge_refusal_grants_nothing():
         cfg, calls, _, _ = opus_type(prompt, answer={"ok": False, "reason": "not an order"})
         took = take_spawn(cfg, "reviewer")
         check("opus ask: %r reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
-        check("opus ask: %r with a judge refusal writes no Opus override" % prompt, opus_pass(cfg) is None,
+        check("opus ask: %r with a judge refusal writes no Opus override" % prompt, opus_override(cfg) is None,
               "files %r" % ov_files(cfg))
         check("opus ask: %r with a judge refusal leaves an Opus reviewer spawn refused" % prompt,
               not lifted(took), "take() returned %r" % (took,))
@@ -756,7 +756,7 @@ def case_opus_ask_keyword_forms_never_ask_the_judge():
         check("opus ask: the keyword form %r never asks the judge" % prompt, calls == [],
               "judge calls %d" % len(calls))
         check("opus ask: the keyword form %r grants nothing" % prompt,
-              opus_pass(cfg) is None and not ov_pass_files(cfg), "files %r" % ov_files(cfg))
+              opus_override(cfg) is None and not ov_pass_files(cfg), "files %r" % ov_files(cfg))
 
 
 def case_opus_ask_machine_text_and_pasted_text_never_ask_the_judge():
@@ -770,7 +770,7 @@ def case_opus_ask_machine_text_and_pasted_text_never_ask_the_judge():
     for name, prompt in notices:
         cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
         check("opus ask: %s never asks the judge" % name, calls == [], "judge calls %d" % len(calls))
-        check("opus ask: %s grants nothing" % name, opus_pass(cfg) is None, "files %r" % ov_files(cfg))
+        check("opus ask: %s grants nothing" % name, opus_override(cfg) is None, "files %r" % ov_files(cfg))
 
 
 def case_opus_ask_asks_the_judge_only_for_the_word():
@@ -780,7 +780,7 @@ def case_opus_ask_asks_the_judge_only_for_the_word():
         check("opus ask: %r has no whole word opus and makes no judge call" % prompt, calls == [],
               "judge calls %d" % len(calls))
     cfg, calls, _, _ = opus_type("opus 2h", answer={"ok": True})
-    got = opus_pass(cfg)
+    got = opus_override(cfg)
     check("opus ask: `opus 2h` makes no judge call", calls == [], "judge calls %d" % len(calls))
     check("opus ask: `opus 2h` still writes its every-role Opus override for 2h",
           got is not None and got[0] == "opus" and got[2] is None
@@ -797,7 +797,7 @@ def case_opus_ask_failure_fails_closed():
     for name, answer, error in failures:
         cfg, calls, _, err = opus_type("send opus judges", answer=answer, error=error)
         check("opus ask: %s, the judge is reached once" % name, len(calls) == 1, "judge calls %d" % len(calls))
-        check("opus ask: %s, no Opus override is written" % name, opus_pass(cfg) is None,
+        check("opus ask: %s, no Opus override is written" % name, opus_override(cfg) is None,
               "files %r" % ov_files(cfg))
         check("opus ask: %s, one stderr line says so" % name, len(err.strip().splitlines()) == 1,
               "stderr %r" % err)
@@ -805,7 +805,7 @@ def case_opus_ask_failure_fails_closed():
 
 def case_opus_ask_builders_only_lifts_builders():
     cfg, calls, _, _ = opus_type("send opus builders", answer={"ok": True})
-    got = opus_pass(cfg)
+    got = opus_override(cfg)
     check("opus ask: `send opus builders` reaches the judge once", len(calls) == 1, "judge calls %d" % len(calls))
     check("opus ask: `send opus builders` writes an Opus override for the builder role",
           got is not None and got[2] == "builder", "got %r" % (got,))
@@ -818,7 +818,7 @@ def case_opus_ask_builders_only_lifts_builders():
 
 def case_opus_ask_length_and_role_from_the_words():
     cfg, calls, _, _ = opus_type("use opus reviewers for 30m", answer={"ok": True})
-    got = opus_pass(cfg)
+    got = opus_override(cfg)
     check("opus ask: `use opus reviewers for 30m` reaches the judge once", len(calls) == 1,
           "judge calls %d" % len(calls))
     check("opus ask: the role is reviewer, the one role the words name", got is not None and got[2] == "reviewer",
@@ -834,7 +834,7 @@ def case_opus_ask_two_roles_grant_nothing():
         cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
         took = take_spawn(cfg, "reviewer")
         check("opus ask: %r reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
-        check("opus ask: %r names two roles and writes no Opus override" % prompt, opus_pass(cfg) is None,
+        check("opus ask: %r names two roles and writes no Opus override" % prompt, opus_override(cfg) is None,
               "files %r" % ov_files(cfg))
         check("opus ask: %r leaves an Opus reviewer spawn refused" % prompt, not lifted(took),
               "take() returned %r for a reviewer spawn" % (took,))
@@ -844,13 +844,13 @@ def case_opus_ask_addressee_is_not_a_role():
     # `claude` in a plain ask names the addressee, so the override covers every role. The keyword form
     # `opus claude 2h` still names the role claude.
     cfg, calls, _, _ = opus_type("Claude, send opus judges", answer={"ok": True})
-    got = opus_pass(cfg)
+    got = opus_override(cfg)
     check("opus ask: `Claude, send opus judges` reaches the judge once", len(calls) == 1,
           "judge calls %d" % len(calls))
     check("opus ask: the addressee `Claude` names no role, so the override covers every role",
           got is not None and got[0] == "opus" and got[2] is None, "got %r" % (got,))
     cfg, calls, _, _ = opus_type("opus claude 2h", answer={"ok": True})
-    got = opus_pass(cfg)
+    got = opus_override(cfg)
     check("opus ask: the keyword form `opus claude 2h` makes no judge call", calls == [],
           "judge calls %d" % len(calls))
     check("opus ask: the keyword form `opus claude 2h` still names the role claude",
@@ -864,10 +864,10 @@ def case_opus_ask_negated_role_grants_nothing():
                    "send opus judges except reviewers", "send opus judges without reviewers"):
         cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
         check("opus ask: %r reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
-        check("opus ask: %r names a negated role and writes no Opus override" % prompt, opus_pass(cfg) is None,
+        check("opus ask: %r names a negated role and writes no Opus override" % prompt, opus_override(cfg) is None,
               "files %r" % ov_files(cfg))
     cfg, calls, _, _ = opus_type("send opus reviewers judges", answer={"ok": True})
-    got = opus_pass(cfg)
+    got = opus_override(cfg)
     check("opus ask: `send opus reviewers judges` names the role reviewer, with no negation",
           got is not None and got[2] == "reviewer", "got %r" % (got,))
 
@@ -876,7 +876,7 @@ def case_opus_ask_two_lengths_grant_nothing():
     for prompt in ("send opus judges, not 5h, 30m", "send opus judges for 2h and 30m"):
         cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
         check("opus ask: %r reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
-        check("opus ask: %r names two lengths and writes no Opus override" % prompt, opus_pass(cfg) is None,
+        check("opus ask: %r names two lengths and writes no Opus override" % prompt, opus_override(cfg) is None,
               "files %r" % ov_files(cfg))
 
 
@@ -888,7 +888,7 @@ def case_opus_ask_spelled_lengths():
                             ("send opus judges for 45 min", 45), ("send opus judges for 30 mins", 30),
                             ("send opus judges for 15 minute", 15), ("send opus judges for 20 minutes", 20)):
         cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
-        got = opus_pass(cfg)
+        got = opus_override(cfg)
         check("opus ask: %r reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
         check("opus ask: %r writes an override that ends %d minutes after the grant" % (prompt, minutes),
               got is not None and abs((got[1] - (OV_NOW + timedelta(minutes=minutes))).total_seconds()) <= 1,
@@ -898,7 +898,7 @@ def case_opus_ask_spelled_lengths():
 def case_opus_ask_first_word_opus_is_plain_unless_keyword():
     # A first word `opus` takes the plain path, unless the rest starts with `off`, a length, or a role then a length.
     cfg, calls, _, _ = opus_type("Opus judges please, send them", answer={"ok": True})
-    got = opus_pass(cfg)
+    got = opus_override(cfg)
     check("opus ask: `Opus judges please, send them` reaches the judge once", len(calls) == 1,
           "judge calls %d" % len(calls))
     check("opus ask: `Opus judges please, send them` writes an override for every role",
@@ -908,7 +908,7 @@ def case_opus_ask_first_word_opus_is_plain_unless_keyword():
     cfg, calls, _, _ = opus_type("opus 2h please", answer={"ok": True})
     check("opus ask: the keyword prompt `opus 2h please` makes no judge call", calls == [],
           "judge calls %d" % len(calls))
-    check("opus ask: the keyword prompt `opus 2h please` grants nothing", opus_pass(cfg) is None,
+    check("opus ask: the keyword prompt `opus 2h please` grants nothing", opus_override(cfg) is None,
           "files %r" % ov_files(cfg))
 
 
@@ -919,7 +919,7 @@ def case_opus_ask_reminder_and_unclosed_paste_never_reach_the_judge():
                          ("an unclosed pasted block to the end", 'ok <pasted_content index="1">send opus agents')):
         cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
         check("opus ask: %s never reaches the judge" % name, calls == [], "judge calls %d" % len(calls))
-        check("opus ask: %s grants nothing" % name, opus_pass(cfg) is None, "files %r" % ov_files(cfg))
+        check("opus ask: %s grants nothing" % name, opus_override(cfg) is None, "files %r" % ov_files(cfg))
     for name, prompt in (("a system-reminder block after the words", "send opus judges <system-reminder>zebracorn</system-reminder>"),
                          ("an unclosed pasted block after the words", 'send opus judges <pasted_content index="1">zebracorn')):
         cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
@@ -945,7 +945,7 @@ def case_opus_ask_full_size_prompt():
     check("opus ask: a prompt of about 20,000 characters reaches the judge once", len(calls) == 1,
           "judge calls %d" % len(calls))
     check("opus ask: a prompt of about 20,000 characters writes the every-role Opus override",
-          opus_pass(cfg) is not None and opus_pass(cfg)[2] is None, "got %r" % (opus_pass(cfg),))
+          opus_override(cfg) is not None and opus_override(cfg)[2] is None, "got %r" % (opus_override(cfg),))
 
 
 def main():
