@@ -42,7 +42,8 @@ const ASKED_AFTER_SEND = "2026-10-30T00:00:00Z";
 // dbExtra is more database content ({collection: {id: data}}), such as the roadmap's own steps and
 // meta docs, which the status part must never read. window.__reads lists every read as
 // [collection, id or null]; window.__uses lists every window.claude.use(capability) call.
-function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, holdReceipts, dbExtra = {} }) {
+// noStore: the page gets no database (a view that cannot reach the store), so use("db") gives null.
+function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, holdReceipts, dbExtra = {}, noStore = false }) {
   const { meta: metaExtra, ...otherExtra } = dbExtra;
   const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: { ...(meta ? { page: meta } : {}), ...metaExtra }, groups: { ...groups }, receipts: { ...receipts }, ...otherExtra };
   window.__reads = []; window.__uses = [];
@@ -86,7 +87,7 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
       return { threadId: target.threadId || "t-new-" + window.__sent.length, commentId: "c" + window.__sent.length };
     },
   };
-  window.claude = { use: async (cap) => { window.__uses.push(cap); return cap === "db" ? db : cap === "comments" ? (cm || null) : null; } };
+  window.claude = { use: async (cap) => { window.__uses.push(cap); return cap === "db" ? (noStore ? null : db) : cap === "comments" ? (cm || null) : null; } };
 }
 
 let browser;
@@ -99,7 +100,7 @@ function pageName() {
 }
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null, noStore = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport });
@@ -113,11 +114,13 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
-  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, holdReceipts, dbExtra });
+  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, holdReceipts, dbExtra, noStore });
   await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
   await page.goto(ORIGIN);
+  // With no store there are no items to wait for: the page is loaded once its empty state is drawn.
+  if (noStore) { await page.waitForFunction("state.loaded"); return page; }
   await page.waitForFunction("state.items.length > 0"); // the stub database has delivered the items
   await page.waitForSelector(`#item-${items.length ? items[0].id : Object.keys(rawItems)[0]}`);
   return page;
@@ -1431,7 +1434,7 @@ test("a send gives one notice that names the item and the choice", async (t) => 
   await choose(page, DECISION, "a");
   await addNote(page, DECISION, "bold");
   await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   const s = await sent(page);
   assert.equal(s.length, 1);
   assert.match(s[0].text, /27 a \(bold\)/);
@@ -1507,7 +1510,7 @@ test("a not_found on the stored thread starts a new anchored thread", async (t) 
   const page = await open(t, { comments: { can: "available", goneThreads: ["t-old"] }, storage: { "waiting.thread": "t-old" } });
   if (!page) return;
   await takePick(page, DECISION); await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   const s = await sent(page);
   assert.equal(s.length, 2);
   assert.equal(s[0].threadId, "t-old");
@@ -1585,7 +1588,7 @@ test("a canSendToClaude that never answers does not hold the send", async (t) =>
 test("Undo tells Claude the answers are withdrawn", async (t) => {
   const page = await open(t); if (!page) return;
   await takePick(page, DECISION); await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   await page.locator("#undoBtn").click();
   await page.waitForFunction(() => window.__sent.length === 2);
   assert.match((await sent(page))[1].text, /Undone on the waiting page\. Owners: test thread\. Items: 27 are open again\./);
@@ -1671,7 +1674,7 @@ test("the template declares utf-8", () => {
 test("a failed receipt delete does not stop Undo, the page state or the notice", async (t) => {
   const page = await open(t, { receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z" } }, failDeleteIn: "receipts" }); if (!page) return;
   await takePick(page, DECISION); await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   await page.locator("#undoBtn").click();
   await page.waitForFunction(() => window.__sent.length === 2);
   assert.equal(await page.evaluate((id) => id in state.answers, DECISION.id), false, "the page still shows the item as sent");
@@ -3943,6 +3946,165 @@ test("merged_page.py refuses --current with --no-roadmap, since a repo with no r
   assert.equal(r.stdout, "", "the refusal printed a page");
 });
 
+// ---------------------------------------------------------------- one page: the phase list draws every step (Status tab)
+// The rail holds one button per phase that has a step: the five known phases in their order, and any other
+// phase id a step carries, ordered by its smallest order and then by id, with Later last. A step with no
+// phase, or an empty one, is in "No phase". Every fixture goes through merged_page.py --data, so the roadmap
+// build bakes it as it bakes a real repo, and the case checks the baked steps before it asks the page anything.
+
+// The steps of a fixture, keyed by file stem (the step id). A row is [id, phase, order, status]; an undefined
+// phase leaves the key out, so the step has no phase at all.
+const stepsOf = (rows) => Object.fromEntries(rows.map(([id, phase, order, status = "todo"]) => [id, {
+  title: "Step " + id, status, order, note: "n", updatedAt: "2026-10-26T00:00:00Z", ...(phase === undefined ? {} : { phase }),
+}]));
+// The page built from a fixture. make_repo adds a cleanup step c1 unless the fixture names one, so a fixture names its own c1.
+function phasePage(steps, phases = {}) {
+  assert.ok(steps.c1, "the fixture names no c1: make_repo would add its own cleanup step c1");
+  return mergedPage("--data", JSON.stringify({ steps, meta: { phases } }));
+}
+// Each step's phase, id to phase, null where the step has none. Fixture and baked data are compared in this form.
+const phaseOf = (steps) => Object.fromEntries(Object.entries(steps).map(([id, s]) => [id, s.phase ?? null]));
+// Before any phase is asked about: the build bakes every fixture step under the fixture's phase, so a red below is the page's.
+async function assertBaked(page, steps) {
+  const baked = await page.evaluate(() => Object.fromEntries(Object.entries(window.ROADMAP_DATA.steps).map(([id, s]) => [id, s.phase ?? null])));
+  assert.deepEqual(baked, phaseOf(steps), "the roadmap build did not bake the fixture's steps under their phases, so the page is not the one the case set up");
+}
+// The names on the rail, in order, one per phase button.
+const railNames = (page) => page.locator(".prail > button .nm > span:first-child").allTextContents();
+// The step ids the phase list draws now: the rows of the phase shown, open and done.
+const listedIds = (page) => page.locator("#svPhases [data-row]").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-row")));
+// Presses each rail button in turn, and returns the step ids the phase list drew under each button's name.
+async function listedByPhase(page) {
+  // A null prototype: a phase named __proto__ would otherwise set the prototype of a plain object, not a key.
+  const out = Object.create(null);
+  const count = await page.locator(".prail > button").count();
+  for (let i = 0; i < count; i++) {
+    const button = page.locator(".prail > button").nth(i);
+    const name = await button.locator(".nm > span:first-child").textContent();
+    await button.click();
+    out[name] = await listedIds(page);
+  }
+  return out;
+}
+
+// (a) The degen shape: every step in one foreign phase. The tab is not blank, and each step's title is drawn.
+test("the phase list draws a repo whose steps all sit in one foreign phase: the phase shows, and every step title is drawn", async (t) => {
+  const steps = stepsOf([["c1", "v2", 1, "active"], ["a2", "v2", 2], ["a3", "v2", 3, "done"]]);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["v2"], "the rail does not name the one phase the steps hold, v2: it shows the five known phases only");
+  const titles = await page.locator("#svPhases .ttl").allTextContents();
+  for (const [id, s] of Object.entries(steps)) assert.ok(titles.includes(s.title), `step ${id} (${s.title}) is not drawn in the phase list, though its phase v2 is shown`);
+});
+
+// (b) The home shape: known phases that hold steps, foreign phases by their smallest order, Later last.
+test("the phase list draws a home-shaped repo: known phases that hold steps, then foreign phases by their first order, Later last, every step drawn", async (t) => {
+  const steps = stepsOf([["c1", "now", 1], ["n2", "now", 2, "done"], ["d3", "duo", 4], ["d4", "duo", 5], ["o5", "owner", 7], ["l6", "later", 9]]);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["now", "duo", "owner", "Later"], "the rail does not hold the phases that have steps, foreign ones by their smallest order, Later last, and no empty known phase");
+  const drawn = Object.values(await listedByPhase(page)).flat();
+  for (const id of Object.keys(steps)) assert.ok(drawn.includes(id), `step ${id} is drawn under no phase of the rail: the phase list hides it`);
+});
+
+// (b, tie) Foreign phases whose smallest order is the same sit in id order. File order would put zeta first.
+test("the phase list orders foreign phases with the same smallest order by id", async (t) => {
+  const steps = stepsOf([["a1", "zeta", 5], ["c1", "zeta", 3], ["z2", "alpha", 3]]);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["alpha", "zeta"], "the rail does not put alpha before zeta: a tie on the smallest order goes by phase id");
+});
+
+// (b, current) Where the plan stands is the first shown phase with an open step. Now is shown but all done, so Duo is current.
+test("the phase list: Where the plan stands names the first shown phase with an open step, Duo here, not Later", async (t) => {
+  const steps = stepsOf([["c1", "now", 1, "done"], ["d3", "duo", 4], ["l6", "later", 9]]);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.equal(await page.locator(".prail .here").count(), 1, "the rail marks no single current phase");
+  assert.equal(await page.locator(".prail .nm:has(.here) > span:first-child").textContent(), "duo", "the current phase on the rail is not duo, the first shown phase with an open step");
+  assert.equal(await page.locator("#svNow .ph").textContent(), "duo", "the Where the plan stands block does not name duo as the current phase");
+});
+
+// (c) A foreign phase takes its name from meta.phases.<id>.name when that is a non-empty string, else its id.
+test("the phase list names a foreign phase from meta.phases when that name is a non-empty string, else by its id", async (t) => {
+  const steps = stepsOf([["c1", "v2", 1], ["d3", "duo", 2], ["o5", "owner", 3]]);
+  const phases = { v2: { name: "Version two" }, duo: { name: "" }, owner: { name: 7 } };
+  const page = await open(t, { pageHtml: phasePage(steps, phases) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["Version two", "duo", "owner"], "the rail does not name each foreign phase from meta.phases.<id>.name when it is a non-empty string, else by its id");
+});
+
+// (d) A step with no phase key, and one with an empty phase, are both drawn under one phase named No phase.
+test("the phase list draws a step with no phase, or an empty one, under No phase", async (t) => {
+  const steps = stepsOf([["c1", undefined, 1, "active"], ["e2", "", 2]]);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["No phase"], "the rail does not hold one No phase button for the steps with no phase");
+  await page.locator(".prail > button", { hasText: "No phase" }).click();
+  const ids = await listedIds(page);
+  assert.ok(ids.includes("c1"), "step c1, with no phase key, is not drawn under No phase");
+  assert.ok(ids.includes("e2"), "step e2, with an empty phase, is not drawn under No phase");
+});
+
+// (b, full size) The shape of claude-settings: the five known phases and seven more, two steps each, twenty-four in all.
+// The orders run later, then the seven others, then the four known phases before Later. So a sort by order alone
+// puts Later first, and a foreign phase with a small order must still sit between Roll out and Later.
+test("the phase list at full size puts the seven others between Roll out and Later, by their smallest order, and draws every step", async (t) => {
+  const others = ["now", "next", "page", "checks", "ci", "merge", "records"];
+  const rows = [];
+  let order = 1;
+  for (const phase of ["later", ...others, "cleanup", "organize", "design", "rollout"]) for (const k of [1, 2]) rows.push([phase === "cleanup" && k === 1 ? "c1" : `${phase}-${k}`, phase, order++]);
+  const steps = stepsOf(rows);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["Clean up", "Organize", "Design", "Roll out", ...others, "Later"], "the rail is not the known phases in their order, then the others by their smallest order, then Later last");
+  const drawn = Object.values(await listedByPhase(page)).flat();
+  for (const id of Object.keys(steps)) assert.ok(drawn.includes(id), `step ${id} is drawn under no phase of the rail: the phase list hides it`);
+});
+
+// Green control: the five known phases all hold steps, so the rail keeps the five names in today's order.
+test("the phase list keeps the five known names in today's order when all five phases hold steps", async (t) => {
+  const page = await open(t, { pageHtml: mergedPage("--current", "organize") }); if (!page) return;
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["Clean up", "Organize", "Design", "Roll out", "Later"], "the five known names or their order changed");
+});
+
+// Phase ids that name a member of Object.prototype. The page keeps per-phase state in plain objects, so each id must
+// read as its own key, never as an inherited member: its steps draw, and the rail names the phase by its id.
+for (const name of ["__proto__", "constructor", "toString"]) {
+  test(`the phase list draws every step of a phase named ${name}, and names that phase by its id`, async (t) => {
+    const steps = stepsOf([["c1", name, 1, "active"], ["a2", name, 2], ["a3", name, 3, "done"]]);
+    const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+    await assertBaked(page, steps);
+    await openStatus(page);
+    assert.deepEqual(await railNames(page), [name], `the rail does not name the one phase the steps hold, ${name}, by its id`);
+    const drawn = Object.values(await listedByPhase(page)).flat();
+    for (const id of Object.keys(steps)) assert.ok(drawn.includes(id), `step ${id} is not drawn in the phase ${name}`);
+  });
+}
+
+// A phase that is not a non-empty string (a number, null, an object) is no phase: its step goes under No phase.
+// An object phase on an open step crashes the roadmap build (skills/roadmap/build.py upkeep, an unhashable dict), so
+// that case's step is done: it tests the page's handling, not the build's crash, which the case reports elsewhere.
+for (const [label, phase, status] of [["a number", 5, "active"], ["null", null, "active"], ["an object", {}, "done"]]) {
+  test(`the phase list draws a step whose phase is ${label} under No phase`, async (t) => {
+    const steps = stepsOf([["c1", phase, 1, status]]);
+    const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+    await assertBaked(page, steps);
+    await openStatus(page);
+    assert.deepEqual(await railNames(page), ["No phase"], `the rail does not hold one No phase button for a step whose phase is ${label}`);
+    await page.locator(".prail > button", { hasText: "No phase" }).click();
+    assert.ok((await listedIds(page)).includes("c1"), `step c1, whose phase is ${label}, is not drawn under No phase`);
+  });
+}
+
 // ---------------------------------------------------------------- c135: a question that takes several answers
 // Spec: the c135 spec (Data, Answer, Page). Labels: docs/design/c135-multi.html. A multi item sets `multi: true`; `ranked: true` also orders the ticks.
 
@@ -4135,7 +4297,7 @@ test("an unranked multi item keeps its ticks in option order: C then A equals my
   assert.deepEqual(await ticked(page, it), ["a", "c"]);
   assert.match(await card(page, it).locator(".ready").textContent(), /^Ready to send: Red and Green, your choice\.$/, "the ready line does not name the ticks in option order");
   await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   const a = (await answers(page))[it.id];
   assert.deepEqual([a.choice, a.note], [["a", "c"], ""], "the answer is not in option order");
   const s = await sent(page);
@@ -4335,7 +4497,7 @@ test("the notice to Claude writes a list pick as 31 a+c, in rank order when rank
   await tick(page, m, "a"); await tick(page, m, "c"); await addNote(page, m, "bold");
   await tick(page, r, "c"); await tick(page, r, "a");
   await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   const s = await sent(page);
   assert.equal(s.length, 1);
   assert.match(s[0].text, /31 a\+c \(bold\)/);
@@ -5182,4 +5344,165 @@ test("a stored park draft whose entry is gone is pruned on load, and a later ent
   await need(parkLine(page, PARK_A), "the later entry with the same id is not on the page");
   assert.equal(await parkBtn(page, PARK_A, "unpark").getAttribute("aria-pressed"), "false", "a later entry with the same id is pre-staged");
   assert.equal(await page.locator("#send").isDisabled(), true, "a later entry with the same id is ready to send");
+});
+
+// ---------------------------------------------------------------- what the page says after a send: a wake, a paste in chat, a none key
+// SKILL.md forbids a session to reply in a comment thread, so no line the page shows may send the owner there.
+const NO_THREAD = /thread/i;
+const WRITER = "home-triage-4";
+const NOT_TOLD_TEXT = "No session was told. It waits for " + WRITER + "'s next wake or turn start.";
+// An answer is read by each item's owner, not by the writer, so its unsent line names no writer.
+const ANSWER_NOT_TOLD = "No session was told. Each owner reads its answer at its next wake or turn start.";
+// The ask hint says "Telling Claude…" while the wake result is pending. A test waits for that result, not for a clock.
+const askHintSettled = (page) => page.waitForFunction(() => { const h = document.getElementById("askHint").textContent; return h.includes("Sent") && !h.includes("Telling"); });
+// Types an ask and sends it, then returns the hint once the wake result has landed.
+async function askFrom(page, text) {
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", text);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await askHintSettled(page);
+  return (await page.textContent("#askHint")).trim();
+}
+
+test("an ask sent while a session can take a comment says a wake was sent, never that Claude was told", async (t) => {
+  const page = await open(t, { meta: { writer: WRITER }, comments: { can: "available" } }); if (!page) return;
+  const hint = await askFrom(page, ASK_TEXT);
+  assert.match(hint, /A wake was sent\./, "the ask hint does not say a wake was sent: " + JSON.stringify(hint));
+  assert.doesNotMatch(hint, /Claude was told/, "the ask hint still says Claude was told: " + JSON.stringify(hint));
+});
+
+test("an ask sent with no session to tell says what happens next, and names no thread", async (t) => {
+  const page = await open(t, { meta: { writer: WRITER }, comments: { can: "no_session" } }); if (!page) return;
+  const hint = await askFrom(page, ASK_TEXT);
+  assert.ok(hint.includes(NOT_TOLD_TEXT), "the ask hint does not say what happens next: " + JSON.stringify(hint));
+  assert.doesNotMatch(hint, NO_THREAD, "the ask hint names a thread: " + JSON.stringify(hint));
+});
+
+test("an answer sent with no session to tell says each owner reads it at its next wake, and names no thread or writer", async (t) => {
+  const page = await open(t, { meta: { writer: WRITER }, comments: { can: "no_session" } }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await told(page, "No session was told");
+  const status = (await page.textContent("#sentStatus")).trim();
+  assert.ok(status.includes(ANSWER_NOT_TOLD), "the sent panel does not say each owner reads its answer at its next wake: " + JSON.stringify(status));
+  assert.doesNotMatch(status, NO_THREAD, "the sent panel names a thread: " + JSON.stringify(status));
+  assert.ok(!status.includes(WRITER), "the sent panel names the writer, but each owner reads its own answer: " + JSON.stringify(status));
+});
+
+test("a failed Send tells the owner to paste the copied answers in chat, and names no thread", async (t) => {
+  const page = await open(t, { failSet: true }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await page.locator("#barStatus", { hasText: "Not saved (denied)" }).waitFor();
+  const bar = (await page.textContent("#barStatus")).trim();
+  assert.ok(bar.includes("Copy the answers and paste them in chat."), "the failed-save note does not say to paste the copied answers in chat: " + JSON.stringify(bar));
+  assert.doesNotMatch(bar, NO_THREAD, "the failed-save note names a thread: " + JSON.stringify(bar));
+});
+
+// One decision whose options are given, with a pick on its first key that is not none. Returns its warning, or null with no browser.
+const optWith = (key, label) => ({ key, label, how: "h", gain: "g", lose: "l" });
+const optNoLabel = (key) => ({ key, how: "h", gain: "g", lose: "l" });
+async function noneKeyWarning(t, options) {
+  const pick = options.find((o) => o.key !== "none").key;
+  const page = await open(t, { items: [], rawItems: { "none-key": { ...DECISION, id: "none-key", n: 33, options, pick } } }); if (!page) return null;
+  return (await warn(page, "none-key").textContent()).trim();
+}
+// The warning names the option by its letter and label, then gives the reason. The head is the part before the reason.
+function assertNoneWarning(text, head) {
+  assert.ok(text.includes(head + ' The page keeps that key for "None of these", so this decision cannot be answered.'), "the none-key warning does not read " + JSON.stringify(head) + ": " + JSON.stringify(text));
+  assert.doesNotMatch(text, /undefined/, "the none-key warning prints undefined: " + JSON.stringify(text));
+}
+
+test("a none key warning names its option by letter and label", async (t) => {
+  const text = await noneKeyWarning(t, [optWith("none", "Keep the old way"), optWith("b", "Blue")]); if (text === null) return;
+  assertNoneWarning(text, 'Option A, "Keep the old way", has the key none.');
+});
+
+test("a none key label over 28 characters is cut with an ellipsis in the warning", async (t) => {
+  const text = await noneKeyWarning(t, [optWith("none", "Keep the existing layout for every reader"), optWith("b", "Blue")]); if (text === null) return;
+  assertNoneWarning(text, 'Option A, "Keep the existing layout fo…", has the key none.');
+  assert.doesNotMatch(text, /for every reader/, "the none-key warning shows the whole label: " + JSON.stringify(text));
+});
+
+test("a none key with no label names its letter only, and prints no undefined", async (t) => {
+  const text = await noneKeyWarning(t, [optWith("a", "Red"), optNoLabel("none")]); if (text === null) return;
+  assertNoneWarning(text, "Option B has the key none.");
+});
+
+test("a none key with a blank label names its letter only, and prints no empty quotes", async (t) => {
+  const text = await noneKeyWarning(t, [optWith("a", "Red"), optWith("none", "   ")]); if (text === null) return;
+  assertNoneWarning(text, "Option B has the key none.");
+  assert.doesNotMatch(text, /""/, "the none-key warning prints empty quotes: " + JSON.stringify(text));
+});
+
+test("the copy confirmation names no thread", async (t) => {
+  const page = await open(t, { failSet: true }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await page.locator("#barStatus", { hasText: "Not saved (denied)" }).waitFor();
+  await stubClipboard(page, false);
+  await page.click("#copy");
+  await page.locator("#barStatus", { hasText: "Copied" }).waitFor();
+  const bar = (await page.textContent("#barStatus")).trim();
+  assert.doesNotMatch(bar, NO_THREAD, "the copy confirmation names a thread: " + JSON.stringify(bar));
+});
+
+test("a parked line with no id says the writer has not prepared it, and names no thread", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: { writer: "triage", parked: [PARK_NOID] } }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkLine(page, PARK_NOID), "the line with no id is not a .pk in .parked .pk-list");
+  const why = (await parkLine(page, PARK_NOID).locator(".pk-why").first().textContent()).trim();
+  assert.match(why, /has not prepared this line yet/, "the no-id line does not say the writer has not prepared it: " + JSON.stringify(why));
+  assert.doesNotMatch(why, NO_THREAD, "the no-id line names a thread: " + JSON.stringify(why));
+});
+
+// ---------------------------------------------------------------- an option with no label: the ready line names its letter
+// The page never prints a raw key or "undefined". An option with no title is named by its letter, as its chip is.
+test("a pick of an option with no label names its letter on the ready line", async (t) => {
+  const it = mk("no-label-pick", 41, { options: [optWith("a", "Red"), optNoLabel("b")], pick: "a" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await page.locator('label[for="o-no-label-pick-b"]').click();
+  const ready = (await card(page, it).locator(".ready").textContent()).trim();
+  assert.equal(ready, "Ready to send: B, your choice.", "the ready line does not name the option by its letter: " + JSON.stringify(ready));
+});
+
+test("a pick of an option with a blank label names its letter on the ready line", async (t) => {
+  const it = mk("blank-label-pick", 42, { options: [optWith("a", "Red"), optWith("b", "   ")], pick: "a" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await page.locator('label[for="o-blank-label-pick-b"]').click();
+  const ready = (await card(page, it).locator(".ready").textContent()).trim();
+  assert.equal(ready, "Ready to send: B, your choice.", "the ready line does not name the option by its letter: " + JSON.stringify(ready));
+});
+
+test("a two-pick with an option that has no label names that option by its letter on the ready line", async (t) => {
+  const it = mk("no-label-two", 43, { multi: true, options: [optWith("a", "Red"), optNoLabel("b")], pick: ["a", "b"] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 2);
+  await page.locator('label[for="o-no-label-two-a"]').click();
+  await page.locator('label[for="o-no-label-two-b"]').click();
+  const ready = (await card(page, it).locator(".ready").textContent()).trim();
+  assert.equal(ready, "Ready to send: Red and B, your choice.", "the two-pick ready line does not name the unlabelled option by its letter: " + JSON.stringify(ready));
+});
+
+// ---------------------------------------------------------------- pins: a failed withdraw and a view with no store say "in chat"
+// Pins, not red cases: these lines are green on the current page. They hold the wording the page says now, so a
+// thread line coming back fails here.
+test("a withdraw the store refuses says to paste the answer in chat, and names no thread", async (t) => {
+  const page = await open(t, { answers: SAVED_A, failDelete: true }); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByRole("button", { name: "Change" }).click();
+  await choose(page, DECISION, "a");
+  await send(page);
+  const note = c.getByText("Not withdrawn (denied)", { exact: false }).first();
+  await note.waitFor();
+  const text = (await note.textContent()).trim();
+  assert.match(text, /in chat/, "the withdraw note does not say to paste in chat: " + JSON.stringify(text));
+  assert.doesNotMatch(text, NO_THREAD, "the withdraw note names a thread: " + JSON.stringify(text));
+});
+
+test("a view that cannot reach the store says to paste its answers in chat, and names no thread", async (t) => {
+  const page = await open(t, { items: [], noStore: true }); if (!page) return;
+  const empty = page.locator("#list .empty").first();
+  await empty.waitFor();
+  const text = (await empty.textContent()).trim();
+  assert.match(text, /in chat/, "the no-store empty state does not say to paste in chat: " + JSON.stringify(text));
+  assert.doesNotMatch(text, NO_THREAD, "the no-store empty state names a thread: " + JSON.stringify(text));
 });
