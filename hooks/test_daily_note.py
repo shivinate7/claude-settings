@@ -20,7 +20,12 @@ Contract the builder codes against. Every case is red until hooks/daily_note.py 
 - Failed checks, each one stdout line:
   1. A `crash` decision line (rule guard-crash) from the previous day.
   2. guard.log exists but cannot be read. The line says unknown.
+  3. An agent-end reap run on a window day that was killed (a started row, no done row) or crashed
+     (an error key). The reader is <config dir>/state/agent-end-payloads.jsonl. Unreadable: unknown.
+  4. <config dir>/janitor/launchd-sweep.err.log is not empty and was last written on a window day.
   No volume check. A day of high but steady denies, or a ramp of growing volume, prints nothing.
+- Cost of checks 3 and 4: they read files on disk after the stamp check, start no process, and
+  write nothing beyond the stamp. Watched in this process, since main() catches every error.
 - Each line: plain text, at most 240 characters, names what failed, and names the reader
   command by its ABSOLUTE path, built from the hook's own folder: <hook folder>/../lint/
   guard_log_report.py. Nothing else goes to stdout. stderr stays empty.
@@ -30,6 +35,9 @@ Contract the builder codes against. Every case is red until hooks/daily_note.py 
 - Wiring: a SessionStart hook under a startup matcher runs the note in the same
   `[ -f ... ] || exit 0` shape as the other hooks, so a missing script exits 0 silently.
 """
+import contextlib
+import importlib.util
+import io
 import json
 import os
 import shutil
@@ -37,6 +45,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime
+from unittest import mock
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 NOTE = os.path.join(ROOT, "hooks", "daily_note.py")
@@ -52,6 +62,12 @@ MORNING = "2026-10-14T09:00:00-05:00"
 BASELINE = ["2026-10-%02d" % day for day in range(6, 13)]  # the 7 days before YESTERDAY
 HISTORY = BASELINE + [YESTERDAY]
 CRASH_AT = "2026-10-13T23:30:00"  # a late-evening line on YESTERDAY, Central wall time
+YESTERDAY_NOON = "2026-10-13T12:00:00-05:00"  # a run or a log write on YESTERDAY, the one window day of MORNING
+LATER_SAME_DAY = "2026-10-14T15:00:00-05:00"
+OLD_WRITE = "2026-10-01T12:00:00-05:00"  # an error log last written before the window
+# A Claude Code session sets these. The version check would then read the real binary and write its
+# cache under the config dir, so every case clears them.
+SCRUBBED = ("CLAUDE_CODE_EXECPATH", "AI_AGENT")
 
 
 def row(stamp, decision, rule, matched="x", tool="Bash", session="s-1"):
@@ -122,8 +138,31 @@ class NoteCase(unittest.TestCase):
         with open(os.path.join(self.config, "guard.log"), "a", encoding="utf-8") as handle:
             handle.write("".join(lines))
 
+    def payload_path(self):
+        return os.path.join(self.config, "state", "agent-end-payloads.jsonl")
+
+    def write_payload(self, lines):
+        os.makedirs(os.path.dirname(self.payload_path()), exist_ok=True)
+        with open(self.payload_path(), "w", encoding="utf-8") as handle:
+            handle.write("".join(lines))
+
+    def sweep_err_path(self):
+        return os.path.join(self.config, "janitor", "launchd-sweep.err.log")
+
+    def sweep_out_path(self):
+        return os.path.join(self.config, "janitor", "launchd-sweep.log")
+
+    def write_sweep_err(self, text, when):
+        os.makedirs(os.path.dirname(self.sweep_err_path()), exist_ok=True)
+        with open(self.sweep_err_path(), "w", encoding="utf-8") as handle:
+            handle.write(text)
+        stamp = datetime.fromisoformat(when).timestamp()
+        os.utime(self.sweep_err_path(), (stamp, stamp))
+
     def env(self, config):
         env = dict(os.environ)
+        for key in SCRUBBED:
+            env.pop(key, None)
         env.update({"CLAUDE_CONFIG_DIR": config, "TEMP": self.temp, "TMP": self.temp,
                     "TMPDIR": self.temp, "APPDATA": self.appdata,
                     "LOCALAPPDATA": self.localappdata, "HOME": self.home,
@@ -296,6 +335,230 @@ class WiringTests(NoteCase):
                                     errors="replace", timeout=60)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, "")
+
+
+def json_line(record):
+    return json.dumps(record) + "\n"
+
+
+def run_id(pid, when):
+    """An agent-end run id, "<pid>-<time_ns>", at an instant (janitor/agent_end_reap.py writes time.time_ns())."""
+    return "%d-%d" % (pid, int(datetime.fromisoformat(when).timestamp()) * 10 ** 9 + 123456789)
+
+
+def started_row(run):
+    return json_line({"raw": "{}", "run": run, "state": "started"})
+
+
+def done_row(run):
+    return json_line({"raw": "{}", "run": run, "state": "done", "target": None})
+
+
+def errored_row(run):
+    """A run whose handler raised: the reap hook's done row carries an `error` key."""
+    return json_line({"raw": "{}", "run": run, "state": "done", "error": "RuntimeError('boom')"})
+
+
+MALFORMED_ROWS = [
+    "not json at all\n",
+    json_line(["a", "list"]),
+    json_line({"raw": "{}", "state": "started"}),  # no run key
+    json_line({"run": 7, "state": "started"}),  # run is not a string
+    json_line({"run": "12345", "state": "started"}),  # no time part after the pid
+    json_line({"run": "9-" + "9" * 40, "state": "started"}),  # a time no date can hold
+]
+
+
+class AgentEndTests(NoteCase):
+    """The agent-end check: a reap run on a window day that was killed or crashed. main() cuts each
+    line at 240 characters, so a line that still ends with its reader path fits."""
+
+    def window_control(self):
+        """A started-only run on the window day. It always prints, so a silent case shows the check ran."""
+        return [started_row(run_id(900, YESTERDAY_NOON))]
+
+    def assert_one_run_line(self, result, count):
+        lines = self.failure_lines(result)
+        self.assertEqual(len(lines), 1, "want one agent-end line, got %r" % lines)
+        self.assertIn("%d agent-end reap run(s)" % count, lines[0])
+        self.assertTrue(lines[0].endswith("Read: " + self.payload_path()),
+                        "the line does not end with its reader path: %r" % lines[0])
+        return lines[0]
+
+    def test_a_started_only_run_on_a_window_day_is_one_line_that_ends_with_its_reader(self):
+        self.write_payload([started_row(run_id(101, YESTERDAY_NOON))])
+        self.assert_one_run_line(self.run_note(MORNING), 1)
+
+    def test_an_errored_run_on_a_window_day_is_one_line(self):
+        self.write_payload([errored_row(run_id(102, YESTERDAY_NOON))])
+        self.assert_one_run_line(self.run_note(MORNING), 1)
+
+    def test_a_run_with_a_started_and_a_done_row_is_not_counted(self):
+        run = run_id(103, YESTERDAY_NOON)
+        self.write_payload([started_row(run), done_row(run)] + self.window_control())
+        self.assert_one_run_line(self.run_note(MORNING), 1)
+
+    def test_a_run_with_only_a_done_row_is_not_counted(self):
+        self.write_payload([done_row(run_id(104, YESTERDAY_NOON))] + self.window_control())
+        self.assert_one_run_line(self.run_note(MORNING), 1)
+
+    def test_a_run_outside_the_window_or_on_today_is_not_counted(self):
+        self.write_payload([started_row(run_id(105, "2026-10-12T12:00:00-05:00")),
+                            started_row(run_id(106, "2026-10-14T10:00:00-05:00"))] + self.window_control())
+        self.assert_one_run_line(self.run_note(MORNING), 1)
+
+    def test_a_run_at_0430_utc_on_the_14th_counts_as_the_13th(self):
+        self.write_payload([started_row(run_id(107, "2026-10-14T04:30:00+00:00"))])
+        self.assert_one_run_line(self.run_note(MORNING), 1)
+
+    def test_a_run_at_0530_utc_on_the_14th_is_not_counted(self):
+        self.write_payload([started_row(run_id(108, "2026-10-14T05:30:00+00:00"))] + self.window_control())
+        self.assert_one_run_line(self.run_note(MORNING), 1)
+
+    def test_several_runs_give_one_line_with_their_count(self):
+        self.write_payload([started_row(run_id(pid, when)) for pid, when in (
+            (111, "2026-10-13T08:00:00-05:00"),
+            (112, "2026-10-13T10:00:00-05:00"),
+            (113, "2026-10-13T12:00:00-05:00"))])
+        self.assert_one_run_line(self.run_note(MORNING), 3)
+
+    def test_malformed_rows_are_skipped_and_do_not_count(self):
+        self.write_payload(MALFORMED_ROWS + [started_row(run_id(121, YESTERDAY_NOON))])
+        self.assert_one_run_line(self.run_note(MORNING), 1)
+
+    def test_malformed_rows_alone_print_nothing_and_fail_no_run(self):
+        self.write_payload(MALFORMED_ROWS)
+        self.assert_silent(self.run_note(MORNING))
+
+    def test_a_missing_payload_log_is_silent(self):
+        self.assert_silent(self.run_note(MORNING))
+
+    def test_a_payload_log_that_cannot_be_read_is_reported_as_unknown(self):
+        os.makedirs(self.payload_path())  # a directory cannot be read as a log
+        lines = self.failure_lines(self.run_note(MORNING))
+        self.assertEqual(len(lines), 1, "want one unknown line, got %r" % lines)
+        self.assertIn("unknown", lines[0].lower())
+        self.assertTrue(lines[0].endswith("Read: " + self.payload_path()), lines[0])
+
+
+class SweepErrorLogTests(NoteCase):
+    """The daily sweep's error log: one line when it is not empty and was last written on a window day."""
+
+    def test_a_non_empty_error_log_from_a_window_day_is_one_line_naming_both_logs(self):
+        self.write_sweep_err("sweep failed\n", YESTERDAY_NOON)
+        lines = self.failure_lines(self.run_note(MORNING))
+        self.assertEqual(len(lines), 1, "want one sweep-error line, got %r" % lines)
+        self.assertIn(self.sweep_err_path(), lines[0])
+        self.assertTrue(lines[0].endswith("stdout: " + self.sweep_out_path()),
+                        "the line does not end with the stdout log: %r" % lines[0])
+
+    def test_an_empty_error_log_is_silent(self):
+        self.write_sweep_err("", YESTERDAY_NOON)
+        self.assert_silent(self.run_note(MORNING))
+
+    def test_an_error_log_last_written_before_the_window_is_silent(self):
+        self.write_sweep_err("old error\n", OLD_WRITE)
+        self.assert_silent(self.run_note(MORNING))
+
+    def test_missing_logs_are_silent(self):
+        self.assert_silent(self.run_note(MORNING))
+
+
+class StartCostTests(NoteCase):
+    """The cost stated for checks 3 and 4: files on disk after the stamp check, no process, and nothing
+    written beyond the stamp. Watched in this process, since main() catches every error and exits 0."""
+
+    def fail_both_checks(self):
+        self.write_payload([started_row(run_id(131, YESTERDAY_NOON))])
+        self.write_sweep_err("sweep failed\n", YESTERDAY_NOON)
+
+    def load_note(self):
+        self.require_file(NOTE)
+        spec = importlib.util.spec_from_file_location("daily_note_under_test", NOTE)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def in_process(self, module, now):
+        """One start of the note in this process, with the env a child would get. Returns stdout and stderr."""
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.dict(os.environ):
+            for key in SCRUBBED:
+                os.environ.pop(key, None)
+            os.environ.update(self.env(self.config))
+            os.environ[CLOCK] = now
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                module.main()
+        return out.getvalue(), err.getvalue()
+
+    def touched_paths(self, module, now):
+        """Every path the note opens or stats during one start, as absolute paths, with what it printed."""
+        touched = []
+        real_open, real_stat = open, os.stat
+
+        def spy_open(file, *args, **kwargs):
+            if isinstance(file, (str, bytes, os.PathLike)):
+                touched.append(os.path.abspath(os.fsdecode(file)))
+            return real_open(file, *args, **kwargs)
+
+        def spy_stat(path, *args, **kwargs):
+            if isinstance(path, (str, bytes, os.PathLike)):
+                touched.append(os.path.abspath(os.fsdecode(path)))
+            return real_stat(path, *args, **kwargs)
+
+        with mock.patch("builtins.open", spy_open), mock.patch("os.stat", spy_stat):
+            out, err = self.in_process(module, now)
+        return touched, out, err
+
+    def test_the_first_start_reads_both_logs_and_a_second_start_reads_neither(self):
+        self.fail_both_checks()
+        module = self.load_note()
+        first, out1, err1 = self.touched_paths(module, MORNING)
+        self.assertEqual(err1, "", "the note raised on the first start: %r" % err1)
+        self.assertIn(self.payload_path(), first, "the first start never read the agent-end payload log")
+        self.assertIn(self.sweep_err_path(), first, "the first start never checked the sweep error log")
+        self.assertEqual(len(out1.splitlines()), 2,
+                         "control: both checks should print a line on the first start, got %r" % out1)
+        second, out2, err2 = self.touched_paths(module, LATER_SAME_DAY)
+        self.assertEqual(out2, "", "a second start on the same day printed: %r" % out2)
+        self.assertNotIn(self.payload_path(), second, "a second start on the same day read the payload log")
+        self.assertNotIn(self.sweep_err_path(), second, "a second start on the same day checked the sweep error log")
+
+    def test_the_first_start_starts_no_process(self):
+        self.fail_both_checks()
+        module = self.load_note()
+        started = []
+        targets = ("subprocess.Popen", "subprocess.run", "subprocess.call", "subprocess.check_call",
+                   "subprocess.check_output", "os.system", "os.fork", "os.posix_spawn",
+                   "os.posix_spawnp", "os.spawnv", "os.execv")
+        with contextlib.ExitStack() as stack:
+            for target in targets:
+                stack.enter_context(mock.patch(target, side_effect=refuse_process(target, started), create=True))
+            out, err = self.in_process(module, MORNING)
+        self.assertEqual(started, [], "the first start started a process: %r" % started)
+        self.assertEqual(err, "", "the note raised while a process call was refused: %r" % err)
+        self.assertEqual(len(out.splitlines()), 2,
+                         "control: both checks should print a line, got %r" % out)
+
+    def test_the_first_start_writes_only_the_stamp(self):
+        self.fail_both_checks()
+        before = self.snapshot()
+        result = self.run_note(MORNING)
+        after = self.snapshot()
+        lines = self.failure_lines(result)
+        self.assertEqual(len(lines), 2, "control: both checks should print a line, got %r" % lines)
+        added = sorted(path for path in after if path not in before)
+        self.assertEqual(added, ["daily-note.stamp"], "the first start wrote more than the stamp: %r" % added)
+        changed = sorted(path for path in before if path in after and before[path] != after[path])
+        self.assertEqual(changed, [], "the first start changed existing files: %r" % changed)
+
+
+def refuse_process(name, started):
+    """A stand-in for a process start: it records the call and raises, so a start that makes it fails loudly."""
+    def refuse(*args, **kwargs):
+        started.append(name)
+        raise RuntimeError("%s starts a process" % name)
+    return refuse
 
 
 if __name__ == "__main__":
