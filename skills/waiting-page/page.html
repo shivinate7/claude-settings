@@ -352,6 +352,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 /* Answer bar: what is ready, then one Send. The stamp and Undo sit above it after a Send. */
 .bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
 .bar .in { padding-block: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.bar .brow { flex: 1 1 100%; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; } /* the status and its buttons; the read-only copy box sits below the row */
 .bar .st { flex: 1 1 0; font-size: 14.5px; color: var(--muted); min-width: 0; }
 .bar .st b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .bar textarea { flex: 1 1 100%; font: 13px var(--mono); background: var(--ground); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
@@ -844,9 +845,9 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 <div class="bar" id="bar">
   <div class="sent" id="sent" hidden><div class="in" id="sentIn"></div></div>
   <div class="in">
-    <span class="st" id="barStatus"></span>
-    <button class="btn quiet" type="button" id="copy" hidden>Copy answers</button>
-    <button class="btn send" type="button" id="send" disabled>Send answers</button>
+    <div class="brow"><span class="st" id="barStatus"></span>
+      <button class="btn quiet" type="button" id="copy" hidden>Copy answers</button>
+      <button class="btn send" type="button" id="send" disabled>Send answers</button></div>
     <textarea id="copyBox" rows="2" hidden readonly></textarea>
   </div>
 </div>
@@ -2062,7 +2063,7 @@ async function copyText(text) { try { await navigator.clipboard.writeText(text);
 $("copy").addEventListener("click", async () => {
   const text = answerLine() || "No answers yet.", box = $("copyBox");
   if (await copyText(text)) { state.barNote = "Copied. Paste it in chat."; box.hidden = true; }
-  else { box.hidden = false; box.value = text; box.select(); state.barNote = "Select and copy the text below."; }
+  else { box.hidden = false; box.value = text; box.select(); state.barNote = "Select and copy the text in the box."; }
   renderBar();
 });
 $("send").addEventListener("click", sendAll);
@@ -2072,7 +2073,7 @@ $("send").addEventListener("click", sendAll);
 const ASK_MAX = 4000, ASK_NOTICE = 500, ASK_SHOWN = 3, ASK_NEW_MS = 864e5;
 // sent: the batch the Undo covers. line: what the line under the buttons says in place of it (undone, allfail, undofail).
 // stack: the asks not sent yet, each { k, text, edit?, editErr?, gone?, state?, err? }. copyBox: words a refused clipboard leaves to select.
-const askState = { map: null, bad: false, sent: null, line: null, note: "", copyBox: "", busy: false, busyN: 0, stack: [], focus: null, open: {}, older: false };
+const askState = { map: null, bad: false, sent: null, line: null, note: "", copyBox: "", keepFail: false, busy: false, busyN: 0, stack: [], focus: null, open: {}, older: false };
 let askTimer, askStamp = 0, askRowN = 0;
 // Ids made in one batch rise in the order made: askAll breaks the tie of a shared `at` by id, so the last-typed ask sorts on top.
 const askId = () => { askStamp = Math.max(Date.now(), askStamp + 1); return "ask-" + askStamp.toString(36) + Math.random().toString(36).slice(2, 4).padEnd(2, "0"); };
@@ -2098,9 +2099,20 @@ document.addEventListener("visibilitychange", () => { if (document.hidden) markA
 window.addEventListener("pagehide", markAsksSeen);
 const saveAskDraft = () => { try { const v = $("askText").value; if (v) localStorage.setItem("waiting.askDraft", v); else localStorage.removeItem("waiting.askDraft"); } catch (e) {} };
 try { $("askText").value = localStorage.getItem("waiting.askDraft") || ""; } catch (e) {}
-// The stack is kept beside the draft, so a reload shows it again. An ask already written to the store is not kept.
-const saveAskStack = () => { try { const t = askState.stack.filter((r) => !r.gone && r.state !== "saved").map((r) => r.text); if (t.length) localStorage.setItem("waiting.askStack", JSON.stringify(t)); else localStorage.removeItem("waiting.askStack"); } catch (e) {} };
-try { const t = JSON.parse(localStorage.getItem("waiting.askStack") || "[]"); if (Array.isArray(t)) askState.stack = t.filter((x) => typeof x === "string" && x.trim()).map((x) => ({ k: ++askRowN, text: x })); } catch (e) {}
+// The stack is kept beside the draft, so a reload shows it again. An ask already written to the store is not kept. An edit left open keeps its words.
+// A browser that refuses the write sets keepFail, and the hint says so: the list would not come back after a reload.
+const saveAskStack = () => {
+  try {
+    const t = askState.stack.filter((r) => !r.gone && r.state !== "saved").map((r) => (r.edit != null ? { text: r.text, edit: r.edit } : r.text));
+    if (t.length) localStorage.setItem("waiting.askStack", JSON.stringify(t)); else localStorage.removeItem("waiting.askStack");
+    askState.keepFail = false;
+  } catch (e) { askState.keepFail = true; }
+};
+try {
+  const t = JSON.parse(localStorage.getItem("waiting.askStack") || "[]");
+  if (Array.isArray(t)) askState.stack = t.map((x) => (typeof x === "string" ? { text: x } : x && typeof x.text === "string" ? { text: x.text, edit: typeof x.edit === "string" ? x.edit : null } : null))
+    .filter((x) => x && x.text.trim()).map((x) => { const r = { k: ++askRowN, text: x.text }; if (x.edit != null) r.edit = x.edit; return r; });
+} catch (e) {}
 
 function askRailRow() {
   const n = askWaiting();
@@ -2110,13 +2122,16 @@ function askRailRow() {
 function renderAskForm() {
   const s = askState, a = s.sent, typed = $("askText").value.trim(), hint = $("askHint"), slot = $("askSlot");
   let cls = "askhint", kids, live = "polite", slotKids = [];
-  const counting = !!a && undoLeft(a) > 0, rows = stackLive().filter((r) => !r.state), failed = rows.filter((r) => r.err).length;
+  // Send waits for the count, and for an Undo whose delete is still awaited, though its window has passed.
+  const counting = !!a && undoLeft(a) > 0, holding = counting || (!!a && !!a.busy), rows = stackLive().filter((r) => !r.state), failed = rows.filter((r) => r.err).length;
   const n = rows.length + (typed ? 1 : 0), over = typed.length > ASK_MAX;
   const words = (t) => [h("span", {}, t, h("span", { class: "kbd" }, " Ctrl+Enter sends."))];
   if (s.note) kids = [s.note];
   else if (state.db === false) { cls += " bad"; kids = ["This view cannot reach the page's store, so an ask cannot be saved here. Copy it and paste it in chat."]; }
   else if (over) { cls += " bad"; kids = ["Your ask is " + typed.length + " characters. The limit is " + ASK_MAX + ". Shorten it, then send. Nothing was cut."]; }
-  else if (counting && n) kids = words("Send turns on when the Undo count ends. Add to list stays on.");
+  else if (s.keepFail) { cls += " bad"; kids = ["This browser would not keep your list, so a reload would lose it. Send it, or copy it and paste it in chat."]; }
+  // Add to list is on only with words in the box, so its clause is said only then.
+  else if (holding) kids = words((failed ? "Send ask tries " + (failed === 1 ? "the one" : "the " + failed) + " not saved again when the Undo count ends." : "Send turns on when the Undo count ends.") + (typed ? " Add to list stays on." : ""));
   else if (failed) kids = words("Send ask tries " + (failed === 1 ? "the one" : "the " + failed) + " not saved again.");
   else if (rows.length && typed) kids = words("Send takes the " + rows.length + " in the list and the one in the box.");
   else if (rows.length) kids = words(rows.length === 1 ? "Add more, or send it." : "Add more, or send them together.");
@@ -2127,8 +2142,8 @@ function renderAskForm() {
   if (state.db === false || (s.line && s.line.kind === "allfail")) slotKids = [$("askCopy") || h("button", { class: "btn alt", type: "button", id: "askCopy", onclick: () => copyAsk() }, "Copy ask")];
   // A button already there stays, so a press that is under way is not lost to a repaint each second.
   if (slotKids.length !== slot.children.length || slotKids[0] !== slot.firstElementChild) slot.replaceChildren(...slotKids);
-  $("askAdd").disabled = !typed || over;
-  $("askSend").disabled = !state.db || s.busy || counting || !n || over;
+  $("askAdd").disabled = state.db === false || !typed || over;
+  $("askSend").disabled = !state.db || s.busy || holding || !n || over;
   const lbl = $("askSendLbl"), want = n > 1 ? "Send " + n + " asks" : "Send ask";
   if (lbl.textContent !== want) lbl.textContent = want;
 }
@@ -2139,6 +2154,7 @@ function renderLine() {
   if (s.busy) { g = "wait"; words = ["Saving " + asksN(s.busyN) + "… Keep typing: the box does not wait for the send."]; }
   else if (ln && ln.kind === "undone") { g = "wait"; words = ["Undone. Your " + asksN(ln.n) + (ln.n === 1 ? " is" : " are") + " back in the list, not sent."]; }
   else if (ln && ln.kind === "allfail") { g = "due"; cls = "bad"; words = ["Not saved (" + ln.code + "). Your " + asksN(ln.n) + (ln.n === 1 ? " is" : " are") + " kept in the list: copy " + (ln.n === 1 ? "it" : "them") + " and paste " + (ln.n === 1 ? "it" : "them") + " in chat."]; }
+  else if (ln && ln.kind === "late" && a) { g = "due"; cls = "bad"; words = ["Too late to undo " + asksN(ln.n) + ". " + (ln.n === 1 ? "It stays" : "They stay") + " sent."]; }
   else if (ln && ln.kind === "undofail" && a) { g = "due"; cls = "bad"; undo = true; words = ["Undo failed (" + ln.code + "). " + asksN(a.ids.length) + (a.ids.length === 1 ? " stays" : " stay") + " sent."]; }
   else if (a) { undo = true; words = [h("b", {}, a.total > a.texts.length ? a.texts.length + " of " + a.total + " sent " + fmt(a.at, false) + "." : "Sent " + fmt(a.at, false) + ". " + asksN(a.texts.length) + "."), " " + a.told]; }
   const sig = words ? g + "|" + cls + "|" + undo + "|" + words.map((k) => (k && k.nodeType ? k.textContent : k)).join("") : "";
@@ -2166,10 +2182,11 @@ function stackRow(r, i) {
   const num = h("span", { class: "sn", "aria-hidden": "true" }, String(n));
   const edit = btn("edit", "Edit", "quiet", "Edit ask " + n), rm = btn("rm", "Remove", "quiet", "Remove ask " + n);
   if (r.state === "saving") return h("li", {}, num, h("p", { class: "stext" }, r.text), h("span", { class: "sacts" }, h("span", { class: "sstate" }, "Saving…")));
+  if (r.state === "undoing") return h("li", {}, num, h("p", { class: "stext" }, r.text), h("span", { class: "sacts" }, h("span", { class: "sstate" }, "Taking back…")));
   if (r.state === "saved") return h("li", {}, num, h("p", { class: "stext" }, r.text), h("span", { class: "sacts" }, h("span", { class: "sstate ok" }, glyph("done"), "Saved")));
   if (r.gone) return h("li", { class: "gone" }, num, h("p", { class: "stext" }, "Removed: “" + r.text + "”"), h("span", { class: "sacts" }, btn("undo", "Undo remove", "alt")));
   if (r.edit != null) {
-    const ta = h("textarea", { rows: 2, "aria-label": "Ask " + n, "data-sk": k, "data-act": "text", oninput: (e) => { r.edit = e.target.value; } });
+    const ta = h("textarea", { rows: 2, "aria-label": "Ask " + n, "data-sk": k, "data-act": "text", oninput: (e) => { r.edit = e.target.value; saveAskStack(); } });
     ta.value = r.edit;
     return h("li", {}, num, h("div", { class: "stext sedit" }, ta), h("span", { class: "sacts" }, btn("done", "Done", "alt"), rm), r.editErr ? h("p", { class: "serr", role: "alert" }, r.editErr) : null);
   }
@@ -2187,6 +2204,7 @@ function renderStack() {
   box.replaceChildren(...(s.stack.length || s.copyBox ? [
     s.stack.length ? h("p", { class: "stackh", id: "stackH" }, s.busy ? "Sending" : "Not sent yet") : null,
     s.stack.length ? h("ol", { class: "stack", "aria-labelledby": "stackH" }, s.stack.map(stackRow)) : null,
+    s.copyBox ? h("p", { class: "stackh", role: "status" }, "Select and copy the text below.") : null,
     s.copyBox ? h("textarea", { class: "copybox", id: "askCopyBox", readonly: true, rows: 3, "aria-label": "Your asks, to copy" }) : null].filter(Boolean) : []));
   const cb = $("askCopyBox"); if (cb) cb.value = s.copyBox;
   const at = want || (keep && { k: keep[0], act: keep[1] });
@@ -2261,7 +2279,7 @@ function renderAsks() { renderAskForm(); renderLine(); renderStack(); renderAskL
 function clearAskNotes() {
   const s = askState;
   s.note = ""; s.copyBox = "";
-  if (s.sent && undoLeft(s.sent) <= 0) s.sent = null;
+  if (s.sent && !s.sent.busy && undoLeft(s.sent) <= 0) s.sent = null; // an Undo still awaiting a delete keeps its state
   if (s.line && !(s.line.kind === "undofail" && s.sent)) s.line = null;
 }
 // Add to list moves the typed words into the stack. Nothing is written to the store.
@@ -2276,7 +2294,7 @@ function addAsk() {
 // Send writes every ask in the list, and the typed box as the last one, with one `at`, in order. Each is tried: one that fails stays in the list.
 async function sendAsk() {
   const s = askState, box = $("askText");
-  if (!state.db || s.busy || (s.sent && undoLeft(s.sent) > 0)) return;
+  if (!state.db || s.busy || (s.sent && (undoLeft(s.sent) > 0 || s.sent.busy))) return;
   commitEdits();
   const text = box.value.trim();
   if (text.length > ASK_MAX) { renderAskForm(); return; } // the hint says why; the words stay in the box
@@ -2294,7 +2312,7 @@ async function sendAsk() {
     try { await state.db.collection("asks").doc(id).set({ id, text: r.text, at }); }
     catch (e) { delete r.state; r.err = (e && e.code) || "error"; renderStack(); continue; }
     (s.map = s.map || {})[id] = { id, text: r.text, at };
-    r.state = "saved"; wrote.push({ id, text: r.text }); renderStack();
+    r.state = "saved"; wrote.push({ id, text: r.text }); saveAskStack(); renderStack(); // kept at once, so a reload now does not write this ask again
   }
   s.stack = s.stack.filter((r) => r.state !== "saved");
   s.busy = false; s.busyN = 0; saveAskStack(); clearInterval(askTimer);
@@ -2311,31 +2329,37 @@ async function sendAsk() {
   if (s.sent === sent) { sent.told = told ? TOLD : NOT_TOLD(); renderLine(); }
 }
 // Undo deletes each record of the batch and puts the asks back in the list, in their order, ahead of any stacked since. The box is never written.
-// The window is read from the clock, as undoLeft does. A delete that fails stops there: the asks from it on stay sent.
+// Each ask goes into the kept list before its delete, so a reload between the two loses none. The window is read from the clock before each delete, as undoLeft does.
+// A delete that fails, or a window that has passed, stops there: the asks from it on stay sent.
 async function undoAsk() {
   const s = askState, a = s.sent; if (!a || a.busy || undoLeft(a) <= 0) return;
-  a.busy = true;
-  const gone = [];
-  let code = "";
-  for (let i = 0; i < a.ids.length; i++) {
-    try { await state.db.collection("asks").doc(a.ids[i]).delete(); }
-    catch (e) { code = (e && e.code) || "error"; break; }
-    if (s.map) delete s.map[a.ids[i]];
-    gone.push({ id: a.ids[i], text: a.texts[i] });
+  a.busy = true; renderAskForm();
+  const ids = a.ids.slice(), texts = a.texts.slice(), gone = [], mine = [];
+  let code = "", late = false;
+  for (let i = 0; i < ids.length; i++) {
+    if (undoLeft(a) <= 0) { late = true; break; }
+    const row = { k: ++askRowN, text: texts[i], state: "undoing" };
+    s.stack.splice(mine.length ? s.stack.indexOf(mine[mine.length - 1]) + 1 : 0, 0, row); mine.push(row); saveAskStack(); renderStack();
+    try { await state.db.collection("asks").doc(ids[i]).delete(); }
+    catch (e) { code = (e && e.code) || "error"; s.stack = s.stack.filter((r) => r !== row); saveAskStack(); break; }
+    delete row.state;
+    if (s.map) delete s.map[ids[i]];
+    gone.push({ id: ids[i], text: texts[i] });
+    saveAskStack();
   }
   a.busy = false;
-  s.stack = gone.map((g) => ({ k: ++askRowN, text: g.text })).concat(s.stack);
   a.ids = a.ids.slice(gone.length); a.texts = a.texts.slice(gone.length);
   s.note = ""; s.copyBox = "";
-  if (a.ids.length) s.line = { kind: "undofail", code: code || "error" };
-  else { clearInterval(askTimer); s.sent = null; s.line = { kind: "undone", n: gone.length }; $("askText").focus({ preventScroll: true }); }
+  if (a.ids.length) s.line = late ? { kind: "late", n: a.ids.length } : { kind: "undofail", code: code || "error" };
+  else if (s.sent === a) { clearInterval(askTimer); s.sent = null; s.line = { kind: "undone", n: gone.length }; $("askText").focus({ preventScroll: true }); }
   saveAskStack(); renderAsks();
   if (gone.length) notifyClaude(fitBytes("Undone on the waiting page. " + (gone.length === 1 ? "Ask " + gone[0].id + " is withdrawn." : "Asks " + gone.map((g) => g.id).join(", ") + " are withdrawn.")), await canTell());
 }
 // Copy ask copies the words of one row, or every ask in the list and the box. A refused clipboard leaves them in a box to select.
 async function copyAsk(only) {
-  const s = askState, words = typeof only === "string" ? only : [...stackLive().map((r) => r.text), $("askText").value.trim()].filter(Boolean).join("\n\n");
-  if (await copyText(words)) { s.note = "Copied. Paste it in chat."; s.copyBox = ""; } else { s.copyBox = words; s.note = "Select and copy the text in the box."; }
+  // With no store, a stacked ask is not this view's to copy: only the box is.
+  const s = askState, rowsText = state.db === false ? [] : stackLive().map((r) => r.text), words = typeof only === "string" ? only : [...rowsText, $("askText").value.trim()].filter(Boolean).join("\n\n");
+  if (await copyText(words)) { s.note = "Copied. Paste it in chat."; s.copyBox = ""; } else { s.copyBox = words; s.note = ""; } // the words to select are told above the box, not in the hint
   renderAskForm(); renderStack();
   const cb = $("askCopyBox"); if (cb) { cb.focus(); cb.select(); }
 }
