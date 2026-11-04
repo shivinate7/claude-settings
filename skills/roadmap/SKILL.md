@@ -126,13 +126,13 @@ exits 1. The printed line tells the two apart.
 
 A step's note, why or ask may cite a mockup by its id, `item<N>-<letter>` as a whole token (`item48-a`). The step then
 carries the field `mockups`, `{"<id>": "<path>"}`, one entry per cited id. Each path is a repo path under the design folder
-(`docs/design/<item folder>/<file>`), and the file is on origin: the default branch or the record branch (decision `mockup-home`).
+(`docs/design/<item folder>/<file>`), and the file is on origin as a file, on any ref under `refs/remotes/origin/` (decision `mockup-home`).
 
-The build prints `mockup with no file: <step id> <mockup id>` for each cited id that has no usable file. That means no entry, a path outside the
-design folder (a machine-home path or a link too), or a file that origin does not hold, even when the checkout does. The build writes the
+The build judges only open steps (status not done); a done step is skipped. It prints `mockup with no file: <step id> <mockup id>` for each cited id that has no usable file. A cited id misses when it has no entry, or its path is outside the
+design folder (a machine-home path, a link or a folder too). It also misses when origin does not hold the file, even if the checkout does. The build writes the
 page, then exits 1. The fix is to commit the file, push it, and name it in `mockups`.
 
-A checkout with no origin ref for the default branch, or a shallow one, cannot show origin. The entry reads unknown, never a miss or a
+A checkout with no origin ref, or a shallow one, cannot show origin. So does a failed git read or an unreadable layout. The entry reads unknown, never a miss or a
 pass: the build prints `mockup file unread: <step id> <mockup id> (<why>)` and exits 0.
 
 ## Upkeep list
@@ -212,7 +212,7 @@ dated-claim row reads the notes already loaded and adds nothing.
 The red line and the two stale-ready rows read the live file the build already reads, and add no
 process, file, timer or log. The publisher adds one field, `createdAt`, per pull row, from the GitHub
 list call it already makes.
-The mockup check starts up to five short git reads per cited id and adds no file, timer or log.
+The mockup check runs two short git reads per entry that names a design-folder path, plus one `ls-tree` per origin ref until one holds the file. It adds no file, timer or log.
 No watcher, no timer, no log.
 
 ## Tests
