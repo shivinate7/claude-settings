@@ -2,6 +2,7 @@
 """The stale-prose merge check. Standard library only.
 
     python3 lint/stale_cites.py --range <base>...<head>
+    python3 lint/stale_cites.py --tree [REV]
 
 Refuses a range that leaves a tracked Markdown line naming a name the range removed.
   STALE001  the line names a path the range deleted or renamed, and the path is absent at head.
@@ -12,8 +13,18 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             module-level class.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
-`<!-- ste-disable-line STALE001 -->` (or STALE002). Fenced blocks count as prose.
+`<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004). Fenced blocks count as prose.
 Each Markdown file is read as committed at head, never from the working tree.
+--tree [REV] reads every tracked Markdown file at REV (default HEAD) instead of a range, so it fires on lines no
+change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base, so a shallow clone is fine.
+  STALE003  the line names `<folder>/.../<file.ext>` that is no tracked file (or folder) at REV, as written or
+            from the folder of the Markdown file. One tracked file with the same name elsewhere is named as a
+            hint. A cite with a placeholder character, no extension, no folder part, or a first segment that is
+            no tracked top folder is no path cite, so it never fires.
+  STALE004  the line anchors `path:N` or `path:N-M` on a tracked file, and N is below 1, M is below N, or the
+            last number is past the file's last line. A dead path gives STALE003 only.
+--tree and --range are exclusive.
+
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
 2 a read that could not run, except a base that does not resolve (a shallow clone): that prints
 `stale-cites: unknown, ...` naming fetch-depth 0 and exits 0, so a repo that pins the ste-lint action and
@@ -25,10 +36,13 @@ Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no 
 A touched .py adds one `git cat-file --batch`. A removed path or def adds `ls-tree` and that `cat-file
 --batch`, so 5 at most. Each tracked .md is read once, only when something was removed. It writes no file
 (no .pyc either) and leaves no process running.
+A --tree run starts one python3, then git rev-parse, ls-tree and one cat-file --batch. It reads each tracked .md
+once, and each file a line anchor names once more, even when that file is a .md. It writes no file.
 """
 import argparse
 import ast
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -47,6 +61,8 @@ PAIR_RES = (  # "`file.py` `name`" and "(file.py name)"
 )
 DISABLE_RE = re.compile(r"<!--\s*ste-disable-line([^>]*?)-->")
 SIMPLE_PATH = re.compile(r"^%s$" % RUN)
+FILE_CITE = re.compile(r"^[^/]+(?:/[^/]+)*/[^/]*[^/.]\.[A-Za-z0-9]+$")  # a folder part and an extension
+ANCHOR = re.compile(r":(\d+)(?:-(\d+))?(?!\w)")
 
 
 class Unknown(Exception):
@@ -206,6 +222,25 @@ def path_cites(line, gone, exotic):
     return hits
 
 
+def tracked_entries(rev):
+    """[(mode, path)] of every entry in the tree at rev."""
+    tree = git("ls-tree", "-r", "-z", rev).decode("utf-8", "replace").split("\0")
+    return [(e.split(" ", 1)[0], e.split("\t", 1)[1]) for e in tree if "\t" in e]
+
+
+def markdown_files(entries, excludes):
+    """The tracked .md files a prose check reads: regular files, not the records page, not excluded."""
+    return [p for mode, p in entries if mode in ("100644", "100755") and p.endswith(".md")
+            and p != RECORDS_PAGE and not any(rx.match(p) for rx in excludes)]
+
+
+def read_markdown(batch, rev, md):
+    blob = batch.get("%s:%s" % (rev, md))
+    if blob is None:
+        raise Unknown("%s is in the tree at %s but cannot be read" % (md, rev))
+    return blob.decode("utf-8", "replace").replace("\r\n", "\n")  # a bad byte is U+FFFD, never a skip
+
+
 def scan(range_text):
     """(found, unknowns): {(path, line, code): [messages]}, and one text per touched .py that does not parse."""
     diff_args, base, head = parse_range(range_text)
@@ -239,18 +274,8 @@ def scan(range_text):
         if not gone and not removed_names:
             return found, unknowns
 
-        excludes = exclude_patterns(".")
-        tree = git("ls-tree", "-r", "-z", head).decode("utf-8", "replace").split("\0")
-        tracked = [e.split("\t", 1)[1] for e in tree if "\t" in e and e.split(" ", 1)[0] in ("100644", "100755")]
-        tracked = [t for t in tracked if t.endswith(".md")]
-
-        for md in tracked:
-            if not md or md == RECORDS_PAGE or any(rx.match(md) for rx in excludes):
-                continue
-            blob = batch.get("%s:%s" % (head, md))
-            if blob is None:
-                raise Unknown("%s is in the tree at %s but cannot be read" % (md, head))
-            text = blob.decode("utf-8", "replace").replace("\r\n", "\n")  # a bad byte is U+FFFD, never a skip
+        for md in markdown_files(tracked_entries(head), exclude_patterns(".")):
+            text = read_markdown(batch, head, md)
             for number, line in enumerate(text.split("\n"), 1):
                 off = disabled(line) if "ste-disable-line" in line else set()
                 cited = path_cites(line, simple, exotic) if gone and "STALE001" not in off else []
@@ -271,14 +296,83 @@ def scan(range_text):
     return found, unknowns
 
 
+def placeholder_adjacent(line, start, end):
+    """A run touching a glob, template or shell-variable character names no one file. A `*` before the run is
+    Markdown emphasis (`**path**`), so only a lone `*` after it counts."""
+    before = line[start - 1] if start else ""
+    after = line[end] if end < len(line) else ""
+    return bool(before and before in "${") or bool(after and after in "?<{[$") or (after == "*" and before != "*")
+
+
+def line_count(data):
+    return data.count(b"\n") + (1 if data and not data.endswith(b"\n") else 0)
+
+
+def scan_tree(rev):
+    """(found, unknowns) for every tracked Markdown line at rev: STALE003 dead path cites, STALE004 bad anchors."""
+    found = {}
+    entries = tracked_entries(rev)
+    files = {p for _, p in entries}
+    folders = {p.rsplit("/", i)[0] for p in files for i in range(1, p.count("/") + 1)}
+    tops = {p.split("/", 1)[0] for p in files if "/" in p}
+    by_name = {}
+    for p in sorted(files):
+        by_name.setdefault(p.rsplit("/", 1)[-1], []).append(p)
+    mds = markdown_files(entries, exclude_patterns("."))
+    batch = BlobReader()
+    counts = {}  # tracked file -> its line count, read once
+
+    def lines_of(path):
+        if path not in counts:
+            data = batch.get("%s:%s" % (rev, path))
+            counts[path] = line_count(data) if data is not None else None
+        return counts[path]
+
+    try:
+        for md in mds:
+            folder = posixpath.dirname(md)
+            for number, line in enumerate(read_markdown(batch, rev, md).split("\n"), 1):
+                if "/" not in line:
+                    continue
+                off = disabled(line) if "ste-disable-line" in line else set()
+                for run in RUN_RE.finditer(line):
+                    cite = run.group(0).rstrip(".-")
+                    if not FILE_CITE.match(cite) or cite.split("/", 1)[0] not in tops \
+                            or placeholder_adjacent(line, run.start(), run.end()):
+                        continue
+                    home = next((c for c in (cite, posixpath.normpath(posixpath.join(folder, cite)))
+                                 if c in files or c in folders), None)
+                    if home is None:
+                        if "STALE003" not in off:
+                            same = by_name.get(cite.rsplit("/", 1)[-1], [])
+                            hint = " (did you mean %s?)" % same[0] if len(same) == 1 else ""
+                            found.setdefault((md, number, "STALE003"), []).append(
+                                "%s names no tracked file at %s%s" % (cite, rev, hint))
+                        continue
+                    anchor = ANCHOR.match(line, run.end()) if cite == run.group(0) and home in files else None
+                    if anchor is None or "STALE004" in off:
+                        continue
+                    first, last = int(anchor.group(1)), int(anchor.group(2) or anchor.group(1))
+                    total = lines_of(home)
+                    if total is not None and (first < 1 or last < first or last > total):
+                        found.setdefault((md, number, "STALE004"), []).append(
+                            "%s%s is not a line of that file, which has %d" % (home, anchor.group(0), total))
+    finally:
+        batch.close()
+    return found, []
+
+
 def main(argv):
-    parser = argparse.ArgumentParser(description="Refuse Markdown lines that name what the range removed.")
-    parser.add_argument("--range", required=True, help="base...head, as the ste-lint step diffs")
+    parser = argparse.ArgumentParser(description="Refuse Markdown lines that name what no longer exists.")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--range", help="base...head, as the ste-lint step diffs")
+    mode.add_argument("--tree", nargs="?", const="HEAD", metavar="REV",
+                      help="every tracked Markdown line at REV (default HEAD): dead paths, bad line anchors")
     args = parser.parse_args(argv)
     try:
         root = git("rev-parse", "--show-toplevel").decode().strip()
         os.chdir(root)
-        found, unknowns = scan(args.range)
+        found, unknowns = scan(args.range) if args.range else scan_tree(args.tree)
     except BaseUnknown as exc:
         print("stale-cites: unknown, the base of %s does not resolve (%s). Check out with fetch-depth 0 "
               "(actions/checkout) so the range has history. Nothing was checked." % (args.range, exc))
