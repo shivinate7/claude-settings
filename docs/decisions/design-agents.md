@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-11-04 07:56 CST (Cockpit item 204 a): the design reviewer runs beside code review round 1,
+Owner, 2026-11-04 07:56 CST (Cockpit item 204 a): the design reviewer runs beside review round 1,
 on the first built head, so design fixes ride the normal review rounds. Owner, 2026-10-26 (waiting-page
 item 15, answer b): a lane that touches a screen gets two design agents, both on Opus, except a
 text-only change (owner, 2026-11-03: design reviewer only).
@@ -11,12 +11,13 @@ text-only change (owner, 2026-11-03: design reviewer only).
   screen, with a notes file, in the repo's design folder (the `design` kind in `lint/layout.json`).
   home's `docs/design/` is the working pattern.
 - The builder builds to the step's mockup when one exists (`agents/builder.md`).
-- The design reviewer (`agents/design-reviewer.md`) runs beside code review round 1, on the first built
+- The design reviewer (`agents/design-reviewer.md`) runs beside review round 1, on the first built
   head. It judges each built screen against the mockup and the repo's design rules, at every size and
   theme, with a verdict per screen. Its fixes go to the builder with the round-1 code findings.
-  - Coordinator's reading, for the owner to correct: when round 1 changes a screen, the round-2 code
-    reviewer checks that the design reviewer's findings still hold. No second design review runs unless
+  - Coordinator's reading, for the owner to correct: when round 1 changes a screen, the round-2 reviewer
+    checks that the design reviewer's findings still hold. No second design review runs unless
     round 1 changed a screen's layout.
+    Open for the owner: they judge what counts as a layout change, and so when a second design review runs.
 - Routing has one test, one exception: does the lane touch a screen (`roles-one-role-per-agent`). `agents/reviewer.md`
   still reviews the code. Exception: a text-only change skips the designer. The design
   reviewer still runs beside round 1. Owner ask `ask-mw18vywh8g` (small text changes on existing
@@ -52,8 +53,8 @@ stop the same way (`designer-diff`). Risk: likely. A designer that writes produc
 second builder, unreviewed as one. Landed 2026-10-26.
 
 Reason: the owner wants each screen seen before it is built, and judged on the first built head against
-what was seen. Beside round 1, its fixes ride the normal review rounds (degen pull requests 385 and 386
-ran it after round 3). A text-only change is the exception: no designer sees it first, and the design
+what was seen. Beside round 1, its fixes ride the normal review rounds. In the degen repo, PRs 385 and
+386, the design reviewer ran after review round 3 (owner, Cockpit item 204 a). A text-only change is the exception: no designer sees it first, and the design
 reviewer judges it against main's screenshots. Reopen when the owner rules on `/design`, or when a design
 agent's Opus cost shows in a cull.
 

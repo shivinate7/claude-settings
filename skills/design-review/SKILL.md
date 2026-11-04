@@ -8,10 +8,10 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
 
 ## When it runs
 
-Beside code review round 1, on the first built head. The blind reviewers (A and B) and the compare
-step all run then. Fixes go to the builder with the round-1 code findings. Only when round 1 changed a
-screen does the round-2 code reviewer check these findings still hold. Decision `design-agents` (design
-agents: when each runs) holds the rest, the coordinator's reading pending the owner.
+Beside review round 1, on the first built head. The blind reviewers (A and B) and the compare
+step all run then. Fixes go to the builder with the round-1 code findings. When round 1 changed a
+screen, the round-2 reviewer checks that these findings still hold (the coordinator's reading, pending
+the owner; decision `design-agents`).
 
 ## Pinned sources
 
