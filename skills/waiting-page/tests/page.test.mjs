@@ -3873,6 +3873,35 @@ test("the phase list keeps the five known names in today's order when all five p
   assert.deepEqual(await railNames(page), ["Clean up", "Organize", "Design", "Roll out", "Later"], "the five known names or their order changed");
 });
 
+// Phase ids that name a member of Object.prototype. The page keeps per-phase state in plain objects, so each id must
+// read as its own key, never as an inherited member: its steps draw, and the rail names the phase by its id.
+for (const name of ["__proto__", "constructor", "toString"]) {
+  test(`the phase list draws every step of a phase named ${name}, and names that phase by its id`, async (t) => {
+    const steps = stepsOf([["c1", name, 1, "active"], ["a2", name, 2], ["a3", name, 3, "done"]]);
+    const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+    await assertBaked(page, steps);
+    await openStatus(page);
+    assert.deepEqual(await railNames(page), [name], `the rail does not name the one phase the steps hold, ${name}, by its id`);
+    const drawn = Object.values(await listedByPhase(page)).flat();
+    for (const id of Object.keys(steps)) assert.ok(drawn.includes(id), `step ${id} is not drawn in the phase ${name}`);
+  });
+}
+
+// A phase that is not a non-empty string (a number, null, an object) is no phase: its step goes under No phase.
+// An object phase on an open step crashes the roadmap build (skills/roadmap/build.py upkeep, an unhashable dict), so
+// that case's step is done: it tests the page's handling, not the build's crash, which the case reports elsewhere.
+for (const [label, phase, status] of [["a number", 5, "active"], ["null", null, "active"], ["an object", {}, "done"]]) {
+  test(`the phase list draws a step whose phase is ${label} under No phase`, async (t) => {
+    const steps = stepsOf([["c1", phase, 1, status]]);
+    const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+    await assertBaked(page, steps);
+    await openStatus(page);
+    assert.deepEqual(await railNames(page), ["No phase"], `the rail does not hold one No phase button for a step whose phase is ${label}`);
+    await page.locator(".prail > button", { hasText: "No phase" }).click();
+    assert.ok((await listedIds(page)).includes("c1"), `step c1, whose phase is ${label}, is not drawn under No phase`);
+  });
+}
+
 // ---------------------------------------------------------------- c135: a question that takes several answers
 // Spec: the c135 spec (Data, Answer, Page). Labels: docs/design/c135-multi.html. A multi item sets `multi: true`; `ranked: true` also orders the ticks.
 
