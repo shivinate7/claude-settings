@@ -67,6 +67,7 @@ import threading
 import time
 import uuid
 from collections import Counter
+from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
@@ -2242,9 +2243,16 @@ def _removed_count(decisions):
     return sum(1 for d in decisions if d["action"] == "reap" and not d.get("error"))
 
 
+# The newest lines are the only ones a reader needs (the preview's "last --confirm run" line); at one
+# line per repository per run, 2000 lines is months of daily runs, and the file never grows without bound.
+MAX_RUN_LOG_LINES = 2000
+_RUN_LOG_LOCK = threading.Lock()  # `_pmap` workers append concurrently; the trim rewrites the file
+
+
 def append_run_log(path: str, results):
-    """One JSON line per repository, so a run's yield is readable later. Never fails the sweep:
-    the reaping is done by now, and a log that cannot be written is only a missing line."""
+    """One JSON line per repository, so a run's yield is readable later. Keeps the last
+    MAX_RUN_LOG_LINES lines. Never fails the sweep: the reaping is done by now, and a log that
+    cannot be written is only a missing line."""
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         lines = []
@@ -2259,10 +2267,53 @@ def append_run_log(path: str, results):
                 "branches_reaped": _removed_count(result["branches"]),
                 "time_ms": int(time.time() * 1000),
             }))
-        with open(path, "a", encoding="utf-8") as handle:
-            handle.write("\n".join(lines) + "\n")
+        with _RUN_LOG_LOCK:
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write("\n".join(lines) + "\n")
+            with open(path, encoding="utf-8") as handle:
+                kept = handle.readlines()
+            if len(kept) > MAX_RUN_LOG_LINES:
+                temp = "%s.%d.tmp" % (path, os.getpid())
+                with open(temp, "w", encoding="utf-8") as handle:
+                    handle.writelines(kept[-MAX_RUN_LOG_LINES:])
+                os.replace(temp, path)
     except (OSError, ValueError) as exc:
         print("janitor: run log not written (%s)" % exc)
+
+
+def read_last_runs(path: str):
+    """The newest run-log line for each root, as {root: line}. One read of PATH. A missing file is {}.
+    An unreadable file raises OSError; a line that is not JSON is skipped."""
+    last = {}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for text in handle:
+                try:
+                    row = json.loads(text)
+                    last[row["root"]] = row
+                except (ValueError, KeyError, TypeError):
+                    continue
+    except FileNotFoundError:
+        pass
+    return last
+
+
+def last_run_line(last, root: str, path: str) -> str:
+    """The preview's one line about a root's last --confirm run. LAST is read_last_runs' answer, or an
+    exception that read raised."""
+    if isinstance(last, Exception):
+        return "last --confirm run: unknown (%s)" % type(last).__name__
+    row = last.get(root)
+    if row is None:
+        return "last --confirm run: none in %s" % path
+    try:
+        import local_time
+        at = datetime.fromtimestamp(int(row["time_ms"]) / 1000, timezone.utc)
+        when = local_time.line(lambda: at).split(None, 2)[2]  # "2026-11-04 07:57 CST (UTC-06:00)"
+        return "last --confirm run: %s, %s worktrees removed, %s branches reaped" % (
+            when, row["worktrees_removed"], row["branches_reaped"])
+    except (KeyError, TypeError, ValueError, OverflowError, OSError) as err:
+        return "last --confirm run: unknown (%s)" % type(err).__name__
 
 
 def append_restore_log(path: str, repo: str, branch: str, commit: str):
@@ -2761,6 +2812,7 @@ JUDGE_BUDGET_SECONDS = 12
 DEADLINE_TAIL_SECONDS = 7.5
 _now = time.monotonic  # `main` reads it at a pass's start; the cases replace it with their own clock
 _DEADLINE = None  # a `_now()` time while `main` runs; None means no deadline
+_LAST_RUN = None  # a function while a preview prints its report: a root to its last --confirm run line
 
 
 def _past_deadline() -> bool:
@@ -3060,6 +3112,8 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
     for result in results:
         print("", file=out)
         print("== %s ==" % result["root"], file=out)
+        if _LAST_RUN:
+            print("  %s" % _LAST_RUN(result["root"]), file=out)
         if result["refused"]:
             refused_repos.append((result["root"], result["refused"]))
             print("  REFUSED: %s -- reaps nothing in this repository" % result["refused"],
@@ -3339,7 +3393,18 @@ def _sweep_roots(args, roots, restore_log_path, mode):
     results = list(_pmap(
         one,
         roots, args.confirm or mode == "tier1", _ROOT_POOL))
-    print_sweep_report(results, args.confirm or mode == "tier1")
+    global _LAST_RUN
+    if not args.confirm and mode != "tier1":  # a preview: one read of the run log, not one per root
+        run_log = default_run_log_path()
+        try:
+            last = read_last_runs(run_log)
+        except OSError as err:
+            last = err
+        _LAST_RUN = lambda root: last_run_line(last, root, run_log)  # noqa: E731
+    try:
+        print_sweep_report(results, args.confirm or mode == "tier1")
+    finally:
+        _LAST_RUN = None
     if args.confirm:
         if any(_removed_count(r["worktrees"]) + _removed_count(r["branches"]) for r in results):
             try:

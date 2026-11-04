@@ -9,11 +9,22 @@ same day prints nothing and writes nothing. The window is the days since the sta
 through the day before today, at most 7 days. With no stamp, or a stamp that is not before today,
 the window is the day before today. A day with no session start keeps its lines for the next start.
 
-Checks, each over the window. Each failure is one stdout line of at most 240 characters. The line
-names the reader, lint/guard_log_report.py, by its absolute path beside this hook's folder, so the
-path holds from any working folder.
+Checks, each over the window. Each failure is one stdout line of at most 240 characters, ending
+with `Read:` and its reader by absolute path. The guard.log checks name lint/guard_log_report.py,
+beside this hook's folder, so the path holds from any working folder.
 - a `crash` line: a guard hook crashed.
 - guard.log exists and cannot be read: unknown. A missing guard.log is not a failure.
+- agent-end reap runs killed or crashed. The reader is the agent-end payload log,
+  <config dir>/state/agent-end-payloads.jsonl (janitor/agent_end_reap.py `log`). A run counts when
+  its run id's time (the part after the pid) falls on a window day, and it has a `started` row
+  that no `done` row follows, or a row with an `error` key. A malformed row is skipped. A started
+  row can also be a done row the log lost (debt agent-end-log-loses-row). A missing file is not a
+  failure; an unreadable one is unknown.
+- the daily sweep's error log, <config dir>/janitor/launchd-sweep.err.log
+  (janitor/install_launchd.py `build_plist`), exists, is not empty, and was last written on a window
+  day. The line names it and launchd-sweep.log, its stdout log. A missing file is not a failure.
+Both read files already on disk, after the done-today stamp check: they start no process and write
+nothing beyond the stamp.
 There is no volume check: refusals grew with use, and a count check fired on 6 of 14 real days.
 A line carries its UTC offset (an old line has none). Its day is the date of the reader-local `when`.
 
@@ -26,6 +37,7 @@ when the facts match, and it starts no process.
 Seam: CLAUDE_DAILY_NOTE_NOW, an ISO-8601 instant with its UTC offset, in place of the clock.
 Advisory, fail-open: any error prints one stderr line and exits 0.
 """
+import json
 import os
 import re
 import sys
@@ -40,12 +52,15 @@ MAX_WINDOW = 7    # days
 READER = os.path.normpath(os.path.join(HERE, "..", "lint", "guard_log_report.py"))
 
 
-def central_today():
-    """The Central calendar day now. The one home of the DST rule is hooks/local_time.py."""
+def central_day(at):
+    """The Central calendar day of an aware instant. The one home of the DST rule is hooks/local_time.py."""
     import local_time
+    return date.fromisoformat(re.search(r"\d{4}-\d\d-\d\d", local_time.line(lambda: at)).group())
+
+
+def central_today():
     seam = os.environ.get("CLAUDE_DAILY_NOTE_NOW")
-    clock = (lambda: datetime.fromisoformat(seam)) if seam else (lambda: datetime.now(timezone.utc))
-    return date.fromisoformat(re.search(r"\d{4}-\d\d-\d\d", local_time.line(clock)).group())
+    return central_day(datetime.fromisoformat(seam) if seam else datetime.now(timezone.utc))
 
 
 def read_stamp(path):
@@ -60,7 +75,7 @@ def failures(lines, window):
     """One line per failed check over the window, a list of consecutive days."""
     import guard_log_report as report  # the one reader of guard.log lines
     days = {day.isoformat() for day in window}
-    span = str(window[0]) if len(window) == 1 else "%s to %s" % (window[0], window[-1])
+    span = span_of(window)
     tail = "Read: python %s" % READER
     rows = [row for row in map(report.parse_line, lines) if row and row.when.date().isoformat() in days]
     out = []
@@ -68,6 +83,67 @@ def failures(lines, window):
     if crashes:
         out.append("%d guard crash line(s), %s: a guard hook crashed. %s" % (len(crashes), span, tail))
     return out
+
+
+def span_of(window):
+    return str(window[0]) if len(window) == 1 else "%s to %s" % (window[0], window[-1])
+
+
+def run_day(run):
+    """The Central day in an agent-end run id, "<pid>-<time_ns>". None when the id has no readable time."""
+    try:
+        return central_day(datetime.fromtimestamp(int(run.split("-", 1)[1]) / 1e9, timezone.utc))
+    except (AttributeError, IndexError, ValueError, OverflowError, OSError):
+        return None
+
+
+def agent_end_failures(path, window):
+    """One line when an agent-end reap run on a window day was killed or crashed, from the payload log
+    at PATH. A run is one `run` id: its `started` row with no `done` row, or any row with `error`."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            rows = handle.readlines()
+    except FileNotFoundError:
+        return []
+    except OSError as err:
+        return ["agent-end payload log cannot be read (%s): its state is unknown. Read: %s"
+                % (type(err).__name__, path)]
+    days = set(window)
+    runs = {}
+    for text in rows:
+        try:
+            row = json.loads(text)
+            run, state = row["run"], row.get("state")
+            if not isinstance(run, str):
+                continue
+        except (ValueError, KeyError, AttributeError, TypeError):
+            continue
+        seen = runs.setdefault(run, {"started": False, "done": False, "bad": False})
+        seen["started"] = seen["started"] or state == "started"
+        seen["done"] = seen["done"] or state == "done"
+        seen["bad"] = seen["bad"] or "error" in row
+    bad = [run for run, seen in runs.items()
+           if (seen["bad"] or (seen["started"] and not seen["done"])) and run_day(run) in days]
+    if not bad:
+        return []
+    return ["%d agent-end reap run(s) killed or crashed, %s: servers may be left (or a lost row, debt "
+            "agent-end-log-loses-row). Read: %s" % (len(bad), span_of(window), path)]
+
+
+def sweep_error_failures(err_path, out_path, window):
+    """One line when the daily sweep's error log exists, is not empty and was last written on a window day."""
+    try:
+        info = os.stat(err_path)
+    except FileNotFoundError:
+        return []
+    except OSError as err:
+        return ["launchd-sweep.err.log cannot be read (%s): its state is unknown. Read: tail %s; stdout: %s"
+                % (type(err).__name__, err_path, out_path)]
+    day = central_day(datetime.fromtimestamp(info.st_mtime, timezone.utc))
+    if info.st_size <= 0 or day not in set(window):
+        return []
+    return ["daily sweep wrote errors (%d bytes, %s). Read: tail %s; stdout: %s"
+            % (info.st_size, day, err_path, out_path)]
 
 
 def main():
@@ -98,6 +174,9 @@ def main():
         except OSError as err:
             out = ["guard.log cannot be read (%s): its state is unknown. Read: python %s"
                    % (type(err).__name__, READER)]
+        out += agent_end_failures(os.path.join(config, "state", "agent-end-payloads.jsonl"), window)
+        out += sweep_error_failures(os.path.join(config, "janitor", "launchd-sweep.err.log"),
+                                    os.path.join(config, "janitor", "launchd-sweep.log"), window)
         os.makedirs(config, exist_ok=True)
         with open(stamp_path, "w", encoding="utf-8") as handle:
             handle.write(today.isoformat() + "\n")
