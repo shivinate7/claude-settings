@@ -4,10 +4,10 @@ description: Use when a session builds a repo's roadmap block, or the user says 
 ---
 
 A repo has one page: the waiting page. Its Status tab shows the repo's plan from its homes. This
-skill publishes no page. The build makes one marked roadmap block, and the page writer splices
+skill publishes no page. The script makes one marked roadmap block, and the page writer splices
 it into the live page (see "Publish the roadmap block"). The old roadmap URL retires: it gets no more
 publishes. The page's URL is the `waiting-page` key of the layout extras file. The `roadmap` key there
-is the `{map, github}` object the build reads, never a URL. The tab stores
+is the `{map, github}` object build.py reads, never a URL. The tab stores
 no copy: each panel prints the commit it read, or "unknown" and why.
 
 ## Build
@@ -18,7 +18,7 @@ Run from any folder:
 
 `--record-branch` defaults to the extras key `record-branch` in `.claude/layout-extras.json`, else `roadmap`.
 With no flag, an extras file that cannot be read warns and reads `roadmap`. A `record-branch` value that is
-not a plain git branch name stops the build.
+not a plain git branch name stops the script.
 
 `--block` writes only the roadmap block, the text between `<!-- roadmap:data -->` and `<!-- /roadmap:data -->`. It holds
 `window.ROADMAP_DATA` and `window.ROADMAP_BUILD`, and never a database stand-in. With no record branch,
@@ -114,12 +114,12 @@ closes it, from the upkeep list. A trailer that names no step is listed there to
 
 ## The red line
 
-The build exits 1 when a `todo` step is named by an open pull request. It prints
+build.py exits 1 when a `todo` step is named by an open pull request. It prints
 `todo step with an open PR: <id> (#N)` for each pair, writes the page, then exits 1. A pull names a
 step when its branch is exactly the step id, or its title holds the id as a whole word, in any case. The
 fix is to set the step to `doing`, or to close the pull. With no usable `--live` read of `readAt` and
 `pulls` (the `sessions` list is not needed), the line reads
-`todo step with an open PR: unknown (<why>)` and the build exits 0. The conflict-marker refusal also
+`todo step with an open PR: unknown (<why>)` and build.py exits 0. The conflict-marker refusal also
 exits 1. The printed line tells the two apart.
 
 ## Upkeep list
@@ -196,7 +196,7 @@ reads. The stale-step row adds one more `list_sessions` walk inside that publish
 fields per session in the file. The page-ruling row adds one `ArtifactData list items` read (every
 page) to the same publish. The roadmap build script adds no git process, file, timer or log for either row. The
 dated-claim row reads the notes already loaded and adds nothing.
-The red line and the two stale-ready rows read the live file the build already reads, and add no
+The red line and the two stale-ready rows read the live file build.py already reads, and add no
 process, file, timer or log. The publisher adds one field, `createdAt`, per pull row, from the GitHub
 list call it already makes.
 No watcher, no timer, no log.

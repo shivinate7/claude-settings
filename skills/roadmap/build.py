@@ -10,12 +10,12 @@ rest) come from the checkout itself, at the paths lint/layout.py gives. Without 
 branch is the one the checkout's extras file names ("record-branch", a fork worktree's own), else
 "roadmap"; the flag wins.
 
-With --block the build writes only the marked data block (window.ROADMAP_DATA and window.ROADMAP_BUILD,
+With --block this script writes only the marked data block (window.ROADMAP_DATA and window.ROADMAP_BUILD,
 never ROADMAP_DB) to --out. The one page of a repo is the waiting page: its writer splices that block into
-the live page and alone publishes (skills/waiting-page/splice.py). The build publishes nothing.
+the live page and alone publishes (skills/waiting-page/splice.py). This script publishes nothing.
 
 The viewer in page/index.html reads its data through the artifact database (window.claude.use('db')).
-The build puts a small read-only stand-in for that database (window.ROADMAP_DB), holding every JSON
+This script puts a small read-only stand-in for that database (window.ROADMAP_DB), holding every JSON
 file, in front of the page's own script, so the same viewer runs from disk and as the published
 artifact. It also writes window.ROADMAP_BUILD: the commit each panel read, or "unknown" and why.
 
@@ -23,7 +23,7 @@ Live work (step o8, option a) comes from --live FILE: the project threads and th
 and branches, which the publisher reads with its own tools just before the build. This script cannot
 reach either itself, so it only checks the file's shape and bakes it in.
 
-After the build it prints an upkeep list for the triage thread (step c55): open-step notes over
+After it runs, this script prints an upkeep list for the triage thread (step c55): open-step notes over
 NOTE_WORDS words; in phases that hold an active step, open steps untouched for STALE_DAYS days and
 open steps with no note (a later phase waits on purpose, so flagging it would cry wolf); and steps that
 entered the top TOP open places in the last day without a "Placed ahead of" line.
@@ -48,7 +48,7 @@ usable createdAt reads "unknown (#N has no createdAt)". A pull names a step when
 its title holds the id as a whole token (names_step), used by the pair line below. The stale-draft row's lane check is
 unlaned's: the branch equals a live session step exactly.
 
-The build goes red (step roadmap-pr-without-step) when a todo step is named by an open pull: it prints
+This script goes red (step roadmap-pr-without-step) when a todo step is named by an open pull: it prints
 "todo step with an open PR: <id> (#N)" per pair, writes the page, then exits 1. Without a usable readAt and pulls read (sessions are not
 needed) it prints one "todo step with an open PR: unknown (<why>)" line and exits 0. The conflict-marker refusal also exits 1; the
 printed line tells them apart.
@@ -79,7 +79,7 @@ Cost per build: about six git processes, one read of each scanned file, one page
 watcher, no timer, no log. The stale-step row adds no git process, file, timer or log to the build. It
 adds to triage's publish, already running: one more list_sessions walk (every page) and three more
 fields (id, session_status, tags) per session in the live file it already writes. The page-ruling row adds
-one read of the waiting page's items (n, status, home) to that same publish. The build adds no git
+one read of the waiting page's items (n, status, home) to that same publish. This script adds no git
 process, file, timer or log for it. The dated-claim row adds no git process, file, timer or log: it reads
 the notes already loaded.
 The red line and the two stale-ready rows add no process, file, timer or log: they read the live file the
@@ -110,7 +110,7 @@ FUTURE_MINUTES = 5
 KNOWN_STATUS = ("todo", "doing", "active", "done")
 TOP = 5
 DATA = "roadmap/data"
-# roadmap.html is left out: the build rewrites it, so a conflict there is resolved by building.
+# roadmap.html is left out: this script rewrites it, so a conflict there is resolved by building.
 SCANNED = ("roadmap", "briefs", "plans", "handoffs")
 OUTPUT = "roadmap/roadmap.html"
 # The layout kinds whose homes the page reads, with the panel name each one gets.
