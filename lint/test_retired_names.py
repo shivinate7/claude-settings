@@ -7,8 +7,8 @@ Each name below is an exact old file name, record slug, rule anchor, identifier,
 message of groups 1 and 5 to 9 of the plan: guard and check, grant and override, record, finding and
 safety hole, refuse, round.
 Each is distinctive, so a whole-word match in a tracked file is the old name coming back. This
-file, GLOSSARY.md, whose "Not" cells list them, and the generated docs/records.md are the exceptions, with the per-name
-HISTORY files below, each with its reason. A retired word in plain
+file, GLOSSARY.md, whose "Not" cells list them, and the generated docs/records.md are the exceptions. A HISTORY
+file may keep its name only on a line that holds the opt-out marker. A retired word in plain
 prose ("the test will pass") is a reviewer's call, not this test's. The widened glossary check will replace this list.
 """
 import os
@@ -19,6 +19,7 @@ import tempfile
 import unittest
 
 import _test_temp  # test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+from check_glossary import OPT_OUT  # the one home of the opt-out marker, a line that holds it is skipped
 
 RUN_FOLDER = _test_temp.run_folder()
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -62,24 +63,31 @@ RETIRED = {
     "Lane kind:": "Designer kind:",
 }
 
-# old name -> the tracked files that may keep it: the debt record that retires it, and the test that quotes the
-# old header to refuse it. Any other file that holds a retired name is a hit. Each entry needs its reason here.
+# old name -> the tracked file that may keep it, on each line that holds the opt-out marker. The one home of the
+# marker is lint/check_glossary.py, which skips the same line. The fixtures quote the old header to refuse it.
+# Any other file, or an unmarked line, that holds a retired name is a hit.
 HISTORY = {
-    "running_lane_hit": ("docs/debts/lane-word-means-agent.md",),  # the debt lists the old names it retires
-    "Lane kind:": ("docs/debts/lane-word-means-agent.md",  # the debt lists the old header it retires
-                   "hooks/test_blind_brief.py"),  # the fixtures quote the old header to refuse it
+    "Lane kind:": ("hooks/test_blind_brief.py",),
 }
 
 
 def hits(repo, name):
     """Tracked files that hold name as a whole word, any case, less the exceptions. None when git
-    cannot run."""
-    run = subprocess.run(["git", "-C", repo, "grep", "-l", "-i", "-w", "-F", "-e", name, "--", ".", ":!" + SELF,
-                          ":!" + GLOSSARY, ":!" + RECORDS_PAGE] + [":!" + p for p in HISTORY.get(name, ())],
+    cannot run. A HISTORY file's line that holds OPT_OUT is not a hit."""
+    run = subprocess.run(["git", "-C", repo, "grep", "-n", "-i", "-w", "-F", "-e", name, "--", ".", ":!" + SELF,
+                          ":!" + GLOSSARY, ":!" + RECORDS_PAGE],
                          capture_output=True, encoding="utf-8", errors="replace")
     if run.returncode not in (0, 1):  # 1 means no match; anything else is no reading
         return None
-    return [p for p in run.stdout.splitlines() if p]
+    found = []
+    for line in run.stdout.splitlines():  # path:number:text
+        path, _, rest = line.partition(":")
+        text = rest.partition(":")[2]
+        if path in HISTORY.get(name, ()) and OPT_OUT in text:
+            continue
+        if path not in found:
+            found.append(path)
+    return found
 
 
 class RetiredNames(unittest.TestCase):
