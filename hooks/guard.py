@@ -3658,8 +3658,9 @@ SIM_BYPASS_REASON = (
 )
 
 
-# The xcodebuild options that take the next word as their value (`man xcodebuild`, Xcode 16). Any other dash
-# word is a flag with no value, so the word after it can be the action. A colon or `=` form
+# The xcodebuild options that take the next word as their value, written from memory of `man xcodebuild` and
+# not checked against it. Any other dash word is a flag with no value, so the word after it can be the action.
+# A wrong entry changes only the remedy text, never the verdict. A colon or `=` form
 # (`-only-testing:X`, `-scheme=X`) holds its value in the same word and is in no list.
 SIM_ROUTE_VALUE_FLAGS = frozenset({
     "-project", "-workspace", "-target", "-scheme", "-configuration", "-xcconfig", "-arch", "-sdk", "-toolchain",
