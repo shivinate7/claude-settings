@@ -1150,3 +1150,4 @@
 - page-button-this-item: "this item" in the shared page-button list means "Click this item on GitHub." needs no link, though main refused it. Decision: act-in-place
 - clause-start-noun-verb: a clause after a new break that starts with the noun "merge", "hit" or "approve" ("…, but merge stays manual.") is refused, though main allowed it. Decision: act-in-place
 - close-paren-no-break: ")" is no clause break, so "(The session reruns CI) Mark the PR ready." with no link passes. Decision: act-in-place
+- classifier-force-push-lane: the auto-mode classifier refused Bash `git push --force-with-lease` of a rebased lane branch (lane-undo-check, 2026-11-03), so a lane told to rebase must merge instead. Decision: git-integration-branch-merge
