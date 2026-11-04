@@ -101,8 +101,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     with no shell label. A step that presses in a web app needs a link in `links` (guard rule `press-link`).
     A step never sends the owner to a file for a command and never holds one: put it in `command` and say "paste the
     command below". The writer refuses a step with a shell line in backticks, and a `command` without both shells
-    (guard rule `command-in-item`). Each shell in `command` opens with its own `gh auth switch -u shivinate7`, or
-    `-u ssemwal-cdc` where shivinate7 has no access, before any other gh line (guard rule `gh-login-switch`). A `str_replace` on `command` that adds a gh line carries the switch in its `new_str`.
+    (guard rule `command-in-item`). Each shell in `command` opens with the gh login switch of rule `output-never-hand-off-doable-step`, before any other gh line (guard rule `gh-login-switch`). A `str_replace` on `command` that adds a gh line carries the switch in its `new_str`.
   - A task carries a line in `context` that starts "Why yours: <why only the owner can do it, and the check that showed it>".
     When the cloud refused the act, the session first asks a session on the owner's computer
     (`list_computer_folders`, then `request_computer_folder`), and the line names that outcome.
@@ -187,6 +186,11 @@ into `meta/page`. The writer watches the page ("Read the answers").
   the page, not only its own. It re-ranks when it adds, updates or closes an item. A close by
   another session needs no re-rank. The writer re-ranks at its next add or update.
 
+## Rotate the writer
+
+A rotation moves the writer role to a new session, and the page and its open asks must follow it.
+The steps are in project-ops `templates/operating-model.md`, "Rotation of standing sessions", steps 1 and 5.
+
 ## Chat first
 
 A session that talks with the owner sends each question to the writer in the turn it asks it
@@ -266,7 +270,8 @@ never runs it. There is one path: the record branch's own worktree. Never write 
    from the copy. After the last page of a collection, touch `.complete` in its folder. An empty collection
    is an empty folder with that marker. Make the folder by hand if the tool wrote none.
 3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --fetched <folder> --out <copy folder> --page <file>`.
-   `<file>` is the page that "Keep the page on main's code" step 1 already read.
+   `<file>` is the page that "Keep the page on main's code" step 1 already read. Its HTML lands in the copy as
+   `page/page.html`, written only when it changed.
    Name a collection that really emptied with `--allow-empty <collection>`. Without it, an emptied
    collection is `unknown`.
 4. Read the verdict line.
@@ -311,11 +316,12 @@ the waiting page. A page that moves loses its read access, and the repo then hol
    each collection the entry lists, with `out_dir` set to `<folder>/<id>/<collection>`, `query.limit` 1000, and
    `next_cursor` followed until it is empty. A list call that errors, or that ends with a cursor still pending,
    stops the run for that artifact: touch no `.complete` for it. After the last page of a collection, touch
-   `.complete` in its folder. For the waiting page, also save its `page.html` from `Artifact` action `read` to
-   `<folder>/<id>/page.html`.
+   `.complete` in its folder. Also save the page from `Artifact` action `read` to `<folder>/<id>/page.html`,
+   and each file of `Artifact` action `list` scope `files` to `<folder>/<id>/files/<path>`.
 3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --all <repo root> --fetched <folder> --worktree <worktree>`.
    It prints one line per artifact, `<id>: <verdict>`, with the verdicts of a single export, or
-   `<id>: skipped - no export` for an entry held with `"export": false`, which needs no folder.
+   `<id>: skipped - no export` for an entry held with `"export": false`, which needs no folder. The page and each
+   text file are scanned like the docs; a find refuses that artifact only.
 4. Run `git add` on the export folder of each artifact whose line says `changed`. Then commit and push the record
    branch. A `refused` or `unknown` artifact wrote nothing, so its folder is as it was. Say each such line in
    the reply, and fix the cause first.
@@ -381,11 +387,8 @@ live page.
      an item in a group. The page shows it in the last section, and `pick` goes with the owner's
      next Send unless the owner chooses another. The owner cannot hold a stood pick
      open: choosing another option is the only way out. A `multi` item stands with its list `pick`: the owner's ticks replace it. A question that touches a rule starts blank.
-3. Once the item exists, tell the owner where it is (ruling 3a, narrowed by ruling 3b). Name the
-   item in the reply, in one line. Give the page URL for an open item only: the page hides a closed
-   item, except an arbiter ruling. The owner already saw the question in chat, so open no new question box. A box stops the
-   session until the owner answers. Running work continues with no one to brake it. You may end the
-   turn: each agent's end wakes the session.
+3. Once the item exists, name it in the reply in one line, with the page URL for an open item only
+   (the page hides a closed item, except an arbiter ruling). Open no question box (`questions-go-to-owner`).
 4. Keep working on what does not depend on the answer.
 
 ## Read the answers
@@ -499,7 +502,7 @@ item and leaves it open until the lane takes the answer. Then it closes the item
 A parked answer (`answers/park.<id>`): the writer waits 10 seconds after its `at`, as for an item's answer, so it never routes an act inside the Undo window.
 Then it reads `answers/park.<id>` again (`ArtifactData get`). If it is gone, the owner undid or withdrew it: leave the entry, and rule nothing.
 This re-read saves nothing to the inbox, because the hook skips a document with `parked: true`. Then the writer finds the entry in `meta/page.parked` by `id`.
-A chat word on a parked line takes the same branch. That word is the Copy text (`Unpark "<ref>"` or `Drop "<ref>"`) or a reply in the thread.
+A chat word on a parked line takes the same branch. That word is the Copy text (`Unpark "<ref>"` or `Drop "<ref>"`).
 The writer finds the entry by its `ref`, or by its `id` when the word names it. Nothing is in `answers/`, so it skips the wait, the re-read and the answer delete.
 - `unpark`: put the line back in the work: move it back to its roadmap step, or add a fresh item.
 - `drop`: file the abandon at the home the entry's `ref` names (rule `building-land-design-or-abandon`). When `ref` names no home, ask the owner where it goes and leave the entry and the answer in place until he answers.
@@ -509,8 +512,8 @@ The writer finds the entry by its `ref`, or by its `id` when the word names it. 
 ## Route an ask
 
 An ask is the owner's free text, never an answer. Wait 10 seconds after its `at`, then read `asks/<id>` again: an
-undone ask is gone, and nothing is routed. The writer takes each ask with no `owner`, or routes it to the session that
-holds its subject:
+undone ask is gone, and nothing is routed. The writer takes each ask with no `owner`, or routes it to the session that holds its subject. An
+ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the writer"):
 
 1. `update` the ask (never `set`) with `owner` (itself, or that session) and `read`, the time now.
 2. The owner session answers with `reply` and `answered` set to now. A question with a plain answer needs nothing else.
@@ -607,6 +610,7 @@ holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another arti
 
 The roadmap build makes the Status tab's data, the roadmap block. The waiting-page writer alone
 publishes the page file, so the repo has one page and one publisher. The skill roadmap publishes nothing.
+The Status tab draws each phase id that its steps use, and a step with no phase goes under "No phase".
 
 1. Build the roadmap block: `python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out <block file>`
    (add `--live <file>` as the skill roadmap says). The live file's pull rows carry `createdAt` (GitHub's
@@ -626,9 +630,7 @@ publishes the page file, so the repo has one page and one publisher. The skill r
 5. A design republish ("Add a design", step 5) is the same act the other way: it changes only the
    `designData` block of the live page and keeps the roadmap block.
 
-The old roadmap page retires. The page's URL is the `waiting-page` key of the repo's extras file,
-never the `roadmap` key (a `{map, github}` object that the build reads). The old URL gets no more
-publishes.
+Page URL keys and the retired roadmap URL: skill `roadmap`, first paragraph.
 
 ## Update a repo's pages
 

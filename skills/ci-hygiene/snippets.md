@@ -199,11 +199,11 @@ updates:
 
 This repo's `renovate.json` tracks three custom pins. None of them is an action.
 
-Audit with zizmor. Run the CI command from the repo root. It is the zizmor CI step of
-`.github/workflows/checks.yml`:
+Audit with zizmor. Run the CI command from the repo root. The zizmor CI step of
+`.github/workflows/checks.yml` runs the `zizmor` action, whose `run.sh` holds the pin:
 
 ```sh
-pipx run zizmor==1.30.1 .github/ actions/
+ZIZMOR_PATHS=".github/ actions/" bash actions/zizmor/run.sh
 ```
 
 ## 9. Wait without loops
@@ -221,7 +221,7 @@ to `/dev/null`.
 ```sh
 cp -R . "$(mktemp -d)/scratch" && cd "$_"   # scratch copy
 # break one target, for example replace one pinned SHA with a tag
-pipx run zizmor==1.30.1 .github/ actions/   # must exit non-zero
+ZIZMOR_PATHS=".github/ actions/" bash actions/zizmor/run.sh   # must exit non-zero
 ```
 
 Decide a commit on the check's own exit code. A pipe takes the exit code of its last command:
