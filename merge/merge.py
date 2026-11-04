@@ -30,7 +30,7 @@ the minute read and the merge with its head guard. Every read is a `gh api` REST
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, ast, contextlib, datetime, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, contextlib, datetime, functools, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -336,10 +336,11 @@ def refuse_old_lock(b, old, now):
     if old and old[1] > now:
         raise Held(holder_text(b, old, now) + " It holds the lock under the old name: that run is on merge.py from before c53. " + LOCK_CITE)
 
+@functools.lru_cache(maxsize=None)
 def boot_stamp():
     """One text per boot of this machine, or "" when it cannot be read. Cloud VMs share a hostname and each has its own pid numbers, so a pid
     absent here proves a holder dead only on the machine that booted when the lock was taken. Linux: the boot id. macOS: kern.boottime
-    seconds. Windows: boot time from the tick count (seconds; same_boot allows the drift)."""
+    seconds. Windows: boot time from the tick count (seconds; same_boot allows the drift). Read once per process, so every read in a run agrees."""
     try:
         if sys.platform.startswith("linux"):
             with open("/proc/sys/kernel/random/boot_id", encoding="ascii") as f:
@@ -370,8 +371,9 @@ def lock_message(ttl, now, holder=None):
     if holder:
         lines += [f"pr: {holder['pr']}", "branch: " + " ".join(str(holder["branch"]).split()), f"host: {socket.gethostname()}", f"platform: {sys.platform}",
                   f"pid: {os.getpid()}", f"started: {int(now)}"]
-        if boot_stamp():
-            lines.append("boot: " + boot_stamp())
+        boot = boot_stamp()
+        if boot:
+            lines.append("boot: " + boot)
         session = " ".join(holder.get("session", "").split())[:SESSION_MAX]  # fold first, then test: a blank one writes no line
         if session:
             lines.append("session: " + session)
