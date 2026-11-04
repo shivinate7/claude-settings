@@ -11,6 +11,7 @@ Temp files: the run folder of lint/_test_temp.py (decision test-temp-standard).
 """
 import contextlib
 import io
+import json
 import os
 import re
 import shutil
@@ -461,15 +462,17 @@ class Protect(unittest.TestCase):
     def required(self):
         return protect.REQUIRED_CHECK  # the one home of the name (protect.py): no case copies it
 
-    def run_protect(self, *argv, existing=None, other_rules=False):
+    def run_protect(self, *argv, existing=None, other_rules=False, held_checks=None):
         calls = []
 
         def gh(args, body=None):
             calls.append((list(args), body))
             if "GET" in args:
                 if args[-1].endswith("/required_status_checks"):
+                    if held_checks is not None:  # the live shape: the contexts, and the checks rule with each app id
+                        return 0, json.dumps({"strict": False, "contexts": [c["context"] for c in held_checks], "checks": held_checks})
                     if existing is not None:
-                        return 0, '{"contexts": %s}' % __import__("json").dumps(existing)
+                        return 0, '{"contexts": %s}' % json.dumps(existing)
                     return 1, "HTTP 404: Required status checks not enabled" if other_rules else "HTTP 404: Branch not protected"
                 return (0, '{"required_pull_request_reviews": {"required_approving_review_count": 1},"enforce_admins": {"enabled": true}}') if other_rules else (1, "HTTP 404: Branch not protected")
             return 0, "{}"
@@ -505,7 +508,7 @@ class Protect(unittest.TestCase):
         self.assertEqual(code, 0, out)
         patches = [c for c in calls if "PATCH" in c[0]]
         self.assertEqual(len(patches), 1, calls)
-        self.assertEqual(patches[0][1]["contexts"], [self.required()])
+        self.assertEqual(patches[0][1], {"checks": [{"context": self.required()}]}, "a held rule with no app id: the PATCH sends the check with no app id, and no contexts key")
         self.assertFalse([c for c in calls if "PUT" in c[0]], calls)
 
     def test_checks_already_set_change_nothing(self):
@@ -560,6 +563,68 @@ class Protect(unittest.TestCase):
     def test_the_patch_leaves_strict_alone(self):
         _, _, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm", existing=["old"])
         self.assertNotIn("strict", [c for c in calls if "PATCH" in c[0]][0][1])
+
+    def test_the_patch_keeps_the_app_id_of_the_held_rule(self):
+        for app_id in (15368, 4242):  # the held rule's own id: a constant would pass only one of them
+            with self.subTest(app_id=app_id):
+                code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm",
+                                                    held_checks=[{"context": "ci", "app_id": app_id}])
+                self.assertEqual(code, 0, out)
+                patches = [c for c in calls if "PATCH" in c[0]]
+                self.assertEqual(len(patches), 1, calls)  # the scope first: one PATCH, then its body
+                self.assertEqual(patches[0][1], {"checks": [{"context": self.required(), "app_id": app_id}]},
+                                 f"the PATCH must pin the required check to app id {app_id}, the one the held rule names")
+
+    def test_a_held_rule_with_no_single_app_id_patches_the_check_unpinned(self):
+        rules = {  # no one app id the check could be pinned to
+            "two different app ids": {"held_checks": [{"context": "ci", "app_id": 15368}, {"context": "lint", "app_id": 4242}]},
+            "app id null": {"held_checks": [{"context": "ci", "app_id": None}]},
+            "app id -1": {"held_checks": [{"context": "ci", "app_id": -1}]},
+            "no checks at all": {"held_checks": []},
+            "no checks key": {"existing": ["ci"]},
+        }
+        for name, held in rules.items():
+            with self.subTest(rule=name):
+                code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm", **held)
+                self.assertEqual(code, 0, out)
+                patches = [c for c in calls if "PATCH" in c[0]]
+                self.assertEqual(len(patches), 1, calls)  # the scope first: one PATCH, then its body
+                self.assertEqual(patches[0][1], {"checks": [{"context": self.required()}]},
+                                 f"{name}: the PATCH must send the check with no app id")
+                self.assertRegex(out, r"(?i)\bunpinned\b", f"{name}: the printed line must say the check is unpinned\n{out}")
+
+    def test_the_preview_names_the_app_id_it_would_pin(self):
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(),
+                                            held_checks=[{"context": "ci", "app_id": 15368}])
+        self.assertEqual(code, 0, out)
+        self.assertFalse([c for c in calls if "GET" not in c[0]], calls)  # the scope first: a preview makes no write call
+        self.assertIn("15368", out, "the preview must name the app id a confirmed run would pin")
+
+    def test_a_held_rule_already_pinned_to_the_check_is_left_alone(self):  # a green control: the fixture reads the live shape
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm",
+                                            held_checks=[{"context": self.required(), "app_id": 15368}])
+        self.assertEqual(code, 0, out)
+        self.assertFalse([c for c in calls if "GET" not in c[0]], calls)
+        self.assertIn("Nothing to set", out)
+
+    def test_a_new_protection_keeps_todays_body(self):  # a green control: the PUT path does not take the app id
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm")
+        self.assertEqual(code, 0, out)
+        puts = [c for c in calls if "PUT" in c[0]]
+        self.assertEqual(len(puts), 1, calls)  # the scope first: one PUT, then its body
+        self.assertEqual(puts[0][1]["required_status_checks"], {"strict": False, "contexts": [self.required()]},
+                         "the PUT path keeps today's body: contexts, strict off")
+
+    def test_a_new_protection_says_its_check_is_unpinned(self):
+        code, out, _ = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm")
+        self.assertEqual(code, 0, out)
+        self.assertRegex(out, r"(?i)\bunpinned\b", "the PUT path sends no app id, so its printed line must say the check is unpinned\n" + out)
+
+    def test_a_new_protection_preview_says_its_check_is_unpinned(self):
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required())
+        self.assertEqual(code, 0, out)
+        self.assertFalse([c for c in calls if "GET" not in c[0]], calls)  # the scope first: a preview makes no write call
+        self.assertRegex(out, r"(?i)\bunpinned\b", "the preview of a new protection must say the check is unpinned\n" + out)
 
     def test_a_branch_protected_without_a_check_rule_is_refused_not_replaced(self):  # a PUT would drop its review rule and restrictions
         code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm", other_rules=True)
