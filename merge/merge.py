@@ -2730,7 +2730,7 @@ def review_state(rec, head):
     (by position, across all rounds) is PASS or absent; or the final allowed round is done and Guard or check is no; or the final allowed round is done, Guard or check is yes and Net value is zero or positive; or Kind is delete-only,
     Guard or check is no and the first round is done; or Kind is docs-only with no round. A guard or check change owes the net-value test after the
     final allowed round whatever the verdict, and owes the later rounds when the first fails, even if it only deletes. Net value negative holds the change.
-    A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a round 3 or delete-only done names it."""
+    A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round or delete-only done names it."""
     if rec is None:
         return "bad", "the newest record does not parse"
     if rec["head"] != head:
