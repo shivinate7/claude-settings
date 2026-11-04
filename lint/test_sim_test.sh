@@ -15,7 +15,7 @@
 #  - None booted, its own boot: the lease (bin/sim-lease, beside the script) grants the UDID for the role, duo slot 1 or
 #    2 or the pro UDID. The tool boots that UDID, tests, and shuts that same UDID down. The UDIDs are read from SLOT_UDID
 #    in bin/sim-lease, the one home of the device IDs.
-#  - A failed boot exits non-zero and runs no xcodebuild.
+#  - A failed boot exits non-zero, runs no xcodebuild, and shuts nothing down.
 #  - At the cap (2 booted devices of any kind, no iPhone among them): no boot, no xcodebuild, exit non-zero, and
 #    the booted devices and the remedy are printed. Under the cap it boots.
 #  - A no-op lease (sim-lease prints none: CI or GITHUB_ACTIONS true, or not Darwin): it boots nothing, runs nothing,
@@ -873,7 +873,8 @@ tool_ended() { local st; st=$(ps -o stat= -p "$tool_pid" 2>/dev/null); [[ -z $st
 lease_freed_after_reap() { env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" "$sim_lease" status > /dev/null 2>&1; lease_released; }
 
 # pro_dies_during_duo_wait BOOTED: a pro holder takes the pro lease, a duo run queues behind it, and the holder dies. With
-# BOOTED yes the 18 Pro is still booted when the holder dies, as a pro run that never shut it down leaves it.
+# BOOTED yes the 18 Pro is still booted when the holder dies, as a pro run that never shut it down leaves it. With BOOTED
+# duo, a Duo of slot 2 is booted during the wait, so the queued run reuses that Duo after its grant.
 pro_dies_during_duo_wait() {
   fresh
   sleep 600 > /dev/null 2>&1 &
@@ -885,6 +886,8 @@ pro_dies_during_duo_wait() {
   if [[ $1 = yes ]]; then
     booted "iPhone 18 Pro" $PRO
     need "the 18 Pro is booted when the holder dies" grep -Fq "iPhone 18 Pro" "$booted_file"
+  elif [[ $1 = duo ]]; then
+    booted "iPhone Duo" $DUO2
   fi
   kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
   finish_tool
@@ -974,6 +977,38 @@ finish_tool
 need "shutdown of the Duo it booted, after the boot" has_call "simctl shutdown $DUO1"
 need "the Duo's boot is recorded" record_names "$DUO1"
 end_case "77 TERM to the tool during a slow simctl boot: the Duo still comes up, and is shut down and recorded"
+
+# Case 78: a Duo booted during the wait, then the pro holder dies: the queued duo run reuses that Duo after its grant, and
+# gives the lease back before xcodebuild.
+pro_dies_during_duo_wait duo
+need "exit code" rc_is 0
+need "steps are run only" steps_are "run "
+need "destination is the booted Duo" dest_is "$DUO2"
+need "lease not held during xcodebuild" lease_not_held_at_xc
+need "no shutdown" no_shutdown
+end_case "78 a Duo booted during the wait, then the pro holder dies: the queued run reuses it, and the lease goes back before xcodebuild"
+
+# Case 79: a failed own boot shuts nothing down. The boot fails, so the tool clears its boot mark before it exits, and its
+# cleanup has no simulator of its own to shut down.
+fresh; run STUB_BOOT_RC=1
+need "boot was tried on the Duo's UDID" has_call "simctl boot $DUO1"
+need "exit is non-zero" test $rc -ne 0
+need "no shutdown of a device it did not boot" no_shutdown
+end_case "79 failed own boot shuts nothing down"
+
+# Case 80: a dead holder's lock folder that also holds take.out, the file a holder leaves when it dies during its lease
+# take. The take over moves the whole folder, so no part of it may be left beside the lock.
+# no_dead_folder: no sim-test.lock.dead.* folder is left beside the lock folder.
+no_dead_folder() { [ -z "$(ls -d "$lockdir".dead.* 2>/dev/null)" ]; }
+# no_rmdir_error: the tool wrote no rmdir error to stderr.
+no_rmdir_error() { ! grep -Fq rmdir "$work/run.err"; }
+dead=$(dead_pid)
+fresh; hold_lock "$dead"; : > "$lockdir/take.out"; run
+need "exit code" rc_is 0
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "no sim-test.lock.dead.* folder is left" no_dead_folder
+need "no rmdir error on stderr" no_rmdir_error
+end_case "80 dead holder's lock folder with take.out: taken over, no dead folder left, no rmdir error"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
