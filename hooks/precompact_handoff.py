@@ -785,7 +785,7 @@ def run_nudge(payload):
             print(json.dumps({"decision": "block", "reason": (
                 "Context is about %dk tokens, messages about %dk. Rewrite your handoff at %s now, the whole "
                 "file; never append. Follow step 4 of %s for its sections and their order. "
-                "Then continue."
+                "Then continue. (decision precompact-handoff)"
                 % (size // 1000, messages // 1000, handoff_path(session_id), prompt_path()))}))
     except Exception as e:
         sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)

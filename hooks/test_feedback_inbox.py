@@ -53,7 +53,8 @@ Inbox: <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.inbox.md, outside git. Format:
     Opener and closer are bare backtick lines. Lines inside a fence are never headers or items.
   - An item line starts with `- fb-` and follows its block's closer, before the next header.
     Shape: `- <id> [<kind>] -> <home>`. kind is one of ruling, task, question, note, standing, page, repo.
-    home is any non-empty text after `->`. For ruling and task, the home's first word is a path.
+    home is any non-empty text after `->`. For ruling and task, the home's first word is a path, except
+    that a task may name `step:<slug>` (see Tracked homes).
     For page, the home is `page:<digits>`: the number of the waiting-page item the owner answers.
     For repo, the home is `repo:<owner>/<name>`: the repo the owner's feedback is about.
 
@@ -70,7 +71,8 @@ Repeat flag (decision owner-feedback-inbox, "Repeats"): the Stop guard judges ea
 Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path). A Stop hook. Stdin
   is one JSON object: hook_event_name, session_id, stop_hook_active, cwd, and transcript_path when
   the session has a transcript. It reads the inbox, the handoff <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.md
-  and, for page items, the transcript. Exit 0 in every case. Stdout is one JSON object or nothing.
+  and, for page items, the transcript and, in a waiting-page repo, the waiting copy on the record
+  branch (see Filing). Exit 0 in every case. Stdout is one JSON object or nothing.
   - Bursts. A turn's messages are the ones captured since the last guard run. They are a burst when
     they are two or more, or one message with three or more non-blank lines or two or more bullet
     lines (`- `, `* `, `+ `, `1. `, `1) `). Only a burst's messages need items, except page items,
@@ -94,6 +96,11 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     debt-notes. Some branch's tree in that file's repo holds it. Else the reason names the id. The
     handoff never counts for these two kinds. A repo with no home of the kind gets a reason that
     names the layout keys, todo first for a task.
+  - Step homes. A task item, open or closed, may instead name `step:<slug>`: it passes when
+    roadmap/data/steps/<slug>.json is a blob on some ref, read as a closed note's step home is. A step
+    home with no such blob blocks, and the reason names the item. A ruling never names a step: steps
+    hold tasks, not rulings, so `[ruling] -> step:<slug>` blocks even when the step file exists. The home
+    is cleaned as a ruling home is: one pair of backticks or quotes comes off, and a trailing `:,;.` strips.
   - A ruling whose tracked file sits outside the ruling homes is blocked with the reason
     `<path> is not a tracked ruling home`, and the reason names the repo's ruling homes.
   - Fail open: when the cwd is not in a git repo, or the layout or the repo's extras file cannot
@@ -131,6 +138,17 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     checked" for a repo item, and names the reason, as the homes check does. An absent,
     missing or unreadable transcript stands down every block the same way. A stand-down of one block
     never turns off the checks of the other blocks.
+  - Filing (the waiting copy). In a repo that names a waiting page (layout.waiting_page), a page item's
+    number must also be filed: the repo's waiting copy holds an item file under the `waiting` kind's
+    `items/` folder, read with git from `origin/<record branch>` (layout.record_branch, else `roadmap`),
+    whose numeric field `n` equals the number. A filed number passes the filing check, and the send check
+    still applies. A number that is not filed blocks, and the reason names the item id, `page:<n>`, and
+    the act: export the page copy. A copy that cannot be read (no record branch, no waiting folder, a git
+    error) is unknown, never clear: stdout carries a systemMessage that starts "Feedback guard: page
+    filing not checked", and the send check decides the item alone. A repo with no waiting page runs the
+    send check alone, with no filing message. A malformed home is refused before the filing check runs.
+    Cost: one to four git starts over a note item, inside the Stop process, per page item in a
+    waiting-page repo, whatever the copy's size. The cost case proves both figures.
   - Repos. `- <id> [repo] -> repo:<owner>/<name>` says the owner's feedback is about another repo, not
     the session's own. The home is cleaned as a ruling home is: one pair of backticks or quotes comes
     off when both ends match, a `#anchor` drops, and trailing `:,;.` strips. Each part of what is left
@@ -303,18 +321,19 @@ def capture_counted(cfg, sid, prompt, cwd, env):
     return run(probe_path(), payload(obj), cfg, args=(HERE, LT_PATH), extra_env=env)
 
 
-def guard(cfg, sid, stop_active=False, cwd=None, transcript=None):
+def guard(cfg, sid, stop_active=False, cwd=None, transcript=None, extra_env=None):
     """Runs the guard, as the Stop hook does, through the probe: its model call is stubbed to answer
     that nothing repeats, so no case reaches a real model. `cwd` is the session's folder in the
     payload: the shared fixture repo unless a case names another. `transcript` is the payload's
-    transcript_path, left out when None."""
+    transcript_path, left out when None. `extra_env` adds variables for this run, such as GIT_START_LOG."""
     obj = {"hook_event_name": "Stop", "session_id": sid, "stop_hook_active": stop_active,
            "cwd": cwd or fixture_repo()}
     if transcript is not None:
         obj["transcript_path"] = transcript
     log = os.path.join(os.path.dirname(cfg), "model-calls-guard.log")
-    return run(probe_path(), payload(obj), cfg, args=(HERE, GUARD_PATH),
-               extra_env={"FG_STUB_LOG": log})
+    env = {"FG_STUB_LOG": log}
+    env.update(extra_env or {})
+    return run(probe_path(), payload(obj), cfg, args=(HERE, GUARD_PATH), extra_env=env)
 
 
 GIT_ID = ("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
@@ -516,6 +535,7 @@ def expect_silent(name, p):
 def expect_block(name, p, named=(), unnamed=()):
     reason = block_reason(p) or ""
     check(name + ": blocks", p.code == 0 and block_reason(p) is not None, p.desc())
+    check("%s: cites decision owner-feedback-inbox" % name, "decision owner-feedback-inbox" in reason, reason)
     for n in named:
         check("%s: names %s" % (name, n), n in reason, reason)
     for n in unnamed:
@@ -1044,33 +1064,39 @@ def queued_rec(text):
             "attachment": {"type": "queued_command", "prompt": text}}
 
 
-def result_rec():
-    return {"type": "user", "message": {"content": [
-        {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}}
+def result_rec(tool_id="t1", content="ok", is_error=False):
+    """The user record that holds the tool_result of `tool_id`, with `content` as the tool printed it."""
+    block = {"type": "tool_result", "tool_use_id": tool_id, "content": content}
+    if is_error:
+        block["is_error"] = True
+    return {"type": "user", "message": {"content": [block]}}
 
 
 def said_rec(text):
     return {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
 
 
-def used_rec(name, tool_input):
-    return {"type": "assistant", "message": {"content": [
-        {"type": "tool_use", "name": name, "input": tool_input}]}}
+def used_rec(name, tool_input, tool_id=None):
+    """An assistant record with one tool_use of `name`. `tool_id` is set only when a result must pair with it."""
+    block = {"type": "tool_use", "name": name, "input": tool_input}
+    if tool_id is not None:
+        block["id"] = tool_id
+    return {"type": "assistant", "message": {"content": [block]}}
 
 
 def send_rec(message):
     return used_rec(SEND, {"to": "coordinator", "message": message})
 
 
-def page_run(cfg, sid, blocks, records, cwd=None):
+def page_run(cfg, sid, blocks, records, cwd=None, extra_env=None):
     """Writes one inbox block per (text, items) pair, with minutes 04, 05, ... of one hour, then the
     transcript `records`, then runs the guard with the transcript's path in the payload. `cwd` is the
-    session's folder, the shared fixture repo unless a case names another."""
+    session's folder, the shared fixture repo unless a case names another. `extra_env` goes to the run."""
     write_file(inbox_of(cfg, sid), "".join(
         render_block(text, header="2026-10-13 10:%02d CDT (UTC-05:00)" % (4 + n), items=items)
         for n, (text, items) in enumerate(blocks)))
     write_transcript(cfg, sid, records)
-    return guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid))
+    return guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid), extra_env=extra_env)
 
 
 def expect_unproved(name, p, item_id):
@@ -1318,6 +1344,348 @@ def case_page_queued_owner_record_anchors():
     p = page_run(new_cfg(), "page-queued-send", [("98: a", (PAGE_ITEM,))],
                  [queued_rec("98: a"), send_rec("98: a")])
     expect_silent("page: a queued owner record with a later send passes", p)
+
+
+# --------------------------------------------------------------------------- page filing (the waiting copy)
+
+# A page item's number must be filed: the repo's waiting copy holds an item whose numeric n is that number.
+# The copy is read from the record branch the layout names. Only a repo that names a waiting page is
+# checked; the send check alone decides every other repo. An unreadable copy is unknown, never clear.
+PAGE_FILING_FAIL_OPEN = "Feedback guard: page filing not checked"
+RECORD_BRANCH = "roadmap"  # layout.DEFAULT_RECORD_BRANCH: the branch a repo reads with no record-branch key
+FILED = (("disk-cleanup", 98), ("sweep-notes", 99))  # the copy holds item 98
+UNFILED = (("near-97", 97), ("near-980", 980), ("near-198", 198))  # no item with n 98
+FORTY = (("disk-cleanup", 98),) + tuple(("filler-%02d" % i, 100 + i) for i in range(39))
+NEUTRAL = "rename item 98 now"  # no pick: "98 n" is no answer letter, so only the page item needs proof
+SENT = "Ruling on item 98 now"  # a send that names 98 as a whole token
+
+
+def filing_extras(record_branch=None):
+    """The extras file of a waiting-page repo, with a record-branch key when `record_branch` is given."""
+    found = {"kinds": {}, "waiting-page": PAGE_URL}
+    if record_branch is not None:
+        found["record-branch"] = record_branch
+    return json.dumps(found)
+
+
+def copy_files(items):
+    """{path: text} for a waiting copy: one waiting/items/<id>.json per (id, n), each with the numeric field n."""
+    return {"waiting/items/%s.json" % item_id: json.dumps({"id": item_id, "n": n}) for item_id, n in items}
+
+
+def record_repo(key, files, branch=RECORD_BRANCH, extras=None, torn=False):
+    """A waiting-page repo. `files` ({path: text}) are committed on `branch` only. The branch's
+    remote-tracking ref holds them, as after a fetch, and the local branch is gone. Main holds the
+    ruling home and no copy. `torn` points the ref at no object, so git cannot read it. Built once
+    per run for each key."""
+    def build():
+        root = make_repo(key, tracked=("decisions/a-ruling.md",),
+                         extras=filing_extras() if extras is None else extras)
+        git(root, "checkout", "-q", "-b", branch)
+        for rel, text in files.items():
+            write_file(os.path.join(root, *rel.split("/")), text)
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "-m", "record branch")
+        git(root, "checkout", "-q", "main")
+        if torn:
+            write_file(os.path.join(root, ".git", "refs", "remotes", "origin", *branch.split("/")),
+                       "f" * 40 + "\n")
+        else:
+            git(root, "update-ref", "refs/remotes/origin/" + branch, "refs/heads/" + branch)
+        git(root, "update-ref", "-d", "refs/heads/" + branch)
+        return root
+    return shared_repo(key, build)
+
+
+def expect_filing_unknown(name, p):
+    """No block, and a systemMessage that starts with PAGE_FILING_FAIL_OPEN: the copy could not be read."""
+    obj = guard_json(p) or {}
+    msg = obj.get("systemMessage") or ""
+    check(name + ": exit 0, no block", p.code == 0 and not is_block(obj), p.desc())
+    check("%s: a systemMessage starts with %r" % (name, PAGE_FILING_FAIL_OPEN),
+          msg.startswith(PAGE_FILING_FAIL_OPEN), p.desc())
+
+
+def expect_unfiled(name, p, item_id, number):
+    """A block that names the item and page:<n>, and whose remedy says to export the page copy. The send is
+    there, so the reason is the filing one, and it names no forbidden target (main, --admin)."""
+    reason = expect_unproved(name, p, item_id)
+    check("%s: names page:%s" % (name, number), "page:%s" % number in reason, reason)
+    check("%s: the remedy says to export the page copy" % name,
+          "export" in reason.lower() and "page" in reason.lower(), reason)
+    check("%s: the send check passed, so the reason is not the send reason" % name,
+          "no send" not in reason, reason)
+    check("%s: the remedy names no forbidden target" % name,
+          re.search(r"\bmain\b|--admin", reason) is None, reason)
+
+
+def case_page_filed_number_passes():
+    """A page item whose number the waiting copy holds passes with its send, and no filing message. Green on
+    today's guard, which the send check alone already passes: this pins a filed item as a pass."""
+    p = page_run(new_cfg(), "page-filed", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), send_rec(SENT)], cwd=record_repo("filed", copy_files(FILED)))
+    expect_silent("page filing: n 98 filed, with its send, passes with no systemMessage", p)
+
+
+def case_page_filed_number_still_needs_its_send():
+    """The send check stays: a filed number with no send still blocks on the send. Green today."""
+    p = page_run(new_cfg(), "page-filed-nosend", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), said_rec("Noted.")], cwd=record_repo("filed", copy_files(FILED)))
+    expect_send_missing("page filing: n 98 filed, no send, blocks on the send", p, "fb-0958-7", "98")
+
+
+def case_page_unfiled_number_refuses_with_the_export_remedy():
+    """A page item whose number the copy does not hold is refused, though the send is there. Numbers 980 and
+    198 do not satisfy 98, so the check is equality, not a prefix or a substring. Red today: no filing check
+    runs, so the send alone passes it."""
+    repo = record_repo("unfiled", copy_files(UNFILED))
+    p = page_run(new_cfg(), "page-unfiled", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), send_rec(SENT)], cwd=repo)
+    expect_unfiled("page filing: n 98 not in the copy, with its send, refuses", p, "fb-0958-7", "98")
+    p = page_run(new_cfg(), "page-unfiled-closed", [(NEUTRAL, ("- fb-0958-7 [page] -> page:98 [closed]",))],
+                 [owner_rec(NEUTRAL), said_rec("Noted.")], cwd=repo)
+    expect_silent("page filing: a closed page item with an unfiled number is never checked", p)
+
+
+def case_page_unreadable_copy_is_unknown_and_checks_the_send():
+    """A copy that cannot be read is unknown, never clear. The guard says so in a systemMessage, and the send
+    check decides the item alone. Red today: no filing check runs, so no systemMessage."""
+    for label, repo in (
+            ("no record branch", waiting_repo()),
+            ("a record branch with no waiting folder", record_repo("no-folder", {"README.txt": "no copy\n"})),
+            ("a record branch ref git cannot read", record_repo("torn", copy_files(FILED), torn=True))):
+        p = page_run(new_cfg(), "page-unknown", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), send_rec(SENT)], cwd=repo)
+        expect_filing_unknown("page filing: unknown (%s), with its send" % label, p)
+        p = page_run(new_cfg(), "page-unknown-nosend", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), said_rec("Noted.")], cwd=repo)
+        expect_send_missing("page filing: unknown (%s), with no send, blocks on the send" % label,
+                            p, "fb-0958-7", "98")
+
+
+def case_page_filing_reads_the_record_branch_the_layout_names():
+    """The copy is read from the record branch the layout names, not from roadmap. A copy on the named branch
+    passes. In a repo that names records, a copy only on roadmap is no copy, so it is unknown. Red today: no
+    filing check runs, so no systemMessage."""
+    named = record_repo("named", copy_files(FILED), branch="records", extras=filing_extras("records"))
+    p = page_run(new_cfg(), "page-named", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), send_rec(SENT)], cwd=named)
+    expect_silent("page filing: n 98 filed on the named record branch passes", p)
+    roadmap_only = record_repo("named-roadmap-only", copy_files(FILED), branch=RECORD_BRANCH,
+                               extras=filing_extras("records"))
+    p = page_run(new_cfg(), "page-named-other", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), send_rec(SENT)], cwd=roadmap_only)
+    expect_filing_unknown("page filing: a copy only on roadmap is unknown in a repo that names records", p)
+
+
+def case_page_filing_needs_a_waiting_page_repo():
+    """The filing check runs only in a repo that names a waiting page. A page item in a repo with none keeps the
+    send check alone: a send passes, with no filing message. Green today, and it pins the gate."""
+    p = page_run(new_cfg(), "page-no-waiting", [(NEUTRAL, (PAGE_ITEM,))], [owner_rec(NEUTRAL), send_rec(SENT)])
+    expect_silent("page filing: a repo with no waiting page passes on its send alone", p)
+
+
+def case_page_malformed_home_refused_beside_a_filed_number():
+    """A malformed home is refused as malformed, even when its digits name a filed item: page:98x is not
+    page:98. Green today, by design: the home check runs before the filing check."""
+    repo = record_repo("filed", copy_files(FILED))
+    for home in ("page:98x", "page:abc", "page:", "page:9x", "handoff"):
+        item = "- fb-0958-9 [page] -> %s" % home
+        p = page_run(new_cfg(), "page-filed-bad", [(NEUTRAL, (item,))],
+                     [owner_rec(NEUTRAL), send_rec(SENT)], cwd=repo)
+        reason = block_reason(p) or ""
+        check("page filing: home %r blocks as malformed beside a filed number" % home,
+              p.code == 0 and block_reason(p) is not None and "malformed page home" in reason.lower()
+              and "fb-0958-9" in reason, reason or p.desc())
+
+
+def case_page_filing_reads_do_not_grow_with_the_copy():
+    """The cost of the filing read, which a test proves (the rule that every reader states its cost): the git
+    starts of a page item do not grow with the copy's size, and a page item adds one to four git starts over a
+    note item in the same repo. Red today: the page item adds none."""
+    extra = {}
+    for label, repo in (("a copy of 2 items", record_repo("filed", copy_files(FILED))),
+                        ("a copy of 40 items", record_repo("filed-forty", copy_files(FORTY)))):
+        cfg = new_cfg()
+        env = git_counter(cfg)
+        p = page_run(cfg, "page-cost", [(NEUTRAL, (PAGE_ITEM,))], [owner_rec(NEUTRAL), send_rec(SENT)],
+                     cwd=repo, extra_env=env)
+        expect_silent("page filing cost: %s, n 98 filed, passes" % label, p)
+        page_starts = len(git_lines(env))
+        cfg = new_cfg()
+        env = git_counter(cfg)
+        page_run(cfg, "page-cost-note", [(NEUTRAL, ("- fb-0958-7 [note] -> noted",))],
+                 [owner_rec(NEUTRAL), said_rec("Noted.")], cwd=repo, extra_env=env)
+        extra[label] = page_starts - len(git_lines(env))
+    counts = list(extra.values())
+    check("page filing cost: the same extra git starts for 2 items and for 40 (%s)" % extra,
+          counts[0] == counts[1], extra)
+    check("page filing cost: one to four extra git starts over a note item (%s)" % extra,
+          all(1 <= n <= 4 for n in counts), extra)
+
+
+CORRUPT_ITEM = '{"id": "disk-cleanup", "n": 98'  # an item file cut short: not JSON
+
+
+def commit_files(root, files, message):
+    """Writes {path: text} into `root` and commits them in one commit."""
+    for rel, text in files.items():
+        write_file(os.path.join(root, *rel.split("/")), text)
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", message)
+
+
+def stale_origin_repo():
+    """A clone whose refs/remotes/origin/roadmap is the commit before the one that files item 98. The source
+    repo, which the clone's origin names, holds the filed copy. git clone makes the clone, so origin is a real
+    remote, and the local roadmap branch is gone, as in record_repo. Built once per run."""
+    def build():
+        src = make_repo("stale-origin-src", tracked=("decisions/a-ruling.md",), extras=filing_extras())
+        git(src, "checkout", "-q", "-b", RECORD_BRANCH)
+        commit_files(src, copy_files((("sweep-notes", 99),)), "record branch before item 98")
+        stale = git(src, "rev-parse", "HEAD").strip()
+        commit_files(src, copy_files(FILED), "page writer files item 98")
+        git(src, "checkout", "-q", "main")
+        root = os.path.join(ROOT, "repos", "stale-origin")
+        git(ROOT, "clone", "-q", src, root)
+        git(root, "update-ref", "refs/remotes/origin/" + RECORD_BRANCH, stale)
+        return root
+    return shared_repo("stale-origin", build)
+
+
+def case_page_corrupt_item_file_is_unknown_never_a_block():
+    """A copy with an item file that is not JSON is unreadable. The filing is unknown, so the page item is never
+    refused for it, with its send or without. The send check decides alone."""
+    for label, key, files in (
+            ("a corrupt item beside a good one", "corrupt-beside",
+             {"waiting/items/sweep-notes.json": json.dumps({"id": "sweep-notes", "n": 99}),
+              "waiting/items/disk-cleanup.json": CORRUPT_ITEM}),
+            ("a corrupt item alone", "corrupt-alone", {"waiting/items/disk-cleanup.json": CORRUPT_ITEM})):
+        repo = record_repo(key, files)
+        p = page_run(new_cfg(), "page-corrupt", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), send_rec(SENT)], cwd=repo)
+        expect_filing_unknown("page filing: unreadable copy (%s), with its send" % label, p)
+        p = page_run(new_cfg(), "page-corrupt-nosend", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), said_rec("Noted.")], cwd=repo)
+        expect_send_missing("page filing: unreadable copy (%s), with no send, blocks on the send" % label,
+                            p, "fb-0958-7", "98")
+
+
+def case_page_stale_origin_ref_names_the_fetch():
+    """A filed number that the clone's origin ref lacks is refused, and the remedy names the fetch. The copy is
+    read as of the last fetch. The hook fetches nothing: the origin ref is the same after the run."""
+    repo = stale_origin_repo()
+    before = git(repo, "rev-parse", "refs/remotes/origin/" + RECORD_BRANCH).strip()
+    source = git(os.path.join(ROOT, "repos", "stale-origin-src"), "rev-parse", RECORD_BRANCH).strip()
+    check("page filing: the remote's record branch is past the clone's origin ref", source != before,
+          "remote %s, origin ref %s" % (source, before))
+    p = page_run(new_cfg(), "page-stale", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), send_rec(SENT)], cwd=repo)
+    expect_unfiled("page filing: n 98 on the remote, not in the origin ref, refuses", p, "fb-0958-7", "98")
+    reason = block_reason(p) or ""
+    check("page filing: the remedy names `git fetch origin %s`" % RECORD_BRANCH,
+          "git fetch origin %s" % RECORD_BRANCH in reason, reason)
+    check("page filing: the remedy says the copy is read as of the last fetch",
+          "last fetch" in reason.lower(), reason)
+    after = git(repo, "rev-parse", "refs/remotes/origin/" + RECORD_BRANCH).strip()
+    check("page filing: the hook fetches nothing, so the origin ref does not move",
+          after == before, "before %s, after %s" % (before, after))
+
+
+def case_page_stood_down_send_does_not_check_the_filing():
+    """A send the check stood down on proves nothing, so the filing check does not run for it. An unfiled number
+    then blocks on nothing, and the send stand-down message is the only one. Covers a transcript with no owner
+    record and a transcript that is missing."""
+    repo = record_repo("unfiled", copy_files(UNFILED))
+    p = page_run(new_cfg(), "page-stood-down", [(NEUTRAL, (PAGE_ITEM,))], [], cwd=repo)
+    expect_stand_down("page filing: stood-down send (no owner record), n 98 unfiled: no filing block", p, "owner")
+    cfg = new_cfg()
+    write_file(inbox_of(cfg, "page-stood-down-absent"), render_block(NEUTRAL, items=(PAGE_ITEM,)))
+    p = guard(cfg, "page-stood-down-absent", cwd=repo)
+    expect_stand_down("page filing: stood-down send (no transcript), n 98 unfiled: no filing block", p,
+                      "transcript")
+
+
+# --------------------------------------------------------------------------- read-back cases
+
+OTHER_PAGE_URL = "https://claude.ai/artifact/00000000-0000-4000-8000-000000000000"  # not the waiting page
+ITEM_98 = ("disk-cleanup", {"id": "disk-cleanup", "n": 98})  # the item the waiting copy lacks
+
+
+def case_page_read_back_proves_the_filing():
+    """An ArtifactData get, list or query of the waiting page's items collection, after the owner's message,
+    whose result returns item 98, proves the filing. The sender cannot export the copy, but it can read the page
+    back. The copy here lacks item 98, so only the read-back can pass the item. The case checks that the filing
+    accepts that read-back, since the copy alone refuses item 98."""
+    repo = record_repo("unfiled", copy_files(UNFILED))
+    reads = (
+        ("a get of items/disk-cleanup", tool_input("get", collection="items", doc_id="disk-cleanup"),
+         [ITEM_98], "string"),
+        ("a list of items, with n 97 and n 99 beside n 98", tool_input("list", collection="items", doc_id=None),
+         [("near-97", {"id": "near-97", "n": 97}), ITEM_98, ("sweep-notes", {"id": "sweep-notes", "n": 99})],
+         "blocks"),
+        ("a query of items where n is 98",
+         tool_input("query", collection="items", doc_id=None, query={"where": [["n", "==", 98]]}),
+         [ITEM_98], "nested"),
+    )
+    for label, inp, docs, form in reads:
+        p = page_run(new_cfg(), "page-readback", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), send_rec(SENT), used_rec("ArtifactData", inp, tool_id="rb1"),
+                      result_rec("rb1", response_of(docs, form=form))], cwd=repo)
+        expect_silent("page filing: n 98 proved by %s, with its send" % label, p)
+
+
+def case_page_read_back_that_misses_n_does_not_prove_the_filing():
+    """A read proves the filing only as an ArtifactData get, list or query of the waiting page's items
+    collection, with no out_dir, no error, a result that returns item 98, and a send after the owner's message.
+    Each case here misses one of those. The copy lacks item 98, so each one must be refused. The case guards the
+    proof against over-accepting: a read that misses any one condition does not file the number."""
+    repo = record_repo("unfiled", copy_files(UNFILED))
+    get98 = tool_input("get", collection="items", doc_id="disk-cleanup")
+    misses = (
+        ("a read that returns n 97", [used_rec("ArtifactData", get98, tool_id="rb1"),
+                                      result_rec("rb1", response_of([("near-97", {"id": "near-97", "n": 97})]))]),
+        ("a read that returns n 980", [used_rec("ArtifactData", get98, tool_id="rb1"),
+                                       result_rec("rb1", response_of([("near-980", {"id": "near-980", "n": 980})]))]),
+        ("a read of answers that returns n 98", [used_rec("ArtifactData", tool_input("get"), tool_id="rb1"),
+                                                  result_rec("rb1", response_of([ITEM_98]))]),
+        ("a read of another page's items", [used_rec("ArtifactData", dict(get98, url=OTHER_PAGE_URL), tool_id="rb1"),
+                                            result_rec("rb1", response_of([ITEM_98]))]),
+        ("a read whose result is an error", [used_rec("ArtifactData", get98, tool_id="rb1"),
+                                             result_rec("rb1", response_of([ITEM_98]), is_error=True)]),
+        ("a result of another tool call", [used_rec("ArtifactData", get98, tool_id="rb1"),
+                                           result_rec("rb2", response_of([ITEM_98]))]),
+        ("a read with out_dir, whose result returns n 98",
+         [used_rec("ArtifactData", tool_input("list", collection="items", doc_id=None,
+                                              out_dir=os.path.join(ROOT, "out")), tool_id="rb1"),
+          result_rec("rb1", response_of([ITEM_98]))]),
+    )
+    for label, records in misses:
+        p = page_run(new_cfg(), "page-readback-no", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), send_rec(SENT)] + records, cwd=repo)
+        expect_unfiled("page filing: %s does not prove n 98" % label, p, "fb-0958-7", "98")
+    p = page_run(new_cfg(), "page-readback-early", [(NEUTRAL, (PAGE_ITEM,))],
+                 [used_rec("ArtifactData", get98, tool_id="rb1"), result_rec("rb1", response_of([ITEM_98])),
+                  owner_rec(NEUTRAL), send_rec(SENT)], cwd=repo)
+    expect_unfiled("page filing: a read-back before the owner's message does not prove n 98", p, "fb-0958-7", "98")
+    p = page_run(new_cfg(), "page-readback-nosend", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), used_rec("ArtifactData", get98, tool_id="rb1"),
+                  result_rec("rb1", response_of([ITEM_98]))], cwd=repo)
+    expect_send_missing("page filing: a read-back of n 98 with no send still blocks on the send", p,
+                        "fb-0958-7", "98")
+
+
+def case_page_unfiled_remedy_offers_the_read_back():
+    """The remedy for an unfiled number names both ways out: the page writer exports the copy into folder
+    `waiting`, or the sender reads item 98 back from the page. The case checks that the remedy offers the read-back,
+    since an export of the copy alone cannot file item 98."""
+    repo = record_repo("unfiled", copy_files(UNFILED))
+    p = page_run(new_cfg(), "page-remedy", [(NEUTRAL, (PAGE_ITEM,))], [owner_rec(NEUTRAL), send_rec(SENT)],
+                 cwd=repo)
+    expect_unfiled("page filing remedy: n 98 unfiled, with its send", p, "fb-0958-7", "98")
+    reason = block_reason(p) or ""
+    check("page filing remedy: offers a read of item 98 back from the page as a way out",
+          "read item 98 back from the page" in reason and "ArtifactData" in reason, reason)
 
 
 # --------------------------------------------------------------------------- repo cases
@@ -1597,13 +1965,18 @@ def grant_repo():
         "grant-homes", tracked=("settings.json", ".claude/CLAUDE.md", "decisions/a-ruling.md")))
 
 
-def step_repo():
-    """A repo whose step file sits on a lane branch only: some branch's tree holds it, main's does not."""
+def step_repo(debts=True):
+    """A repo whose step file sits on a lane branch only: some branch's tree holds it, main's does not. With
+    `debts` it tracks a debt, so the repo has a task home of its own, and a task's refusal then comes from its
+    step home. Without it, the repo has no todo, debts or debt-notes home at all."""
+    key = "steps" if debts else "steps-bare"
+
     def build():
-        root = make_repo("steps", tracked=("decisions/a-ruling.md",))
+        tracked = ("decisions/a-ruling.md",) + (("debts/a-task.md",) if debts else ())
+        root = make_repo(key, tracked=tracked)
         lane_file(root, "roadmap/data/steps/%s.json" % STEP_SLUG)
         return root
-    return shared_repo("steps", build)
+    return shared_repo(key, build)
 
 
 def names_number(reason, n):
@@ -1852,6 +2225,109 @@ def case_closed_note_with_a_home_passes():
     expect_silent("close home: a closed question homed to answered stays green", p)
     p = homed(new_cfg(), "open-note", ("- fb-0958-4 [note] -> noted",))
     expect_silent("close home: an open note homed to noted stays green", p)
+
+
+# Task homes: a task may name a step, as a closed note may. A ruling may not: steps hold tasks, not rulings.
+
+def expect_step_on_lane_only(name, root):
+    """The scope of the step cases: the step file is a blob on a lane branch and not in main's work tree. A
+    pass then proves the branch read, not a file on main."""
+    rel = "roadmap/data/steps/%s.json" % STEP_SLUG
+    check(name + ": the step file is a blob on the lane branch",
+          rel in git(root, "ls-tree", "-r", "--name-only", "lane").split("\n"), root)
+    check(name + ": the step file is not in main's work tree",
+          not os.path.exists(os.path.join(root, *rel.split("/"))), root)
+
+
+def case_task_open_step_home_passes():
+    """An open task whose home is `step:<slug>` passes when the step file is a blob on a lane branch. Red
+    today: a task's home is read as a path under todo, debts or debt-notes, so the step home is refused as
+    not a tracked task home. The step is on a lane branch only, so the pass proves the branch read."""
+    repo = step_repo()
+    expect_step_on_lane_only("task step home", repo)
+    p = homed(new_cfg(), "task-step", ("- fb-0958-7 [task] -> step:%s" % STEP_SLUG,), cwd=repo)
+    expect_silent("task step home: an open task homed to a step on a lane branch passes", p)
+
+
+def case_task_closed_step_home_passes():
+    """A closed task whose home is `step:<slug>` passes on the same lane-branch step. Red today, as the open
+    task is: a closed task is checked against the same task homes."""
+    repo = step_repo()
+    expect_step_on_lane_only("closed task step home", repo)
+    p = homed(new_cfg(), "task-step-closed", ("- fb-0958-7 [task] -> step:%s [closed]" % STEP_SLUG,), cwd=repo)
+    expect_silent("task step home: a closed task homed to a step on a lane branch passes", p)
+
+
+def case_task_missing_step_home_blocks():
+    """An open or closed task whose home is `step:<slug>` with no step file on any branch blocks, and the
+    reason names the item. Green today: the guard refuses a step home for a task whether or not the file
+    exists. It guards a fix that lets a step home through without the file."""
+    repo = step_repo()
+    p = homed(new_cfg(), "task-step-missing", ("- fb-0958-7 [task] -> step:no-such-step",), cwd=repo)
+    expect_block("task step home: an open task homed to a step with no file on any branch blocks", p,
+                 named=("fb-0958-7",))
+    p = homed(new_cfg(), "task-step-missing-closed", ("- fb-0958-7 [task] -> step:no-such-step [closed]",),
+              cwd=repo)
+    expect_block("task step home: a closed task homed to a step with no file on any branch blocks", p,
+                 named=("fb-0958-7",))
+
+
+def case_ruling_step_home_still_blocks():
+    """An open or closed ruling whose home is `step:<slug>` blocks, though the step file is on a lane branch.
+    Green today. It guards a fix that lets a step home through for every kind, not only tasks."""
+    repo = step_repo()
+    expect_step_on_lane_only("ruling step home", repo)
+    p = homed(new_cfg(), "ruling-step", ("- fb-0958-8 [ruling] -> step:%s" % STEP_SLUG,), cwd=repo)
+    expect_block("ruling step home: an open ruling homed to an existing step still blocks", p, named=("fb-0958-8",))
+    p = homed(new_cfg(), "ruling-step-closed", ("- fb-0958-8 [ruling] -> step:%s [closed]" % STEP_SLUG,), cwd=repo)
+    expect_block("ruling step home: a closed ruling homed to an existing step still blocks", p, named=("fb-0958-8",))
+
+
+def case_task_backtick_step_home_passes():
+    """A task whose home is a backticked step, `step:<slug>`, passes when the step file is a blob on a lane
+    branch. Red today: the task check reads the raw first word, so the backticks stay on and the step home is
+    refused as not a tracked task home."""
+    repo = step_repo()
+    expect_step_on_lane_only("backtick task step home", repo)
+    p = homed(new_cfg(), "task-step-ticks", ("- fb-0958-7 [task] -> `step:%s`" % STEP_SLUG,), cwd=repo)
+    expect_silent("task step home: a task homed to a backticked step on a lane branch passes", p)
+
+
+def case_task_trailing_dot_step_home_passes():
+    """A task whose home is a step with a sentence period after it, `step:<slug>.`, passes when the step file is
+    a blob on a lane branch. Red today: the raw first word keeps the period, so the step home is refused."""
+    repo = step_repo()
+    expect_step_on_lane_only("trailing-dot task step home", repo)
+    p = homed(new_cfg(), "task-step-dot", ("- fb-0958-7 [task] -> step:%s." % STEP_SLUG,), cwd=repo)
+    expect_silent("task step home: a task homed to a step with a trailing period passes", p)
+
+
+def case_closed_note_backtick_step_home_passes():
+    """A closed note whose home is a backticked step, `step:<slug>` [closed], passes when the step file is a blob
+    on a lane branch. Red today: the closed note check reads the raw first word, so the backticks stay on and the
+    step home is refused."""
+    repo = step_repo()
+    expect_step_on_lane_only("backtick closed note step home", repo)
+    p = homed(new_cfg(), "close-step-ticks", ("- fb-0958-4 [note] -> `step:%s` [closed]" % STEP_SLUG,), cwd=repo)
+    expect_silent("close home: a closed note homed to a backticked step on a lane branch passes", p)
+
+
+def case_task_step_home_without_a_task_layout_passes():
+    """A task whose home is `step:<slug>` passes in a repo with no todo, debts or debt-notes home, when the step
+    file is a blob on a lane branch. Green control: the step file is read before the layout's task homes."""
+    repo = step_repo(debts=False)
+    expect_step_on_lane_only("bare task step home", repo)
+    p = homed(new_cfg(), "task-step-bare", ("- fb-0958-7 [task] -> step:%s" % STEP_SLUG,), cwd=repo)
+    expect_silent("task step home: a task homed to a step passes in a repo with no task layout home", p)
+
+
+def case_task_malformed_step_homes_refuse():
+    """`step:..`, `step:a/../b` and a bare `step:` name no step file, so a task homed to one blocks and the reason
+    names the item. Green control: each is refused today, and must stay refused."""
+    repo = step_repo()
+    for home in ("step:..", "step:a/../b", "step:"):
+        p = homed(new_cfg(), "task-step-bad", ("- fb-0958-7 [task] -> %s" % home,), cwd=repo)
+        expect_block("task step home: a task homed to %r blocks" % home, p, named=("fb-0958-7",))
 
 
 # Cost: the transcript is read only for a pick block in a repo with a waiting page, or for an open page item.
@@ -3199,6 +3675,20 @@ CASES = (
     case_page_owner_record_missing_stands_down,
     case_page_crlf_owner_text_matches_the_inbox,
     case_page_artifactdata_write_without_n_blocks,
+    case_page_filed_number_passes,
+    case_page_filed_number_still_needs_its_send,
+    case_page_unfiled_number_refuses_with_the_export_remedy,
+    case_page_unreadable_copy_is_unknown_and_checks_the_send,
+    case_page_filing_reads_the_record_branch_the_layout_names,
+    case_page_filing_needs_a_waiting_page_repo,
+    case_page_malformed_home_refused_beside_a_filed_number,
+    case_page_filing_reads_do_not_grow_with_the_copy,
+    case_page_corrupt_item_file_is_unknown_never_a_block,
+    case_page_stale_origin_ref_names_the_fetch,
+    case_page_stood_down_send_does_not_check_the_filing,
+    case_page_read_back_proves_the_filing,
+    case_page_read_back_that_misses_n_does_not_prove_the_filing,
+    case_page_unfiled_remedy_offers_the_read_back,
     case_repo_send_naming_the_repo_passes,
     case_repo_slug_match_ignores_case,
     case_repo_send_before_the_owner_record_blocks,
@@ -3238,6 +3728,15 @@ CASES = (
     case_grant_act_words_narrowed_passes,
     case_closed_note_without_a_home_blocks,
     case_closed_note_with_a_home_passes,
+    case_task_open_step_home_passes,
+    case_task_closed_step_home_passes,
+    case_task_missing_step_home_blocks,
+    case_ruling_step_home_still_blocks,
+    case_task_backtick_step_home_passes,
+    case_task_trailing_dot_step_home_passes,
+    case_closed_note_backtick_step_home_passes,
+    case_task_step_home_without_a_task_layout_passes,
+    case_task_malformed_step_homes_refuse,
     case_page_check_reads_no_transcript_for_other_blocks,
     case_run_folder_sweep_removes_old_siblings_keeps_new,
     table_reorient_forms,
