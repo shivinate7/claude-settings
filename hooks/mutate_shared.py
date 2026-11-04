@@ -669,7 +669,7 @@ def format_report(rows, gold=None) -> str:
 # that fails, or is missing, runs every changed suite and adds a row note). A script the argv names that the commit
 # lacks is read from the clone's HEAD instead, with its whole folder, so the siblings it loads come along; the row
 # names it. The commit's own copy wins. Only a part with a "/" is a script path: a bare command name resolves on
-# PATH, and a script at the repo root is never served from HEAD,
+# PATH, so a bare root name such as `select.sh` is never served from HEAD; `./select.sh` is, with the whole tree,
 # "suite_filter": {"paths": regex, "keep": a SUITE_FILTERS name} (optional); a changed file that "tests" matches
 # and "paths" matches is a suite only when the filter reads its text as one,
 # "sparse_skip": top folders left out of each checkout}. A profile of {"parts": {name: profile}} runs
