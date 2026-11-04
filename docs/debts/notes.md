@@ -1277,3 +1277,5 @@
 - opus-plain-ask: in a cloud session, an owner's first Opus ask that is refused as a seed is refused again when he repeats it, because `_own_record` skips the earlier copy. Any other owner turn first lets it through.
 - opus-plain-ask: a seed record with more than one text block has joined text that differs from the prompt, so `_own_record` misses it and the seed counts as an owner turn.
 - opus-plain-ask: the check-in fixtures in `hooks/test_local_time.py` put the record in the transcript, the unmeasured shape, and none sets `isMeta`.
+- sim-test-sigkill-leaves-pro-booted: SIGKILL skips the EXIT trap of sim-test, so the 18 Pro stays booted while its lease is reaped, and a Duo can be granted beside it. Decision: sim-lease-tool.
+- sim-test-term-waits-for-take: a TERM or INT sent to sim-test alone while `sim-lease take` waits runs its trap only when `take` returns, up to SIM_LEASE_WAIT (300 s). No boot happens and the lease is given on exit, but the queue head is held until then. A Ctrl-C or a process-group kill reaches `take` at once. Decision: sim-lease-tool.
