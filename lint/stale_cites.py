@@ -11,12 +11,18 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             def, class, assignment or import binds it, also under a module-level if or try, or when it is a
             def directly in a module-level class. A name that moved but is still bound in the file is not
             removed.
+  STALE003  one backticked code span cites a script and a `--flag` of it, and the range removed that flag from the
+            script. A `~/.claude/<path>` cite is `<path>` at the repo root. A Python flag is an `add_argument`
+            string literal (read with `ast`); a shell (.sh) flag is a whole-word `--token` in the file. A flag
+            named only in a docstring or comment of a .py was never declared. A span that cites no script (as in
+            `git push --force`), or a script that never had the flag (a shim whose target holds the flags), never
+            fires.
   Unknown   the line cites `<file.mjs> <name>` (also .js, .cjs, .ts, .sh) in the same two forms, and the range
             touched that file. JavaScript and shell names are not read, so the line prints
             `stale-cites: unknown, <path>:<line> ...` and never fails the run.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
-`<!-- ste-disable-line STALE001 -->` (or STALE002). Fenced blocks count as prose.
+`<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003). Fenced blocks count as prose.
 Each Markdown file is read as committed at head, never from the working tree.
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
 2 a read that could not run, except a base that does not resolve (a shallow clone): that prints
@@ -26,8 +32,9 @@ the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the e
 
 Cost, per ste-lint changed-scope run (CostTests in lint/test_stale_cites.py proves it): one python3 start.
 Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and touches no .py,
-.mjs, .js, .cjs, .ts or .sh. A touched .py adds one `git cat-file --batch`. A removed path or name, or a touched
-.mjs, .js, .cjs, .ts or .sh, adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read
+.mjs, .js, .cjs, .ts or .sh. A touched .py adds one `git cat-file --batch`. A removed path, name or flag, or a touched
+.mjs, .js, .cjs, .ts or .sh, adds `ls-tree` and that `cat-file --batch`, so 5 at most. The flag reader reads the
+touched .py and .sh blobs through that same open `cat-file`. Each tracked .md is read
 once, only when one of those holds. A touched .py also loads the py-facts script once, in-process (no start,
 no .pyc). It writes no file and leaves no process running.
 """
@@ -222,6 +229,33 @@ def names_in(source):
     return names
 
 
+CLAUDE_HOME = "~/.claude/"
+CODE_SPAN = re.compile(r"`([^`\n]+)`")
+LONG_FLAG = re.compile(r"--[A-Za-z][\w-]*")
+SHELL_FLAG = re.compile(r"(?<![\w-])--[A-Za-z][\w-]*")
+SHELL_SCRIPT = re.compile(r"\.sh\Z")
+
+
+def argument_flags(source):
+    """The long flags a Python source declares: the string literals passed to `add_argument`, read with `ast`.
+    A flag only named in a docstring or comment is not declared. None when the source does not parse."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return None
+    flags = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "add_argument":
+            flags.update(arg.value for arg in node.args
+                         if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and LONG_FLAG.fullmatch(arg.value))
+    return flags
+
+
+def shell_flags(source):
+    """The whole-word `--token`s in a shell source; `--between-x` is no `--between`."""
+    return set(SHELL_FLAG.findall(source))
+
+
 def disabled(line):
     codes = set()
     for match in DISABLE_RE.finditer(line):
@@ -331,11 +365,51 @@ class ForeignReader:
         return messages
 
 
+class FlagReader:
+    """STALE003: a code span that cites `script --flag` for a flag the range removed from that script."""
+    code = "STALE003"
+
+    def prepare(self, rng):
+        removed_flags = {}  # script at head -> flags the range removed
+        files = dict(rng.py_files)  # base path -> head path
+        shell = {p for p in list(rng.foreign_files) if SHELL_SCRIPT.search(p)}
+        files.update({old: new for old, new in rng.renamed.items() if new in shell})
+        files.update({p: p for p in shell if p not in rng.renamed.values()})
+        for path in sorted(files):
+            old_src = rng.batch.get("%s:%s" % (rng.base, path))
+            new_src = rng.batch.get("%s:%s" % (rng.head, files[path]))
+            if old_src is None or new_src is None:
+                continue
+            read = argument_flags if path.endswith(".py") else shell_flags
+            before, after = read(old_src.decode("utf-8", "replace")), read(new_src.decode("utf-8", "replace"))
+            if before is None or after is None:
+                continue  # a .py that does not parse is already reported as unknown by NameReader
+            if before - after:
+                removed_flags[files[path]] = before - after
+        return removed_flags or None
+
+    def line(self, state, text, claimed):
+        if "--" not in text:
+            return []
+        messages = []
+        for span in CODE_SPAN.finditer(text):
+            tokens = span.group(1).split()
+            for token in tokens:
+                script = token[len(CLAUDE_HOME):] if token.startswith(CLAUDE_HOME) else token
+                for flag_token in tokens if script in state else ():
+                    flag = LONG_FLAG.match(flag_token)
+                    if flag and flag.group(0) in state[script]:
+                        message = "%s no longer takes %s at head; fix the cite" % (script, flag.group(0))
+                        if message not in messages:
+                            messages.append(message)
+        return messages
+
+
 # One entry per code. A reader has `code`, `prepare(rng)` (its state, or None when the range gives it nothing to
 # check) and `line(state, text, claimed)` (messages for one Markdown line; `claimed` holds the paths an earlier
 # reader already cited there). A reader with `unknown = True` reports its messages as unknown, not as findings.
 # A new check adds one entry.
-READERS = (PathReader(), NameReader(), ForeignReader())
+READERS = (PathReader(), NameReader(), ForeignReader(), FlagReader())
 
 
 def scan(range_text):
