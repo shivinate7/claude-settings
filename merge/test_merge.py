@@ -3472,6 +3472,20 @@ class GhHalf(Env):
         self.assertIn("commit_message", fields[0], "the dropped-lane lift is written into the merge commit message")
         self.assertEqual(set(fields[0]["commit_message"].splitlines()), {"Reason flag: --undo-check-unknown-ok: octopus read it"})
 
+    def test_a_silent_undo_read_after_the_wait_lifted_by_the_reason_flag_is_written_into_the_merge_commit_message(self):
+        # the first silent-undo read passes. The read in prove(), after the wait, cannot read the history, and the flag lifts it.
+        # Only that read lifts, so its line is the one the merge call must carry.
+        reason = "history read by hand after the wait"
+        with UnknownOverride.unreadable_after_the_claim(self):
+            rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", reason, host=self.gh_host())
+        self.assertEqual(rc, 0, out)
+        self.assertIn("pushed to feat", out, "the claim moved the head, so the read after the wait scans again and is not the memo")
+        self.assertEqual(out.count(f"--undo-check-unknown-ok, reason: {reason}"), 1, "the lift is logged once, by the read after the wait")
+        fields = self.gh_state("merge_fields") or []
+        self.assertEqual(len(fields), 1, "the merge call was sent once, so the fields below are its")
+        self.assertIn("commit_message", fields[0], "the lift of the read after the wait is written into the merge commit message")
+        self.assertEqual(set(fields[0]["commit_message"].splitlines()), {f"Reason flag: --undo-check-unknown-ok: {reason}"})
+
     def test_open_heads_lists_the_open_pr_heads_past_ghs_default_of_30(self):
         # A list read stops at its first page (30 rows by default) unless it asks for 100 a page and every page. A lane whose open PR is past row 30 would be deleted, and its PR closed.
         # Each head comes with its sha and its PR's base, {name: (sha, base)}, so the cut can tell the lane's own PR
