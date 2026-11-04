@@ -1,7 +1,7 @@
 {
   "formatVersion": 4,
   "title": "Decisions fixture",
-  "codeExtensions": ["ts", "tsx", "py"],
-  "decisionsDir": "docs/decisions/",
+  "codeExtensions": ["ts", "tsx", "py", "sh"],
+  "decisionsDir": "docs/records/",
   "decisionIdPattern": "D\\d+"
 }
