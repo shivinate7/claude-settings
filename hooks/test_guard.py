@@ -439,6 +439,7 @@ WFREPO = os.path.join(ROOT, "wfrepo")      # a folder that holds one workflow fi
 GHSLOW = os.path.join(ROOT, "ghslow")      # green, but every call takes longer than the guard waits
 HANG_MARGIN_S = 3      # what a read may run past MERGE_READ_TIMEOUT: process start and the kill landing
 HANG_CEILING_S = 45    # the most MERGE_READ_TIMEOUT plus its margin may be: well inside the hook's 60s
+HOOK_BUDGET_S = 60     # the hook's own time budget
 GHWARM = os.path.join(ROOT, "ghwarm")      # green, each call as slow as a real gh measured locally
 GHHANG = os.path.join(ROOT, "ghhang")      # green, but every call never answers at all
 GHBLANK = os.path.join(ROOT, "ghblank")    # green checks, a base that reads as empty
@@ -8742,11 +8743,12 @@ sh("merge-checks: a flag value is no pull request", "gh pr merge -b note 12 -R y
 add("merge-checks: the host merge tool reads the pull request and repo it names", "allow",
     silent=True, tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x",
     owner="y", env_path=NEED_ON, config=MERGECFG)
-# max_seconds ends a guard that never times out its read at the ceiling, not after every slow call
-# (4 calls x 20 s): its mutant died in 98 s. Off Windows only: a `.cmd` fake cannot be killed on time there.
+# A guard still judging at the hook's 60 s budget is past the point where the hook is cut off, so the case
+# stops it there, not after every slow call (4 calls x 20 s, its mutant took 98 s). The correct guard ends near
+# MERGE_READ_TIMEOUT (25 s). Off Windows only: a `.cmd` fake cannot be killed on time there.
 add("merge-checks: a gh slower than the guard waits is unknown, and denies", "deny", "merge-checks",
     carries="could not run", cwd=NOGIT, env_path=GHSLOW + os.pathsep + PY_PATH, config=MERGECFG,
-    max_seconds=HANG_CEILING_S if os.name != "nt" else None, command="gh pr merge 12 --squash")
+    max_seconds=HOOK_BUDGET_S if os.name != "nt" else None, command="gh pr merge 12 --squash")
 # Incident 2026-10-03: MERGE_READ_TIMEOUT (3s) sits under real `gh` latency (3.0-3.9s measured),
 # so a settled, all-green head still reads as unknown and the guard cries wolf on passing CI.
 # c53: a branch name, a pull request URL and the current branch are read through REST: the open pull request list matched on head.ref, or the number.
@@ -18185,8 +18187,6 @@ def merge_import_exits_case():
     if "unknown" not in reason and "pending" not in reason:
         return False, "expected unknown or pending in the reason, got " + reason[:160]
     return True, "a merge tool that exits at import denies the merge: " + reason[:80]
-
-
 
 
 def guard_merge_read_timeout():

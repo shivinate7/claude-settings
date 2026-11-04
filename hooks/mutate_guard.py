@@ -1213,7 +1213,7 @@ MUTATIONS = [
 
     # RULE 0, worktree-home. Each mutant breaks one clause of
     # docs/decisions/an-agent-outside-its-home-tree-must-stop.md. Each names the one case that kills it,
-    # mostly `worktree_home_case`, the whole sequence: the bare family prefix ran all 25 cases, 40 s a mutant.
+    # mostly `worktree_home_case`, the whole sequence: the bare family prefix ran every worktree-home case, 40 s a mutant.
     ("worktree-home: the first call from inside the worktree never writes the home record",
      '    if path_is_inside(cwd, candidate) is True:\n        write_agent_home(cwd, agent_id, candidate)',
      '    if path_is_inside(cwd, candidate) is False:\n        write_agent_home(cwd, agent_id, candidate)',
