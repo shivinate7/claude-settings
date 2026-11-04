@@ -50,9 +50,10 @@ line starts `stale-cites: report, `. It has two halves.
 Cost, per ste-lint changed-scope run (CostTests in lint/test_stale_cites.py proves it): one python3 start.
 Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and changes only
 Markdown outside RULE_FILES.
-A touched .py adds one `git cat-file --batch`. A removed path or name adds `ls-tree` and that `cat-file
---batch`, so 5 at most. Each tracked .md is read once, only when something was removed. A touched .py also
-loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
+A touched .py adds one `git cat-file --batch` and, through the report below, one `ls-tree`, so it starts 5. A removed
+or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once, and only
+when a removed or renamed path, or a name that a touched .py no longer defines, gives the findings something to
+look for. A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
 The report adds, for a changed non-Markdown file, one `ls-tree` of the decisions folders and the mechanisms file (none
 when the run already listed the whole tree) and the `cat-file --batch`, which reads each decision record whole (a regex
 then takes its Home line) and the mechanisms file once. The decisions folder is the first of lint/layout.py
