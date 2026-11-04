@@ -4,9 +4,12 @@ Mockup: `status-repo-phases.html`. Sample data: degen (`v2`, 8 steps), home (`no
 `later`; 49 steps), claude-settings (the five known phases plus `now`, `next`, `page`, `checks`, `ci`,
 `merge`, `records`; 77 steps), and claude-settings with 2 steps that have no phase and a long
 `meta.phases.ci.name`. Sizes: phone 390 (the brief's size) and wide 1280 (c193's size). Tablet 760 is
-added to show item 4. This repo's device list reads "unknown". Themes: light and dark.
+added to show item 3. This repo's device list reads "unknown". Themes: light and dark.
 
-## Measured (headless Chrome, harness labels off, fallback fonts)
+## Measured (headless Chrome, fallback fonts)
+
+Labels were on, and they change no layout. The `ci` clip check was run again with labels off,
+because the label itself reads as a clip.
 
 | Data | Width | Chips | Rows | Rail height | Clipped name |
 |---|---|---|---|---|---|

@@ -906,7 +906,8 @@ const STATES = [
 function screen(sid) {
   const st = STATES.find((x) => x.id === sid), D = DATA[st.data], steps = D.steps, PH = phaseList(steps, D.meta);
   const byPhase = (k) => steps.filter((s) => (k === NONE ? !(typeof s.phase === "string" && s.phase) : s.phase === k));
-  const cur = PH.find((p) => byPhase(p.k).some((s) => s.status !== "done")) || PH[PH.length - 1];
+  // No phase is never current: only numbered phases count.
+  const cur = PH.find((p) => !p.none && byPhase(p.k).some((s) => s.status !== "done")) || PH.filter((p) => !p.none).pop();
   const shown = st.show ? PH.find((p) => p.k === st.show) : cur;
   const numbered = PH.filter((p) => !p.none);
   const work = (l) => [...l.filter((s) => s.status === "active"), ...l.filter((s) => s.status !== "active")];
