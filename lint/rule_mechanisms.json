@@ -83,9 +83,10 @@
     "roles-sonnet-is-the-ceiling": {
       "mechanism": {
         "kind": "guard",
-        "ref": "agent-model-cap"
+        "ref": "agent-model-cap",
+        "reason": "The guard (agent-model-cap, hooks/guard.py opus_without_grant) refuses an explicit Opus spawn that has no grant. It does not see a model name that is not an alias on a role with no table row. It does not see a spawn with no model whose model comes from CLAUDE_CODE_SUBAGENT_MODEL or an agent-file pin (lint/check_agent_models.py reads the pin)."
       },
-      "test": "hooks/test_guard.py::floor: Agent Explore with model opus and no Audit: marker is denied (item 137)"
+      "test": "hooks/test_guard.py::ceiling: Agent with model opus and no role is denied"
     },
     "roles-opus-shaped-say-so": {
       "mechanism": {
