@@ -6,7 +6,8 @@ Other files reach these names through `guard`.
 import shlex
 
 from guard_core import (
-    _git, branch_is_empty, branch_on_remote, design_files, resolve_default_base,
+    _git, branch_is_ancestor, branch_is_empty, branch_on_remote, design_files,
+    resolve_default_base,
 )
 
 
@@ -54,8 +55,9 @@ def branch_delete_subject(args, where: str):
 # A design file on a branch's tip is the only copy of that file when no ref on origin holds the tip
 # (the incident: an unmerged design branch deleted, with its picked mockup). A local delete leaves
 # origin's copy, so it is judged only when the default branch cannot be read (rule shared-trees-
-# archive-then-delete). A remote delete removes origin's copy, so only `archive/<branch>` on origin
-# holding the tip keeps the file. `<branch>` is a placeholder (rule git-remedy-never-names-target).
+# archive-then-delete). A remote delete removes origin's copy, so a tip that is on the default
+# branch, or that any `archive/*` ref on origin holds, keeps the file; a tip it cannot read asks.
+# The tip is the last-fetched tracking ref. `<branch>` is a placeholder (rule git-remedy-never-names-target).
 _ARCHIVE_REMEDY = (
     "Remedy: push the branch to an archive name first, `git push origin "
     "<branch>:refs/heads/archive/<branch>`, with <branch> the branch you are deleting, never "
@@ -68,9 +70,9 @@ DESIGN_DELETE_DENY_REASON = (
     "tip. Deleting the branch loses the file. " + _ARCHIVE_REMEDY
 )
 DESIGN_DELETE_ASK_REASON = (
-    "Archive before delete (rule shared-trees-archive-then-delete): the tip of this branch holds a file under the "
-    "design folder, and no read of the default branch says whether the file survives the "
-    "delete. " + _ARCHIVE_REMEDY
+    "Archive before delete (rule shared-trees-archive-then-delete): a read that says whether this "
+    "branch's design file survives the delete did not answer (the branch tip, its design files, "
+    "the archive refs or the default branch). " + _ARCHIVE_REMEDY
 )
 
 
@@ -103,24 +105,37 @@ def design_branch_delete_ask(args, where: str, folder) -> bool:
 
 def design_push_delete_verdict(where: str, remote: str, names, folder) -> str:
     """'deny', 'ask' or '' for a push that deletes `names` on `remote`. A name counts when its tip
-    (the remote-tracking ref, else the local branch) holds a file under `folder` that the default
-    branch lacks and `archive/<name>` on the remote does not hold the tip. An unreadable default
-    branch asks instead of denying. A name with no readable tip is not judged."""
+    (the remote-tracking ref, else the local branch) is not on the default branch, holds a file
+    under `folder` that the default branch lacks, and no `archive/*` ref on the remote holds the
+    tip. A tip that does not resolve, a failed read of the design files or of the archive refs, and
+    an unreadable default branch each ask: the delete removes origin's copy, so an unread tip never
+    allows. The default branch is read at the first resolved tip, so a name with no tip starts no
+    git beyond the tip lookup."""
     if not folder:
         return ""
-    base = resolve_default_base(where, remote)
+    base = None
+    base_read = False
     verdict = ""
     for name in names:
         tip = _tip_of(where, "refs/remotes/%s/%s" % (remote, name), "refs/heads/" + name)
         if tip is None:
+            verdict = "ask"
+            continue
+        if not base_read:
+            base, base_read = resolve_default_base(where, remote), True
+        if base is not None and branch_is_ancestor(where, base, tip):
             continue
         files = design_files(where, tip, folder, base)
+        if files is None:
+            verdict = "ask"
+            continue
         if not files:
             continue
-        if branch_on_remote(where, tip, "refs/remotes/%s/archive/%s" % (remote, name)):
+        archived = branch_on_remote(where, tip, "refs/remotes/%s/archive" % remote)
+        if archived:
             continue
-        if base is None:
-            verdict = verdict or "ask"
+        if archived is None or base is None:
+            verdict = "ask"
         else:
             return "deny"
     return verdict
