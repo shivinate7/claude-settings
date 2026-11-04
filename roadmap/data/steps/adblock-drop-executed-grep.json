@@ -1,0 +1,9 @@
+{
+ "title": "ios-adblock: drop the Executed grep from the iOS Simulator test step",
+ "phase": "ci",
+ "status": "todo",
+ "order": 527,
+ "why": "Lane verdict-xcode-no-executed (session_013NEJKzkmWLHdJfNqySLNuA) moved the check into verdict; the grep from ios-adblock PR #136 then repeats it.",
+ "note": "Waits on: claude-settings PR #1130 merges, and ios-adblock's claude-settings pin moves to that merge. Then drop the grep -Eq 'Executed [1-9]\u2026' block from the 'Test on iOS Simulator' step in ios-adblock .github/workflows/ci.yml. Named by the coordinator Nov 3 18:15 CST.",
+ "updatedAt": "2026-11-04T00:20:00Z"
+}

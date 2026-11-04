@@ -1,0 +1,9 @@
+{
+ "title": "Waiting page: one sub-group per repo inside each tier, this repo first",
+ "phase": "page",
+ "status": "todo",
+ "order": 528,
+ "why": "Lane page-answered-sink took 'By repo' (page item 212, closed as taken under questions-go-to-owner; mockup docs/design/answered-sink.html, state sections-repo).",
+ "note": "Waits on: PR #1137 merges. Adds a new writer field `repo` on items. Named by the coordinator Nov 3 18:16 CST.",
+ "updatedAt": "2026-11-04T00:20:00Z"
+}
