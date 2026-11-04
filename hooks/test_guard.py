@@ -25534,9 +25534,11 @@ SIM_UE = "1A2B3C4D-0000-4000-8000-00000000000E"  # Named-UDID Mini, booted: its 
 SIM_UF = "1A2B3C4D-0000-4000-8000-00000000000F"  # Delta, shut down on RT only
 SIM_UDA = "1A2B3C4D-0000-4000-8000-0000000000D3"  # Delta, shut down on RT_OLD (25.0), listed first
 SIM_UDB = "1A2B3C4D-0000-4000-8000-0000000000D4"  # Delta, shut down on RT (26.0), listed second
+SIM_RT17 = "com.apple.CoreSimulator.SimRuntime.iOS-17-0"
+SIM_U17 = "1A2B3C4D-0000-4000-8000-0000000000D5"  # Delta, booted on RT17 (17.0): the copy OS=17.0 names
 # The launchd_sim of each booted device: the pid and the start time the fake `ps` gives it, and the
 # same pair in the boot record. A record that names another pid or start time is an older boot.
-LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003, SIM_UE: 4004}
+LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003, SIM_UE: 4004, SIM_U17: 4005}
 LSTART = "Sat Oct 10 07:00:00 2026"
 LAUNCHD_CMD = ("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/"
                "Resources/launchd_sim")
@@ -25650,6 +25652,11 @@ def register_simulator_boot_cases():
             (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
             (SIM_UE, "Gamma Mini", "Booted", SIM_TYPE_MINI, SIM_RT),
             (SIM_UF, "Delta", "Shutdown", SIM_TYPE_AIR, SIM_RT)]), None),
+        # Delta shut down on 25.0 (listed first) and booted on 17.0. OS=17.0 names only the booted copy, so a
+        # destination that picks the 17.0 runtime boots nothing.
+        "os_two_rt": (make_fake_xcrun(os.path.join(ROOT, "sim_os_two_rt"), [
+            (SIM_UDA, "Delta", "Shutdown", SIM_TYPE_PRO, SIM_RT_OLD),
+            (SIM_U17, "Delta", "Booted", SIM_TYPE_PRO, SIM_RT17)]), None),
     }
     cfgs = {}
     for name, (folder, records) in fixtures.items():
@@ -25666,6 +25673,7 @@ def register_simulator_boot_cases():
     cap_path, cap_cfg = on("cap")
     one_path, one_cfg = on("one")
     twin_path, twin_cfg = on("twin")
+    os_two_path, os_two_cfg = on("os_two_rt")
 
     # Rule simulator-boot-cap. The reason names both booted UDIDs.
     # The bypass rule judges a raw boot on its text, before the cap rule reads the device list.
@@ -25852,6 +25860,38 @@ def register_simulator_boot_cases():
     sh("route: a test with -only-testing before the action names sim-test",
        "xcodebuild -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' -only-testing:AppTests test",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+
+    # The remedy names sim-test with the xcodebuild arguments only. The shell's redirects and a background `&`
+    # are not arguments of xcodebuild, so the remedy holds none of them, whether spaced or glued to a quote.
+    sh("route: a test of a shut-down simulator with 2>&1 names sim-test -scheme App, with no redirect word",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' 2>&1",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
+       carries="Run `sim-test -scheme App", lacks=("2>&1", ">", "&"))
+    sh("route: a test of a shut-down simulator with > out.log names sim-test -scheme App, with no > word",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' > out.log",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
+       carries="Run `sim-test -scheme App", lacks=(">",))
+    sh("route: a test of a shut-down simulator, the quote glued to a trailing &, names sim-test -scheme App",
+       'xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '"&',
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
+       carries="Run `sim-test -scheme App", lacks=("&",))
+    sh("route: a test of a shut-down simulator, the quote glued to a redirect, names sim-test -scheme App",
+       'xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '">/dev/null',
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
+       carries="Run `sim-test -scheme App", lacks=(">",))
+    # A boolean flag between the scheme and the action is no option with a value, so the action is still `test`.
+    sh("route: a boolean flag before the action, -skipMacroValidation, still names sim-test",
+       "xcodebuild -scheme App -skipMacroValidation test -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    # OS=17.0 picks the 17.0 copy of Delta, which is booted, so nothing is booted and the route allows. The
+    # control is the same destination without the glued paren. Today the glued value reads OS as "17.0)",
+    # drops the runtime filter, and judges the shut-down 25.0 copy too.
+    sh("route: OS=17.0 in a subshell, its paren glued to the value, judges the 17.0 copy only: booted, so allowed",
+       "(cd ios && xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=17.0')",
+       "allow", env_path=os_two_path, config=os_two_cfg)
+    sh("control: OS=17.0 with no glued paren judges the 17.0 copy only: booted, so allowed",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=17.0'",
+       "allow", env_path=os_two_path, config=os_two_cfg)
 
     # Rule simulator-boot-locked (decision sim-test-is-the-one-boot-path, rulings 2 and 5). A simulator MCP
     # launch that names a shut-down device is refused while <config>/state/sim-test.lock is held by a live
