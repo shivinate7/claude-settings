@@ -1,0 +1,9 @@
+{
+ "title": "The map skill's layout test also catches a dynamic import of skill code",
+ "phase": "later",
+ "status": "todo",
+ "order": 180.5,
+ "why": "skills/plain-english-map/tests/layout.test.mjs reads only literal specifiers and createRequire, so a dynamic import of skill code escapes the layout test. q_max closed its own debt map-skill-layout-static-only when it dropped its copy, so the gap now lives only here.",
+ "note": "Nov 5 09:10 CST (coordinator, from lane qmax-map-format-4): filed as todo. Per roles-findings-are-debts-or-notes it waits until it bites; build only after an incident.",
+ "updatedAt": "2026-11-05T15:11:00Z"
+}
