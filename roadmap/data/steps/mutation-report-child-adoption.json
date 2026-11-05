@@ -1,0 +1,9 @@
+{
+ "title": "Each child repo runs the mutation CI report",
+ "phase": "next",
+ "status": "todo",
+ "order": 150.6,
+ "why": "Follows mutation-ci-report (#1262, item 163 d): the report runs in claude-settings first; each child repo then adopts it.",
+ "note": "Nov 5 10:21 CST (coordinator): waits on #1262 merging and on its first batch run measuring CI minutes. One lane per child repo. q_max and banchi need the action pin, fetch-depth 0 and a known-defects list. degen, mailaudit, home, ios-adblock and joyous also need a mutate profile and a test selector.",
+ "updatedAt": "2026-11-05T16:21:00Z"
+}
