@@ -4,10 +4,11 @@
   "home": "decision owner-override",
   "id": "opus-plain-ask-scope",
   "kind": "decision",
+  "lane": "opus-plain-ask-scope",
   "lastAnswer": {
-    "at": "2026-11-04T04:30:51Z",
-    "choice": "none",
-    "note": "Said: \"it should just have the context to know what part needs opus agents from the messages before and after\". Rewritten 22:32 CST: the scope comes from context."
+    "at": "2026-11-04T14:03:20Z",
+    "choice": "b",
+    "note": "Read 08:04 CST. Lane opus-plain-ask-scope builds it; open until it merges. Follow-up question: item 256."
   },
   "n": 226,
   "options": [
@@ -36,8 +37,9 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 26,
   "ref": "lane opus-plain-ask (session_013NEJL3hjX4qVEjikwaYF5b)",
+  "reply": "Landed: claude-settings #1244 merged in batch 10 (main 59bff081, Nov 5 06:36 CST); a plain Opus ask is scoped from your earlier prompts. Item 256 asks about later prompts.",
   "short": "Plain Opus ask: which roles",
-  "status": "open",
+  "status": "closed",
   "title": "Your plain Opus ask: the judge reads the messages around it to know which agents run Opus. Build it that way?",
   "why": "Recommended: a. It does what you said, and a vague ask costs you one line instead of a wide grant. Meanwhile lane opus-plain-ask builds only the 225 a fix and holds the scope until you pick."
 }

@@ -6,9 +6,9 @@
   "id": "oq-rail-break-1280",
   "kind": "decision",
   "lastAnswer": {
-    "at": "2026-11-04T01:05:56Z",
-    "choice": "none",
-    "note": "zoom out why are any of these options"
+    "at": "2026-11-04T12:22:11Z",
+    "choice": "a",
+    "note": ""
   },
   "n": 184,
   "options": [
@@ -32,7 +32,7 @@
   "rank": 10,
   "ref": "deep audit 1102, banchi homes; banchi app/src/App.css:23 (main 0657163)",
   "short": "Rail width: one home",
-  "status": "open",
+  "status": "closed",
   "title": "banchi: Make the code token the one home for the rail width?",
-  "why": "One home per value; the code already holds the width the app uses."
+  "why": "You picked a (06:22 CST). Landed: banchi #1053 merged 06:50 CST (5983877e). D95, D276 and DESIGN.md name the token --bn-rail-break-px."
 }

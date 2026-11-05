@@ -4,6 +4,12 @@
   "home": "joyous CLAUDE.md",
   "id": "prose-joyous-claude-md",
   "kind": "decision",
+  "lane": "joyous-claude-md-fixes",
+  "lastAnswer": {
+    "at": "2026-11-04T14:03:20Z",
+    "choice": "a",
+    "note": "Read 08:04 CST. Lane joyous-claude-md-fixes builds it; open until it merges."
+  },
   "n": 228,
   "options": [
     {

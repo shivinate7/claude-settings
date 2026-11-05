@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-04T13:53:00Z",
+  "context": "Goal: one uniform direction for every watch, wake, sweep and reap (your item 180).\nProblem (rule): decision the-janitor-is-one-machine-wide-sweep and janitor/GUIDE.md say the sweep never runs code a repository supplies. But sweep.py's repo reaper (run_repo_reaper) runs an npm script from each repo. The record and the code disagree.\nBased on (read): lane watchers-prose-and-plan, 07:51 CST, read janitor/sweep.py on main.\nDeparts from: main (record says no repo code runs; code runs it) \u2014 a: the record allows the repo reaper by name; b: the reaper is removed.\n\nMeanwhile: #1228 merges without it, and the reaper stays as it is.",
+  "home": "claude-settings decision the-janitor-is-one-machine-wide-sweep; janitor/GUIDE.md",
+  "id": "janitor-repo-reaper",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "claude-settings #1228",
+      "url": "https://github.com/shivinate7/claude-settings/pull/1228"
+    }
+  ],
+  "n": 253,
+  "options": [
+    {
+      "gain": "Per-repo cleanup keeps working; the record tells the truth.",
+      "how": "Amend the record: only your own repos, only their named cleanup script. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "key": "a",
+      "label": "Keep the reaper, and allow it by name in the record (coordinator reading)",
+      "lose": "An unattended sweep runs repo code, so a bad script in one repo runs with no one watching.",
+      "widens": true
+    },
+    {
+      "gain": "The sweep runs only its own code, as its record says.",
+      "how": "Delete run_repo_reaper from sweep.py; each repo runs its own cleanup inside its own work.",
+      "key": "b",
+      "label": "Remove the reaper",
+      "lose": "Each repo's own cleanup must run some other way, or not at all."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "b",
+  "rank": 3,
+  "ref": "item 180; docs/plans/align-watchers.md Q7; claude-settings #1228; lane watchers-prose-and-plan",
+  "short": "janitor: run repo cleanup scripts?",
+  "status": "closed",
+  "title": "Should the janitor keep running each repo's npm cleanup script?",
+  "why": "Withdrawn 07:59 CST: already decided. Your ruling uniform-over-variants (2026-10-27 12:51 CDT) says a shared tool never grows a per-repo exception, so the janitor's repo reaper goes (option b). The coordinator files it in the align-watchers plan."
+}

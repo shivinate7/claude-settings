@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-04T13:10:00Z",
+  "context": "Goal: mailaudit records state only what is true now (your 191 b, retire the GitHub-token records).\nProblem (rule): this record says the ledger push shares GitHub's write budget. After 191 b the app makes no GitHub writes, so the record is now false. Retiring it is a new act that 191 b did not name.\nBased on (read): lane mailaudit-token-records-retire, 07:09 CST, PR #196.\nDeparts from: main \u2014 deletes the open thread the-write-budget-is-shared and its index line in CLAUDE.md.\n\nMeanwhile: draft PR mailaudit #196 goes ahead without it, and batch runner 9 batches it.",
+  "home": "mailaudit open thread the-write-budget-is-shared; mailaudit CLAUDE.md index",
+  "id": "mailaudit-write-budget-retire",
+  "kind": "decision",
+  "lane": "mailaudit-write-budget-retire",
+  "lastAnswer": {
+    "at": "2026-11-04T13:56:30Z",
+    "choice": "a",
+    "note": ""
+  },
+  "links": [
+    {
+      "label": "mailaudit #196",
+      "url": "https://github.com/shivinate7/mailaudit/pull/196"
+    }
+  ],
+  "n": 251,
+  "options": [
+    {
+      "gain": "No false record stays live.",
+      "how": "A follow-up PR deletes the record and its index line in CLAUDE.md.",
+      "key": "a",
+      "label": "Retire it in a small follow-up to #196",
+      "lose": "If GitHub writes come back, the risk must be written again."
+    },
+    {
+      "gain": "The risk stays on file.",
+      "how": "The record gets a dormant mark.",
+      "key": "b",
+      "label": "Keep it, marked dormant until GitHub writes return",
+      "lose": "A live record states something false today."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "item 191; mailaudit #196; lane mailaudit-token-records-retire",
+  "short": "mailaudit: retire write-budget record",
+  "status": "open",
+  "title": "Retire mailaudit's open-thread record the-write-budget-is-shared?",
+  "why": "Recommended: a. The app makes no GitHub writes now, so the record is false, and git keeps its text if the risk returns."
+}

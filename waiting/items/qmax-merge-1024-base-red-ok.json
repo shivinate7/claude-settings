@@ -1,0 +1,29 @@
+{
+  "added": "2026-11-04T09:47:00Z",
+  "command": {
+    "mac": "cd ~/q_max\ngh auth switch -u shivinate7\n~/.claude/bin/merge 1024 --confirm --base-red-ok \"main head 5bbf10e13 gate and stamp are green; the unknown read is a cancelled browser dispatch run 41377928751 on older commit 5ab167f2f\"",
+    "powershell": "cd C:\\Users\\ShivamSemwal\\Clones\\q_max\ngh auth switch -u shivinate7\n& \"$HOME\\.claude\\bin\\merge.cmd\" 1024 --confirm --base-red-ok \"main head 5bbf10e13 gate and stamp are green; the unknown read is a cancelled browser dispatch run 41377928751 on older commit 5ab167f2f\""
+  },
+  "context": "q_max #1024 (checks.yml fold #1021 + ste-lint pin #1022) is green at c6affabf (checks job 4 min 43 s). q_max main head 5bbf10e1 has gate and stamp green. The merge tool refused batch runner 9 at 03:43 CST with \"main's runs are UNKNOWN\". The unknown read comes from browser dispatch run 41377928751, cancelled with no red job, on older commit 5ab167f2. A claude-settings lane (red-main-skips-old-cancel) fixes the read; this task merges #1024 now.\n\nWhy yours: only your typed `--base-red-ok` lifts the merge tool's main-state refusal (same as task 243). No session may type it for you.\n\nThe cd paths assume ~/q_max on the Mac and C:\\Users\\ShivamSemwal\\Clones\\q_max on Windows; change them if not.",
+  "home": "claude-settings merge tool (--base-red-ok)",
+  "id": "qmax-merge-1024-base-red-ok",
+  "kind": "task",
+  "links": [
+    {
+      "label": "q_max #1024",
+      "url": "https://github.com/shivinate7/q_max/pull/1024"
+    }
+  ],
+  "n": 244,
+  "owner": "batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
+  "rank": 1,
+  "ref": "q_max #1024; browser run 41377928751; claude-settings lane red-main-skips-old-cancel",
+  "short": "q_max: merge #1024 past unknown main",
+  "status": "closed",
+  "steps": [
+    "Open a terminal on your Mac or PC.",
+    "Paste the command below."
+  ],
+  "title": "Merge q_max #1024 past a false \"main unknown\" read",
+  "why": "Withdrawn 03:48 CST: not yours. Record no-merge-onto-red-main cites your ruling on item 178 (a, 2026-11-03 22:31 CST): Claude may type --base-red-ok with a logged reason for an unknown read. Batch runner 9 merges #1024 itself."
+}

@@ -1,7 +1,6 @@
 {
   "added": "2026-11-03T22:00:00Z",
   "context": "Goal: An undo stays reachable when the ledger is empty.\nProblem (rule): recent-checks-can-be-undone says the Recent cell shows only when the ledger holds data, as Reset does. Reset shows on every ledger, so the cell would hide right after a Reset empties it. The same record states a paper fill as settled, and another record calls it an unbuilt default.\nBased on (read): mailaudit src/app.jsx:6573-6576 says Reset shows on an empty ledger; recent-checks-can-be-undone.md:145 (main cd3e12f).\nBased on (ruling): recovery-control-not-state-gated: a recovery control must not depend on the state it recovers.\nDeparts from: The Recent cell shows only when the ledger holds data \u2014 the record is rewritten so it shows on every ledger, and the paper fill is called an unbuilt default.",
-  "group": "audit-1102-children",
   "home": "mailaudit docs/decisions/recent-checks-can-be-undone.md",
   "id": "recent-cell-gate",
   "kind": "decision",

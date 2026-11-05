@@ -1,7 +1,6 @@
 {
   "added": "2026-11-03T22:05:00Z",
   "context": "Goal: Every Instagram call except the spike sends an honest User-Agent.\nProblem (rule): Your 2026-10-20 ruling deleted the never-disguise rule for the app attempt of the spike only. The scheduled DM reader sends the app agent too, a test pins it, and no ruling covers it. Whether the read needs the app agent is unmeasured.\nBased on (read): degen server/ig_dm.py:141 sends ig_spike.APP_AGENT; tests/server/test_ig_dm_real.py:256 pins it; instagram-reader.md:22 and :41 (main e9d14f5).\nBased on (ruling): instagram-reader.md:41 (owner, 2026-10-20 21:45 CDT).\nDeparts from: The record lets only the spike use another agent and the DM reader uses one \u2014 the ruling extends to the reader and two lines are rewritten.",
-  "group": "audit-1102-children",
   "home": "degen docs/decisions/instagram-reader.md",
   "id": "ig-inbox-agent-scope",
   "kind": "decision",

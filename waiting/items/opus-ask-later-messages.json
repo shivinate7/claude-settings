@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-04T14:09:00Z",
+  "context": "Goal: a plain \"use Opus\" message grants Opus only to the work your nearby messages name (your 226 b).\nProblem (money): 226 said the scope comes from your messages before and after the ask. When you send the ask, no later message exists yet. Reading later messages means one model call on each of your messages while the grant lives, even ones that never say \"opus\". Today those cost nothing.\nBased on (read): hooks/local_time.py calls the Opus ask judge once, on the message that carries \"opus\" (decision owner-override, cost line).\nDeparts from: main (the scope comes from the ask alone) \u2014 a reads your earlier messages too; b also lets a later message narrow a live grant.\n\nMeanwhile: the lane builds the \"before the ask\" part, which both options need.",
+  "home": "claude-settings decision owner-override; lane opus-plain-ask-scope record",
+  "id": "opus-ask-later-messages",
+  "kind": "decision",
+  "n": 256,
+  "options": [
+    {
+      "gain": "The cost stays one extra model call per ask that names no role.",
+      "how": "The judge reads the ask and your messages before it.",
+      "key": "a",
+      "label": "Earlier messages only",
+      "lose": "A later \"for the reviewers\" does not narrow the grant."
+    },
+    {
+      "gain": "Matches 226's words.",
+      "how": "A later message may only narrow a live grant, never widen it.",
+      "key": "b",
+      "label": "Earlier and later",
+      "lose": "One model call on each of your messages while a grant lives."
+    }
+  ],
+  "owner": "lane opus-plain-ask-scope (session_013NEJL2N7nzFwsM4NGCp48s)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "item 226 b; coordinator message 2026-11-04 08:07 CST",
+  "short": "Opus ask: read later messages too?",
+  "status": "open",
+  "title": "Should a plain Opus ask also read your messages after the ask?",
+  "why": "It keeps the cost to one call per ask, and the part both options need is already being built."
+}

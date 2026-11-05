@@ -4,10 +4,11 @@
   "home": "artifact-lane",
   "id": "artifact-pages-other-account",
   "kind": "decision",
+  "lane": "artifact-pages-other-account (session_013NEJL49cWWQx8kXJAVpNoi)",
   "lastAnswer": {
-    "at": "2026-11-04T04:20:46Z",
-    "choice": "none",
-    "note": "Asked: \"i thought just like our waiting queue theyre rebuildable as commit all the data out is that incorrect\". Rewritten 22:22 CST: the queue is rebuildable; these 8 never had their content exported."
+    "at": "2026-11-04T23:44:40Z",
+    "choice": "c",
+    "note": "Read 17:48 CST. Sent to the coordinator: it sends you the one export command to run while signed in to the other account; a lane then commits the files and points each link at them. Open until that lands."
   },
   "n": 217,
   "options": [

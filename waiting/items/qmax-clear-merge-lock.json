@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-04T09:50:00Z",
+  "command": {
+    "mac": "cd ~/q_max\ngh auth switch -u shivinate7\n~/.claude/bin/merge --unlock main",
+    "powershell": "cd C:\\Users\\ShivamSemwal\\Clones\\q_max\ngh auth switch -u shivinate7\n& \"$HOME\\.claude\\bin\\merge.cmd\" --unlock main"
+  },
+  "context": "q_max #1024 is green and ready, but a released merge lock blocks it: the ref refs/heads/merge-lock/main still exists, marked \"released: 1793785480\". The merge tool refuses while that ref exists.\n\nWhy yours: the cloud cannot clear it. At 03:49 CST the auto-mode classifier refused batch runner 9 both a delete of the ref through the GitHub API and `merge --unlock main`. No computer folder is attached (03:49 CST). Your standing grant \"Acts the cloud refuses\" does not name this act. Lane merge-lock-retake fixes the merge tool so a released lock stops blocking.\n\nThe cd paths assume ~/q_max on the Mac and C:\\Users\\ShivamSemwal\\Clones\\q_max on Windows; change them if not.\n\nAfter: batch runner 9 merges #1024.",
+  "home": "claude-settings merge tool (--unlock); lane merge-lock-retake",
+  "id": "qmax-clear-merge-lock",
+  "kind": "task",
+  "links": [
+    {
+      "label": "q_max #1024",
+      "url": "https://github.com/shivinate7/q_max/pull/1024"
+    },
+    {
+      "label": "Batch runner 9 session",
+      "url": "https://claude.ai/code/session_013NEJKymmzw37seAr3Qq5nv"
+    }
+  ],
+  "n": 245,
+  "owner": "batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
+  "rank": 1,
+  "ref": "q_max #1024; ref merge-lock/main; lane merge-lock-retake",
+  "reply": "09:52 CST: not needed. q_max #1024 merged as a3afe47e5 at 09:49 CST with no lock refusal (coordinator).",
+  "short": "q_max: clear released merge lock",
+  "status": "closed",
+  "steps": [
+    "Open a terminal on your Mac or PC.",
+    "Paste the command below.",
+    "Or open https://claude.ai/code/session_013NEJKymmzw37seAr3Qq5nv and type: yes: run ~/.claude/bin/merge --unlock main in q_max. Batch runner 9 then clears the lock and merges #1024 itself."
+  ],
+  "title": "Clear q_max's released merge lock so #1024 can merge"
+}

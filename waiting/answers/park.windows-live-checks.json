@@ -1,0 +1,8 @@
+{
+  "act": "unpark",
+  "at": "2026-11-04T23:44:51.464Z",
+  "id": "windows-live-checks",
+  "note": "a session on your Windows PC runs the two checks; step c29 closes when Windows passes",
+  "parked": true,
+  "ref": "10 windows-live-checks"
+}

@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-04T13:00:00Z",
+  "context": "Goal: one uniform direction for every watch, wake, sweep, reap and log, in place of the patchwork of lessons, bugs and fixes (your note on item 180, 06:50 CST).\nProblem (rule): decision the-janitor-is-one-machine-wide-sweep says the hook run cleans one repo, but the code runs the machine-wide tiers at every session end. It scans every process, and sends the report to DEVNULL, where nobody reads it.\nBased on (read): the daily job already runs the machine-wide tiers.\nDeparts from: main \u2014 the hook run sweeps one repo; the process, sim and temp tiers run only in the daily job.",
+  "home": "claude-settings rule outcomes-mechanize-rules; docs/plans/align-watchers.md",
+  "id": "watchers-sessionend-sweep",
+  "kind": "decision",
+  "lane": "watchers-session-end-scope",
+  "lastAnswer": {
+    "at": "2026-11-04T13:53:21Z",
+    "choice": "a",
+    "note": "daily job needs to have parts enter the session end too many remnant processes linger too long"
+  },
+  "n": 250,
+  "options": [
+    {
+      "gain": "A cheap session end; the code matches its record.",
+      "how": "The SessionEnd hook sweeps its own repo; the process, sim and temp tiers run only in the daily job.",
+      "key": "a",
+      "label": "One repo at SessionEnd; machine-wide only in the daily job",
+      "lose": "Orphan servers and booted simulators wait for the daily job, so the simulator-boot-cap guard may refuse more often."
+    },
+    {
+      "gain": "Cleanup stays fast.",
+      "how": "The record says the hook run is machine-wide.",
+      "key": "b",
+      "label": "Keep it machine-wide and fix the record",
+      "lose": "Every session end scans every process for a report nobody reads."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 2,
+  "ref": "item 180; Sonnet workflow align-watchers (3 mappers, a synthesis and a critic), 06:58 CST",
+  "reply": "Landed: claude-settings #1240 merged in batch 10 (main 59bff081, Nov 5 06:36 CST); the SessionEnd sweep is scoped to its own repository.",
+  "short": "watchers: SessionEnd sweep scope",
+  "status": "closed",
+  "title": "Should the SessionEnd sweep clean only the session's own repo?",
+  "why": "Recommended: a. The code matches its record, and the machine-wide scan already runs daily."
+}

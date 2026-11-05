@@ -1,7 +1,6 @@
 {
   "added": "2026-11-03T22:05:00Z",
   "context": "Goal: A culling session knows what to delete.\nProblem (rule): D-570 (a retired decision is deleted) says in line 20 that a partly replaced entry stays and says so, and in rule 6 (your stamp, 2026-09-29) that it folds into the entry that replaced it. D-492 says its reversed entry was deleted, which fits rule 6 only.\nBased on (read): q_max a-retired-decision-is-deleted.md:20 and :29 (main 5bbf10e).\nBased on (ruling): Rule 6 carries the owner stamp of 2026-09-29.\nDeparts from: Line 20 keeps a partly replaced entry and rule 6 folds it \u2014 line 20 is rewritten to match rule 6.",
-  "group": "audit-1102-children",
   "holds": "No cull of a partly replaced entry runs.",
   "home": "q_max docs/decisions/a-retired-decision-is-deleted.md",
   "id": "oq-partly-replaced-entry",

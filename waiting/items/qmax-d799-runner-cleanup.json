@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-04T23:07:00Z",
+  "context": "Goal: q_max's browser tier goes green so #1011 and the q_max batch can merge.\nProblem (rule): q_max decision D-799 (A browser check deletes the rows it seeds) puts clean-up in each check's own finally. About 40 checks skip it, so 87 jobs pile up by 14-FLOSS, the seeded jobs fall off the 50-row Jobs page, and about a dozen checks time out. Changing D-799 needs your word or the arbiter's (D-749, An entry changes only on a new ruling).\nBased on (measured): the lane's local full run counted jobs per check; CONTENT-UNIT went red at 444 s without clean-up, green at 80 s with it (PR #1029, head f1706d3b).\nDeparts from: q_max main (D-799: each check cleans up in its own finally) \u2014 a moves job clean-up to the shared runner runCheck; b adds a finally to each of about 40 checks.",
+  "home": "q_max D-799, A browser check deletes the rows it seeds",
+  "id": "qmax-d799-runner-cleanup",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "q_max PR #1029",
+      "url": "https://github.com/shivinate7/q_max/pull/1029"
+    }
+  ],
+  "n": 260,
+  "options": [
+    {
+      "gain": "One place does it, and a new check cannot leak.",
+      "how": "runCheck removes each check's finished jobs; a check keeps its own finally for other rows.",
+      "key": "a",
+      "label": "Rewrite D-799: the runner removes each check's finished jobs",
+      "lose": "A job a later check needs must be registered to keep it for the run."
+    },
+    {
+      "gain": "No ruling change.",
+      "how": "Add a finally to each of about 40 checks.",
+      "key": "b",
+      "label": "Keep D-799 and fix each check",
+      "lose": "About 40 edits, and the next new check can leak again."
+    }
+  ],
+  "owner": "lane qmax-browser-red-checks (session_013NEJKz3jwH1Hgo3i865Jqu); the coordinator relays the answer",
+  "pick": "a",
+  "rank": 3,
+  "ref": "coordinator message 2026-11-04 17:05 CST; q_max PR #1029 (head f1706d3b)",
+  "short": "q_max: browser clean-up in the runner?",
+  "status": "open",
+  "title": "q_max: should the shared browser runner clean up each check's jobs, instead of each check?",
+  "why": "Recommended: a. One home for clean-up, so the next new check cannot leak."
+}

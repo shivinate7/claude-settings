@@ -1,0 +1,9 @@
+{
+  "answered": "2026-11-04T23:48:00Z",
+  "at": "2026-11-04T23:45:09.269Z",
+  "filed": "2026-11-04T23:48:00Z",
+  "home": "step:ask-reply-back",
+  "id": "ask-mw2rl21hpt",
+  "reply": "You are right: an answered ask has no reply box. I filed the fix as roadmap step ask-reply-back (commit 99a5d405). The page will get a reply box on each answered ask, and your reply saves as a new ask linked to the old one. The coordinator starts its lane. Until then, send a new ask that starts \"re ask-<id>\", and I read it as a reply to that ask.",
+  "text": "there's no way to reply back to \"Your ask\" threads"
+}

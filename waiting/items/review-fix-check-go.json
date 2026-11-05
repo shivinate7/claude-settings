@@ -4,6 +4,12 @@
   "home": "CLAUDE.md rule roles-review-cap-three",
   "id": "review-fix-check-go",
   "kind": "decision",
+  "lane": "review-fix-check",
+  "lastAnswer": {
+    "at": "2026-11-04T13:56:30Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 231,
   "options": [
     {

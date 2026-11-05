@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-04T14:50:00Z",
+  "context": "Goal: design fixes ride the normal review rounds, and a screen changed later still gets a design read (your 204 a).\nProblem (rule): #1231 puts the design reviewer beside code round 1. After that, the code reviewer checks that the design findings still hold. A second design read runs only if a later round changed a screen's \"layout\". That word is the coordinator's reading, and the record does not define it.\nBased on (read): decision design-agents as rewritten in #1231.\nDeparts from: main (one design read after the builder) \u2014 #1231 adds a second read on an undefined \"layout\" change; a and b define it, c drops it.\n\nMeanwhile: #1231 merges with the coordinator's reading; your answer rewrites one line of decision design-agents.",
+  "home": "decision design-agents",
+  "id": "second-design-read-trigger",
+  "kind": "decision",
+  "n": 259,
+  "options": [
+    {
+      "gain": "No screen change merges unseen by a designer.",
+      "how": "Markup, styles, or the tokens a screen uses: any change gets one more design read.",
+      "key": "a",
+      "label": "Any change to a screen file after round 1",
+      "lose": "A design read for small style fixes too."
+    },
+    {
+      "gain": "Fewer design reads.",
+      "how": "An element added, removed or moved, or a size or spacing change.",
+      "key": "b",
+      "label": "Only a change in structure",
+      "lose": "Someone must judge what counts, so a change can slip by."
+    },
+    {
+      "gain": "One design read per lane.",
+      "how": "The code reviewer alone checks the design findings after round 1.",
+      "key": "c",
+      "label": "Never",
+      "lose": "A late screen change gets no designer's eye."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "lane design-review-beside-round-1, PR #1231 (your 204 a); coordinator message 2026-11-04 08:48 CST",
+  "short": "When does a second design read run?",
+  "status": "open",
+  "title": "After code round 1, what screen change gets a second design review?",
+  "why": "Recommended: a. It needs no judgment call, and no screen change merges unseen."
+}

@@ -1,51 +1,38 @@
 {
-  "added": "2026-11-04T04:32:00Z",
-  "context": "Goal: a builder cannot undo earlier lane work, and the check does not cry wolf.\nProblem (rule): the earlier options were only three cut-offs for one dial, and each trades missed losses against false alarms; the shape of the check is your call too.\nBased on (measured): sweep of 31 batches merged Oct 31 to Nov 2 at head 57be5cb5: any net loss, 16 batches red with 62 findings; 3 lines, 41 findings; 6 lines, 29 findings. Both real undo incidents (3297d8fa, df25a68d) are caught at every setting.\nBased on (measured): a format pass that joins a multi-line call is flagged at the 1-line setting (commit 82c61b892).\nBased on (measured): lane-undo-check, 22:27 CST, 31 batches at head 5b013f4d: (b) 62 flags in 16 batches (7 whole-file put-backs, 54 test-hunk losses, 1 test-file delete); (d) 22 flags in 13 batches (7, 14, 1). Ignoring whitespace-only joins changes nothing (still 62).\nDeparts from: main, which has no net-loss read \u2014 adds one in the shape you pick.",
-  "home": "no-undo-lane-commits",
+  "added": "2026-11-04T14:16:00Z",
+  "context": "Goal: a builder cannot undo earlier lane work, and the check does not cry wolf.\nProblem (rule): you asked for a against b (08:03 CST). One Sonnet agent argued both on the 31-batch sweep; options c and d are dropped from this item.\nBased on (measured): the first real undo, 3297d8fa, has a hunk that lost exactly 6 lines, so a misses that hunk; only the whole-file read keeps it red. A weakened test (1807d3708, ce60895c9) sat in the 1 to 6 line band.\nBased on (measured): of 15 flags in the 1 to 6 band, 0 were silent undos: 8 were noise (reworded comments, a moved helper, fixture rewrites) and 6 were deliberate re-points.\nBased on (notes): a cuts reason lines from 41 to about 21 and red batches from 16 to about 11-13 of 31 (the agent's estimate; a is not built).\nDeparts from: main, which has no net-loss read \u2014 adds one in the shape you pick.\n\nMeanwhile: PR #1099 waits with the batch runner as shape b; the lane builds nothing until you pick.",
+  "home": "decision silent-undo-check-design",
   "id": "no-undo-net-loss-dial",
   "kind": "decision",
+  "lane": "lane-undo-check (PR #1099)",
   "lastAnswer": {
-    "at": "2026-11-04T04:16:42Z",
-    "choice": "none",
-    "note": "Asked: \"are these real good options?\". Rewritten 22:18 CST: the three cut-offs became three shapes."
+    "at": "2026-11-04T23:44:40Z",
+    "choice": "b",
+    "note": "Read 17:48 CST. Filed 17:56 CST in decision silent-undo-check-design, PR #1099 (head 1e029e0b). Closes when #1099 merges."
   },
   "n": 220,
   "options": [
     {
-      "gain": "Fewest false alarms (29 in the sweep); both incidents caught.",
+      "gain": "About 20 fewer reason lines per 3 days, and fewer red batches.",
       "how": "Same as main's block constant.",
       "key": "a",
       "label": "Flag past 6 lines",
-      "lose": "A lane can drop up to 5 test lines per change with no word."
+      "lose": "A loss of 1 to 6 test lines, a flipped assert included, passes with no word."
     },
     {
-      "gain": "No loss slips by unseen, and a real tidy-up costs one line.",
-      "how": "Every net loss flags; the builder clears it with one line in the commit saying why the tests went.",
+      "gain": "Every lane test-line loss carries a stated reason.",
+      "how": "Every net loss flags; the builder clears it with one line in the commit saying why the tests went. This is the check as built in PR #1099.",
       "key": "b",
-      "label": "Flag any loss, cleared by one reason line",
-      "lose": "62 findings in the sweep would each have needed that line."
-    },
-    {
-      "gain": "About a third of b's flags (22, against 62); both incidents still caught; the format pass 82c61b892 drops from 2 flags to 1.",
-      "how": "A removed test line counts only when it opens a test or holds an assert (def test, it(, assert, expect( and so on). The builder clears a flag with one line in the commit saying why. The opener list per language gets one home.",
-      "key": "d",
-      "label": "Flag lost test cases and asserts, cleared by one reason line",
-      "lose": "A loss that is not an opener or an assert, such as a fixture line, is not seen; one list of patterns to keep per language."
-    },
-    {
-      "gain": "No new alarms at all.",
-      "how": "Drop the dial; keep main's other no-undo checks only.",
-      "key": "c",
-      "label": "No net-loss read",
-      "lose": "A lane that trims tests in small steps is never seen."
+      "label": "Flag any loss, cleared by one reason line (recommended)",
+      "lose": "About 41 reason lines per 3 days (62 flags; one line covers its path). A reason written early for a path also excuses a later real drop in that file, so there the reviewer is the only check."
     }
   ],
   "owner": "lane lane-undo-check (session_013NEJL2Yi1iyx98kfwkRJxW)",
-  "pick": "a",
+  "pick": "b",
   "rank": 20,
-  "ref": "decision no-undo-lane-commits (PR #1099); page item 167",
-  "short": "No-undo net-loss dial",
+  "ref": "decision no-undo-lane-commits (PR #1099); one Sonnet agent's verdict via lane lane-undo-check, 08:14 CST; page item 167",
+  "short": "No-undo: past 6 lines, or any loss",
   "status": "open",
-  "title": "When a lane's change removes test lines an earlier lane added, how should the no-undo check react?",
-  "why": "Recommended: d. It catches both real incidents with 22 flags, not 62, so each flag is worth reading."
+  "title": "No-undo check: flag a lane's test-line loss past 6 lines, or flag any loss with one reason line?",
+  "why": "Recommended: b, the check as built today. 6 is main's block size, not a measured tolerance, and a weakened test sat in the 1 to 6 line band."
 }

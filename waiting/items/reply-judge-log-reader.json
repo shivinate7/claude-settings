@@ -1,7 +1,6 @@
 {
   "added": "2026-11-03T21:58:00Z",
   "context": "Goal: every log has someone who reads it, or it is not written.\nProblem (rule): rule outcomes-mechanize-rules says a log needs a named reader; the reply judge's reader is the advisor, which decides nothing.\nBased on (read): docs/decisions/reply-judge-samples-never-refuses.md:8 and hooks/reply_judge.py:31 name \"the advisor at each cull\" as the reader.\nBased on (read): CLAUDE.md rule questions-go-to-owner: the built-in advisor answers no question and decides nothing; docs/decisions/questions-go-to-owner.md:11 retires the terminal advisor session.\nBased on (read): no record names who runs the cull.\nDeparts from: main, with a log read by a role that cannot rule \u2014 names a reader, or stops the log.",
-  "group": "audit-1102-rules",
   "home": "reply-judge-samples-never-refuses",
   "id": "reply-judge-log-reader",
   "kind": "decision",

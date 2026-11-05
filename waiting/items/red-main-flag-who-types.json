@@ -1,7 +1,6 @@
 {
   "added": "2026-11-03T21:58:00Z",
   "context": "Goal: a merge on a red or unreadable main happens only when it should, and the rule is read one way.\nProblem (rule): two records and the merge tool disagree on who may type the flags that let a merge past a red main or an unreadable undo check.\nBased on (read): docs/decisions/no-merge-onto-red-main.md:21 says --base-red-ok is a reason flag, like --undo-check-unknown-ok, that Claude can type with no owner present.\nBased on (read): merge/merge.py:279, :281, :1910 and :1913 print --undo-check-unknown-ok as \"Owner override\" and \"If the owner accepts that\"; docs/decisions/silent-undo-check-design.md:67 calls it the owner flag.\nBased on (read): no guard in hooks/ or merge/cloud_allow.json reads either flag.\nDeparts from: main, where the records disagree \u2014 makes one reading, in the record and in the tool's messages.",
-  "group": "audit-1102-rules",
   "home": "no-merge-onto-red-main",
   "id": "red-main-flag-who-types",
   "kind": "decision",

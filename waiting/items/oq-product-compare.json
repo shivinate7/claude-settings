@@ -1,10 +1,15 @@
 {
   "added": "2026-11-03T22:00:00Z",
   "context": "Goal: A sale shows no misleading verdict.\nProblem (rule): D227 (product history is its own route) says it computes no comparison of a fill against its bucket. The product history screen draws a 'What You Got' block with a Difference row. No decision covers the block, and only the code protects the rule now.\nBased on (read): banchi D227 lines 79-83; app/src/ProductHistory.tsx:581-617 draws the Difference row (main 0657163).\nBased on (read): Debt 070 calls the panel a read-only diagnostic and does not rule on it.\nDeparts from: D227 says the view computes no comparison and the screen computes one \u2014 D227 allows the Difference as a plain number, or the row is removed.",
-  "group": "audit-1102-children",
   "home": "banchi D227 (product history is its own route)",
   "id": "oq-product-compare",
   "kind": "decision",
+  "lane": "banchi-difference-row-ruling",
+  "lastAnswer": {
+    "at": "2026-11-04T12:40:20Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 187,
   "options": [
     {

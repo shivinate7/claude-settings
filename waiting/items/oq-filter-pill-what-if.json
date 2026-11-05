@@ -1,7 +1,6 @@
 {
   "added": "2026-11-03T22:05:00Z",
   "context": "Goal: A filter shows only where it changes something.\nProblem (rule): D-675 (your ruling) says What-If shows no price date pill. The screen shows a greyed one, from a session commit with no ruling, and a debt says Build Cost only. Three records and the code give three answers.\nBased on (read): q_max PreconScreen.tsx:906-907 passes priceDateOff on What-If; D-675 line 18 says no pill (main 5bbf10e).\nBased on (read): one-filter-model-one-bar.md:76 reaffirms D-675 afterwards.\nDeparts from: D-675 says What-If shows no pill and the screen shows a greyed pill \u2014 the greyed pill is dropped and the debt is corrected.",
-  "group": "audit-1102-children",
   "home": "q_max docs/decisions/a-filter-shows-only-where-it-changes-something.md",
   "id": "oq-filter-pill-what-if",
   "kind": "decision",

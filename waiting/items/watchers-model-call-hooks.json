@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-04T13:57:00Z",
+  "context": "Goal: one uniform direction for every watch, wake and hook (your item 180).\nProblem (rule): you asked whether these still exist and use a Claude token. Yes. On main, settings.json runs five as command hooks that call a model: call_judge, prose_judge, reply_judge, feedback_guard and report_guard. sendmessage_state uses the same call. Each starts its own `claude -p`, 25 to 70 s, with CLAUDE_CODE_OAUTH_TOKEN, through one home, decision_watch.invoke_model. local_time makes no model call. None uses Claude Code's built-in prompt hook. How often each one fires is unmeasured.\nBased on (read): claude-settings main 446f2d3d: settings.json, hooks/decision_watch.py invoke_model, hooks/local_time.py (read 07:55 CST).\nBased on (assumed): Claude Code's built-in prompt hook covers these events and runs on the session's own sign-in, with no token. A lane proves that per event before any move.\nDeparts from: main (six callers start their own claude -p with a token) \u2014 option a moves each one it can to a built-in prompt hook.",
+  "home": "claude-settings rule outcomes-mechanize-rules; docs/plans/align-watchers.md",
+  "id": "watchers-model-call-hooks",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T13:53:20Z",
+    "choice": "none",
+    "note": "do these still exist and are used? these use a claude auth token right? i thought we moved to all being hooked"
+  },
+  "n": 248,
+  "options": [
+    {
+      "gain": "No separate token or process for most of them; one way of hooking.",
+      "how": "Keep invoke_model only where the built-in hook cannot serve the event, with a stated cost.",
+      "key": "a",
+      "label": "Move each to a built-in prompt hook where the event allows",
+      "lose": "A lane per hook group; a built-in hook may judge differently, so each one's tests must pass again."
+    },
+    {
+      "gain": "No behaviour change.",
+      "how": "One Cost line in invoke_model's record.",
+      "key": "b",
+      "label": "Keep them as they are, and state their cost",
+      "lose": "The token and the extra processes stay."
+    },
+    {
+      "gain": "Fewer hooks.",
+      "how": "Count each hook's fires for one week; delete any with none.",
+      "key": "c",
+      "label": "Measure for a week, then delete the ones that never fire",
+      "lose": "A week of waiting; nothing moves until then."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 2,
+  "ref": "item 180; Sonnet workflow align-watchers (3 mappers, a synthesis and a critic), 06:58 CST",
+  "short": "model-call hooks: where?",
+  "status": "open",
+  "title": "The model-call hooks call `claude -p` with your token. Where should they go?",
+  "why": "Recommended: a. Most of the hooks lose their separate token and process, and every hook works one way."
+}

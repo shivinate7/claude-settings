@@ -1,7 +1,6 @@
 {
   "added": "2026-11-03T22:48:00Z",
   "context": "Goal: each repo's map of its code stays true, with one tool for it.\nProblem (rule): banchi keeps its own map and drift check (docs-audit map family), beside the shared plain-english-map skill, so the same job has two homes.\nBased on (read): plan, banchi row 42: STAYS ?, no incident, banchi docs/map.py against cs plain-english-map.\nBased on (read): CLAUDE.md rule building-one-home-per-capability: a duplicate needs a stated reason.\nDeparts from: banchi's own map check \u2014 banchi moves to the shared skill.",
-  "group": "child-guard-questions",
   "home": "child-guard-promotion",
   "id": "banchi-repo-map",
   "kind": "decision",

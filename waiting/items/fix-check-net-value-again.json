@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-04T13:59:30Z",
+  "context": "Goal: a small fix after the last review round gets one short read (the fix check) and merges (your 203 a).\nProblem (rule): rule roles-review-cap-three gives a change that edits a guard or check a net-value test after round 3. A fix that lands after that test edits the same guard again, and the rule does not say whether the test runs again.\nBased on (read): lane review-fix-check, 07:58 CST.\nDeparts from: main (silent on a post-round-3 fix) \u2014 a: the fix check alone covers it; b: the net-value test runs again on the fix.\n\nMeanwhile: the lane waits for your go (task 254); this answer shapes only one line of its record.",
+  "home": "claude-settings rule roles-review-cap-three; lane review-fix-check record",
+  "id": "fix-check-net-value-again",
+  "kind": "decision",
+  "n": 255,
+  "options": [
+    {
+      "gain": "A fix merges after one short read.",
+      "how": "The fix check confirms the fix matches the finding.",
+      "key": "a",
+      "label": "No: the fix check is enough",
+      "lose": "A fix that opens a new safety hole is caught only if the fix check sees it."
+    },
+    {
+      "gain": "Every guard change is weighed for net safety at its final form.",
+      "how": "The round-3 reviewer judges net value again on the fixed head.",
+      "key": "b",
+      "label": "Yes: judge net value again on the fixed head",
+      "lose": "One more read per guard fix."
+    }
+  ],
+  "owner": "lane review-fix-check (session_013NEJKzRvvmoLf7T9kB4uEe)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "items 203, 231, 254",
+  "short": "Post-round-3 guard fix: net-value again?",
+  "status": "open",
+  "title": "When a fix after the last review round edits a guard or a check, does it owe the net-value test again?",
+  "why": "Recommended: a. It keeps your 203 a promise of one short read, and the fix check still reads the fix against its finding."
+}

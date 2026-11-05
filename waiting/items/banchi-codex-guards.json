@@ -1,14 +1,14 @@
 {
   "added": "2026-11-04T04:22:00Z",
   "context": "Goal: banchi keeps only guards for tools you actually use, with one home per guard.\nProblem (rule): a past banchi session added a setup for OpenAI's Codex coding tool (banchi decision D135, \"Codex reads the same rules\"): a .codex folder of hooks, AGENTS.md and .agents links, and Codex halves of four guards. You never used it, and these copies drift from the Claude Code guards.\nBased on (read): lane banchi-drop-codex-guards, read only, 22:26 CST: deleting all of it loses nothing Claude Code runs. One catch: the reset --merge/--keep check lives only in banchi's guard-shell.py, so it moves to the shared guard first and the delete waits for that.\nBased on (read): the same mistakes are caught today by the claude-settings Claude Code guards.\nDeparts from: banchi main, which keeps a Codex setup \u2014 a deletes it and rewrites D135; d deletes only the Codex-only guard clauses.",
-  "group": "child-guard-questions",
   "home": "child-guard-promotion",
   "id": "banchi-codex-guards",
   "kind": "decision",
+  "lane": "banchi-drop-codex",
   "lastAnswer": {
-    "at": "2026-11-04T04:20:46Z",
-    "choice": "none",
-    "note": "Asked: \"ive never used banchi in codex and had no idea that existed\". Rewritten 22:22 CST. The coordinator's delete lane banchi-drop-codex-guards is paused until you pick (22:24 CST)."
+    "at": "2026-11-04T13:56:30Z",
+    "choice": "a",
+    "note": ""
   },
   "n": 214,
   "options": [
@@ -44,6 +44,7 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 14,
   "ref": "docs/plans/child-guard-promotion.md on PR #1119 (ea66d8e), owner question 1, banchi rows 1, 7, 8, 9",
+  "reply": "Nov 5 06:40 CST: the first lane, guard-reset-merge-keep (claude-settings #1242), merged in batch 10 (main 59bff081). Lane banchi-drop-codex is next; this item closes when it lands.",
   "short": "banchi Codex-only guards",
   "status": "open",
   "title": "You never use banchi in Codex: delete banchi's Codex setup and its Codex-only guards?",

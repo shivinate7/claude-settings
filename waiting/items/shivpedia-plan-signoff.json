@@ -1,10 +1,15 @@
 {
-  "added": "2026-11-02T04:15:00Z",
-  "context": "Goal: a shared shivpedia that makes each next project faster, as experiences, not commandments.\nProblem (rule): you asked (21:07 CST) that nothing be built until you sign off the whole plan, so every shivpedia lane waits on your word.\nBased on (read): draft PR #1034, docs/plans/prose-homes-shivpedia.md, 3 review rounds by 2 blind reviewers each.\nBased on (read): the plan's four picks, each with a recommended answer: an entry is called an \"experience\"; triage reads each repo's outbox for cross-repo lessons; only builder reports carry a Lessons line; no registry of generated pages for now.\nDeparts from: main \u2014 adds skills/shivpedia/, moves GLOSSARY.md into it, and makes 16 prose moves so each kind of prose has one home.",
+  "added": "2026-11-04T12:57:00Z",
+  "context": "Goal: the next project goes faster because lessons from past repos reach it.\nProblem (goal): an Opus critic read the plan and says build smaller. The plan checks every write, but nothing makes a session read the book, so it grows unread. Its counts are stale (main is 1321 commits past its base).\nBased on (read): decision test-practices already holds 12 cross-repo testing practices, and the builder, reviewer and test-author files read it. The plan would move part of it to a new home that no agent file reads.\nBased on (read): q_max, joyous and ios-adblock have no roadmap outbox, so their lessons have no way in.\nBased on (measured): no count shows the \"faster\" goal; the pace numbers already exist and the plan uses none.\nDeparts from: main \u2014 adds one practices record beside test-practices and one read line in agents/plan.md and the brief template, in place of the plan's select.py, shape check, feed and cull.\n\nMeanwhile: no lane starts on #1034.",
   "holds": "Every shivpedia lane: the new skill, the glossary move, and the 16 prose moves.",
   "home": "craft-book",
   "id": "shivpedia-plan-signoff",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T12:45:08Z",
+    "choice": "none",
+    "note": "send a critic opus agent on this plan"
+  },
   "links": [
     {
       "label": "Draft PR #1034",
@@ -14,25 +19,33 @@
   "n": 150,
   "options": [
     {
-      "gain": "Building starts now. No cross-repo PRs, less report noise, and no new code for a page registry.",
-      "how": "The plan lands with its four recommended picks, and lanes start building it.",
+      "gain": "Lessons reach plans now, at about one read line of cost; you see whether anyone uses them before paying for the full build.",
+      "how": "Keep test-practices as the testing chapter. Add one sibling record (merging practices) with evidence from several repos. Add one read line to agents/plan.md and the brief template. Collect lessons by hand for two weeks from reviewer findings and owner corrections. Then count cites and repeats.",
       "key": "a",
-      "label": "Sign off as written",
-      "lose": "Lessons from roles other than builders may slip, and triage reads one more thing per repo."
+      "label": "Build the small proof",
+      "lose": "No automatic feed for two weeks; the full plan waits on the count."
     },
     {
-      "gain": "The plan matches what you want before anything is built.",
-      "how": "Name your changes in the reply, such as calling an entry an \"entry\", having each lane open a claude-settings PR for lessons, a Lessons line in every landing report, or a page registry lane now. The plan is revised, then lanes start.",
+      "gain": "The whole feed, check and cull land at once.",
+      "how": "Re-count the plan at main, then build it as written.",
       "key": "b",
-      "label": "Sign off with changes",
-      "lose": "Building waits for the revision."
+      "label": "Build the plan as written, after a fresh re-count",
+      "lose": "The read gap stays; testing advice gets two homes; three repos feed nothing; cost per turn unmeasured."
+    },
+    {
+      "gain": "No cost.",
+      "how": "Close draft PR #1034; build nothing.",
+      "key": "c",
+      "label": "Park the plan and close #1034",
+      "lose": "Lessons keep living only in debts, notes and memory."
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
   "rank": 2,
   "ref": "draft PR #1034, docs/plans/prose-homes-shivpedia.md; roadmap step craft-book",
-  "short": "shivpedia plan sign-off",
+  "short": "shivpedia plan: build small?",
   "status": "open",
-  "title": "Sign off the shivpedia plan as written, or name changes?",
-  "why": "You asked at 21:07 CST that nothing be built until you sign off the whole plan. The plan is in draft PR #1034, after 3 review rounds by 2 blind reviewers each."
+  "title": "How should the shivpedia plan proceed?",
+  "why": "Recommended: a. Lessons reach plans now at the cost of one read line, and the two-week count shows whether the full build is worth it."
 }

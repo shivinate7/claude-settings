@@ -12,10 +12,11 @@
   "rank": 1,
   "ref": "degen #436, #428; milestone run 41747042457",
   "short": "degen: merge #436 past red main",
-  "status": "open",
+  "status": "closed",
   "steps": [
     "Open Terminal on your Mac.",
     "Paste the command below."
   ],
-  "title": "Type the red-main override to merge degen #436"
+  "title": "Type the red-main override to merge degen #436",
+  "why": "Withdrawn 03:50 CST: degen main reads red (milestone run 41747042457, job milestone-proof failed). By record no-merge-onto-red-main the override is only for the batch that carries the fix, #428. degen waits for #428, which waits on your pick on item 241."
 }

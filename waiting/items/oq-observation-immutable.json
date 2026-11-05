@@ -1,38 +1,45 @@
 {
-  "added": "2026-11-04T01:13:00Z",
-  "context": "Goal: You can always see what a rate said before it was corrected.\nProblem (risk): A q_max rule says a saved rate is never changed: a fix keeps the old row and adds a new one. But the code changes saved rates directly in 7 places, and nothing warns when someone adds an 8th.\nBased on (read): 7 update sites, approvalLedger.ts:910, observationStore.ts:464 and 5 more (main 5bbf10e).\nBased on (ruling): an-award-files-its-lines-as-rates (2026-10-01) already lets one of them change in place.\nDeparts from: the rule says never change a saved rate, and the code changes it in 7 places \u2014 the rule names the allowed changes, and a check flags any new one.",
-  "group": "audit-1102-children",
+  "added": "2026-11-04T12:30:00Z",
+  "context": "Goal: you can always see what a rate said before it was corrected.\nProblem (rule): q_max rule D-296 says \"an observation is never modified after insert\". The code changes saved rows in 8 places, each under a later ruling of yours or the arbiter's. So the rule says something false. Changing D-296 needs your word.\nBased on (read): none of the 8 changes a rate's price, total, quantity or description. They change the cost code when a person codes a won line, the won or lost mark, a bid date that was empty, and the search index (one Opus audit, q_max main 5bbf10e).\nBased on (read): one real gap. When a person codes a won line, its per-unit benchmark value is overwritten, and the old value is kept nowhere. The old cost code is kept, but no screen shows it.\nBased on (read): nothing flags a 9th place today.\nDeparts from: D-296 says a saved rate never changes \u2014 D-296 lists the 8 allowed changes, a check flags any new one, and the code history keeps the old benchmark value too.",
   "home": "q_max docs/decisions/d-296-observations-are-retired-never-edited-in-place.md",
   "id": "oq-observation-immutable",
   "kind": "decision",
+  "lane": "qmax-saved-rate-rule",
   "lastAnswer": {
-    "at": "2026-11-04T01:10:48Z",
-    "choice": "none",
-    "note": "this is so hard to understand indont know how to decide because the queetion isnt intuitive for me to understand"
+    "at": "2026-11-04T12:45:08Z",
+    "choice": "a",
+    "note": ""
   },
   "n": 197,
   "options": [
     {
-      "gain": "The rule tells the truth, and any new change is caught.",
-      "how": "The rule lists the 7 allowed changes; a check flags any new place that changes a saved rate.",
+      "gain": "The rule tells the truth, a 9th place is caught, and the old benchmark value is kept.",
+      "how": "D-296 lists the 8 allowed changes; a check flags a new one; a migration adds two columns that keep the old benchmark value.",
       "key": "a",
-      "label": "Allow the known changes, flag new ones",
-      "lose": "A few saved rates can still change without a trace of the old value."
+      "label": "Fix the rule, add a check, keep the old benchmark value",
+      "lose": "One small migration that only adds two columns."
     },
     {
-      "gain": "Every old value is kept.",
-      "how": "Rewrite the 7 places to keep the old row and add a new one.",
+      "gain": "Every old row stays whole.",
+      "how": "Rewrite the 8 places to insert a new row instead of changing the old one.",
       "key": "b",
-      "label": "Never change a saved rate",
-      "lose": "7 places in the code must be rewritten, which can put stored rates at risk."
+      "label": "Make every change keep the old row and add a new one",
+      "lose": "A large rewrite; new row ids break 162 references in 21 files and the undo, which can put stored rates at risk."
+    },
+    {
+      "gain": "The smallest change.",
+      "how": "D-296 lists the 8 allowed changes; a check flags a new one.",
+      "key": "c",
+      "label": "Fix the rule and add a check only",
+      "lose": "The old benchmark value is still lost when a line is coded."
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "rank": 23,
   "ref": "deep audit 1102, q_max homes; coordinator message 2026-11-03 15:55 CST, oq-observation-immutable",
-  "short": "Change a saved rate in place?",
+  "short": "q_max: saved rate rule vs code",
   "status": "open",
-  "title": "q_max: When a saved rate is wrong, may the code change it in place?",
-  "why": "It makes the rule match the code and catches any new change."
+  "title": "q_max: the rule says a saved rate never changes, but 8 places change saved rows. Fix the rule, or the code?",
+  "why": "Recommended: a. The rule becomes true, a new change is caught, and the one real loss, the old benchmark value, is kept, for the cost of two added columns."
 }

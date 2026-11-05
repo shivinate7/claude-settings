@@ -1,45 +1,44 @@
 {
-  "added": "2026-11-04T04:39:00Z",
-  "context": "Goal: a stalled background job never goes unnoticed, at a stated cost, and watchers come back where their bug is fixed.\nProblem (rule): CLAUDE.md rule outcomes-mechanize-rules, line 11, says monitoring runs \"never on a timer or on every tool call, and starts no new long-lived process\" (added b25883784, 2026-10-22). Its reason is a principle, \"watching must cost less than what it watches\"; no record gives a bug as the reason. Yet the stall watcher runs a loop per background job today, and you said the watchers were turned off for bugs.\nBased on (read): what was turned off, and whether its bug is fixed:\n- Monitor tool: denied 2026-09-16, \"it errors often\" (a5af6d69d). Allowed again 2026-10-11 by decision agents-wait-with-monitor (f58db013f). Its error rate is unmeasured.\n- gh run watch: refused since 2026-10-16; one run made 131 GitHub calls in 60 s and merges failed on the rate limit (2b96e1c7c). Replaced by the CI wake hook, which reads every 30-120 s; its real rate is unmeasured.\n- Sleep-and-poll waiter: relaxed 2026-10-12 (8a5ff1bfb); its false alarms are still open.\n- tail -f: still refused, by principle only (the stream outlives the turn). No bug.\n- Agents' leftover watchers: held by an instruction only; the check was dropped after it refused 248 of 1,787 real stops. Not fixed.\n- decision-watch Stop row: removed 2026-10-13 (386194af8) because the Stop event might never reach the mod. Fixed in code (1340aa4f0, 93147e97b); no live proof yet.\n- Stall watcher: never turned off; advisory; does nothing on Windows.\nBased on (ruling): agents-wait-with-monitor, stall-watch, background-needs-end-note. Asked again because CLAUDE.md line 11 still bans what they allow, and you asked whether the bugs are fixed.\nDeparts from: CLAUDE.md line 11, which bans every timer and long-lived process \u2014 c allows one that ends with its job.",
-  "group": "audit-1102-rules",
+  "added": "2026-11-04T13:00:00Z",
+  "context": "Goal: one uniform direction for every watch, wake, sweep, reap and log, in place of the patchwork of lessons, bugs and fixes (your note on item 180, 06:50 CST).\nProblem (rule): rule outcomes-mechanize-rules says no timer, no long-lived process, a stated cost and a test that proves it. Main breaks this in three places. The stall watcher keeps a python process and a 0.2 s loop per background job, while its record says \"no new process or timer\". ci_wake polls for up to 55 min per `gh pr ready`. The daily job is a timer. About 25 mechanisms state no cost, and none has a cost test.\nBased on (read): the load brake (decision machine-load-brake) already states its cost and proves it in a test. It is the model to copy.\nBased on (read): the critic found that only the stall watcher wakes a session that sits idle on a silent background job. The Stop check fires only at a turn end.\nDeparts from: main \u2014 adds one Cost, Reader and Test line to each mechanism record, a shared cost-test helper, and a check-records rule that fails a record without them. It names three standing exceptions in place of silent breaks.\n\nSource: Sonnet workflow align-watchers (3 mappers, a synthesis and a critic), 06:58 CST; it found 30 mechanisms plus about 12 hooks. Meanwhile, two lanes that need no ruling run: watchers-stall-defects (stall temp files, repeated stall message) and watchers-prose-and-plan (docs/plans/align-watchers.md, stale prose). Items 248 to 250 ask the three sub-questions.",
   "home": "stall-watch",
   "id": "stall-watch-timer-rule",
   "kind": "decision",
   "lastAnswer": {
-    "at": "2026-11-04T04:28:21Z",
+    "at": "2026-11-04T12:50:00Z",
     "choice": "none",
-    "note": "Asked: \"have we fixed background watchers? remember they were disabled out of buginess not out of disdain\". Rewritten 22:39 CST from the coordinator's read of git history."
+    "note": "send a sonnet workflow to align all of these toward one uniform direction as its currently a patchwork of lessons bugs and fixes and stale prose"
   },
   "n": 180,
   "options": [
     {
-      "gain": "Smallest change; the record tells the truth.",
-      "how": "Rewrite stall-watch's cost line (one watcher per background job, ends with its job, 0.2 s loop) and name it as your exception to line 11.",
+      "gain": "One rule everywhere; each break becomes visible and tested; no idle job goes unwatched.",
+      "how": "Run only inside a hook already started. The stall watcher, ci_wake and the daily job stay as named exceptions, each with a stated cost and a cost test.",
       "key": "a",
-      "label": "Record an exception for the stall watcher only",
-      "lose": "Every other watcher stays banned, bug fixed or not."
+      "label": "Events only, with three named exceptions",
+      "lose": "Three processes remain; about 8 small lanes of cost lines and tests."
     },
     {
-      "gain": "Line 11 holds with no exception.",
-      "how": "Drop the watcher. The Stop check reads each job's log age once, when the session stops.",
+      "gain": "The rule holds with no exception.",
+      "how": "Drop the stall watcher, and replace ci_wake with a PR subscription locally too.",
       "key": "b",
-      "label": "Rework the stall watcher to read on demand",
-      "lose": "A stall is seen only when the session stops, not as it happens."
+      "label": "Events only, no exceptions",
+      "lose": "A job that stalls while the session is idle is never reported, and agents wait blind."
     },
     {
-      "gain": "The rule says what your rulings already allow, and Monitor's bug gets a number.",
-      "how": "Rewrite line 11: a watcher may run if it ends with its job and its record states its cost (as agents-wait-with-monitor, stall-watch and background-needs-end-note already allow). A lane measures Monitor's error rate (debt notes line 495).",
+      "gain": "No work.",
+      "how": "No change.",
       "key": "c",
-      "label": "Rewrite line 11 to match your rulings; measure Monitor",
-      "lose": "One rule rewrite and one measuring lane."
+      "label": "Leave it as is",
+      "lose": "The patchwork stays; records keep claiming costs the code does not have."
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "rank": 5,
   "ref": "deep audit 1102, report docs/plans/deep-audit/report.md on audit/deep-1102 (6b6a41f3), table 'claude-settings: homes', row stall-watch-timer-rule",
-  "short": "stall watcher timer",
+  "short": "watchers: one rule",
   "status": "open",
-  "title": "Watchers: CLAUDE.md line 11 still bans what your rulings allow. Rewrite it to allow a watcher that ends with its job, and measure Monitor's errors?",
-  "why": "Recommended: c. Your rulings already allow these watchers; only line 11 lags, and Monitor's \"errors often\" has never been measured. Also open: decision-watch needs one live proof line, or its Stop row comes back (decision-watch-mod-limits)."
+  "title": "Which one rule should every watch, wake, sweep, reap and log follow?",
+  "why": "Recommended: a. One rule covers every mechanism, and the three that break it become named, costed and tested instead of silent."
 }

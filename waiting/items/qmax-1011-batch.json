@@ -5,10 +5,11 @@
   "home": "git-never-merge-failing-ci",
   "id": "qmax-1011-batch",
   "kind": "decision",
+  "lane": "batch runner 9: browser run 41861801325",
   "lastAnswer": {
-    "at": "2026-11-02T06:56:26.205Z",
-    "choice": "none",
-    "note": "merge"
+    "at": "2026-11-04T12:22:11Z",
+    "choice": "a",
+    "note": ""
   },
   "links": [
     {
@@ -53,9 +54,9 @@
   "owner": "runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
   "rank": 1,
   "ref": "q_max PRs #1011 and #1008; q_max browser runs 40740294267 and 41377928751",
-  "reply": "01:01 CST: reopened. Your \"merge\" reached the merging session, but the tool still refuses on main's unknown browser state; pick how.",
+  "reply": "09:52 CST: open again until the browser run ends. #1024 merged as a3afe47e5 at 09:49 CST. Browser run 41861801325 started on the new main at 09:50 CST (cap 240 min). Note: q_max's after-merge deploy read was UNKNOWN in the cloud (RENDER_API_KEY not set); the merge stands.",
   "short": "q_max #1011 batch",
   "status": "open",
   "title": "q_max #1011: run main's browser tests once first, or merge now past the unknown result?",
-  "why": "Recommended: a. Main is proven before 7 more PRs land on it. Meanwhile runner 9 holds #1011 and the q_max batch; other repos go on."
+  "why": "You picked a (06:22 CST). Batch runner 9 took it: browser run 41828932078 on q_max main 5bbf10e1 started 06:23 CST; on green it merges #1024, then #1011."
 }

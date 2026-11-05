@@ -5,10 +5,11 @@
   "home": "late-review-fixes",
   "id": "docs-only-ruling-records",
   "kind": "decision",
+  "lane": "ruling-records-short-review",
   "lastAnswer": {
-    "at": "2026-11-04T04:23:29Z",
-    "choice": "none",
-    "note": "Asked: \"what does it mean by skip review, im imagining a concern where a ruling i say in haste contradicts a ruling from so long ago, with no review ... then i dont get that flag?\". Rewritten 22:24 CST: explains skip review; adds c, a contradiction check."
+    "at": "2026-11-04T13:56:30Z",
+    "choice": "b",
+    "note": ""
   },
   "n": 205,
   "options": [
@@ -38,8 +39,9 @@
   "pick": "a",
   "rank": 5,
   "ref": "step late-review-fixes; lane session_013NEJL2mkqxZo8g998PyeoS report, branch late-review-fixes head 93af114c; degen page item 83",
+  "reply": "Landed: claude-settings #1232 merged in batch 10 (main 59bff081, Nov 5 06:36 CST); a ruling record gets one short reviewer read.",
   "short": "Docs-only and ruling records",
-  "status": "open",
+  "status": "closed",
   "title": "A record that files your ruling: skip the reviewer, but have a check flag it when it contradicts an older ruling?",
   "why": "Recommended: c. Your worry is a hasty ruling quietly overriding an old one; a contradiction check catches that without making every record wait for a reviewer."
 }

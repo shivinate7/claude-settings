@@ -1,10 +1,15 @@
 {
   "added": "2026-11-03T22:00:00Z",
   "context": "Goal: No record tells a session to mint a credential the app ignores, and you can still recover the ledger from a backup.\nProblem (rule): About fifteen records and CLAUDE.md still tell a reader to put a GitHub token on each device. The app no longer writes to GitHub and no device holds a token. Retiring them needs a ruling on one form: a dated Retired line, or none.\nBased on (read): mailaudit docs/decisions/live-verification.md:13 says no device holds a token; src/entry.jsx has no token screen, though it still sends a stored token on GitHub calls when one exists (entry.jsx:354-366) (main cd3e12f).\nBased on (notes): Not run live; unmeasured at runtime. Worker snapshots protect recovery; web History still reads GitHub.\nDeparts from: These records say a token goes on every device and the app has none \u2014 each is marked retired and its first sentence rewritten, with one dated Retired line allowed.",
-  "group": "audit-1102-children",
   "home": "mailaudit docs/records.md",
   "id": "github-era-records-retire",
   "kind": "decision",
+  "lane": "mailaudit-token-records-retire",
+  "lastAnswer": {
+    "at": "2026-11-04T12:40:20Z",
+    "choice": "b",
+    "note": ""
+  },
   "n": 191,
   "options": [
     {

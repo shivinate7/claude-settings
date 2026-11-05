@@ -1,14 +1,14 @@
 {
-  "added": "2026-11-04T01:13:00Z",
-  "context": "Goal: Every q_max screen shows money the same way.\nProblem (rule): You ruled that money shows in thousands. Most screens follow it, but the dashboard and the comparison screen show totals to the dollar.\nBased on (read): Dashboard.tsx:2639-2645, ComparisonScreen.tsx:799 (main 5bbf10e).\nBased on (ruling): money-shows-in-thousands.\nDeparts from: the dashboard and comparison totals show whole dollars \u2014 they show thousands, like the rest.",
-  "group": "audit-1102-children",
+  "added": "2026-11-04T12:26:00Z",
+  "context": "Goal: Every q_max screen shows money the same way.\nProblem (rule): You ruled that money shows in thousands. Most screens follow it, but the dashboard and the comparison screen show totals to the dollar.\nBased on (ruling): D-632 money-shows-in-thousands already exempts rates (arbiter, 2026-10-16): a unit rate, a per-SF figure and a rate band never go in thousands; a unit rate shows cents below $100 and whole dollars at $100 or more (formatRate). This question is about totals only.\nBased on (read): Dashboard.tsx:2639-2645, ComparisonScreen.tsx:799 (main 5bbf10e).\nBased on (ruling): money-shows-in-thousands.\nDeparts from: the dashboard and comparison totals show whole dollars \u2014 they show thousands, like the rest.",
   "home": "q_max docs/decisions/money-shows-in-thousands.md",
   "id": "oq-money-thousands-totals",
   "kind": "decision",
+  "lane": "qmax-totals-in-thousands",
   "lastAnswer": {
-    "at": "2026-11-04T01:10:48Z",
-    "choice": "none",
-    "note": "i"
+    "at": "2026-11-04T12:45:08Z",
+    "choice": "a",
+    "note": ""
   },
   "n": 195,
   "options": [

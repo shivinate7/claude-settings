@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-04T13:00:00Z",
+  "context": "Goal: one uniform direction for every watch, wake, sweep, reap and log, in place of the patchwork of lessons, bugs and fixes (your note on item 180, 06:50 CST).\nProblem (rule): the rule says a log needs a named reader or it is not written. Four have none: the agent-end payload log, janitor-runs.jsonl, launchd-sweep.log and its .err.log. A fifth, the \"STOP seen\" line in shadow.log, is the only evidence that the decision mod fires, but nothing reads it live.\nBased on (read): `git grep` finds no reader for the four.\nDeparts from: main \u2014 deletes four log writers; keeps \"STOP seen\" until another fire-check lands.",
+  "home": "claude-settings rule outcomes-mechanize-rules; docs/plans/align-watchers.md",
+  "id": "watchers-unread-logs",
+  "kind": "decision",
+  "lane": "watchers-log-readers",
+  "lastAnswer": {
+    "at": "2026-11-04T13:53:21Z",
+    "choice": "b",
+    "note": ""
+  },
+  "n": 249,
+  "options": [
+    {
+      "gain": "Less writing and less to read.",
+      "how": "Remove the four log writers; keep \"STOP seen\" until a fire-check replaces it.",
+      "key": "a",
+      "label": "Delete the four now; keep \"STOP seen\" for now",
+      "lose": "If a reader was missed, its data stops."
+    },
+    {
+      "gain": "Keeps the data.",
+      "how": "Each of the four logs gets a named reader in its record.",
+      "key": "b",
+      "label": "Name a reader for each",
+      "lose": "Someone must read four logs."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 2,
+  "ref": "item 180; Sonnet workflow align-watchers (3 mappers, a synthesis and a critic), 06:58 CST",
+  "short": "watchers: logs with no reader",
+  "status": "open",
+  "title": "Should logs with no named reader be deleted now?",
+  "why": "Recommended: a. No reader exists for the four, so they cost writes and give nothing."
+}

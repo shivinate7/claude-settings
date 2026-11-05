@@ -1,7 +1,6 @@
 {
   "added": "2026-11-03T21:58:00Z",
   "context": "Goal: only the batch runner merges, through the merge tool.\nProblem (risk): settings.json allows Bash(gh pr merge:*) with no record, so a lane or coordinator can merge on a bare call that only the CI check judges.\nBased on (read): settings.json:11 holds \"Bash(gh pr merge:*)\"; no file in docs/decisions records it.\nBased on (read): docs/decisions/auto-mode-owner-acts.md says it is the one home of every allow entry and forbids a broad class.\nBased on (read): docs/decisions/session-tiers.md:106: hooks/guard_merge.py judges a raw merge on CI only; the coordinator's no-merge ruling is not enforced there (debt merge-role-skips-raw-merge).\nDeparts from: main, with an unrecorded allow for raw merges \u2014 removes it, or records it.",
-  "group": "audit-1102-rules",
   "home": "auto-mode-owner-acts",
   "id": "raw-merge-allow-rule",
   "kind": "decision",

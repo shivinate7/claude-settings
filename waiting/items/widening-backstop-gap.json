@@ -1,7 +1,6 @@
 {
   "added": "2026-11-03T21:58:00Z",
   "context": "Goal: a question never recommends making a shared tool fit one repo without you seeing the warning.\nProblem (rule): the record says the reply judge backs up the widens mark, but the reply judge never reads page writes, so nothing catches an unmarked widening option.\nBased on (read): docs/decisions/uniform-over-variants.md:14: an unmarked widening option passes; the reply judge is the backstop.\nBased on (read): hooks/reply_judge.py reads reply text only, on one Stop in five (SAMPLE_EVERY = 5); docs/decisions/task-names-its-check.md:14 says it never judges ArtifactData writes.\nBased on (read): hooks/call_judge.py has no widening check; the 2026-10-27 incident was a page item.\nDeparts from: main, with a backstop named that does not exist \u2014 adds one, or removes the claim.",
-  "group": "audit-1102-rules",
   "home": "uniform-over-variants",
   "id": "widening-backstop-gap",
   "kind": "decision",

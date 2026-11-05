@@ -5,10 +5,11 @@
   "home": "late-review-fixes",
   "id": "design-review-placement",
   "kind": "decision",
+  "lane": "design-review-beside-round-1",
   "lastAnswer": {
-    "at": "2026-11-04T04:24:43Z",
-    "choice": "none",
-    "note": "Asked: \"are these my only two options\". Rewritten 22:25 CST: added c (every round) and d (end, with its own fix round)."
+    "at": "2026-11-04T13:56:30Z",
+    "choice": "a",
+    "note": ""
   },
   "n": 204,
   "options": [
@@ -45,8 +46,9 @@
   "pick": "a",
   "rank": 4,
   "ref": "step late-review-fixes; lane session_013NEJL2mkqxZo8g998PyeoS report, branch late-review-fixes head 93af114c; degen page item 83",
+  "reply": "Landed: claude-settings #1231 merged in batch 10 (main 59bff081, Nov 5 06:36 CST); the design reviewer runs beside code round 1.",
   "short": "Design reviewer timing",
-  "status": "open",
+  "status": "closed",
   "title": "When should the design reviewer run, so its fixes do not land after the last code review?",
   "why": "Running it beside round 1 fixes the cause; the fix check alone only shortens the wait."
 }

@@ -4,10 +4,11 @@
   "home": "one-lane-one-step",
   "id": "cloud-refused-acts-any-repo",
   "kind": "decision",
+  "lane": "cloud-refused-acts-any-repo (session_013NEJL498Vy1KbTBNwN6b4Y)",
   "lastAnswer": {
-    "at": "2026-11-04T04:16:42Z",
-    "choice": "none",
-    "note": "Asked: \"theres three acts the cloud refuses and that was made by us, not by the cloud? why? should we remove it\". Rewritten 22:18 CST: the refusals are the cloud's; the grant is ours; c added."
+    "at": "2026-11-04T23:44:40Z",
+    "choice": "a",
+    "note": "i feel like cloud could do it it's just the setup script that the sesison first starts with and then tests doesn't work yanno? \u2014 Read 17:48 CST. Sent to the coordinator with your note: it changes the grant to two acts for any repo's coordinator, and checks whether the cloud refusal comes from the session's setup script rather than the cloud itself. Open until that lands."
   },
   "n": 219,
   "options": [
