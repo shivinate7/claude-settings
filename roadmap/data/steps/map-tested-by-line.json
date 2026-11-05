@@ -1,0 +1,9 @@
+{
+ "title": "The shared map gets a tested-by line",
+ "phase": "next",
+ "status": "todo",
+ "order": 150.5,
+ "why": "The shared map has no tested-by line, so banchi lost 81 checked test-to-file links when banchi #1063 (item 209 a) moved to it.",
+ "note": "Nov 5 09:35 CST (coordinator): needs a design first. Its lane starts after map7-scope-mappaths and map-show-decision-lookup land, because all three touch the same skill.",
+ "updatedAt": "2026-11-05T15:35:00Z"
+}
