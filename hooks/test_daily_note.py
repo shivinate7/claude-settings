@@ -26,9 +26,10 @@ Contract the builder codes against. Every case is red until hooks/daily_note.py 
   No volume check. A day of high but steady denies, or a ramp of growing volume, prints nothing.
 - Cost of checks 3 and 4: they read files on disk after the stamp check, start no process, and
   write nothing beyond the stamp. Watched in this process, since main() catches every error.
-- Each line: plain text, at most 240 characters, names what failed, and names the reader
-  command by its ABSOLUTE path, built from the hook's own folder: <hook folder>/../lint/
-  guard_log_report.py. Nothing else goes to stdout. stderr stays empty.
+- Each line: plain text, names what failed, and names the reader command by its ABSOLUTE path,
+  built from the hook's own folder: <hook folder>/../lint/guard_log_report.py. Nothing else goes
+  to stdout. stderr stays empty. At most 240 characters, unless its short head and whole Read:
+  tail are longer than 240; then the line is those two and nothing more (lane ruling, 06:27 CST).
 - Done-today stamp: under CLAUDE_CONFIG_DIR, and it records the Central day. Never under TEMP,
   TMP, APPDATA or LOCALAPPDATA.
 - A crash in the note: exit 0, stdout empty, exactly one stderr line.
@@ -200,6 +201,13 @@ class NoteCase(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
         return result.stdout.splitlines()
+
+    def assert_short_head_and_whole_tail(self, line, short, tail):
+        """Lane ruling, 06:27 CST: past the cap, a line is its short head and its whole Read: tail, nothing
+        more. The control first: the pair must be past the cap, or this assert checks nothing."""
+        self.assertGreater(len(short + " " + tail), MAX_LINE, "control: the short head and tail must pass the cap")
+        self.assertEqual(line, short + " " + tail,
+                         "the line is not its short head plus its whole tail: %r" % line)
 
     def snapshot(self):
         tree = {}
@@ -389,8 +397,8 @@ MALFORMED_ROWS = [
 
 
 class AgentEndTests(NoteCase):
-    """The agent-end check: a reap run on a window day that was killed or crashed. main() cuts each
-    line at 240 characters, so a line that still ends with its reader path fits."""
+    """The agent-end check: a reap run on a window day that was killed or crashed. A line keeps its
+    short head and its whole Read: tail, and fits 240 unless those two are longer (lane ruling, 06:27 CST)."""
 
     def window_control(self):
         """A started-only run on the window day. It always prints, so a silent case shows the check ran."""
@@ -474,6 +482,15 @@ class AgentEndTests(NoteCase):
         self.write_payload([started_row(run_id(142, YESTERDAY_NOON))])
         self.assert_one_run_line(self.run_note(MORNING), 1)
 
+    def test_a_215_character_reader_tail_keeps_the_short_head_and_the_whole_tail(self):
+        self.config = self.long_path(215 - 37, "claude-config-")  # the tail is "Read: " + config + 31 characters
+        tail = "Read: " + self.payload_path()
+        self.assertEqual(len(tail), 215, "control: the reader tail must be 215 characters")
+        self.write_payload([started_row(run_id(pid, YESTERDAY_NOON)) for pid in (151, 152, 153)])
+        lines = self.failure_lines(self.run_note(MORNING))
+        self.assertEqual(len(lines), 1, "want one agent-end line, got %r" % lines)
+        self.assert_short_head_and_whole_tail(lines[0], "3 agent-end reap run(s) killed or crashed:", tail)
+
 
 class SweepErrorLogTests(NoteCase):
     """The daily sweep's error log: one line when it is not empty and was last written on a window day."""
@@ -506,6 +523,15 @@ class SweepErrorLogTests(NoteCase):
         self.assertEqual(len(lines), 1, "want one sweep-error line, got %r" % lines)
         self.assertTrue(lines[0].endswith(tail), "the cap cut the sweep line's Read: tail: %r" % lines[0])
         self.assertLessEqual(len(lines[0]), MAX_LINE)
+
+    def test_a_67_character_config_dir_keeps_the_sweep_count_and_the_whole_tail(self):
+        self.config = self.long_path(67, "claude-config-")  # the tail is 2 x 67 + 77 characters
+        tail = "Read: tail %s; stdout: %s" % (self.sweep_err_path(), self.sweep_out_path())
+        self.assertEqual(len(tail), 211, "control: the sweep tail must be 211 characters")
+        self.write_sweep_err("e" * 12345, YESTERDAY_NOON)  # 12345 bytes
+        lines = self.failure_lines(self.run_note(MORNING))
+        self.assertEqual(len(lines), 1, "want one sweep-error line, got %r" % lines)
+        self.assert_short_head_and_whole_tail(lines[0], "daily sweep errors (12345 bytes):", tail)
 
 
 class StartCostTests(NoteCase):
