@@ -114,8 +114,11 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     it writes `lastAnswer` again without `choice`: the old key may now name another option.
   - `lane` (a lane's branch slug) is set when an answer is filed while its lane is busy. The card shows "waits on lane <slug>"
     in its top row. The item stays open until the lane takes the answer, and then the writer closes it.
-  - Before writing `reply`, `lastAnswer` or `lane`, the writer checks that the page is current with `stale_pages.py`, the same
-    gate as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the three.
+  - `waits` (`{repo, run}` or `{repo, pr}`: a CI run id or a PR number) is set while the item waits on that run or PR. An item
+    with `waits` and `lastAnswer` reads as answered on the page. No `answers/` logic reads it.
+    `stale_pages.py --items` names each open item's wait `ended`, `waiting` or `unknown` (see "Route and close").
+  - Before writing `reply`, `lastAnswer`, `lane` or `waits`, the writer checks that the page is current with `stale_pages.py`, the same
+    gate as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the four.
   - The page draws only the top-level fields that its `itemFields` block lists (`page.html`). A write that names another
     top-level field is refused (guard rule `item-field-rendered`), and a stored item that carries one shows a warning on its card.
     To add a field, draw it on the page and add its name to that block. A key inside `options` or `steps` is not judged.
@@ -234,10 +237,12 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
 
 1. Read the page with `Artifact` action `read`. Use the file the read names as the saved full page.
    A read that gives a summary, not the raw page, is `unknown`.
-2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out>`. It
+2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out> --items <items>`, where
+   `<items>` is what `ArtifactData list items` saved. It
    compares the page's code outside `designData` with `skills/waiting-page/page.html` on
    claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
-   read. Code outside main's page, other than the host's document skeleton, is `behind`.
+   read. Code outside main's page, other than the host's document skeleton, is `behind`. Then it prints one
+   `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`). The exit code stays the page's.
 3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
    republish, so the copy holds the page as it was.
 4. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
@@ -253,8 +258,8 @@ The guard enforces this (rule `page-stale`, decision `page-stale-publish`): an `
 repo's waiting page from a file behind main is refused, and its reason repeats steps 1, 2 and 4. An allowed
 publish of main's page stamps main's page version, and the next session start says when the page is behind.
 
-Cost: on demand, inside a wake already running. One `Artifact read`, one python process and at most
-one short read-only git process, with no fetch. It writes `<out>` only, and no file without
+Cost: on demand, inside a wake already running. One `Artifact read`, one python process, at most
+one short read-only git process, with no fetch, and one gh call per open item with `waits`. It writes `<out>` only, and no file without
 `--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
 
 ## Keep a copy in the repo
@@ -478,6 +483,11 @@ turn it is filed. An answer whose lane is busy is filed at
 once as a note on its step (the item's home), never held for the lane. The writer then sets `lane` and `lastAnswer` on the
 item and leaves it open until the lane takes the answer. Then it closes the item. A `none` answer with a clear direction is a clear answer, so it takes this same path. The note is filed at once on the step. The item closes when the lane takes it, with no new options. A chat answer has no
 `answers/<id>`, so steps 2 to 4 skip their delete, and the writer sets `lastAnswer` from the chat answer.
+
+While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `answers/<id>`. End of a wait: when the
+`--items` line for the item says `ended` ("Keep the page on main's code", step 2), the writer, in that wake, drops
+`waits` (`ArtifactData update items/<id> {"waits": {"__delete__": true}}`), then closes or rewrites the item, then
+deletes `answers/<id>`.
 
 1. Write `receipts/<id>` with `read` set to now. Then move the answer to the item's home: the
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
