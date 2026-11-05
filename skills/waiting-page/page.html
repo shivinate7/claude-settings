@@ -810,6 +810,25 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   .frow .fgo { grid-column: 3; grid-row: 1 / span 2; }
 }
 .older { justify-self: start; width: auto; }
+/* The owner's reply sits inside the thread it follows, on the surface ground of "You asked", so his words and a session's differ by ground. */
+.askc .thread .myreply { display: grid; gap: 4px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); min-width: 0; }
+.askc .thread .myreply .lhead { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.askc .thread .myreply .reply { font-size: 16px; }
+.askc .thread .myreply + .lhead, .askc .thread .reply + .myreply { margin-top: 4px; }
+/* The thread's end: the line that answers Send reply and Undo, then Reply or the reply box. */
+.replyend { display: grid; gap: 8px; min-width: 0; }
+.replyend > .btn.replybtn { justify-self: start; min-height: 44px; }
+.replyform { padding: 12px; border-radius: var(--r); background: var(--ground); }
+.replyform textarea { background: var(--surface); }
+.replyform .askrow .btn.rx { grid-column: 3; min-height: 48px; }
+@media (max-width: 520px) { .replyform .askrow .btn.rx { grid-column: 1; grid-row: 2; justify-self: start; } }
+/* A folded thread with a reply that waits or a new answer to one: the row stays one button; the reply shows under it, outside the fold. */
+.askc.folded .fwait { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 2px 12px; margin: 0; padding: 8px 16px 12px; border-top: 1px solid var(--line); }
+.askc.folded .fwait > .g { margin-top: 5px; }
+.askc.folded .fwait .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.askc.folded .fwait .astate { grid-column: 2; }
+@media (max-width: 520px) { .askc.folded .fwait .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
+.reline { margin: 0; font-size: 14.5px; color: var(--muted); overflow-wrap: anywhere; }
 .asks .empty.unk { color: var(--due); border-color: var(--due); }
 /* The rail row for asks: the head of an overview tier, no chips. With no waiting ask it is grey, as an empty tier is. */
 .ov-tier.zero .ov-head { color: var(--muted); }
@@ -2071,11 +2090,13 @@ $("copy").addEventListener("click", async () => {
 $("send").addEventListener("click", sendAll);
 
 /* ---------- Ask box: the owner's free text; a session answers under it (asks/<id>). Never mixed with Send answers. ---------- */
-// The page writes id, text and at once, at Send. Sessions write only owner, read, reply, answered, home, filed (SKILL.md, "The database").
+// The page writes id, text and at once, at Send, and `re` with them when the ask is a reply to an answer. Sessions write only owner, read, reply, answered, home, filed (SKILL.md, "The database").
 const ASK_MAX = 4000, ASK_NOTICE = 500, ASK_SHOWN = 3, ASK_NEW_MS = 864e5;
 // sent: the batch the Undo covers. line: what the line under the buttons says in place of it (undone, allfail, undofail).
+// Each has `where`: "box" for the Ask box, or the id of the thread's root ask when a reply was sent from there. busyAt is the same for a send under way.
 // stack: the asks not sent yet, each { k, text, edit?, editErr?, gone?, state?, err? }. copyBox: words a refused clipboard leaves to select.
-const askState = { map: null, bad: false, sent: null, line: null, note: "", copyBox: "", keepFail: false, busy: false, busyN: 0, stack: [], focus: null, open: {}, older: false };
+// rep: the reply box of each thread by its root ask id, { open, text, err, note }.
+const askState = { map: null, bad: false, sent: null, line: null, note: "", copyBox: "", keepFail: false, busy: false, busyN: 0, busyAt: "box", stack: [], focus: null, open: {}, older: false, rep: {} };
 let askTimer, askStamp = 0, askRowN = 0;
 // Ids made in one batch rise in the order made: askAll breaks the tie of a shared `at` by id, so the last-typed ask sorts on top.
 const askId = () => { askStamp = Math.max(Date.now(), askStamp + 1); return "ask-" + askStamp.toString(36) + Math.random().toString(36).slice(2, 4).padEnd(2, "0"); };
@@ -2089,13 +2110,29 @@ const askTime = (a) => { const t = Date.parse(a.at); return isNaN(t) ? -Infinity
 const askKnown = () => state.db !== false && state.db !== null && !askState.bad && askState.map !== null;
 const askAll = () => Object.entries(askState.map || {}).filter(([, a]) => a && typeof a.text === "string").map(([k, a]) => ({ ...a, id: k }))
   .sort((a, b) => askTime(b) - askTime(a) || (a.id < b.id ? 1 : -1));
+// A record with `re` joins the thread of the record it follows, oldest first. A record whose `re` is not in the map, or loops back to it, is a thread of its own.
+function askThreads() {
+  const all = askAll(), byId = new Map(all.map((a) => [a.id, a]));
+  const rootOf = (a) => {
+    const seen = new Set([a.id]);
+    for (let x = a; ;) { const p = typeof x.re === "string" ? byId.get(x.re) : null; if (!p) return x; if (seen.has(p.id)) return a; seen.add(p.id); x = p; }
+  };
+  const th = new Map(all.map((a) => [a.id, { ...a, reps: [], orphan: typeof a.re === "string" && !byId.has(a.re) }]));
+  all.forEach((a) => { const r = rootOf(a); if (r !== a) th.get(r.id).reps.push(a); });
+  th.forEach((t) => t.reps.reverse());
+  return all.filter((a) => rootOf(a) === a).map((a) => th.get(a.id));
+}
 const askWaiting = () => (askKnown() ? askAll().filter((a) => !askReply(a)).length : null);
+const askMembers = (t) => [t, ...t.reps];
+const askWaitsIn = (t) => askMembers(t).some((a) => !askReply(a));
+// The newest answered record of a thread: a reply follows its answer, and its time says whether the thread has a new answer. A tie goes to the later record.
+const askLatest = (t) => askMembers(t).filter((a) => askReply(a)).reduce((best, a) => (!best || (Date.parse(a.answered) || -Infinity) >= (Date.parse(best.answered) || -Infinity) ? a : best), null);
 // An answer is new while it is later than the seen mark of this viewer, read once at load. With no mark, the last 24 hours are new.
 let ASK_SEEN = null;
 try { const t = Date.parse(localStorage.getItem("waiting.askSeen")); if (!isNaN(t)) ASK_SEEN = t; } catch (e) {}
 const ASK_LOADED = Date.now();
 const askFresh = (a) => { const t = Date.parse(a.answered) || Date.parse(a.at); return ASK_SEEN !== null ? t > ASK_SEEN : ASK_LOADED - t < ASK_NEW_MS; };
-const askIsOpen = (a) => (a.id in askState.open ? askState.open[a.id] : askFresh(a));
+const askIsOpen = (t) => (t.id in askState.open ? askState.open[t.id] : askFresh(askLatest(t) || t));
 const markAsksSeen = () => { try { localStorage.setItem("waiting.askSeen", new Date().toISOString()); } catch (e) {} };
 document.addEventListener("visibilitychange", () => { if (document.hidden) markAsksSeen(); });
 window.addEventListener("pagehide", markAsksSeen);
@@ -2121,12 +2158,71 @@ function askRailRow() {
   const n = askWaiting();
   return h("div", { class: "ov-tier" + (n ? "" : " zero") }, h("a", { class: "ov-head", href: "#asks", "aria-label": (n === null ? "Asks not read" : n + (n === 1 ? " ask waiting" : " asks waiting") + " for an answer") + ", Ask", onclick: (e) => { e.preventDefault(); jump("asks"); } }, glyph("wait"), "Ask", h("span", { class: "ct" }, n === null ? "—" : String(n))));
 }
+// Send, for an ask and for a reply, waits for the count, and for an Undo whose delete is still awaited, though its window has passed.
+function askHold() {
+  const a = askState.sent, counting = !!a && undoLeft(a) > 0 && !a.busy;
+  return { counting, holding: counting || (!!a && !!a.busy) };
+}
+/* The reply to an answer: a thread's reply box, keyed by its root ask id. It sends through sendAsk and undoes through undoAsk. */
+const replyDraftKey = (k) => "waiting.replyDraft." + k;
+const repOf = (k) => {
+  const r = askState.rep;
+  if (!r[k]) { let text = ""; try { text = localStorage.getItem(replyDraftKey(k)) || ""; } catch (e) {} r[k] = { open: false, text, err: "", note: "" }; }
+  return r[k];
+};
+const saveReplyDraft = (k) => { try { const v = repOf(k).text; if (v) localStorage.setItem(replyDraftKey(k), v); else localStorage.removeItem(replyDraftKey(k)); } catch (e) {} };
+const threadOf = (k) => askThreads().find((t) => t.id === k) || null;
+// Its hint says why Send reply is off, or where the reply goes. A refused save keeps the words and offers Copy reply.
+function syncReplyForm(form) {
+  const k = form.id.slice(3), rp = repOf(k), typed = rp.text.trim(), over = typed.length > ASK_MAX, { counting, holding } = askHold(), hint = $("rh-" + k), slot = form.querySelector(".slot");
+  const words = (t) => [h("span", {}, t, h("span", { class: "kbd" }, " Ctrl+Enter sends."))];
+  let cls = "askhint", kids;
+  if (rp.note) kids = [rp.note];
+  else if (rp.err) { cls += " bad"; kids = ["Not saved (" + rp.err + "). Your reply is still in the box: copy it and paste it in chat."]; }
+  else if (over) { cls += " bad"; kids = ["Your reply is " + typed.length + " characters. The limit is " + ASK_MAX + ". Shorten it, then send. Nothing was cut."]; }
+  else if (holding) kids = words("Send reply turns on " + (counting ? "when the Undo count ends." : "when Undo is done."));
+  else kids = words((typed ? "" : "Send reply turns on once you type. ") + "Your reply goes to " + askWriter() + ", which passes it to the session that answered, or answers here.");
+  const sig = cls + "|" + kids.map((x) => (x && x.nodeType ? x.textContent : x)).join("");
+  if (hint.dataset.sig !== sig) { hint.dataset.sig = sig; hint.className = cls; hint.replaceChildren(...kids); }
+  const copy = rp.err ? [$("rc-" + k) || h("button", { class: "btn alt", type: "button", id: "rc-" + k, onclick: () => copyReply(k) }, "Copy reply")] : [];
+  if (copy.length !== slot.children.length || copy[0] !== slot.firstElementChild) slot.replaceChildren(...copy);
+  $("rs-" + k).disabled = !state.db || askState.busy || holding || !typed || over;
+}
+const syncReplyForms = () => document.querySelectorAll(".replyform").forEach(syncReplyForm);
+function replyForm(k) {
+  const rp = repOf(k);
+  const ta = h("textarea", { id: "rt-" + k, rows: 3, "aria-describedby": "rh-" + k, oninput: (e) => { rp.text = e.target.value; rp.err = ""; rp.note = ""; saveReplyDraft(k); syncReplyForms(); } });
+  ta.value = rp.text;
+  return h("form", { class: "askform replyform", id: "rf-" + k, onsubmit: (e) => e.preventDefault() }, h("label", { for: "rt-" + k }, "Your reply"), ta,
+    h("div", { class: "askrow" }, h("p", { class: "askhint", id: "rh-" + k, "aria-live": "polite" }), h("span", { class: "slot" }),
+      h("button", { class: "btn quiet rx", type: "button", id: "rx-" + k, onclick: () => closeReply(k) }, "Close"),
+      h("button", { class: "btn askgo", type: "button", id: "rs-" + k, onclick: () => sendAsk(k) }, "Send reply")));
+}
+// A result line that is over, or an Undo that is not live, is dropped at the next Reply press. A live count stays, so its Undo stays.
+function openReply(k) {
+  const s = askState, a = s.sent, rp = repOf(k);
+  if (!(a && (undoLeft(a) > 0 || a.busy))) { if (a && a.where !== "box") s.sent = null; if (s.line && s.line.where !== "box") s.line = null; }
+  rp.open = true; rp.err = ""; rp.note = "";
+  renderAskList();
+  const ta = $("rt-" + k); if (ta) ta.focus({ preventScroll: true });
+}
+// Close keeps the words as a draft.
+function closeReply(k) {
+  repOf(k).open = false; saveReplyDraft(k); renderAskList();
+  const b = $("reply-" + k); if (b) b.focus({ preventScroll: true });
+}
+// The words with the ask they follow, for a person to paste in chat when the store refused them. A refused clipboard leaves them selected in the box.
+async function copyReply(k) {
+  const rp = repOf(k), t = threadOf(k), re = t && askLatest(t), words = (re ? "re " + re.id + ": " : "") + rp.text.trim();
+  if (await copyText(words)) rp.note = "Copied. Paste it in chat."; else rp.note = "Select and copy the text in the box" + (re ? ", and start it with “re " + re.id + ":”." : ".");
+  syncReplyForms();
+  const ta = $("rt-" + k); if (ta && !(rp.note.startsWith("Copied"))) { ta.focus({ preventScroll: true }); ta.select(); }
+}
 // The hint row: the words say why Send is off, or what Send takes. The result of a send or an Undo is on the line under the buttons.
 function renderAskForm() {
-  const s = askState, a = s.sent, typed = $("askText").value.trim(), hint = $("askHint"), slot = $("askSlot");
+  const s = askState, typed = $("askText").value.trim(), hint = $("askHint"), slot = $("askSlot");
   let cls = "askhint", kids, live = "polite", slotKids = [];
-  // Send waits for the count, and for an Undo whose delete is still awaited, though its window has passed.
-  const counting = !!a && undoLeft(a) > 0 && !a.busy, holding = counting || (!!a && !!a.busy), rows = stackLive().filter((r) => !r.state), failed = rows.filter((r) => r.err).length;
+  const { counting, holding } = askHold(), rows = stackLive().filter((r) => !r.state), failed = rows.filter((r) => r.err).length;
   const n = rows.length + (typed ? 1 : 0), over = typed.length > ASK_MAX;
   const words = (t) => [h("span", {}, t, h("span", { class: "kbd" }, " Ctrl+Enter sends."))];
   if (s.note) kids = [s.note];
@@ -2150,25 +2246,35 @@ function renderAskForm() {
   $("askSend").disabled = !state.db || s.busy || holding || !n || over;
   const lbl = $("askSendLbl"), want = n > 1 ? "Send " + n + " asks" : "Send ask";
   if (lbl.textContent !== want) lbl.textContent = want;
+  syncReplyForms();
 }
-// The line under the buttons answers Send and Undo where they were pressed. It holds the told fact once for the batch.
+// The line answers Send and Undo where they were pressed: under the Ask box's buttons, or at the end of the thread a reply was sent from. It holds the told fact once for the batch.
+function lineSpec() {
+  const s = askState, a = s.sent, ln = s.line, wh = (o) => (o && o.where) || "box";
+  const reply = (w) => w !== "box", what = (w, n) => (reply(w) ? "your reply" : asksN(n));
+  if (s.busy) return { where: s.busyAt, g: "wait", cls: "", undo: false, words: [reply(s.busyAt) ? "Saving your reply…" : "Saving " + asksN(s.busyN) + "… Keep typing: the box does not wait for the send."] };
+  if (ln && ln.kind === "undone") return { where: wh(ln), g: "wait", cls: "", undo: false, words: [reply(wh(ln)) ? "Undone. Your reply is back in the box, not sent." : "Undone. Your " + asksN(ln.n) + (ln.n === 1 ? " is" : " are") + " back in the list, not sent."] };
+  if (ln && ln.kind === "allfail") return { where: "box", g: "due", cls: "bad", undo: false, words: ["Not saved (" + ln.code + "). Your " + asksN(ln.n) + (ln.n === 1 ? " is" : " are") + " kept in the list: copy " + (ln.n === 1 ? "it" : "them") + " and paste " + (ln.n === 1 ? "it" : "them") + " in chat."] };
+  if (a && a.busy) return { where: a.where, g: "wait", cls: "", undo: true, words: ["Taking back " + what(a.where, a.ids.length) + "…"] };
+  if (ln && ln.kind === "late" && a) return { where: a.where, g: "due", cls: "bad", undo: false, words: ["Too late to undo " + what(a.where, ln.n) + ". " + (ln.n === 1 ? "It stays" : "They stay") + " sent."] };
+  if (ln && ln.kind === "undofail" && a) return { where: a.where, g: "due", cls: "bad", undo: true, words: ["Undo failed (" + ln.code + "). " + (reply(a.where) ? "Your reply stays sent." : asksN(a.ids.length) + (a.ids.length === 1 ? " stays" : " stay") + " sent.")] };
+  if (a) return { where: a.where, g: "done", cls: "", undo: true, words: [h("b", {}, reply(a.where) ? "Sent " + fmt(a.at, false) + "." : a.total > a.texts.length ? a.texts.length + " of " + a.total + " sent " + fmt(a.at, false) + "." : "Sent " + fmt(a.at, false) + ". " + asksN(a.texts.length) + "."), " " + a.told] };
+  return null;
+}
+// Paints the line in its holder: #askLine or a thread's .replyend, where it comes first. The holder keeps its last words, so a repaint with the same words changes nothing.
+function paintLine(box, sp, reply) {
+  const sig = sp ? sp.g + "|" + sp.cls + "|" + sp.undo + "|" + sp.words.map((k) => (k && k.nodeType ? k.textContent : k)).join("") : "";
+  if (box.dataset.sig === sig) return;
+  const fa = document.activeElement, hadUndo = fa && fa.id === "askUndo";
+  box.dataset.sig = sig;
+  const old = box.querySelector(".sline"); if (old) old.remove();
+  if (sp) box.prepend(h("p", { class: "sline", ...(reply ? { role: "status" } : {}) }, glyph(sp.g), h("span", { class: sp.cls }, ...sp.words), sp.undo ? h("button", { class: "btn alt", type: "button", id: "askUndo", onclick: undoAsk }, "") : null));
+  if (hadUndo && $("askUndo")) $("askUndo").focus({ preventScroll: true });
+}
 function renderLine() {
-  const s = askState, a = s.sent, ln = s.line, box = $("askLine"), left = a ? undoLeft(a) : 0;
-  let g = "done", cls = "", words = null, undo = false;
-  if (s.busy) { g = "wait"; words = ["Saving " + asksN(s.busyN) + "… Keep typing: the box does not wait for the send."]; }
-  else if (ln && ln.kind === "undone") { g = "wait"; words = ["Undone. Your " + asksN(ln.n) + (ln.n === 1 ? " is" : " are") + " back in the list, not sent."]; }
-  else if (ln && ln.kind === "allfail") { g = "due"; cls = "bad"; words = ["Not saved (" + ln.code + "). Your " + asksN(ln.n) + (ln.n === 1 ? " is" : " are") + " kept in the list: copy " + (ln.n === 1 ? "it" : "them") + " and paste " + (ln.n === 1 ? "it" : "them") + " in chat."]; }
-  else if (a && a.busy) { g = "wait"; undo = true; words = ["Taking back " + asksN(a.ids.length) + "…"]; }
-  else if (ln && ln.kind === "late" && a) { g = "due"; cls = "bad"; words = ["Too late to undo " + asksN(ln.n) + ". " + (ln.n === 1 ? "It stays" : "They stay") + " sent."]; }
-  else if (ln && ln.kind === "undofail" && a) { g = "due"; cls = "bad"; undo = true; words = ["Undo failed (" + ln.code + "). " + asksN(a.ids.length) + (a.ids.length === 1 ? " stays" : " stay") + " sent."]; }
-  else if (a) { undo = true; words = [h("b", {}, a.total > a.texts.length ? a.texts.length + " of " + a.total + " sent " + fmt(a.at, false) + "." : "Sent " + fmt(a.at, false) + ". " + asksN(a.texts.length) + "."), " " + a.told]; }
-  const sig = words ? g + "|" + cls + "|" + undo + "|" + words.map((k) => (k && k.nodeType ? k.textContent : k)).join("") : "";
-  if (box.dataset.sig !== sig) {
-    const fa = document.activeElement, hadUndo = fa && fa.id === "askUndo";
-    box.dataset.sig = sig;
-    box.replaceChildren(...(words ? [h("p", { class: "sline" }, glyph(g), h("span", { class: cls }, ...words), undo ? h("button", { class: "btn alt", type: "button", id: "askUndo", onclick: undoAsk }, "") : null)] : []));
-    if (hadUndo && $("askUndo")) $("askUndo").focus({ preventScroll: true });
-  }
+  const sp = lineSpec();
+  paintLine($("askLine"), sp && sp.where === "box" ? sp : null, false);
+  document.querySelectorAll(".replyend").forEach((end) => paintLine(end, sp && sp.where === end.dataset.end ? sp : null, true));
   syncUndo();
   showTray();
 }
@@ -2180,7 +2286,7 @@ function syncUndo() {
   if (left > 0 && !a.busy) { b.textContent = "Undo send (" + left + ")"; b.classList.remove("spent"); b.removeAttribute("aria-hidden"); b.removeAttribute("tabindex"); }
   else if (!b.classList.contains("spent")) {
     // Read focus before .spent hides the button: hiding it can drop focus to the body first.
-    if (document.activeElement === b) $("askText").focus({ preventScroll: true });
+    if (document.activeElement === b) (a && a.where !== "box" && ($("rt-" + a.where) || $("reply-" + a.where)) || $("askText")).focus({ preventScroll: true });
     b.classList.add("spent"); b.tabIndex = -1; b.setAttribute("aria-hidden", "true"); b.textContent = "Undo send";
   }
 }
@@ -2212,7 +2318,7 @@ function renderStack() {
   const fa = document.activeElement, keep = fa && box.contains(fa) && fa.dataset.sk ? [fa.dataset.sk, fa.dataset.act] : null;
   const caret = keep && fa.tagName === "TEXTAREA" ? [fa.selectionStart, fa.selectionEnd] : null;
   box.replaceChildren(...(s.stack.length || s.copyBox ? [
-    s.stack.length ? h("p", { class: "stackh", id: "stackH" }, s.busy ? "Sending" : "Not sent yet") : null,
+    s.stack.length ? h("p", { class: "stackh", id: "stackH" }, s.busy && s.busyAt === "box" ? "Sending" : "Not sent yet") : null,
     s.stack.length ? h("ol", { class: "stack", "aria-labelledby": "stackH" }, s.stack.map(stackRow)) : null,
     s.copyBox ? h("p", { class: "stackh", role: "status" }, "Select and copy the text below.") : null,
     s.copyBox ? h("textarea", { class: "copybox", id: "askCopyBox", readonly: true, rows: 3, "aria-label": "Your asks, to copy" }) : null].filter(Boolean) : []));
@@ -2243,54 +2349,87 @@ function stackAct(r, act) {
   saveAskStack(); renderAskForm(); renderStack();
 }
 function renderAskList() {
-  const root = $("askList"), s = askState, fa = document.activeElement, keep = fa && root.contains(fa) ? fa.dataset.ask || fa.id : "";
+  const root = $("askList"), s = askState, fa = document.activeElement, keep = fa && root.contains(fa) ? fa.id || fa.dataset.ask : "";
+  const caret = keep && fa.tagName === "TEXTAREA" ? [fa.selectionStart, fa.selectionEnd] : null;
   if (state.db === false || s.bad) root.replaceChildren(h("p", { class: "empty unk" }, "Your asks cannot be read in this view."));
   else if (!askKnown()) root.replaceChildren(h("p", { class: "empty" }, "Loading your asks…"));
   else {
-    const all = askAll();
+    const all = askThreads();
     if (!all.length) root.replaceChildren(h("p", { class: "empty" }, "Nothing asked yet. Type above, and a session answers here."));
     else {
-      // Each waiting ask and each new answer shows, whatever its age. Of the answers already seen, the newest ASK_SHOWN show. The rest wait behind one button. A reply never moves a row.
+      // Each thread with a waiting ask or reply, and each new answer, shows whatever its age. Of the answers already seen, the newest ASK_SHOWN show. The rest wait behind one button. A reply never moves a row.
       let seen = 0;
-      const shown = all.filter((a) => !askReply(a) || s.older || askFresh(a) || ++seen <= ASK_SHOWN), hidden = all.length - shown.length;
+      const shown = all.filter((t) => askWaitsIn(t) || s.older || askFresh(askLatest(t)) || ++seen <= ASK_SHOWN), hidden = all.length - shown.length;
       root.replaceChildren(...[h("ol", { class: "asklist", "aria-label": "Your asks, newest first" }, shown.map(askItem)),
         hidden ? h("button", { class: "unfold older", type: "button", id: "askOlder", "aria-expanded": "false", onclick: () => { s.older = true; renderAskList(); const n = $("askList").querySelector("li:last-child [data-ask]"); if (n) n.focus({ preventScroll: true }); } }, h("span", { class: "chev", "aria-hidden": "true" }), h("span", { class: "uf-labels" }, h("span", { class: "uf-show" }, "Show " + hidden + " older " + (hidden === 1 ? "ask" : "asks")))) : null].filter(Boolean));
     }
   }
   const n = askWaiting(), ct = $("askCount");
   ct.hidden = !n; ct.textContent = n ? String(n) : ""; ct.setAttribute("aria-label", n + (n === 1 ? " ask waiting" : " asks waiting") + " for an answer");
-  if (keep) { const f = root.querySelector('[data-ask="' + CSS.escape(keep) + '"]') || $(keep); if (f) f.focus({ preventScroll: true }); }
-}
-function askItem(a) {
-  const press = () => { askState.open[a.id] = !askIsOpen(a); renderAskList(); const c = $("askList").querySelector('[data-ask="' + CSS.escape(a.id) + '"]'); if (c) c.focus({ preventScroll: true }); };
-  const answered = askReply(a), when = fmt(a.answered) || "";
-  if (answered && !askIsOpen(a)) {
-    return h("li", { class: "askc folded" }, h("button", { class: "frow", type: "button", "aria-expanded": "false", "data-ask": a.id, onclick: press },
-      glyph("done"), h("span", { class: "ftext" }, a.text), h("span", { class: "fwhen" }, "Answered" + (when ? " " + when : "")), h("span", { class: "fgo" }, "Show answer")));
+  // The cards were rebuilt, so each thread's forms and result line are set again before focus returns.
+  syncReplyForms(); renderLine();
+  if (keep) {
+    const f = root.querySelector('[data-ask="' + CSS.escape(keep) + '"]') || $(keep);
+    if (f) { f.focus({ preventScroll: true }); if (caret && f.tagName === "TEXTAREA") f.setSelectionRange(caret[0], caret[1]); }
   }
-  const head = h("div", { class: "ahead" }, glyph(answered ? "done" : "wait"), h("span", { class: "aby" }, "You asked" + (fmt(a.at) ? ", " + fmt(a.at) : "")),
-    answered ? null : (validT(a.at) ? h("span", {}, waited(a.at)) : null),
-    answered && askFresh(a) ? h("span", { class: "newmark" }, "New answer") : null,
-    answered ? h("button", { class: "morebtn", type: "button", "aria-expanded": "true", "data-ask": a.id, onclick: press }, "Fold") : null);
-  const text = h("p", { class: "atext" }, a.text);
-  if (answered) {
-    const fl = typeof a.home === "string" && a.home.trim() ? a.home.trim() : "";
-    return h("li", { class: "askc" }, head, text, h("div", { class: "thread" }, h("p", { class: "lhead" }, "Answer from " + askOwner(a) + (when ? ", " + when : "")), h("p", { class: "reply" }, answered),
-      fl ? h("p", { class: "filed" }, "Filed in " + fl + (fmt(a.filed) ? ", " + fmt(a.filed) : "")) : null));
-  }
-  const read = typeof a.owner === "string" && a.owner.trim() && validT(a.read);
-  return h("li", { class: "askc" }, head, text, read
-    ? h("p", { class: "astate" }, "Read by " + askOwner(a) + " ", h("span", { class: "t" }, fmt(a.read, false)), ". Waiting for its answer.")
-    : h("p", { class: "astate" }, "Waiting for " + askWriter() + " to read it."));
 }
-function renderAsks() { renderAskForm(); renderLine(); renderStack(); renderAskList(); renderRail(); }
+// What a record that waits says: not read yet, or read by the session that holds it.
+const askWaitWords = (a) => (typeof a.owner === "string" && a.owner.trim() && validT(a.read)
+  ? ["Read by " + askOwner(a) + " ", h("span", { class: "t" }, fmt(a.read, false)), ". Waiting for its answer."]
+  : ["Waiting for " + askWriter() + " to read it."]);
+// A session's answer to a record: who, when, the words, and where it was filed.
+function askAnswer(a) {
+  const when = fmt(a.answered) || "", fl = typeof a.home === "string" && a.home.trim() ? a.home.trim() : "";
+  return [h("p", { class: "lhead" }, "Answer from " + askOwner(a) + (when ? ", " + when : "")), h("p", { class: "reply" }, askReply(a)),
+    fl ? h("p", { class: "filed" }, "Filed in " + fl + (fmt(a.filed) ? ", " + fmt(a.filed) : "")) : null];
+}
+// The owner's reply, nested in its thread, with the answer to it after it.
+function askMine(r) {
+  const answered = askReply(r);
+  return [h("div", { class: "myreply", id: r.id },
+    h("p", { class: "lhead" }, answered ? null : glyph("wait"), h("span", {}, "Your reply" + (fmt(r.at) ? ", " + fmt(r.at) : "")), answered || !validT(r.at) ? null : h("span", {}, waited(r.at))),
+    h("p", { class: "reply" }, r.text), answered ? null : h("p", { class: "astate" }, ...askWaitWords(r))), ...(answered ? askAnswer(r) : [])];
+}
+// A reply that waits, or has a new answer, shows under its folded thread, outside the fold.
+function askFoldedMine(r) {
+  const answered = askReply(r);
+  if (answered && !askFresh(r)) return null;
+  return h("p", { class: "fwait" }, glyph(answered ? "done" : "wait"), h("span", { class: "ftext" }, "Your reply: " + r.text),
+    h("span", { class: "astate" }, ...(answered ? ["Answer from " + askOwner(r) + (fmt(r.answered) ? ", " + fmt(r.answered) : "") + ". Show answer to read it."] : askWaitWords(r))));
+}
+// The thread's end: Reply, or the reply box. It shows where the line of Send reply and Undo goes.
+function askReplyEnd(t) {
+  const k = t.id;
+  return h("div", { class: "replyend", "data-end": k }, repOf(k).open ? replyForm(k)
+    : h("button", { class: "btn alt replybtn", type: "button", id: "reply-" + k, "aria-expanded": "false", "aria-controls": "rf-" + k, "data-ask": k, onclick: () => openReply(k) }, "Reply"));
+}
+function askItem(t) {
+  const s = askState, press = () => { s.open[t.id] = !askIsOpen(t); renderAskList(); const c = $("askList").querySelector('[data-ask="' + CSS.escape(t.id) + '"]'); if (c) c.focus({ preventScroll: true }); };
+  const answered = askReply(t), when = fmt(t.answered) || "", latest = askLatest(t);
+  if (answered && !askIsOpen(t)) {
+    // A fold changes only at a load or a press, so a thread with replies keeps the fold it first drew, and a new answer to a reply does not unfold it.
+    if (t.reps.length && !(t.id in s.open)) s.open[t.id] = false;
+    return h("li", { class: "askc folded" }, h("button", { class: "frow", type: "button", "aria-expanded": "false", "data-ask": t.id, onclick: press },
+      glyph("done"), h("span", { class: "ftext" }, t.text), h("span", { class: "fwhen" }, "Answered" + (when ? " " + when : "")), h("span", { class: "fgo" }, "Show answer")),
+      ...t.reps.map(askFoldedMine));
+  }
+  const head = h("div", { class: "ahead" }, glyph(askWaitsIn(t) ? "wait" : "done"), h("span", { class: "aby" }, "You asked" + (fmt(t.at) ? ", " + fmt(t.at) : "")),
+    answered ? null : (validT(t.at) ? h("span", {}, waited(t.at)) : null),
+    latest && askFresh(latest) ? h("span", { class: "newmark" }, "New answer") : null,
+    answered ? h("button", { class: "morebtn", type: "button", "aria-expanded": "true", "data-ask": t.id, onclick: press }, "Fold") : null);
+  const body = [...(answered ? askAnswer(t) : []), ...t.reps.flatMap(askMine)];
+  return h("li", { class: "askc" }, head, t.orphan ? h("p", { class: "reline" }, "Re: an ask not on this page") : null, h("p", { class: "atext" }, t.text),
+    answered ? null : h("p", { class: "astate" }, ...askWaitWords(t)), body.length ? h("div", { class: "thread" }, body) : null, latest ? askReplyEnd(t) : null);
+}
+function renderAsks() { renderAskForm(); renderStack(); renderAskList(); renderRail(); }
 
 // Typing, Add to list and Send clear the last result: a note, a result line that is not a count, a count that has ended, the words to select.
+// A reply's result line is not the Ask box's: it stays until Send ask or the next Reply press.
 function clearAskNotes() {
   const s = askState;
   s.note = ""; s.copyBox = "";
-  if (s.sent && !s.sent.busy && undoLeft(s.sent) <= 0) s.sent = null; // an Undo still awaiting a delete keeps its state
-  if (s.line && !(s.line.kind === "undofail" && s.sent)) s.line = null;
+  if (s.sent && s.sent.where === "box" && !s.sent.busy && undoLeft(s.sent) <= 0) s.sent = null; // an Undo still awaiting a delete keeps its state
+  if (s.line && s.line.where === "box" && !(s.line.kind === "undofail" && s.sent)) s.line = null;
 }
 // Add to list moves the typed words into the stack. Nothing is written to the store.
 function addAsk() {
@@ -2302,67 +2441,92 @@ function addAsk() {
   box.value = ""; saveAskDraft(); saveAskStack(); renderAsks(); box.focus({ preventScroll: true });
 }
 // Send writes every ask in the list, and the typed box as the last one, with one `at`, in order. Each is tried: one that fails stays in the list.
-async function sendAsk() {
-  const s = askState, box = $("askText");
+// Given a thread's root id, it sends that thread's reply box instead: one record that also carries `re`, through the same lock, Undo and wake comment.
+// A reply's words stay in its box until the write succeeds, and a refused write is told in its own hint.
+async function sendAsk(rk) {
+  const s = askState, box = $("askText"), rp = typeof rk === "string" ? repOf(rk) : null;
   if (!state.db || s.busy || (s.sent && (undoLeft(s.sent) > 0 || s.sent.busy))) return;
-  commitEdits();
-  const text = box.value.trim();
-  if (text.length > ASK_MAX) { renderAskForm(); return; } // the hint says why; the words stay in the box
-  s.stack = s.stack.filter((r) => !r.gone);
-  if (text) { s.stack.push({ k: ++askRowN, text }); box.value = ""; saveAskDraft(); }
-  const batch = s.stack.filter((r) => !r.state && r.edit == null);
-  if (!batch.length) { renderAsks(); return; }
-  clearAskNotes(); s.sent = null; s.busy = true; s.busyN = batch.length;
+  let batch;
+  if (rp) {
+    const t = threadOf(rk), re = t && askLatest(t), text = rp.text.trim();
+    if (!re || !text || text.length > ASK_MAX) { syncReplyForms(); return; } // its hint says why; the words stay in the box
+    batch = [{ text, re: re.id, by: askOwner(re) }];
+  } else {
+    commitEdits();
+    const text = box.value.trim();
+    if (text.length > ASK_MAX) { renderAskForm(); return; } // the hint says why; the words stay in the box
+    s.stack = s.stack.filter((r) => !r.gone);
+    if (text) { s.stack.push({ k: ++askRowN, text }); box.value = ""; saveAskDraft(); }
+    batch = s.stack.filter((r) => !r.state && r.edit == null);
+    if (!batch.length) { renderAsks(); return; }
+    clearAskNotes();
+  }
+  const where = rp ? rk : "box";
+  s.sent = null; s.line = null; s.busy = true; s.busyN = batch.length; s.busyAt = where;
   batch.forEach((r) => { r.state = "saving"; delete r.err; });
   saveAskStack(); renderAsks();
   const can = await canTell();
   const at = new Date().toISOString(), wrote = [];
   for (const r of batch) {
-    const id = askId();
-    try { await state.db.collection("asks").doc(id).set({ id, text: r.text, at }); }
+    const id = askId(), body = { id, text: r.text, at };
+    if (r.re) body.re = r.re;
+    try { await state.db.collection("asks").doc(id).set(body); }
     catch (e) { delete r.state; r.err = (e && e.code) || "error"; renderStack(); continue; }
-    (s.map = s.map || {})[id] = { id, text: r.text, at };
-    r.state = "saved"; wrote.push({ id, text: r.text }); saveAskStack(); renderStack(); // kept at once, so a reload now does not write this ask again
+    (s.map = s.map || {})[id] = body;
+    r.state = "saved"; wrote.push({ id, text: r.text, re: r.re, by: r.by }); saveAskStack(); renderStack(); // kept at once, so a reload now does not write this ask again
   }
   s.stack = s.stack.filter((r) => r.state !== "saved");
   s.busy = false; s.busyN = 0; saveAskStack(); clearInterval(askTimer);
-  const sent = wrote.length ? { ids: wrote.map((w) => w.id), texts: wrote.map((w) => w.text), at, total: batch.length, told: "Telling Claude…" } : null;
+  const sent = wrote.length ? { ids: wrote.map((w) => w.id), texts: wrote.map((w) => w.text), at, total: batch.length, told: "Telling Claude…", where } : null;
   if (sent) {
     s.sent = sent;
     askTimer = setInterval(() => { if (!s.sent || undoLeft(s.sent) <= 0) clearInterval(askTimer); renderAskForm(); syncUndo(); }, 1000);
-  } else s.line = { kind: "allfail", code: batch.find((r) => r.err).err, n: batch.length };
+  } else if (rp) rp.err = batch[0].err;
+  else s.line = { kind: "allfail", code: batch.find((r) => r.err).err, n: batch.length, where };
+  if (rp && sent) { rp.open = false; rp.text = ""; rp.err = ""; rp.note = ""; saveReplyDraft(rk); }
   renderAsks();
+  // The box closed under the focus; it goes to Reply, unless the owner has moved on to something else.
+  if (rp && sent && (!document.activeElement || document.activeElement === document.body)) { const b = $("reply-" + rk); if (b) b.focus({ preventScroll: true }); }
   if (!sent) return;
   const cut = (t) => { const c = plain(t); return c.slice(0, ASK_NOTICE) + (c.length > ASK_NOTICE ? "…" : ""); };
-  const head = "Asked on the waiting page. Writer: " + askWriter() + ". ";
-  const told = await notifyClaude(fitBytes(wrote.length === 1 ? head + "Ask " + wrote[0].id + ": " + cut(wrote[0].text) + "." : head + wrote.length + " asks: " + wrote.map((w) => w.id + ": " + cut(w.text)).join("; ") + "."), can);
+  const w0 = wrote[0];
+  const note = rp ? "Replied on the waiting page. Writer: " + askWriter() + ". Ask " + w0.id + " re " + w0.re + ", answered by " + plain(w0.by) + ": " + cut(w0.text) + "."
+    : "Asked on the waiting page. Writer: " + askWriter() + ". " + (wrote.length === 1 ? "Ask " + w0.id + ": " + cut(w0.text) + "." : wrote.length + " asks: " + wrote.map((w) => w.id + ": " + cut(w.text)).join("; ") + ".");
+  const told = await notifyClaude(fitBytes(note), can);
   if (s.sent === sent) { sent.told = told ? TOLD : NOT_TOLD(); renderLine(); }
 }
 // Undo deletes each record of the batch and puts the asks back in the list, in their order, ahead of any stacked since. The box is never written.
 // Each ask goes into the kept list before its delete, so a reload between the two loses none. The window is read from the clock before each delete, as undoLeft does.
 // A delete that fails, or a window that has passed, stops there: the asks from it on stay sent.
+// A reply has no list: its record is deleted, and its words go back in its thread's reply box, ahead of any typed there since.
 async function undoAsk() {
   const s = askState, a = s.sent; if (!a || a.busy || undoLeft(a) <= 0) return;
+  const rk = a.where === "box" ? null : a.where;
   a.busy = true; renderAskForm(); renderLine();
   const ids = a.ids.slice(), texts = a.texts.slice(), gone = [], mine = [];
   let code = "", late = false;
   for (let i = 0; i < ids.length; i++) {
     if (undoLeft(a) <= 0) { late = true; break; }
-    const row = { k: ++askRowN, text: texts[i], state: "undoing" };
-    s.stack.splice(mine.length ? s.stack.indexOf(mine[mine.length - 1]) + 1 : 0, 0, row); mine.push(row); saveAskStack(); renderStack();
+    const row = rk ? null : { k: ++askRowN, text: texts[i], state: "undoing" };
+    if (row) { s.stack.splice(mine.length ? s.stack.indexOf(mine[mine.length - 1]) + 1 : 0, 0, row); mine.push(row); saveAskStack(); renderStack(); }
     try { await state.db.collection("asks").doc(ids[i]).delete(); }
-    catch (e) { code = (e && e.code) || "error"; s.stack = s.stack.filter((r) => r !== row); saveAskStack(); break; }
-    delete row.state;
+    catch (e) { code = (e && e.code) || "error"; if (row) { s.stack = s.stack.filter((r) => r !== row); saveAskStack(); } break; }
+    if (row) delete row.state;
     if (s.map) delete s.map[ids[i]];
     gone.push({ id: ids[i], text: texts[i] });
     saveAskStack();
   }
   a.busy = false;
   a.ids = a.ids.slice(gone.length); a.texts = a.texts.slice(gone.length);
-  s.note = ""; s.copyBox = "";
-  if (a.ids.length) { s.line = late ? { kind: "late", n: a.ids.length } : { kind: "undofail", code: code || "error" }; if (late) $("askText").focus({ preventScroll: true }); }
-  else if (s.sent === a) { clearInterval(askTimer); s.sent = null; s.line = { kind: "undone", n: gone.length }; $("askText").focus({ preventScroll: true }); }
+  if (!rk) { s.note = ""; s.copyBox = ""; }
+  if (a.ids.length) { s.line = late ? { kind: "late", n: a.ids.length, where: a.where } : { kind: "undofail", code: code || "error", where: a.where }; if (late && !rk) $("askText").focus({ preventScroll: true }); }
+  else if (s.sent === a) {
+    clearInterval(askTimer); s.sent = null; s.line = { kind: "undone", n: gone.length, where: a.where };
+    if (rk) { const rp = repOf(rk); rp.text = rp.text.trim() ? texts[0] + "\n\n" + rp.text : texts[0]; rp.open = true; rp.err = ""; rp.note = ""; saveReplyDraft(rk); }
+    else $("askText").focus({ preventScroll: true });
+  }
   saveAskStack(); renderAsks();
+  if (rk && s.line && s.line.kind === "undone") { const ta = $("rt-" + rk); if (ta) ta.focus({ preventScroll: true }); }
   if (gone.length) notifyClaude(fitBytes("Undone on the waiting page. " + (gone.length === 1 ? "Ask " + gone[0].id + " is withdrawn." : "Asks " + gone.map((g) => g.id).join(", ") + " are withdrawn.")), await canTell());
 }
 // Copy ask copies the words of one row, or every ask in the list and the box. A refused clipboard leaves them in a box to select.
@@ -2374,7 +2538,7 @@ async function copyAsk(only) {
   const cb = $("askCopyBox"); if (cb) { cb.focus(); cb.select(); }
 }
 $("askAdd").addEventListener("click", addAsk);
-$("askSend").addEventListener("click", sendAsk);
+$("askSend").addEventListener("click", () => sendAsk());
 $("askText").addEventListener("input", () => { clearAskNotes(); saveAskDraft(); renderAskForm(); renderLine(); renderStack(); });
 
 /* ---------- Designs: each mockup is stored whole in this page and shown in a sandboxed frame ---------- */
@@ -2546,7 +2710,7 @@ let hoverItem = null;
 document.addEventListener("mouseover", (e) => { const c = e.target.closest && e.target.closest(".card"); if (c) hoverItem = c.id.replace("item-", ""); });
 document.addEventListener("keydown", (e) => {
   if (!$("dsheet").hidden) { if (e.key === "Escape") closeDesign(); else if (e.key === "ArrowLeft") showDesign(dAt - 1); else if (e.key === "ArrowRight") showDesign(dAt + 1); return; }
-  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); if (e.target.closest && e.target.closest("#asks")) sendAsk(); else sendAll(); return; }
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); const rf = e.target.closest && e.target.closest(".replyform"); if (rf) sendAsk(rf.id.slice(3)); else if (e.target.closest && e.target.closest("#asks")) sendAsk(); else sendAll(); return; }
   if (e.target.closest && e.target.closest("textarea,input[type=text]")) return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const fc = document.activeElement && document.activeElement.closest && document.activeElement.closest(".card");
