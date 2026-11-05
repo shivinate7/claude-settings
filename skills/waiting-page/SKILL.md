@@ -302,7 +302,8 @@ timer, no watcher.
 
 Each claude.ai artifact a repo holds is one entry in the `artifacts` key of its extras file
 (`python3 ~/.claude/lint/layout.py artifacts <repo root>` prints them). An entry has `id`, `url`, `role` and
-`account`. A role other than `waiting-page` also has `collections`, the collections to export. `id` is a slug of
+`account`. A role other than `waiting-page` also has `collections`, the collections to export. An empty list
+(`"collections": []`) makes a page-only entry: its page and files export, and no database does. `id` is a slug of
 32 characters or fewer. `account` is a plain label such as `work`, never an email. The role `waiting-page` marks
 the repo's waiting page. Its default collections are the five above, and its export folder is the waiting-data
 folder. Any other artifact exports to `artifacts/<id>/`. The old `waiting-page` key stays the fallback when no entry
@@ -327,7 +328,9 @@ the waiting page. A page that moves loses its read access, and the repo then hol
    and each file of `Artifact` action `list` scope `files` to `<folder>/<id>/files/<path>`.
 3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --all <repo root> --fetched <folder> --worktree <worktree>`.
    It prints one line per artifact, `<id>: <verdict>`, with the verdicts of a single export, or
-   `<id>: skipped - no export` for an entry held with `"export": false`, which needs no folder. The page and each
+   `<id>: skipped - no export` for an entry held with `"export": false`, which needs no folder. When the session
+   can read only one account's pages, add `--account <label>`: an entry of another account prints
+   `<id>: skipped - account <its account>`, needs no folder and writes nothing. The page and each
    text file are scanned like the docs; a find refuses that artifact only.
 4. Run `git add` on the export folder of each artifact whose line says `changed`. Then commit and push the record
    branch. A `refused` or `unknown` artifact wrote nothing, so its folder is as it was. Say each such line in

@@ -243,7 +243,8 @@ def artifacts(root):
     """[{id, url, role, account, collections, export}] from the "artifacts" key of `root`'s extras file, in order; []
     for a repo with no extras file or no key. `collections` and `export` are filled in: the waiting-page role exports
     the five waiting collections to the waiting-data folder of the record branch, any other role needs its own
-    `collections` and exports to `artifacts/<id>/`. An entry with `"export": false` (never the waiting-page role) is held and never exported: it needs
+    `collections` and exports to `artifacts/<id>/`. A page-only entry (any other role, `"collections": []`) exports its page
+    and files and no database; an empty list is refused on the waiting-page role, and a missing key on any other. An entry with `"export": false` (never the waiting-page role) is held and never exported: it needs
     no collections and reads with `export` False and `collections` []. LayoutError, naming the entry by its id, for an email as account, a
     repeated id, an id over 32 characters, a url that is no artifact link, a second waiting-page role or an unsafe path."""
     found = _repo_keys(root).get(ARTIFACTS)
@@ -276,7 +277,7 @@ def artifacts(root):
             raise LayoutError("%s: %s (id %s) is the waiting page and cannot be held with export false" % (where, label, entry_id))
         if "collections" in item:
             names = item["collections"]
-            if not isinstance(names, list) or not names or len(set(names)) != len(names) \
+            if not isinstance(names, list) or (not names and role == WAITING_ROLE) or len(set(names)) != len(names) \
                     or not all(isinstance(n, str) and COLLECTION.fullmatch(n) for n in names):
                 raise LayoutError("%s: %s (id %s) collections is not a list of distinct collection names" % (where, label, entry_id))
         elif no_export:

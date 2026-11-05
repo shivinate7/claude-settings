@@ -46,7 +46,7 @@ neither one of the five collections nor `page/`, or one doc over the byte cap.
 Every artifact, the step "Before you switch Claude accounts":
 
     python3 ~/.claude/skills/waiting-page/export_page.py --all REPO_ROOT --fetched DIR --worktree RECORD_WORKTREE
-        [--allow-empty COLLECTION]
+        [--allow-empty COLLECTION] [--account LABEL]
 
 REPO_ROOT holds the extras file with the artifacts registry (lint/layout.py `artifacts()`). DIR holds one folder per
 artifact id, each laid out as in a single export, plus `page.html` and `files/<path>` (the page's supporting files).
@@ -55,7 +55,10 @@ waiting-data folder; any other artifact: `artifacts/<id>/`), with the same scan 
 `<id>/page.html` lands at `page/page.html` there, and `<id>/files/<path>` at `page/files/<path>`; a waiting-page entry
 also exports its designData block. A supporting file no longer fetched stays in the copy; history is the delete.
 An entry with `"export": false` prints `<id>: skipped - no export`, needs no folder in DIR, writes nothing and
-counts as exit 0. Each other artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
+counts as exit 0. An entry with `"collections": []` is page-only: its page and files export, and no database does.
+With --account LABEL, an entry whose account differs prints `<id>: skipped - account <its account>` and is treated the
+same way, so a session that can read only one account's pages exports those and holds the rest. Without the flag every
+entry exports. Each other artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
 unknown leaves its own folder as it was and holds back no other. Exit: 0 when every artifact is changed or same; else
 the worst of 1 (refused), 2 (unknown: also a registry that is missing, empty or unreadable) and 3 (a crash).
 
@@ -421,7 +424,7 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
     return "changed %d" % changed if changed else "same"
 
 
-def export_all(root, fetched, worktree, allow_empty):
+def export_all(root, fetched, worktree, allow_empty, account=None):
     """Export each registry artifact of the repo at `root`; print one line per artifact; the exit code."""
     sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
     sys.path.insert(1, os.path.join(os.path.expanduser("~"), ".claude", "lint"))
@@ -437,6 +440,9 @@ def export_all(root, fetched, worktree, allow_empty):
         name = entry["id"]
         if entry["export"] is False:  # held in the registry, never exported: no folder needed, nothing written
             print("%s: skipped - no export" % name)
+            continue
+        if account is not None and entry["account"] != account:  # a page this session cannot read: no folder needed
+            print("%s: skipped - account %s" % (name, entry["account"]))
             continue
         folder = os.path.join(fetched, name)
         page = os.path.join(folder, PAGE_FILE)
@@ -510,6 +516,7 @@ def main(argv):
                     help="a collection that really emptied, so its docs leave the copy")
     ap.add_argument("--all", help="the repo root whose artifacts registry lists each artifact to export")
     ap.add_argument("--worktree", help="with --all: the record branch worktree each artifact's export path is under")
+    ap.add_argument("--account", help="with --all: export only the entries of this account label; skip the rest")
     ap.add_argument("--rebuild", help="the waiting-data folder to read batches from")
     ap.add_argument("--batches", help="the folder to write batch-NNN.json into")
     args = ap.parse_args(argv)
@@ -518,11 +525,13 @@ def main(argv):
     if [all_mode, export_mode, rebuild_mode].count(True) != 1 or (all_mode and not (args.all and args.fetched and args.worktree)) \
             or (export_mode and not (args.fetched and args.out)) or (rebuild_mode and not (args.rebuild and args.batches)):
         ap.error("use --fetched DIR --out DIR [--page FILE], or --all ROOT --fetched DIR --worktree DIR, or --rebuild DIR --batches DIR")
+    if args.account is not None and not all_mode:
+        ap.error("--account goes with --all")
     if export_mode and any(name not in COLLECTIONS for name in args.allow_empty):
         ap.error("--allow-empty names one of: %s" % ", ".join(COLLECTIONS))
     try:
         if all_mode:
-            return export_all(os.path.abspath(args.all), args.fetched, args.worktree, args.allow_empty)
+            return export_all(os.path.abspath(args.all), args.fetched, args.worktree, args.allow_empty, args.account)
         if export_mode:
             verdict = export(args.fetched, args.out, args.page, args.allow_empty)
         else:
