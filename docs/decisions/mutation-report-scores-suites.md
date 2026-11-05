@@ -86,7 +86,7 @@ Owner, item `mutation-ci-job`, pick d, 2026-11-05 07:41 CST: "Report only, plus 
 - `--known-bugs` plants each defect of `.github/known-bugs.json` in a checkout of HEAD and runs its catcher suite. A suite that goes red with an assertion on the planted copy is CAUGHT. A suite that passes, crashes or times out is a MISS. A stale or ambiguous anchor, and a catcher not green on the clean copy, are UNKNOWN. It exits 1 on any MISS or UNKNOWN (decision `ci-unknown-is-red`), and is the only part of the job that can fail it. The owner chose this because each of the three plants was deterministic: 3 runs each, caught every time, offline.
 - `--tests-for PATH` prints the suites that test one file: the `REPORT_TARGETS` suites when the file is listed, else each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it. It is the `select` of the `claude_settings` profile in `REPLAY_PROFILES`.
 
-`hooks/test_mutate_ci.py` pins the three modes and the list. A file with no `test_<stem>` beside it has no suite, so its mutants are not run and its lines read untested: an untested line may be a file `--tests-for` does not map.
+`hooks/test_mutate_ci.py` pins the three modes and the list. A file with no `test_<stem>` beside it has no suite, so its mutants are not run and its lines read untested. An untested line may be a file that `--tests-for` does not map.
 
 On 2026-11-02 no CI check read the replay. The CI report above is the first.
 
