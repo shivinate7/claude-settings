@@ -19,6 +19,7 @@ change commits on top. The check runs as the copy at lint/check_red_run.py in th
 module path, which a stub run uses.
 """
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -172,11 +173,18 @@ class CheckCase(Fixture):
         rel = self.new_test_path()
         sha = self.commit("add widget tests", {rel: TEST_TEXT})
         out = self.assertFlagged(sha, "add widget tests", rel)
-        # The check's message states both trailer forms, and how to add a trailer to a pushed commit.
+        # The check's message states both trailer forms, and how to add a trailer to a commit.
         self.assertIn("Red-run: <command> -> <N> failed on <sha>", out, out)
         self.assertIn("Red-run: none: <reason>", out, out)
         self.assertIn("reword", out, out)
-        self.assertIn("--force-with-lease", out, out)
+        # The remedy names no forced push and no interactive rebase, which the sessions cannot run.
+        self.assertNotIn("--force", out, "remedy names a forced push:\n" + out)
+        self.assertNotIn("rebase -i", out, "remedy names an interactive rebase:\n" + out)
+        self.assertIsNone(re.search(r"(?:^|[\s`])\+[\w/:]", out), "remedy names a + refspec:\n" + out)
+        # A commit not yet pushed is reworded and pushed plainly; a pushed one goes to a new branch.
+        self.assertIsNotNone(re.search(r"git push(?!\s+-)", out),
+                             "remedy names no plain git push for an unpushed commit:\n" + out)
+        self.assertIn("new branch", out.lower(), "remedy names no new-branch route for a pushed commit:\n" + out)
 
     def test_valid_red_run_trailer_passes(self):
         for red in (GOOD, "Red-run: python3 lint/test_widgets.py -> 1 failed on abcdef1",
