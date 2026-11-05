@@ -2483,10 +2483,11 @@ async function sendAsk(rk) {
     askTimer = setInterval(() => { if (!s.sent || undoLeft(s.sent) <= 0) clearInterval(askTimer); renderAskForm(); syncUndo(); }, 1000);
   } else if (rp) rp.err = batch[0].err;
   else s.line = { kind: "allfail", code: batch.find((r) => r.err).err, n: batch.length, where };
-  if (rp && sent) { rp.open = false; rp.text = ""; rp.err = ""; rp.note = ""; saveReplyDraft(rk); }
+  // Only the words that were sent leave the box: words typed while the write ran stay as the draft.
+  if (rp && sent) { const cur = rp.text.trim(), was = batch[0].text; rp.open = false; rp.text = cur === was ? "" : cur.startsWith(was) ? cur.slice(was.length).trim() : rp.text; rp.err = ""; rp.note = ""; saveReplyDraft(rk); }
   renderAsks();
-  // The box closed under the focus; it goes to Reply, unless the owner has moved on to something else.
-  if (rp && sent && (!document.activeElement || document.activeElement === document.body)) { const b = $("reply-" + rk); if (b) b.focus({ preventScroll: true }); }
+  // The form was rebuilt under the focus (closed on success, its Send off while it saved on failure): focus goes to Reply or the box, unless the owner has moved on.
+  if (rp && (!document.activeElement || document.activeElement === document.body)) { const b = $(sent ? "reply-" + rk : "rt-" + rk); if (b) b.focus({ preventScroll: true }); }
   if (!sent) return;
   const cut = (t) => { const c = plain(t); return c.slice(0, ASK_NOTICE) + (c.length > ASK_NOTICE ? "…" : ""); };
   const w0 = wrote[0];

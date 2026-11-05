@@ -95,7 +95,7 @@ today's Send path: the 8-second Undo, the "Send waits until Undo ends" lock and 
 - Per thread, keyed by the root ask id `<k>`: `#reply-<k>` (Reply, `aria-expanded`, `aria-controls="rf-<k>"`, `data-ask`),
   `form#rf-<k>.askform.replyform`, `#rt-<k>` textarea, `#rh-<k>` hint (`aria-live="polite"`), `#rx-<k>` Close, `#rs-<k>` Send reply,
   `#rc-<k>` Copy reply. The line: `p.sline` (`role="status"`) in `.replyend`; its Undo keeps id `askUndo` (one Undo at a time).
-- `.myreply` (id = the reply's ask id), `.replyend`, `p.fwait` in `li.askc.folded`, `.reline` (option "Own row" only).
+- `.myreply` (id = the reply's ask id), `.replyend`, `p.fwait` in `li.askc.folded`, `.reline` (option "Own row" with its link, and, with no link, the orphan notice of section 3).
 - `askState.sent` gains `where`: `"box"` or the root id, so `renderLine` draws the line at the right place.
 
 ## 8. Sizes and themes
