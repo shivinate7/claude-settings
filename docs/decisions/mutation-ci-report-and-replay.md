@@ -1,4 +1,4 @@
-# Each batch reports its mutation catch share and replays known bugs
+# Each batch reports its mutation catch share and replays known defects
 
 ## The ruling
 
@@ -13,7 +13,7 @@ The modes are part of the one home of mutation testing (`hooks/mutate_guard.py` 
 
 ## Why a replay miss fails the job
 
-A replay miss means that a test which once caught a real bug no longer catches it. The two named incidents were such losses: 3297d8fa (a lane deleted the test that pinned merge.py's ten-minute lock spare) and df25a68d (a fix deleted the tests that pinned its own two fixes). The suites that catch them are back on main, and the replay keeps them there.
+A replay miss means that a test which once caught a real defect no longer catches it. The two named incidents were such losses: 3297d8fa (a lane deleted the test that pinned merge.py's ten-minute lock spare) and df25a68d (a fix deleted the tests that pinned its own two fixes). The suites that catch them are back on main, and the replay keeps them there.
 
 Evidence, 2026-11-05, main 0497265b, each plant applied by hand in a copy of the tree:
 
