@@ -18,11 +18,11 @@ The modes, as the builder implements them. This file is their interface.
   changed mutant the share reads `0/0` with no percentage.
 - `--known-defects FILE --repo REPO [--suite-timeout S] [--log PATH]`. FILE is a JSON list of planted defects. Each defect
   prints one line, `CAUGHT|MISS|UNKNOWN id: name [reason]`. It exits 1 when any defect is MISS or UNKNOWN, else 0. A
-  missing FILE prints one `UNKNOWN` line that names the path, and exits 1. An empty list prints one line and exits 0.
+  missing FILE prints one `UNKNOWN` line that names the path, and exits 1. An empty list prints one line and exits 0, and with `--base REF` an empty list `[]` exits 0 only when REF's list names no entry.
   With `--base REF`, FILE is the head list and REF's list is read with `git show REF:<FILE relative to REPO>`. Each id on
   REF's list needs a head row, unless a commit in `REF..HEAD` has a `Known-defect-removed: <id>` trailer naming that exact
   id. A dropped id prints `MISSING <id>: ...` and exits 1. A REF that does not resolve, a FILE outside REPO, or a head with
-  no list prints an `UNKNOWN` line and exits 1. A REF with no list file checks nothing against it.
+  no list prints an `UNKNOWN` line and exits 1. A REF with no list file checks nothing against it. An entry on REF's list with no `id` reads UNKNOWN.
 - `--tests-for PATH`. It prints the REPORT_TARGETS suites for PATH when listed, and nothing else. Else it prints each
   tracked `test_<stem>.py` and `test_<stem>_*.py` beside PATH. A .py PATH also gets each tracked `test_*.py` in the
   repository that loads the module `<stem>`: an `import`, an `importlib.import_module` or `__import__` call, or a file
@@ -889,6 +889,34 @@ class KnownDefectsBaseTests(unittest.TestCase):
         code, out, err = known_base_run(outside, repo)
         self.assertTrue(any(outside in line for line in unknown_lines(out)),
                         "a list outside the repository must print an UNKNOWN line that names its path\n" + out + err)
+        self.assertEqual(code, 1, "exit %d\n%s%s" % (code, out, err))
+
+    def test_a_trailer_on_a_commit_before_the_base_does_not_excuse_the_drop(self):
+        """The trailer sits on a commit that is an ancestor of REF, so REF..HEAD does not hold it: the drop reads MISSING."""
+        repo = defect_repo()
+        put(repo, {"NOTES.md": "kb-drop was retired before the base.\n"})
+        retired = commit(repo, "Retire kb-drop\n\nKnown-defect-removed: kb-drop")
+        put(repo, {KNOWN_DEFECTS_FILE: list_text([DROP, KEEP])})
+        commit(repo, "List the planted defects")
+        git(repo, "tag", BASE_TAG)
+        listed = head_list(repo, [KEEP], "Drop kb-drop")
+        git(repo, "merge-base", "--is-ancestor", retired, BASE_TAG)  # the fixture: the trailer commit is before the base
+        self.assertIn("kb-drop", base_ids(repo), "the fixture: the base list holds kb-drop")
+        code, out, err = known_base_run(listed, repo)
+        self.assertIn("kb-drop", missing_of(out),
+                      "a trailer on a commit before REF excused kb-drop: only REF..HEAD may name it\n" + out + err)
+        self.assertEqual(code, 1, "exit %d\n%s%s" % (code, out, err))
+
+    def test_a_base_entry_with_no_id_and_an_empty_head_reads_unknown_and_exits_1(self):
+        """An entry on REF's list with no `id` is not skipped: an empty head would read green if it were."""
+        idless = {key: value for key, value in DROP.items() if key != "id"}
+        repo = base_list_repo([idless])
+        listed = head_list(repo, [], "Empty the list")
+        entries = json.loads(show(repo, BASE_TAG, KNOWN_DEFECTS_FILE))
+        self.assertEqual(len(entries), 1, "the fixture: the base list holds one entry")
+        self.assertNotIn("id", entries[0], "the fixture: the base entry has no id")
+        code, out, err = known_base_run(listed, repo)
+        self.assertTrue(unknown_lines(out), "a base entry with no id must read UNKNOWN, not be skipped\n" + out + err)
         self.assertEqual(code, 1, "exit %d\n%s%s" % (code, out, err))
 
 
