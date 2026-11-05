@@ -1355,11 +1355,32 @@ def _build_ctxrepo():
     run_vcs(CTXREPO, "branch", "done")
 
 
+GHDEV_CHECK = {}  # the delay check's thread, and the error it raised, if it raised one
+
+
+def _run_ghdev_check():
+    try:
+        _verify_fake_gh_delay(GHDEV, delay=1)
+    except BaseException as exc:  # _build_ghdev raises it, on the thread that needs the answer
+        GHDEV_CHECK["error"] = exc
+
+
+def _start_ghdev_check():
+    """Run the delay check on a daemon thread. Called once, after build_fixtures has written GHDEV's fake."""
+    thread = threading.Thread(target=_run_ghdev_check, name="ghdev-delay-check", daemon=True)
+    GHDEV_CHECK["thread"] = thread
+    thread.start()
+
+
 def _build_ghdev():
-    # Trust this delay only once it is proven, not assumed: run it now, under the guard's own
-    # narrow PATH, and fail fixture setup outright if it does not really delay. See
-    # _verify_fake_gh_delay's docstring for the defect this catches.
-    _verify_fake_gh_delay(GHDEV, delay=1)
+    # Trust this delay only once it is proven, not assumed: the check runs under the guard's own
+    # narrow PATH and fails fixture setup outright if it does not really delay. See
+    # _verify_fake_gh_delay's docstring for the defect this catches. It takes about a second and starts
+    # with the fixtures, so this waits only for what is left of it, and a run that never names
+    # GHDEV never waits.
+    GHDEV_CHECK["thread"].join()
+    if "error" in GHDEV_CHECK:
+        raise GHDEV_CHECK["error"]
 
 
 def _build_gitmain():
@@ -2118,6 +2139,7 @@ def _build_links():
 
 
 build_fixtures()
+_start_ghdev_check()
 _mark("build_fixtures: eager config, fake gh writes, GHNONE and the link probe")
 
 # Each builder runs the first time a case names one of its paths (see lazy_fixture). A builder's
