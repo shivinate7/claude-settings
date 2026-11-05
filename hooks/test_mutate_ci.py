@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Cases for the mutation CI report and the known-bug replay in hooks/mutate_guard.py: the `--changed`,
-`--known-bugs` and `--tests-for` modes. Standard library only, unittest style.
+"""Cases for the mutation CI report and the known-defect replay in hooks/mutate_guard.py: the `--changed`,
+`--known-defects` and `--tests-for` modes. Standard library only, unittest style.
 
     python3 hooks/test_mutate_ci.py
 
@@ -15,17 +15,17 @@ The modes, as the builder implements them. This file is their interface.
   share. `--log PATH` writes one JSON file with the keys base, head, profile, made, killed, crashed, survived,
   not_run and untested, and writes nothing else into REPO. With no changed mutant the share reads `0/0` with no
   percentage.
-- `--known-bugs FILE --repo REPO [--suite-timeout S] [--log PATH]`. FILE is a JSON list of planted bugs. Each bug
-  prints one line, `CAUGHT|MISS|UNKNOWN id: name [reason]`. It exits 1 when any bug is MISS or UNKNOWN, else 0.
+- `--known-defects FILE --repo REPO [--suite-timeout S] [--log PATH]`. FILE is a JSON list of planted defects. Each defect
+  prints one line, `CAUGHT|MISS|UNKNOWN id: name [reason]`. It exits 1 when any defect is MISS or UNKNOWN, else 0.
 - `--tests-for PATH`. It prints the REPORT_TARGETS suites for PATH when listed, else each tracked `test_<stem>.py`
   and `test_<stem>_*.py` beside it.
 
 Each mode is dispatched from main() in hooks/mutate_guard.py and has an entry point beside `report_main` and
-`replay_main`: `changed_main`, `known_bugs_main`, `tests_for_main`. A case checks for its entry point first and
+`replay_main`: `changed_main`, `known_defects_main`, `tests_for_main`. A case checks for its entry point first and
 fails by name when it is missing. So a red run never reaches the guard campaign that main() runs for an argument it
 does not know.
 
-The real list, `.github/known-bugs.json`, is read at HEAD. Its three pinned entries carry the exact catchers and
+The real list, `.github/known-defects.json`, is read at HEAD. Its three pinned entries carry the exact catchers and
 plants that the coordinator measured. Every entry's `old` text must occur exactly once in its file at HEAD.
 
 Test temp files take the run folder of lint/_test_temp.py. The fixture writers (put, commit, topic, pull_request)
@@ -58,8 +58,8 @@ from test_mutate_replay import commit, pull_request, put, topic  # noqa: E402  t
 
 PY = sys.executable
 CLI_LIMIT = 300  # seconds a mode run may take before its case fails
-KNOWN_BUGS_FILE = ".github/known-bugs.json"
-ENTRY = {"--changed": "changed_main", "--known-bugs": "known_bugs_main", "--tests-for": "tests_for_main"}
+KNOWN_DEFECTS_FILE = ".github/known-defects.json"
+ENTRY = {"--changed": "changed_main", "--known-defects": "known_defects_main", "--tests-for": "tests_for_main"}
 
 RUN = ""  # this run's folder, made in setUpModule and removed in tearDownModule
 CACHE = {}  # the fixture of a case built once per run, where a case reuses it
@@ -238,7 +238,7 @@ def replayed(files):
     return repo, sha
 
 
-def bug_repo():
+def defect_repo():
     """main holds calc.py and six suites. Each suite is green on the clean source, except test_red.py and
     test_boom.py, which are red and crashing on it."""
     repo = new_repo()
@@ -300,19 +300,19 @@ def changed_run(repo, profile, base="main", head="feat", extra=(), log=None, lim
     return run_cli(args + list(extra))
 
 
-def known_run(bugs, repo, extra=(), log=None):
-    """`--known-bugs` on `bugs`, a list of planted bugs, against `repo`."""
-    spec = os.path.join(fresh(), "known-bugs.json")
+def known_run(defects, repo, extra=(), log=None):
+    """`--known-defects` on `defects`, a list of planted defects, against `repo`."""
+    spec = os.path.join(fresh(), "known-defects.json")
     with open(spec, "w", encoding="utf-8") as handle:
-        json.dump(bugs, handle)
-    args = ["--known-bugs", spec, "--repo", repo] + list(extra)
+        json.dump(defects, handle)
+    args = ["--known-defects", spec, "--repo", repo] + list(extra)
     if log is not None:
         args += ["--log", log]
     return run_cli(args)
 
 
-def bug(bug_id, old, new, suite, file="calc.py"):
-    return {"id": bug_id, "name": bug_id, "file": file, "old": old, "new": new, "argv": [PY, suite],
+def defect(defect_id, old, new, suite, file="calc.py"):
+    return {"id": defect_id, "name": defect_id, "file": file, "old": old, "new": new, "argv": [PY, suite],
             "classify": "fail_line"}
 
 
@@ -338,12 +338,12 @@ def untested_of(out):
 
 
 def verdicts_of(out):
-    """{bug id: verdict} from the verdict lines. An id on two lines is a FAIL."""
+    """{defect id: verdict} from the verdict lines. An id on two lines is a FAIL."""
     found = VERDICT.findall(out)
-    ids = [bug_id for _verdict, bug_id in found]
+    ids = [defect_id for _verdict, defect_id in found]
     if len(ids) != len(set(ids)):
-        raise AssertionError("a bug id has two verdict lines: %s" % ids)
-    return {bug_id: verdict for verdict, bug_id in found}
+        raise AssertionError("a defect id has two verdict lines: %s" % ids)
+    return {defect_id: verdict for verdict, defect_id in found}
 
 
 def read_log(path):
@@ -556,89 +556,89 @@ class ChangedTests(unittest.TestCase):
         self.assertEqual(code, 2, "a profile name the repository does not hold is a bad argument")
 
 
-class KnownBugsTests(unittest.TestCase):
-    """`--known-bugs`: CAUGHT, MISS and UNKNOWN, the exit codes, the repository left as found, the log."""
+class KnownDefectsTests(unittest.TestCase):
+    """`--known-defects`: CAUGHT, MISS and UNKNOWN, the exit codes, the repository left as found, the log."""
 
     def test_a_caught_mutant_reads_caught_and_exits_0(self):
-        repo = bug_repo()
-        code, out, err = known_run([bug("kb-caught", "return a + b", "return a - b", "test_calc.py")], repo)
+        repo = defect_repo()
+        code, out, err = known_run([defect("kb-caught", "return a + b", "return a - b", "test_calc.py")], repo)
         self.assertEqual(verdicts_of(out), {"kb-caught": "CAUGHT"}, out + err)
-        self.assertEqual(code, 0, "all bugs caught must exit 0: exit %d" % code)
+        self.assertEqual(code, 0, "all defects caught must exit 0: exit %d" % code)
 
     def test_a_suite_that_pins_nothing_reads_miss_and_exits_1(self):
-        repo = bug_repo()
-        code, out, err = known_run([bug("kb-miss", "return a * b", "return 0", "test_nothing.py")], repo)
+        repo = defect_repo()
+        code, out, err = known_run([defect("kb-miss", "return a * b", "return 0", "test_nothing.py")], repo)
         self.assertEqual(verdicts_of(out), {"kb-miss": "MISS"}, out + err)
         self.assertEqual(code, 1, "a MISS must exit 1: exit %d" % code)
 
     def test_a_crash_is_a_miss_not_a_catch(self):
-        repo = bug_repo()
-        code, out, err = known_run([bug("kb-crash", "return a * b", "return None", "test_crash.py")], repo)
+        repo = defect_repo()
+        code, out, err = known_run([defect("kb-crash", "return a * b", "return None", "test_crash.py")], repo)
         self.assertEqual(verdicts_of(out), {"kb-crash": "MISS"}, "a suite that throws reads MISS, never CAUGHT\n" + out)
         self.assertEqual(code, 1, "exit %d" % code)
 
     def test_a_mutant_that_hangs_past_the_suite_timeout_reads_miss(self):
-        repo = bug_repo()
-        code, out, err = known_run([bug("kb-hang", "return a + b", "return a - b", "test_hang.py")], repo,
+        repo = defect_repo()
+        code, out, err = known_run([defect("kb-hang", "return a + b", "return a - b", "test_hang.py")], repo,
                                    extra=["--suite-timeout", "5"])
         self.assertEqual(verdicts_of(out), {"kb-hang": "MISS"}, "a timeout reads MISS, never CAUGHT\n" + out)
         self.assertEqual(code, 1, "exit %d" % code)
 
     def test_a_stale_anchor_reads_unknown_and_its_mutant_never_runs(self):
-        repo = bug_repo()
-        code, out, err = known_run([bug("kb-stale", "return a ** b", "return a", "test_nothing.py")], repo)
+        repo = defect_repo()
+        code, out, err = known_run([defect("kb-stale", "return a ** b", "return a", "test_nothing.py")], repo)
         self.assertEqual(verdicts_of(out), {"kb-stale": "UNKNOWN"}, "a missing anchor reads UNKNOWN\n" + out)
         self.assertEqual(code, 1, "UNKNOWN must exit 1: exit %d" % code)
 
     def test_an_anchor_found_twice_reads_unknown_as_ambiguous(self):
-        repo = bug_repo()
-        code, out, err = known_run([bug("kb-twice", "return a", "return 0", "test_nothing.py")], repo)
+        repo = defect_repo()
+        code, out, err = known_run([defect("kb-twice", "return a", "return 0", "test_nothing.py")], repo)
         self.assertEqual(verdicts_of(out), {"kb-twice": "UNKNOWN"}, "an anchor in two places reads UNKNOWN\n" + out)
         self.assertEqual(code, 1, "exit %d" % code)
 
     def test_a_red_clean_suite_reads_unknown_and_is_never_caught(self):
-        repo = bug_repo()
-        code, out, err = known_run([bug("kb-red", "return a + b", "return a - b", "test_red.py")], repo)
+        repo = defect_repo()
+        code, out, err = known_run([defect("kb-red", "return a + b", "return a - b", "test_red.py")], repo)
         self.assertEqual(verdicts_of(out), {"kb-red": "UNKNOWN"},
                          "a suite red on the clean copy is a control failure: UNKNOWN, never CAUGHT\n" + out)
         self.assertEqual(code, 1, "exit %d" % code)
 
     def test_a_clean_suite_that_crashes_reads_unknown(self):
-        repo = bug_repo()
-        code, out, err = known_run([bug("kb-boom", "return a + b", "return a - b", "test_boom.py")], repo)
+        repo = defect_repo()
+        code, out, err = known_run([defect("kb-boom", "return a + b", "return a - b", "test_boom.py")], repo)
         self.assertEqual(verdicts_of(out), {"kb-boom": "UNKNOWN"}, "a control that crashes reads UNKNOWN\n" + out)
         self.assertEqual(code, 1, "exit %d" % code)
 
-    def test_one_line_per_bug_and_all_caught_exits_0(self):
-        repo = bug_repo()
-        bugs = [bug("kb-caught", "return a + b", "return a - b", "test_calc.py"),
-                bug("kb-mul", "return a * b", "return a + b", "test_calc.py")]
-        code, out, err = known_run(bugs, repo)
+    def test_one_line_per_defect_and_all_caught_exits_0(self):
+        repo = defect_repo()
+        defects = [defect("kb-caught", "return a + b", "return a - b", "test_calc.py"),
+                defect("kb-mul", "return a * b", "return a + b", "test_calc.py")]
+        code, out, err = known_run(defects, repo)
         self.assertEqual(verdicts_of(out), {"kb-caught": "CAUGHT", "kb-mul": "CAUGHT"}, out + err)
         self.assertEqual(code, 0, "exit %d" % code)
 
     def test_an_empty_list_prints_one_line_and_exits_0(self):
-        repo = bug_repo()
+        repo = defect_repo()
         code, out, err = known_run([], repo)
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
         self.assertEqual(len(out.strip().splitlines()), 1, "an empty list prints one line:\n" + out)
 
-    def test_a_missing_file_exits_0_and_says_no_known_bugs_listed(self):
-        repo = bug_repo()
+    def test_a_missing_file_exits_0_and_says_no_known_defects_listed(self):
+        repo = defect_repo()
         absent = os.path.join(fresh(), "absent.json")
-        code, out, err = run_cli(["--known-bugs", absent, "--repo", repo])
+        code, out, err = run_cli(["--known-defects", absent, "--repo", repo])
         self.assertEqual(code, 0, "a missing file is not a failure: exit %d\n%s%s" % (code, out, err))
-        self.assertIn("no known bugs listed", out)
+        self.assertIn("no known defects listed", out)
 
     def test_the_repository_is_left_as_found_and_the_plant_runs_on_head(self):
-        repo = bug_repo()
+        repo = defect_repo()
         edited = os.path.join(repo, "calc.py")
         with open(edited, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(CALC_BASE.replace("return a + b", "return (a + b)"))
         before = (status_of(repo), rev(repo, "HEAD"))
         self.assertIn("calc.py", before[0], "the fixture: the working tree must be dirty")
         # The working copy has no `return a + b`, so the anchor is stale there. HEAD has it once.
-        code, out, err = known_run([bug("kb-caught", "return a + b", "return a - b", "test_calc.py")], repo)
+        code, out, err = known_run([defect("kb-caught", "return a + b", "return a - b", "test_calc.py")], repo)
         self.assertEqual(verdicts_of(out), {"kb-caught": "CAUGHT"}, "the plant reads the HEAD tree, not the working tree\n"
                          + out)
         self.assertEqual((status_of(repo), rev(repo, "HEAD")), before, "the run changed the repository")
@@ -647,24 +647,24 @@ class KnownBugsTests(unittest.TestCase):
                              "the run changed the working copy of calc.py")
 
     def test_the_log_is_one_json_file_and_the_repository_is_untouched(self):
-        repo = bug_repo()
+        repo = defect_repo()
         before = (tree_of(repo), status_of(repo))
         folder, log = fixture_log()
-        bugs = [bug("kb-caught", "return a + b", "return a - b", "test_calc.py"),
-                bug("kb-miss", "return a * b", "return 0", "test_nothing.py")]
-        code, out, err = known_run(bugs, repo, log=log)
+        defects = [defect("kb-caught", "return a + b", "return a - b", "test_calc.py"),
+                defect("kb-miss", "return a * b", "return 0", "test_nothing.py")]
+        code, out, err = known_run(defects, repo, log=log)
         self.assertEqual(code, 1, "exit %d" % code)
         self.assertEqual(os.listdir(folder), ["log.json"], "the log folder must hold exactly the log")
         with open(log, encoding="utf-8") as handle:
             raw = handle.read()
         json.loads(raw)
-        for bug_id in ("kb-caught", "kb-miss"):
-            self.assertIn(bug_id, raw, "the log names %s" % bug_id)
+        for defect_id in ("kb-caught", "kb-miss"):
+            self.assertIn(defect_id, raw, "the log names %s" % defect_id)
         self.assertEqual((tree_of(repo), status_of(repo)), before, "the run wrote into the repository")
 
-    def test_known_bugs_without_repo_is_a_bad_argument_exit_2(self):
-        spec = profile_file([bug("kb-caught", "return a + b", "return a - b", "test_calc.py")])
-        code, out, err = run_cli(["--known-bugs", spec])
+    def test_known_defects_without_repo_is_a_bad_argument_exit_2(self):
+        spec = profile_file([defect("kb-caught", "return a + b", "return a - b", "test_calc.py")])
+        code, out, err = run_cli(["--known-defects", spec])
         self.assertEqual(code, 2, "--repo is required: exit %d" % code)
 
 
@@ -687,30 +687,30 @@ class RealListTests(unittest.TestCase):
 
     def listed(self):
         """The entries at HEAD, or [] when the list is not committed."""
-        done = subprocess.run(["git", "show", "HEAD:%s" % KNOWN_BUGS_FILE], cwd=REPO, capture_output=True,
+        done = subprocess.run(["git", "show", "HEAD:%s" % KNOWN_DEFECTS_FILE], cwd=REPO, capture_output=True,
                               text=True, encoding="utf-8")
         if done.returncode != 0:
             return []
         return json.loads(done.stdout)
 
-    def test_the_list_holds_the_three_pinned_bugs_by_id(self):
+    def test_the_list_holds_the_three_pinned_defects_by_id(self):
         entries = self.listed()
-        self.assertTrue(entries, "%s lists no bugs at HEAD" % KNOWN_BUGS_FILE)
+        self.assertTrue(entries, "%s lists no defects at HEAD" % KNOWN_DEFECTS_FILE)
         ids = {entry.get("id") for entry in entries}
-        for bug_id in self.PINNED:
-            self.assertIn(bug_id, ids, "%s has no entry %s" % (KNOWN_BUGS_FILE, bug_id))
+        for defect_id in self.PINNED:
+            self.assertIn(defect_id, ids, "%s has no entry %s" % (KNOWN_DEFECTS_FILE, defect_id))
 
     def test_each_pinned_entry_carries_the_coordinator_plant_and_catcher(self):
         entries = {entry.get("id"): entry for entry in self.listed()}
-        self.assertTrue(entries, "%s lists no bugs at HEAD" % KNOWN_BUGS_FILE)
-        for bug_id, want in self.PINNED.items():
-            self.assertIn(bug_id, entries, "%s has no entry %s" % (KNOWN_BUGS_FILE, bug_id))
+        self.assertTrue(entries, "%s lists no defects at HEAD" % KNOWN_DEFECTS_FILE)
+        for defect_id, want in self.PINNED.items():
+            self.assertIn(defect_id, entries, "%s has no entry %s" % (KNOWN_DEFECTS_FILE, defect_id))
             for field, value in want.items():
-                self.assertEqual(entries[bug_id].get(field), value, "%s: %s differs" % (bug_id, field))
+                self.assertEqual(entries[defect_id].get(field), value, "%s: %s differs" % (defect_id, field))
 
     def test_every_entry_anchor_is_present_exactly_once_at_head(self):
         entries = self.listed()
-        self.assertTrue(entries, "%s lists no bugs at HEAD" % KNOWN_BUGS_FILE)
+        self.assertTrue(entries, "%s lists no defects at HEAD" % KNOWN_DEFECTS_FILE)
         for entry in entries:
             for field in ("id", "name", "file", "old", "new", "argv", "classify"):
                 self.assertIn(field, entry, "%s has no %s" % (entry.get("id"), field))
