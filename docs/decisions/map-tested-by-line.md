@@ -14,6 +14,7 @@ Lane `map-tested-by-line`, 2026-11-05. Banchi's retired `docs/map.py` held `test
   - It imports the file, through the import reader that MAP9 uses. A type-only import does not count.
   - Or it imports one `__init__.py` or `index.*` that re-exports the file (one hop).
   - Or a string in its code is the file's path, from the test's folder or the repository root. This covers a test that runs the file as a subprocess. Comments and docstrings never count (rule `building-scanner-respects-strings`).
+  - A Python import of a package loads its `__init__.py`. MAP9 `uses` facts read the same way.
   - A test in another language, or a run with no `python3`, is an unknown read and fails.
 - **No new config key.** The line names its tests.
 - **Format version 5.** The step from 4 to 5 changes no file. It makes an older copy of the skill refuse the map.
@@ -27,8 +28,6 @@ Banchi checked two things. Each id was in its harness `TESTS` registry. And the 
 - That the test asserts anything about the file.
 - That a path named in a string is run, and not only read as data.
 - That a file is untested: the old empty `tested_by: []` has no form here.
-
-- A Python test that imports a package loads that package's `__init__.py`. MAP9 `uses` facts read the same way.
 
 ## Cost
 
