@@ -2369,8 +2369,12 @@ BANCHI_SELECT = ["python3", "scripts/tests-for.py", "{path}"]
 REPLAY_PROFILES = {
     # claude_settings: the CI report (`--changed`) reads this repository by it. A suite is a `test_*.py` file anywhere;
     # `--tests-for` (below) names the suites of a file. No install: the suites use the standard library.
+    # Product code is a `.py` file under hooks, lint, merge, janitor, actions or skills. `code_not` excludes a file named
+    # `test_*.py` or `_test_*.py`, and any file under a folder named exactly `test`, `tests`, `fixture` or `fixtures`.
+    # A `*_test.py` file or a folder such as `fixtures_cli` stays product.
     "claude_settings": {
-        "code": r"^(hooks|lint|merge|janitor|actions)/.*\.py$", "code_not": r"(^|/)(test_|_test_)[^/]*\.py$",
+        "code": r"^(hooks|lint|merge|janitor|actions|skills)/.*\.py$",
+        "code_not": r"(^|/)(test_|_test_)[^/]*\.py$|(^|/)tests?/|(^|/)fixtures?/",
         "tests": r"(^|/)test_[^/]*\.py$",
         "argv": ["python3", "{suite}"], "classify": "fail_line", "install": None, "sparse_skip": [],
         "select": ["python3", "hooks/mutate_guard.py", "--tests-for", "{path}"],
