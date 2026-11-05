@@ -12,7 +12,7 @@ do not use this skill in that repository.
 
 The repository values live in `map.config.json` at the repository root. The keys are `title`,
 `codeExtensions`, `formatVersion`, `mapPaths`, `screenKeys`, `modelSeam`, `workerStage`, `migrationsDir`, `decisionsDir`, `decisionIdPattern` and `requireAllKeys`.
-`mapPaths` is a list of path prefixes: MAP1 asks for a map line only for the code files under them. With no `mapPaths`, MAP1 covers the whole repository.
+`mapPaths` is a list of path prefixes: MAP1 asks for a map line only for the code files under them, and MAP7 reads only those files. With no `mapPaths`, MAP1 and MAP7 cover the whole repository.
 `decisionsDir` is a folder prefix, and `decisionIdPattern` a regex string for one decision id, such as `D\d+`. Set both or neither: one alone is an error.
 `scripts/lib/map-config.mjs` checks the whole shape.
 
