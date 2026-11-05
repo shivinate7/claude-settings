@@ -9,7 +9,8 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import ast, atexit, contextlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import ast, atexit, base64, contextlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import ctypes  # the Windows-branch test patches os.name; ctypes' own import would then take the Windows path on Linux, so it loads here first
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -299,6 +300,10 @@ class Env(unittest.TestCase):
     def lock_ref(self):
         return "refs/heads/merge-lock/main" in self.refs()
 
+    def lock_text(self):
+        sh(self.co, "git", "fetch", "-q", "origin", "refs/heads/merge-lock/main")
+        return sh(self.co, "git", "log", "-1", "--format=%B", "FETCH_HEAD")
+
     def worktrees(self):
         return sh(self.co, "git", "worktree", "list").count("\n") + 1
 
@@ -314,6 +319,14 @@ class Env(unittest.TestCase):
         p = os.path.join(self.t, "hook.sh")
         put(p, fn_script)
         os.environ["MERGE_TEST_HOOK"] = p
+
+    PUSH_REFUSAL = "refused by the test"  # the text the refusing pre-receive hook prints on stderr
+
+    def refuse_pushes(self, text=PUSH_REFUSAL):
+        """Every ref update to the origin is refused from here on: a pre-receive hook that prints `text` and exits 1."""
+        hook = os.path.join(self.bare, "hooks", "pre-receive")
+        put(hook, f"#!/bin/sh\necho '{text}' >&2\nexit 1\n")
+        os.chmod(hook, 0o755)
 
 class Flow(Env):
     def test_preview_presses_nothing(self):
@@ -794,7 +807,13 @@ class Race(Env):
         # Both runs read "no lock" before either wrote. Only the create-only push can tell them apart.
         self.lock.acquire("main", 600)
         lock2 = merge.GitLock(self.other, now=lambda: self.now)
-        lock2.read = lambda b, ref=None: None
+        real_read, stale = lock2.read, [True]
+        def stale_first_read(b, ref=None):  # the stale view answers the first read of the main ref only; the re-read after the push is real
+            if stale and ref is None:
+                stale.clear()
+                return None
+            return real_read(b, ref)
+        lock2.read = stale_first_read
         with self.assertRaises(merge.Held):
             lock2.acquire("main", 600)
 
@@ -825,10 +844,6 @@ class CloudProxy(Env):
                   "  case $ref in refs/heads/*) ;; *) echo 'proxy: 403 ref' >&2; exit 1;; esac\n"
                   "done\n")
         os.chmod(hook, 0o755)
-
-    def lock_text(self):
-        sh(self.co, "git", "fetch", "-q", "origin", "refs/heads/merge-lock/main")
-        return sh(self.co, "git", "log", "-1", "--format=%B", "FETCH_HEAD")
 
     def test_a_full_merge_through_the_proxy_lands_and_leaves_an_expired_lock(self):
         rc, out = self.run_merge("7", "--confirm")
@@ -881,6 +896,93 @@ class CloudProxy(Env):
             self.assertIsInstance(merge.default_lock(self.co), merge.GitLock)
         with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE": ""}):
             self.assertIsInstance(merge.default_lock(self.co), merge.GhLock)
+
+class LockRetake(Env):
+    """GitLock.acquire when its lease push fails (decision merge-lock). The ref is read again: a moved ref is another run's take and stays Held;
+    an unchanged ref is a refused push, which stops and prints the push output. Held is a Stop too, so each refusal case asserts it is not a Held."""
+    EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+    def released_lock(self):
+        """A released lock on origin, pushed by the product's own release, so its expiry reads 0. -> its sha."""
+        c, out = merge.GitLock(self.other, now=lambda: self.now).released("main", "--force-with-lease=refs/heads/merge-lock/main:")
+        self.assertEqual(c, 0, out)
+        self.assertEqual(merge.expiry_of(self.lock_text()), 0)
+        return self.head("merge-lock/main")
+
+    def rival_lock(self, lease):
+        """Another run's live lock, pushed by the other clone under `lease`. -> its sha."""
+        sha = sh(self.other, "git", "commit-tree", self.EMPTY_TREE, "-m", merge.lock_message(600, self.now))
+        sh(self.other, "git", "push", "-q", lease, "origin", f"{sha}:refs/heads/merge-lock/main")
+        return sha
+
+    def move_after_first_read(self, lock):
+        """`lock`'s first read of the main ref answers as the ref stands, then another run moves the ref before the push. Later reads are real.
+        -> the list that receives the rival's sha once it has moved."""
+        real, moved = lock.read, []
+        def read(b, ref=None):
+            if ref is not None or moved:
+                return real(b, ref)
+            got = real(b, ref)
+            moved.append(self.rival_lock(f"--force-with-lease={merge.lock_ref(b)}:{got[0] if got else ''}"))
+            return got
+        lock.read = read
+        return moved
+
+    def assert_refused_push_stops(self):
+        """acquire on a ref the origin refuses: a Stop that is not a Held, holding the push output and the lock cite."""
+        with self.assertRaises(merge.Stop) as cm:
+            self.lock.acquire("main", 600)
+        self.assertNotIsInstance(cm.exception, merge.Held, "a refused push on an unchanged lock reads as another run's take")
+        self.assertIn(self.PUSH_REFUSAL, str(cm.exception), "the Stop drops the push output")
+        self.assertIn(merge.LOCK_CITE, str(cm.exception), "the Stop drops the lock cite")
+
+    def test_a_released_lock_the_remote_refuses_stops_and_names_the_push(self):
+        released = self.released_lock()
+        self.refuse_pushes()
+        self.assert_refused_push_stops()
+        self.assertEqual(self.head("merge-lock/main"), released, "the refused push moved the released lock")
+
+    def test_no_lock_ref_the_remote_refuses_stops_and_names_the_push(self):
+        self.assertFalse(self.lock_ref())  # scope: no lock ref on origin before the take
+        self.refuse_pushes()
+        self.assert_refused_push_stops()
+        self.assertFalse(self.lock_ref(), "the refused push created a lock ref")
+
+    def test_a_ref_absent_at_the_read_and_present_at_the_push_is_held(self):
+        self.assertFalse(self.lock_ref())  # scope: no lock ref on origin before the take
+        lock2 = merge.GitLock(self.other, now=lambda: self.now)
+        moved = self.move_after_first_read(lock2)
+        with self.assertRaises(merge.Held):
+            lock2.acquire("main", 600)
+        self.assertEqual(len(moved), 1, "the rival never moved the ref, so the case proves nothing")
+        self.assertEqual(self.head("merge-lock/main"), moved[0], "the Held take left the rival's lock in place")
+
+    def test_a_released_lock_that_moves_before_the_push_is_held(self):
+        self.released_lock()  # scope: the released lock is on origin before the take
+        lock2 = merge.GitLock(self.other, now=lambda: self.now)
+        moved = self.move_after_first_read(lock2)
+        with self.assertRaises(merge.Held):
+            lock2.acquire("main", 600)
+        self.assertEqual(len(moved), 1, "the rival never moved the ref, so the case proves nothing")
+        self.assertEqual(self.head("merge-lock/main"), moved[0], "the Held take left the rival's lock in place")
+
+    def test_a_released_lock_is_retaken_by_one_push_and_no_delete(self):
+        released = self.released_lock()
+        self.assertEqual(self.head("merge-lock/main"), released)  # scope: the released lock is on origin before the take
+        with unittest.mock.patch.object(merge, "git", side_effect=merge.git) as calls:
+            sha = self.lock.acquire("main", 600)
+        pushes = [c.args for c in calls.call_args_list if "push" in c.args]
+        self.assertEqual(len(pushes), 1, pushes)
+        self.assertFalse([a for args in pushes for a in args if a.startswith(":refs/heads/merge-lock/")], pushes)
+        self.assertEqual(self.head("merge-lock/main"), sha)
+        self.assertGreater(merge.expiry_of(self.lock_text()), self.now)
+
+    def test_a_live_lock_is_still_held(self):
+        held = merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
+        self.assertEqual(self.head("merge-lock/main"), held)  # scope: the live lock is on origin before the take
+        with self.assertRaises(merge.Held):
+            self.lock.acquire("main", 600)
+        self.assertEqual(self.head("merge-lock/main"), held)
 
 class Guards(Env):
     def test_moved_head_is_refused_and_nothing_is_claimed(self):
@@ -2793,10 +2895,7 @@ class Unlock(Env):
     def test_an_unlock_that_the_remote_refuses_stops_and_names_the_push(self):
         sha = sh(self.co, "git", "commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "held, not ours")
         sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/heads/merge-lock/main")
-        hook = os.path.join(self.bare, "hooks", "pre-receive")  # every ref update to the origin is refused from here on
-        with open(hook, "w") as f:
-            f.write("#!/bin/sh\necho 'refused by the test' >&2\nexit 1\n")
-        os.chmod(hook, 0o755)
+        self.refuse_pushes()
         with self.assertRaises(merge.Stop) as caught:
             self.lock.unlock("main")
         assert_cites(self, "unlock-failed", str(caught.exception))
@@ -2898,6 +2997,8 @@ class GhLockTest(unittest.TestCase):
 #     whole). `--slurp` (needs `--paginate`, refuses `--jq`) prints the pages as one array of pages.
 #   - `--jq` knows only: `.`  `.a.b`  `.a[]`  `.[]`  `.a[].b`  (applied to each page).
 #   - an argument holding `&` is refused: the Windows `.cmd` shim of this suite lets cmd.exe split the command there. Send query values with `-f`.
+#   - an argument holding a newline (`\n` or `\r`), a `-f` value included, is refused for the same reason: cmd.exe cuts the command at it. Send a multi-line value as JSON with `--input <file>`.
+#   - `--input <file>` reads a JSON object and merges its keys into the fields (gh's own body-from-file rule, so a PUT or POST sends it). `--input -` (stdin) is refused.
 #   - GraphQL (`gh pr ...`, `gh repo view`, `gh api graphql`, any other gh command) answers the HTTP 403 a Claude Code cloud session gives.
 GH_REST_LIB = r'''
 import json, re
@@ -2917,8 +3018,11 @@ def api_error(code, message):
     return "%sgh: %s (HTTP %d)" % (body, message, code)
 
 def parse(argv):
-    """The args after `gh api` -> (method, path, params, flags, jq). Query values in the path and -f/-F fields land in params."""
-    method, path, params, flags, jq, typed = None, None, {}, set(), None, False
+    """The args after `gh api` -> (method, path, params, flags, jq). Query values in the path and -f/-F fields land in params. --input FILE merges its JSON object into params."""
+    for x in argv:  # every argument, a -f value too: cmd.exe cuts any argument at a newline
+        if "\n" in x or "\r" in x:
+            raise Refused("fake gh api: an argument holds a newline (%r). The Windows .cmd shim of this suite lets cmd.exe cut the command there. Send a multi-line value as JSON with --input <file>." % x)
+    method, path, params, flags, jq, typed, body = None, None, {}, set(), None, False, None
     argv = [part for x in argv for part in (x.split("=", 1) if x.startswith("--") and "=" in x else [x])]  # --method=PUT is --method PUT
     i = 0
     while i < len(argv):
@@ -2931,6 +3035,10 @@ def parse(argv):
             k, _, v = argv[i + 1].partition("="); params[k] = v; typed = True; i += 2
         elif x in ("-q", "--jq"):
             jq = argv[i + 1]; i += 2
+        elif x == "--input":
+            if argv[i + 1] == "-":
+                raise Refused("fake gh api: --input - (stdin) is not supported by this fake: give a file path")
+            body = argv[i + 1]; typed = True; i += 2
         elif x in ("-H", "--header"):
             i += 2
         elif x in ("-i", "--include"):
@@ -2948,6 +3056,15 @@ def parse(argv):
     path, _, query = path.lstrip("/").partition("?")
     for pair in filter(None, query.split("&")):
         k, _, v = pair.partition("="); params.setdefault(k, v)
+    if body is not None:
+        try:
+            with open(body, encoding="utf-8") as f:
+                obj = json.load(f)
+        except (OSError, ValueError) as e:
+            raise Refused("fake gh api: --input %s is not a readable JSON file (%s)" % (body, e))
+        if not isinstance(obj, dict):
+            raise Refused("fake gh api: --input %s holds JSON that is not an object" % body)
+        params.update(obj)
     if "slurp" in flags and "paginate" not in flags:
         raise Refused("the `--slurp` option requires `--paginate`")
     if "slurp" in flags and jq:
@@ -6146,6 +6263,41 @@ class LockHolder(Env):
 
     def test_the_lock_records_the_boot(self):
         self.assertIn(f"boot: {merge.boot_stamp()}", self.peek()[0].splitlines())
+
+    def test_the_windows_lock_boot_matches_a_later_read_across_a_second(self):  # Windows stamps are whole seconds, so two reads can straddle a second; cache_clear keeps a cached stamp from hiding that
+        reads, now, kernel32 = [], [1000.0], types.SimpleNamespace(GetTickCount64=lambda: 500)  # 500 ms of uptime
+        def clock():  # a fake clock: each read steps 0.2 s, and the lock's boot line must still equal a stamp read after it
+            now[0] = round(now[0] + 0.2, 1)
+            reads.append(now[0])
+            return now[0]
+        getattr(merge.boot_stamp, "cache_clear", lambda: None)()
+        try:
+            with unittest.mock.patch.object(merge.sys, "platform", "win32"), unittest.mock.patch.object(merge.os, "name", "nt"), \
+                    unittest.mock.patch.object(ctypes, "WinDLL", lambda name: kernel32, create=True), unittest.mock.patch.object(merge.time, "time", clock):
+                msg = merge.lock_message(600, 1000, {"pr": 7, "branch": "b"})
+                self.assertTrue(reads, "the Windows branch of boot_stamp never read the clock")
+                stamp = merge.boot_stamp()
+                self.assertTrue(stamp, "the Windows branch gave no boot stamp")
+                self.assertIn("boot: " + stamp, msg.splitlines(), f"the lock's boot line is not the stamp read after it, {stamp}:\n{msg}")
+        finally:
+            getattr(merge.boot_stamp, "cache_clear", lambda: None)()
+
+    def test_the_windows_boot_stamp_is_the_same_on_every_call(self):  # Windows stamps are whole seconds, so a read can land either side of a second; the memo must give every call the first answer
+        now, kernel32 = [1000.2], types.SimpleNamespace(GetTickCount64=lambda: 500)  # 500 ms of uptime
+        def clock():  # returns 1000.2, 1000.4, 1000.6, ...: the stamp int(t - 0.5) is 999, 999, then 1000
+            t = now[0]
+            now[0] = round(t + 0.2, 1)
+            return t
+        getattr(merge.boot_stamp, "cache_clear", lambda: None)()
+        try:
+            with unittest.mock.patch.object(merge.sys, "platform", "win32"), unittest.mock.patch.object(merge.os, "name", "nt"), \
+                    unittest.mock.patch.object(ctypes, "WinDLL", lambda name: kernel32, create=True), unittest.mock.patch.object(merge.time, "time", clock):
+                first = merge.boot_stamp()
+                self.assertTrue(first, "the Windows branch of boot_stamp gave no boot stamp")
+                for _ in range(2):  # the clock passes 1000.5 on the third call, so a boot_stamp without a memo fails there
+                    self.assertEqual(merge.boot_stamp(), first, "boot_stamp gave a different stamp on a later call in one process: its memo is missing")
+        finally:
+            getattr(merge.boot_stamp, "cache_clear", lambda: None)()
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "the pid namespace link is Linux's")
     def test_the_linux_boot_stamp_names_the_pid_namespace(self):  # the same boot id runs under any container's own pid numbers
@@ -9700,19 +9852,57 @@ def main_job(name, conclusion, minutes=1):
             "html_url": f"https://github.com/o/r/actions/runs/1/job/{len(name)}"}
 
 
+# The workflow file a head serves when a case gives none: one job with no if:, so every job name reads as one that may run.
+NO_IF_WORKFLOW = "\n".join(["name: checks", "on: push", "jobs:", "  checks:", "    runs-on: ubuntu-latest", "    steps:", "      - run: echo ok"]) + "\n"
+CHECKS_PATH = ".github/workflows/checks.yml"
+REAL_CHECKS = os.path.join(os.path.dirname(HERE), ".github", "workflows", "checks.yml")  # the file as it is on disk, never a stub
+# The live nightly case: schedule run LIVE_R failed on checks-windows-merge-3, all-jobs-passed and ci-done skipped; the newer push run LIVE_N
+# passed merge-3 and skipped the same two. Their jobs and conclusions are the ones test_action.sh's live case gives too.
+LIVE_R, LIVE_N = 41817705653, 41905916525
+LIVE_N_SHA = f"{LIVE_N:040x}"
+
+
+def real_checks():
+    with open(REAL_CHECKS, encoding="utf-8") as f:
+        return f.read()
+
+
+def live_nightly():
+    """-> (main_runs, jobs) of the live nightly case, newest run first, as GET actions/runs and the jobs read give them."""
+    runs = [main_run(LIVE_N, "success", sha=LIVE_N_SHA, path=CHECKS_PATH), main_run(LIVE_R, "failure", event="schedule", path=CHECKS_PATH)]
+    jobs = {LIVE_R: [main_job("checks-windows-merge-3", "failure", 19), main_job("all-jobs-passed", "skipped"), main_job("ci-done", "skipped")],
+            LIVE_N: [main_job("checks-windows-merge-3", "success", 19), main_job("all-jobs-passed", "skipped"), main_job("ci-done", "skipped")]}
+    return runs, jobs
+
+
 class MainRunsHost(FakeHost, merge.Host):
     """FakeHost for the flow; the real Host.base_state over scripted REST. `main_runs`: main's push runs, newest first. `jobs`: run id -> jobs.
-    `runs_fail` / `jobs_fail`: that read fails with this text. `jobs_fail_of`: run id -> the text its jobs read fails with."""
+    `runs_fail` / `jobs_fail`: that read fails with this text. `jobs_fail_of`: run id -> the text its jobs read fails with.
+    `texts`: head sha -> the workflow file's text on that head (a head not in it reads as NO_IF_WORKFLOW). `text_fail`: every file read fails with this text."""
     base_state = getattr(merge.Host, "base_state", None)
 
-    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None):
+    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None, texts=None, text_fail=None):
         FakeHost.__init__(self, root, other)
         self.ignore, self.cwd, self.warned = {}, root, set()
         self.main_runs, self.jobs, self.runs_fail, self.jobs_fail, self.reads = main_runs, jobs, runs_fail, jobs_fail, []
         self.jobs_fail_of = jobs_fail_of or {}
+        self.texts, self.text_fail = texts or {}, text_fail
+
+    def file_at_head(self, rel, extra, fields):
+        """`contents/<path>` read at a head: the ref is a field or a query. Raw when the Accept header asks for raw, else the JSON reply with base64 content."""
+        query = re.search(r"[?&]ref=([0-9a-f]+)", rel)
+        ref = fields.get("ref") or (query and query.group(1))
+        if self.text_fail:
+            return 1, self.text_fail
+        text = self.texts.get(ref, NO_IF_WORKFLOW)
+        if any("vnd.github.raw" in a for a in extra):
+            return 0, text
+        return 0, json.dumps({"encoding": "base64", "content": base64.b64encode(text.encode("utf-8")).decode("ascii")})
 
     def api(self, rel, *extra, method="GET", fields=None):
         self.reads.append(rel)
+        if rel.startswith("contents/"):
+            return self.file_at_head(rel, extra, fields or {})
         assert (rel, method, fields.get("branch")) == ("actions/runs", "GET", "main"), (rel, fields)
         if self.runs_fail:
             return 1, self.runs_fail
@@ -9916,6 +10106,84 @@ class RedMainBrake(Env):
                               main_run(930, "failure", name="links", event="schedule", path=LINKS_PATH)],
                              {930: [main_job("readme-links", "failure", 20)], 931: [main_job("readme-links", "success", 20)]})
         self.merged(rc, out)
+
+    # The failed-run clear, job by job: a job the red run did not fail, whose job-level if: names another event, is not needed by a green run of
+    # that event. A red job always is. The workflow file is read at the green run's head (GET contents, ref = its head sha).
+    def test_a_newer_push_run_clears_a_red_nightly_whose_pull_request_jobs_it_skipped(self):
+        runs, jobs = live_nightly()
+        rc, out, _ = self.go(runs, jobs, texts={LIVE_N_SHA: real_checks()})
+        self.merged(rc, out)
+
+    def test_the_live_nightly_is_green_on_the_red_main_read(self):
+        # the same live case as test_action.sh's live case: base_verdict, the red-main check's read, judges it green, with no merge
+        runs, jobs = live_nightly()
+        self.host = MainRunsHost(self.co, self.other, runs, jobs, texts={LIVE_N_SHA: real_checks()})
+        verdict, detail = merge.base_verdict(self.co, self.host, "main")
+        self.assertEqual(verdict, "green", detail)
+
+    def test_a_red_job_skipped_in_the_push_run_still_blocks_the_clear_when_its_if_names_no_event(self):
+        # lint failed in the nightly and was skipped in the push run. It has no if:, so it may run and stays needed.
+        sha = "c" * 40
+        lint = "\n".join(["name: checks", "on: [push, schedule]", "jobs:",
+                          "  checks-windows-merge-3:", "    runs-on: windows-latest", "    steps:", "      - run: echo ok",
+                          "  lint:", "    runs-on: ubuntu-latest", "    needs: checks-windows-merge-3", "    steps:", "      - run: echo ok",
+                          "  all-jobs-passed:", "    runs-on: ubuntu-latest", "    needs: [lint, checks-windows-merge-3]",
+                          "    if: ${{ always() && github.event_name == 'pull_request' }}", "    steps:", "      - run: echo ok"]) + "\n"
+        runs = [main_run(1211, "success", sha=sha), main_run(1210, "failure", event="schedule")]
+        jobs = {1210: [main_job("checks-windows-merge-3", "success", 19), main_job("lint", "failure", 3), main_job("all-jobs-passed", "skipped")],
+                1211: [main_job("checks-windows-merge-3", "success", 19), main_job("lint", "skipped"), main_job("all-jobs-passed", "skipped")]}
+        rc, out, before = self.go(runs, jobs, texts={sha: lint})
+        self.refused(rc, out, before)
+        self.assertIn("run 1210", out)
+        self.assertIn("lint: fail", out)
+
+    def test_a_red_job_whose_if_excludes_the_push_event_is_never_dropped(self):
+        # all-jobs-passed is pull_request-only, so the push run skips it. It failed in the nightly: it stays needed, and the clear is refused.
+        sha = "d" * 40
+        runs = [main_run(1221, "success", sha=sha), main_run(1220, "failure", event="schedule")]
+        jobs = {1220: [main_job("checks-windows-merge-3", "success", 19), main_job("all-jobs-passed", "failure", 2)],
+                1221: [main_job("checks-windows-merge-3", "success", 19), main_job("all-jobs-passed", "skipped")]}
+        rc, out, before = self.go(runs, jobs, texts={sha: real_checks()})
+        self.refused(rc, out, before)
+        self.assertIn("run 1220", out)
+        self.assertIn("all-jobs-passed: fail", out)
+
+    def test_a_job_whose_if_names_the_push_event_inside_an_or_still_blocks_the_clear(self):
+        # checks-extra's if: is an ||, so it may run. It is skipped in the push run, so it stays needed and the clear is refused.
+        sha = "e" * 40
+        checks_extra = "\n".join(["name: checks", "on: [push, schedule]", "jobs:",
+                          "  checks-windows-merge-3:", "    runs-on: windows-latest", "    steps:", "      - run: echo ok",
+                          "  checks-extra:", "    runs-on: ubuntu-latest", "    if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}",
+                          "    steps:", "      - run: echo ok"]) + "\n"
+        runs = [main_run(1231, "success", sha=sha), main_run(1230, "failure", event="schedule")]
+        jobs = {1230: [main_job("checks-windows-merge-3", "failure", 19), main_job("checks-extra", "skipped")],
+                1231: [main_job("checks-windows-merge-3", "success", 19), main_job("checks-extra", "skipped")]}
+        rc, out, before = self.go(runs, jobs, texts={sha: checks_extra})
+        self.refused(rc, out, before)
+        self.assertIn("run 1230", out)
+        self.assertIn("checks-windows-merge-3: fail", out)
+
+    def test_a_failed_read_of_the_workflow_file_is_unknown_and_refuses_the_clear(self):
+        runs, jobs = live_nightly()
+        rc, out, before = self.go(runs, jobs, text_fail="HTTP 500: Internal Server Error (fake contents read)")
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out, "a failed read of the workflow file is unknown: never red, and never a clear")
+        self.assertIn("the read failed", out)
+
+    def test_a_red_job_the_green_run_lacks_or_did_not_pass_is_red_not_unknown_when_the_workflow_read_fails(self):
+        # A certain red needs no workflow file: a green run that lacks a red job, or did not pass it, clears nothing whatever the if:.
+        # The read fails here and must not turn the red into unknown. The control is the test above: a green run that passed the red job needs the file.
+        red_run = main_run(1310, "failure", event="schedule")
+        red_jobs = [main_job("checks-windows-merge-3", "failure", 19), main_job("all-jobs-passed", "skipped")]
+        for variant, green_jobs in (("the red job is missing", [main_job("all-jobs-passed", "skipped")]),
+                                    ("the red job is skipped", [main_job("checks-windows-merge-3", "skipped"), main_job("all-jobs-passed", "skipped")])):
+            with self.subTest(variant=variant):
+                rc, out, before = self.go([main_run(1311, "success"), red_run], {1310: red_jobs, 1311: green_jobs},
+                                          text_fail="HTTP 500: Internal Server Error (fake contents read)")
+                self.refused(rc, out, before)
+                self.assertNotIn("UNKNOWN", out, "a certain red reads as unknown: the workflow read ran first, and its failure came before the red check")
+                self.assertIn("latest completed run is red", out)
+                self.assertIn("checks-windows-merge-3: fail", out)
 
     def test_a_green_schedule_run_with_every_job_of_a_red_push_run_clears_it(self):
         rc, out, _ = self.go([main_run(941, "success", event="schedule"), main_run(940, "failure")],
@@ -11258,9 +11526,12 @@ def parse_text(test, text):
     test.assertIsNotNone(rec, "parse_review refused a well-formed record:\n" + text)
     return rec
 
+def record_verdict(test, text, head=REVIEW_HEAD):
+    """-> (state, why) of the record, as review_state gives them."""
+    return review_fn(test, "review_state")(parse_text(test, text), head)
+
 def record_state(test, text, head=REVIEW_HEAD):
-    state, _why = review_fn(test, "review_state")(parse_text(test, text), head)
-    return state
+    return record_verdict(test, text, head)[0]
 
 def posted_body(test, out):
     """The record printed in `out`, from its marker line through its CI line: the text a lane posts."""
@@ -11367,10 +11638,10 @@ class ReviewRecordForm(unittest.TestCase):
             self.assertIsNone(review_fn(self, "parse_review")(record_text(kind="bogus").rstrip("\n") + REVIEW_FOOTER))
 
 class ReviewRecordRules(unittest.TestCase):
-    """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS,
-    or the third round is done and Guard or check is no, or the third round is done with Guard or check yes and a Net value of zero or
-    positive. Net value negative is held. The third round with Guard or check yes and no Net value is open. A first-round FAIL is open.
-    The verdicts are PASS, FAIL and PARTIAL."""
+    """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS
+    and the last design-reviewer line is PASS or absent, or the third round is done and Guard or check is no, or the third round is done
+    with Guard or check yes and a Net value of zero or positive. Net value negative is held. The third round with Guard or check yes and no
+    Net value is open. A first-round FAIL is open. The verdicts are PASS, FAIL and PARTIAL."""
 
     def test_a_pass_in_the_last_round_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS)), "done")
@@ -11403,7 +11674,48 @@ class ReviewRecordRules(unittest.TestCase):
     def test_a_design_reviewer_fail_in_round_three_with_guard_no_is_done(self):
         # The review cap rule (roles-review-cap-three) ends the review after the third round when Guard or check is no, even when that round fails.
         rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, FAIL")
-        self.assertEqual(record_state(self, record_text(rounds=rounds, guard="no")), "done")
+        state, why = record_verdict(self, record_text(rounds=rounds, guard="no"))
+        self.assertEqual(state, "done", "round 3 is done whatever its verdict, so the state must stay done")
+        self.assertIn("in round 3 is FAIL", why, f"why does not name the design reviewer's round 3 FAIL: {why!r}")
+
+    def test_a_reviewer_pass_in_the_last_round_does_not_clear_a_design_fail_in_round_one(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds))
+        self.assertEqual(state, "open", "the last design-reviewer line is FAIL, but the record reads done")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
+    def test_a_design_fail_in_round_one_is_not_cleared_by_a_later_reviewer_pass(self):
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds))
+        self.assertEqual(state, "open", "the last design-reviewer line is FAIL, but the record reads done")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
+    def test_a_design_partial_in_round_one_is_not_cleared_by_a_later_reviewer_pass(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PARTIAL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds))
+        self.assertEqual(state, "open", "the last design-reviewer line is PARTIAL, so the record must not read done")
+        self.assertIn("in round 1 is PARTIAL", why, f"why does not name the design reviewer's round 1 PARTIAL: {why!r}")
+
+    def test_a_design_pass_in_a_later_round_after_a_design_fail_is_done(self):
+        # Pinning: the last design-reviewer line is PASS, so the design rule holds and the record reads done.
+        rounds = ("Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS", "Round 2: design-reviewer, opus, PASS")
+        self.assertEqual(record_state(self, record_text(rounds=rounds)), "done")
+
+    def test_a_reviewer_fail_then_a_reviewer_pass_with_no_design_line_is_done(self):
+        # Pinning: no design-reviewer line at all, so the design rule does not apply to the record.
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds, guard="no"))
+        self.assertEqual(state, "done", "a record with no design line must read done")
+        self.assertEqual(why, "round 2 passed", f"the no-design record must say exactly 'round 2 passed': {why!r}")
+
+    def test_a_design_reviewer_role_with_a_space_or_capitals_does_not_parse(self):
+        # Pinning: the role is exactly "design-reviewer". A misspelled role makes the record bad, so it can never read as done.
+        for role in ("design reviewer", "Design-Reviewer"):
+            with self.subTest(role=role):
+                text = record_text(rounds=("Round 1: reviewer, sonnet, PASS", f"Round 1: {role}, opus, FAIL"))
+                rec = review_fn(self, "parse_review")(text)
+                self.assertIsNone(rec, f"parse_review accepted the role {role!r}")
+                self.assertEqual(review_fn(self, "review_state")(rec, REVIEW_HEAD)[0], "bad", f"a record with the role {role!r} did not read bad")
 
     def test_a_delete_only_change_passed_in_round_one_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, kind="delete-only")), "done")
@@ -11413,6 +11725,36 @@ class ReviewRecordRules(unittest.TestCase):
             with self.subTest(verdict=verdict):
                 rec = record_text(rounds=(f"Round 1: reviewer, sonnet, {verdict}",), kind="delete-only", guard="no")
                 self.assertEqual(record_state(self, rec), "done")
+
+    def test_a_delete_only_guard_no_change_with_a_design_fail_in_round_one_is_done_and_names_design(self):
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL")
+        state, why = record_verdict(self, record_text(rounds=rounds, kind="delete-only", guard="no"))
+        self.assertEqual(state, "done", "a delete-only change with guard no is done after round 1, so the state must stay done")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
+    def test_a_round_three_guard_no_with_a_design_fail_in_round_one_is_done_and_names_round_one(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, opus, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds, guard="no"))
+        self.assertEqual(state, "done", "round 3 is done whatever its verdict, so the state must stay done")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
+    def test_a_delete_only_guard_no_with_a_design_fail_in_round_one_and_a_round_two_fail_is_done_and_names_round_one(self):
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, FAIL")
+        state, why = record_verdict(self, record_text(rounds=rounds, kind="delete-only", guard="no"))
+        self.assertEqual(state, "done", "a delete-only change with guard no is done after round 1, so the state must stay done")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
+    def test_a_round_three_guard_yes_net_positive_with_a_design_partial_in_round_one_is_done_and_names_round_one(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PARTIAL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, opus, FAIL")
+        state, why = record_verdict(self, record_text(rounds=rounds, guard="yes", net="positive"))
+        self.assertEqual(state, "done", "round 3 with a net value of positive is done, so the state must stay done")
+        self.assertIn("in round 1 is PARTIAL", why, f"why does not name the design reviewer's round 1 PARTIAL: {why!r}")
+
+    def test_a_delete_only_guard_no_with_a_design_fail_in_round_one_is_done_whatever_round_two_is(self):
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds, kind="delete-only", guard="no"))
+        self.assertEqual(state, "done", "a delete-only change with guard no stays done after round 1, whatever round 2 is")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
 
     def test_a_delete_only_change_with_guard_yes_and_a_round_one_fail_is_open(self):
         # A guard or check change owes the second and third rounds when the first round fails, even if it only deletes.

@@ -56,6 +56,31 @@ merge.CI_JOB = __STUB__
 sys.exit(merge.main(sys.argv[1:]))
 '''
 
+# Added to STUB before its verdict lines: one `start:` line per step on stderr, then a wait for the GO file. The wait is
+# a bound only (20 s): the case creates GO once it has read the first announcement from merge's stderr, so the lint
+# cannot end before the announcement is read.
+PROGRESS = '''GO = __GO__
+for _state, _name in STEPS:
+    print("start: " + _name, file=sys.stderr, flush=True)
+end = time.time() + 20
+while not os.path.exists(GO) and time.time() < end:
+    time.sleep(0.05)
+'''
+
+WORKFLOW = """name: t
+on: push
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lint one
+        run: python3 lint/a.py
+      - name: Make lint-py
+        run: make lint-py
+      - name: Lint two
+        run: python3 lint/b.py
+"""
+
 
 def pass_lines(text):
     return [line for line in text.splitlines() if line.startswith("PASS:")]
@@ -71,6 +96,19 @@ class NoLock:
 
     def unlock(self, *args, **kwargs):
         raise AssertionError("merge --lane-lint unlocked a merge lock")
+
+
+class LintStepNames(unittest.TestCase):
+    """merge's lint_steps reads each `would run ` line of ci-job's plan as a step name. The plan's summary line names no
+    step, so it must not come back as one."""
+
+    def test_the_plan_summary_is_not_a_step_name(self):
+        root = tempfile.mkdtemp(prefix="lint-steps-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, root, True)
+        os.makedirs(os.path.join(root, ".github", "workflows"))
+        tm.put(os.path.join(root, ".github", "workflows", "checks.yml"), WORKFLOW)
+        names = merge.lint_steps(root, "origin/main")
+        self.assertEqual(names, {"Lint one", "Lint two"}, "lint_steps read a line that is no step: %s" % sorted(names - {"Lint one", "Lint two"}))
 
 
 class LaneLint(tm.CloudSession):
@@ -141,6 +179,47 @@ class LaneLint(tm.CloudSession):
         sh = tm.sh
         sh(self.other, "git", "fetch", "-q", "origin")
         sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/release")
+
+    def progress_run(self, steps, rc, *argv):
+        """Run merge in a subprocess through HARNESS, with the stub of `steps` (see PROGRESS). -> (rc, stdout, stderr).
+        stderr is read live: the case creates the GO file at the first `start:` line, so a stderr that merge captures
+        instead of passing on reads to the end only after the stub's bound."""
+        go = os.path.join(self.t, "go")
+        text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
+        text = text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(0))
+        tm.put(self.stub, text.replace("lines = [", PROGRESS.replace("__GO__", repr(go)) + "lines = [", 1))
+        harness = os.path.join(self.t, "lane_lint_progress.py")
+        tm.put(harness, HARNESS.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(self.stub)))
+        env = {**os.environ, "CLAUDE_CONFIG_DIR": self.cfg}
+        env.pop("CLAUDE_CODE_REMOTE", None)
+        proc = subprocess.Popen([sys.executable, harness, *argv], cwd=self.co, env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(self.stop_run, proc)
+        err = []
+        for line in proc.stderr:
+            err.append(line)
+            if line.startswith("start:"):
+                open(go, "w", encoding="utf-8").close()
+                break
+        out, rest = proc.communicate(timeout=120)
+        return proc.returncode, out, "".join(err) + rest
+
+    def test_a_progress_line_from_ci_job_reaches_the_callers_stderr_live_and_the_pass_still_reads_from_stdout(self):
+        rc, out, err = self.progress_run(PASSING, 0, "--lane-lint", self.head("feat"))
+        self.assertTrue(any(line.startswith("start:") for line in err.splitlines()),
+                        "no ci-job start line reached merge's stderr while the lint ran: " + err)
+        self.assertEqual(len(self.lint_calls()), 1, out + err)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertEqual([line for line in out.splitlines() if line.startswith("start:")], [], out)
+
+    def test_a_failed_step_with_a_progress_line_still_refuses_and_names_the_step(self):
+        rc, out, err = self.progress_run(FAILING, 1, "--lane-lint", self.head("feat"))
+        self.assertTrue(any(line.startswith("start:") for line in err.splitlines()),
+                        "no ci-job start line reached merge's stderr while the lint ran: " + err)
+        self.assertEqual(rc, 1, out + err)
+        self.assertTrue(any("comment narration" in line and "FAIL" in line for line in (out + err).splitlines()), out + err)
+        self.assertEqual(pass_lines(out), [], out)
 
     def test_a_passing_lint_prints_one_pass_line_naming_head_and_base(self):
         self.use_ci_job(PASSING, 0)

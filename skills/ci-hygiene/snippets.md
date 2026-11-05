@@ -170,15 +170,16 @@ Same-repo action: `uses: $/path` (GitHub changelog 2026-07-30). This repo's `che
 `uses: ./...` call, an action or a workflow. For a reusable workflow call, the replacement is
 unknown; read zizmor's docs for self-repository.
 
-Pins of claude-settings' `ste-lint` action follow the session's tools. Check drift with the tool
-that reads the pin. It exits 3 when the pin lags:
+Pins of claude-settings' `ste-lint` and `zizmor` actions follow the session's tools. Check drift with
+the tool that reads the pins. It exits 3 when a pin lags:
 
 ```sh
 bin/ste-changed origin/main
 ```
 
 Move the pin in a lane of its own (decision `action-pins-follow-sessions`, pins follow the session's
-tools). Other pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.
+tools). Ask before moving a zizmor pin: the no-question grant covers ste-lint pins only. Other
+pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.
 
 This repo's `.github/dependabot.yml` ignores every version update for `github-actions`, so only a
 security fix opens a PR (decision `dependabot-security-only`, Dependabot runs security updates only):

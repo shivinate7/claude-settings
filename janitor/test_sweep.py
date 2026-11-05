@@ -17,6 +17,7 @@ Destructive git calls this suite drives (`git branch -D`, `git worktree remove`,
 itself, never typed by hand through a shell, the same way hooks/test_guard.py drives its own
 fixtures.
 """
+import argparse
 import concurrent.futures
 import contextlib
 import gc
@@ -1718,7 +1719,7 @@ class LooseProcessTests(unittest.TestCase):
         stubs = {
             (os, "kill"): lambda pid, sig: sent.append(pid),
             (sweep, "reap_listener"): lambda d: sent.append(d["pid"]),
-            (sweep, "find_dead_rooted"): lambda: [],
+            (sweep, "find_dead_rooted"): lambda *a, **k: [],  # any signature: the daily read may pass checkout_paths
         }
         real = {key: getattr(*key) for key in stubs}
         repo = os.path.join(self.home, "repo")
@@ -1733,6 +1734,219 @@ class LooseProcessTests(unittest.TestCase):
                 setattr(key[0], key[1], fn)
         self.assertNotIn(self.marked, sent)
         self.assertIsNone(self.procs[0].poll())
+
+
+# ----------------------------------------- the SessionEnd run's reads (janitor/sweep.py)
+#
+# The SessionEnd run (`--session-end`, `args.session_end`) reads no loose processes, reads the machine's
+# pid list once, and stops every proven dead-rooted orphan, in any repository, as the scheduled job does.
+# The branch and worktree tiers stay one repository's. Every machine read below is answered from a
+# fixture table by `fake_process_table`, so a case decides the rule and not this machine's processes.
+# Each missing script path is real, under real folders, so `sweep._project_ancestor` decides exactly as
+# it does on a live machine.
+
+SCOPE_PIDS = {"primary": 900101, "other": 900103, "ancestor": 900104, "loose": 900106}
+
+
+def build_scope_fixture(name):
+    """One base folder under ROOT, holding:
+      proj      this session's primary checkout, a real repository
+      other     another repository, never a root of the run
+      .claude   so a missing script directly under base resolves to base as its project ancestor
+    Every script is missing under a missing folder, so each is a dead-rooted candidate on a live
+    machine. Returns the paths and `rows` (pid -> argv) for `fake_process_table`."""
+    base = os.path.join(ROOT, "scope-" + name)
+    os.makedirs(os.path.join(base, ".claude"))
+    proj, other = os.path.join(base, "proj"), os.path.join(base, "other")
+    make_repo(proj, {"f.txt": "x\n"})
+    make_repo(other, {"f.txt": "x\n"})
+    rows = {
+        SCOPE_PIDS["primary"]: "sh " + os.path.join(proj, "tools", "serve.sh"),
+        SCOPE_PIDS["other"]: "sh " + os.path.join(other, "tools", "serve.sh"),
+        SCOPE_PIDS["ancestor"]: "sh " + os.path.join(base, "elsewhere", "x.sh"),
+        SCOPE_PIDS["loose"]: "zsh -c source %s && true" % os.path.join(
+            base, ".claude", "shell-snapshots", "snapshot-zsh-1"),
+    }
+    return {"base": base, "proj": proj, "other": other, "rows": rows}
+
+
+@contextlib.contextmanager
+def fake_process_table(rows):
+    """The machine's process reads, answered from `rows` (pid -> argv): the pid list, each command,
+    and orphan and owner (every listed process is an orphan of this user). `send_signal` records
+    each pid it is asked to signal. `os.kill` is a net: a signal that bypassed `send_signal` is
+    recorded too, and never sent. Yields a record: `pid_reads` (pid-list reads), `signals`, `kills`,
+    and `reset()`, which zeroes the reads and both lists."""
+    table = types.SimpleNamespace(pid_reads=0, signals=[], kills=[])
+
+    def reset():
+        table.pid_reads, table.signals, table.kills = 0, [], []
+
+    def pids():
+        table.pid_reads += 1
+        return list(rows)
+
+    def signal_pid(pid):
+        table.signals.append(pid)
+        return True
+
+    def kill(pid, sig):
+        table.kills.append(pid)
+
+    table.reset = reset
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(mock.patch.object(sweep, "list_all_pids", pids))
+        stack.enter_context(mock.patch.object(sweep, "process_command", lambda pid: rows.get(pid)))
+        stack.enter_context(mock.patch.object(sweep, "is_orphan", lambda pid: True))
+        stack.enter_context(mock.patch.object(sweep, "is_current_user_process", lambda pid: True))
+        stack.enter_context(mock.patch.object(sweep, "send_signal", signal_pid))
+        stack.enter_context(mock.patch.object(os, "kill", kill))
+        yield table
+
+
+def fake_result(root):
+    """One repository's result with every key `sweep_repo` returns, and no worktree."""
+    return {"root": root, "refused": None, "branches": [], "listeners": [], "pruned": None,
+            "husks": [], "strays": [], "trash": [], "reaper": "none", "worktrees": []}
+
+
+def sweep_over_fixture(fx, session_end, before=None):
+    """One `sweep._sweep_roots` run over the fixture machine, the way `main` calls it for the
+    SessionEnd hook (`session_end`) or the daily job (not `session_end`). `before`, when given, is
+    called first, inside the same stubs, to read the scope the case starts from; its value comes
+    back as `before`. Returns what the run read and signalled."""
+    seen = {"loose": 0, "sim": 0, "temp": 0, "before": None}
+    real_loose = sweep.find_loose_processes
+
+    def loose():
+        seen["loose"] += 1
+        return real_loose()
+
+    def sim(confirm, record_path=None):
+        seen["sim"] += 1
+        return []
+
+    def temp(confirm):
+        seen["temp"] += 1
+        return 0
+
+    args = argparse.Namespace(confirm=True, attended=False, session_end=session_end)
+    log = os.path.join(fx["base"], "restore.log")
+    env = {"HOME": fx["base"], "USERPROFILE": fx["base"],
+           "JANITOR_RUN_LOG": os.path.join(fx["base"], "run.log")}
+    with fake_process_table(fx["rows"]) as table, contextlib.ExitStack() as stack:
+        stack.enter_context(mock.patch.dict(os.environ, env))
+        stack.enter_context(mock.patch.object(
+            sweep, "sweep_repo", lambda root, *a, **k: fake_result(root)))
+        stack.enter_context(mock.patch.object(sweep, "find_loose_processes", loose))
+        stack.enter_context(mock.patch.object(sweep, "sim_tier", sim))
+        stack.enter_context(mock.patch.object(sweep, "temp_tier", temp))
+        stack.enter_context(mock.patch.object(sweep, "find_swept_listeners", lambda paths: []))
+        stack.enter_context(mock.patch.object(sweep, "print_grace_period_report",
+                                              lambda *a, **k: None))
+        if before is not None:
+            seen["before"] = before()
+            table.reset()
+        with contextlib.redirect_stdout(io.StringIO()):
+            seen["code"] = sweep._sweep_roots(args, [fx["proj"]], log, "full")
+        seen["signals"] = list(table.signals)
+        seen["kills"] = list(table.kills)
+        seen["pid_reads"] = table.pid_reads
+    return seen
+
+
+def pids_of(decisions):
+    return {d["pid"] for d in decisions or []}
+
+
+class SessionEndScopeTests(unittest.TestCase):
+    """`sweep._sweep_roots` for the SessionEnd run, against the daily job on the same fixture."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.fx = build_scope_fixture("session-end-run")
+
+    def test_the_session_end_run_signals_the_orphan_under_its_primary_checkout(self):
+        seen = sweep_over_fixture(self.fx, session_end=True)
+        self.assertIn(SCOPE_PIDS["primary"], seen["signals"],
+                      "the orphan under this repository's primary checkout was not signalled")
+
+    def test_the_session_end_run_signals_a_proven_orphan_in_another_repository(self):
+        """The dead-rooted stop is as wide at SessionEnd as the scheduled job's: a proven orphan
+        whose script sat under another repository is signalled by either run."""
+        seen = sweep_over_fixture(self.fx, session_end=True,
+                                  before=lambda: sweep.find_dead_rooted())
+        self.assertIn(SCOPE_PIDS["other"], pids_of(seen["before"]),
+                      "precondition: the machine-wide read did not see the other repository's "
+                      "orphan, so this case proves nothing")
+        self.assertIn(SCOPE_PIDS["other"], seen["signals"],
+                      "the session-end run left a proven orphan in another repository alone, "
+                      "where the scheduled job signals it")
+
+    def test_the_session_end_run_signals_an_orphan_whose_project_ancestor_is_its_parent(self):
+        """A missing script under a folder that carries `.claude` has that parent as its project
+        ancestor. The scheduled job signals it, so the session-end run does too."""
+        seen = sweep_over_fixture(self.fx, session_end=True,
+                                  before=lambda: sweep.find_dead_rooted())
+        self.assertIn(SCOPE_PIDS["ancestor"], pids_of(seen["before"]),
+                      "precondition: the machine-wide read did not see the parent-ancestor orphan")
+        self.assertIn(SCOPE_PIDS["ancestor"], seen["signals"],
+                      "the session-end run left a parent-ancestor orphan alone, where the "
+                      "scheduled job signals it")
+
+    def test_the_session_end_run_scans_no_loose_processes(self):
+        seen = sweep_over_fixture(self.fx, session_end=True)
+        self.assertEqual(seen["loose"], 0,
+                         "the session-end run scanned loose processes %d time(s)" % seen["loose"])
+
+    def test_the_session_end_run_reads_the_machine_pid_list_once(self):
+        """Cost: one machine pid-list read per session end (the dead-rooted read). The old run
+        reads it twice, once more for the loose-process scan."""
+        seen = sweep_over_fixture(self.fx, session_end=True)
+        self.assertEqual(seen["pid_reads"], 1,
+                         "the session-end run read the machine pid list %d times" % seen["pid_reads"])
+
+    def test_the_session_end_run_still_runs_the_simulator_and_temp_tiers(self):
+        seen = sweep_over_fixture(self.fx, session_end=True)
+        self.assertEqual(seen["sim"], 1, "the session-end run did not run the simulator tier")
+        self.assertEqual(seen["temp"], 1, "the session-end run did not run the temp-folder tier")
+
+    def test_the_daily_run_still_signals_another_repos_orphan(self):
+        """Control: the daily run is machine-wide, and the session-end run must match it."""
+        seen = sweep_over_fixture(self.fx, session_end=False)
+        self.assertIn(SCOPE_PIDS["other"], seen["signals"])
+
+    def test_the_daily_run_still_scans_loose_processes_and_reads_the_pid_list_twice(self):
+        """Control: the daily run keeps the dead-rooted read and the loose-process scan."""
+        seen = sweep_over_fixture(self.fx, session_end=False)
+        self.assertEqual(seen["loose"], 1)
+        self.assertEqual(seen["pid_reads"], 2)
+
+    def test_main_accepts_the_session_end_flag_in_full_mode(self):
+        """Flag parsing only: `main` takes --session-end with a root and runs the full mode. Old
+        code rejects the flag at argparse, which is the one red a main-level case can give."""
+        seen = {}
+
+        def fake_roots(args, roots, restore_log_path, mode):
+            seen.update(session_end=getattr(args, "session_end", None), mode=mode, roots=roots)
+            return 0
+
+        argv = ["--confirm", "--session-end", "--restore-log",
+                os.path.join(self.fx["base"], "restore.log"), self.fx["proj"]]
+        with mock.patch.object(sweep, "_sweep_roots", fake_roots), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            try:
+                code = sweep.main(argv)
+            except SystemExit as exit_:
+                code = None
+                refused = exit_.code
+        if code is None:
+            self.fail("sweep.main rejected --session-end (exit %r), so the SessionEnd run cannot "
+                      "be scoped" % (refused,))
+        self.assertEqual(code, 0)
+        self.assertEqual(seen["mode"], "full", "--session-end changed the mode to %r" % seen["mode"])
+        self.assertIs(seen["session_end"], True)
 
 
 class PrimaryCheckoutExclusionTests(unittest.TestCase):
@@ -5787,19 +6001,19 @@ class AgentWorktreeReapTests(unittest.TestCase):
     case here forbids one of their removals. The agent rule removes a tree only when ALL hold:
     its path is `<repo>/.claude/worktrees/agent-*` (a branch or a detached HEAD); it is clean
     (no uncommitted, no untracked file); no process has a cwd inside it; its last change is 4
-    hours old or more; its HEAD commit is reachable from a remote-tracking ref. A repo whose
-    package.json defines `reap:worktrees` gets that script run with `--remove` instead. A read
-    that fails keeps the tree. A tree that should go below is pushed and not merged, which the
+    hours old or more; its HEAD commit is reachable from a remote-tracking ref. The sweep never
+    runs code a repository supplies: a `reap:worktrees` script in its package.json is ignored, and
+    npm is never run. A read that fails keeps the tree. A tree that should go below is pushed and not merged, which the
     older rulings keep before 24 hours, so its removal at 5 hours can only be the agent rule's,
     and its keep can only be that rule's refusal.
 
     The incident shape: a lane pushes `HEAD:<lane>` from a local branch of another name, so a
-    remover that trusts the branch's upstream reads the tree as never pushed.
+    check that trusts the branch's upstream reads the tree as never pushed.
 
     Seams. Clock: `time.time` runs HOURS ahead, so no file is touched and nothing sleeps.
     Process table: `sweep.list_all_pids` and `sweep.process_cwd` (darwin: `_all_cwds_macos`).
-    npm: a stub `npm` first on PATH logs argv and cwd. It is a real executable, so the sweep
-    may reach it by any call form. Failed git read: `subprocess.run` answers 128 for one tree.
+    npm: a stub `npm` first on PATH logs argv and cwd; the sweep must never call it. It is a real
+    executable, so the sweep may reach it by any call form. Failed git read: `subprocess.run` answers 128 for one tree.
     A kept tree must also see no `git worktree remove` call: git refuses a dirty tree on its own,
     and that refusal is not the sweep's guard. Every keep case also holds a control tree (`agent-ctl`) that must be removed in the same run,
     so a sweep that does nothing, or stops early, cannot pass a keep case."""
@@ -5935,7 +6149,7 @@ class AgentWorktreeReapTests(unittest.TestCase):
                       "the sweep touched the remote")
         self.assertEqual(run_vcs(self.repo, "cat-file", "-e", sha + "^{commit}").returncode, 0,
                          "the lane's commit is gone from the repository")
-        self.assertEqual(self.npm_calls(), [], "a repo with no `reap:worktrees` script ran npm")
+        self.assertEqual(self.npm_calls(), [], "the sweep ran npm: it never runs code a repository supplies")
 
     # ---- (b) the 4 hour floor
 
@@ -6001,24 +6215,46 @@ class AgentWorktreeReapTests(unittest.TestCase):
         self.assertTrue(self.listed(self.repo))
         self.assertRemoved(ctl, out)
 
-    # ---- (g) the repo's own remover
+    # ---- (g) a repo's package.json script is never run; the agent rule judges its trees
 
-    def test_g_runs_the_repos_remover_with_remove_and_removes_nothing_itself(self):
-        write(os.path.join(self.repo, "package.json"),
-              json.dumps({"name": "x", "scripts": {"reap:worktrees": "node reap.mjs"}}))
+    SCRIPTED_PACKAGE_JSON = b'{"name": "x", "scripts": {"reap:worktrees": "node reap.mjs"}}'
+
+    def main_package_json(self, raw):
+        """Commit RAW as the repo's package.json on main, and push main. A tree made after this
+        call starts from that file."""
+        with open(os.path.join(self.repo, "package.json"), "wb") as handle:
+            handle.write(raw)
         run_vcs(self.repo, "add", "-A")
-        self.assertEqual(run_vcs(self.repo, *IDENT, "commit", "-q", "-m", "reaper").returncode, 0)
+        require(run_vcs(self.repo, *IDENT, "commit", "-q", "-m", "package.json").returncode == 0,
+                "commit of package.json failed")
         require(run_vcs(self.repo, "push", "-q", "origin", "main").returncode == 0, "push of main failed")
-        tree = self.agent("g")  # the built-in rule would remove it at 5 hours
+
+    def test_g_a_repo_package_json_script_is_never_run(self):
+        self.main_package_json(self.SCRIPTED_PACKAGE_JSON)
+        self.agent("g")  # idle 5 hours: the agent rule's to remove, whatever the script says
+        self.run_sweep(5)
+        self.assertEqual(self.npm_calls(), [], "the sweep ran npm for a repo whose package.json "
+                         "holds a `reap:worktrees` script: it never runs code a repository supplies")
+
+    def test_g_the_agent_rule_removes_the_tree_despite_a_repo_package_json_script(self):
+        self.main_package_json(self.SCRIPTED_PACKAGE_JSON)
+        tree = self.agent("g")
         out = self.run_sweep(5)
-        calls = self.npm_calls()
-        self.assertEqual(len(calls), 1, "npm calls: %r\n%s" % (calls, out))
-        argv = calls[0]["argv"]
-        self.assertIn("reap:worktrees", argv)
-        self.assertIn("--remove", argv)
-        self.assertLess(argv.index("reap:worktrees"), argv.index("--remove"), argv)
-        self.assertEqual(_norm_path(calls[0]["cwd"]), _norm_path(self.repo))
-        self.assertKept(tree, out)
+        self.assertRemoved(tree, out)
+
+    def test_g_an_unparseable_package_json_keeps_the_agent_rule_and_runs_no_npm(self):
+        self.main_package_json(b'{"scripts": {"reap:worktrees": "node reap.mjs"')  # cut short
+        tree = self.agent("g")
+        out = self.run_sweep(5)
+        self.assertEqual(self.npm_calls(), [], "the sweep ran npm for an unparseable package.json")
+        self.assertRemoved(tree, out)
+
+    def test_g_an_unreadable_package_json_keeps_the_agent_rule_and_runs_no_npm(self):
+        self.main_package_json(b'\xff\xfe{"scripts": {}}')  # not UTF-8: the read fails
+        tree = self.agent("g")
+        out = self.run_sweep(5)
+        self.assertEqual(self.npm_calls(), [], "the sweep ran npm for an unreadable package.json")
+        self.assertRemoved(tree, out)
 
     # ---- (i) a detached tree: the red-run checkout a test-author makes under .claude/worktrees
 
