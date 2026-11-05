@@ -813,6 +813,12 @@ TESTS_FOR_LOADS = {
         + 'HERE = os.path.dirname(os.path.abspath(__file__))\nLOADER = SourceFileLoader("x_under_test", os.path.join(HERE, "widget.py"))\n',
     "tests/test_form_runpy.py": "import os\nimport runpy\n\n"
         + 'HERE = os.path.dirname(os.path.abspath(__file__))\nrunpy.run_path(os.path.join(HERE, "widget.py"))\n',
+    "tests/test_form_from_package.py": "from pkg import widget\n",
+    "tests/test_form_import_dotted.py": "import pkg.widget\n",
+    "tests/test_form_spec_keyword.py": SPEC_HEADER
+        + 'SPEC = importlib.util.spec_from_file_location("x_under_test", location=os.path.join(HERE, "widget.py"))\n',
+    "tests/test_form_spec_in_function.py": SPEC_HEADER
+        + 'def load():\n    path = os.path.join(HERE, "widget.py")\n    spec = importlib.util.spec_from_file_location("x_under_test", path)\n',
     "tests/test_form_lone_quote.py": "# don't mind this note\nimport widget\n",
     "other/sub/test_form_deep.py": "import widget\n",
 }
@@ -826,6 +832,8 @@ TESTS_FOR_MENTIONS = {
     "tests/test_no_hash_opener.py": 'TEXT = "# import widget"\n',
     "tests/test_no_spec_name.py": SPEC_HEADER
         + 'OTHER = os.path.join(HERE, "other_module.py")\nSPEC = importlib.util.spec_from_file_location("widget", OTHER)\n',
+    "tests/test_no_spec_name_arg.py": SPEC_HEADER
+        + 'OTHER = os.path.join(HERE, "other_module.py")\nSPEC = importlib.util.spec_from_file_location("widget.py", OTHER)\n',
     "tests/test_no_other_basename.py": SPEC_HEADER
         + 'SPEC = importlib.util.spec_from_file_location("x_under_test", os.path.join(HERE, "old_widget.py"))\n',
     "tests/test_no_prefix.py": "import widget_extra\n",
@@ -957,6 +965,17 @@ class TestsForTests(unittest.TestCase):
         for name in sorted(printed - beside):
             with self.subTest(extra=name):
                 self.assertRegex(show(REPO, "HEAD", name), r"\bguard\b", "%s is printed but names no guard" % name)
+
+    def test_a_load_bound_inside_a_function_prints_its_suite_for_guard_rm_var(self):
+        target = "hooks/guard_rm_var.py"
+        self.assertNotIn(target, dict(mutate_guard.REPORT_TARGETS), "the fixture: %s must be unlisted" % target)
+        loader = "hooks/test_guard.py"
+        self.assertRegex(show(REPO, "HEAD", loader), r'(?m)^    path = os\.path\.join\(.*"guard_rm_var\.py"\)$',
+                         "the fixture: %s binds the guard_rm_var path inside a function" % loader)
+        code, out, err = run_cli(["--tests-for", target])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertIn(loader, out.splitlines(),
+                      "%s loads guard_rm_var inside a function, so --tests-for %s must print it" % (loader, target))
 
 
 if __name__ == "__main__":
