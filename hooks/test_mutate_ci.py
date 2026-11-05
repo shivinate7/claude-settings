@@ -106,6 +106,12 @@ def status_of(repo):
     return git(repo, "status", "--porcelain")
 
 
+def state_of(repo):
+    """What a run must leave as found, by name: the worktrees, the branches, the working tree and HEAD of `repo`."""
+    return {"worktrees": git(repo, "worktree", "list", "--porcelain"), "branches": git(repo, "branch", "--list"),
+            "status": status_of(repo), "HEAD": rev(repo, "HEAD")}
+
+
 def tree_of(repo):
     """Every file under the repository but .git, as sorted relative paths: what a run must not add to."""
     names = []
@@ -673,20 +679,20 @@ class KnownDefectsTests(unittest.TestCase):
         edited = os.path.join(repo, "calc.py")
         with open(edited, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(CALC_BASE.replace("return a + b", "return (a + b)"))
-        before = (status_of(repo), rev(repo, "HEAD"))
-        self.assertIn("calc.py", before[0], "the fixture: the working tree must be dirty")
+        before = state_of(repo)
+        self.assertIn("calc.py", before["status"], "the fixture: the working tree must be dirty")
         # The working copy has no `return a + b`, so the anchor is stale there. HEAD has it once.
         code, out, err = known_run([defect("kb-caught", "return a + b", "return a - b", "test_calc.py")], repo)
         self.assertEqual(verdicts_of(out), {"kb-caught": "CAUGHT"}, "the plant reads the HEAD tree, not the working tree\n"
                          + out)
-        self.assertEqual((status_of(repo), rev(repo, "HEAD")), before, "the run changed the repository")
+        self.assertEqual(state_of(repo), before, "the run changed the repository's worktrees, branches, status or HEAD")
         with open(edited, encoding="utf-8") as handle:
             self.assertEqual(handle.read(), CALC_BASE.replace("return a + b", "return (a + b)"),
                              "the run changed the working copy of calc.py")
 
     def test_the_log_is_one_json_file_and_the_repository_is_untouched(self):
         repo = defect_repo()
-        before = (tree_of(repo), status_of(repo))
+        before = (tree_of(repo), state_of(repo))
         folder, log = fixture_log()
         defects = [defect("kb-caught", "return a + b", "return a - b", "test_calc.py"),
                 defect("kb-miss", "return a * b", "return 0", "test_nothing.py")]
@@ -698,7 +704,8 @@ class KnownDefectsTests(unittest.TestCase):
         json.loads(raw)
         for defect_id in ("kb-caught", "kb-miss"):
             self.assertIn(defect_id, raw, "the log names %s" % defect_id)
-        self.assertEqual((tree_of(repo), status_of(repo)), before, "the run wrote into the repository")
+        self.assertEqual((tree_of(repo), state_of(repo)), before,
+                         "the run wrote into the repository's files, worktrees, branches, status or HEAD")
 
     def test_known_defects_without_repo_is_a_bad_argument_exit_2(self):
         spec = profile_file([defect("kb-caught", "return a + b", "return a - b", "test_calc.py")])
