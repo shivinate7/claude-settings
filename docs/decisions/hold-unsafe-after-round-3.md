@@ -22,7 +22,7 @@ Owner, 2026-10-15 12:00 CDT. The owner's words:
   - FAIL, or a diff wider than the finding: the fix starts a new lane at round 1.
   - A fix check is not a review round. It runs on the reviewer row of the model table (decision `agent-model-cap`), haiku. Its brief carries no `Round N of 3` marker, so no guard changes.
   - "Last round" includes the single round of a delete-only change.
-  - Open, not decided: whether a fix that edits a guard or check owes the net-value test again (owner page item 255).
+  - A passing fix check is the review of the new head. It does not repeat the net-value test (owner, 2026-11-05 08:41 CST, typed in the lane; page item 232 a). A guard or check change keeps the net value that round 3 gave it.
 - A change changes a guard or check when it edits one of these. The list is the orchestrator's brief, not an owner grant. Test files alone never count (owner, 2026-10-15 22:39 and 22:55 CDT).
   - A guard: any hook that can refuse or ask, with its wiring and prompt-type guards in `settings.json`. Also any `allow`, `deny` or `ask` entry under `permissions` in `settings.json`, and any `tools` or `disallowedTools` line in `agents/*.md` frontmatter. Examples: `hooks/guard*.py`, `hooks/rm_prompt_answer.py`, `githooks/`.
   - A check: any check that can fail CI or the merge. Examples: `.github/workflows/`, `actions/*`, `lint/` checks, `merge/` checks, `hooks/mutate_*.py`.
