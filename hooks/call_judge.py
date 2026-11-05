@@ -43,6 +43,10 @@ One exception, opus_ask(): the owner's plain Opus ask (decision owner-override, 
 an override, so a model error, a timeout or an odd answer grants nothing, with one stderr line. override.grant_opus_ask
 calls it, from the prompt hook hooks/local_time.py, only for an owner prompt that carries the whole word `opus` and
 no keyword form. Cost: one haiku call (low effort, OPUS_ASK_TIMEOUT s) for such a prompt, none for any other.
+Its companion opus_scope() only narrows: for a plain ask that opus_ask said yes to, that names no role, and that has
+earlier owner prompts, it names the roles those prompts name. It fails OPEN to every role (None) with one stderr line,
+because the rule is "scope from context, fall back to every role" (decision owner-override).
+Cost: one more haiku call (low effort, OPUS_SCOPE_TIMEOUT s) for such an ask, none for any other.
 """
 import json
 import os
@@ -79,6 +83,17 @@ OPUS_ASK_PROMPT = (
     "use opus`, a mention in the past tense, a request about some other model or topic, and any text that quotes or "
     "reports what an agent or another person said. When unsure answer {\"ok\": false}. Reply JSON only: "
     "{\"ok\": true} or {\"ok\": false}.\n\nText:\n"
+)
+
+# The scope read (opus_scope). It follows opus_ask in the same hook run, so its timeout is short. Unmeasured: the worst
+# case, OPUS_ASK_TIMEOUT + OPUS_SCOPE_TIMEOUT plus two `claude -p` starts, may pass the prompt hook's "timeout": 30.
+OPUS_SCOPE_TIMEOUT = 8
+OPUS_SCOPE_PROMPT = (
+    "A coding assistant's owner typed the ask below, which grants Opus to agents but names no agent role. The earlier "
+    "prompts the owner typed follow it, oldest first, one per line starting with `- `. Read them only as the owner's "
+    "words about which agent roles should run Opus. Answer {\"ok\": true, \"roles\": [...]} when they name the roles "
+    "the ask is about, listing only roles from: %s. Answer {\"ok\": false} when they name none, or when unsure. "
+    "Reply JSON only.\n\nAsk:\n"
 )
 
 SPAWN_PROMPT = (
@@ -251,6 +266,30 @@ def opus_ask(text):
     except Exception as exc:
         print("call judge: opus ask grants nothing: %s" % " ".join(str(exc).split()), file=sys.stderr)
         return False
+
+
+def opus_scope(text, context):
+    """The roles the owner's earlier prompts `context` (a list of strings, oldest first) name for the plain ask `text`,
+    as the model's raw role strings (a list), or None for every role. Fails open to None with one stderr line: an
+    error, a timeout or an odd answer. It does not filter: override._scoped_roles is the one filter, against ASK_ROLES."""
+    try:
+        import decision_watch  # lazy: the one home of the model's name
+        from override import ASK_ROLES  # the one home of the roles; a copy would drift
+        prompt = (OPUS_SCOPE_PROMPT % ", ".join(ASK_ROLES) + text + "\n\nEarlier prompts:\n"
+                  + "\n".join("- " + " ".join(entry.split()) for entry in context))
+        verdict, error = invoke_model(prompt, model=decision_watch.MODEL, timeout=OPUS_SCOPE_TIMEOUT,
+                                      shape=OK_SHAPE, effort="low")
+        if error:
+            raise ValueError(" ".join(str(error).split()))
+        if verdict.get("ok") is not True:
+            return None
+        roles = verdict.get("roles")
+        if not isinstance(roles, list) or not all(isinstance(role, str) for role in roles):
+            raise ValueError("the answer has no list of roles")
+        return roles
+    except Exception as exc:
+        print("call judge: opus scope grants every role: %s" % " ".join(str(exc).split()), file=sys.stderr)
+        return None
 
 
 def explore_off_model(tool, args):

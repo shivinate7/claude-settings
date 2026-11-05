@@ -300,8 +300,8 @@ MUTATIONS = [
      '    if target in ("HEAD", "@"):',
      '    if target in ("@",):', "guard", 'lease with includes, HEAD, on main'),
     ("force-push: refs/heads/ is not stripped",
-     'target.removeprefix("refs/heads/")',
-     'target', "guard", 'forced to the default branch asks: a full ref'),
+     'target.removeprefix("refs/heads/") in (defaults or ())',
+     'target in (defaults or ())', "guard", 'forced to the default branch asks: a full ref'),
     ("force-push: a glob destination no longer asks",
      'if target is None or "*" in target:',
      'if target is None:', "guard", 'forced to the default branch asks: a glob refspec'),
@@ -352,6 +352,52 @@ MUTATIONS = [
      'refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))',
      'refuse(tool, verdict, "force-push", PUSH_ASK_REASON, "git push " + " ".join(args))',
      "guard", 'the long force flag'),
+    # push-main and push-stray-branch (owner rulings 207 a and 206 a).
+    ("push-main: a colon-less main is not a destination",
+     '            elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                return "main"',
+     '            elif False:\n                return "main"', "guard", 'a push of main from a feature branch asks'),
+    ("push-main: a refspec target of main is not a destination",
+     '                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                    return "main"',
+     '                if False:\n                    return "main"', "guard", 'HEAD:main from a feature branch asks'),
+    ("push-main: --all no longer asks",
+     '    if every:\n        return "main"',
+     '    if False:\n        return "main"', "guard", 'main, --all reaches main and asks'),
+    ("push-main: a bare push that writes main no longer asks",
+     '        if dest in DEFAULT_BRANCH_FALLBACK:\n            return "main"',
+     '        if False:\n            return "main"', "guard", 'main tracking origin/main, a bare push asks'),
+    ("push-main: HEAD on main no longer asks",
+     '        if implied and current() in DEFAULT_BRANCH_FALLBACK:',
+     '        if False:', "guard", 'main tracking origin/main, HEAD asks'),
+    ("push-main: push.default upstream is not read for a bare push",
+     '            dest = merge or None',
+     '            dest = None', "guard", 'a branch tracking main asks'),
+    ("push-main: a bare push under simple ignores git's own refusal",
+     '            dest = cur if merge == cur else None',
+     '            dest = cur', "guard", 'a bare push on main with no upstream is git'),
+    ("push-stray-branch: a stray destination no longer asks",
+     '    return "stray" if merge != current() and not upstream else ""',
+     '    return ""', "guard", 'stray branch, HEAD asks'),
+    ("push-stray-branch: @ is not an implied destination",
+     '            elif source in ("HEAD", "@") or',
+     '            elif source in ("HEAD",) or', "guard", 'stray branch, @ asks'),
+    ("push-stray-branch: a colon-less current branch is not implied",
+     ' or (current() is not None and source == current()):',
+     ' or False:', "guard", 'colon-less refspec asks'),
+    ("push-stray-branch: a bare push under current is not implied",
+     '            dest = cur\n            implied = True',
+     '            dest = cur', "guard", 'a bare push under push.default current asks'),
+    ("push-stray-branch: an upstream of main no longer stays silent",
+     'or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:',
+     'or pushed != remote_cfg:', "guard", 'lane from main, HEAD is silent'),
+    ("push-stray-branch: another remote than the upstream's is judged",
+     'or not remote_cfg or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:',
+     'or not remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:', "guard", "another remote than the upstream's"),
+    ("push-main: --branches is not read as --all",
+     '            elif name in ("--all", "--branches"):',
+     '            elif name == "--all":', "guard", 'main, --branches reaches main and asks'),
+    ("push-stray-branch: a -u push of the local name still asks",
+     'return "stray" if merge != current() and not upstream else ""',
+     'return "stray" if merge != current() else ""', "guard", 'stacked lane, -u HEAD is silent'),
     ("env-file: a search command's pattern is read as a path",
      '                if index in patterns:\n                    continue\n',
      '                if False:\n                    continue\n', "guard",
@@ -695,8 +741,15 @@ MUTATIONS = [
      '    if stash_takes_the_stack(args):\n        stack = stash_stack(where)',
      '    if stash_action(args) in ("drop", "clear"):\n        stack = stash_stack(where)', "guard", 'subject: popping a real entry from a CLEAN checkout still denies'),
     ("shared-tree: reset collapses back to a name match, --hard or not",
-     '    return "--hard" in args',
+     '    return any(flag in args for flag in RESET_DISCARD_FLAGS)',
      '    return True', "guard", 'reset: a plain reset only unstages, the working tree is untouched'),
+    # Each mutant drops ONE flag from the one constant, so each form's own case must go red.
+    ("shared-tree: reset --merge no longer takes --hard's verdict",
+     'RESET_DISCARD_FLAGS = ("--hard", "--merge", "--keep")',
+     'RESET_DISCARD_FLAGS = ("--hard", "--keep")', "guard", 'reset: --merge at HEAD over a staged edit and a staged new file refuses'),
+    ("shared-tree: reset --keep no longer takes --hard's verdict",
+     'RESET_DISCARD_FLAGS = ("--hard", "--merge", "--keep")',
+     'RESET_DISCARD_FLAGS = ("--hard", "--merge")', "guard", 'reset: --keep at another commit moves the branch, so a shared checkout refuses'),
     # Added: the subject read. One per arm. Each mutation blinds ONE subject read, which must
     # turn that arm's empty-subject case red: a guard that refuses without reading its subject is
     # the defect these arms fix.
@@ -1235,9 +1288,11 @@ MUTATIONS = [
      "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: a write outside the recorded home, inside the clone, is allowed through",
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                    and path_is_inside(resolved_target, home) is False):',
+     '                    and path_is_inside(resolved_target, home) is False\n'
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                    and path_is_inside(resolved_target, home) is None):',
+     '                    and path_is_inside(resolved_target, home) is None\n'
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
      "guard", "worktree-home: a /c/ cwd inside the home is inside"),
     # The next two anchors sit in worktree_home_hit, which returns a log detail and lets judge()
     # refuse; a mutant that returns a detail for a status that allows is a deny.
@@ -1261,10 +1316,12 @@ MUTATIONS = [
      '            try:\n                resolved_target = _resolved(write_target, home_cwd)\n'
      '            except Exception:\n                resolved_target = write_target\n'
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                    and path_is_inside(resolved_target, home) is False):',
+     '                    and path_is_inside(resolved_target, home) is False\n'
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
      '            resolved_target = write_target\n'
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                    and path_is_inside(resolved_target, home) is False):',
+     '                    and path_is_inside(resolved_target, home) is False\n'
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
      "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: the write-target loop judges only the first path field",
      '        for write_target in (write_targets(tool_input) if home_primary else ()):',
@@ -1280,12 +1337,14 @@ MUTATIONS = [
      "        return (bool(owner) and owner == own",
      "guard", "worktree-home: any session's write into another checkout"),
     ("other-checkout: the clone's common git directory is judged as the primary's own files",
-     '                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)',
-     '                and True)',
+     '                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True\n'
+     '                and not _own_red_run(',
+     '                and True\n'
+     '                and not _own_red_run(',
      "guard", "worktree-home: any session's write into another checkout"),
     ("other-checkout: a shell target ignores a leading cd",
-     "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True)",
-     "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=False)",
+     "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True, predicate_command=True)",
+     "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=False, predicate_command=True)",
      "guard", "worktree-home: any session's write into another checkout"),
     ("other-checkout: a quiet redirect pays the git read",
      '        writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))\n        moves =',
@@ -1293,8 +1352,8 @@ MUTATIONS = [
      "guard", "worktree-home: the cross-checkout read costs"),
     # The `cd` act: `worktree_home_cd_*_case`.
     ("other-checkout: a cd into another checkout is not judged",
-     "        if elsewhere(move, where) and not _cd_red_run(",
-     "        if False and not _cd_red_run(",
+     "        if elsewhere(move, where) and not _own_red_run(",
+     "        if False and not _own_red_run(",
      "guard", "worktree-home: a cd into another checkout of the clone is refused"),
     ("other-checkout: a bare cd with no write word is skipped like a read",
      "    if not moves and not writes:\n        return \"\"\n    roots =",
@@ -1313,17 +1372,34 @@ MUTATIONS = [
      '    if False and path_is_inside(target, home) is True:\n        return True\n    if isinstance(payload, dict)',
      "guard", "worktree-home: the cd exemptions pass"),
     ("other-checkout: the session's recorded home is not exempt from the cd act",
-     "    return bool(held) and path_is_inside(target, held) is True\n\n\ndef _cd_red_run(",
-     "    return False\n\n\ndef _cd_red_run(",
+     "    return bool(held) and path_is_inside(target, held) is True\n\n\n# The shell verbs",
+     "    return False\n\n\n# The shell verbs",
      "guard", "worktree-home: the cd exemptions pass"),
     ("other-checkout: the agent's own red-run folder is not exempt from the cd act",
-     '    return (os.path.basename(owner).startswith("agent-" + agent_id + "-")',
-     '    return (False and os.path.basename(owner).startswith("agent-" + agent_id + "-")',
+     '                and os.path.normcase(os.path.basename(folder)).startswith(',
+     '                and False and os.path.normcase(os.path.basename(folder)).startswith(',
      "guard", "worktree-home: the cd exemptions pass"),
     ("other-checkout: the red-run exemption matches a prefix of the agent id",
-     '    return (os.path.basename(owner).startswith("agent-" + agent_id + "-")',
-     '    return (os.path.basename(owner).startswith("agent-" + agent_id)',
+     '                    os.path.normcase("agent-" + agent_id + "-"))):',
+     '                    os.path.normcase("agent-" + agent_id))):',
      "guard", "worktree-home: an agent's cd into a sibling agent tree"),
+    # The write act's exemption: `worktree_home_red_write_case`.
+    ("other-checkout: a write into the agent's own red-run folder is refused",
+     '                and not _own_red_run(payload, roots[0], resolved, verb in RED_RUN_ROOT_VERBS))',
+     '                and True)',
+     "guard", "worktree-home: an agent's write into its own red-run folder"),
+    ("worktree-home: a Write into the agent's own red-run folder is refused",
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
+     '                    and True):',
+     "guard", "worktree-home: an agent's write into its own red-run folder"),
+    ("other-checkout: the red-run folder's own root is exempt, so rm and mv may name it",
+     "            return root_ok or folder != path",
+     "            return True",
+     "guard", "worktree-home: the own red-run folder's root is refused"),
+    ("other-checkout: the red-run folder is anchored on the owning checkout, not the primary",
+     '                and not _own_red_run(payload, roots[0], resolved, verb in RED_RUN_ROOT_VERBS))',
+     '                and not _own_red_run(payload, owner, resolved, verb in RED_RUN_ROOT_VERBS))',
+     "guard", "worktree-home: a red-run folder nested under another linked worktree"),
     ("other-checkout: a cd within its own checkout pays the git read",
      '                 if own_root and _checkout_root_by_stat(m) not in ("", own_root) and not _cd_home_exempt(payload, where, m)]',
      "                 if own_root and not _cd_home_exempt(payload, where, m)]",
@@ -2201,6 +2277,7 @@ MUTATIONS = [
 REPORT_TARGETS = [
     ("lint/report_guard.py", ["lint/test_report_guard.py", "lint/test_report_guard_route.py",
                              "lint/test_report_guard_landing.py",
+                             "lint/test_report_guard_refusal.py",
                              "hooks/test_reply_judge.py", "hooks/test_wrappers.py",
                              "lint/test_rule_audit.py", "lint/test_settings_matcher.py"]),
     ("hooks/feedback_guard.py", ["hooks/test_feedback_inbox.py", "lint/test_settings_matcher.py"]),
@@ -2276,6 +2353,9 @@ if not passed:
     print(result.detail)
     sys.exit(1)
 """
+# banchi's per-file selector (scripts/tests-for.py), named by both parts. A commit that lacks the script has no
+# copy in its checkout, so a replay reads the clone's HEAD copy (`_select_suites`, hooks/mutate_shared.py).
+BANCHI_SELECT = ["python3", "scripts/tests-for.py", "{path}"]
 REPLAY_PROFILES = {
     "q_max": {
         "code": r"^(src|harness|app)/.*\.(ts|tsx|mts|mjs|js)$", "code_not": r"^harness/tests/|\.(test|spec)\.(mjs|js|ts|tsx|mts)$",
@@ -2292,7 +2372,7 @@ REPLAY_PROFILES = {
                      "{suite}"],
             "classify": "playwright", "cwd": "app",
             "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"], "lockfile": "app/package-lock.json",
-            "sparse_skip": ["demo-assets", "vendor"],
+            "sparse_skip": ["demo-assets", "vendor"], "select": BANCHI_SELECT,
         },
         "py": {
             "code": r"^(?!harness/tests/).*\.py$", "code_not": r"^scripts/(.*/)?[^/]*selftest\.py$",
@@ -2303,6 +2383,7 @@ REPLAY_PROFILES = {
                         ["{deps}/venv/bin/pip", "install", "--quiet", "--disable-pip-version-check", "-r",
                          "requirements.txt"]],
             "lockfile": "requirements.txt", "link": None, "sparse_skip": ["demo-assets", "vendor"],
+            "select": BANCHI_SELECT,
         },
     }},
 }

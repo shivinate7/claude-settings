@@ -22,7 +22,7 @@ The owner may use any word for a thing (`speak-one-name-per-thing`); the glossar
 
 | Term | Meaning | Home | Not |
 |---|---|---|---|
-| lane | The unit of work. One isolated piece of work, with its own branch, worktree and lane PR. Its branch slug is its name. In a coordinator build a lane session runs it. In a solo or one-lane session an agent runs it. | `rule:parallelism-own-lane-orchestrator`, `docs/decisions/lane-by-slug.md` | `workstream` |
+| lane | The unit of work. One isolated piece of work, with its own branch, worktree and lane PR. Its branch slug is its name. A lane session runs it, local and cloud alike. An agent is never a lane. | `rule:parallelism-own-lane-orchestrator`, `docs/decisions/lane-by-slug.md` | `workstream` |
 | batch | The lane PRs that join one integration branch and merge to main together. | `rule:git-integration-branch-merge` | — |
 | integration branch | The branch that holds the commit of each lane in a batch. | `rule:git-integration-branch-merge` | `batch branch` |
 | integration PR | The one PR of a batch that goes ready. Its CI run is the only CI run for the batch. A lone lane is its own integration PR. | `rule:git-integration-branch-merge`, `skills/ci-hygiene/SKILL.md` | — |
@@ -53,7 +53,7 @@ The owner may use any word for a thing (`speak-one-name-per-thing`); the glossar
 | page writer | The session that writes the waiting page. Triage writes it where triage runs. Elsewhere the coordinator does. | `docs/decisions/session-tiers.md`, `skills/waiting-page/SKILL.md` | waiting-page writer |
 | batch runner | The standing session that owns the integration batch, the CI waits, the merge tool runs and archiving lanes whose topic has no queued step, after the integration PR merges. | `docs/decisions/session-tiers.md` | `branch manager`, `point guard` |
 | arbiter | A standing session that holds a repo's ruling voice, below the owner. Any repo may have one, for long-running work. A coordinator starts one only on the owner's grant, such as "spawn arbiter". Batch checks go to the batch runner, not to it. | `docs/decisions/session-tiers.md` | — |
-| lane session | A one-lane session that a coordinator starts to run one lane. The lane holds one topic and may take several steps on it. It spawns its own agents and reports up to the coordinator. | `docs/decisions/session-tiers.md` | `lane lead` |
+| lane session | A one-lane session that runs one lane. A coordinator starts it, or the owner does. The lane holds one topic and may take several steps on it. It spawns its own agents and reports up to the coordinator that started it, if any. | `docs/decisions/session-tiers.md` | `lane lead` |
 | topic | The one subject a lane holds. The lane's `cs-topic` tag names it, and the brief's first line names it as `Topic:`. Unrelated work starts a new lane. | `docs/decisions/session-tiers.md` | — |
 | shape | The pick a new session makes from the ask: solo, one lane or coordinator. A session may grow to a larger shape. A solo session has no tier. | `rule:roles-pick-mode-from-request`, `docs/decisions/session-tiers.md` | — |
 | tier | A session's role in a build: coordinator, triage, batch runner, arbiter or lane session. Sessions only. | `docs/decisions/session-tiers.md` | — |
