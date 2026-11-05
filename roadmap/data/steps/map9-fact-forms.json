@@ -1,0 +1,9 @@
+{
+ "title": "Decide per form whether the shared MAP9 fact reader widens or the repo rewords",
+ "phase": "later",
+ "status": "todo",
+ "order": 180.6,
+ "why": "q_max #1030 hit five forms the shared MAP9 fact line cannot express: an inline HTTP status, a constant written as arithmetic, an inline threshold, a date, and a cite that can only point at JSON. Detail in q_max #1030's PR body.",
+ "note": "Nov 5 09:28 CST (coordinator): decide per form, widen the fact reader or reword. Only a form that two or more repos hit is worth a reader change; else the repo rewords (a repo changes to fit a shared tool).",
+ "updatedAt": "2026-11-05T15:28:00Z"
+}
