@@ -1419,5 +1419,5 @@
 - changed-log-case-misses-git: the `--changed` log case in `hooks/test_mutate_ci.py` compares the tree and status only, so a no-op `_drop_checkout` keeps it green; the replay suite covers the shared helper. Decision: mutation-ci-report-and-replay.
 - budget-is-per-part: `replay_profile` gives each part of a parts profile (banchi) its own budget, so its `--changed` run can last 2 times the budget; claude_settings has one part. Decision: mutation-ci-report-and-replay.
 - tested-by-label-near-miss: `  - Tested-by:` (a hyphen) is read as no line, so the claim goes unchecked; `Decisions:` has the same exact-label rule (skills/plain-english-map/scripts/map-check.mjs subLineEntries). Seen 2026-11-05, lane map-tested-by-line. Decision: map-tested-by-line.
-- tested-by-untracked-message: MAP11 says "git does not track it" for a `./tests/x.py` path that is tracked (skills/plain-english-map/scripts/map-check.mjs MAP11). Decision: map-tested-by-line.
 - tested-by-data-string: a path string that is only data, such as `DATA = "src/x.py"`, passes MAP11 as a load. Decision: map-tested-by-line.
+- tested-by-subheading: a `### ` heading inside `## Code files` ends the section for MAP11, so a tested-by line under it fails as misplaced (skills/plain-english-map/scripts/map-check.mjs subLineEntries). Decision: map-tested-by-line.
