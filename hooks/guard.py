@@ -2759,11 +2759,11 @@ def lane_session_hit(payload, tool: str) -> tuple:
     at full, and an unread record or any error counts as no lane."""
     if not isinstance(payload, dict) or is_cloud() or tool not in RUNNING_LANE_TOOLS or payload.get("agent_id"):
         return "", ""
-    import override
-    own_id = override.remote_session_id()
-    if own_id is None:
-        return "", ""
-    try:
+    try:  # fails closed: an unimportable override or an unread id is no lane, so the later checks still run
+        import override
+        own_id = override.remote_session_id()
+        if own_id is None:
+            return "", ""
         full = load_full(read_load())
         transcript = payload.get("transcript_path")
         if not full or not isinstance(transcript, str) or not transcript:
