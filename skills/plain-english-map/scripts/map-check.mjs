@@ -1,6 +1,6 @@
 // Plain English is the master copy of what the code does, and a check keeps `docs/map/` in sync with it.
 //
-// Run `node <skill>/scripts/map-check.mjs` from a repository root to run the 10 MAP checks there.
+// Run `node <skill>/scripts/map-check.mjs` from a repository root to run the 11 MAP checks there.
 // The check bodies live here, in `mapChecks`. A host may register each one with its own check.
 //
 // `migrationTables` strips SQL `--` comments first (`stripSqlComments` below — `ctx.stripComments`
@@ -278,31 +278,50 @@ const parseHomes = (text) => {
 /** The lines under a `## Homes` heading of one docs/map/ page, as { line, capability, file, symbol }. */
 export const homeLines = (text) => parseHomes(text).homes;
 
-// ---- Decision lines: the ids of the decision records that a map line's file follows ----
+// ---- Sub-lines: the labelled lines under a map line (`Decisions:` and `Tested by:`), read by one reader ----
 
 // A decisions line is an indented list line under a map line: `  - Decisions: ` and each id in backticks, joined by `, `.
+// A tested-by line is the same with `Tested by: ` and each test path from the repository root. Its label is found at any indent, so an unindented one is read, and fails.
 const DECISIONS_LABEL_RE = /^[ \t]+[-*+]\s+Decisions:/;
 const DECISIONS_LINE_RE = /^[ \t]+[-*+] Decisions: (`[^`]+`(?:, `[^`]+`)*)\s*$/;
+const TESTED_LABEL_RE = /^[ \t]*[-*+]\s+Tested by:/;
+const TESTED_LINE_RE = /^[ \t]+[-*+] Tested by: (`[^`]+`(?:, `[^`]+`)*)\s*$/;
+const backticked = (s) => [...s.matchAll(/`([^`]+)`/g)].map((x) => x[1]);
 
 /**
- * The code-file map lines of one docs/map/ page, each as { file, line, ids, at, bad }. `line` is the 1-based number of the map line,
- * and `ids` the ids on its decisions lines. `at` is the 1-based number of its first decisions line, or null when it has none.
- * `bad` holds each decisions line that is not in the form above: a bad line adds no id.
+ * The map lines of one docs/map/ page, as `entries`, each { file, line, code, ids, at, bad, tests, testsAt, testsBad }. `line` is the 1-based number of the map line.
+ * A map line is a backtick list line outside a Tables or a Screens section. `code` is true when `re` accepts its path: only a code line reads decisions lines,
+ * so MAP10 is the same for a file whose extension the config leaves out. A tested-by line is valid only under a map line in `## Code files` (`placed`): any other place makes it an orphan.
+ * `ids` are the ids on its decisions lines, `at` is the number of the first one or null, and `bad` holds each decisions line that is not in the form: a bad line adds no id.
+ * `tests`, `testsAt` and `testsBad` are the same for its tested-by lines.
+ * `orphans` holds each tested-by line that sits under no `placed` map line (a table line, a screen line, a home and a line in another section included), as { line, text }.
  */
-export const decisionEntries = (text, re) => {
-  const out = [];
-  let entry = null;
+export const subLineEntries = (text, re) => {
+  const entries = [], orphans = [];
+  let entry = null, inFiles = true, inCode = false;
   for (const [line, l] of unfenced(text)) {
-    if (/^#{1,6}\s/.test(l)) { entry = null; continue; }
+    if (/^#{1,6}\s/.test(l)) { entry = null; inFiles = !/\b(?:tables|screens)\b/i.test(l); inCode = /^#{1,6}\s+code files\s*$/i.test(l); continue; }
     const mapLine = l.match(LIST_ITEM_TOKEN_RE);
-    if (mapLine) { entry = re.test(mapLine[1]) ? { file: mapLine[1], line, ids: [], at: null, bad: [] } : null; if (entry) out.push(entry); continue; }
-    if (!entry || !DECISIONS_LABEL_RE.test(l)) continue;
+    if (mapLine) {
+      const code = re.test(mapLine[1]);
+      entry = inFiles || code ? { file: mapLine[1], line, code, placed: inCode, ids: [], at: null, bad: [], tests: [], testsAt: null, testsBad: [] } : null;
+      if (entry) entries.push(entry);
+      continue;
+    }
+    if (TESTED_LABEL_RE.test(l)) {
+      const m = l.match(TESTED_LINE_RE);
+      if (!entry?.placed) orphans.push({ line, text: l.trim() });
+      else if (!m) entry.testsBad.push({ line, text: l.trim() });
+      else { entry.testsAt ??= line; entry.tests.push(...backticked(m[1])); }
+      continue;
+    }
+    if (!entry?.code || !DECISIONS_LABEL_RE.test(l)) continue;
     const m = l.match(DECISIONS_LINE_RE);
     if (!m) { entry.bad.push({ line, text: l.trim() }); continue; }
     entry.at ??= line;
-    entry.ids.push(...[...m[1].matchAll(/`([^`]+)`/g)].map((x) => x[1]));
+    entry.ids.push(...backticked(m[1]));
   }
-  return out;
+  return { entries, orphans };
 };
 
 // ---- MAP9 helpers ----
@@ -1110,7 +1129,7 @@ export const aiCallRows = (sources, cfg = repoMapConfig()) => {
   });
 };
 
-// ---- The 10 MAP checks. One home for each body: a host may register them with its own check, and the command below runs them. ----
+// ---- The 11 MAP checks. One home for each body: a host may register them with its own check, and the command below runs them. ----
 export const TRACE_PAGE_RE = /^docs\/map\/traces\/([^/]+)\.md$/;
 
 /** The files this repository tracks in `root`, from `git ls-files`. */
@@ -1123,6 +1142,10 @@ export const gitLsFiles = (root) =>
 // Top-level docs/map/*.md only. A trace page under docs/map/traces/ has its own checks, MAP5 and MAP6.
 // A bullet under a trace heading that says "tables" or "screens" would else add a fake MAP3 or MAP4 line.
 export const mapFilePaths = (files) => files.filter((f) => /^docs\/map\/[^/]+\.md$/.test(f));
+
+// The index files that MAP11 follows one hop through: a package's `__init__.py` and a folder's `index.*` that re-export a file.
+const INDEX_PY_RE = /(^|\/)__init__\.py$/;
+const INDEX_JS_RE = /(^|\/)index\.(?:ts|tsx|mjs|js|cjs)$/;
 
 const skip = (key, what) => ({ skipped: `map.config.json has no "${key}" setting, so there is no ${what} to check` });
 // A check that no config has to turn on: `requireAllKeys` never makes its skip a fail.
@@ -1141,7 +1164,7 @@ export const decisionGaps = ({ cfg, root, read, all, pages }) => {
   const byFile = new Map();
   const unknown = [], bad = [];
   for (const [page, text] of pages) {
-    for (const e of decisionEntries(text, re)) {
+    for (const e of subLineEntries(text, re).entries.filter((x) => x.code)) {
       // A file with a map line on two pages is judged on the union of its ids, and fixed on its first line.
       if (!byFile.has(e.file)) byFile.set(e.file, { file: e.file, page, line: e.line, at: e.at, ids: [] });
       byFile.get(e.file).ids.push(...e.ids);
@@ -1160,7 +1183,7 @@ export const decisionGaps = ({ cfg, root, read, all, pages }) => {
 };
 
 /**
- * The bodies of MAP1..MAP10, for one validated config `cfg`, one repository `root` and a `read(file)` of its text. Each body returns true,
+ * The bodies of MAP1..MAP11, for one validated config `cfg`, one repository `root` and a `read(file)` of its text. Each body returns true,
  * returns `{ skipped: '<reason>' }`, or throws an error that says what is wrong. `files` is the list of tracked files, read at each call.
  */
 export const mapChecks = ({ cfg, root, read, files = () => gitLsFiles(root) }) => {
@@ -1185,6 +1208,38 @@ export const mapChecks = ({ cfg, root, read, files = () => gitLsFiles(root) }) =
       tracked: new Set(trackedCodeFiles(all, cfg)),
     });
   };
+
+  // What MAP11 judges: each tested-by line's problems by form, and the (file, test) pairs left to read. `reqs` is every read that judging them takes:
+  // each test, and each index file that a test may re-export through. An index file is read only for a language that a test is in, so a repository
+  // with no Python test starts no python3.
+  const testedBy = (all) => {
+    const tracked = new Set(all);
+    const re = extRe(cfg);
+    const problems = [], pairs = new Map();
+    for (const f of mapFilePaths(all)) {
+      const { entries, orphans } = subLineEntries(read(f), re);
+      for (const o of orphans) problems.push(`${f}:${o.line} a tested-by line sits under no map line in "## Code files" (a table line, a screen line, a home and a line in another section are none): ${o.text}`);
+      for (const e of entries) {
+        for (const b of e.testsBad) problems.push(`${f}:${b.line} tested-by line is not "  - Tested by: \`PATH\`, \`PATH\`": ${b.text}`);
+        for (const named of e.tests) {
+          // `./tests/x.py` and `tests/x.py` name one tracked file.
+          const test = named.startsWith('./') ? path.posix.normalize(named) : named;
+          if (!tracked.has(test)) problems.push(`${f}:${e.testsAt} ${e.file} names the test ${named}, and git does not track it`);
+          // An untracked mapped file is MAP2's finding, and no test can be judged against it.
+          else if (tracked.has(e.file) && !pairs.has(`${e.file}\0${test}`)) pairs.set(`${e.file}\0${test}`, { page: f, at: e.testsAt, file: e.file, test });
+        }
+      }
+    }
+    const tests = new Set([...pairs.values()].map((p) => p.test));
+    const langs = new Set([...tests].map((t) => (t.endsWith('.py') ? 'py' : 'js')));
+    const indexes = all.filter((x) => (langs.has('py') && INDEX_PY_RE.test(x)) || (langs.has('js') && INDEX_JS_RE.test(x)));
+    return { problems, pairs: [...pairs.values()], reqs: [...new Set([...tests, ...indexes])].map((file) => ({ file, op: 'loads' })) };
+  };
+
+  // MAP9 reads the facts of the map, and MAP11 reads the tests of its tested-by lines. In one run the tree is read once (`files()` answers the same list),
+  // so MAP9 reads both in one `readFacts` call and hands MAP11 its results: python3 starts once for the whole run. A host that gives each check
+  // its own list, or runs MAP11 alone, gets one call for each.
+  let handed = null;
 
   return {
     MAP1: () => {
@@ -1310,7 +1365,11 @@ export const mapChecks = ({ cfg, root, read, files = () => gitLsFiles(root) }) =
           else if (h.symbol) items.push({ home: h, here, req: { file: h.file, op: 'defines', symbol: h.symbol } });
         }
       }
-      const results = items.length ? readFacts(items.map((i) => i.req), root, { tracked: all }) : [];
+      const t11 = testedBy(all);
+      const reqs = [...items.map((i) => i.req), ...t11.reqs];
+      const got = reqs.length ? readFacts(reqs, root, { tracked: all }) : [];
+      const results = got.slice(0, items.length);
+      handed = { all, results: got.slice(items.length) };
       const unknown = new Map();
       items.forEach((it, i) => {
         const res = results[i], { fact, home, here } = it;
@@ -1342,6 +1401,31 @@ export const mapChecks = ({ cfg, root, read, files = () => gitLsFiles(root) }) =
         ...missing.map((m) => `${m.page}:${m.line} ${m.file} cites ${m.ids.join(', ')} in a comment, and its decisions line has no such id`),
         ...unknown.map((u) => `${u.page}:${u.line} ${u.file} lists ${u.id}, and no record in ${cfg.decisionsDir} names it`),
       ];
+      if (problems.length) throw new Error(problems.join('; '));
+      return true;
+    },
+
+    MAP11: () => {
+      const all = files();
+      const { problems, pairs, reqs } = testedBy(all);
+      if (pairs.length) {
+        const got = handed?.all === all ? handed.results : readFacts(reqs, root, { tracked: all });
+        const read1 = new Map(got.map((r) => [r.file, r]));
+        const unknown = new Map();
+        for (const { page, at, file, test } of pairs) {
+          const r = read1.get(test);
+          if (!r.ok) { unknown.set(test, r.reason); continue; }
+          if (r.value.imports.includes(file) || r.value.named.includes(file)) continue;
+          // One hop: a test loads the file when it imports one index file that imports it.
+          const hops = r.value.imports.filter((i) => read1.has(i) && (INDEX_PY_RE.test(i) || INDEX_JS_RE.test(i)));
+          if (hops.some((i) => read1.get(i).ok && read1.get(i).value.imports.includes(file))) continue;
+          const lost = hops.find((i) => !read1.get(i).ok);
+          if (lost) unknown.set(lost, read1.get(lost).reason);
+          problems.push(`${page}:${at} ${file} lists the test ${test}, and it does not load the file: it neither imports it, nor imports an index file that imports it, nor names its path in a string${lost ? ` (an unknown read of ${lost} may hide the link)` : ''}`);
+        }
+        // An unknown read is never a pass: the test was not judged.
+        for (const [test, reason] of unknown) problems.push(`unknown read: could not read ${test}: ${reason}`);
+      }
       if (problems.length) throw new Error(problems.join('; '));
       return true;
     },
