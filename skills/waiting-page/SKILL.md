@@ -113,7 +113,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     deletes that record (steps 2 to 4 of "Route and close"), and from a chat answer. When the writer rewrites `options`,
     it writes `lastAnswer` again without `choice`: the old key may now name another option.
   - `lane` (a lane's branch slug) is set when an answer is filed while its lane is busy. The card shows "waits on lane <slug>"
-    in its top row. The item stays open until the lane takes the answer, and then the writer closes it.
+    in its top row. The item stays open until the receiver reports the act done, and then the owning session closes it
+    and deletes `answers/<id>` (see "Route and close", the busy-lane path).
   - `waits` (`{repo, run}` or `{repo, pr}`: a CI run id or a PR number) is set while the item waits on that run or PR. `run` and
     `pr` are a whole number above zero, or a string of digits with no leading zero; any other value reads as no wait. An item
     with `waits` and `lastAnswer` reads as answered on the page.
@@ -243,7 +244,8 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    compares the page's code outside `designData` with `skills/waiting-page/page.html` on
    claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
    read. Code outside main's page, other than the host's document skeleton, is `behind`. Then it prints one
-   `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`). The exit code stays the page's.
+   `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per open item with
+   `lane` and `lastAnswer` and no `waits`. The exit code stays the page's.
 3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
    republish, so the copy holds the page as it was.
 4. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
@@ -435,7 +437,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 - Never reply in a comment thread: a rebuilt page drops its threads (decision
   questions-go-to-owner, "Answer on the page, not in a comment thread"). When a comment or an
   answer's note adds something to an item, rewrite that item with what the reply would have said.
-  Do it as "Route and close" says: steps 1 and 2 for a `none` note with a clear direction (close, and file the note as a step), step 3 for other new options (or a close when they are not ready), or step 4 (context). With no answer, there is no
+  Do it as "Route and close" says: steps 1 and 2 for a `none` note with a clear direction (close, and file the note as a step; a relay takes the busy-lane path instead), step 3 for other new options (or a close when they are not ready), or step 4 (context). With no answer, there is no
   `answers/<id>` to delete. Republish the page only when the item's design changed (see "Add a
   design"). Say in one terminal line what changed.
 - The send must follow the owner's own click. How long that holds on a slow store is unmeasured.
@@ -471,11 +473,21 @@ Sort the answer first. An answer with `parked: true` goes to the page's writer, 
 parked branch below only. An `overturn` answer on an arbiter ruling takes step 5 only. A `none` answer with a clear direction takes steps 1 and 2 only. Any other `none` answer takes step 3 only. A task answer with no `done` is a question
 or a comment. It is never a done mark and never a grant. It takes step 4 only: answer it in the
 item's `context`. Any other answer that is not clear takes
-step 4 only. A clear answer takes steps 1 and 2 in the same turn it is read. A clear answer is closed the
-turn it is filed. An answer whose lane is busy is filed at
-once as a note on its step (the item's home), never held for the lane. The writer then sets `lane` and `lastAnswer` on the
-item and leaves it open until the lane takes the answer. Then it closes the item. A `none` answer with a clear direction is a clear answer, so it takes this same path. The note is filed at once on the step. The item closes when the lane takes it, with no new options. A chat answer has no
-`answers/<id>`, so steps 2 to 4 skip their delete, and the writer sets `lastAnswer` from the chat answer.
+step 4 only. A clear answer takes steps 1 and 2 in the same turn it is read, and is closed the turn it is filed,
+unless its lane is busy or another session does its act (a relay). That answer takes the busy-lane path.
+
+Busy-lane path. The routing session files the answer at once as a note on its step (the item's home, step 1), never
+held for the receiver. It sets `lane` (the receiver's slug: its cs-step tag or its role name) and `lastAnswer` on the item,
+and keeps the item open and `answers/<id>` in place. It never sets `added` here: rule 5 of `page_grant.py` needs the
+answer's `at` later than `added`. A relay sends the receiver only the page URL, the item id and the act. The routing
+session closes the item and deletes `answers/<id>` (step 2) only when the receiver reports the act done. The done report
+is status, never a grant. A `none` answer with a clear direction takes this same path, with no new options.
+A chat answer has no `answers/<id>`, so steps 2 to 4 skip their delete, and the writer sets `lastAnswer` from the chat answer.
+
+Never-ending wait. At each wake the writer runs `--items`, and each lane line names an item kept open for a receiver.
+The owning session checks that receiver with `get_session`. If it ended, failed or was archived with no done report, the
+owning session writes one line on the item's `context` saying so (the page draws `context`), then re-routes the act or
+closes the item with a home. There is no age threshold.
 
 While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `answers/<id>`. End of a wait: when the
 `--items` line for the item says `ended` ("Keep the page on main's code", step 2), the writer, in that wake, drops

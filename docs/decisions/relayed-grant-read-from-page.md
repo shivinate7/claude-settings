@@ -43,7 +43,7 @@ Auto mode trusts only words typed in the session's own chat. A relay is text ano
 
 ## Gaps
 
-- Deleted answers. A routed answer is deleted, so a reader finds no answer and the checker prints `not counted`. Keeping the answer is not enough. The item must stay open too, until the receiver reports the act done. The fix is on the write side: the owning session keeps the answer and the item open until then. It waits for the owner. "Route and close" is not changed here.
+- Deleted answers. A routed answer that another session acts on is kept. The owning session sets `lane` and `lastAnswer`, keeps the item open and `answers/<id>` in place, and closes and deletes only when the receiver reports the act done (SKILL "Route and close", the busy-lane path). `stale_pages.py --items` prints a lane line for each such item, so the writer sees it at each wake. If the receiver ended with no done report, the owning session says so on the item's `context` and re-routes or closes it. The done report is status, never a grant.
 - Attribution. The stored answer has no writer field. A live read shows only `data`, `version` and `updatedAt`. ArtifactData writes as the owner, so a session's write cannot be told from the owner's Send. Attribution rests on the page being the owner's private page, and on the rule that no session writes `answers/`. Unmeasured. Guards stop Claude's mistakes, not an attacker (decision guard-guards-mistakes-only).
 - The auto-mode classifier sees commands, not the answer behind them (decision auto-mode-owner-acts, its Gap). The entry below relies on a `counted` line in the session's transcript. Whether the classifier reads that line is unmeasured.
 
