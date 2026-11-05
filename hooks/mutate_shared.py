@@ -166,15 +166,48 @@ def skip_reason(only_on):
     return "%s-only, this platform is %s" % (only_on, here)
 
 
-def report_verdict(label: str, code, red, required: str) -> str:
+_ERROR_HEADER = re.compile(r"^ERROR: ")
+_RULE_LINE = re.compile(r"^(=|-){10,}\s*$")
+
+
+def diagnostic_lines(output: str) -> list:
+    """Each unittest `ERROR: ...` header in `output`, then that block's final exception line.
+
+    A case that throws prints no FAIL line, so a WRONG CAUSE report built from FAIL lines alone
+    shows only `FAILED (errors=1)` and loses the exception (a TimeoutExpired on Windows run
+    42063704930). A block runs from its header to the next rule line of `=` or `-`; the dashed
+    rule right under the header is skipped. Blocks with no traceback give the header alone."""
+    lines = output.splitlines()
+    found = []
+    index = 0
+    while index < len(lines):
+        if not _ERROR_HEADER.match(lines[index]):
+            index += 1
+            continue
+        found.append(lines[index].rstrip())
+        index += 1
+        if index < len(lines) and _RULE_LINE.match(lines[index]):
+            index += 1
+        last = None
+        while index < len(lines) and not _RULE_LINE.match(lines[index]):
+            if lines[index].strip():
+                last = lines[index].rstrip()
+            index += 1
+        if last is not None:
+            found.append(last)
+    return found
+
+
+def report_verdict(label: str, code, red, required: str, seen=()) -> str:
     """Classify and print one mutant's verdict. Returns "survived", "wrong_cause", or "killed".
 
     A nonzero exit plus any red line is not proof, because every red line may belong to some OTHER
     case than the one the mutation's label names. `required` is the case
     name (or a distinctive fragment of it) that must appear among the suite's own FAIL lines
     before a kill counts as proof; a red suite that misses it is WRONG CAUSE, not KILLED.
-    A WRONG CAUSE also prints the red lines it actually saw, bounded by WRONG_CAUSE_LINES_SHOWN, because a bare count says
-    nothing about which case broke.
+    A WRONG CAUSE also prints the red lines it actually saw, then `seen` (the suite's ERROR
+    lines, see `diagnostic_lines`), as one report bounded by WRONG_CAUSE_LINES_SHOWN, because a
+    bare count says nothing about which case broke. `seen` never changes the verdict: only `red` does.
     """
     if code == 0 or not red:
         print("SURVIVED    %-62s %2d red" % (label, len(red)), flush=True)
@@ -182,11 +215,12 @@ def report_verdict(label: str, code, red, required: str) -> str:
     if not any(required in line for line in red):
         print("WRONG CAUSE %-62s %2d red, missing %r" % (
             label, len(red), required), flush=True)
-        for line in red[:WRONG_CAUSE_LINES_SHOWN]:
+        shown = list(red) + list(seen)
+        for line in shown[:WRONG_CAUSE_LINES_SHOWN]:
             print("            saw: %s" % line.strip(), flush=True)
-        if len(red) > WRONG_CAUSE_LINES_SHOWN:
+        if len(shown) > WRONG_CAUSE_LINES_SHOWN:
             print("            saw: ... and %d more" % (
-                len(red) - WRONG_CAUSE_LINES_SHOWN), flush=True)
+                len(shown) - WRONG_CAUSE_LINES_SHOWN), flush=True)
         return "wrong_cause"
     print("KILLED      %-62s %2d red" % (label, len(red)), flush=True)
     return "killed"
@@ -217,13 +251,29 @@ def staged_suite(run, required: str):
     return code, red
 
 
+def staged_suite_seen(run, required: str):
+    """`staged_suite` plus the diagnostics of the run that gave the verdict. Return (code, red, seen).
+
+    `run(only)` returns (code, red, ran) or (code, red, ran, seen); a runner that has no `seen`
+    reads as an empty one. `seen` is the last run's, which is the run `staged_suite` returned."""
+    last = []
+
+    def stage(only):
+        code, red, ran, *extra = run(only)
+        last[:] = extra[0] if extra else []
+        return code, red, ran
+
+    code, red = staged_suite(stage, required)
+    return code, red, list(last)
+
+
 def run_mutants(entries, run_one):
     """Run every entry through `run_one`, in parallel, printing each mutant's verdict as it
     lands, then the tally line. Returns 0 when every mutant was killed (a caller's own `main`
     should return that, or 1 otherwise), so a caller can end with
     `return mutate_shared.run_mutants(MUTATIONS, run_one)`.
 
-    `run_one(entry) -> (label, code, red, required, skip)` is supplied by the caller: it applies
+    `run_one(entry) -> (label, code, red, required, skip[, seen])` is supplied by the caller: it applies
     one mutation and runs its suite however that caller lays a mutant out on disk (one file next
     to a shared work directory, or a whole per-mutant scaffold -- see this module's own
     docstring for why that part is not shared). This function owns only the parallel dispatch,
@@ -236,12 +286,12 @@ def run_mutants(entries, run_one):
     wrong_cause = 0
     skipped = 0
     with ThreadPoolExecutor(max_workers=jobs) as pool:
-        for label, code, red, required, skip in pool.map(run_one, entries):
+        for label, code, red, required, skip, *more in pool.map(run_one, entries):
             if skip:
                 skipped += 1
                 print("SKIPPED     %-62s %s" % (label, skip), flush=True)
                 continue
-            status = report_verdict(label, code, red, required)
+            status = report_verdict(label, code, red, required, more[0] if more else ())
             if status == "survived":
                 survivors += 1
             elif status == "wrong_cause":
