@@ -9,11 +9,11 @@ ArtifactData, so the session fetches first, then runs this checker:
     python3 ~/.claude/skills/waiting-page/page_grant.py --root REPO_ROOT --page-url URL --item ID --fetched DIR [--pick KEY]
 
 DIR holds `answers/ID.json` and `items/ID.json`, the data object of each doc. REPO_ROOT is the repo of the page; its
-extras file holds the artifacts registry (lint/layout.py `artifacts()`). --pick binds the pick a peer relayed: a key,
-or `a+c` for a multi item; the page's choice must equal it exactly.
+extras file holds the artifacts registry (lint/layout.py `artifacts()`). --pick is the pick the peer relayed: a key,
+or `a+c` for a multi item; the page's choice must equal it exactly. A decision is never counted without it.
 
 Verdict, one line on stdout, then exit:
-  counted item=ID n=N choice=C at=T [note=JSON]  exit 0. Choice of a multi item: keys joined by `+`; of a task: `done`.
+  counted item=ID n=N choice=C at=T [note=JSON]  exit 0. Choice of a multi item: keys joined by `+`.
   not counted: REASON                            exit 1. REASON names the failed rule.
   unknown: REASON                                exit 2. No readable registry or waiting-page entry, a fetched file that is
                                                  not one JSON object, or a crash.
@@ -21,12 +21,15 @@ Counted only when all hold:
   1. --page-url is the same artifact (layout.artifact_id) as the registry's `waiting-page` entry.
   2. answers/ID.json and items/ID.json exist. Relay text alone never counts.
   3. The answer's `item` is --item and the item's `id`, and the answer's `n` is the item's `n`.
-  4. The answer's `at` is later than the item's `added`: an earlier answer belongs to an earlier ask.
-  5. A decision (`kind` absent or `decision`): `choice` is the key of one option, or `overturn` when the item's `arbiter`
+  4. The item is open: `status` is `open`, or absent (the page hides only `closed`, page.html `state.items`). A closed
+     item takes no answer, except an arbiter ruling (`arbiter` true, written closed) answered `overturn`.
+  5. The answer's `at` is later than the item's `added`: an earlier answer belongs to an earlier ask. Both carry a
+     time zone (`Z` or an offset); one without is not counted.
+  6. A decision (`kind` absent or `decision`): `choice` is the key of one option, or `overturn` when the item's `arbiter`
      is true. `none` never counts: it asks for new options, and the routing session judges a direction. A `multi` item
      takes a non-empty list of distinct keys; a list on a pick-one item or a string on a multi item does not count.
-  6. A task (`kind: task`): `done` is true. A task answer with no `done` is never a grant.
-  7. With --pick, the choice equals it.
+  7. --pick is given and the choice equals it.
+A task (`kind: task`) is never counted, with or without `done`: a task answer grants no act.
 
 Cost: one python process, reads the extras file and two fetched files, writes nothing. No git, no network, no timer.
 """
@@ -34,7 +37,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 
@@ -64,14 +67,16 @@ def load_layout():
 
 
 def moment(text, what):
-    """An ISO timestamp as an aware datetime (a zone-less one is UTC); not counted when it is none."""
+    """An ISO timestamp as an aware datetime; not counted when it is none or has no time zone."""
     if not isinstance(text, str):
         raise not_counted("%s is not a timestamp" % what)
     try:
         when = datetime.fromisoformat(text.strip().replace("Z", "+00:00"))
     except ValueError:
         raise not_counted("%s is not an ISO timestamp" % what)
-    return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+    if when.tzinfo is None:
+        raise not_counted("%s has no time zone: write it with Z or an offset" % what)
+    return when
 
 
 def read_doc(fetched, collection, item_id):
@@ -100,9 +105,7 @@ def choice_of(item, answer):
     """The counted choice text of a decision or a task answer; not counted when the answer is no clear one."""
     kind = item.get("kind", "decision")
     if kind == "task":
-        if answer.get("done") is not True:
-            raise not_counted("task answer has no done: a note alone is never a grant")
-        return "done"
+        raise not_counted("item is a task: a task answer grants no act, done or not")
     if kind != "decision":
         raise not_counted("item kind %r is neither decision nor task" % (kind,))
     keys = option_keys(item)
@@ -159,11 +162,17 @@ def judge(args):
     n = answer.get("n")
     if isinstance(n, bool) or not isinstance(n, int) or n != item.get("n"):
         raise not_counted("answer n %s is not the item's n %s: the answer is for another ask" % (n, item.get("n")))
+    status = item.get("status", "open")  # absent is open, as the page reads it: it hides only "closed"
+    if status != "open" and not (status == "closed" and item.get("arbiter") is True and answer.get("choice") == "overturn"):
+        raise not_counted("item status is %s: only an open item takes an answer, or a closed arbiter ruling an overturn"
+                          % json.dumps(status))
     if moment(answer.get("at"), "answer at") <= moment(item.get("added"), "item added"):
         raise not_counted("answer is not later than the item's added time: it predates the ask")
 
     choice = choice_of(item, answer)
-    if args.pick is not None and choice != args.pick:
+    if args.pick is None:
+        raise not_counted("no --pick: a decision is counted only against the pick the peer relayed")
+    if choice != args.pick:
         raise not_counted("page pick is %s, not %s" % (choice, args.pick))
     line = "counted item=%s n=%d choice=%s at=%s" % (args.item, n, choice, answer["at"])
     note = answer.get("note")
