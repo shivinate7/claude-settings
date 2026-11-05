@@ -2287,6 +2287,9 @@ if not passed:
     print(result.detail)
     sys.exit(1)
 """
+# banchi's per-file selector (scripts/tests-for.py), named by both parts. A commit that lacks the script has no
+# copy in its checkout, so a replay reads the clone's HEAD copy (`_select_suites`, hooks/mutate_shared.py).
+BANCHI_SELECT = ["python3", "scripts/tests-for.py", "{path}"]
 REPLAY_PROFILES = {
     "q_max": {
         "code": r"^(src|harness|app)/.*\.(ts|tsx|mts|mjs|js)$", "code_not": r"^harness/tests/|\.(test|spec)\.(mjs|js|ts|tsx|mts)$",
@@ -2303,7 +2306,7 @@ REPLAY_PROFILES = {
                      "{suite}"],
             "classify": "playwright", "cwd": "app",
             "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"], "lockfile": "app/package-lock.json",
-            "sparse_skip": ["demo-assets", "vendor"],
+            "sparse_skip": ["demo-assets", "vendor"], "select": BANCHI_SELECT,
         },
         "py": {
             "code": r"^(?!harness/tests/).*\.py$", "code_not": r"^scripts/(.*/)?[^/]*selftest\.py$",
@@ -2314,6 +2317,7 @@ REPLAY_PROFILES = {
                         ["{deps}/venv/bin/pip", "install", "--quiet", "--disable-pip-version-check", "-r",
                          "requirements.txt"]],
             "lockfile": "requirements.txt", "link": None, "sparse_skip": ["demo-assets", "vendor"],
+            "select": BANCHI_SELECT,
         },
     }},
 }
