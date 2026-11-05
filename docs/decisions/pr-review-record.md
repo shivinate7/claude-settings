@@ -25,12 +25,14 @@ Head: <40-hex sha>
 Kind: normal|delete-only|docs-only
 Guard or check: yes|no
 Round <n>: <reviewer|design-reviewer>, <model>, <PASS|FAIL|PARTIAL>
+Fix check: <40-hex reviewed head>, reviewer, <model>, <PASS|FAIL>
 Net value: not owed|zero|positive|negative
 CI: read live by merge --reviewed
 ```
 
 - The first line is the marker. A line `---` after the CI line ends the record, so the attribution footer may follow.
 - One `Round` line per reviewer. A round can hold more than one line.
+- The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. A PASS counts only after the last round (round 3, or round 1 of a `delete-only` change with Guard or check `no`), keeps the net value round 3 gave, and reads open after any other round.
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
   PR as `CI draft, no run`, because a draft has no CI run.
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
@@ -72,6 +74,7 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 - Open: an integration PR has no record of its own.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
+- One fix check per record. A second fix on a fixed head starts a new lane at round 1. The tool does not check this.
 
 ## Lane picks
 

@@ -6390,6 +6390,218 @@ test("a stored park draft whose entry is gone is pruned on load, and a later ent
   assert.equal(await page.locator("#send").isDisabled(), true, "a later entry with the same id is ready to send");
 });
 
+// ---------------------------------------------------------------- Park on every open card (page-park-any-item)
+
+// A Park press sits in .alts on an open card: after None of these on a decision, after Mark done on a task. A press stages
+// {act:"park"} and writes nothing. Send writes answers/<id> as {act, at, item, n, note}, with no choice, done or parked field.
+const parkPress = (page, it) => page.locator(`#b-park-${it.id}`);
+const pressedOf = (loc) => loc.getAttribute("aria-pressed");
+const PARK_RECORD_KEYS = ["act", "at", "item", "n", "note"];
+const altsOf = async (page, it) => (await card(page, it).locator(".alts > button").allTextContents()).map((s) => s.trim());
+// The record Send wrote under the id, once the store holds it.
+const recordOf = async (page, id) => { await page.waitForFunction((k) => !!window.__answers()[k], id); return (await answers(page))[id]; };
+
+test("a Park press on a decision card stages with no write, and Send writes one park record with exactly five keys", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  await need(parkPress(page, DECISION), "the decision card has no Park button");
+  assert.deepEqual(await altsOf(page, DECISION), ["None of these", "Park"], "Park is not in .alts after None of these");
+  assert.match((await parkPress(page, DECISION).getAttribute("class")) || "", /\bparkbtn\b/, "the Park button has no parkbtn class");
+  assert.equal(await pressedOf(parkPress(page, DECISION)), "false", "Park starts pressed");
+  await parkPress(page, DECISION).click();
+  assert.equal(await pressedOf(parkPress(page, DECISION)), "true", "a Park press did not press Park");
+  assert.deepEqual(await page.evaluate(() => window.__log), [], "a Park press wrote before Send");
+  assert.equal(await card(page, DECISION).locator(".ready").textContent(), "Ready to send: park.", "the ready line does not name the staged Park");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "the Send bar does not count the staged Park");
+  await send(page);
+  const rec = await recordOf(page, DECISION.id);
+  assert.deepEqual(Object.keys(rec).sort(), PARK_RECORD_KEYS, "the park record has the wrong fields: " + Object.keys(rec).join(", "));
+  assert.deepEqual([rec.act, rec.item, rec.n, rec.note], ["park", DECISION.id, 27, ""], "the park record has the wrong values");
+  assert.ok(!Number.isNaN(Date.parse(rec.at)), "at is not an ISO time");
+  assert.deepEqual(await parkWrites(page), [["set", "answers", DECISION.id]], "Send wrote more than the one park record");
+});
+
+test("a Park press on a task card stages with no write, and Send writes one park record with no done field", async (t) => {
+  const page = await open(t, { items: [TASK] }); if (!page) return;
+  await need(parkPress(page, TASK), "the task card has no Park button");
+  assert.deepEqual(await altsOf(page, TASK), ["Mark done", "Park"], "Park is not in .alts after Mark done");
+  await parkPress(page, TASK).click();
+  assert.equal(await pressedOf(parkPress(page, TASK)), "true", "a Park press did not press Park on the task");
+  assert.deepEqual(await page.evaluate(() => window.__log), [], "a Park press wrote before Send");
+  assert.equal(await card(page, TASK).locator(".ready").textContent(), "Ready to send: park.", "the ready line does not name the staged Park on the task");
+  await send(page);
+  const rec = await recordOf(page, TASK.id);
+  assert.deepEqual(Object.keys(rec).sort(), PARK_RECORD_KEYS, "the task park record has the wrong fields: " + Object.keys(rec).join(", "));
+  assert.deepEqual([rec.act, rec.item, rec.n, rec.note], ["park", TASK.id, 28, ""], "the task park record has the wrong values");
+  assert.deepEqual(await parkWrites(page), [["set", "answers", TASK.id]], "Send wrote more than the one park record");
+});
+
+test("a staged Park with a typed note is ready, and Send writes the note in the park record", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  await need(parkPress(page, DECISION), "the decision card has no Park button");
+  await parkPress(page, DECISION).click();
+  await addNote(page, DECISION, "Wait for the mutation job.");
+  assert.equal(await card(page, DECISION).locator(".ready").textContent(), "Ready to send: park.", "a typed note changes the staged Park's ready line");
+  assert.equal(await page.locator("#send").isDisabled(), false, "Send is shut on a staged Park with a note");
+  await send(page);
+  const rec = await recordOf(page, DECISION.id);
+  assert.deepEqual(Object.keys(rec).sort(), PARK_RECORD_KEYS, "the park record with a note has the wrong fields: " + Object.keys(rec).join(", "));
+  assert.deepEqual([rec.act, rec.item, rec.n, rec.note], ["park", DECISION.id, 27, "Wait for the mutation job."], "the park record lost the typed note");
+});
+
+test("a Park press overrides a stood pick, and Send writes the park record with no choice", async (t) => {
+  const it = mk("stand-park", 7, { stands: true });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), true, "the pick does not stand");
+  await need(parkPress(page, it), "the card with a stood pick has no Park button");
+  await parkPress(page, it).click();
+  assert.equal(await pressedOf(parkPress(page, it)), "true", "a Park press did not press Park on a stood pick");
+  await send(page);
+  const rec = await recordOf(page, it.id);
+  assert.ok(!("choice" in rec), "the stood pick went with the park record: " + JSON.stringify(rec));
+  assert.deepEqual(Object.keys(rec).sort(), PARK_RECORD_KEYS, "the park record over a stood pick has the wrong fields: " + Object.keys(rec).join(", "));
+  assert.deepEqual([rec.act, rec.item, rec.note], ["park", it.id, ""], "the park record over a stood pick has the wrong values");
+});
+
+test("Park toggles off on a second press, a pick, None of these or Mark done clears it, and Park clears each of them", async (t) => {
+  const page = await open(t, { items: [DECISION, TASK] }); if (!page) return;
+  const dp = () => parkPress(page, DECISION), tp = () => parkPress(page, TASK);
+  const none = () => card(page, DECISION).getByRole("button", { name: "None of these" });
+  const done = () => card(page, TASK).getByRole("button", { name: "Mark done" });
+  await need(dp(), "the decision card has no Park button");
+  await need(tp(), "the task card has no Park button");
+  // A second press clears the staged Park: no write, Send shut, no ready line.
+  await dp().click();
+  await dp().click();
+  assert.equal(await pressedOf(dp()), "false", "a second Park press did not clear Park");
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open on a cleared Park");
+  assert.equal(await card(page, DECISION).locator(".ready").textContent(), "", "the ready line still names a cleared Park");
+  assert.deepEqual(await page.evaluate(() => window.__log), [], "toggling Park wrote");
+  // A picked option clears Park, and Park clears the picked option.
+  await choose(page, DECISION, "a");
+  await dp().click();
+  assert.equal(await pressedOf(dp()), "true", "Park did not press over a picked option");
+  assert.equal(await page.isChecked(`#o-${DECISION.id}-a`), false, "Park did not clear the picked option");
+  await choose(page, DECISION, "a");
+  assert.equal(await pressedOf(dp()), "false", "a picked option did not clear Park");
+  assert.equal(await page.isChecked(`#o-${DECISION.id}-a`), true, "a picked option was not picked after Park");
+  // None of these clears Park, and Park clears None of these.
+  await dp().click();
+  await none().click();
+  assert.equal(await pressedOf(dp()), "false", "None of these did not clear Park");
+  assert.equal(await pressedOf(none()), "true", "None of these did not press");
+  await dp().click();
+  assert.equal(await pressedOf(dp()), "true", "Park did not press over None of these");
+  assert.equal(await pressedOf(none()), "false", "Park did not clear None of these");
+  // Mark done clears Park, and Park clears Mark done.
+  await tp().click();
+  await done().click();
+  assert.equal(await pressedOf(tp()), "false", "Mark done did not clear Park");
+  assert.equal(await pressedOf(done()), "true", "Mark done did not press");
+  await tp().click();
+  assert.equal(await pressedOf(tp()), "true", "Park did not press over Mark done");
+  assert.equal(await pressedOf(done()), "false", "Park did not clear Mark done");
+  assert.equal(await page.locator("#send").textContent(), "Send 2 answers", "the two staged Parks are not both counted");
+  assert.deepEqual(await page.evaluate(() => window.__log), [], "the toggles wrote before Send");
+});
+
+test("Undo within 8 s after a Park Send deletes the park record and hands the Park back as a draft", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  await need(parkPress(page, DECISION), "the decision card has no Park button");
+  await parkPress(page, DECISION).click();
+  await send(page);
+  await recordOf(page, DECISION.id);
+  await page.locator("#undoBtn").waitFor({ timeout: 3000 }).catch(() => {});
+  await need(page.locator("#undoBtn"), "Send shows no Undo after a Park");
+  await page.locator("#undoBtn").click();
+  await page.waitForFunction((k) => !(k in window.__answers()), DECISION.id);
+  assert.deepEqual((await parkWrites(page)).filter((l) => l[0] === "delete"), [["delete", "answers", DECISION.id]], "Undo did not delete answers/<id> once");
+  assert.equal(await pressedOf(parkPress(page, DECISION)), "true", "Undo did not hand the Park back as a draft");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "the undone Park is not ready to send again");
+});
+
+test("a sent Park shows the receipt Parked. with Change, and Change then a pick sends a normal choice record", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  await need(parkPress(page, DECISION), "the decision card has no Park button");
+  await parkPress(page, DECISION).click();
+  await send(page);
+  await recordOf(page, DECISION.id);
+  const c = card(page, DECISION);
+  await c.locator(".receipt").waitFor({ timeout: 3000 }).catch(() => {});
+  await need(c.locator(".receipt"), "the sent Park card shows no receipt");
+  assert.match(await c.locator(".receipt").textContent(), /Parked\./, "the receipt does not read Parked.");
+  await need(c.getByRole("button", { name: "Change" }), "the sent Park receipt has no Change button");
+  await c.getByRole("button", { name: "Change" }).click();
+  await choose(page, DECISION, "a");
+  await send(page);
+  await page.waitForFunction((k) => !!window.__answers()[k] && window.__answers()[k].choice === "a", DECISION.id);
+  const rec = (await answers(page))[DECISION.id];
+  assert.deepEqual(Object.keys(rec).sort(), ["at", "choice", "item", "n", "note"], "the changed answer is not a normal choice record: " + Object.keys(rec).join(", "));
+  assert.equal(rec.choice, "a", "the changed answer lost the picked option");
+});
+
+test("a parked line keeps only Unpark and Drop, and no Park press is drawn on a .pk line", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: PARK_META }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkLine(page, PARK_A), "the parked line is not a .pk in .parked .pk-list");
+  assert.deepEqual(await parkLine(page, PARK_A).locator(".btn.pkb").evaluateAll((els) => els.map((e) => e.id)), ["pk-unpark-" + PARK_A.id, "pk-drop-" + PARK_A.id], "a parked line has acts other than Unpark and Drop");
+  assert.equal(await parkLine(page, PARK_A).locator("[id^='b-park-'], .parkbtn").count(), 0, "a parked line draws a Park press");
+});
+
+// Controls: these pass on the code as it stands. A blocked card and a ruling card draw no live Park press.
+test("control: a blocked decision card's Park press is off, a press on it stages nothing, and Send writes no record for it", async (t) => {
+  const opt = (key) => ({ key, label: "L" + key, how: "h", gain: "g", lose: "l" });
+  const rawItems = {
+    "dup-keys": { ...DECISION, id: "dup-keys", n: 41, options: [opt("a"), opt("a")], pick: "a" },
+    "good": { ...DECISION, id: "good", n: 43 },
+  };
+  const page = await open(t, { items: [], rawItems }); if (!page) return;
+  const blocked = { ...DECISION, id: "dup-keys" }, good = { ...DECISION, id: "good" };
+  await need(parkPress(page, blocked), "the blocked decision card has no Park button");
+  assert.equal(await card(page, blocked).locator(".ready").textContent(), "This item cannot be sent.", "the card is not blocked");
+  assert.equal(await parkOff(parkPress(page, blocked)), true, "the blocked card's Park press is on");
+  await parkPress(page, blocked).click({ force: true }); // a real press on the disabled button: it changes nothing
+  assert.equal(await pressedOf(parkPress(page, blocked)), "false", "a press on the blocked card's Park staged it");
+  await need(parkPress(page, good), "the good decision card has no Park button");
+  assert.equal(await parkOff(parkPress(page, good)), false, "the good card's Park press is off");
+  await takePick(page, good);
+  await send(page);
+  await page.waitForFunction(() => !!window.__answers()["good"]);
+  assert.equal("dup-keys" in await answers(page), false, "Send wrote a record for the blocked card");
+  assert.deepEqual((await parkWrites(page)).filter((l) => l[2] === "dup-keys"), [], "a write named the blocked card");
+});
+
+test("control: an arbiter ruling card draws no Park press, and an open decision beside it keeps one", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER] }); if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  await need(parkPress(page, DECISION), "the open decision card has no Park button");
+  assert.equal(await page.locator(`#b-park-${ARBITER.id}`).count(), 0, "the ruling card draws a Park press");
+  assert.equal(await card(page, ARBITER).locator(".parkbtn").count(), 0, "the ruling card has a parkbtn");
+});
+
+// Item 10 (windows-live-checks) in the state the owner saw: the item is open, and its parked line and park answer still exist.
+const W10 = mk("windows-live-checks", 10, { title: "Windows live checks" });
+const W10_PARK = { id: W10.id, ref: "Step windows-live-checks, the Windows live checks", note: "Triage removes this line." };
+
+test("an open item whose stale parked line and park answer remain shows its options and draws no parked line or Unpark sent badge", async (t) => {
+  const saved = { [parkKey(W10_PARK)]: { parked: true, id: W10.id, act: "unpark", ref: W10_PARK.ref, note: W10_PARK.note, at: "2026-11-04T23:44:00.000Z" } };
+  const page = await open(t, { items: [W10], meta: { writer: "triage", parked: [W10_PARK] }, answers: saved }); if (!page) return;
+  await parkLoaded(page, parkKey(W10_PARK));
+  await need(card(page, W10), "the open item has no card");
+  assert.equal(await page.locator(`label[for="o-${W10.id}-a"]`).count(), 1, "the open item shows no option a");
+  assert.equal(await page.locator(`label[for="o-${W10.id}-b"]`).count(), 1, "the open item shows no option b");
+  assert.equal(await page.locator("#pk-line-" + W10.id).count(), 0, "the Parked by you block draws a line for the open item " + W10.id);
+  assert.equal(await page.locator(".parked .ans", { hasText: "Unpark sent" }).count(), 0, "the Parked by you block shows an Unpark sent badge for the open item " + W10.id);
+});
+
+test("a parked line whose id is no open item still draws with its Unpark sent badge, beside an open item", async (t) => {
+  const saved = { [parkKey(PARK_A)]: { parked: true, id: PARK_A.id, act: "unpark", ref: PARK_A.ref, note: PARK_A.note, at: "2026-11-01T17:42:00.000Z" } };
+  const page = await open(t, { items: [W10], meta: { writer: "triage", parked: [PARK_A] }, answers: saved }); if (!page) return;
+  await parkLoaded(page, parkKey(PARK_A));
+  await need(card(page, W10), "the open item has no card");
+  await need(parkLine(page, PARK_A), "the parked line with no open item is not drawn");
+  await need(await parkBadge(page, PARK_A, "Unpark sent"), "the parked line with no open item shows no Unpark sent badge");
+});
+
 // ---------------------------------------------------------------- what the page says after a send: a wake, a paste in chat, a none key
 // SKILL.md forbids a session to reply in a comment thread, so no line the page shows may send the owner there.
 const NO_THREAD = /thread/i;

@@ -299,6 +299,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 |---|---|---|
 | `agent-end-log-loses-row` | On Windows, test_parallel_writers_lose_no_row lost one of 24 rows (run 39086341296) though the same tree passed before. | [`docs/debts/agent-end-log-loses-row.md`](../docs/debts/agent-end-log-loses-row.md) |
 | `agent-reports-with-live-watcher` | No check stops an agent that sends its final report while a Monitor or background task it started is still running. | [`docs/debts/agent-reports-with-live-watcher.md`](../docs/debts/agent-reports-with-live-watcher.md) |
+| `alts-dash-edge-contrast` | The `.btn.dash` buttons in a card's `.alts` row (None of these, Mark done, Park) draw an unpressed edge in `--line`. | [`docs/debts/alts-dash-edge-contrast.md`](../docs/debts/alts-dash-edge-contrast.md) |
 | `ask-copy-moves-send` | At 390px, with the store unreachable (`state.db === false`), a press on Copy ask shortens the hint from 3 lines to 1. | [`docs/debts/ask-copy-moves-send.md`](../docs/debts/ask-copy-moves-send.md) |
 | `ask-seen-on-hidden-tab` | `markAsksSeen` stamps the current time into `waiting.askSeen` on every hide (`visibilitychange` to hidden) and on every `pagehide`. | [`docs/debts/ask-seen-on-hidden-tab.md`](../docs/debts/ask-seen-on-hidden-tab.md) |
 | `banchi-build-steps` | A pending Banchi step is a line `` 0. `step <slug>` `` in a file in `docs/gates/steps/`. | [`docs/debts/banchi-build-steps.md`](../docs/debts/banchi-build-steps.md) |
