@@ -17,7 +17,7 @@ Test: `lint/test_sim_lease.py` (slots, load bars, queue order, reaping by dead p
 
 Not proven here: there is no Mac in the cloud. The real `sysctl -n vm.loadavg` text, the real `ps -o lstart=` format on macOS and a real `simctl` boot under the lease are untested here. The shims write those formats as the tool expects them. The shell-macos CI job runs the sim-test suite on a Mac, but with shimmed load and `ps`.
 
-Not covered: a SIGKILL of `sim-test` skips its EXIT trap, so the 18 Pro stays booted while its lease is reaped, and a Duo can be granted beside it (debt note `sim-test-sigkill-leaves-pro-booted`). The two boot paths that skip `sim-test` (decision `sim-test-is-the-one-boot-path`, ruling 5) also skip the lease.
+Not covered: a SIGKILL of `sim-test` skips its EXIT trap, so the 18 Pro stays booted while its lease is reaped. A Duo can then be granted beside it (debt note `sim-test-sigkill-leaves-pro-booted`). An `xcodebuild -destination` boot skips the lease, and the route rule refuses it (decision `sim-test-is-the-one-boot-path`, ruling 5). A simulator MCP `launch` of a shut-down device is allowed only to a session that holds a live lease for that device. The guard reads `leases.json` through `live_leases` and `SLOT_UDID` in `bin/sim-lease`.
 
 Basis: owner rulings (degen `shared-sim-lease`, 2026-11-02 13:49 to 14:47 CST), and the standing need that a session never boots over the load bars. Landed: 2026-11-04.
 
