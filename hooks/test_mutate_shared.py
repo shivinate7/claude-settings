@@ -383,6 +383,52 @@ FAIL_SUITE = textwrap.dedent("""\
 LABEL = "fixture: a no-op mutant, so the suite is the only thing under test"
 
 
+def verdict_seen(code, red, seen):
+    """report_verdict with REQUIRED as the required case, and `seen` as its diagnostics."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        return mutate_shared.report_verdict("mutant", code, red, REQUIRED, seen=seen)
+
+
+class SeenNeverChangesTheVerdictTests(unittest.TestCase):
+    """Controls, green on the head. `seen` is diagnostics only: the verdict reads `red` alone, so an ERROR
+    block that names the required case must not turn a WRONG CAUSE into a kill."""
+
+    def test_an_error_in_the_required_case_with_no_fail_line_is_wrong_cause(self):
+        seen = ["ERROR: " + REQUIRED + " (mod.Class.test_x)", "subprocess.TimeoutExpired: sleep 9"]
+        self.assertEqual(verdict_seen(1, ["FAILED (errors=1)"], seen), "wrong_cause")
+
+    def test_seen_lines_naming_the_required_case_never_make_a_kill(self):
+        seen = ["ERROR: " + REQUIRED + " (mod.Class.test_x)"]
+        self.assertEqual(verdict_seen(1, RED_WRONG, seen), "wrong_cause")
+
+
+class GuardDriverErrorLinesTests(unittest.TestCase):
+    """The two drivers return their ERROR lines as `seen`. The guard driver reads a suite's stdout only, and
+    unittest writes its ERROR blocks to stderr, so the guard driver's `seen` misses them. The sweep driver
+    reads both streams, and is the control."""
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+        self.config = os.path.join(self.run, "cfg")
+        os.makedirs(self.config)
+        write_files(self.run, {"test_fixture_suite.py": ERROR_SUITE})
+        self.suite = os.path.join(self.run, "test_fixture_suite.py")
+
+    def assertErrorBlockSeen(self, seen, driver):
+        self.assertTrue(any(line.startswith("ERROR: " + ERROR_CASE + " (") for line in seen),
+                        "the %s driver's seen holds no ERROR line for its failing case: %r" % (driver, seen))
+
+    def test_the_sweep_driver_returns_the_error_block_as_seen(self):
+        result = mutate_sweep.run_suite(self.suite, self.config)
+        self.assertErrorBlockSeen(result[3], "sweep")
+
+    def test_the_guard_driver_returns_the_error_block_as_seen(self):
+        result = mutate_guard.run_suite(self.suite, "GUARD_UNDER_TEST",
+                                        os.path.join(self.run, "copy.py"), self.config)
+        self.assertErrorBlockSeen(result[3], "guard")
+
+
 class ErrorBlockReportTests(unittest.TestCase):
     """A mutant's suite runs through `run_mutants`, the path every mutation test takes, so each case reads
     the report a reader sees. An ERROR in the required case is WRONG CAUSE, and the report names the ERROR
