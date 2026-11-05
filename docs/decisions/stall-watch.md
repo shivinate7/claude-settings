@@ -62,7 +62,8 @@ guard rule, so the watcher does the waiting and the session is told once.
   relative path after a `cd` resolves against the shell's directory, so that job can still stall falsely.
   The watcher reports a stall only on a job state and named-log sample from the same pass. A sample
   from the once-a-second check can be a second old, and miss a write or the job's end.
-  Cost: no new process or timer. Each named log gets one stat a second in the watcher's own loop,
+  Each background job starts one watcher process. Its process cost is open: owner Cockpit item 180 holds
+  it (plan `docs/plans/align-watchers.md`). Each named log gets one stat a second in the watcher's own loop,
   one more before each stall report, and one at each Stop check. The beat file costs one append per
   heartbeat. The watcher reads it on each 0.2 s loop pass.
 - The job removes its log and beat file when it ends, also after a STALL report (the job keeps writing
@@ -83,7 +84,13 @@ When a turn ends, a Stop hook runs `hooks/stall_watch.py --stop`. It reads the s
 lists each open background shell whose output file has been quiet longer than the age. Each log its
 command names must be quiet too. A relative log resolves against the call record's `cwd`. A shell whose
 output file is not found is listed as unknown. It prints one systemMessage that tells the model to stop
-the shell or tell the owner.
+the shell or tell the owner. It repeats at every Stop while a job stays quiet. No dedupe exists yet (open
+debt `stall-message-repeats-every-stop`).
+
+If the shared names module fails to load, the check prints nothing. A false "still running" alarm is
+worse than a missed stall, and the guard already refuses every call in that state (owner ruling,
+2026-10-21). For a stalled background job, only the watcher's exit-3 report wakes an idle session. This
+check runs at turn end, so it does not cover a job that stalls after the turn ends.
 
 A job is listed only at the first Stop after its stall crossed. The crossing is its output file's mtime
 (or the newest mark of a named log) plus the quiet age. The previous Stop is the timestamp of the newest

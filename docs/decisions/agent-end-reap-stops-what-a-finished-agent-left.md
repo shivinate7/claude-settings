@@ -16,8 +16,8 @@ stops. When the worktree is removed is in `when-a-worktree-may-be-removed`.
 primary checkout. Reason: no session record names an agent, so a running agent's worktree reads as
 "not live".
 
-Owner ruling, 2026-09-27: the sweep skips each process whose cwd is under a `.claude/worktrees/*`
-checkout. It leaves those folders to janitor/agent_end_reap.py.
+The sweep skips each process whose cwd is under a `.claude/worktrees/*` checkout. This reaper owns
+those folders (owner ruling, 2026-09-27).
 
 ### The reaper
 
@@ -28,7 +28,7 @@ checkout. It leaves those folders to janitor/agent_end_reap.py.
 The reaper stops one process only when each read below answers a confirmed yes:
 
 1. The process cwd is inside the target, read in one batch.
-2. No live session has a cwd inside the target (`guard.worktree_live_session`).
+2. No live session has a cwd inside the target (`git_reads.worktree_live_session`).
 3. The root of its process tree inside the target is orphaned. The reaper climbs from the
    process to each live parent whose cwd is also inside the target. Then it asks
    `sweep.is_orphan` about the last one. A live parent outside the target means keep. A
@@ -43,18 +43,17 @@ On Windows, `cmd &` then another line in one foreground Bash call outlives the a
 A `run_in_background` task of a live agent hangs from a live host outside the worktree, so the reaper
 keeps it. The agent's own shells have the live host as parent, so they keep the tree (`when-a-worktree-may-be-removed`).
 
-Owner ruling, 2026-09-27: the reaper stops each orphaned tree inside an ended agent's worktree, not
-only listeners. The reaper targets only the ending agent's tree.
+The reaper stops each orphaned tree inside the ended agent's worktree, not only listeners. It targets
+only that tree (owner ruling, 2026-09-27).
 
-Owner ruling, 2026-10-10: the guard's ownership change changes the guard's kill rule only. The reaper's
-reads stay as above (`a-kill-by-pid-needs-an-owned-pid`).
+The guard's kill rule is separate from the reaper's reads. The guard's ownership change
+(`a-kill-by-pid-needs-an-owned-pid`) did not change them (owner ruling, 2026-10-10).
 
-Owner ruling, 2026-10-10: the reap reads every process's cwd in one batch call
-(`sweep._read_all_cwds_macos`). A failed or empty read returns None, which means keep. Reason: a reap
-that hit the 60 s hook cap sent no signal and left a server running. The batch timeout stays below the
-hook cap.
+The reap reads every process's cwd in one batch call (`sweep._read_all_cwds_macos`). A failed or empty
+read returns None, which means keep. The batch timeout stays below the hook cap (owner ruling,
+2026-10-10). Reason: a reap that hit the 60 s hook cap sent no signal and left a server running.
 
-Owner ruling, 2026-10-26: scratchpad orphans are reaped at session end by `janitor/session_end_sweep.py`, not at agent end. Reason: the session and its agents share one scratchpad and no agent tag exists, so an agent-end reap would stop live servers of the session or of a sibling lane. The session-end reap stops a process only when its parent is init, its exec environment holds exactly `CLAUDE_CODE_SESSION_ID=<payload session_id>`, and its cwd is inside the realpath of the payload `scratchpad_dir`. No `scratchpad_dir` stops nothing. A failed read keeps. `janitor/agent_end_reap.py` stays as above.
+Scratchpad orphans are reaped at session end by `janitor/session_end_sweep.py`, not at agent end (owner ruling, 2026-10-26). Reason: the session and its agents share one scratchpad and no agent tag exists, so an agent-end reap would stop live servers of the session or of a sibling lane. The session-end reap stops a process only when its parent is init, its exec environment holds exactly `CLAUDE_CODE_SESSION_ID=<payload session_id>`, and its cwd is inside the realpath of the payload `scratchpad_dir`. No `scratchpad_dir` stops nothing. A failed read keeps. The agent-end reap keeps the reads above and covers the ending agent's tree only.
 
 ## The payload log
 
