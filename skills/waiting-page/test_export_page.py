@@ -22,6 +22,9 @@ Contract the page cases assume (the builder builds to it):
     still export. A supporting file that is not UTF-8 is scanned as cp1252 text, so a cp1252 note holding an email
     refuses. A file is binary only with a NUL byte, whatever its name: a binary file with no shape in it exports, and a
     text file under an image or font name is scanned.
+  --all, a page-only entry (`collections` []) exports its page and files and no database.
+  --all --account LABEL. An entry whose account differs prints `<id>: skipped - account <its account>`, needs no fetched
+    folder, writes nothing and exits 0 for it. Without the flag every entry exports as before.
   Retina names are not emails: `logo@2x.png`, as a file name or in page text, exports; `jane@2x.com` refuses.
   Digit-led domains are emails: jane@1st.example.com, jane@12.34.example.com and jane@1.2.3.com refuse in page text.
   URL credentials refuse on an IP host as on a host name: postgres://app:<password>@10.0.0.5:5432/db refuses; an IP
@@ -935,12 +938,16 @@ class All(Base):
     WAIT, QUEUE = "page01", "queue02"
     VERDICT = r"\b(changed\s+\d+|same|refused|unknown)\b"
 
-    def repo(self):
+    def queue_entry(self, **changes):
+        return dict({"id": self.QUEUE, "url": "https://claude.ai/artifact/" + self.QUEUE, "role": "queue-page", "account": "work",
+                     "collections": ["items"]}, **changes)
+
+    def repo(self, queue=None):
+        """The registry: the waiting page, then the queue entry. `queue` replaces the queue entry for a case of another shape."""
         root = os.path.join(self.tmp.name, "repo")
         registry = {"kinds": {}, "artifacts": [
             {"id": self.WAIT, "url": "https://claude.ai/artifact/" + self.WAIT, "role": "waiting-page", "account": "work"},
-            {"id": self.QUEUE, "url": "https://claude.ai/artifact/" + self.QUEUE, "role": "queue-page", "account": "work",
-             "collections": ["items"]}]}
+            queue or self.queue_entry()]}
         write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps(registry))
         return root
 
@@ -952,10 +959,11 @@ class All(Base):
 
     def fetched_all(self, docs, pages=None, files=None):
         """One fetched folder per artifact id, each shaped as a single fetch is. `pages` maps an id to its page.html
-        bytes; `files` maps an id to {path under files/: bytes}, the page's supporting files."""
+        bytes; `files` maps an id to {path under files/: bytes}, the page's supporting files. An id whose `docs` value is
+        None is a page-only fetch: its folder holds the page and files and no collection folder."""
         root = tempfile.mkdtemp(prefix="fetched-all-", dir=self.tmp.name)
         for artifact_id, parts in docs.items():
-            folder = self.fetch(**parts)
+            folder = self.fetch(**parts) if parts is not None else tempfile.mkdtemp(prefix="fetched-page-", dir=self.tmp.name)
             if pages and artifact_id in pages:
                 write_bytes(os.path.join(folder, "page.html"), pages[artifact_id])
             for rel, data in ((files or {}).get(artifact_id) or {}).items():
@@ -1073,6 +1081,27 @@ class All(Base):
         self.assertEqual(read_bytes(landed), QUEUE_PAGE, "the empty artifact's page/page.html is not byte-identical")
         self.assertVerdictOf(r, self.QUEUE, r"changed\s+1\b")
 
+    def test_a_page_only_entry_of_the_flag_account_exports_its_page_and_file_then_reports_same(self):
+        """--all --account other, with a page-only entry (`collections` []) whose fetch holds page.html and files/x.js: both
+        export under artifacts/<id>/page/ and the run prints `changed 2`, exit 0. A second run prints `same`."""
+        script = b'console.log("page only");\n'
+        page_only = self.queue_entry(account="other", collections=[])
+        fetched = self.fetched_all({self.QUEUE: None}, pages={self.QUEUE: QUEUE_PAGE}, files={self.QUEUE: {"x.js": script}})
+        root, worktree = self.repo(queue=page_only), self.out("worktree")
+        args = ("--all", root, "--fetched", fetched, "--worktree", worktree, "--account", "other")
+        first = self.run_cmd(*args)
+        self.assertEqual(first.returncode, 0,
+                         "a page-only entry of the flag's account was not exported. Output:\n" + shown(first))
+        self.assertVerdictOf(first, self.QUEUE, r"changed\s+2\b")
+        base = os.path.join(self.export_folder(worktree, self.QUEUE), "page")
+        self.assertEqual(read_bytes(os.path.join(base, "page.html")), QUEUE_PAGE, "page/page.html is not byte-identical")
+        self.assertEqual(read_bytes(os.path.join(base, "files", "x.js")), script, "page/files/x.js is not byte-identical")
+        self.assertIn("%s: skipped - account work" % self.WAIT, verdict_lines(first),
+                      "the waiting page of another account was not skipped")
+        second = self.run_cmd(*args)
+        self.assertEqual(second.returncode, 0, "the second run of a page-only entry failed. Output:\n" + shown(second))
+        self.assertVerdictOf(second, self.QUEUE, r"\bsame\b")
+
     def test_a_secret_in_an_artifacts_page_refuses_only_that_artifact(self):
         root, worktree = self.repo(), self.out("worktree")
         pages = {self.WAIT: PAGE_BYTES, self.QUEUE: QUEUE_PAGE}
@@ -1171,32 +1200,42 @@ class All(Base):
 class NoExport(Base):
     """`"export": false` (decision waiting-data-in-repo): an artifact the repo holds and does not export, such as a page in
     an account this session cannot read. `--all` prints `<id>: skipped - no export` for it, exits 0 for it and needs no
-    fetched folder for it. The other artifacts export as in class All."""
+    fetched folder for it. The other artifacts export as in class All.
+    The same registry takes `--account LABEL`: an entry whose account differs prints `<id>: skipped - account <its account>`,
+    needs no fetched folder, writes nothing and exits 0 for it. Without the flag every entry exports as before."""
     WAIT = "page01"
     EXTERNAL = ["ext%03d" % n for n in range(1, 9)]  # the eight pages of the other account, with synthetic ids
 
     def waiting(self):
         return {"id": self.WAIT, "url": "https://claude.ai/artifact/" + self.WAIT, "role": "waiting-page", "account": "work"}
 
-    def external(self, entry_id, **changes):
-        return dict({"id": entry_id, "url": "https://claude.ai/artifact/" + entry_id, "role": "page",
-                     "account": "other-account", "export": False}, **changes)
+    def external(self, entry_id, held=True, **changes):
+        """An artifact of the other account. `held` (the default) adds `export` false: the repo holds the page, never exports it."""
+        entry = {"id": entry_id, "url": "https://claude.ai/artifact/" + entry_id, "role": "page", "account": "other-account"}
+        if held:
+            entry["export"] = False
+        return dict(entry, **changes)
 
     def repo(self, entries):
         root = os.path.join(self.tmp.name, "repo")
         write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "artifacts": entries}))
         return root
 
-    def fetched_waiting(self):
-        """The fetched folder a session makes when the other account cannot be read: the waiting page's folder only."""
+    def fetched_waiting(self, also=()):
+        """The fetched folder a session makes when the other account cannot be read: the waiting page's folder only. `also`
+        names more ids whose folders are fetched too, each shaped as the waiting page's."""
         root = tempfile.mkdtemp(prefix="fetched-all-", dir=self.tmp.name)
-        fetched = self.fetch(items={"i1": item(1)}, answers={"a1": {"item": "i1", "pick": "a"}},
-                             groups={"g1": {"name": "Group"}}, asks={"k1": {"item": "i1"}}, meta={"page": META})
-        os.rename(fetched, os.path.join(root, self.WAIT))
+        for entry_id in (self.WAIT,) + tuple(also):
+            fetched = self.fetch(items={"i1": item(1)}, answers={"a1": {"item": "i1", "pick": "a"}},
+                                 groups={"g1": {"name": "Group"}}, asks={"k1": {"item": "i1"}}, meta={"page": META})
+            os.rename(fetched, os.path.join(root, entry_id))
         return root
 
-    def run_all(self, root, fetched, worktree):
-        return self.run_cmd("--all", root, "--fetched", fetched, "--worktree", worktree)
+    def run_all(self, root, fetched, worktree, account=None):
+        args = ["--all", root, "--fetched", fetched, "--worktree", worktree]
+        if account is not None:
+            args += ["--account", account]
+        return self.run_cmd(*args)
 
     def test_each_export_false_entry_prints_skipped_and_the_run_exits_0(self):
         root = self.repo([self.waiting()] + [self.external(i) for i in self.EXTERNAL])
@@ -1240,6 +1279,53 @@ class NoExport(Base):
         self.assertTrue(says(r, "unknown"), "no unknown verdict printed for a waiting-page entry with export false. Output:\n" + shown(r))
         self.assertNotIn("%s: skipped - no export" % self.WAIT, verdict_lines(r),
                          "the waiting page was skipped instead of refused. Output:\n" + shown(r))
+
+    def test_each_other_account_entry_prints_skipped_and_the_run_exits_0(self):
+        """--account LABEL: an entry whose account differs prints `<id>: skipped - account <its account>`, exits 0 for it, and
+        needs no fetched folder. The eight entries here have none."""
+        entries = [self.waiting()] + [self.external(i, held=False, collections=["items"]) for i in self.EXTERNAL]
+        r = self.run_all(self.repo(entries), self.fetched_waiting(), self.out("worktree"), account="work")
+        self.assertEqual(r.returncode, 0, "a run with --account must exit 0 when its other-account entries are skipped. Output:\n"
+                         + shown(r))
+        for entry_id in self.EXTERNAL:
+            self.assertIn("%s: skipped - account other-account" % entry_id, verdict_lines(r),
+                          "%s has no `skipped - account` line. Output:\n%s" % (entry_id, shown(r)))
+
+    def test_an_entry_of_the_flag_account_exports_as_today_beside_the_skipped_one(self):
+        """--account LABEL: an entry whose account matches exports as it does without the flag, and the waiting page does too."""
+        own, other = "own001", self.EXTERNAL[0]
+        matching = {"id": own, "url": "https://claude.ai/artifact/" + own, "role": "page", "account": "work",
+                    "collections": ["items"]}
+        entries = [self.waiting(), matching, self.external(other, held=False, collections=["items"])]
+        r = self.run_all(self.repo(entries), self.fetched_waiting(also=(own,)), self.out("worktree"), account="work")
+        self.assertEqual(r.returncode, 0, "a run with --account must exit 0. Output:\n" + shown(r))
+        self.assertIn("%s: skipped - account other-account" % other, verdict_lines(r),
+                      "the other-account entry was not skipped. Output:\n" + shown(r))
+        self.assertIn("%s: changed 5" % self.WAIT, verdict_lines(r),
+                      "the waiting page of the flag's account did not export. Output:\n" + shown(r))
+        self.assertIn("%s: changed 1" % own, verdict_lines(r),
+                      "the entry of the flag's account did not export as it does without the flag. Output:\n" + shown(r))
+
+    def test_a_skipped_entry_writes_nothing_even_when_its_folder_was_fetched(self):
+        worktree, other = self.out("worktree"), self.EXTERNAL[0]
+        r = self.run_all(self.repo([self.waiting(), self.external(other, held=False, collections=["items"])]),
+                         self.fetched_waiting(also=(other,)), worktree, account="work")
+        self.assertEqual(r.returncode, 0, "a run with --account must exit 0. Output:\n" + shown(r))
+        self.assertIn("%s: skipped - account other-account" % other, verdict_lines(r),
+                      "the other-account entry was not skipped. Output:\n" + shown(r))
+        self.assertFalse(os.path.exists(os.path.join(worktree, "artifacts")),
+                         "a skipped entry wrote an artifacts folder although its account was not the flag's")
+
+    def test_without_the_flag_an_other_account_entry_exports_as_today(self):
+        """Control: with no --account every entry exports whatever its account, and no line says skipped."""
+        other = self.EXTERNAL[0]
+        r = self.run_all(self.repo([self.waiting(), self.external(other, held=False, collections=["items"])]),
+                         self.fetched_waiting(also=(other,)), self.out("worktree"))
+        self.assertEqual(r.returncode, 0, "a run without --account must exit 0. Output:\n" + shown(r))
+        self.assertIn("%s: changed 1" % other, verdict_lines(r),
+                      "an other-account entry did not export without the flag. Output:\n" + shown(r))
+        self.assertEqual([line for line in verdict_lines(r) if "skipped - account" in line], [],
+                         "a run without --account skipped an entry")
 
 
 if __name__ == "__main__":
