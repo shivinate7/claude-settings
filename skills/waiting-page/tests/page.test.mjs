@@ -6379,6 +6379,37 @@ test("a parked line keeps only Unpark and Drop, and no Park press is drawn on a 
   assert.equal(await parkLine(page, PARK_A).locator("[id^='b-park-'], .parkbtn").count(), 0, "a parked line draws a Park press");
 });
 
+// Controls: these pass on the code as it stands. A blocked card and a ruling card draw no live Park press.
+test("control: a blocked decision card's Park press is off, a press on it stages nothing, and Send writes no record for it", async (t) => {
+  const opt = (key) => ({ key, label: "L" + key, how: "h", gain: "g", lose: "l" });
+  const rawItems = {
+    "dup-keys": { ...DECISION, id: "dup-keys", n: 41, options: [opt("a"), opt("a")], pick: "a" },
+    "good": { ...DECISION, id: "good", n: 43 },
+  };
+  const page = await open(t, { items: [], rawItems }); if (!page) return;
+  const blocked = { ...DECISION, id: "dup-keys" }, good = { ...DECISION, id: "good" };
+  await need(parkPress(page, blocked), "the blocked decision card has no Park button");
+  assert.equal(await card(page, blocked).locator(".ready").textContent(), "This item cannot be sent.", "the card is not blocked");
+  assert.equal(await parkOff(parkPress(page, blocked)), true, "the blocked card's Park press is on");
+  await parkPress(page, blocked).click({ force: true }); // a real press on the disabled button: it changes nothing
+  assert.equal(await pressedOf(parkPress(page, blocked)), "false", "a press on the blocked card's Park staged it");
+  await need(parkPress(page, good), "the good decision card has no Park button");
+  assert.equal(await parkOff(parkPress(page, good)), false, "the good card's Park press is off");
+  await takePick(page, good);
+  await send(page);
+  await page.waitForFunction(() => !!window.__answers()["good"]);
+  assert.equal("dup-keys" in await answers(page), false, "Send wrote a record for the blocked card");
+  assert.deepEqual((await parkWrites(page)).filter((l) => l[2] === "dup-keys"), [], "a write named the blocked card");
+});
+
+test("control: an arbiter ruling card draws no Park press, and an open decision beside it keeps one", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER] }); if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  await need(parkPress(page, DECISION), "the open decision card has no Park button");
+  assert.equal(await page.locator(`#b-park-${ARBITER.id}`).count(), 0, "the ruling card draws a Park press");
+  assert.equal(await card(page, ARBITER).locator(".parkbtn").count(), 0, "the ruling card has a parkbtn");
+});
+
 // Item 10 (windows-live-checks) in the state the owner saw: the item is open, and its parked line and park answer still exist.
 const W10 = mk("windows-live-checks", 10, { title: "Windows live checks" });
 const W10_PARK = { id: W10.id, ref: "Step windows-live-checks, the Windows live checks", note: "Triage removes this line." };
