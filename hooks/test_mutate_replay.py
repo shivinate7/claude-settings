@@ -1352,19 +1352,40 @@ class BanchiSelftestTests(unittest.TestCase):
 
 
 # The child repositories' profiles: the REPLAY_PROFILES keys mailaudit, home, ios_adblock, joyous and degen. A row is
-# (key, part, sample product file, sample suite). `part` is None for a repository with one profile; home and
-# ios_adblock name each part. The samples are hardcoded paths, since CI has no child clones.
+# (key, part, sample product file, sample suite, pins). `part` is None for a repository with one profile; home and
+# ios_adblock name each part. The samples are hardcoded paths, since CI has no child clones. `pins` holds the literal
+# classify, argv, install and lockfile of the row, and link where the row installs.
 CHILD_ROWS = [
-    ("mailaudit", None, "src/view-rules.mjs", "test/view-rules.test.mjs"),
-    ("home", "js", "web/model.js", "web/model.test.js"),
-    ("home", "py", "tools/switchbot-ble-gaps.py", "tools/test_switchbot_ble_gaps.py"),
-    ("ios_adblock", "node", "chrome/slice.mjs", "chrome/test/slice.test.mjs"),
-    ("ios_adblock", "shell", "ios/WebExtension/src/strictmode.js", "tests/test_strictmode.sh"),
-    ("joyous", None, "src/lib/conversions/normalize.ts", "tests/conversions/normalize.test.ts"),
-    ("degen", None, "server/jd.py", "tests/addon/test_jd_heal.py"),
+    ("mailaudit", None, "src/view-rules.mjs", "test/view-rules.test.mjs", {
+        "classify": "fail_line", "argv": ["node", "{suite}"],
+        "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+        "lockfile": "package-lock.json", "link": "node_modules"}),
+    ("home", "js", "web/model.js", "web/model.test.js", {
+        "classify": "node_tap", "argv": ["node", "--test", "--test-reporter=tap", "{suite}"],
+        "install": None, "lockfile": None}),
+    ("home", "py", "tools/switchbot-ble-gaps.py", "tools/test_switchbot_ble_gaps.py", {
+        "classify": "fail_line", "argv": ["python3", "{suite}"], "install": None, "lockfile": None}),
+    ("ios_adblock", "node", "chrome/slice.mjs", "chrome/test/slice.test.mjs", {
+        "classify": "node_tap", "argv": ["node", "--test", "--test-reporter=tap", "{suite}"],
+        "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+        "lockfile": "chrome/package-lock.json", "link": "node_modules"}),
+    ("ios_adblock", "shell", "ios/WebExtension/src/strictmode.js", "tests/test_strictmode.sh", {
+        "classify": "fail_line", "argv": ["bash", "{suite}"], "install": None, "lockfile": None}),
+    ("joyous", None, "src/lib/conversions/normalize.ts", "tests/conversions/normalize.test.ts", {
+        "classify": "node_tap",
+        "argv": ["node", "--experimental-strip-types", "--test", "--test-reporter=tap", "{suite}"],
+        "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+        "lockfile": "package-lock.json", "link": "node_modules"}),
+    ("degen", None, "server/jd.py", "tests/addon/test_jd_heal.py", {
+        "classify": "fail_line",
+        "argv": ["env", "FEED_FREE_FLOOR_GB=0", "{deps}/venv/bin/python", "-m", "unittest", "{suite}"],
+        "install": [[sys.executable, "-m", "venv", "{deps}/venv"],
+                    ["{deps}/venv/bin/pip", "install", "--quiet", "--disable-pip-version-check", "-r",
+                     "requirements.txt"]],
+        "lockfile": "requirements.txt", "link": None}),
 ]
-# Suites the spec leaves out of ios_adblock: a zsh script, a script that needs macOS Swift, and a TAP script that the
-# node part covers.
+# Suites left out of ios_adblock: test_chrome_slice.sh is TAP, which the node part covers; test_build_rules.sh and
+# test_export_lists.sh are zsh; test_merge_chunks.sh needs macOS Swift.
 IOS_LEFT_OUT = ["tests/test_chrome_slice.sh", "tests/test_build_rules.sh", "tests/test_export_lists.sh",
                 "tests/test_merge_chunks.sh"]
 
@@ -1410,18 +1431,27 @@ def child_is_product(profile, label, path):
     return bool(code.search(path)) and not (not_code and not_code.search(path))
 
 
+def replay_value(profile, field):
+    """The value the replay reads for `field`. A row that installs reads link and lockfile with the replay's defaults; a
+    row with no install reads the raw value, None."""
+    if profile.get("install") is None:
+        return profile.get(field)
+    return profile.get(field, {"link": "node_modules", "lockfile": "package-lock.json"}.get(field))
+
+
 class ChildProfileTests(unittest.TestCase):
-    """Each child repository's profile, pinned by its sample paths and read here, never run: a child clone is not in
-    CI. A red here on main means the key is missing, which is the defect, not a stale case."""
+    """Each child repository's profile, pinned by the literal values in CHILD_ROWS, by its sample paths and by
+    IOS_LEFT_OUT, and read here, never run: a child clone is not in CI. A red here means the profile changed from its
+    pin or lost its key or part. That change is the defect, not a stale case."""
 
     def test_each_child_profile_key_exists(self):
-        for key, part, _, _ in CHILD_ROWS:
+        for key, part, _, _, _ in CHILD_ROWS:
             with self.subTest(profile=child_label(key, part)):
                 child_profile(key, part)
 
     def test_each_child_profile_uses_only_the_known_keys(self):
         known = known_profile_keys()
-        for key, part, _, _ in CHILD_ROWS:
+        for key, part, _, _, _ in CHILD_ROWS:
             label = child_label(key, part)
             with self.subTest(profile=label):
                 extra = (set(child_profile(key, part)) | set(mutate_guard.REPLAY_PROFILES[key])) - known
@@ -1429,14 +1459,14 @@ class ChildProfileTests(unittest.TestCase):
                                  % (label, sorted(extra)))
 
     def test_each_child_profile_code_matches_the_sample_product_file(self):
-        for key, part, product, _ in CHILD_ROWS:
+        for key, part, product, _, _ in CHILD_ROWS:
             label = child_label(key, part)
             with self.subTest(profile=label):
                 self.assertTrue(child_is_product(child_profile(key, part), label, product),
                                 "%s: code does not match the sample product file %s" % (label, product))
 
     def test_each_child_profile_code_skips_the_sample_suite(self):
-        for key, part, _, suite in CHILD_ROWS:
+        for key, part, _, suite, _ in CHILD_ROWS:
             label = child_label(key, part)
             with self.subTest(profile=label):
                 self.assertFalse(child_is_product(child_profile(key, part), label, suite),
@@ -1444,14 +1474,14 @@ class ChildProfileTests(unittest.TestCase):
                                  % (label, suite))
 
     def test_each_child_profile_tests_matches_the_sample_suite(self):
-        for key, part, _, suite in CHILD_ROWS:
+        for key, part, _, suite, _ in CHILD_ROWS:
             label = child_label(key, part)
             with self.subTest(profile=label):
                 tests = child_pattern(child_profile(key, part), "tests", label)
                 self.assertTrue(tests.search(suite), "%s: tests does not match the sample suite %s" % (label, suite))
 
     def test_each_child_profile_classify_is_a_known_classifier(self):
-        for key, part, _, _ in CHILD_ROWS:
+        for key, part, _, _, _ in CHILD_ROWS:
             label = child_label(key, part)
             with self.subTest(profile=label):
                 classify = child_profile(key, part).get("classify")
@@ -1459,12 +1489,28 @@ class ChildProfileTests(unittest.TestCase):
                                 "%s: classify %r is not a mutate_shared.CLASSIFIERS name" % (label, classify))
 
     def test_each_child_profile_select_is_a_list_holding_the_path(self):
-        for key, part, _, _ in CHILD_ROWS:
+        for key, part, _, _, _ in CHILD_ROWS:
             label = child_label(key, part)
             with self.subTest(profile=label):
                 select = child_profile(key, part).get("select")
                 self.assertTrue(isinstance(select, list) and "{path}" in select,
                                 "%s: select is not a list holding {path}" % label)
+
+    def test_each_child_row_pins_the_four_fields(self):
+        for key, part, _, _, pins in CHILD_ROWS:
+            label = child_label(key, part)
+            with self.subTest(profile=label):
+                missing = {"classify", "argv", "install", "lockfile"} - set(pins)
+                self.assertFalse(missing, "%s pins no %s" % (label, ", ".join(sorted(missing))))
+
+    def test_each_child_profile_pins_its_literal_values(self):
+        for key, part, _, _, pins in CHILD_ROWS:
+            label = child_label(key, part)
+            profile = child_profile(key, part)
+            for field, want in pins.items():
+                with self.subTest(profile=label, field=field):
+                    got = replay_value(profile, field)
+                    self.assertEqual(got, want, "%s: %s is %r, want %r" % (label, field, got, want))
 
     def test_mailaudit_code_skips_a_worker_test_file(self):
         self.assertFalse(child_is_product(child_profile("mailaudit", None), "mailaudit", "worker/core.test.mjs"),
@@ -1473,6 +1519,10 @@ class ChildProfileTests(unittest.TestCase):
     def test_joyous_code_skips_astro_files(self):
         self.assertFalse(child_is_product(child_profile("joyous", None), "joyous", "src/pages/index.astro"),
                          "joyous code reads a .astro file as product")
+
+    def test_joyous_code_skips_a_test_file_under_src(self):
+        self.assertFalse(child_is_product(child_profile("joyous", None), "joyous", "src/lib/x.test.ts"),
+                         "joyous code reads the test file src/lib/x.test.ts as product")
 
     def test_degen_tests_skip_the_web_folder(self):
         tests = child_pattern(child_profile("degen", None), "tests", "degen")
@@ -1486,13 +1536,13 @@ class ChildProfileTests(unittest.TestCase):
                 self.assertFalse(child_is_product(child_profile("home", part), label, suite),
                                  "%s code reads the suite %s as product" % (label, suite))
 
-    def test_ios_adblock_tests_skip_the_suites_the_spec_leaves_out(self):
+    def test_ios_adblock_tests_skip_the_suites_left_out(self):
         for part in ("node", "shell"):
             label = child_label("ios_adblock", part)
             for path in IOS_LEFT_OUT:
                 with self.subTest(profile=label, suite=path):
                     tests = child_pattern(child_profile("ios_adblock", part), "tests", label)
-                    self.assertIsNone(tests.search(path), "%s tests selects %s, a suite the spec leaves out"
+                    self.assertIsNone(tests.search(path), "%s tests selects %s, which IOS_LEFT_OUT leaves out"
                                       % (label, path))
 
 
