@@ -125,11 +125,12 @@ class Stale(unittest.TestCase):
         with open(os.path.join(self.fetched, page_id + ext), "w", encoding="utf-8") as f:
             f.write(text or "")
 
-    def run_script(self, *args, script=None, home=None):
-        """Every script run goes through here, so the timeout bounds each one."""
+    def run_script(self, *args, script=None, home=None, extra_env=None):
+        """Every script run goes through here, so the timeout bounds each one. `extra_env` adds variables to the run."""
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
         if home is not None:
             env["HOME"] = home
+        env.update(extra_env or {})
         return subprocess.run([sys.executable, script or CMD, *args], capture_output=True, text=True,
                               timeout=30, env=env)
 
@@ -460,8 +461,8 @@ class Stale(unittest.TestCase):
 
     # Single-page mode: stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]
 
-    def page_run(self, page, *extra, home=None, script=None):
-        return self.run_script("--page", page, *extra, home=home, script=script)
+    def page_run(self, page, *extra, home=None, script=None, env=None):
+        return self.run_script("--page", page, *extra, home=home, script=script, extra_env=env)
 
     def verdict(self, r):
         """(word, line) for the one stdout line that names a verdict."""
@@ -750,6 +751,238 @@ class Stale(unittest.TestCase):
             self.assert_only_new(before, {"behind.html", "current.html"})
         self.assertEqual(spy.call_count, 3)
         self.assertEqual({c.kwargs.get("timeout") for c in spy.call_args_list}, {30})
+
+    # Single-page mode with --items <file or folder>: one wait line per open item with a `waits` field, after the verdict line.
+
+    def gh_env(self, answers):
+        """The environment of one run: WAITING_PAGE_GH names a gh stand-in that answers `answers` ({full argv: [exit, stdout]}),
+        and PATH starts with a gh that only logs, so no run reaches GitHub. Returns (env, the folder whose calls.txt logs both)."""
+        folder = tempfile.mkdtemp(dir=self.tmp.name, prefix="gh-")
+        write_text(os.path.join(folder, "answers.json"), json.dumps(answers))
+        stub = self.executable(os.path.join(folder, "gh"), GH_STUB)
+        path_dir = tempfile.mkdtemp(dir=self.tmp.name, prefix="path-")
+        self.executable(os.path.join(path_dir, "gh"), GH_LOG.replace("@LOG@", repr(os.path.join(folder, "calls.txt"))))
+        return {"WAITING_PAGE_GH": stub, "PATH": path_dir + os.pathsep + os.environ.get("PATH", "")}, folder
+
+    def executable(self, path, text):
+        write_text(path, text.replace("@PYTHON@", sys.executable))
+        os.chmod(path, 0o755)
+        return path
+
+    def gh_calls(self, folder):
+        """Each argv that reached the gh stand-in or the logging gh, in order. Empty when none did."""
+        path = os.path.join(folder, "calls.txt")
+        if not os.path.exists(path):
+            return []
+        with open(path, encoding="utf-8") as f:
+            return f.read().splitlines()
+
+    def items_file(self, items):
+        """The items as a JSON list: the first shape --items takes."""
+        path = os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix="items-"), "items.json")
+        return write_text(path, json.dumps(items))
+
+    def items_folder(self, items):
+        """The items as the folder `ArtifactData list` saves: one <id>.json per item, and the .complete marker it leaves."""
+        folder = tempfile.mkdtemp(dir=self.tmp.name, prefix="items-")
+        for item in items:
+            write_text(os.path.join(folder, item["id"] + ".json"), json.dumps(item))
+        write_text(os.path.join(folder, ".complete"), "")
+        return folder
+
+    def current_and_behind(self):
+        """The two fetched pages the --items cases run on: page.html as it is, and the stale page the behind cases use."""
+        return (write_text(os.path.join(self.fetched, "current.html"), PAGE),
+                write_text(os.path.join(self.fetched, "behind.html"), set_body(ALTERED, STALE_BODY)))
+
+    def items_run(self, page, items, env):
+        return self.page_run(page, "--main", TEMPLATE, "--items", items, env=env)
+
+    def page_line(self, r):
+        """The page's verdict line: the first stdout line."""
+        return (r.stdout.splitlines() or [""])[0]
+
+    def assert_page_word(self, r, word, code):
+        """Exit `code`, and the verdict line first on stdout reads `word`."""
+        self.assertTrue(self.page_line(r).startswith(word + ":"), "the first stdout line is not the page verdict %r:\n%s" % (word, r.stdout + r.stderr))
+        self.assertEqual(r.returncode, code, "the exit code is not the page verdict's:\n" + r.stdout + r.stderr)
+
+    def wait_lines(self, r, n):
+        """The stdout lines after the verdict line that name item `n` as a whole number."""
+        return [line for line in r.stdout.splitlines()[1:] if re.search(r"(?<!\d)%d(?!\d)" % n, line)]
+
+    def assert_wait_line(self, r, n, target, word):
+        """Exactly one line after the verdict line names item `n` and `target`, and it reads `word` and no other wait word."""
+        lines = self.wait_lines(r, n)
+        self.assertEqual(len(lines), 1, "item %d: want one wait line after the verdict line, got %d:\n%s" % (n, len(lines), r.stdout + r.stderr))
+        line = lines[0]
+        self.assertRegex(line, r"(?<!\d)%s(?!\d)" % re.escape(str(target)), "item %d: its wait line does not name %s" % (n, target))
+        self.assertRegex(line, r"\b%s\b" % word, "item %d: its wait line does not read %s" % (n, word))
+        for other in WAIT_WORDS - {word}:
+            self.assertNotRegex(line, r"\b%s\b" % other, "item %d: its wait line reads %s as well as %s" % (n, other, word))
+
+    def assert_wait(self, waits, argv, answer, target, word, n=154, as_folder=False):
+        """Item `n` waiting on `waits`, gh answering `answer` to `argv`: the page stays current at exit 0, its wait line
+        names `target` and reads `word`, and gh was called once, with argv."""
+        current, _ = self.current_and_behind()
+        env, folder = self.gh_env({argv: answer})
+        item = [wait_item(n, waits)]
+        items = self.items_folder(item) if as_folder else self.items_file(item)
+        r = self.items_run(current, items, env)
+        self.assert_page_word(r, "current", 0)
+        self.assert_wait_line(r, n, target, word)
+        self.assertEqual(self.gh_calls(folder), [argv], "gh calls for item %d" % n)
+
+    def test_a_run_that_completed_with_a_failure_names_its_item_ended(self):
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                self.assert_wait({"repo": REPO, "run": RUN}, RUN_ARGV, RUN_DONE, RUN, "ended", as_folder=as_folder)
+
+    def test_an_open_pr_or_a_run_in_progress_names_its_item_waiting(self):
+        with self.subTest("open pr"):
+            self.assert_wait({"repo": REPO, "pr": PR}, PR_ARGV, PR_OPEN, PR, "waiting")
+        with self.subTest("run in progress"):
+            self.assert_wait({"repo": REPO, "run": RUN}, RUN_ARGV, RUN_IN_PROGRESS, RUN, "waiting")
+
+    def test_a_pr_closed_without_a_merge_names_its_item_ended(self):
+        self.assert_wait({"repo": REPO, "pr": PR}, PR_ARGV, PR_CLOSED, PR, "ended")
+
+    def test_a_merged_pr_names_its_item_ended(self):
+        self.assert_wait({"repo": REPO, "pr": PR}, PR_ARGV, PR_MERGED, PR, "ended")
+
+    def test_a_gh_that_fails_is_missing_or_answers_non_json_names_its_item_unknown(self):
+        current, behind = self.current_and_behind()
+        base, _ = self.gh_env({RUN_ARGV: [1, ""]})
+        envs = {
+            "exits non-zero": base,
+            "missing": dict(base, WAITING_PAGE_GH=os.path.join(self.tmp.name, "no-such-gh")),
+            "answers non-json": self.gh_env({RUN_ARGV: [0, "not json"]})[0],
+        }
+        for label, env in envs.items():
+            for word, page, code in (("current", current, 0), ("behind", behind, 1)):
+                with self.subTest(gh=label, page=word):
+                    items = self.items_file([wait_item(154, {"repo": REPO, "run": RUN})])
+                    r = self.items_run(page, items, env)
+                    self.assert_page_word(r, word, code)
+                    self.assert_wait_line(r, 154, RUN, "unknown")
+
+    def test_without_items_gh_is_never_called(self):
+        current, _ = self.current_and_behind()
+        env, folder = self.gh_env({RUN_ARGV: RUN_DONE})
+        r = self.page_run(current, "--main", TEMPLATE, env=env)
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(len(r.stdout.splitlines()), 1, "a run without --items printed lines past the verdict:\n" + r.stdout)
+        self.assertEqual(self.gh_calls(folder), [], "a run without --items called gh")
+
+    def test_one_open_waits_item_makes_exactly_one_gh_call(self):
+        current, _ = self.current_and_behind()
+        env, folder = self.gh_env({RUN_ARGV: RUN_DONE})
+        r = self.items_run(current, self.items_file([wait_item(154, {"repo": REPO, "run": RUN})]), env)
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(self.gh_calls(folder), [RUN_ARGV], "gh calls for one open waits item")
+
+    def test_a_closed_waits_item_makes_no_gh_call_and_prints_no_line(self):
+        current, _ = self.current_and_behind()
+        env, folder = self.gh_env({RUN_ARGV: RUN_DONE, PR_ARGV: PR_MERGED})
+        items = [wait_item(155, {"repo": REPO, "pr": PR}, status="closed"), wait_item(154, {"repo": REPO, "run": RUN})]
+        r = self.items_run(current, self.items_file(items), env)
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(self.wait_lines(r, 155), [], "the closed item printed a wait line")
+        self.assertEqual(self.gh_calls(folder), [RUN_ARGV], "gh calls: the closed item must not be asked, the open one must")
+
+    def test_an_empty_list_or_an_open_item_with_no_waits_makes_no_gh_call(self):
+        current, _ = self.current_and_behind()
+        cases = {
+            "empty list": self.items_file([]),
+            "folder with only the marker": self.items_folder([]),
+            "open item with no waits": self.items_file([wait_item(3, None)]),
+        }
+        for label, items in cases.items():
+            with self.subTest(label):
+                env, folder = self.gh_env({RUN_ARGV: RUN_DONE})
+                r = self.items_run(current, items, env)
+                self.assert_page_word(r, "current", 0)
+                self.assertEqual(len(r.stdout.splitlines()), 1, "printed lines past the verdict:\n" + r.stdout)
+                self.assertEqual(self.gh_calls(folder), [], "gh calls")
+
+    def test_full_size_items_make_one_call_per_open_waits_item_and_no_more(self):
+        current, _ = self.current_and_behind()
+        items, answers, want = [], {}, []
+        for i in range(40):  # open, waits on a PR: asked
+            pr = 3001 + i
+            items.append(wait_item(501 + i, {"repo": REPO, "pr": pr}))
+            answers[pr_argv(pr)] = PR_OPEN
+            want.append(pr_argv(pr))
+        for i in range(40):  # closed, waits on a run: not asked
+            items.append(wait_item(601 + i, {"repo": REPO, "run": "8%08d" % i}, status="closed"))
+        for i in range(40):  # open, no waits: not asked
+            items.append(wait_item(701 + i, None))
+        self.assertEqual(len(items), 120)
+        env, folder = self.gh_env(answers)
+        r = self.items_run(current, self.items_file(items), env)
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(sorted(self.gh_calls(folder)), sorted(want), "gh calls for 120 items")
+        self.assertEqual(len(r.stdout.splitlines()) - 1, 40, "want one wait line per open waits item:\n" + r.stdout)
+        for i in range(40):
+            self.assert_wait_line(r, 501 + i, 3001 + i, "waiting")
+
+    def test_the_exit_code_stays_the_verdicts_with_an_ended_wait(self):
+        current, behind = self.current_and_behind()
+        env, _ = self.gh_env({RUN_ARGV: RUN_DONE})
+        items = self.items_file([wait_item(154, {"repo": REPO, "run": RUN})])
+        for word, page, code in (("current", current, 0), ("behind", behind, 1)):
+            with self.subTest(page=word):
+                r = self.items_run(page, items, env)
+                self.assert_page_word(r, word, code)
+                self.assert_wait_line(r, 154, RUN, "ended")
+
+
+# The item 154 history: run 41861801325 ended completed/failure, and PR 1011 was its PR. Fixtures for the --items cases.
+REPO, RUN, PR = "shivinate7/q_max", "41861801325", 1011
+RUN_ARGV = "run view %s --repo %s --json status,conclusion" % (RUN, REPO)
+
+
+def pr_argv(pr):
+    return "pr view %d --repo %s --json state,mergedAt" % (pr, REPO)
+
+
+PR_ARGV = pr_argv(PR)
+RUN_DONE = [0, '{"status":"completed","conclusion":"failure"}']
+RUN_IN_PROGRESS = [0, '{"status":"in_progress","conclusion":""}']
+PR_OPEN = [0, '{"state":"OPEN","mergedAt":null}']
+PR_CLOSED = [0, '{"state":"CLOSED","mergedAt":null}']
+PR_MERGED = [0, '{"state":"MERGED","mergedAt":"2026-11-04T21:10:00Z"}']
+WAIT_WORDS = {"ended", "waiting", "unknown"}
+# The gh stand-in: answers by its full argv, logs each argv to calls.txt beside itself, and fails on any argv it does not know.
+GH_STUB = '''#!@PYTHON@
+import json, os, sys
+HERE = os.path.dirname(os.path.abspath(__file__))
+argv = " ".join(sys.argv[1:])
+with open(os.path.join(HERE, "calls.txt"), "a", encoding="utf-8") as f:
+    f.write(argv + "\\n")
+with open(os.path.join(HERE, "answers.json"), encoding="utf-8") as f:
+    answers = json.load(f)
+if argv not in answers:
+    sys.stderr.write("UNEXPECTED gh call: %s\\n" % argv)
+    sys.exit(3)
+code, out = answers[argv]
+sys.stdout.write(out)
+sys.exit(code)
+'''
+# The gh on PATH: logs its call with a PATH prefix, so a run that ignores WAITING_PAGE_GH shows in the calls.
+GH_LOG = '''#!@PYTHON@
+import sys
+open(@LOG@, "a", encoding="utf-8").write("PATH " + " ".join(sys.argv[1:]) + "\\n")
+sys.exit(3)
+'''
+
+
+def wait_item(n, waits, status="open"):
+    """An item record as the page holds it. `waits` is its waits field, or None for an item with none."""
+    item = {"id": "item-%d" % n, "n": n, "kind": "task", "status": status, "title": "CI fix"}
+    if waits is not None:
+        item["waits"] = waits
+    return item
 
 
 def load_stale_pages():
