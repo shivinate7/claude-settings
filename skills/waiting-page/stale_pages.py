@@ -49,7 +49,7 @@ or `{repo, pr}`, one gh call runs through the program named by WAITING_PAGE_GH (
 `run view <id> --repo <repo> --json status,conclusion` or `pr view <n> --repo <repo> --json state,mergedAt`.
 Each such item prints one line after the verdict line, `wait: item <n> (<what>): <word> (<detail>)`. An open item with a
 non-empty string `lane` and a `lastAnswer` object but no `waits` prints `wait: item <n> (lane <slug>): waiting (answered <lastAnswer.at>)`
-instead: a routed answer whose receiver has not reported the act done. It starts no gh process and does not count against WAIT_CAP.
+(`answered at unknown` when `at` is missing or not a string) instead: a routed answer whose receiver has not reported the act done. It starts no gh process and does not count against WAIT_CAP.
 An item with `waits` keeps its one line. The word is
 `ended` (the run completed with any conclusion; the PR merged; the PR closed unmerged, which its line says),
 `waiting` (the run or PR is still going), or `unknown` (gh missing, non-zero, timed out, not JSON, or a
@@ -471,7 +471,9 @@ def wait_lines(items, complete=True):
         if "waits" not in item:
             answer, lane = item.get("lastAnswer"), item.get("lane")
             if isinstance(answer, dict) and isinstance(lane, str) and lane:
-                lines.append("wait: item %s (lane %s): waiting (answered %s)" % (item.get("n", item.get("id", "?")), lane, answer.get("at")))
+                at = answer.get("at")
+                lines.append("wait: item %s (lane %s): waiting (answered %s)" % (item.get("n", item.get("id", "?")), lane,
+                                                                                at if isinstance(at, str) and at else "at unknown"))
             continue
         name, label = "item %s" % item.get("n", item.get("id", "?")), json.dumps(item["waits"])
         try:

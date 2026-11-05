@@ -112,9 +112,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     The card shows it above the reply, as "Your last answer, <time>". The writer copies it from `answers/<id>` before it
     deletes that record (steps 2 to 4 of "Route and close"), and from a chat answer. When the writer rewrites `options`,
     it writes `lastAnswer` again without `choice`: the old key may now name another option.
-  - `lane` (a lane's branch slug) is set when an answer is filed while its lane is busy. The card shows "waits on lane <slug>"
-    in its top row. The item stays open until the receiver reports the act done, and then the owning session closes it
-    and deletes `answers/<id>` (see "Route and close", the busy-lane path).
+  - `lane` (the receiver's branch slug, or its role tag, such as `batch-runner`, when it has no branch) is set when an answer
+    takes the busy-lane path. The card shows "waits on lane <slug>" in its top row. The item stays open until the receiver
+    reports the act done, and then the owning session closes it and deletes `answers/<id>` (see "Route and close", the busy-lane path).
   - `waits` (`{repo, run}` or `{repo, pr}`: a CI run id or a PR number) is set while the item waits on that run or PR. `run` and
     `pr` are a whole number above zero, or a string of digits with no leading zero; any other value reads as no wait. An item
     with `waits` and `lastAnswer` reads as answered on the page.
@@ -470,29 +470,41 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 ## Route and close
 
 Sort the answer first. An answer with `parked: true` goes to the page's writer, not to an item's owner, and takes the
-parked branch below only. An `overturn` answer on an arbiter ruling takes step 5 only. A `none` answer with a clear direction takes steps 1 and 2 only. Any other `none` answer takes step 3 only. A task answer with no `done` is a question
+parked branch below only. An `overturn` answer on an arbiter ruling takes step 5 only. A `none` answer with a clear direction takes steps 1 and 2 only, unless it names a relayed act: that one takes the busy-lane path. Any other `none` answer takes step 3 only. A task answer with no `done` is a question
 or a comment. It is never a done mark and never a grant. It takes step 4 only: answer it in the
 item's `context`. Any other answer that is not clear takes
-step 4 only. A clear answer takes steps 1 and 2 in the same turn it is read, and is closed the turn it is filed,
-unless its lane is busy or another session does its act (a relay). That answer takes the busy-lane path.
+step 4 only. A clear answer takes steps 1 and 2 in the same turn it is read, and is closed the turn it is filed.
+The exception: its lane is busy, or another session does its act (a relay). That answer takes the busy-lane path.
 
-Busy-lane path. The routing session files the answer at once as a note on its step (the item's home, step 1), never
-held for the receiver. It sets `lane` (the receiver's slug: its cs-step tag or its role name) and `lastAnswer` on the item,
-and keeps the item open and `answers/<id>` in place. It never sets `added` here: rule 5 of `page_grant.py` needs the
-answer's `at` later than `added`. A relay sends the receiver only the page URL, the item id and the act. The routing
-session closes the item and deletes `answers/<id>` (step 2) only when the receiver reports the act done. The done report
-is status, never a grant. A `none` answer with a clear direction takes this same path, with no new options.
-A chat answer has no `answers/<id>`, so steps 2 to 4 skip their delete, and the writer sets `lastAnswer` from the chat answer.
+Busy-lane path. It runs when a lane is busy, or when the act is another session's (a relay). The routing session files the
+answer at once as a note on its step (the item's home, step 1), never held for the receiver. It sets `lane` (the receiver's
+branch slug, or its role tag, such as `batch-runner`, when it has no branch) and `lastAnswer` on the item, and keeps the item
+open and `answers/<id>` in place. It never sets `added` here: rule 5 of `page_grant.py` needs the answer's `at` later than
+`added`. A relay sends the receiver only the page URL, the item id and the act. The routing session closes the item and deletes
+`answers/<id>` (step 2) only when the receiver reports the act done. The done report is status, never a grant. A `none` answer
+with a clear direction takes this same path, with no new options.
 
-Never-ending wait. At each wake the writer runs `--items`, and each lane line names an item kept open for a receiver.
-The owning session checks that receiver with `get_session`. If it ended, failed or was archived with no done report, the
-owning session writes one line on the item's `context` saying so (the page draws `context`), then re-routes the act or
-closes the item with a home. There is no age threshold.
+- Already routed. The owning session reads `answers/` at each turn start, so a kept answer looks new. An answer whose item
+  already has `lane` and a `lastAnswer` with the same `at` is routed. Skip it until the done report.
+- Withdrawn. If a kept answer is gone at the owning session's re-read, the owner withdrew it. The session drops `lane`
+  (`{"lane": {"__delete__": true}}`) and nothing else, leaves the item open as unanswered, and tells the receiver the act is withdrawn.
+- Chat answer. It has no `answers/<id>`, so `page_grant.py` can never count it for a receiver. An act another session does
+  needs the page answer, or the owner's grant typed in that session. A chat answer for such an act is closed as above (steps 2 to 4
+  skip their delete, and the writer sets `lastAnswer` from it). The routing session tells the owner in its reply that the receiver
+  needs the page answer or the owner's grant typed there.
+
+Never-ending wait. At each turn start while it holds a lane item (it already reads answers then), the owning session checks the
+receiver with `get_session`. The writer's `--items` lane line is the page-side sign. If the owning session itself ended, the
+inherit rule applies (see "Read the answers", the watch bullet). If the receiver ended, failed or was archived with no done
+report, never re-run or re-route the act on the kept answer. Check whether the act landed (for example, the PR merged or the
+setting changed). If it did, close the item (step 2) with a home. If it did not, or you cannot tell, write one `context` line on the
+item (the page draws `context`): "receiver <slug> ended at <time> with no done report; the act is unconfirmed". Leave the item
+open, so the page shows it. There is no age threshold.
 
 While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `answers/<id>`. End of a wait: when the
 `--items` line for the item says `ended` ("Keep the page on main's code", step 2), the writer, in that wake, drops
-`waits` (`ArtifactData update items/<id> {"waits": {"__delete__": true}}`). Then it closes or rewrites the item
-and deletes `answers/<id>`.
+`waits` (`ArtifactData update items/<id> {"waits": {"__delete__": true}}`). With `lane` set, that is all: the close and the
+delete of `answers/<id>` wait for the done report. Otherwise it then closes or rewrites the item and deletes `answers/<id>`.
 
 1. Write `receipts/<id>` with `read` set to now. Then move the answer to the item's home: the
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
