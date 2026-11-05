@@ -55,5 +55,12 @@ read returns None, which means keep. The batch timeout stays below the hook cap 
 
 Scratchpad orphans are reaped at session end by `janitor/session_end_sweep.py`, not at agent end (owner ruling, 2026-10-26). Reason: the session and its agents share one scratchpad and no agent tag exists, so an agent-end reap would stop live servers of the session or of a sibling lane. The session-end reap stops a process only when its parent is init, its exec environment holds exactly `CLAUDE_CODE_SESSION_ID=<payload session_id>`, and its cwd is inside the realpath of the payload `scratchpad_dir`. No `scratchpad_dir` stops nothing. A failed read keeps. The agent-end reap keeps the reads above and covers the ending agent's tree only.
 
-The payload log is written under a lock file. Before the lock, parallel writers lost rows. A later
-Windows loss is open (debt `agent-end-log-loses-row`).
+## The payload log
+
+The payload log is `state/agent-end-payloads.jsonl` under the config dir. Each agent end writes a `started` row, then a `done` row. The `done` row replaces the `started` row when that row is still the last line. Writes take the lock file `<log>.lock`. Measured on b0c87cb (PR 322 review): 13 of 120 rows were lost at 3 writers with a shared temp name and no lock.
+
+Cap: the last 200 rows (`MAX_LOG_LINES` in `janitor/agent_end_reap.py`).
+
+Reader: `hooks/daily_note.py` (`agent_end_failures`), at the first startup of each Central day. It prints one line that counts the runs whose day is in the window and that have a `started` row with no `done` row, or a row with an `error`. A run whose rows the cap cut is not counted. `janitor/prove_agent_end_reap.py` reads the last row of the log in its own empty temp config dir.
+
+Cost: each agent end rewrites the log twice, through a temp file and a replace, and takes the lock file. The log starts no process: its writer is the SubagentStop hook that already runs. The note reads the log once a day.

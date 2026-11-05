@@ -76,10 +76,10 @@ small, M medium, L large).
 | `daily_note` (SessionStart, startup; 10 s) | One python per startup. The record names no cost test. Rule 5 needs one. | Add a "no process" test. Keep the slug. | no | S |
 | Waiter guard (`hooks/guard_stream.py`) | In-process. Starts no child. Its remedy names the CI-wake notice or Monitor (checked: `WAITER_REASON`, line 248). | Record its cost. | no | S |
 | SessionEnd sweep | `janitor/session_end_sweep.py` runs `sweep.py <root> --confirm` on one repository. Timeout 55 s. Its output goes to DEVNULL (checked: lines 255 to 257). The record says the hook sweeps one repository. The run also scans every process (`sweep.py` line 1436) and lists simulators (line 1787). | Q4. | 4 | M |
-| Daily job (launchd and schtasks) | A timer by design. The installers write the job and load nothing (checked: `install_launchd.py` prints the load command; it calls no `launchctl`). Logs go to `launchd-sweep.log` and `launchd-sweep.err.log` (lines 63 and 64). Their reader is unchecked. | Q4 and Q5. | 4, 5 | S |
+| Daily job (launchd and schtasks) | A timer by design. The installers write the job and load nothing (checked: `install_launchd.py` prints the load command; it calls no `launchctl`). Logs go to `launchd-sweep.log` and `launchd-sweep.err.log`. `hooks/daily_note.py` reads the error log. | Q4. | 4 | S |
 | Idle simulator tier | Lists devices and runs `xcrun simctl shutdown` under `--confirm` (checked: `sweep.py` lines 1787 and 1906). The guard `simulator-boot-cap` refuses at two booted devices (record `sweep-shuts-down-idle-simulators`; code unchecked). | Q4. | 4 | S |
 | Agent-end reap | Runs on SubagentStop, timeout 60 s (checked: `settings.json`). Its build pass deletes trash in a detached child. That child has no time bound (record `build-dirs-reaped-at-agent-end`; the bound is unchecked). | Bound the child by time. State the cost. Split the record by stage. | no | M |
-| Agent-end payload log | Written under a lock file, one row per run (record `agent-end-reap-stops-what-a-finished-agent-left`). No reader is named. | Q5. | 5 | S |
+| Agent-end payload log | Written under a lock file, capped at 200 rows. Its reader is `hooks/daily_note.py` (`agent_end_failures`) (record `agent-end-reap-stops-what-a-finished-agent-left`). | None. | no | none |
 | Repo reaper (npm `reap:worktrees`) | Removed. The sweep ignores a repository's `reap:worktrees` script (`janitor/test_sweep.py`). | None. Q7 is decided. | no | none |
 | `install_schtasks.resolve_primary_checkout` | `janitor/install_schtasks.py` keeps a local copy. `install_launchd.py` calls `guard.primary_checkout`. | Both installers call `guard.primary_checkout`. This is code work for a builder. | no | S |
 | `sim-lease` (`bin/sim-lease`) | A 2 s poll inside `take` (from the map; unchecked). | Keep it. Add a cost test. Fix the docstring. | no | S |
@@ -107,13 +107,10 @@ small, M medium, L large).
 
 Nothing here is deleted before its owner question is ruled. Each delete names its reader check.
 
-- **Agent-end payload log.** No reader is named on main. Q5.
 - **`STOP seen` line in `shadow.log`.** `mods/decision-watch/hooks/register.mjs` line 81 writes it. Line 358
   counts it for `/dw`. It is the only live evidence that the mod fires, and the record says no live read
   has happened. Delete it only after another fire check lands. Q5.
 - **`janitor-runs.jsonl`.** `janitor/sweep.py` line 2238 writes it. Its reader is unchecked. Q5.
-- **`launchd-sweep.log` and `launchd-sweep.err.log`.** The plist writes them (`install_launchd.py` lines 63
-  and 64). Their reader is unchecked. The report stays on stdout for a person. Q5.
 - **Loose-process tier in the hook run.** It reports only. The hook sends its output to DEVNULL (line 257).
   So the run has no reader for it. Its scan cost is unchecked. Q4.
 - **`lint/md_sweep.py` and `lint/ste_gate.py`.** Both are exit-0 stubs. Each stays until
@@ -166,8 +163,8 @@ simulators then stay until the next daily run. A sweep that runs less often mean
 `simulator-boot-cap` refusals, which are false alarms, not holes. (b) keep the hook run machine-wide.
 Recommendation: (a), because the record already says one repository.
 
-**Q5. Logs with no reader.** Options: (a) delete now the logs that have no reader: the agent-end payload
-log, `janitor-runs.jsonl`, and the launchd logs. The `STOP seen` line goes only after another fire check
+**Q5. Logs with no reader.** Options: (a) delete now the logs that have no reader: `janitor-runs.jsonl`.
+`hooks/daily_note.py` now reads the agent-end payload log and the launchd error log. The `STOP seen` line goes only after another fire check
 lands. (b) name a reader for each one. Recommendation: (a) for the logs with no reader. Keep `guard.log`,
 with a rotating cap.
 
@@ -199,7 +196,6 @@ One line each, with the reason the text stays.
 - daily_note.py docstring: volume figure dropped in this change. The weekly id stays, because a slug never changes.
 - daily_note: precompact-handoff item 12. Not read.
 - agent-end reap: "The sweep takes the deepest checkout" names `sweep.py`. True. The Home is the reaper by design.
-- agent-end payload log docstring ("the fields get measured"). Whether the reason is spent is Q5.
 - janitor: "Banchi keeps its own tier 2". A child repo. Not checkable here.
 - janitor: "Each new rule gets a row in rule_mechanisms.json". Unmeasured.
 - GUIDE: "runs against every repository" omits roots detail. The GUIDE covers roots later.

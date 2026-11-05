@@ -5892,12 +5892,42 @@ class RunLogTests(unittest.TestCase):
                 "branch old-merged was not created")
         require(os.path.isdir(self.wt), "the detached worktree was not created")
 
-    def _main(self, argv):
-        with mock.patch.dict(os.environ, {"JANITOR_RUN_LOG": self.log}), _machine_quiet(), \
+    def _main(self, argv, report=None, run_log=None):
+        real_report = sweep.print_sweep_report
+
+        def tee(results, confirm, out=None):  # the report's `out=sys.stdout` default is bound at import
+            return real_report(results, confirm, out=report if report is not None else io.StringIO())
+
+        with mock.patch.dict(os.environ, {"JANITOR_RUN_LOG": run_log or self.log}), _machine_quiet(), \
                 mock.patch.object(shutil, "disk_usage",
                                   return_value=types.SimpleNamespace(total=1, used=1, free=4242)), \
+                mock.patch.object(sweep, "print_sweep_report", tee), \
                 contextlib.redirect_stdout(io.StringIO()):
             return sweep.main(argv + ["--restore-log", self.restore])
+
+    def _write_run_lines(self, roots):
+        with open(self.log, "w", encoding="utf-8") as handle:
+            for index, root in enumerate(roots):
+                handle.write(json.dumps({"root": root, "free_bytes": 1, "worktrees_removed": 0,
+                                         "branches_reaped": 0, "time_ms": index}) + "\n")
+
+    def _append(self, root):
+        sweep.append_run_log(self.log, [{"root": root, "worktrees": [], "branches": []}])
+
+    def _seed_run_log(self):
+        """One --confirm run, which writes a line for each repository. Its report is not kept."""
+        _age_admin_files(self.wt, 7200)
+        self._main([self.busy, self.idle, "--confirm"])
+        require(os.path.isfile(self.log), "the seeding --confirm run wrote no run log")
+
+    def _last_run_line(self, text, root):
+        """The line the report prints right after ROOT's section header."""
+        lines = text.splitlines()
+        headers = [i for i, line in enumerate(lines)
+                   if line.startswith("== ") and line.endswith(" ==") and _norm_path(line[3:-3]) == _norm_path(root)]
+        self.assertEqual(len(headers), 1, "the report has no single section for %s: %r" % (root, text))
+        index = headers[0] + 1
+        return lines[index] if index < len(lines) else ""
 
     def test_confirm_appends_one_line_per_repository_with_the_four_fields(self):
         _age_admin_files(self.wt, 7200)  # quiet for 2 hours: the strict idle rule allows the reap
@@ -5957,6 +5987,199 @@ class RunLogTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(self.log), "the first repository wrote no run line")
         roots = [_norm_path(r.get("root", "")) for r in _read_run_log(self.log)]
         self.assertIn(_norm_path(self.busy), roots, "no run-log line for the first repository")
+
+    def test_preview_prints_each_roots_last_run_line_and_opens_the_run_log_once(self):
+        self._seed_run_log()
+        opened = []
+        real_open = open
+
+        def spy(file, *args, **kwargs):
+            if isinstance(file, str) and _norm_path(file) == _norm_path(self.log):
+                opened.append(file)
+            return real_open(file, *args, **kwargs)
+
+        report = io.StringIO()
+        with mock.patch("builtins.open", spy):
+            self._main([self.busy, self.idle], report=report)
+        text = report.getvalue()
+        busy_line = self._last_run_line(text, self.busy)
+        idle_line = self._last_run_line(text, self.idle)
+        self.assertTrue(busy_line.startswith("  last --confirm run: "), "no last-run line under busy: %r" % busy_line)
+        self.assertIn(", 1 worktrees removed, 1 branches reaped", busy_line)
+        self.assertTrue(idle_line.startswith("  last --confirm run: "), "no last-run line under idle: %r" % idle_line)
+        self.assertIn(", 0 worktrees removed, 0 branches reaped", idle_line)
+        self.assertEqual(len(opened), 1, "the preview opened the run log %d times for two roots" % len(opened))
+
+    def test_preview_with_no_run_log_says_none_in_the_log_path(self):
+        require(not os.path.exists(self.log), "the run log exists before any run")
+        report = io.StringIO()
+        self._main([self.busy, self.idle], report=report)
+        text = report.getvalue()
+        for root in (self.busy, self.idle):
+            self.assertEqual(self._last_run_line(text, root), "  last --confirm run: none in %s" % self.log)
+
+    def test_preview_with_an_unreadable_run_log_says_unknown_with_the_error_name(self):
+        os.makedirs(self.log)  # a directory cannot be read as a log
+        try:
+            open(self.log, encoding="utf-8")
+        except OSError as err:
+            name = type(err).__name__
+        else:
+            self.fail("opening a directory as a file did not fail on this platform")
+        report = io.StringIO()
+        self._main([self.busy, self.idle], report=report)
+        text = report.getvalue()
+        for root in (self.busy, self.idle):
+            self.assertEqual(self._last_run_line(text, root), "  last --confirm run: unknown (%s)" % name)
+
+    def test_confirm_and_tier1_runs_print_no_last_run_line(self):
+        self._seed_run_log()
+        preview = io.StringIO()
+        self._main([self.busy, self.idle], report=preview)
+        self.assertTrue(self._last_run_line(preview.getvalue(), self.idle).startswith("  last --confirm run: "),
+                        "control: the preview should print a last-run line")
+        for flag in ("--confirm", "--tier1"):
+            report = io.StringIO()
+            self._main([self.busy, self.idle, flag], report=report)
+            self.assertNotIn("last --confirm run:", report.getvalue(), "a %s run printed a last-run line" % flag)
+
+    def test_cap_keeps_the_newest_lines_and_leaves_no_temp_file(self):
+        cap = getattr(sweep, "MAX_RUN_LOG_LINES", 2000)  # the fallback lets an older build fail on the count
+        # Three roots reused, each with a line inside the window: no root line lies before the cut, so the
+        # file holds exactly the cap (the root bound adds nothing here).
+        self._write_run_lines(["old-%d" % (i % 3) for i in range(cap)])
+        self._append("new-1")
+        kept = _read_run_log(self.log)
+        self.assertEqual(len(kept), cap, "the run log kept %d lines, not the cap of %d" % (len(kept), cap))
+        self.assertEqual(kept[0]["time_ms"], 1, "the oldest kept line is not the second-oldest line")
+        self.assertEqual(kept[-1]["root"], "new-1", "the newest line is not the one just appended")
+        leftovers = [name for name in os.listdir(self.base) if name.endswith(".tmp")]
+        self.assertEqual(leftovers, [], "the trim left a temp file behind: %r" % leftovers)
+
+    def test_roots_past_the_cut_are_bounded_to_the_newest_max_run_log_roots(self):
+        cap = getattr(sweep, "MAX_RUN_LOG_LINES", 2000)
+        roots_kept = getattr(sweep, "MAX_RUN_LOG_ROOTS", 200)  # the fallback lets an older build fail on the count
+        total = 3000  # one-off roots: 1000 lines sit before the cut, and only the newest roots_kept of them stay
+        results = [{"root": "root-%04d" % i, "worktrees": [], "branches": []} for i in range(total)]
+        sweep.append_run_log(self.log, results)
+        kept = _read_run_log(self.log)
+        self.assertEqual(len(kept), cap + roots_kept,
+                         "the run log kept %d lines, not the cap of %d plus %d root lines"
+                         % (len(kept), cap, roots_kept))
+        roots = [row["root"] for row in kept]
+        want = ["root-%04d" % i for i in range(total - cap - roots_kept, total)]
+        self.assertTrue(roots == want,  # not assertEqual: its failure would print every kept root
+                        "the kept lines are not the newest %d roots past the cut, then the newest %d lines"
+                        % (roots_kept, cap))
+
+    def test_each_roots_newest_line_survives_the_cap(self):
+        cap = getattr(sweep, "MAX_RUN_LOG_LINES", 2000)
+        self._write_run_lines(["quiet-root"] + ["busy-root"] * cap)
+        self._append("newest-root")
+        roots = [row["root"] for row in _read_run_log(self.log)]
+        self.assertTrue("quiet-root" in roots,  # not assertIn: its failure would print every kept line
+                        "the cap dropped quiet-root's only run line: its preview would print none in %s" % self.log)
+
+    def test_threaded_appends_under_the_cap_keep_every_line_valid_json(self):
+        cap = getattr(sweep, "MAX_RUN_LOG_LINES", 2000)
+        # Four prefill roots reused and every thread line inside the window, so the file ends at exactly the cap.
+        self._write_run_lines(["old-%d" % (i % 4) for i in range(cap - 5)])
+        threads, per_thread = 8, 10
+        barrier = threading.Barrier(threads)
+        lock = getattr(sweep, "_RUN_LOG_LOCK", None)
+        errors, unlocked = [], []
+        real_replace = os.replace
+
+        def spy_replace(src, dst, *args, **kwargs):
+            if lock is None or not lock.locked():
+                unlocked.append(dst)
+            return real_replace(src, dst, *args, **kwargs)
+
+        def worker(index):
+            try:
+                barrier.wait()
+                for number in range(per_thread):
+                    self._append("t%d-%d" % (index, number))
+            except Exception as err:  # reported by the assert below; a thread would otherwise lose it
+                errors.append(repr(err))
+
+        with mock.patch.object(os, "replace", spy_replace):
+            workers = [threading.Thread(target=worker, args=(i,)) for i in range(threads)]
+            for thread in workers:
+                thread.start()
+            for thread in workers:
+                thread.join()
+        self.assertEqual(errors, [], "an append raised in a thread: %r" % errors)
+        self.assertEqual(unlocked, [], "the trim replaced the run log outside the run-log lock %d times" % len(unlocked))
+        with open(self.log, encoding="utf-8") as handle:
+            raw = handle.readlines()
+        bad = []
+        for text in raw:
+            try:
+                json.loads(text)
+            except ValueError:
+                bad.append(text)
+        self.assertEqual(bad, [], "a run-log line is not valid JSON: %r" % bad[:1])
+        self.assertEqual(len(raw), cap, "the run log holds %d lines, not the cap of %d" % (len(raw), cap))
+
+    def test_append_run_log_never_raises_on_an_oserror(self):
+        result = {"root": self.base, "worktrees": [], "branches": []}
+        real_open = open
+
+        def refuse_log(file, *args, **kwargs):
+            if isinstance(file, str) and _norm_path(file) == _norm_path(self.log):
+                raise OSError("injected: the run log cannot be opened")
+            return real_open(file, *args, **kwargs)
+
+        with mock.patch("builtins.open", refuse_log), contextlib.redirect_stdout(io.StringIO()):
+            sweep.append_run_log(self.log, [result])  # must return, not raise
+
+        cap = getattr(sweep, "MAX_RUN_LOG_LINES", 2000)
+        self._write_run_lines(["old-%05d" % i for i in range(cap)])
+
+        def refuse_replace(src, dst, *args, **kwargs):
+            raise OSError("injected: the trim cannot replace the run log")
+
+        with mock.patch.object(os, "replace", refuse_replace), contextlib.redirect_stdout(io.StringIO()):
+            sweep.append_run_log(self.log, [dict(result, root="kept-root")])  # must return, not raise
+        self.assertEqual(_read_run_log(self.log)[-1]["root"], "kept-root",
+                         "the appended line did not survive a failed trim")
+
+    def test_a_trim_whose_replace_fails_leaves_no_temp_file_and_the_log_as_appended(self):
+        cap = getattr(sweep, "MAX_RUN_LOG_LINES", 2000)  # the fallback lets an older build fail on the temp file
+        self._write_run_lines(["old-%d" % (i % 3) for i in range(cap)])
+        with open(self.log, encoding="utf-8") as handle:
+            before = handle.read()
+
+        def refuse(src, dst, *args, **kwargs):
+            raise OSError("injected: the trim cannot replace the run log")
+
+        with mock.patch.object(os, "replace", refuse), contextlib.redirect_stdout(io.StringIO()):
+            self._append("kept-root")  # must return, not raise
+        leftovers = [name for name in os.listdir(self.base) if name.endswith(".tmp")]
+        self.assertEqual(leftovers, [], "a failed trim left a temp file behind: %r" % leftovers)
+        with open(self.log, encoding="utf-8") as handle:
+            after = handle.read()
+        self.assertTrue(after.startswith(before), "a failed trim changed lines the append did not write")
+        appended = [json.loads(text)["root"] for text in after[len(before):].splitlines()]
+        self.assertEqual(appended, ["kept-root"], "the log is not the lines as appended: %r" % appended[-3:])
+
+    def test_a_run_under_a_symlinked_root_is_the_last_run_on_the_real_path_and_on_the_link(self):
+        link = os.path.join(self.base, "busy-link")
+        try:
+            os.symlink(self.busy, link)
+        except OSError as err:
+            raise unittest.SkipTest("os.symlink is not allowed on this platform: %s" % err)
+        _age_admin_files(self.wt, 7200)  # quiet for 2 hours: the strict idle rule allows the reap
+        self._main([link, self.idle, "--confirm"])
+        logged = [row["root"] for row in _read_run_log(self.log)] if os.path.isfile(self.log) else []
+        self.assertIn(link, logged, "the confirm run did not log the symlink as the root: %r" % logged)
+        for root in (os.path.realpath(link), link):
+            report = io.StringIO()
+            self._main([root, self.idle], report=report)
+            line = self._last_run_line(report.getvalue(), root)
+            self.assertIn(", 1 worktrees removed, 1 branches reaped", line,
+                          "the preview on %s did not print the real last-run line: %r" % (root, line))
 
 
 @contextlib.contextmanager

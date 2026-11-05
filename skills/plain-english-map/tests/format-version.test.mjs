@@ -16,7 +16,7 @@
 //   No step can reproduce that, so the fixtures hold no such form. A colon token that is no line reference must survive:
 //   `localhost:3000` is in both fixtures.
 //
-// FIXTURES. `tests/fixture/` is the current repository: its `formatVersion` is the skill's MAP_FORMAT_VERSION (2 on main). `tests/fixture-v1/` holds the three files that
+// FIXTURES. `tests/fixture/` is the current repository: its `formatVersion` is the skill's MAP_FORMAT_VERSION. `tests/fixture-v1/` holds the three files that
 // differ in version 1: the config with no `formatVersion`, and the area page and the trace page with line references.
 // After the upgrade, each of those files must equal the file of `tests/fixture/`. The test text is the whole expected output.
 //
@@ -30,7 +30,7 @@
 //   1c. The same through a junction to the skill folder, the way `~/.claude/skills/<name>` reaches it.
 //   2a. A second run changes no file. The first run did change files.
 //   2b. A run on a map of the current version changes no file, also where a sentence holds a line reference.
-//   2c. Step 6, version 2 to version 3: only the formatVersion line changes, and a second run changes no file.
+//   2c. Versions 2 to 4 (steps 3 and 4 change no file): only the formatVersion line changes, and a second run changes no file.
 //   3a, 3b, 3c. A config with a newer `formatVersion` than the skill: the check command, the picture command and the upgrade
 //       command each refuse, say to update the skill, exit non-zero, and write nothing.
 //   4a, 4b. An older version (a missing key, and 1): the check command fails, names the upgrade command, and writes nothing.
@@ -195,8 +195,8 @@ test('2b. a run on a map of the current version changes no file, also where a se
   assert.ok(same(before, snapshot(dir)), 'a step must run only for a map that is older than its target version');
 });
 
-// Step 6 (version 2 to 3). The upgrade writes the config in two-space JSON, so the case starts from that form, and a second run must change nothing.
-test('2c. a version 2 map upgraded to version 3 changes only the formatVersion line, and a second run changes no file', () => {
+// Versions 2 to 4. The upgrade writes the config in two-space JSON, so the case starts from that form, and a second run must change nothing.
+test('2c. a version 2 map upgraded to version 4 changes only the formatVersion line, and a second run changes no file', () => {
   needFile('scripts/map-upgrade.mjs');
   const dir = withVersion(scratchRepo(), 2);
   const cfg = join(dir, 'map.config.json');
@@ -207,11 +207,11 @@ test('2c. a version 2 map upgraded to version 3 changes only the formatVersion l
   const r = run([UPGRADE], dir);
   assert.equal(r.status, 0, `the upgrade must exit 0\n${out1500(r)}`);
   const afterText = readFileSync(cfg, 'utf8');
-  assert.equal(JSON.parse(afterText).formatVersion, 3, `the upgrade must set formatVersion to 3\n${out1500(r)}`);
+  assert.equal(JSON.parse(afterText).formatVersion, 4, `the upgrade must set formatVersion to 4\n${out1500(r)}`);
   const lines = (s) => s.split('\n');
   assert.equal(lines(afterText).length, lines(beforeText).length, 'the upgrade must keep the config line count');
   const changed = lines(beforeText).flatMap((l, i) => (l === lines(afterText)[i] ? [] : [[l, lines(afterText)[i]]]));
-  assert.deepEqual(changed, [['  "formatVersion": 2,', '  "formatVersion": 3,']], 'only the formatVersion line may change');
+  assert.deepEqual(changed, [['  "formatVersion": 2,', '  "formatVersion": 4,']], 'only the formatVersion line may change');
   const once = snapshot(dir);
   assert.deepEqual([...once.keys()].sort(), [...before.keys()].sort(), 'the upgrade must add and remove no file');
   for (const [f, sig] of once) if (f !== 'map.config.json') assert.equal(sig, before.get(f), `the upgrade must not write ${f}`);

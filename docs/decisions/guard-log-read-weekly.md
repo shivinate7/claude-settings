@@ -12,6 +12,12 @@ The window is the days since the stamp, the stamp day through the day before tod
 
 - a `crash` line in the window: a guard hook crashed.
 - a guard.log that exists and cannot be read: unknown. A missing guard.log is not a failure.
+- an agent-end reap run in the window that was killed or crashed. A run counts when its `started` row has no `done` row after it, or one of its rows has an `error`. It reads the agent-end payload log, `state/agent-end-payloads.jsonl` under the config dir. The log keeps the last 200 rows. The note reads only those rows, so a run whose rows the cap cut prints nothing. A done row the log lost also fires the line (debt `agent-end-log-loses-row`, a row the log can lose on Windows).
+- the daily sweep's error log, `janitor/launchd-sweep.err.log` under the config dir, is not empty and was last written in the window. The line names it and the stdout log, `launchd-sweep.log`. The person who follows the line reads that stdout log.
+
+Reader: `hooks/daily_note.py`, for each file above. Each failed line names the file to read next. The output goes to the session that started.
+
+Cost: one hook process per `startup`, the existing SessionStart hook. Each startup also reads the stamp and runs the Claude Code version check: a cache read and one stat, no process. On the first start of a Central day the checks run: one read of guard.log, one read of the payload log (at most 200 rows), and one stat of the err log. The note writes the stamp, and the version cache when the installed binary is new. It starts no process of its own.
 
 No hook writes `STE-fallback` or `STE-unchecked` lines (owner, 2026-10-22 10:10 CDT; `ste-guard-fixes-not-nags`). Old rows stay in guard.log and show in `lint/guard_log_report.py` like any other row.
 

@@ -16,7 +16,7 @@ guard rule, so the watcher does the waiting and the session is told once.
   still sees it. Allow rules still match a rewritten command.
 - The STALL line lists the job's shell and every process under it, parent first, so stopping them in line
   order ends the job (owner ruling, 2026-10-18). The shell gives the watcher the pid of `&`; in sh,
-  bash and zsh a `{ }` group runs in a forked copy of the shell. The report reads the process table only
+  bash and zsh a `( )` subshell runs in a forked copy of the shell. The report reads the process table only
   and never scans the command text. A parent dies before it can start another child. A job with no child
   (builtins only) lists its own pid. The table lists the same processes. Two limits: an orphan (`(sleep N &); sleep N`) is adopted by
   init and not listed, and a TERM trap that returns respawns a loop body (SIGKILL ends it).
@@ -65,7 +65,18 @@ guard rule, so the watcher does the waiting and the session is told once.
   Each background job starts one watcher process. Its process cost is open: owner Cockpit item 180 holds
   it (plan `docs/plans/align-watchers.md`). Each named log gets one stat a second in the watcher's own loop,
   one more before each stall report, and one at each Stop check. The beat file costs one append per
-  heartbeat. The watcher reads it on each 0.2 s loop pass, and tries one open a second until it exists. The wrapper removes it with the log.
+  heartbeat. The watcher reads it on each 0.2 s loop pass.
+- The job removes its log and beat file when it ends, also after a STALL report (the job keeps writing
+  until then, so nothing is removed at stall time), and when the original calls `exit N` (the exit code is
+  kept). The wrapper creates both files and opens both before the job starts. The watcher inherits those
+  handles, so a job that ends at once loses no output, and the STALL report reads its tail from the
+  handle. An EXIT trap in the job does the removal. The job runs as a `( )` subshell because bash 3.2
+  (macOS `/bin/sh` and `/bin/bash`) runs an EXIT trap at a subshell's normal end only there. Limits: an original that execs drops the trap, and
+  so does one that sets its own EXIT trap. The exec'd command replaces the job's subshell and keeps its pid, so
+  the report still lists one process. A stalled job of that kind leaves its two files. A job killed before it can run its
+  trap leaves them too. A job that never stalls is cleaned by the wrapper after `wait`. The report's
+  `Log:` line says the file is usually removed when the job ends. Cost: two small files created per job
+  and two held handles in the watcher, no new process. In a wrapped run the watcher no longer polls for the beat file. Run by hand with no beat handle, it still tries one open a second.
 
 ## The Stop-time check
 
@@ -80,6 +91,21 @@ If the shared names module fails to load, the check prints nothing. A false "sti
 worse than a missed stall, and the guard already refuses every call in that state (owner ruling,
 2026-10-21). For a stalled background job, only the watcher's exit-3 report wakes an idle session. This
 check runs at turn end, so it does not cover a job that stalls after the turn ends.
+
+A job is listed only at the first Stop after its stall crossed. The crossing is its output file's mtime
+(or the newest mark of a named log) plus the quiet age. The previous Stop is the timestamp of the newest
+`stop_hook_summary` record in the transcript. The harness writes one after each Stop run. So the time
+does not depend on how turns open. A queued prompt, an agent's hand-back and a hook's feedback all leave
+turns that no prompt record marks. A summary whose run came right after a blocked Stop is skipped. That
+Stop has hookErrors not empty, or preventedContinuation true. The next run had `stop_hook_active` true,
+where the check prints nothing, so it listed nothing. A job whose crossing is not later than the
+previous Stop was listed there, so it is silent now. A job that goes quiet again after new output crosses again, and is listed
+again. An unknown job (no output file) is listed once, at the first Stop after its call: its call record's
+time must be later than the previous Stop. Limit: a job whose output file existed at the previous Stop and
+is gone now is not listed. With no summary, or a summary with no readable timestamp,
+every quiet job is listed. The state is the transcript: no file is written and no process is started.
+Cost: one more JSON parse per `stop_hook_summary` line (one a Stop run), in the one pass that `scan_jobs`
+already makes, at each Stop.
 
 The hook exits 0 and never refuses. A crash never refuses a call, as advisory hooks stay fail-open
 (`guard-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has
