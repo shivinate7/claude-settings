@@ -109,19 +109,19 @@ FAMILIES = {
     "diff": "the diff judged at commit, push and stop",
     "builder-refuse": "a builder's diff refused at commit and push and blocked at the first stop, the deny names no path, and a test-author's diff still allowed",
     "impeccable": "impeccable is review-only",
-    "port-question": "the waiting-page writer: a port question carries a Departs from line and holds nothing",
+    "port-question": "the page writer: a port question carries a Departs from line and holds nothing",
     "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, a republish of main's page with empty designData and roadmap blocks is refused, a page with its own title and empty blocks is allowed, and an allowed publish of a page with live data writes the stamp",
-    "uniform-pick": "the waiting-page writer: a pick never names an option that widens a shared tool",
-    "press-link": "the waiting-page writer: a press in a web app carries a link to the exact page",
-    "command-in-item": "the waiting-page writer: a task step never sends the owner to a file for a command",
-    "gh-login-switch": "the waiting-page writer: a gh command in a task switches login first, shivinate7 by default and ssemwal-cdc only for a repo shivinate7 cannot reach",
-    "task-names-check": "the waiting-page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
-    "owner-judge": "the waiting-page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
-    "question-departs": "the waiting-page writer: a decision says how it departs from main in a Departs from line, not a restatement of main",
-    "option-letter-keys": "the waiting-page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, its text names no option by a letter-and-digit key, and an option label that opens with a letter tag (B: x, Option B x) names the key's letter; a closed item is not judged; the page's letters are read from its own source",
-    "rework-off-page": "the waiting-page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
-    "item-field-rendered": "the waiting-page writer: a write names only item fields the page renders (the itemFields block of page.html)",
-    "page-item-design": "the waiting-page writer: a design picture that misses its focus, its state or its height is refused at write, and an allowed publish of the waiting page records the published file",
+    "uniform-pick": "the page writer: a pick never names an option that widens a shared tool",
+    "press-link": "the page writer: a press in a web app carries a link to the exact page",
+    "command-in-item": "the page writer: a task step never sends the owner to a file for a command",
+    "gh-login-switch": "the page writer: a gh command in a task switches login first, shivinate7 by default and ssemwal-cdc only for a repo shivinate7 cannot reach",
+    "task-names-check": "the page writer: a task carries a Why yours line naming the check that showed only the owner can do it",
+    "owner-judge": "the page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task",
+    "question-departs": "the page writer: a decision says how it departs from main in a Departs from line, not a restatement of main",
+    "option-letter-keys": "the page writer: an open decision's option keys are the lowercase letter of their position, unique, never none, its text names no option by a letter-and-digit key, and an option label that opens with a letter tag (B: x, Option B x) names the key's letter; a closed item is not judged; the page's letters are read from its own source",
+    "rework-off-page": "the page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
+    "item-field-rendered": "the page writer: a write names only item fields the page renders (the itemFields block of page.html)",
+    "page-item-design": "the page writer: a design picture that misses its focus, its state or its height is refused at write, and an allowed publish of the waiting page records the published file",
     "rule9": "rule 9, the agent model floor",
     "role-model": "agent-role-model: a spawn's model against its role's row in the decision table, the missing-model default, and the fail-open read",
     "mask-script": "mask_script lexemes",
@@ -437,6 +437,9 @@ GHEMPTY = os.path.join(ROOT, "ghempty")    # no check and no workflow run report
 GHCWD = os.path.join(ROOT, "ghcwd")        # green, but only for a call run inside the folder `ctxrepo`
 WFREPO = os.path.join(ROOT, "wfrepo")      # a folder that holds one workflow file
 GHSLOW = os.path.join(ROOT, "ghslow")      # green, but every call takes longer than the guard waits
+HANG_MARGIN_S = 3      # what a read may run past MERGE_READ_TIMEOUT: process start and the kill landing
+HANG_CEILING_S = 45    # the most MERGE_READ_TIMEOUT plus its margin may be: well inside the hook's 60s
+HOOK_BUDGET_S = 60     # the hook's own time budget
 GHWARM = os.path.join(ROOT, "ghwarm")      # green, each call as slow as a real gh measured locally
 GHHANG = os.path.join(ROOT, "ghhang")      # green, but every call never answers at all
 GHBLANK = os.path.join(ROOT, "ghblank")    # green checks, a base that reads as empty
@@ -571,6 +574,19 @@ PUSHUP = os.path.join(ROOT, "pushup")
 PUSHUPSELF = os.path.join(ROOT, "pushupself")
 PUSHNOUP = os.path.join(ROOT, "pushnoup")
 PUSHMATCH = os.path.join(ROOT, "pushmatch")
+# Owner rulings 206 a and 207 a. PUSHSTRAY sits on `mylocal`, which tracks
+# origin/lane/x, with a `fork` remote the upstream does not name and push.default simple. PUSHLANE and
+# PUSHLANEMASTER sit on lanes cut from origin/main and origin/master: their upstreams are inherited, so
+# the stray-branch rule stays silent there. PUSHSELF sits on `feat`, which tracks origin/feat.
+PUSHSTRAY = os.path.join(ROOT, "pushstray")
+PUSHLANE = os.path.join(ROOT, "pushlane")
+PUSHLANEMASTER = os.path.join(ROOT, "pushlanemaster")
+PUSHSELF = os.path.join(ROOT, "pushself")
+PUSHMAINUP = os.path.join(ROOT, "pushmainup")  # main itself, tracking origin/main
+PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/base: its upstream is another lane
+# The rule ids the two new asks name. Each is the one home for its id in this file.
+PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
+PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
 # roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
 # and its extras file names that branch as the record branch, so `roadmap` is not its record.
 RECROADMAP = os.path.join(ROOT, "recroadmap")
@@ -1774,6 +1790,53 @@ def _build_push():
         if run_vcs(where, "config", "--get", "push.default").stdout.strip() != mode:
             sys.exit("fixture setup failed in build_fixtures: push.default in %r" % where)
 
+    # The upstream shapes of rulings 206 a and 207 a. Each upstream is set by git itself (--track and
+    # --set-upstream-to), then read back, so a case never judges a fixture that lacks its upstream.
+    make_repo(PUSHSTRAY, {"base.txt": "base\n"})
+    run_vcs(PUSHSTRAY, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHSTRAY, "remote", "add", "fork", slash(BRANCHREMOTE))
+    run_vcs(PUSHSTRAY, "update-ref", "refs/remotes/origin/lane/x", "HEAD")
+    run_vcs(PUSHSTRAY, "checkout", "-q", "-b", "mylocal")
+    run_vcs(PUSHSTRAY, "branch", "--set-upstream-to=origin/lane/x", "mylocal")
+    run_vcs(PUSHSTRAY, "config", "push.default", "simple")
+
+    make_repo(PUSHSELF, {"base.txt": "base\n"})
+    run_vcs(PUSHSELF, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHSELF, "update-ref", "refs/remotes/origin/feat", "HEAD")
+    run_vcs(PUSHSELF, "checkout", "-q", "--track", "-b", "feat", "origin/feat")
+
+    for where, lane, base in ((PUSHLANE, "lane/foo", "main"), (PUSHLANEMASTER, "lane/bar", "master")):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "update-ref", "refs/remotes/origin/" + base, "HEAD")
+        run_vcs(where, "checkout", "-q", "--track", "-b", lane, "origin/" + base)
+
+    make_repo(PUSHSTACK, {"base.txt": "base\n"})
+    run_vcs(PUSHSTACK, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHSTACK, "update-ref", "refs/remotes/origin/lane/base", "HEAD")
+    run_vcs(PUSHSTACK, "checkout", "-q", "--track", "-b", "lane/fix", "origin/lane/base")
+
+    make_repo(PUSHMAINUP, {"base.txt": "base\n"})
+    run_vcs(PUSHMAINUP, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHMAINUP, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHMAINUP, "branch", "--set-upstream-to=origin/main", "main")
+
+    for where, upstream in ((PUSHSTRAY, "origin/lane/x"), (PUSHSELF, "origin/feat"),
+                            (PUSHLANE, "origin/main"), (PUSHLANEMASTER, "origin/master"),
+                            (PUSHSTACK, "origin/lane/base"), (PUSHMAINUP, "origin/main")):
+        got = run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip()
+        if got != upstream:
+            sys.exit("fixture setup failed in build_fixtures: %r needs upstream %s, reads %r"
+                     % (where, upstream, got))
+    # The no-upstream cases ride on these two checkouts, so each must read back with no upstream.
+    for where in (PUSHFEAT, PUSHMAIN):
+        if run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
+            sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % where)
+    if (sorted(run_vcs(PUSHSTRAY, "remote").stdout.split()) != ["fork", "origin"]
+            or run_vcs(PUSHSTRAY, "config", "--get", "push.default").stdout.strip() != "simple"):
+        sys.exit("fixture setup failed in build_fixtures: PUSHSTRAY needs remotes fork and origin "
+                 "and push.default simple")
+
 def _build_worktrees():
     """The worktree remove and prune repos: locked, live, dead, stale and clean linked trees."""
     # ----------------------------------------------------------------- worktree remove/prune
@@ -2072,7 +2135,8 @@ lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
-              PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK],
+              PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
+              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -6668,10 +6732,12 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
 REMEDY = "retry with --force-with-lease --force-if-includes"
 
 
-def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash"):
+def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=()):
+    """One `git push` case. An ask names `rule` when one is given (rulings 206 a and 207 a), else
+    force-push. `silent` marks an allow that must print nothing."""
     sh("push: " + name, VCS + " push " + tail, expected,
-       "force-push" if expected != "allow" else None, cwd=cwd, tool=tool,
-       carries=REMEDY if expected == "deny" else ())
+       rule or ("force-push" if expected != "allow" else None), cwd=cwd, tool=tool,
+       carries=REMEDY if expected == "deny" else (), silent=silent, lacks=lacks)
 
 
 # ALLOW: a lease that cannot overwrite newer work, off the default branch.
@@ -6729,6 +6795,8 @@ for form, tail in (
         ("--mirror alone, which forces by itself", "--mirror"),
         ("--all", "--all --force"),
         ("--all with a lease", "--all" + LEASE),
+        ("--branches, git's alias of --all", "--branches --force"),
+        ("--branches with a lease", "--branches" + LEASE),
         ("a glob refspec", "--force origin refs/heads/*:refs/heads/*"),
         ("the short flag", "-f origin HEAD:main")):
     push_case("forced to the default branch asks: " + form, tail, "ask",
@@ -6849,8 +6917,10 @@ sh("push: lease with -c push.default=matching asks",
    VCS + " -c push.default=matching push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
 
 # FALSE ALARMS: a guard that cries wolf is spent.
-push_case("a non-forced push of main", "origin main", "allow", cwd=PUSHMAIN)
-push_case("a non-forced bare push on main", "", "allow", cwd=PUSHMAIN)
+# Re-pointed from allow by ruling 207 a: a non-forced push of main asks.
+push_case("a non-forced push of main asks, on main", "origin main", "ask", cwd=PUSHMAIN, rule=PUSH_MAIN_RULE)
+# PUSHMAIN has no upstream, so git refuses a bare push itself ("has no upstream branch"): no ask is needed.
+push_case("a bare push on main with no upstream is git's refusal, allows", "", "allow", cwd=PUSHMAIN)
 push_case("a non-forced push with -u of the current branch", "-u origin HEAD", "allow")
 push_case("a non-forced push with -u where git cannot be read", "-u origin HEAD", "allow", cwd=NOGIT)
 push_case("a push of a branch whose name holds force", "origin force-fix", "allow")
@@ -6870,6 +6940,123 @@ sh("false alarm: a lease to main-fix", VCS + " push --force-with-lease --force-i
 sh("push: a force push inside a loop's do-block still counts",
    "while true; do " + VCS + " push --force; done", "deny", "force-push", cwd=PUSHFEAT,
    carries=REMEDY)
+
+# ASK, owner rulings 206 a. An implied destination (a bare push, HEAD, @, or a
+# colon-less refspec naming the current branch) that lands off the branch's upstream asks, unless the push
+# carries -u and names the local branch (the silent cases below). PUSHSTRAY is `mylocal`, whose upstream is
+# origin/lane/x.
+push_case("stray branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
+push_case("stray branch, @ asks", "origin @", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
+push_case("stray branch, the current branch named by its colon-less refspec asks", "origin mylocal", "ask",
+          cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
+# The same pushes without -u still ask: -u is what makes a new upstream on purpose.
+push_case("stacked lane, HEAD without -u asks", "origin HEAD", "ask", cwd=PUSHSTACK, rule=PUSH_STRAY_RULE)
+push_case("stacked lane, the local name without -u asks", "origin lane/fix", "ask", cwd=PUSHSTACK,
+          rule=PUSH_STRAY_RULE)
+push_case("stray branch, HEAD with an output tail is one clean ask", "origin HEAD 2>&1 | tail -1", "ask",
+          cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE, lacks=(CHAIN_ASK,))
+# Two refspecs: the explicit one is fine, the second is implied, so the call still asks.
+push_case("stray branch, a second refspec that names the current branch asks",
+          "origin HEAD:push-guard-asks mylocal", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
+sh("push: stray branch, a bare push under push.default current asks",
+   VCS + " -c push.default=current push", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
+
+# ASK, owner rulings 207 a. A non-forced push whose destination is the literal
+# name main or master asks. The name is literal: origin/HEAD does not decide it.
+push_case("main, HEAD:main from a feature branch asks", "origin HEAD:main", "ask", rule=PUSH_MAIN_RULE)
+push_case("main, a push of main from a feature branch asks", "origin main", "ask", rule=PUSH_MAIN_RULE)
+push_case("main, a full ref to refs/heads/main asks", "origin x:refs/heads/main", "ask", rule=PUSH_MAIN_RULE)
+push_case("master, a push to master asks", "origin master", "ask", rule=PUSH_MAIN_RULE)
+push_case("main, a second refspec that reaches main asks", "origin HEAD:push-guard-asks HEAD:main", "ask",
+          rule=PUSH_MAIN_RULE)
+push_case("main, --all reaches main and asks", "--all origin", "ask", rule=PUSH_MAIN_RULE)
+push_case("main, --branches reaches main and asks", "--branches origin", "ask", rule=PUSH_MAIN_RULE)
+# A -u push of the local name writes main when the checkout is main, and -u does not hide a second refspec to main.
+push_case("main, -u HEAD on main asks", "-u origin HEAD", "ask", cwd=PUSHMAIN, rule=PUSH_MAIN_RULE)
+push_case("stacked lane, -u HEAD with a second refspec to main asks", "-u origin HEAD main", "ask",
+          cwd=PUSHSTACK, rule=PUSH_MAIN_RULE)
+push_case("main, HEAD:main asks where origin/HEAD names trunk", "origin HEAD:main", "ask", cwd=PUSHTRUNK,
+          rule=PUSH_MAIN_RULE)
+# A branch that tracks main writes main on a bare push. The upstream is main, so 206 a stays silent here.
+push_case("main tracking origin/main, a bare push asks", "", "ask", cwd=PUSHMAINUP, rule=PUSH_MAIN_RULE)
+push_case("main tracking origin/main, HEAD asks", "origin HEAD", "ask", cwd=PUSHMAINUP, rule=PUSH_MAIN_RULE)
+sh("push: main, a bare push under push.default current on main asks",
+   VCS + " -c push.default=current push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
+sh("push: main, a bare push under push.default upstream from a branch tracking main asks",
+   VCS + " push", "ask", PUSH_MAIN_RULE, cwd=PUSHUP)
+
+# SILENT, the false alarms of both rulings. Each is an allow that prints nothing.
+# Inherited and own upstreams: a lane cut from main or master, and a branch that tracks its own name.
+push_case("lane from main, -u HEAD is silent", "-u origin HEAD", "allow", cwd=PUSHLANE, silent=True)
+push_case("lane from main, HEAD is silent", "origin HEAD", "allow", cwd=PUSHLANE, silent=True)
+push_case("lane from master, HEAD is silent", "origin HEAD", "allow", cwd=PUSHLANEMASTER, silent=True)
+push_case("own upstream, HEAD is silent", "origin HEAD", "allow", cwd=PUSHSELF, silent=True)
+# No upstream yet: the first push of a branch.
+push_case("first push with no upstream, -u HEAD is silent", "-u origin HEAD", "allow", silent=True)
+push_case("first push with no upstream, HEAD is silent", "origin HEAD", "allow", silent=True)
+# Explicit destinations, the form agents push by, from a branch whose upstream differs.
+push_case("explicit destination from a mismatched upstream is silent", "origin HEAD:push-guard-asks", "allow",
+          cwd=PUSHSTRAY, silent=True)
+push_case("archive, feat named to archive/feat is silent", "origin feat:archive/feat", "allow", silent=True)
+push_case("archive, HEAD to archive/x from a mismatched upstream is silent", "origin HEAD:archive/x", "allow",
+          cwd=PUSHSTRAY, silent=True)
+# A bare push that git itself refuses: push.default simple, the upstream names another branch.
+push_case("push.default simple, a bare push with a mismatched upstream is git's refusal, silent", "", "allow",
+          cwd=PUSHSTRAY, silent=True)
+# Another remote than the upstream's remote: the rule reads only branch.<cur>.remote.
+push_case("another remote than the upstream's is silent", "fork HEAD", "allow", cwd=PUSHSTRAY, silent=True)
+# A -u push whose destination is the local branch's own name sets that upstream on purpose (ruling 206 a).
+# PUSHSTACK is lane/fix, cut from origin/lane/base. PUSHSTRAY is `mylocal`,
+# tracking origin/lane/x: its -u push writes `mylocal` by the same rule, so it is silent too.
+push_case("stacked lane, -u HEAD is silent", "-u origin HEAD", "allow", cwd=PUSHSTACK, silent=True)
+push_case("stacked lane, --set-upstream HEAD is silent", "--set-upstream origin HEAD", "allow", cwd=PUSHSTACK,
+          silent=True)
+push_case("stacked lane, -u naming the local branch is silent", "-u origin lane/fix", "allow", cwd=PUSHSTACK,
+          silent=True)
+sh("push: stacked lane, a bare -u under push.default current writes the local name, is silent",
+   VCS + " -c push.default=current push -u origin", "allow", cwd=PUSHSTACK, silent=True)
+push_case("stray branch, -u with HEAD writes the local name, is silent", "-u origin HEAD", "allow",
+          cwd=PUSHSTRAY, silent=True)
+# A push that moves no branch: tags are not a branch destination, even on main.
+push_case("--tags on main is silent", "origin --tags", "allow", cwd=PUSHMAIN, silent=True)
+push_case("a tag name on main is silent", "origin v1.0", "allow", cwd=PUSHMAIN, silent=True)
+# A dry run moves nothing, so it stays silent even at main. The dry-run check before push_ask_hit in
+# guard.py is what keeps these silent.
+push_case("a dry run to main, --dry-run origin HEAD:main, is silent", "--dry-run origin HEAD:main", "allow",
+          silent=True)
+push_case("a dry run to main, -n origin main, is silent", "-n origin main", "allow", silent=True)
+push_case("a dry run of --branches, --branches --dry-run origin, is silent", "--branches --dry-run origin",
+          "allow", silent=True)
+# Tags move no branch. On main tracking origin/main a bare push would ask main, so the tags check is what
+# keeps this one silent.
+push_case("--tags on main tracking origin/main is silent", "origin --tags", "allow", cwd=PUSHMAINUP, silent=True)
+# The main rule reads literal names. trunk is the default here, so a push to it is ordinary.
+push_case("trunk, named by origin/HEAD, is ordinary for the main rule", "origin HEAD:trunk", "allow",
+          cwd=PUSHTRUNK, silent=True)
+# A plain push whose destination cannot be resolved stays allowed, as it is today.
+push_case("a plain push, detached HEAD, no destination to read, stays allowed", "origin HEAD", "allow",
+          cwd=PUSHDETACHED, silent=True)
+push_case("a plain bare push, push.default matching, no destination to read, stays allowed", "", "allow",
+          cwd=PUSHMATCH, silent=True)
+push_case("a plain push where git cannot be read stays allowed", "origin HEAD", "allow", cwd=NOGIT, silent=True)
+
+# Quoted and heredoc push text is data, never a push. The rules judge the command, not its text.
+sh("push: text, a commit message that names a push to main, is silent",
+   VCS + ' commit -m "git push origin main"', "allow", cwd=PUSHFEAT, silent=True)
+sh("push: text, an echo that names a push of HEAD:main, is silent",
+   'echo "' + VCS + ' push origin HEAD:main"', "allow", cwd=PUSHFEAT, silent=True)
+sh("push: text, a heredoc body naming a push to main, is silent",
+   "cat <<'EOF'\n" + VCS + " push origin main\nEOF", "allow", cwd=PUSHFEAT, silent=True)
+sh("push: text, a multi-line quoted string naming a push to main, is silent",
+   'echo "one line\n' + VCS + ' push origin main"', "allow", cwd=PUSHFEAT, silent=True)
+# A comment opener inside a string does not hide the real push after it, and a lone quote in a message
+# does not either (building-scanner-respects-strings). The push is a second command, so it denies alone.
+chained_ask("push: a comment opener inside a string does not hide a push to main that follows it",
+            'echo "#" && ' + VCS + " push origin main", cwd=PUSHMAIN)
+chained_ask("push: a lone quote in a commit message does not hide a push to main that follows it",
+            VCS + ' commit -m "don\'t" && ' + VCS + " push origin main", cwd=PUSHFEAT)
+chained_ask("push: a lone quote in a commit message does not hide a stray push that follows it",
+            VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHSTRAY)
 
 sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", cwd=NOGIT)
 
@@ -8740,9 +8927,12 @@ sh("merge-checks: a flag value is no pull request", "gh pr merge -b note 12 -R y
 add("merge-checks: the host merge tool reads the pull request and repo it names", "allow",
     silent=True, tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12, repo="x",
     owner="y", env_path=NEED_ON, config=MERGECFG)
-sh("merge-checks: a gh slower than the guard waits is unknown, and denies",
-   "gh pr merge 12 --squash", "deny", "merge-checks", carries="could not run", cwd=NOGIT,
-   env_path=GHSLOW + os.pathsep + PY_PATH, config=MERGECFG)
+# A guard still judging at the hook's 60 s budget is past the point where the hook is cut off, so the case
+# stops it there, not after every slow call (4 calls x 20 s, its mutant took 98 s). The correct guard ends near
+# MERGE_READ_TIMEOUT (25 s). Off Windows only: a `.cmd` fake cannot be killed on time there.
+add("merge-checks: a gh slower than the guard waits is unknown, and denies", "deny", "merge-checks",
+    carries="could not run", cwd=NOGIT, env_path=GHSLOW + os.pathsep + PY_PATH, config=MERGECFG,
+    max_seconds=HOOK_BUDGET_S if os.name != "nt" else None, command="gh pr merge 12 --squash")
 # Incident 2026-10-03: MERGE_READ_TIMEOUT (3s) sits under real `gh` latency (3.0-3.9s measured),
 # so a settled, all-green head still reads as unknown and the guard cries wolf on passing CI.
 # c53: a branch name, a pull request URL and the current branch are read through REST: the open pull request list matched on head.ref, or the number.
@@ -9413,8 +9603,10 @@ record_allow("a commit message that names a push to roadmap is text",
 
 def record_push_cost_case():
     """roadmap-one-writer's stated cost (session-tiers, the Cost line): per `git push` call, one
-    `git rev-parse --show-toplevel`. A HEAD push adds `git symbolic-ref`. A bare push adds that and a
-    `git config` read of push.default, and a HEAD push reads no push.default. The layout and extras files
+    `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
+    `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
+    `git symbolic-ref` and two `git config` reads, and reads push.default. A literal destination
+    (`origin main`, `HEAD:main`, `HEAD:<branch>`) adds no read. The layout and extras files
     are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The
     transcript is read only when the push reaches the record branch: a push to another branch passes
     with an unreadable transcript, and a push to the record branch with one is refused. A stand-in git
@@ -9446,9 +9638,12 @@ def record_push_cost_case():
         return kinds, lines
 
     for label, tail, want in (
-        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1}),
-        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 1}),
-        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 1, "config": 1}),
+        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1}),
+        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1}),
+        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2}),
+        ("a literal destination, origin main", "push origin main", {"rev-parse": 1}),
+        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1}),
+        ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1}),
     ):
         kinds, lines = spawn_kinds(VCS + " " + tail, PUSHFEAT)
         if kinds != want:
@@ -12873,6 +13068,42 @@ sh("builder-diff: a builder in a tree git cannot read is allowed and noted", COM
    cwd=NOGIT, agent_id="bld1", agent_type="builder")
 sh("builder-diff: reads stay allowed in a dirty tree", "cat tests/test_a.py && ls tests",
    "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
+
+# ---- merge: gh_call_of reads the pr verb past a root flag. Its callers (merge_call_of, the draft-PR read,
+# ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front hides the
+# verb from each of them. One check per root flag form, called on gh_call_of directly.
+FAMILY = "merge"
+
+
+def gh_root_flag_verb_check(segment, verb):
+    """True when gh_call_of's first two words are the verb, so the root flag before it is read past."""
+    guard = _load_guard_module()
+    rest = guard.gh_call_of(segment)
+    if rest is None:
+        return False, "gh_call_of reads no gh call in %r" % segment
+    if rest[:2] != verb:
+        return False, "gh_call_of(%r) gives %r, so its first two words are not %r" % (segment, rest, verb)
+    return True, "gh_call_of(%r) reads %r past the root flag" % (segment, verb)
+
+
+def gh_root_dash_r_check():
+    return gh_root_flag_verb_check("gh -R o/r pr merge 12", ["pr", "merge"])
+
+
+def gh_root_repo_equals_check():
+    return gh_root_flag_verb_check("gh --repo=o/r pr merge 12", ["pr", "merge"])
+
+
+def gh_root_repo_spaced_check():
+    return gh_root_flag_verb_check("gh --repo o/r pr create --fill", ["pr", "create"])
+
+
+FIXTURELESS_CHECKS.update((gh_root_dash_r_check, gh_root_repo_equals_check, gh_root_repo_spaced_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a -R root flag", gh_root_dash_r_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<repo> root flag",
+                         gh_root_repo_equals_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --repo <repo> root flag",
+                         gh_root_repo_spaced_check))
 
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
@@ -16689,10 +16920,17 @@ def decide(case):
         command = [sys.executable, "-c", LB_PROBE, guard_file, os.devnull,
                    json.dumps({"mode": "judge", "reading": case.get("load") or LB_NORMAL})]
     started = time.monotonic()
-    result = subprocess.run(
-        command, input=payload, capture_output=True, text=True, env=env,
-        timeout=120, cwd=case.get("process_cwd") or None,
-    )
+    limit = case.get("max_seconds")
+    try:
+        # A case with a limit stops its guard at the limit, so a guard too slow fails at once, not at 120 s.
+        result = subprocess.run(
+            command, input=payload, capture_output=True, text=True, env=env,
+            timeout=min(120, limit + 1) if limit else 120, cwd=case.get("process_cwd") or None,
+        )
+    except subprocess.TimeoutExpired:
+        if not limit:
+            raise
+        return "slow", "still judging after %s s, over the %s s limit" % (limit + 1, limit)
     elapsed = time.monotonic() - started
     if case.get("max_seconds") and elapsed > case["max_seconds"]:
         return "slow", "judged in %.2f s, over the %s s limit" % (elapsed, case["max_seconds"])
@@ -18331,10 +18569,6 @@ def merge_import_exits_case():
     if "unknown" not in reason and "pending" not in reason:
         return False, "expected unknown or pending in the reason, got " + reason[:160]
     return True, "a merge tool that exits at import denies the merge: " + reason[:80]
-
-
-HANG_MARGIN_S = 3      # what a read may run past MERGE_READ_TIMEOUT: process start and the kill landing
-HANG_CEILING_S = 45    # the most MERGE_READ_TIMEOUT plus its margin may be: well inside the hook's 60s
 
 
 def guard_merge_read_timeout():
@@ -20475,8 +20709,9 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_override_case),
     ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
      worktree_home_cross_checkout_cost_case),
-    ("roadmap-one-writer: a push starts one rev-parse, symbolic-ref for HEAD and bare, push.default for bare "
-     "only, and reads the transcript only at the record branch", record_push_cost_case),
+    ("roadmap-one-writer: a push starts one rev-parse, symbolic-ref for a refspec, HEAD and bare, push.default "
+     "for bare only, no read for a literal destination, and reads the transcript only at the record branch",
+     record_push_cost_case),
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
      "a write or a mkdir, from a lane or the primary, and names no path",
      worktree_home_cd_into_other_checkout_case),
@@ -22514,15 +22749,15 @@ def ov_type(config, session, prompt, seconds=0):
 
 
 def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agent_type=None,
-            temp=None, env=None, load=None):
+            temp=None, env=None, load=None, env_path=None):
     """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
     reads as the system temp: a git write under it is a throwaway, and silent-write skips it. `env`
     adds variables to this one guard run. `load` is the machine reading a lane-start call meets
-    (LB_NORMAL when None)."""
+    (LB_NORMAL when None). `env_path` is the PATH of this one guard run (None keeps the runner's)."""
     fixed = {"LOCAL_TIME_NOW": ov_clock(seconds)}
     fixed.update(env or {})
     return decide({
-        "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": None,
+        "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": env_path,
         "config": config, "agent_id": agent_id, "agent_type": agent_type, "temp": temp,
         "env": fixed, "tool_input": tool_input, "load": load,
     })
@@ -22578,6 +22813,11 @@ OV_ACTS = (
      "kill %d" % FOREIGN, NOGIT, "deny", "machine-wide-kill", None),
     ("ask-linked-discard", "a hard reset in a linked worktree, which asks",
      VCS + " reset --hard", GITWT, "ask", "shared-tree", None),
+    # The two new asks of rulings 206 a and 207 a are lifted by an owner override like any ask.
+    ("push-stray", "a non-forced push that lands on a stray branch",
+     VCS + " push origin HEAD", PUSHSTRAY, "ask", PUSH_STRAY_RULE, None),
+    ("push-main", "a non-forced push of main",
+     VCS + " push origin main", PUSHMAIN, "ask", PUSH_MAIN_RULE, None),
 )
 
 
@@ -26216,6 +26456,10 @@ FAMILY = "simulator"
 #                        hour" is the newest line in <config>/state/sim-boots.jsonl. Unrecorded is
 #                        not idle.
 #   The cap counts EVERY booted device, owner-booted and unrecorded included.
+#   simulator-boot-route   refuses an xcodebuild -destination that names a shut-down device, judged after
+#                          cap and twin. The remedy is sim-test for `test`, else the generic destination.
+#   simulator-boot-locked  refuses an MCP launch of a shut-down device while the sim-test lock is held by
+#                          a live pid, or by a pid-less folder under 60 s old. A booted device is never refused.
 # A fake `xcrun` and `ps` on PATH answer `simctl list devices` and the process table. A reason names
 # UDIDs and device names only, never the config folder or the record file.
 
@@ -26234,9 +26478,11 @@ SIM_UE = "1A2B3C4D-0000-4000-8000-00000000000E"  # Named-UDID Mini, booted: its 
 SIM_UF = "1A2B3C4D-0000-4000-8000-00000000000F"  # Delta, shut down on RT only
 SIM_UDA = "1A2B3C4D-0000-4000-8000-0000000000D3"  # Delta, shut down on RT_OLD (25.0), listed first
 SIM_UDB = "1A2B3C4D-0000-4000-8000-0000000000D4"  # Delta, shut down on RT (26.0), listed second
+SIM_RT17 = "com.apple.CoreSimulator.SimRuntime.iOS-17-0"
+SIM_U17 = "1A2B3C4D-0000-4000-8000-0000000000D5"  # Delta, booted on RT17 (17.0): the copy OS=17.0 names
 # The launchd_sim of each booted device: the pid and the start time the fake `ps` gives it, and the
 # same pair in the boot record. A record that names another pid or start time is an older boot.
-LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003, SIM_UE: 4004}
+LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003, SIM_UE: 4004, SIM_U17: 4005}
 LSTART = "Sat Oct 10 07:00:00 2026"
 LAUNCHD_CMD = ("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/"
                "Resources/launchd_sim")
@@ -26350,6 +26596,11 @@ def register_simulator_boot_cases():
             (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
             (SIM_UE, "Gamma Mini", "Booted", SIM_TYPE_MINI, SIM_RT),
             (SIM_UF, "Delta", "Shutdown", SIM_TYPE_AIR, SIM_RT)]), None),
+        # Delta shut down on 25.0 (listed first) and booted on 17.0. OS=17.0 names only the booted copy, so a
+        # destination that picks the 17.0 runtime boots nothing.
+        "os_two_rt": (make_fake_xcrun(os.path.join(ROOT, "sim_os_two_rt"), [
+            (SIM_UDA, "Delta", "Shutdown", SIM_TYPE_PRO, SIM_RT_OLD),
+            (SIM_U17, "Delta", "Booted", SIM_TYPE_PRO, SIM_RT17)]), None),
     }
     cfgs = {}
     for name, (folder, records) in fixtures.items():
@@ -26366,6 +26617,7 @@ def register_simulator_boot_cases():
     cap_path, cap_cfg = on("cap")
     one_path, one_cfg = on("one")
     twin_path, twin_cfg = on("twin")
+    os_two_path, os_two_cfg = on("os_two_rt")
 
     # Rule simulator-boot-cap. The reason names both booted UDIDs.
     # The bypass rule judges a raw boot on its text, before the cap rule reads the device list.
@@ -26444,8 +26696,11 @@ def register_simulator_boot_cases():
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC
        + ",OS=26.0'", "deny", rule="simulator-boot-cap", env_path=os_split_path,
        config=os_split_cfg, carries=(SIM_UA, SIM_UE))
-    sh("control: one booted, a second boot by destination is allowed",
-       sim_boot_by_destination(SIM_UC), "allow", env_path=one_path, config=one_cfg)
+    # The controls from here to the twin section boot through the simulator MCP launch, with no lock held.
+    # simulator-boot-route judges only xcodebuild destinations, so an xcodebuild boot of a shut-down device
+    # would be refused by it before the cap or twin rule is read. The MCP launch runs the same cap and twin code.
+    add("control: one booted, a second boot by MCP launch is allowed",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UC, env_path=one_path, config=one_cfg)
     sh("boot a second simulator with one booted: bash simctl boot, bypass first",
        "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-bypass",
        env_path=one_path, config=one_cfg, carries="sim-test")
@@ -26471,21 +26726,170 @@ def register_simulator_boot_cases():
     add("boot a device with an idle booted twin: simulator MCP launch names it by udid",
         "deny", rule="simulator-boot-twin", tool=SIM_MCP, action="launch", udid=SIM_UT1,
         env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
-    sh("control: the twin booted 10 minutes ago is not idle",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_recent"),
-       config=cfgs["twin_recent"][1])
-    sh("control: an unrecorded booted twin is not idle",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_unrecorded"),
-       config=cfgs["twin_unrecorded"][1])
-    sh("control: an idle twin on another runtime does not match",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_other_runtime"),
-       config=cfgs["twin_other_runtime"][1])
-    sh("control: an idle twin of another device type does not match",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_other_type"),
-       config=cfgs["twin_other_type"][1])
-    sh("boot a device with a twin booted by hand after its recorded boot: the record is older",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_rebooted"),
-       config=cfgs["twin_rebooted"][1])
+    add("control: the twin booted 10 minutes ago is not idle",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_recent"),
+        config=cfgs["twin_recent"][1])
+    add("control: an unrecorded booted twin is not idle",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_unrecorded"),
+        config=cfgs["twin_unrecorded"][1])
+    add("control: an idle twin on another runtime does not match",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_other_runtime"),
+        config=cfgs["twin_other_runtime"][1])
+    add("control: an idle twin of another device type does not match",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_other_type"),
+        config=cfgs["twin_other_type"][1])
+    add("boot a device with a twin booted by hand after its recorded boot: the record is older",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_rebooted"),
+        config=cfgs["twin_rebooted"][1])
+
+    # Rule simulator-boot-route (decision sim-test-is-the-one-boot-path, ruling 5). An xcodebuild whose
+    # -destination names a shut-down simulator is refused after the cap and twin rules. The remedy depends
+    # on the action: `test` names sim-test, any other action names the generic destination. A booted
+    # device is not a boot, so it is allowed. The "one" fixture holds one booted device and one shut-down
+    # device of another type, so neither the cap nor the twin rule judges these commands.
+    generic = "generic/platform=iOS Simulator"
+    # The remedy is the phrase "Run `sim-test", not the bare word: the refusal's own text also names the
+    # sim-test lock, so the bare word would hold whatever remedy the refusal printed.
+    sh("route: a test of a shut-down simulator by id names sim-test",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    sh("route: a test with the action after its options, a shut-down simulator by name, names sim-test",
+       "xcodebuild -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini' test",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    sh("route: a build of a shut-down simulator names the generic destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries=generic)
+    sh("route: build-for-testing of a shut-down simulator by name names the generic destination",
+       "xcodebuild build-for-testing -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries=generic)
+    sh("route: no action on a shut-down simulator names the generic destination",
+       "xcodebuild -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries=generic)
+    sh("control: a test of a booted simulator by id is allowed",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UA + "'",
+       "allow", env_path=one_path, config=one_cfg)
+    sh("control: a build of a booted simulator by name is allowed",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Alpha Pro'",
+       "allow", env_path=one_path, config=one_cfg)
+    # Order: route is judged after cap and twin, so a test of a shut-down device that either rule
+    # refuses names that rule, not simulator-boot-route.
+    sh("route is judged after the cap: a test of a shut-down simulator with two booted names the cap",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "deny", rule="simulator-boot-cap", env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    sh("route is judged after the twin: a test of a shut-down twin names the idle twin",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UT1 + "'",
+       "deny", rule="simulator-boot-twin", env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
+
+    # The route rule judges an xcodebuild boot wherever it sits: inside a wrapper (bash -c, sh -lc), with a `)`
+    # glued to the destination, or after an option with a colon (`-only-testing:X`). Each case pins that the boot
+    # is refused with its remedy, since a boot the route misses skips the lock.
+    sh("route: a test of a shut-down simulator inside bash -c names sim-test",
+       "bash -c \"xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'\"",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    sh("route: a test of a shut-down simulator inside sh -lc names sim-test",
+       "sh -lc 'xcodebuild test -scheme App -destination \"platform=iOS Simulator,id=" + SIM_UC + "\"'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    # Its control: a raw boot inside the same wrapper is refused by the bypass rule today, so the wrapper is read.
+    sh("route: a raw boot inside bash -c is refused by the bypass rule (control: the wrapper is read)",
+       "bash -c \"xcrun simctl boot " + SIM_UC + "\"", "deny", rule="simulator-boot-bypass",
+       env_path=one_path, config=one_cfg, carries="sim-test")
+    sh("route: a test in a subshell, the closing paren glued to the destination, names sim-test",
+       "(cd ios && xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "')",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    # Its control: the same subshell with the paren apart from the quote. The guard reads this one today, so the
+    # glued case fails on the glue, not on the subshell.
+    sh("route: a test in a subshell, the closing paren apart from the destination, names sim-test (control)",
+       "(cd ios && xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' )",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    sh("route: a test with -only-testing before the action names sim-test",
+       "xcodebuild -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' -only-testing:AppTests test",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+
+    # The remedy names sim-test with the xcodebuild arguments only. The shell's redirects and a background `&`
+    # are not arguments of xcodebuild, so the remedy holds none of them, whether spaced or glued to a quote.
+    sh("route: a test of a shut-down simulator with 2>&1 names sim-test -scheme App, with no redirect word",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' 2>&1",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
+       carries="Run `sim-test -scheme App", lacks=("2>&1", ">", "&"))
+    sh("route: a test of a shut-down simulator with > out.log names sim-test -scheme App, with no > word",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' > out.log",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
+       carries="Run `sim-test -scheme App", lacks=(">",))
+    sh("route: a test of a shut-down simulator, the quote glued to a trailing &, names sim-test -scheme App",
+       'xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '"&',
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
+       carries="Run `sim-test -scheme App", lacks=("&",))
+    sh("route: a test of a shut-down simulator, the quote glued to a redirect, names sim-test -scheme App",
+       'xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '">/dev/null',
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
+       carries="Run `sim-test -scheme App", lacks=(">",))
+    # A boolean flag between the scheme and the action is no option with a value, so the action is still `test`.
+    sh("route: a boolean flag before the action, -skipMacroValidation, still names sim-test",
+       "xcodebuild -scheme App -skipMacroValidation test -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    # OS=17.0 picks the 17.0 copy of Delta, which is booted, so nothing is booted and the route allows. The
+    # control is the same destination without the glued paren. Today the glued value reads OS as "17.0)",
+    # drops the runtime filter, and judges the shut-down 25.0 copy too.
+    sh("route: OS=17.0 in a subshell, its paren glued to the value, judges the 17.0 copy only: booted, so allowed",
+       "(cd ios && xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=17.0')",
+       "allow", env_path=os_two_path, config=os_two_cfg)
+    sh("control: OS=17.0 with no glued paren judges the 17.0 copy only: booted, so allowed",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=17.0'",
+       "allow", env_path=os_two_path, config=os_two_cfg)
+
+    # Rule simulator-boot-locked (decision sim-test-is-the-one-boot-path, rulings 2 and 5). A simulator MCP
+    # launch that names a shut-down device is refused while <config>/state/sim-test.lock is held by a live
+    # pid. Held: a pid file naming a live pid, or, with no pid file, a lock folder under 60 s old. A dead
+    # pid is not held. A launch of a booted device is never refused by the lock.
+    def lock_config(name, pid_text=None, age=None):
+        cfg = os.path.join(ROOT, "simcfg_lock_" + name)
+        lock = os.path.join(cfg, "state", "sim-test.lock")
+
+        def build():
+            # Built just before the case that names cfg runs (lazy_fixture), so `age` is the age at that run.
+            os.makedirs(lock, exist_ok=True)
+            if pid_text is not None:
+                write(os.path.join(lock, "pid"), pid_text + "\n")
+            if age is not None:
+                stamp = time.time() - age
+                os.utime(lock, (stamp, stamp))
+        lazy_fixture([cfg], build)
+        return cfg
+
+    # The test runner's own pid is alive for as long as the cases run.
+    live_cfg = lock_config("live", str(os.getpid()))
+    add("lock: a live holder refuses an MCP launch of a shut-down device, naming its pid and sim-test",
+        "deny", rule="simulator-boot-locked", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=one_path, config=live_cfg, carries=(str(os.getpid()), "sim-test"))
+    add("lock: a live holder refuses an MCP launch that names the shut-down device by udid",
+        "deny", rule="simulator-boot-locked", tool=SIM_MCP, action="launch", udid=SIM_UC,
+        env_path=one_path, config=live_cfg, carries=(str(os.getpid()), "sim-test"))
+    add("lock: a live holder does not refuse an MCP launch of a booted device",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UA, env_path=one_path, config=live_cfg)
+
+    # A holder that has exited and been reaped is not held: the cap and twin rules judge the launch alone.
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait(timeout=10)
+    dead_cfg = lock_config("dead", str(gone.pid))
+    add("lock: a dead holder is not held, so an MCP launch with two booted goes to the cap",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=cap_path, config=dead_cfg, carries=(SIM_UA, SIM_UB))
+    add("lock: a dead holder is not held, so an MCP launch with room goes through",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UC, env_path=one_path, config=dead_cfg)
+
+    # A lock folder with no pid file is held for 60 s by its mtime, then it is not held.
+    fresh_cfg = lock_config("nopid_fresh", None, age=10)
+    add("lock: a folder with no pid file, 10 s old, is held: an MCP launch of a shut-down device is refused",
+        "deny", rule="simulator-boot-locked", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=one_path, config=fresh_cfg, carries="sim-test")
+    stale_cfg = lock_config("nopid_stale", None, age=600)
+    add("lock: a folder with no pid file, 10 minutes old, is not held: the launch goes through",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UC, env_path=one_path, config=stale_cfg)
+    # The partner of the allow above: the same stale folder, with two booted, so the cap refuses. An
+    # allow that a guard reaches by failing open would not show the cap, so this case shows the cap ran.
+    add("lock: a folder with no pid file, 10 minutes old, is not held: the cap still judges the launch",
+        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=cap_path, config=stale_cfg, carries=(SIM_UA, SIM_UB))
 
 
 def folder_path(name):
@@ -26558,11 +26962,11 @@ def register_simulator_hold_cases():
             ("600", "1", "0", "/Applications/Xcode.app/Contents/MacOS/Xcode")]),
     ]
     for index, (label, rows) in enumerate(holds):
-        sh("control: " + label, sim_boot_by_destination(SIM_UT1), "allow",
-           env_path=env_for("hold_%d" % index, rows), config=cfg)
-    sh("control: a twin is not idle when the process table cannot be read",
-       sim_boot_by_destination(SIM_UT1), "allow",
-       env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg)
+        add("control: " + label, "allow", tool=SIM_MCP, action="launch", device=SIM_UT1,
+            env_path=env_for("hold_%d" % index, rows), config=cfg)
+    add("control: a twin is not idle when the process table cannot be read",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg)
 
 
 def register_simulator_bypass_cases():
@@ -26643,6 +27047,55 @@ def sim_bypass_override_check(timed):
     return check
 
 
+def sim_route_override_check():
+    """The owner override lifts simulator-boot-route. With no override a test of a shut-down device is
+    refused. After `override` the same call is allowed once, and the second call is refused again. The
+    call runs on the "one" fixture PATH (one booted, one shut down), so the route rule is what refuses it."""
+    def check():
+        config, session = ov_config("sim-route-override"), "ov-sim-route-override"
+        rule = "simulator-boot-route"
+        path = folder_path("one")
+        command = "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'"
+
+        def call(seconds):
+            return lambda: ov_call("Bash", {"command": command}, NOGIT, config, session, seconds,
+                                   env_path=path)
+
+        ok, why = ov_story([("with no override", call(0), "deny", rule)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, "override")
+        ok, why = ov_story([("first call", call(60), "allow", rule),
+                            ("second call, override spent", call(120), "deny", rule)], note)
+        if not ok:
+            return False, why
+        return True, "denied with no override, then allowed once"
+    return check
+
+
+def sim_lock_eperm_check():
+    """A lock whose pid the guard cannot signal is not held. bin/sim-test reads a failed `kill -0`, EPERM
+    included, as the holder being gone, and takes the lock over, so the guard must read the same. Root can
+    signal any pid, so no real pid gives EPERM in this sandbox: os.kill is patched to raise PermissionError,
+    in process, and the lock's pid is this process's own pid."""
+    guard = _load_guard_module()
+    cfg = os.path.join(ROOT, "simcfg_lock_eperm")
+    lock = os.path.join(cfg, "state", "sim-test.lock")
+    os.makedirs(lock, exist_ok=True)
+    write(os.path.join(lock, "pid"), str(os.getpid()) + "\n")
+    with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
+        # Scope first: with the real os.kill, the lock is read and this process is its live holder. Without
+        # this, a "" below could mean the lock was never read rather than that EPERM reads as free.
+        read = guard.sim_lock_holder()
+        if read != str(os.getpid()):
+            return False, "fixture not read: sim_lock_holder() returned %r before the patch, want this pid" % read
+        with mock.patch("os.kill", side_effect=PermissionError(1, "Operation not permitted")):
+            got = guard.sim_lock_holder()
+    if got != "":
+        return False, "sim_lock_holder() returned %r, want \"\": a pid the guard cannot signal reads as free" % got
+    return True, "a lock whose pid cannot be signalled reads as free"
+
+
 # The simulator cases need a POSIX shell for the fake xcrun and ps. Windows has neither to fake, so
 # on Windows the simulator family holds no case, and GUARD_FAMILY=simulator runs none and fails.
 FAMILY = "simulator"
@@ -26657,6 +27110,12 @@ if os.name != "nt":
                      "simulator: an owner override lifts a raw boot once (a one-act override)")
         LOG_FAMILY[sim_label] = FAMILY
         LOG_CHECKS = LOG_CHECKS + ((sim_label, sim_bypass_override_check(sim_timed)),)
+    sim_route_label = "simulator: an owner override lifts a test of a shut-down device (simulator-boot-route)"
+    LOG_FAMILY[sim_route_label] = FAMILY
+    LOG_CHECKS = LOG_CHECKS + ((sim_route_label, sim_route_override_check()),)
+    sim_eperm_label = "simulator: a lock whose pid the guard cannot signal (EPERM) reads as free"
+    LOG_FAMILY[sim_eperm_label] = FAMILY
+    LOG_CHECKS = LOG_CHECKS + ((sim_eperm_label, sim_lock_eperm_check),)
 else:
     skip_case("simulator: the boot, hold and bypass rules, every case of the family", NO_SIMULATOR)
 

@@ -143,9 +143,12 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   "Answered, filing pending" and the save time; with `filed`, "Answered, filed in <home>" (the item's `home`) and the
   filed time. In the Answered section, the same two read "Filing pending, sent" and "Filed in <home>". With only
   `read`, the card also says "Read by <owner>" and the time.
-- `asks/<id>`: one per ask typed in the page's Ask box, never an item. The page writes `id` (the key,
-  `ask-<base36 ms><2 chars>`), `text` (4000 characters or fewer, line breaks kept) and `at` (ISO time) once, at Send. Undo
-  (8 seconds) deletes it. A session writes only `owner` (the session that has the ask), `read` (ISO time),
+- `asks/<id>`: one per ask typed in the page's Ask box, never an item. The owner stacks asks with Add to list (nothing is
+  written), then one Send writes every stacked ask and the typed box. The page writes `id` (the key,
+  `ask-<base36 ms><2 chars>`), `text` (4000 characters or fewer, line breaks kept) and `at` (ISO time) once, at Send. The asks
+  of one Send share one `at`, and their ids rise in the order the owner typed them, so the id breaks the tie: the highest
+  id is the last typed. One Undo (8 seconds) deletes every ask of that Send; it checks the 8 seconds before each delete, and a Send waits until the Undo ends. One wake comment tells of the whole Send: "N asks:
+  <id>: <text>; …", or "Ask <id>: <text>" for one. A session writes only `owner` (the session that has the ask), `read` (ISO time),
   `reply` (plain text, line breaks kept), `answered` (ISO time of `reply`), `home` and `filed` (where a feedback ask
   went, in plain words, and when). Never write `text` or `at`: ArtifactData writes as the owner, so this sentence is the only
   guard. A session changes an ask only with `update`, never `set`: `set` replaces the record and drops the owner's text.
@@ -285,8 +288,12 @@ never runs it. There is one path: the record branch's own worktree. Never write 
 
 The copy holds one JSON file per doc, `<collection>/<doc id>.json`, and `page/designData.json`. The mockups live
 in the page's `designData` block, not in the database.
-The scan reads shapes: tokens, keys, cookie and auth headers, passwords, URL query secrets, email addresses and
-phone numbers. A personal fact in plain words, such as an employer or a city, passes. Do not write one in an item.
+The scan reads shapes: tokens, keys, cookie and auth headers, named cookies set with `=`, bare bearer or basic credentials,
+passwords, URL query secrets and credentials in a URL. It reads secret, token, key or cookie names in any case form set to a random-looking value
+(`API_SECRET=...`, `apiKey: ...`). It also reads email addresses,
+phone numbers and postal addresses (street, PO box, "City, ST ZIP"). A personal fact in plain words, such as an employer or a city name alone, passes. Do not write one in an item.
+A password word with a placeholder, a mask or a plain word as its whole value, `PWD=<path>`, a no-reply address and
+the ssh remote of a public git host pass.
 
 Cost: one list call per page of each collection, one python process, and one commit when something changed. No
 timer, no watcher.
@@ -313,10 +320,10 @@ the waiting page. A page that moves loses its read access, and the repo then hol
 
 1. Check out the record branch in its own worktree, as "Keep a copy in the repo" step 1 says.
 2. Make one new folder. For each entry of the registry, make `<folder>/<id>/`. In it, run `ArtifactData list` for
-   each collection the entry lists, with `out_dir` set to `<folder>/<id>/<collection>`, `query.limit` 1000, and
+   each collection the entry lists, with `out_dir` set to `<folder>/<id>`, `query.limit` 1000, and
    `next_cursor` followed until it is empty. A list call that errors, or that ends with a cursor still pending,
    stops the run for that artifact: touch no `.complete` for it. After the last page of a collection, touch
-   `.complete` in its folder. Also save the page from `Artifact` action `read` to `<folder>/<id>/page.html`,
+   `<folder>/<id>/<collection>/.complete`. Make the folder by hand if the tool wrote none. Also save the page from `Artifact` action `read` to `<folder>/<id>/page.html`,
    and each file of `Artifact` action `list` scope `files` to `<folder>/<id>/files/<path>`.
 3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --all <repo root> --fetched <folder> --worktree <worktree>`.
    It prints one line per artifact, `<id>: <verdict>`, with the verdicts of a single export, or
@@ -511,6 +518,8 @@ The writer finds the entry by its `ref`, or by its `id` when the word names it. 
 
 ## Route an ask
 
+Several asks may share one `at`: route each on its own, never as one.
+
 An ask is the owner's free text, never an answer. Wait 10 seconds after its `at`, then read `asks/<id>` again: an
 undone ask is gone, and nothing is routed. The writer takes each ask with no `owner`, or routes it to the session that holds its subject. An
 ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the writer"):
@@ -608,7 +617,7 @@ holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another arti
 
 ## Update the roadmap block
 
-The roadmap build makes the Status tab's data, the roadmap block. The waiting-page writer alone
+The roadmap build makes the Status tab's data, the roadmap block. The page writer alone
 publishes the page file, so the repo has one page and one publisher. The skill roadmap publishes nothing.
 The Status tab draws each phase id that its steps use, and a step with no phase goes under "No phase".
 

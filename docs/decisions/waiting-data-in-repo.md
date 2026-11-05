@@ -23,7 +23,7 @@ Git is each artifact's home. The claude.ai link is one account's view of it.
 - A kept mockup lands in the repo's design folder on main, by PR (layout kind `design`, `docs/design` by default). The record branch holds the artifact page copies. Process-only: the artifact lane's reading of the owner's words "my repos' design folders" (fb-1458-1). The debt is `kept-mockup-never-merged`, which names the gap this closes.
 - Files use sorted keys, two-space indent and a final newline. An unchanged document stays byte-identical, so a commit shows only real change.
 - The page writer (skill `waiting-page`) copies the page at each wake and before each republish. It commits and pushes only when a file changed.
-- The export scans every value and key before it writes. It refuses when it finds a token, a key, a cookie or auth header, a password, an email address or a phone number. The refusal prints each find's file, path and kind. It never prints the value. The page writer fixes the item on the page first.
+- The export scans every value and key, the page text and each supporting text file before it writes. It refuses a token, a key, a cookie or auth header, a named cookie set with `=`, a bare bearer or basic credential, a password or credentials in a URL. It refuses a secret, token, key or cookie name in any case form (`apiKey`, `SECRET_KEY_BASE`) set to a random-looking value. It refuses an email address, a phone number or a postal address. The refusal prints each find's file, path and kind. It never prints the value. The page writer fixes the item on the page first.
 - Recovery needs no live page. The rebuild mode writes batch files of at most 50 writes each. The page writer sends them to a new page, then puts the design data back into the page.
 - The lint check flags a repo that has a waiting page but no `waiting/` folder on its record branch. It reads git refs. A missing ref, such as in a shallow clone, prints `unknown`. The check never passes or fails on that. Tools read the folder name through `lint/layout.py`, never as a literal.
 - The export has an `--all` mode. It exports each registered artifact with the same scan and mirror rules, and prints one verdict line per artifact. One artifact's refusal holds back no other. The skill step "Before you switch Claude accounts" runs it.
@@ -33,7 +33,7 @@ Cost: each run of the page writer makes one list call per page of each collectio
 
 Known limits:
 
-- The scan reads shapes, not meaning. A personal fact in plain words, such as an employer or a city, passes.
+- The scan reads shapes, not meaning. A personal fact in plain words, such as an employer or a city, passes. A password word whose whole value is a placeholder, a mask or a plain word also passes. So do `PWD=<path>`, a no-reply address and the ssh remote of a public git host.
 - A truncated fetch, such as a missed page of results, deletes the missed documents from the copy. Git history keeps them.
 
 Basis: owner rulings fb-1456-1, fb-1458-1, fb-1458-2 and fb-1512-1 ("wb"), the coordinator's note of 11:49 CST, and a named incident (see Incidents). Landed: set at merge.

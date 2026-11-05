@@ -297,8 +297,8 @@ MUTATIONS = [
      '    if target in ("HEAD", "@"):',
      '    if target in ("@",):', "guard", 'lease with includes, HEAD, on main'),
     ("force-push: refs/heads/ is not stripped",
-     'target.removeprefix("refs/heads/")',
-     'target', "guard", 'forced to the default branch asks: a full ref'),
+     'target.removeprefix("refs/heads/") in (defaults or ())',
+     'target in (defaults or ())', "guard", 'forced to the default branch asks: a full ref'),
     ("force-push: a glob destination no longer asks",
      'if target is None or "*" in target:',
      'if target is None:', "guard", 'forced to the default branch asks: a glob refspec'),
@@ -349,6 +349,52 @@ MUTATIONS = [
      'refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))',
      'refuse(tool, verdict, "force-push", PUSH_ASK_REASON, "git push " + " ".join(args))',
      "guard", 'the long force flag'),
+    # push-main and push-stray-branch (owner rulings 207 a and 206 a).
+    ("push-main: a colon-less main is not a destination",
+     '            elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                return "main"',
+     '            elif False:\n                return "main"', "guard", 'a push of main from a feature branch asks'),
+    ("push-main: a refspec target of main is not a destination",
+     '                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                    return "main"',
+     '                if False:\n                    return "main"', "guard", 'HEAD:main from a feature branch asks'),
+    ("push-main: --all no longer asks",
+     '    if every:\n        return "main"',
+     '    if False:\n        return "main"', "guard", 'main, --all reaches main and asks'),
+    ("push-main: a bare push that writes main no longer asks",
+     '        if dest in DEFAULT_BRANCH_FALLBACK:\n            return "main"',
+     '        if False:\n            return "main"', "guard", 'main tracking origin/main, a bare push asks'),
+    ("push-main: HEAD on main no longer asks",
+     '        if implied and current() in DEFAULT_BRANCH_FALLBACK:',
+     '        if False:', "guard", 'main tracking origin/main, HEAD asks'),
+    ("push-main: push.default upstream is not read for a bare push",
+     '            dest = merge or None',
+     '            dest = None', "guard", 'a branch tracking main asks'),
+    ("push-main: a bare push under simple ignores git's own refusal",
+     '            dest = cur if merge == cur else None',
+     '            dest = cur', "guard", 'a bare push on main with no upstream is git'),
+    ("push-stray-branch: a stray destination no longer asks",
+     '    return "stray" if merge != current() and not upstream else ""',
+     '    return ""', "guard", 'stray branch, HEAD asks'),
+    ("push-stray-branch: @ is not an implied destination",
+     '            elif source in ("HEAD", "@") or',
+     '            elif source in ("HEAD",) or', "guard", 'stray branch, @ asks'),
+    ("push-stray-branch: a colon-less current branch is not implied",
+     ' or (current() is not None and source == current()):',
+     ' or False:', "guard", 'colon-less refspec asks'),
+    ("push-stray-branch: a bare push under current is not implied",
+     '            dest = cur\n            implied = True',
+     '            dest = cur', "guard", 'a bare push under push.default current asks'),
+    ("push-stray-branch: an upstream of main no longer stays silent",
+     'or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:',
+     'or pushed != remote_cfg:', "guard", 'lane from main, HEAD is silent'),
+    ("push-stray-branch: another remote than the upstream's is judged",
+     'or not remote_cfg or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:',
+     'or not remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:', "guard", "another remote than the upstream's"),
+    ("push-main: --branches is not read as --all",
+     '            elif name in ("--all", "--branches"):',
+     '            elif name == "--all":', "guard", 'main, --branches reaches main and asks'),
+    ("push-stray-branch: a -u push of the local name still asks",
+     'return "stray" if merge != current() and not upstream else ""',
+     'return "stray" if merge != current() else ""', "guard", 'stacked lane, -u HEAD is silent'),
     ("env-file: a search command's pattern is read as a path",
      '                if index in patterns:\n                    continue\n',
      '                if False:\n                    continue\n', "guard",
@@ -1212,30 +1258,30 @@ MUTATIONS = [
      "guard", "pointer: checkout of a branch in the pointer checkout is refused"),
 
     # RULE 0, worktree-home. Each mutant breaks one clause of
-    # docs/decisions/an-agent-outside-its-home-tree-must-stop.md; all are caught by the single case
-    # that exercises the whole sequence, `worktree_home_case`.
+    # docs/decisions/an-agent-outside-its-home-tree-must-stop.md. Each names the one case that kills it,
+    # mostly `worktree_home_case`, the whole sequence: the bare family prefix ran every worktree-home case, 40 s a mutant.
     ("worktree-home: the first call from inside the worktree never writes the home record",
      '    if path_is_inside(cwd, candidate) is True:\n        write_agent_home(cwd, agent_id, candidate)',
      '    if path_is_inside(cwd, candidate) is False:\n        write_agent_home(cwd, agent_id, candidate)',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: the candidate worktree path drops the agent- prefix, so it never matches",
      'candidate = os.path.join(primary, ".claude", "worktrees", "agent-" + agent_id)',
      'candidate = os.path.join(primary, ".claude", "worktrees", agent_id)',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: AGENT_ID rejects a letter, so every real agent id reads as an orchestrator",
      'AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")',
      'AGENT_ID = re.compile(r"^[0-9_-]{1,64}$")',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: a shell call outside its recorded home is judged as inside it",
      '        if (path_is_inside(home_cwd, home) is False\n',
      '        if (path_is_inside(home_cwd, home) is None\n',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: a write outside the recorded home, inside the clone, is allowed through",
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
      '                    and path_is_inside(resolved_target, home) is False):',
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
      '                    and path_is_inside(resolved_target, home) is None):',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: a /c/ cwd inside the home is inside"),
     # The next two anchors sit in worktree_home_hit, which returns a log detail and lets judge()
     # refuse; a mutant that returns a detail for a status that allows is a deny.
     ("worktree-home: an unreadable home record denies instead of allowing",
@@ -1245,7 +1291,7 @@ MUTATIONS = [
      '    if home_status == "unknown":\n'
      '        return "unreadable state"\n'
      '    if home_status != "home":',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: a non-isolated agent with no record is denied instead of allowed",
      '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
      '    if home_status != "home":',
@@ -1253,7 +1299,7 @@ MUTATIONS = [
      '    if home_status == "no-record":\n'
      '        return "no record"\n'
      '    if home_status != "home":',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: a relative write target drops the join onto the payload's own cwd",
      '            try:\n                resolved_target = _resolved(write_target, home_cwd)\n'
      '            except Exception:\n                resolved_target = write_target\n'
@@ -1262,7 +1308,7 @@ MUTATIONS = [
      '            resolved_target = write_target\n'
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
      '                    and path_is_inside(resolved_target, home) is False):',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: the write-target loop judges only the first path field",
      '        for write_target in (write_targets(tool_input) if home_primary else ()):',
      '        for write_target in (write_targets(tool_input)[:1] if home_primary else ()):',
@@ -1510,8 +1556,8 @@ MUTATIONS = [
      'MERGE_VALUE_FLAGS = {"-R", "--repo", "--body",', "guard",
      'merge-checks: a flag value is no pull request'),
     ("merge-checks: any word that spells gh is the command word",
-     '    index = resolve_command(tokens)\n    if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):\n        return None\n    return tokens[index + 1:]',
-     '    index = next((i for i, t in enumerate(tokens) if basename(t) in ("gh", "gh.exe")), None)\n    if index is None:\n        return None\n    return tokens[index + 1:]',
+     '    index = resolve_command(tokens)\n    if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):\n        return None\n    rest, root = tokens[index + 1:], []',
+     '    index = next((i for i, t in enumerate(tokens) if basename(t) in ("gh", "gh.exe")), None)\n    if index is None:\n        return None\n    rest, root = tokens[index + 1:], []',
      "guard", 'merge-checks: the words of a merge in an echo are no merge'),
     ("merge-checks: the read has no time limit",
      '            module.SH_TIMEOUT = MERGE_READ_TIMEOUT',
@@ -2077,11 +2123,49 @@ MUTATIONS = [
      'elif low.endswith("/simulator.app") or low == "simulator.app":',
      'elif False:', "guard", 'simulator-boot-bypass: open of the Simulator.app path'),
     ("simulator-boot-bypass: a command a wrapper hands on is not read",
-     'return next((hit for text in inner_commands(tokens) for part in split_segments(text)\n                 if (hit := sim_bypass_hit(part))), "")',
-     'return ""', "guard", 'simulator-boot-bypass: bash -c wraps the boot'),
+     '    for text in inner_commands(tokens):\n        for part in split_segments(text):\n            yield from _sim_commands(part)',
+     '    return', "guard", 'simulator-boot-bypass: bash -c wraps the boot'),
     ("simulator-boot-bypass: the refusal is never raised",
      '                refuse(tool, "deny", "simulator-boot-bypass", SIM_BYPASS_REASON, matched)',
      '                pass', "guard", 'simulator-boot-bypass: xcrun simctl boot'),
+    # RULES simulator-boot-route and simulator-boot-locked (decision sim-test-is-the-one-boot-path, rulings 2 and 5).
+    # Each mutant breaks one arm of its rule. The named case is the one that must die.
+    ("simulator-boot-route: an xcodebuild boot of a shut-down device is never refused",
+     '        elif (remedies or {}).get(name):',
+     '        elif False:', "guard",
+     "route: a test of a shut-down simulator by id names sim-test"),
+    ("simulator-boot-route: the test action is never read, so every test gets the generic remedy",
+     'elif token == "test" and not (',
+     'elif False and not (', "guard",
+     "route: a test with the action after its options, a shut-down simulator by name, names sim-test"),
+    ("simulator-boot-route: a test gets the generic remedy, not sim-test",
+     '    if action:\n        return "Run `sim-test',
+     '    if not action:\n        return "Run `sim-test', "guard",
+     "route: a test of a shut-down simulator by id names sim-test"),
+    ("simulator-boot-route: a build names a destination that is not the generic one",
+     "`-destination 'generic/platform=iOS Simulator'` instead, and boot nothing.",
+     "`-destination 'generic/platform=iOS'` instead, and boot nothing.", "guard",
+     "route: a build of a shut-down simulator names the generic destination"),
+    ("simulator-boot-locked: an MCP launch under a live lock is never refused",
+     '            if holder:\n                refuse(tool, "deny", "simulator-boot-locked",',
+     '            if False:\n                refuse(tool, "deny", "simulator-boot-locked",', "guard",
+     "lock: a live holder refuses an MCP launch of a shut-down device, naming its pid and sim-test"),
+    ("simulator-boot-locked: a dead holder pid still holds the lock",
+     '            except ProcessLookupError:\n                return ""',
+     '            except ProcessLookupError:\n                return text', "guard",
+     "lock: a dead holder is not held, so an MCP launch with room goes through"),
+    ("simulator-boot-locked: a pid-less lock folder is held for ever, not for 60 s",
+     'return "unknown" if age < 60 else ""',
+     'return "unknown"', "guard",
+     "lock: a folder with no pid file, 10 minutes old, is not held: the launch goes through"),
+    ("simulator-boot-locked: a pid-less lock folder is never held",
+     'return "unknown" if age < 60 else ""',
+     'return "unknown" if age < 0 else ""', "guard",
+     "lock: a folder with no pid file, 10 s old, is held: an MCP launch of a shut-down device is refused"),
+    ("simulator-boot-locked: a launch of a booted device is refused under the lock",
+     '    for name in shut_down:\n        if tool == SIM_MCP:',
+     '    for name in names:\n        if tool == SIM_MCP:', "guard",
+     "lock: a live holder does not refuse an MCP launch of a booted device"),
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
     ("handoff-unread: the refusal is never printed",
@@ -2104,6 +2188,12 @@ MUTATIONS = [
      '        return handoff if os.path.isfile(handoff) else ""',
      '        return handoff',
      "guard", "handoff-unread: a call is allowed when the flag is set and the handoff is missing"),
+    # gh_call_of (hooks/guard_merge.py) is the one home every gh reader shares. Unread, a repo flag before
+    # the verb hides `pr merge` and `pr create` from the merge guard, the draft read, ci_wake and the report guard.
+    ("gh-root-flag: a repo flag before the pr verb goes unread",
+     '    while rest and _gh_root_repo_flag(rest, 0):',
+     '    while False and _gh_root_repo_flag(rest, 0):',
+     "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
 ]
 
 
@@ -2113,6 +2203,8 @@ MUTATIONS = [
 # Add a verdict-deciding file here, with the suites that name it, to put it in the report.
 REPORT_TARGETS = [
     ("lint/report_guard.py", ["lint/test_report_guard.py", "lint/test_report_guard_route.py",
+                             "lint/test_report_guard_landing.py",
+                             "lint/test_report_guard_refusal.py",
                              "hooks/test_reply_judge.py", "hooks/test_wrappers.py",
                              "lint/test_rule_audit.py", "lint/test_settings_matcher.py"]),
     ("hooks/feedback_guard.py", ["hooks/test_feedback_inbox.py", "lint/test_settings_matcher.py"]),
@@ -2346,12 +2438,23 @@ def run_mutant(sources, work: str, entry):
         return label, None, [], required, skip
     _path, suite, variable, stem = TARGETS[target]
     if target == "guard":
-        # The whole guard family goes in the mutant's own folder, and the anchor lands in the one
-        # module that holds it. The suite loads the copied guard.py, which finds its siblings.
-        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
+        # module that holds it. The suite loads the copied guard.py, which finds its siblings. The
+        # simulator refusal imports janitor/sweep.py from ../janitor and fails open when it cannot, so
+        # the copy takes sweep.py and temp_sweep.py beside its hooks folder, as a checkout has them.
+        # Without them every simulator arm would be judged against a guard that allows everything.
+        root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        tree = os.path.join(root, "hooks")
         mutate_shared.guard_tree(tree)
         mutate_shared.apply_mutant(tree, old, new)
         copy_path = os.path.join(tree, "guard.py")
+        os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
+        for name in ("sweep.py", "temp_sweep.py"):
+            shutil.copy(os.path.join(HERE, "..", "janitor", name), os.path.join(root, "janitor"))
+        # guard.py reads lint/layout.py from ../lint (_layout_module), which is root/lint for this copy. Without
+        # it the role-model table reads as unread and every role-model arm passes unjudged.
+        shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
         mutated = sources[target].replace(old, new, 1)
@@ -2463,9 +2566,9 @@ def main() -> int:
     # failure this file exists to catch. MEASURED: before this line, all seven `watch` mutants
     # printed the identical nine-case failure list, whatever the mutation.
     mutate_shared.guard_tree(work)
-    # Every guard copy sits one folder below `work`, so its `../lint` is work/lint. guard.py imports
-    # lint/layout.py from there (role_model_table, the waiting-page check). Without this folder the import
-    # fails, the guard exits silently and allows, and the role-model deny cases go red whatever the mutation.
+    # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint:
+    # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The ruling and
+    # decision copies read their own tree/lint instead (above). A guard copy carries its own lint folder (run_mutant).
     shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(work, "lint"),
                     ignore=shutil.ignore_patterns("__pycache__"))
 
