@@ -10,8 +10,9 @@ through the day before today, at most 7 days. With no stamp, or a stamp that is 
 the window is the day before today. A day with no session start keeps its lines for the next start.
 
 Checks, each over the window. Each failure is one stdout line of at most 240 characters, ending
-with `Read:` and its reader by absolute path. A line over the limit has its head cut, never its
-`Read:` tail; a tail past the limit by itself prints whole. The guard.log checks name lint/guard_log_report.py,
+with `Read:` and its reader by absolute path. A line over the limit swaps its head for a short
+head, its count and what failed, such as "3 guard crash line(s):". The short head and the `Read:` tail
+are never cut, so a line passes the limit only when those two are longer than it. The guard.log checks name lint/guard_log_report.py,
 beside this hook's folder, so the path holds from any working folder.
 - a `crash` line: a guard hook crashed.
 - guard.log exists and cannot be read: unknown. A missing guard.log is not a failure.
@@ -51,7 +52,6 @@ for sub in (HERE, os.path.join(HERE, "..", "lint")):
 
 MAX_WINDOW = 7    # days
 MAX_LINE = 240    # characters in one failure line
-MIN_HEAD = 30     # characters of a line's head that survive a long tail: its count and what failed
 READER = os.path.normpath(os.path.join(HERE, "..", "lint", "guard_log_report.py"))
 
 
@@ -84,17 +84,17 @@ def failures(lines, window):
     out = []
     crashes = [r for r in rows if r.decision == "crash"]
     if crashes:
-        out.append(fit("%d guard crash line(s), %s: a guard hook crashed." % (len(crashes), span), tail))
+        out.append(fit("%d guard crash line(s), %s: a guard hook crashed." % (len(crashes), span),
+                       "%d guard crash line(s):" % len(crashes), tail))
     return out
 
 
-def fit(head, tail):
-    """One failure line: HEAD, then TAIL (the `Read:` part). When it passes MAX_LINE, HEAD is cut to end in
-    "...", never below MIN_HEAD characters; TAIL is never cut, so a tail past the limit by itself prints whole."""
-    room = MAX_LINE - len(tail) - 1
-    if len(head) > room:
-        head = head[:max(room, MIN_HEAD) - 3].rstrip() + "..."
-    return "%s %s" % (head, tail)
+def fit(head, short_head, tail):
+    """One failure line: HEAD, then TAIL (the `Read:` part). When that passes MAX_LINE, SHORT_HEAD, the
+    count and what failed, takes HEAD's place. Neither SHORT_HEAD nor TAIL is ever cut, so the line passes
+    MAX_LINE only when those two are longer than it."""
+    line = "%s %s" % (head, tail)
+    return line if len(line) <= MAX_LINE else "%s %s" % (short_head, tail)
 
 
 def span_of(window):
@@ -119,7 +119,7 @@ def agent_end_failures(path, window):
         return []
     except OSError as err:
         return [fit("agent-end payload log cannot be read (%s): its state is unknown." % type(err).__name__,
-                    "Read: " + path)]
+                    "agent-end payload log cannot be read (%s):" % type(err).__name__, "Read: " + path)]
     days = set(window)
     runs = {}
     for text in rows:
@@ -139,7 +139,8 @@ def agent_end_failures(path, window):
     if not bad:
         return []
     return [fit("%d agent-end reap run(s) killed or crashed, %s: servers may be left (or a lost row, debt "
-                "agent-end-log-loses-row)." % (len(bad), span_of(window)), "Read: " + path)]
+                "agent-end-log-loses-row)." % (len(bad), span_of(window)),
+                "%d agent-end reap run(s) killed or crashed:" % len(bad), "Read: " + path)]
 
 
 def sweep_error_failures(err_path, out_path, window):
@@ -150,11 +151,13 @@ def sweep_error_failures(err_path, out_path, window):
         return []
     except OSError as err:
         return [fit("launchd-sweep.err.log cannot be read (%s): its state is unknown." % type(err).__name__,
+                    "launchd-sweep.err.log cannot be read (%s):" % type(err).__name__,
                     "Read: tail %s; stdout: %s" % (err_path, out_path))]
     day = central_day(datetime.fromtimestamp(info.st_mtime, timezone.utc))
     if info.st_size <= 0 or day not in set(window):
         return []
     return [fit("daily sweep wrote errors (%d bytes, %s)." % (info.st_size, day),
+                "daily sweep errors (%d bytes):" % info.st_size,
                 "Read: tail %s; stdout: %s" % (err_path, out_path))]
 
 
@@ -185,6 +188,7 @@ def main():
             pass
         except OSError as err:
             out = [fit("guard.log cannot be read (%s): its state is unknown." % type(err).__name__,
+                       "guard.log cannot be read (%s):" % type(err).__name__,
                        "Read: python %s" % READER)]
         out += agent_end_failures(os.path.join(config, "state", "agent-end-payloads.jsonl"), window)
         out += sweep_error_failures(os.path.join(config, "janitor", "launchd-sweep.err.log"),
