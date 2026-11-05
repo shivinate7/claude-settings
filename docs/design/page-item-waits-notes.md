@@ -1,6 +1,6 @@
 # Waiting page, lane page-item-waits-on: design notes
 
-Mockup: `docs/design/page-item-waits.html`. Screen: `skills/waiting-page/page.html` (main 0497265b). Lane kind: informed.
+Mockup: `docs/design/page-item-waits.html`. Screen: `skills/waiting-page/page.html` (main 0497265b). Designer kind: informed.
 Deep links: `#s=page|unfolded|other-repo|run-plain|run-id|both-joined|both-two|pill-ring|pill-tick|change-keep|change-none`,
 `&w=all|390|800|1280`, `&t=light|dark`, `&lab=off`, `&hide=<state>,...`. Each option state has a Hide control.
 The mockup draws with page.html's own `<style>` (lines 8 to 834 at 0497265b), plus the new rules in `#newcss`.
