@@ -1,9 +1,9 @@
 {
  "title": "The shared map gets a tested-by line",
  "phase": "next",
- "status": "todo",
+ "status": "doing",
  "order": 150.5,
  "why": "The shared map has no tested-by line, so banchi lost 81 checked test-to-file links when banchi #1063 (item 209 a) moved to it.",
- "note": "Nov 5 09:35 CST (coordinator): needs a design first. Its lane starts after map7-scope-mappaths and map-show-decision-lookup land, because all three touch the same skill.",
- "updatedAt": "2026-11-05T15:35:00Z"
+ "note": "Nov 5 12:29 CST (coordinator): lane session_013NEJL1i7HSru8MRKq6B1BY started; builds on a meanwhile. Owner question: page item 270 (how strict the check is). Nov 5 09:35 CST (coordinator): needs a design first. Its lane starts after map7-scope-mappaths and map-show-decision-lookup land, because all three touch the same skill.",
+ "updatedAt": "2026-11-05T18:30:00Z"
 }
