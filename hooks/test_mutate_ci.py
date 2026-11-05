@@ -19,8 +19,11 @@ The modes, as the builder implements them. This file is their interface.
 - `--known-defects FILE --repo REPO [--suite-timeout S] [--log PATH]`. FILE is a JSON list of planted defects. Each defect
   prints one line, `CAUGHT|MISS|UNKNOWN id: name [reason]`. It exits 1 when any defect is MISS or UNKNOWN, else 0. A
   missing FILE prints one `UNKNOWN` line that names the path, and exits 1. An empty list prints one line and exits 0.
-- `--tests-for PATH`. It prints the REPORT_TARGETS suites for PATH when listed, else each tracked `test_<stem>.py`
-  and `test_<stem>_*.py` beside it.
+- `--tests-for PATH`. It prints the REPORT_TARGETS suites for PATH when listed, and nothing else. Else it prints each
+  tracked `test_<stem>.py` and `test_<stem>_*.py` beside PATH. A .py PATH also gets each tracked `test_*.py` in the
+  repository that loads the module `<stem>`: an `import`, an `importlib.import_module` or `__import__` call, or a file
+  loader (`spec_from_file_location`, `SourceFileLoader`, `runpy.run_path`) whose path names `<stem>.py`. The loads are
+  found with `ast`, never a grep. A tracked test that fails to parse is skipped.
 
 Each mode is dispatched from main() in hooks/mutate_guard.py and has an entry point beside `report_main` and
 `replay_main`: `changed_main`, `known_defects_main`, `tests_for_main`. A case checks for its entry point first and
@@ -297,16 +300,16 @@ def profile_file(profile):
     return path
 
 
-def run_cli(args):
-    """`hooks/mutate_guard.py <args>` in a child Python, from the repository root. Returns (exit code, stdout,
-    stderr). The mode's entry point is checked first: when it is missing, the case fails by name and nothing runs.
-    A run past CLI_LIMIT is killed with its group and fails."""
+def run_cli(args, cwd=REPO):
+    """`hooks/mutate_guard.py <args>` in a child Python, from `cwd`: the repository root, or a fixture repository, whose
+    `git ls-files` the mode reads. Returns (exit code, stdout, stderr). The mode's entry point is checked first: when it
+    is missing, the case fails by name and nothing runs. A run past CLI_LIMIT is killed with its group and fails."""
     flag = args[0]
     name = ENTRY[flag]
     if getattr(mutate_guard, name, None) is None:
         raise AssertionError("the %s mode is missing: hooks/mutate_guard.py has no %s" % (flag, name))
     command = [PY, os.path.join(HERE, "mutate_guard.py")] + list(args)
-    proc = subprocess.Popen(command, cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    proc = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                             encoding="utf-8", start_new_session=True)
     try:
         out, err = proc.communicate(timeout=CLI_LIMIT)
@@ -782,8 +785,88 @@ class ReplayChangedOnlyTests(unittest.TestCase):
         self.assertEqual(row["killed"], row["made"], "the changed suite pins mul: every mutant dies")
 
 
+# The --tests-for fixture: one product module, the suites beside it, and one tracked file per form that loads it or only
+# mentions it. Each dict maps a path to its text. A load is printed; a mention, a parse failure, a non-test file, an
+# untracked file and a different module name are not.
+SPEC_HEADER = "import importlib.util\nimport os\n\nHERE = os.path.dirname(os.path.abspath(__file__))\n"
+TESTS_FOR_PRODUCT = {
+    "pkg/widget.py": "VALUE = 1\n",
+    "pkg/lonely.py": "VALUE = 2\n",
+    "pkg/widget.mjs": "export const VALUE = 1;\n",
+}
+TESTS_FOR_BESIDE = {
+    "pkg/test_widget.py": "VALUE = 1\n",
+    "pkg/test_widget_extra.py": "VALUE = 1\n",
+    "pkg/test_widget_also.py": "import widget\n",  # beside and a load: printed once
+}
+TESTS_FOR_LOADS = {
+    "tests/test_form_import.py": "import widget\n",
+    "tests/test_form_import_as.py": "import widget as w\n",
+    "tests/test_form_from.py": "from widget import VALUE\n",
+    "tests/test_form_import_module.py": 'import importlib\n\nWIDGET = importlib.import_module("widget")\n',
+    "tests/test_form_dunder.py": 'WIDGET = __import__("widget")\n',
+    "tests/test_form_spec_inline.py": SPEC_HEADER
+        + 'SPEC = importlib.util.spec_from_file_location("x_under_test", os.path.join(HERE, "widget.py"))\n',
+    "tests/test_form_spec_named.py": SPEC_HEADER
+        + 'MODULE = os.path.join(HERE, "widget.py")\nSPEC = importlib.util.spec_from_file_location("x_under_test", MODULE)\n',
+    "tests/test_form_loader.py": "import os\nfrom importlib.machinery import SourceFileLoader\n\n"
+        + 'HERE = os.path.dirname(os.path.abspath(__file__))\nLOADER = SourceFileLoader("x_under_test", os.path.join(HERE, "widget.py"))\n',
+    "tests/test_form_runpy.py": "import os\nimport runpy\n\n"
+        + 'HERE = os.path.dirname(os.path.abspath(__file__))\nrunpy.run_path(os.path.join(HERE, "widget.py"))\n',
+    "tests/test_form_from_package.py": "from pkg import widget\n",
+    "tests/test_form_import_dotted.py": "import pkg.widget\n",
+    "tests/test_form_spec_keyword.py": SPEC_HEADER
+        + 'SPEC = importlib.util.spec_from_file_location("x_under_test", location=os.path.join(HERE, "widget.py"))\n',
+    "tests/test_form_spec_in_function.py": SPEC_HEADER
+        + 'def load():\n    path = os.path.join(HERE, "widget.py")\n    spec = importlib.util.spec_from_file_location("x_under_test", path)\n',
+    "tests/test_form_lone_quote.py": "# don't mind this note\nimport widget\n",
+    "other/sub/test_form_deep.py": "import widget\n",
+}
+TESTS_FOR_MENTIONS = {
+    "tests/test_no_comment.py": "# import widget\n",
+    "tests/test_no_string.py": 'TEXT = "import widget"\n',
+    "tests/test_no_docstring.py": '"""Pins the rule in widget.py."""\n',
+    "tests/test_no_block.py": 'BLOCK = """\nimport widget\n"""\n',
+    "tests/test_no_c_opener.py": 'TEXT = "/* import widget"\n',
+    "tests/test_no_slash_opener.py": 'TEXT = "// import widget"\n',
+    "tests/test_no_hash_opener.py": 'TEXT = "# import widget"\n',
+    "tests/test_no_spec_name.py": SPEC_HEADER
+        + 'OTHER = os.path.join(HERE, "other_module.py")\nSPEC = importlib.util.spec_from_file_location("widget", OTHER)\n',
+    "tests/test_no_spec_name_arg.py": SPEC_HEADER
+        + 'OTHER = os.path.join(HERE, "other_module.py")\nSPEC = importlib.util.spec_from_file_location("widget.py", OTHER)\n',
+    "tests/test_no_other_basename.py": SPEC_HEADER
+        + 'SPEC = importlib.util.spec_from_file_location("x_under_test", os.path.join(HERE, "old_widget.py"))\n',
+    "tests/test_no_prefix.py": "import widget_extra\n",
+    "tests/test_broken.py": "import widget\ndef broken(:\n",
+    "tests/helper.py": "import widget\n",
+    "pkg/test_widgets.py": "VALUE = 1\n",
+}
+UNTRACKED = {"tests/test_untracked.py": "import widget\n"}  # written after the commit, so `git ls-files` never lists it
+
+
+def tests_for_fixture():
+    """The fixture repository the --tests-for cases read, built once per run. The one commit holds every tracked file;
+    UNTRACKED is written after it. A suite that lists the listed path's module is tracked too, for the override case."""
+    if "tests_for" not in CACHE:
+        repo = new_repo()
+        listed = mutate_guard.REPORT_TARGETS[0][0]
+        files = dict(TESTS_FOR_PRODUCT)
+        files.update(TESTS_FOR_BESIDE)
+        files.update(TESTS_FOR_LOADS)
+        files.update(TESTS_FOR_MENTIONS)
+        files[listed] = "VALUE = 3\n"
+        files["tests/test_form_listed.py"] = "import %s\n" % os.path.splitext(os.path.basename(listed))[0]
+        put(repo, files)
+        commit(repo, "Fixture: a product module, its suites, and each form that loads or mentions it")
+        put(repo, UNTRACKED)
+        CACHE["tests_for"] = repo
+    return CACHE["tests_for"]
+
+
 class TestsForTests(unittest.TestCase):
-    """`--tests-for`: the REPORT_TARGETS suites of a listed file, else the tracked tests beside an unlisted one."""
+    """`--tests-for PATH`. A listed path prints exactly its REPORT_TARGETS suites, with no union. An unlisted .py path
+    prints the tests beside it plus each tracked test_*.py in the repository that loads its module by name or by file.
+    Any other unlisted path prints the tests beside it only. A tracked test that fails to parse is skipped."""
 
     def test_a_listed_path_prints_its_report_targets_suites(self):
         targets = dict(mutate_guard.REPORT_TARGETS)
@@ -794,16 +877,105 @@ class TestsForTests(unittest.TestCase):
         self.assertEqual(set(SUITE_NAME.findall(out)), set(targets[target]),
                          "--tests-for must print the REPORT_TARGETS suites of %s" % target)
 
-    def test_an_unlisted_path_prints_each_tracked_test_beside_it(self):
-        target = "hooks/guard.py"
+    def test_a_listed_path_prints_exactly_its_suites_though_a_suite_loads_it(self):
+        target, suites = mutate_guard.REPORT_TARGETS[0]
+        repo = tests_for_fixture()
+        self.assertIn("tests/test_form_listed.py", git(repo, "ls-files").split("\n"),
+                      "the fixture: a tracked suite loads %s" % target)
+        code, out, err = run_cli(["--tests-for", target], cwd=repo)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertEqual(sorted(out.splitlines()), sorted(suites),
+                         "a listed path prints its REPORT_TARGETS suites and no union with its loads")
+
+    def test_the_incident_prints_the_suites_that_load_mutate_shared(self):
+        target = "hooks/mutate_shared.py"
         self.assertNotIn(target, dict(mutate_guard.REPORT_TARGETS), "the fixture: %s must be unlisted" % target)
-        want = {name for name in git(REPO, "ls-files", "hooks").split("\n")
-                if re.fullmatch(r"hooks/test_guard(_[^/]*)?\.py", name)}
-        self.assertTrue(want, "the fixture: hooks/ holds tracked test_guard files")
         code, out, err = run_cli(["--tests-for", target])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        self.assertEqual(set(SUITE_NAME.findall(out)), want,
-                         "an unlisted path reads each tracked test_<stem>.py and test_<stem>_*.py beside it")
+        printed = set(out.splitlines())
+        for name in ("hooks/test_mutate_shared.py", "hooks/test_mutate_replay.py", "hooks/test_mutate_ci.py"):
+            with self.subTest(suite=name):
+                self.assertIn(name, printed, "--tests-for %s must print %s, which loads mutate_shared" % (target, name))
+
+    def test_each_load_form_prints_its_file(self):
+        repo = tests_for_fixture()
+        self.assertIn("pkg/widget.py", git(repo, "ls-files").split("\n"), "the fixture: the product module is tracked")
+        code, out, err = run_cli(["--tests-for", "pkg/widget.py"], cwd=repo)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        printed = set(out.splitlines())
+        for name in sorted(TESTS_FOR_LOADS):
+            with self.subTest(form=name):
+                self.assertIn(name, printed, "%s loads widget, so --tests-for pkg/widget.py must print it" % name)
+
+    def test_each_mention_that_is_not_a_load_prints_nothing(self):
+        repo = tests_for_fixture()
+        code, out, err = run_cli(["--tests-for", "pkg/widget.py"], cwd=repo)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        printed = set(out.splitlines())
+        for name in sorted(set(TESTS_FOR_MENTIONS) | set(UNTRACKED)):
+            with self.subTest(file=name):
+                self.assertNotIn(name, printed, "%s does not load widget, so --tests-for must not print it" % name)
+
+    def test_an_unlisted_py_path_prints_exactly_the_beside_suites_and_the_loads(self):
+        repo = tests_for_fixture()
+        code, out, err = run_cli(["--tests-for", "pkg/widget.py"], cwd=repo)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        want = sorted(set(TESTS_FOR_BESIDE) | set(TESTS_FOR_LOADS))
+        self.assertEqual(sorted(out.splitlines()), want,
+                         "the union: each beside suite and each load, each printed once")
+
+    def test_a_non_py_path_prints_only_the_suites_beside_it(self):
+        repo = tests_for_fixture()
+        code, out, err = run_cli(["--tests-for", "pkg/widget.mjs"], cwd=repo)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertEqual(sorted(out.splitlines()), sorted(TESTS_FOR_BESIDE),
+                         "a non-.py path gets the beside suites only, with no loads")
+
+    def test_an_unparsable_suite_is_skipped_and_the_command_exits_zero(self):
+        repo = tests_for_fixture()
+        self.assertIn("tests/test_broken.py", git(repo, "ls-files").split("\n"), "the fixture: the broken suite is tracked")
+        code, out, err = run_cli(["--tests-for", "pkg/widget.py"], cwd=repo)
+        self.assertEqual(code, 0, "a suite that fails to parse must not stop the command\n%s%s" % (out, err))
+        self.assertNotIn("tests/test_broken.py", out.splitlines(), "a suite that fails to parse is skipped")
+
+    def test_a_file_nothing_loads_prints_nothing(self):
+        repo = tests_for_fixture()
+        code, out, err = run_cli(["--tests-for", "pkg/lonely.py"], cwd=repo)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertEqual(out, "", "no suite sits beside pkg/lonely.py and none loads it: nothing is printed")
+
+    def test_an_unlisted_path_prints_the_suites_beside_it_and_the_loads_of_guard(self):
+        target = "hooks/guard.py"
+        self.assertNotIn(target, dict(mutate_guard.REPORT_TARGETS), "the fixture: %s must be unlisted" % target)
+        beside = {name for name in git(REPO, "ls-files", "hooks").split("\n")
+                  if re.fullmatch(r"hooks/test_guard(_[^/]*)?\.py", name)}
+        self.assertTrue(beside, "the fixture: hooks/ holds tracked test_guard files")
+        code, out, err = run_cli(["--tests-for", target])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        printed = set(out.splitlines())
+        for name in sorted(beside):
+            with self.subTest(beside=name):
+                self.assertIn(name, printed, "%s sits beside hooks/guard.py, so it is printed" % name)
+        # Each pinned suite loads guard by a top-level import. The check on the text is the scope; the print is the subject.
+        for name in ("hooks/test_agent_brief.py", "hooks/test_question_form.py"):
+            with self.subTest(load=name):
+                self.assertIn("import guard", show(REPO, "HEAD", name), "the fixture: %s must import guard" % name)
+                self.assertIn(name, printed, "%s loads guard, so --tests-for %s must print it" % (name, target))
+        # Each extra suite names guard. That is a necessary condition for a load, not a proof of one.
+        for name in sorted(printed - beside):
+            with self.subTest(extra=name):
+                self.assertRegex(show(REPO, "HEAD", name), r"\bguard\b", "%s is printed but names no guard" % name)
+
+    def test_a_load_bound_inside_a_function_prints_its_suite_for_guard_rm_var(self):
+        target = "hooks/guard_rm_var.py"
+        self.assertNotIn(target, dict(mutate_guard.REPORT_TARGETS), "the fixture: %s must be unlisted" % target)
+        loader = "hooks/test_guard.py"
+        self.assertRegex(show(REPO, "HEAD", loader), r'(?m)^    path = os\.path\.join\(.*"guard_rm_var\.py"\)$',
+                         "the fixture: %s binds the guard_rm_var path inside a function" % loader)
+        code, out, err = run_cli(["--tests-for", target])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertIn(loader, out.splitlines(),
+                      "%s loads guard_rm_var inside a function, so --tests-for %s must print it" % (loader, target))
 
 
 if __name__ == "__main__":

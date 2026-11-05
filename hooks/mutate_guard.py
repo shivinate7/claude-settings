@@ -2555,10 +2555,73 @@ def known_defects_main(argv) -> int:
     return 1 if any(result["verdict"] != "CAUGHT" for result in results) else 0
 
 
+def _loads_module(source: str, stem: str) -> bool:
+    """True when the Python text imports or loads the module `stem`, read from its `ast` tree (never its text, so a comment,
+    a string or a docstring that names the module is not a load). The forms: `import`, `from ... import`,
+    `importlib.import_module` and `__import__` with a literal name, and `spec_from_file_location`, `SourceFileLoader` and
+    `runpy.run_path` with a string literal of the basename `<stem>.py` in the path argument (never the module-name argument),
+    directly or through a name bound to such an expression by an assignment in any scope of the file (module, function or
+    class level; one name bound in two scopes pools both values). A path that arrives as a function parameter is not
+    followed, so a loader fed only by a parameter reads False (debt tests-for-misses-param-loads).
+
+    It assumes module stems are unique across the repository, so a name match is a load of this file (only
+    `test_action.py` repeats a stem today). A text that does not parse reads False."""
+    import ast
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError, RecursionError):
+        return False
+    base = stem + ".py"
+    bound = {}  # a name -> the expressions it is bound to, in any scope
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    bound.setdefault(target.id, []).append(node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+            bound.setdefault(node.target.id, []).append(node.value)
+
+    def names_base(expr, seen) -> bool:
+        for part in ast.walk(expr):
+            if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                if part.value.replace("\\", "/").rsplit("/", 1)[-1] == base:
+                    return True
+            elif isinstance(part, ast.Name) and part.id in bound and part.id not in seen:
+                seen.add(part.id)
+                if any(names_base(value, seen) for value in bound[part.id]):
+                    return True
+        return False
+
+    def last_part(dotted: str) -> bool:
+        return dotted.rsplit(".", 1)[-1] == stem
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(last_part(alias.name) for alias in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom):
+            if (node.module and last_part(node.module)) or any(alias.name == stem for alias in node.names):
+                return True
+        elif isinstance(node, ast.Call):
+            func = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+            if func in ("import_module", "__import__"):
+                first = node.args[0] if node.args else next((kw.value for kw in node.keywords if kw.arg == "name"), None)
+                if isinstance(first, ast.Constant) and isinstance(first.value, str) and last_part(first.value):
+                    return True
+            elif func in ("spec_from_file_location", "SourceFileLoader", "run_path"):
+                skip = 0 if func == "run_path" else 1  # the first argument of the other two is the module name
+                parts = list(node.args[skip:]) + [kw.value for kw in node.keywords if kw.arg not in ("name", "fullname")]
+                if any(names_base(part, set()) for part in parts):
+                    return True
+    return False
+
+
 def tests_for_main(argv) -> int:
-    """Print the suites that test one file, a line each: the REPORT_TARGETS suites when the file is listed there, else each
-    tracked `test_<stem>.py` and `test_<stem>_*.py` beside it (in the repository of the working folder). It is the `select`
-    command of the `claude_settings` profile. A file with no suite prints nothing."""
+    """Print the suites that test one file, a line each, sorted, once each. A file listed in REPORT_TARGETS prints exactly its
+    suites. Any other `.py` file prints each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, plus each tracked
+    `test_*.py` in the repository of the working folder that imports or loads its module (`_loads_module`). Any other file
+    prints the suites beside it only. A suite that cannot be read or parsed is skipped. It is the `select` command of the
+    `claude_settings` profile. A file with no suite prints nothing."""
     import argparse
     import re
     parser = argparse.ArgumentParser(prog="mutate_guard.py --tests-for")
@@ -2567,18 +2630,32 @@ def tests_for_main(argv) -> int:
     path = os.path.normpath(args.tests_for).replace(os.sep, "/")
     listed = dict(REPORT_TARGETS)
     if path in listed:
-        names = list(listed[path])
+        names = set(listed[path])
     else:
         folder, name = os.path.split(path)
-        wanted = re.compile(r"test_%s(_[^/]*)?\.py" % re.escape(os.path.splitext(name)[0]))
-        done = _nowindow.run(["git", "ls-files", "-z", "--", folder or "."], capture_output=True, text=True,
+        stem, extension = os.path.splitext(name)
+        wanted = re.compile(r"test_%s(_[^/]*)?\.py" % re.escape(stem))
+        done = _nowindow.run(["git", "ls-files", "-z"], capture_output=True, text=True,
                              encoding="utf-8", stdin=subprocess.DEVNULL)
         if done.returncode != 0:
             print("ERROR git ls-files failed: %s" % done.stderr.strip())
             return 2
-        names = sorted(tracked for tracked in done.stdout.split("\0")
-                       if tracked and os.path.dirname(tracked) == folder and wanted.fullmatch(os.path.basename(tracked)))
-    for name in names:
+        tracked = [item for item in done.stdout.split("\0") if item]
+        names = {item for item in tracked
+                 if os.path.dirname(item) == folder and wanted.fullmatch(os.path.basename(item))}
+        if extension == ".py":
+            for item in tracked:
+                base = os.path.basename(item)
+                if item in names or not (base.startswith("test_") and base.endswith(".py")):
+                    continue
+                try:
+                    with open(item, encoding="utf-8") as handle:
+                        source = handle.read()
+                except (OSError, ValueError):
+                    continue
+                if _loads_module(source, stem):
+                    names.add(item)
+    for name in sorted(names):
         print(name)
     return 0
 
