@@ -420,6 +420,7 @@ SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktr
 SUBJDIRTY = os.path.join(ROOT, "subjdirty")  # a real checkout with real uncommitted work
 SUBJSTASH = os.path.join(ROOT, "subjstash")  # a clean tree carrying one real stash entry
 SUBJSTASHWT = os.path.join(ROOT, "subjstashlane")  # a linked worktree of it: same stack
+SUBJSTAGED = os.path.join(ROOT, "subjstaged")  # a real checkout: a staged edit, a staged new file
 GITBLIND = os.path.join(ROOT, "gitblind")  # a git that answers the repo test and no status read
 # A repository under a scratchpad named after one session. ROOT already sits under the system
 # temporary directory, which is the other half of the path test.
@@ -860,6 +861,27 @@ def _real_process_start_ms(pid):
     parts = [0] * (3 - len(parts)) + parts
     elapsed = int(days or 0) * 86400 + parts[0] * 3600 + parts[1] * 60 + parts[2]
     return int(now_ms - elapsed * 1000)
+
+
+def _require_staged(where, tracked, untracked):
+    """Stop the suite unless `where` holds a STAGED edit to `tracked` (index column M, worktree
+    column clean) and a STAGED new file `untracked` (index column A).
+
+    The `--merge` cases that use SUBJSTAGED depend on exactly this state: git reverts the staged
+    edit and deletes the staged new file. Unstaged work would pass them for the wrong reason, so
+    both are read back with git itself.
+    """
+    lines = _porcelain(where)
+    if not any(line[:2] == "M " and line[3:].strip() == tracked for line in lines):
+        sys.exit(
+            "fixture setup failed in _build_subject: %r is not staged as modified in %r. git "
+            "status --porcelain shows: %r" % (tracked, where, lines)
+        )
+    if not any(line[:2] == "A " and line[3:].strip() == untracked for line in lines):
+        sys.exit(
+            "fixture setup failed in _build_subject: %r is not staged as new in %r. git status "
+            "--porcelain shows: %r" % (untracked, where, lines)
+        )
 
 
 def make_repo(where, files):
@@ -1355,11 +1377,32 @@ def _build_ctxrepo():
     run_vcs(CTXREPO, "branch", "done")
 
 
+GHDEV_CHECK = {}  # the delay check's thread, and the error it raised, if it raised one
+
+
+def _run_ghdev_check():
+    try:
+        _verify_fake_gh_delay(GHDEV, delay=1)
+    except BaseException as exc:  # _build_ghdev raises it, on the thread that needs the answer
+        GHDEV_CHECK["error"] = exc
+
+
+def _start_ghdev_check():
+    """Run the delay check on a daemon thread. Called once, after build_fixtures has written GHDEV's fake."""
+    thread = threading.Thread(target=_run_ghdev_check, name="ghdev-delay-check", daemon=True)
+    GHDEV_CHECK["thread"] = thread
+    thread.start()
+
+
 def _build_ghdev():
-    # Trust this delay only once it is proven, not assumed: run it now, under the guard's own
-    # narrow PATH, and fail fixture setup outright if it does not really delay. See
-    # _verify_fake_gh_delay's docstring for the defect this catches.
-    _verify_fake_gh_delay(GHDEV, delay=1)
+    # Trust this delay only once it is proven, not assumed: the check runs under the guard's own
+    # narrow PATH and fails fixture setup outright if it does not really delay. See
+    # _verify_fake_gh_delay's docstring for the defect this catches. It takes about a second and starts
+    # with the fixtures, so this waits only for what is left of it, and a run that never names
+    # GHDEV never waits.
+    GHDEV_CHECK["thread"].join()
+    if "error" in GHDEV_CHECK:
+        raise GHDEV_CHECK["error"]
 
 
 def _build_gitmain():
@@ -1435,7 +1478,8 @@ def _build_gitmain():
 
 
 def _build_subject():
-    """SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH and SUBJSTASHWT: the subject-read repos."""
+    """The subject-read repos: SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT and
+    SUBJSTAGED."""
     # THE SUBJECT READ. Each arm gets both sides, built with real state: a real clean tree, a
     # real uncommitted edit, a real untracked file, a real one-entry stash stack.
     make_repo(SUBJCLEAN, {"f.txt": "base\n", "keep.txt": "base\n"})
@@ -1464,6 +1508,14 @@ def _build_subject():
     # worktree sees the same one-entry stack, and a drop there destroys the primary's entry.
     run_vcs(SUBJSTASH, "worktree", "add", "-q", SUBJSTASHWT, "-b", "stashlane")
     _require_stash(SUBJSTASHWT, 1)
+
+    # A STAGED edit to a tracked file and a STAGED new file: the state `reset --merge HEAD` reverts
+    # and deletes. The tree is dirty, and its work is all in the index.
+    make_repo(SUBJSTAGED, {"f.txt": "base\n", "keep.txt": "base\n"})
+    write(os.path.join(SUBJSTAGED, "f.txt"), "staged\n")
+    write(os.path.join(SUBJSTAGED, "new.txt"), "staged new\n")
+    run_vcs(SUBJSTAGED, "add", "f.txt", "new.txt")
+    _require_staged(SUBJSTAGED, "f.txt", "new.txt")
 
 def _build_privrepo():
     """PRIVREPO: a dirty repository under a scratchpad named after one session."""
@@ -2118,6 +2170,7 @@ def _build_links():
 
 
 build_fixtures()
+_start_ghdev_check()
 _mark("build_fixtures: eager config, fake gh writes, GHNONE and the link probe")
 
 # Each builder runs the first time a case names one of its paths (see lazy_fixture). A builder's
@@ -2127,7 +2180,8 @@ lazy_fixture([CTXREPO], _build_ctxrepo)
 lazy_fixture([CURREPO], _build_currepo)
 lazy_fixture([GHDEV], _build_ghdev)
 lazy_fixture([GITMAIN, GITWT, AGENTWT, FARWT, SYMWT, DECOYMAIN], _build_gitmain)
-lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT], _build_subject)
+lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT, SUBJSTAGED],
+             _build_subject)
 lazy_fixture([PRIVREPO], _build_privrepo)
 lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, PTRNOORIGIN,
               PTRNOORIGINCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
@@ -2234,20 +2288,19 @@ sh("stash: branch consumes the entry it builds from", VCS + " stash branch lane"
 sh("reset: throws the tree away", VCS + " reset --hard origin/main", "deny", "shared-tree",
    cwd=NOGIT)
 sh("reset: --hard with no argument", VCS + " reset --hard", "deny", "shared-tree", cwd=NOGIT)
-# A bare reset, and every flag except `--hard`, leaves the working tree alone, or aborts rather
-# than overwrite a local change (MEASURED against a real uncommitted change, 2026-09-17: `--keep`
-# and `--merge` both stopped with "Entry not up to date. Cannot merge." and the change survived).
-# Only `--hard` rewrites the tree unconditionally, so it alone stays denied.
+# A bare reset, `--soft` and `--mixed` leave the working tree alone, and `--hard` rewrites it.
+# `--merge` rewrites it too: it reverts a staged edit and deletes a staged new file. `--keep` and
+# `--merge` both move the branch at another commit, so they take `--hard`'s verdict.
 sh("reset: a plain reset only unstages, the working tree is untouched", VCS + " reset HEAD~1",
    "allow", cwd=NOGIT)
 sh("reset: a bare reset with no argument", VCS + " reset", "allow", cwd=NOGIT)
 sh("reset: an explicit mixed reset", VCS + " reset --mixed HEAD~1", "allow", cwd=NOGIT)
 sh("reset: a soft reset moves the branch and touches nothing else", VCS + " reset --soft HEAD~1",
    "allow", cwd=NOGIT)
-sh("reset: --keep aborts rather than overwrite a local change", VCS + " reset --keep HEAD~1",
-   "allow", cwd=NOGIT)
-sh("reset: --merge aborts rather than overwrite a local change", VCS + " reset --merge HEAD~1",
-   "allow", cwd=NOGIT)
+sh("reset: --keep at another commit refuses where there is no git tree",
+   VCS + " reset --keep HEAD~1", "deny", "shared-tree", cwd=NOGIT)
+sh("reset: --merge at another commit refuses where there is no git tree",
+   VCS + " reset --merge HEAD~1", "deny", "shared-tree", cwd=NOGIT)
 sh("reset: a reset naming a path only touches the index",
    VCS + " reset -- app/src/50_engine.js", "allow", cwd=NOGIT)
 sh("reset: a reset at a commit naming a path only touches the index",
@@ -2329,6 +2382,31 @@ sh("subject: a hard reset at a raw sha in a clean worktree asks",
    cwd=SUBJCLEANWT)
 sh("subject: a quiet hard reset at HEAD is still a pass in a clean tree",
    VCS + " reset -q --hard HEAD", "allow", cwd=SUBJCLEAN)
+# THE `--merge` AND `--keep` FORMS TAKE `--hard`'s VERDICT. Each form has its own deny or ask line,
+# so dropping either flag alone turns a line red. SUBJSTAGED holds a staged edit and a staged new
+# file, so any change denies.
+sh("reset: --merge at HEAD over a staged edit and a staged new file refuses",
+   VCS + " reset --merge HEAD", "deny", "shared-tree", cwd=SUBJSTAGED)
+sh("reset: a bare --merge over a staged edit refuses", VCS + " reset --merge", "deny",
+   "shared-tree", cwd=SUBJSTAGED)
+sh("reset: --merge at HEAD in a clean tree takes nothing", VCS + " reset --merge HEAD", "allow",
+   cwd=SUBJCLEAN)
+sh("reset: --keep at HEAD in a clean tree takes nothing", VCS + " reset --keep HEAD", "allow",
+   cwd=SUBJCLEAN)
+sh("reset: --keep at another commit moves the branch, so a shared checkout refuses",
+   VCS + " reset --keep HEAD~1", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("reset: --keep at another commit asks in a clean worktree", VCS + " reset --keep HEAD~1",
+   "ask", "shared-tree", cwd=SUBJCLEANWT)
+sh("reset: --merge at another commit asks in a clean worktree", VCS + " reset --merge HEAD~1",
+   "ask", "shared-tree", cwd=SUBJCLEANWT)
+sh("reset: a flag after the commit still counts, --merge refuses", VCS + " reset HEAD~1 --merge",
+   "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("reset: --merge aimed at a dirty checkout with -C refuses",
+   VCS + " -C " + slash(SUBJSTAGED) + " reset --merge", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("reset: an echo that quotes a merge reset is not a call", 'echo "git reset --merge"', "allow",
+   cwd=SUBJSTAGED)
+sh("reset: a soft reset over a staged edit stays allowed", VCS + " reset --soft HEAD~1", "allow",
+   cwd=SUBJSTAGED)
 sh("subject: setting aside a clean tree takes nothing", VCS + " stash push -u -m lane", "allow",
    cwd=SUBJCLEAN)
 sh("subject: setting aside real uncommitted work still denies", VCS + " stash push -u -m lane",
@@ -2986,8 +3064,9 @@ sh("worktree: a stash push in a dirty worktree denies, the stack is clone-wide",
 sh("worktree: stash save in a dirty worktree denies, the stack is clone-wide",
    VCS + " stash save lane", "deny", "shared-tree", cwd=GITWT)
 
-# THE TABLE'S ALLOW ROWS, checked in a linked worktree. A read, a reset that keeps the tree, or a
-# restore of one staged file is allowed whichever tree the call runs in.
+# THE TABLE'S ROWS, checked in a linked worktree. A read, a reset that keeps the tree, or a
+# restore of one staged file is allowed whichever tree the call runs in. A reset that moves the
+# branch to another commit asks here, as `--hard` does.
 sh("stash: list allows in the worktree", VCS + " stash list", "allow", cwd=GITWT)
 sh("stash: show allows in the worktree", VCS + " stash show", "allow", cwd=GITWT)
 sh("stash: apply over an empty stack allows in the worktree", VCS + " stash apply", "allow",
@@ -2996,8 +3075,10 @@ sh("stash: pop over an empty stack allows in the worktree", VCS + " stash pop", 
    cwd=GITWT)
 sh("reset: a plain reset allows in the worktree", VCS + " reset HEAD~1", "allow", cwd=GITWT)
 sh("reset: --soft allows in the worktree", VCS + " reset --soft HEAD~1", "allow", cwd=GITWT)
-sh("reset: --keep allows in the worktree", VCS + " reset --keep HEAD~1", "allow", cwd=GITWT)
-sh("reset: --merge allows in the worktree", VCS + " reset --merge HEAD~1", "allow", cwd=GITWT)
+sh("reset: --keep at another commit asks in a dirty linked worktree",
+   VCS + " reset --keep HEAD~1", "ask", "shared-tree", cwd=GITWT)
+sh("reset: --merge at another commit asks in a dirty linked worktree",
+   VCS + " reset --merge HEAD~1", "ask", "shared-tree", cwd=GITWT)
 sh("reset: naming a path allows in the worktree", VCS + " reset -- f.txt", "allow", cwd=GITWT)
 sh("restore: --staged alone allows in the worktree", VCS + " restore --staged f.txt", "allow",
    cwd=GITWT)
@@ -19797,6 +19878,162 @@ def worktree_home_cd_exempt_case():
     return True, "the recorded home, the own red-run folder and the session's recorded home pass"
 
 
+def worktree_home_red_write_case():
+    """Rule 0, other-checkout, the write act's exemption for the caller's own red-run folder: an
+    agent's writes into `agent-<its id>-red` pass from its home, as a `cd` chained to a write, a `cp`,
+    a Write and an Edit. The same four writes into a sibling agent's red-run folder, into a folder
+    whose name only starts with the agent's id, into the primary, or from a call with no agent_id are
+    refused. A test-author writes its tests in its red-run folder, so the write act must match the
+    cd act that worktree_home_cd_exempt_case already allows."""
+    primary, home, _, _ = _cross_checkout_fixture(
+        "xcored", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    red = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "-red")[0]
+    sibling_red = sh_add_lane(primary, "agent-" + CD_AGENT_SIBLING + "-red")[0]
+    prefix_trap = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "b-red")[0]
+    write(os.path.join(home, "t.py"), "print(1)\n")
+    problems = []
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow":
+        problems.append("the agent's recording call: want allow, got %s (%s)" % (got, reason[:120]))
+    if not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        problems.append("the agent's recording call wrote no home record")
+
+    def writes_into(folder):
+        """(tool, tool input) for the four writes into FOLDER: a chained cd, a cp, a Write and an Edit."""
+        return (
+            ("Bash", {"command": "cd %s && echo x > f" % slash(folder)}),
+            ("Bash", {"command": "cp t.py %s/" % slash(folder)}),
+            ("Write", {"file_path": os.path.join(folder, "f"), "content": "x"}),
+            ("Edit", {"file_path": os.path.join(folder, "f"), "old_string": "1", "new_string": "2"}),
+        )
+
+    def label(tool, tool_input):
+        return "%s %r" % (tool, tool_input.get("command") or tool_input["file_path"])
+
+    for tool, tool_input in writes_into(red):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if got != "allow":
+            problems.append("%s into the agent's own red-run folder: want allow, got %s (%s)"
+                            % (label(tool, tool_input), got, reason[:120]))
+    for target in (sibling_red, prefix_trap, primary):
+        for tool, tool_input in writes_into(target):
+            got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+            if got != "deny" or any(text in reason for text in (ROOT, slash(ROOT), target, slash(target))):
+                problems.append("%s: want deny naming no path, got %s (%s)"
+                                % (label(tool, tool_input), got, reason[:120]))
+    for tool, tool_input in writes_into(red):
+        got, reason = _decide_full(tool, home, **tool_input)
+        problems += _other_checkout_problems("no agent_id: " + label(tool, tool_input), got, reason,
+                                             (ROOT, slash(ROOT), red, slash(red)))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an agent's writes into its own red-run folder pass; the same writes elsewhere are refused"
+
+
+def worktree_home_red_root_case():
+    """Rule 0, other-checkout, the folder root of the caller's own red-run folder: a write may land
+    inside it, never remove or move it. `rm -rf` of the folder, with or without a trailing slash, a
+    `cd` into it chained to `rm -rf .`, `mv` of it and a Write on its path are refused. A `cp` into
+    it, a `cd` into it chained to a `cp`, and a Write inside it pass. Decision:
+    an-agent-outside-its-home-tree-must-stop."""
+    primary, home, _, _ = _cross_checkout_fixture(
+        "xcoredroot", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    red = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "-red")[0]
+    write(os.path.join(home, "t.py"), "print(1)\n")
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow" or not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        return False, ("the agent's recording call: want allow and a home record, got %s (%s)"
+                       % (got, reason[:120]))
+    paths = (ROOT, slash(ROOT), red, slash(red))
+    problems = []
+    for label, tool, tool_input in (
+        ("rm -rf <red>", "Bash", {"command": "rm -rf %s" % slash(red)}),
+        ("rm -rf <red>/", "Bash", {"command": "rm -rf %s/" % slash(red)}),
+        ("cd <red> && rm -rf .", "Bash", {"command": "cd %s && rm -rf ." % slash(red)}),
+        ("mv <red> x", "Bash", {"command": "mv %s x" % slash(red)}),
+        ("Write on <red>", "Write", {"file_path": red, "content": "x"}),
+    ):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if tool == "Bash":
+            problems += _other_checkout_problems(label, got, reason, paths)
+        elif got != "deny" or any(text in reason for text in paths):
+            problems.append("%s: want deny naming no path, got %s (%s)" % (label, got, reason[:120]))
+    for label, tool, tool_input in (
+        ("cp t.py <red>/", "Bash", {"command": "cp t.py %s/" % slash(red)}),
+        ("cd <red> && cp x .", "Bash", {"command": "cd %s && cp x ." % slash(red)}),
+        ("Write inside <red>", "Write", {"file_path": os.path.join(red, "f"), "content": "x"}),
+    ):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (label, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the red-run folder's root is refused to rm, mv and a Write; a cp into it and a write inside it pass"
+
+
+def worktree_home_red_nested_case():
+    """Rule 0, other-checkout, the red-run folder is the primary's alone: a folder named
+    `agent-<its id>-red` under another linked worktree's `.claude/worktrees/` belongs to that
+    worktree, so a `cd` into it, a shell write into it and a Write into it are refused. Decision:
+    an-agent-outside-its-home-tree-must-stop."""
+    primary, home, lane_b, _ = _cross_checkout_fixture(
+        "xcorednest", lanes=("agent-" + CD_AGENT_HOME, "lane-b"))
+    nested = os.path.join(lane_b, ".claude", "worktrees", "agent-" + CD_AGENT_HOME + "-red")
+    os.makedirs(nested, exist_ok=True)
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow" or not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        return False, ("the agent's recording call: want allow and a home record, got %s (%s)"
+                       % (got, reason[:120]))
+    paths = (ROOT, slash(ROOT), nested, slash(nested), lane_b, slash(lane_b))
+    problems = []
+    for label, tool, tool_input in (
+        ("cd <nested>", "Bash", {"command": "cd %s" % slash(nested)}),
+        ("echo x > <nested>/f", "Bash", {"command": "echo x > %s/f" % slash(nested)}),
+        ("Write <nested>/f", "Write", {"file_path": os.path.join(nested, "f"), "content": "x"}),
+    ):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if tool == "Bash":
+            problems += _other_checkout_problems(label, got, reason, paths)
+        elif got != "deny" or any(text in reason for text in paths):
+            problems.append("%s: want deny naming no path, got %s (%s)" % (label, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a red-run folder nested under another linked worktree is refused to a cd, a shell write and a Write"
+
+
+RED_CASE_OFF_WINDOWS = ("Windows folds path case, so another spelling of the red-run folder is that "
+                        "folder only there; on POSIX it is another folder, so this case does not run")
+
+
+def worktree_home_red_case_fold_case():
+    """Rule 0, other-checkout, the write act's exemption on Windows: the caller's own red-run folder
+    spelled in other letters of case is the same folder, so a Write into it and a `cd` into it
+    chained to a write pass. Decision: an-agent-outside-its-home-tree-must-stop."""
+    if os.name != "nt":
+        return SKIP, RED_CASE_OFF_WINDOWS
+    primary, home, _, _ = _cross_checkout_fixture(
+        "xcorecase", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "-red")
+    upper = os.path.join(primary, ".claude", "worktrees", "AGENT-" + CD_AGENT_HOME.upper() + "-RED")
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow" or not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        return False, ("the agent's recording call: want allow and a home record, got %s (%s)"
+                       % (got, reason[:120]))
+    problems = []
+    for label, tool, tool_input in (
+        ("Write into the upper-case red-run folder", "Write",
+         {"file_path": os.path.join(upper, "f"), "content": "x"}),
+        ("cd into the upper-case red-run folder chained to a write", "Bash",
+         {"command": "cd %s && echo x > f" % slash(upper)}),
+    ):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (label, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a write into the red-run folder spelled in other letters of case passes"
+
+
 # Text is not a move: a `cd` in a comment, in quotes or in a heredoc body is never run. A real `cd`
 # after one of those still is, and a comment opener or a lone quote inside a string must not hide it.
 CD_TEXT_ALLOW = (
@@ -20723,6 +20960,15 @@ LOG_CHECKS = (
      "clone's .git passes", worktree_home_cd_allowed_case),
     ("worktree-home: the cd exemptions pass: an agent's recorded home from outside it, its own red-run "
      "folder, a session's recorded home", worktree_home_cd_exempt_case),
+    ("worktree-home: an agent's write into its own red-run folder, by a cd chained to it, a cp, a Write "
+     "or an Edit, is allowed; the same writes into a sibling's red-run folder, a prefix-named folder, "
+     "the primary, or with no agent_id are refused", worktree_home_red_write_case),
+    ("worktree-home: the own red-run folder's root is refused to rm, mv and a Write, and a cp into it "
+     "or a write inside it passes", worktree_home_red_root_case),
+    ("worktree-home: a red-run folder nested under another linked worktree, not the primary's, is "
+     "refused to a cd, a shell write and a Write", worktree_home_red_nested_case),
+    ("worktree-home: a write into the own red-run folder spelled in other letters of case passes on "
+     "Windows, and is a skip elsewhere", worktree_home_red_case_fold_case),
     ("worktree-home: a cd in a comment, in quotes or in a heredoc body is text, and a real cd after one "
      "is refused", worktree_home_cd_text_case),
     ("worktree-home: an owner override lifts a bare cd into another checkout",
@@ -22749,15 +22995,15 @@ def ov_type(config, session, prompt, seconds=0):
 
 
 def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agent_type=None,
-            temp=None, env=None, load=None):
+            temp=None, env=None, load=None, env_path=None):
     """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
     reads as the system temp: a git write under it is a throwaway, and silent-write skips it. `env`
     adds variables to this one guard run. `load` is the machine reading a lane-start call meets
-    (LB_NORMAL when None)."""
+    (LB_NORMAL when None). `env_path` is the PATH of this one guard run (None keeps the runner's)."""
     fixed = {"LOCAL_TIME_NOW": ov_clock(seconds)}
     fixed.update(env or {})
     return decide({
-        "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": None,
+        "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": env_path,
         "config": config, "agent_id": agent_id, "agent_type": agent_type, "temp": temp,
         "env": fixed, "tool_input": tool_input, "load": load,
     })
@@ -26456,6 +26702,12 @@ FAMILY = "simulator"
 #                        hour" is the newest line in <config>/state/sim-boots.jsonl. Unrecorded is
 #                        not idle.
 #   The cap counts EVERY booted device, owner-booted and unrecorded included.
+#   simulator-boot-route   refuses an xcodebuild -destination that names a shut-down device, judged after
+#                          cap and twin. The remedy is sim-test for `test`, else the generic destination.
+#   simulator-boot-lease   refuses an MCP launch of a shut-down device, held lock or not: a launch needs a lease,
+#                          and the Mac shares one simulator across repos (decision sim-test-is-the-one-boot-path,
+#                          ruling 5). Judged after cap and twin. The reason names sim-test and the lease. A booted
+#                          device is never refused.
 # A fake `xcrun` and `ps` on PATH answer `simctl list devices` and the process table. A reason names
 # UDIDs and device names only, never the config folder or the record file.
 
@@ -26474,9 +26726,11 @@ SIM_UE = "1A2B3C4D-0000-4000-8000-00000000000E"  # Named-UDID Mini, booted: its 
 SIM_UF = "1A2B3C4D-0000-4000-8000-00000000000F"  # Delta, shut down on RT only
 SIM_UDA = "1A2B3C4D-0000-4000-8000-0000000000D3"  # Delta, shut down on RT_OLD (25.0), listed first
 SIM_UDB = "1A2B3C4D-0000-4000-8000-0000000000D4"  # Delta, shut down on RT (26.0), listed second
+SIM_RT17 = "com.apple.CoreSimulator.SimRuntime.iOS-17-0"
+SIM_U17 = "1A2B3C4D-0000-4000-8000-0000000000D5"  # Delta, booted on RT17 (17.0): the copy OS=17.0 names
 # The launchd_sim of each booted device: the pid and the start time the fake `ps` gives it, and the
 # same pair in the boot record. A record that names another pid or start time is an older boot.
-LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003, SIM_UE: 4004}
+LAUNCHD_PID = {SIM_UA: 4001, SIM_UB: 4002, SIM_UT0: 4003, SIM_UE: 4004, SIM_U17: 4005}
 LSTART = "Sat Oct 10 07:00:00 2026"
 LAUNCHD_CMD = ("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/"
                "Resources/launchd_sim")
@@ -26546,12 +26800,12 @@ def register_simulator_boot_cases():
                  [twin_idle_rec]),
         "twin_recent": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_recent"), twin_rows()),
                         [dict(twin_idle_rec, at=sim_iso(10 * 60))]),
-        "twin_unrecorded": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_unrec"), twin_rows()),
+        "twin_unrecorded": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_unrecorded"), twin_rows()),
                             []),
-        "twin_other_runtime": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_rt"),
+        "twin_other_runtime": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_other_runtime"),
                                                twin_rows(state_of_ut0_runtime=SIM_RT_OLD)),
                                [dict(twin_idle_rec, runtime=SIM_RT_OLD)]),
-        "twin_other_type": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_type"),
+        "twin_other_type": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_other_type"),
                                             twin_rows(type_of_ut0=SIM_TYPE_AIR)),
                             [dict(twin_idle_rec, deviceTypeIdentifier=SIM_TYPE_AIR)]),
         # The twin was booted 2 hours ago and shut down, then booted by hand: the live launchd_sim
@@ -26590,6 +26844,11 @@ def register_simulator_boot_cases():
             (SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
             (SIM_UE, "Gamma Mini", "Booted", SIM_TYPE_MINI, SIM_RT),
             (SIM_UF, "Delta", "Shutdown", SIM_TYPE_AIR, SIM_RT)]), None),
+        # Delta shut down on 25.0 (listed first) and booted on 17.0. OS=17.0 names only the booted copy, so a
+        # destination that picks the 17.0 runtime boots nothing.
+        "os_two_rt": (make_fake_xcrun(os.path.join(ROOT, "sim_os_two_rt"), [
+            (SIM_UDA, "Delta", "Shutdown", SIM_TYPE_PRO, SIM_RT_OLD),
+            (SIM_U17, "Delta", "Booted", SIM_TYPE_PRO, SIM_RT17)]), None),
     }
     cfgs = {}
     for name, (folder, records) in fixtures.items():
@@ -26606,6 +26865,7 @@ def register_simulator_boot_cases():
     cap_path, cap_cfg = on("cap")
     one_path, one_cfg = on("one")
     twin_path, twin_cfg = on("twin")
+    os_two_path, os_two_cfg = on("os_two_rt")
 
     # Rule simulator-boot-cap. The reason names both booted UDIDs.
     # The bypass rule judges a raw boot on its text, before the cap rule reads the device list.
@@ -26684,8 +26944,39 @@ def register_simulator_boot_cases():
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC
        + ",OS=26.0'", "deny", rule="simulator-boot-cap", env_path=os_split_path,
        config=os_split_cfg, carries=(SIM_UA, SIM_UE))
-    sh("control: one booted, a second boot by destination is allowed",
-       sim_boot_by_destination(SIM_UC), "allow", env_path=one_path, config=one_cfg)
+    # The MCP launch cases from here to the twin section boot through the simulator MCP tool, with no lock
+    # held. simulator-boot-route judges only xcodebuild destinations, so an xcodebuild boot of a shut-down
+    # device would be refused by it before the cap or twin rule is read. Every MCP launch of a shut-down device
+    # is refused by simulator-boot-lease once cap and twin pass, so the refusal here is the lease: it shows
+    # that cap and twin did not fire.
+    add("lease: one booted, an MCP launch of a shut-down device with no lock is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("lease: one booted, an MCP launch that names the shut-down device by udid is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", udid=SIM_UC,
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("lease: an MCP launch of a booted device with no lock is allowed",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UA, env_path=one_path, config=one_cfg)
+    # A name that differs from the device's name only in case or in outer spaces still names that device.
+    add("lease: an MCP launch naming the shut-down device in lowercase is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device="gamma mini",
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("lease: an MCP launch naming the shut-down device with a leading space is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=" Gamma Mini",
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("lease: an MCP launch naming the shut-down device with a trailing space is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device="Gamma Mini ",
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("control: an MCP launch of a name no device holds is allowed, the name matches nothing",
+        "allow", tool=SIM_MCP, action="launch", device="Zeta Mini", env_path=one_path, config=one_cfg)
+    # Devices unreadable: a failing `simctl list` leaves no device list, so the boot rules fail open, the lease too.
+    unreadable = os.path.join(ROOT, "sim_unreadable")
+    os.makedirs(unreadable, exist_ok=True)
+    write(os.path.join(unreadable, "xcrun"), "#!/bin/sh\nexit 1\n")
+    os.chmod(os.path.join(unreadable, "xcrun"), 0o755)
+    add("control: an MCP launch of a shut-down device with an unreadable device list is allowed (fail open)",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=unreadable + os.pathsep + PY_PATH, config=one_cfg)
     sh("boot a second simulator with one booted: bash simctl boot, bypass first",
        "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-bypass",
        env_path=one_path, config=one_cfg, carries="sim-test")
@@ -26711,21 +27002,142 @@ def register_simulator_boot_cases():
     add("boot a device with an idle booted twin: simulator MCP launch names it by udid",
         "deny", rule="simulator-boot-twin", tool=SIM_MCP, action="launch", udid=SIM_UT1,
         env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
-    sh("control: the twin booted 10 minutes ago is not idle",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_recent"),
-       config=cfgs["twin_recent"][1])
-    sh("control: an unrecorded booted twin is not idle",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_unrecorded"),
-       config=cfgs["twin_unrecorded"][1])
-    sh("control: an idle twin on another runtime does not match",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_other_runtime"),
-       config=cfgs["twin_other_runtime"][1])
-    sh("control: an idle twin of another device type does not match",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_other_type"),
-       config=cfgs["twin_other_type"][1])
-    sh("boot a device with a twin booted by hand after its recorded boot: the record is older",
-       sim_boot_by_destination(SIM_UT1), "allow", env_path=folder_path("twin_rebooted"),
-       config=cfgs["twin_rebooted"][1])
+    # Each launch below is refused by the lease, so the twin rule did not fire: the lease is the rule named.
+    add("twin not idle: a twin booted 10 minutes ago does not fire the twin rule; the lease refuses the launch",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_recent"), config=cfgs["twin_recent"][1], carries=("sim-test", "lease"))
+    add("twin not idle: an unrecorded booted twin does not fire the twin rule; the lease refuses the launch",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_unrecorded"), config=cfgs["twin_unrecorded"][1], carries=("sim-test", "lease"))
+    add("twin not matched: an idle twin on another runtime does not fire the twin rule; the lease refuses",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_other_runtime"), config=cfgs["twin_other_runtime"][1],
+        carries=("sim-test", "lease"))
+    add("twin not matched: an idle twin of another device type does not fire the twin rule; the lease refuses",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_other_type"), config=cfgs["twin_other_type"][1], carries=("sim-test", "lease"))
+    add("twin not idle: a twin booted by hand after its recorded boot does not fire the twin rule; the lease refuses",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_rebooted"), config=cfgs["twin_rebooted"][1], carries=("sim-test", "lease"))
+
+    # Rule simulator-boot-route (decision sim-test-is-the-one-boot-path, ruling 5). An xcodebuild whose
+    # -destination names a shut-down simulator is refused after the cap and twin rules. The remedy depends
+    # on the action: `test` names sim-test, any other action names the generic destination. A booted
+    # device is not a boot, so it is allowed. The "one" fixture holds one booted device and one shut-down
+    # device of another type, so neither the cap nor the twin rule judges these commands.
+    generic = "generic/platform=iOS Simulator"
+    # The remedy is the phrase "Run `sim-test", not the bare word: the refusal's own text also names the
+    # sim-test lock, so the bare word would hold whatever remedy the refusal printed.
+    sh("route: a test of a shut-down simulator by id names sim-test",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    sh("route: a test with the action after its options, a shut-down simulator by name, names sim-test",
+       "xcodebuild -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini' test",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    sh("route: a build of a shut-down simulator names the generic destination",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries=generic)
+    sh("route: build-for-testing of a shut-down simulator by name names the generic destination",
+       "xcodebuild build-for-testing -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries=generic)
+    sh("route: no action on a shut-down simulator names the generic destination",
+       "xcodebuild -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries=generic)
+    sh("control: a test of a booted simulator by id is allowed",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UA + "'",
+       "allow", env_path=one_path, config=one_cfg)
+    sh("control: a build of a booted simulator by name is allowed",
+       "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Alpha Pro'",
+       "allow", env_path=one_path, config=one_cfg)
+    # Order: route is judged after cap and twin, so a test of a shut-down device that either rule
+    # refuses names that rule, not simulator-boot-route.
+    sh("route is judged after the cap: a test of a shut-down simulator with two booted names the cap",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "deny", rule="simulator-boot-cap", env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
+    sh("route is judged after the twin: a test of a shut-down twin names the idle twin",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UT1 + "'",
+       "deny", rule="simulator-boot-twin", env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
+
+    # The route rule judges an xcodebuild boot wherever it sits: inside a wrapper (bash -c, sh -lc), with a `)`
+    # glued to the destination, or after an option with a colon (`-only-testing:X`). Each case pins that the boot
+    # is refused with its remedy, since a boot the route misses skips the lock.
+    sh("route: a test of a shut-down simulator inside bash -c names sim-test",
+       "bash -c \"xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'\"",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    sh("route: a test of a shut-down simulator inside sh -lc names sim-test",
+       "sh -lc 'xcodebuild test -scheme App -destination \"platform=iOS Simulator,id=" + SIM_UC + "\"'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    # Its control: a raw boot inside the same wrapper is refused by the bypass rule today, so the wrapper is read.
+    sh("route: a raw boot inside bash -c is refused by the bypass rule (control: the wrapper is read)",
+       "bash -c \"xcrun simctl boot " + SIM_UC + "\"", "deny", rule="simulator-boot-bypass",
+       env_path=one_path, config=one_cfg, carries="sim-test")
+    sh("route: a test in a subshell, the closing paren glued to the destination, names sim-test",
+       "(cd ios && xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "')",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    # Its control: the same subshell with the paren apart from the quote. The guard reads this one today, so the
+    # glued case fails on the glue, not on the subshell.
+    sh("route: a test in a subshell, the closing paren apart from the destination, names sim-test (control)",
+       "(cd ios && xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' )",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    sh("route: a test with -only-testing before the action names sim-test",
+       "xcodebuild -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' -only-testing:AppTests test",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+
+    # The remedy names sim-test with the xcodebuild arguments only. The shell's redirects and a background `&`
+    # are not arguments of xcodebuild, so the remedy holds none of them, whether spaced or glued to a quote.
+    sh("route: a test of a shut-down simulator with 2>&1 names sim-test -scheme App, with no redirect word",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' 2>&1",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
+       carries="Run `sim-test -scheme App", lacks=("2>&1", ">", "&"))
+    sh("route: a test of a shut-down simulator with > out.log names sim-test -scheme App, with no > word",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' > out.log",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
+       carries="Run `sim-test -scheme App", lacks=(">",))
+    sh("route: a test of a shut-down simulator, the quote glued to a trailing &, names sim-test -scheme App",
+       'xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '"&',
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
+       carries="Run `sim-test -scheme App", lacks=("&",))
+    sh("route: a test of a shut-down simulator, the quote glued to a redirect, names sim-test -scheme App",
+       'xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '">/dev/null',
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
+       carries="Run `sim-test -scheme App", lacks=(">",))
+    # A boolean flag between the scheme and the action is no option with a value, so the action is still `test`.
+    sh("route: a boolean flag before the action, -skipMacroValidation, still names sim-test",
+       "xcodebuild -scheme App -skipMacroValidation test -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
+    # OS=17.0 picks the 17.0 copy of Delta, which is booted, so nothing is booted and the route allows. The
+    # control is the same destination without the glued paren. Today the glued value reads OS as "17.0)",
+    # drops the runtime filter, and judges the shut-down 25.0 copy too.
+    sh("route: OS=17.0 in a subshell, its paren glued to the value, judges the 17.0 copy only: booted, so allowed",
+       "(cd ios && xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=17.0')",
+       "allow", env_path=os_two_path, config=os_two_cfg)
+    sh("control: OS=17.0 with no glued paren judges the 17.0 copy only: booted, so allowed",
+       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=17.0'",
+       "allow", env_path=os_two_path, config=os_two_cfg)
+
+    # The sim-test lock does not decide an MCP launch: a shut-down device is refused by the lease whether the
+    # lock is held or free. So the held case names the lease, and no case reads the lock's age or its holder's
+    # liveness. The lock is one fixture, built just before its case.
+    def lock_config(name, pid_text):
+        cfg = os.path.join(ROOT, "simcfg_lock_" + name)
+        lock = os.path.join(cfg, "state", "sim-test.lock")
+
+        def build():
+            os.makedirs(lock, exist_ok=True)
+            write(os.path.join(lock, "pid"), pid_text + "\n")
+        lazy_fixture([cfg], build)
+        return cfg
+
+    # The test runner's own pid is alive for as long as the cases run, so the lock is held.
+    live_cfg = lock_config("live", str(os.getpid()))
+    add("lease: a live lock holder does not lift the lease: an MCP launch of a shut-down device is refused",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=one_path, config=live_cfg, carries=("sim-test", "lease"))
+    add("lease: a live lock holder does not lift the lease: an MCP launch by udid is refused",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", udid=SIM_UC,
+        env_path=one_path, config=live_cfg, carries=("sim-test", "lease"))
+    add("lease: a live lock holder does not refuse an MCP launch of a booted device",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UA, env_path=one_path, config=live_cfg)
 
 
 def folder_path(name):
@@ -26797,12 +27209,14 @@ def register_simulator_hold_cases():
         ("a twin is not idle while Xcode.app runs", quiet + [
             ("600", "1", "0", "/Applications/Xcode.app/Contents/MacOS/Xcode")]),
     ]
+    # Each launch is refused by the lease, so the twin rule did not fire on the held or unreadable twin.
     for index, (label, rows) in enumerate(holds):
-        sh("control: " + label, sim_boot_by_destination(SIM_UT1), "allow",
-           env_path=env_for("hold_%d" % index, rows), config=cfg)
-    sh("control: a twin is not idle when the process table cannot be read",
-       sim_boot_by_destination(SIM_UT1), "allow",
-       env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg)
+        add(label + ": the twin rule does not fire; the lease refuses the launch",
+            "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+            env_path=env_for("hold_%d" % index, rows), config=cfg, carries=("sim-test", "lease"))
+    add("a twin is not idle when the process table cannot be read: the twin rule does not fire; the lease refuses",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg, carries=("sim-test", "lease"))
 
 
 def register_simulator_bypass_cases():
@@ -26883,6 +27297,42 @@ def sim_bypass_override_check(timed):
     return check
 
 
+def sim_override_check(name, rule, tool, tool_input, path):
+    """The owner override lifts RULE. With no override the call is refused. After `override` the same call
+    is allowed once, and the second call is refused again. The call runs on PATH, so RULE is what refuses it."""
+    def check():
+        config, session = ov_config(name), "ov-" + name
+
+        def call(seconds):
+            return lambda: ov_call(tool, tool_input, NOGIT, config, session, seconds, env_path=path)
+
+        ok, why = ov_story([("with no override", call(0), "deny", rule)])
+        if not ok:
+            return False, why
+        note = ov_type(config, session, "override")
+        ok, why = ov_story([("first call", call(60), "allow", rule),
+                            ("second call, override spent", call(120), "deny", rule)], note)
+        if not ok:
+            return False, why
+        return True, "denied with no override, then allowed once"
+    return check
+
+
+def sim_route_override_check():
+    """The owner override lifts simulator-boot-route. A test of a shut-down device is refused with no override.
+    The call runs on the "one" fixture (one booted, one shut down), so the route rule is what refuses it."""
+    command = "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'"
+    return sim_override_check("sim-route-override", "simulator-boot-route", "Bash",
+                              {"command": command}, folder_path("one"))
+
+
+def sim_lease_override_check():
+    """The owner override lifts simulator-boot-lease. An MCP launch of a shut-down device, with no lock held, is
+    refused with no override. The "one" fixture has one booted device, so the cap does not fire."""
+    return sim_override_check("sim-lease-override", "simulator-boot-lease", SIM_MCP,
+                              {"action": "launch", "device": SIM_UC}, folder_path("one"))
+
+
 # The simulator cases need a POSIX shell for the fake xcrun and ps. Windows has neither to fake, so
 # on Windows the simulator family holds no case, and GUARD_FAMILY=simulator runs none and fails.
 FAMILY = "simulator"
@@ -26897,6 +27347,12 @@ if os.name != "nt":
                      "simulator: an owner override lifts a raw boot once (a one-act override)")
         LOG_FAMILY[sim_label] = FAMILY
         LOG_CHECKS = LOG_CHECKS + ((sim_label, sim_bypass_override_check(sim_timed)),)
+    sim_route_label = "simulator: an owner override lifts a test of a shut-down device (simulator-boot-route)"
+    LOG_FAMILY[sim_route_label] = FAMILY
+    LOG_CHECKS = LOG_CHECKS + ((sim_route_label, sim_route_override_check()),)
+    sim_lease_label = "simulator: an owner override lifts an MCP launch of a shut-down device (simulator-boot-lease)"
+    LOG_FAMILY[sim_lease_label] = FAMILY
+    LOG_CHECKS = LOG_CHECKS + ((sim_lease_label, sim_lease_override_check()),)
 else:
     skip_case("simulator: the boot, hold and bypass rules, every case of the family", NO_SIMULATOR)
 
@@ -26973,6 +27429,10 @@ LOG_RULE_FAMILY = (
     ("worktree-home: an agent's cd into a sibling agent tree", "worktree-home"),
     ("worktree-home: a cd to a checkout's own root", "worktree-home"),
     ("worktree-home: the cd exemptions pass", "worktree-home"),
+    ("worktree-home: an agent's write into its own red-run folder", "worktree-home"),
+    ("worktree-home: the own red-run folder's root", "worktree-home"),
+    ("worktree-home: a red-run folder nested under another linked worktree", "worktree-home"),
+    ("worktree-home: a write into the own red-run folder spelled", "worktree-home"),
     ("worktree-home: a cd in a comment, in quotes", "worktree-home"),
     ("worktree-home: an owner override lifts a bare cd", "worktree-home"),
     ("worktree-home: a later path field", "worktree-home"),

@@ -2567,6 +2567,263 @@ test("Copy ask after a failed write changes the hint to the copy result", async 
   assert.match(hint, /Copied\. Paste it in chat\.|Select and copy the text in the box\./, "after Copy ask the hint still says: " + JSON.stringify(hint));
 });
 
+// ---------------------------------------------------------------- reply to an answered ask (step ask-reply-back)
+// Contract: docs/design/ask-reply-back-notes.md, sections 1-8; the mockup is docs/design/ask-reply-back.html.
+// A reply is one new asks/<id> record {id, text, at, re}, sent through the Ask box's path: one Undo lock, one wake comment.
+// Per thread, keyed by the root ask id <k>: #reply-<k> (Reply), form #rf-<k>, textarea #rt-<k>, hint #rh-<k>,
+// Close #rx-<k>, Send reply #rs-<k>, Copy reply #rc-<k>. The thread's line is .sline in .replyend; its Undo is #askUndo.
+const RPL_ROOT = ASK_ANSWERED.id;
+const RPL_TEXT = "Did round 3 change the rail guard?";
+// ASK_ANSWERED is answered after RPL_NEW, so it opens as a new answer. Every answer is before RPL_SEEN, so each one folds.
+const RPL_NEW = { "waiting.askSeen": "2026-10-29T00:00:00Z" };
+const RPL_SEEN = { "waiting.askSeen": "2026-10-31T00:00:00Z" };
+const RPL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+// An answer a session gave to a reply: a reply to it names this record in re, not the root ask.
+const RPL_DEEP = { id: "ask-rpl-deep", text: "Is the rail guard still unchanged?", at: "2026-10-31T08:00:00Z", re: RPL_ROOT, owner: "lane tier-fold", answered: "2026-10-31T09:00:00Z", reply: "No. The rail guard is unchanged." };
+const rplKeys = (page) => page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").map((l) => l[2]));
+const rplLast = async (page) => (await rplKeys(page)).at(-1);
+// Whether the page sends a wake comment with these words, once it has or at 3 s. Never throws, so a missing comment fails by name.
+const wakeHas = (page, words) => page.waitForFunction((w) => window.__sent.some((s) => String(s.text).includes(w)), words, { timeout: 3000 }).then(() => true, () => false);
+// Whether the line under the reply's thread holds the words, once it shows them or at 3 s. Never throws.
+const rplLineHas = (page, words) => page.waitForFunction((w) => { const l = document.querySelector(".replyend .sline"); return !!l && l.textContent.includes(w); }, words, { timeout: 3000 }).then(() => true, () => false);
+// Presses Reply on the answered ask and waits for its box. A Reply that is not there fails by name.
+async function openReply(page, root) {
+  await mustHave(page, `#reply-${root}`, "Reply control on the answered ask");
+  await page.click(`#reply-${root}`);
+  await mustHave(page, `#rt-${root}`, "reply box");
+}
+// Presses Send reply in the open box, then waits for its write. The button must be on, so a press that cannot go fails by name.
+async function sendReply(page, root) {
+  await mustHave(page, `#rs-${root}`, "Send reply button");
+  assert.equal(await page.locator(`#rs-${root}`).isDisabled(), false, "Send reply is off with the reply typed");
+  const before = (await askWrites(page)).length;
+  await page.click(`#rs-${root}`);
+  await waitAskWrites(page, before + 1);
+}
+async function replyTo(page, root, text) {
+  await openReply(page, root);
+  await page.fill(`#rt-${root}`, text);
+  await sendReply(page, root);
+}
+
+test("reply to an answer: Reply shows only on an unfolded answered ask, not on a waiting ask or a folded row", async (t) => {
+  const seen = { id: "ask-rpl-seen", text: "A seen answer", at: "2026-10-27T09:00:00Z", owner: "triage", answered: "2026-10-27T10:00:00Z", reply: "A seen reply." };
+  const waiting = { id: "ask-rpl-wait", text: "A question still waiting", at: "2026-10-31T08:00:00Z" };
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED, [seen.id]: seen, [waiting.id]: waiting } }, storage: RPL_NEW }); if (!page) return;
+  // Each card is on the page before its Reply is looked for, so an absent Reply is a missing one.
+  await shownBox(page, ASK_ANSWERED.reply);
+  await mustHave(page, `#reply-${RPL_ROOT}`, "Reply on the unfolded answered ask");
+  assert.equal(await page.getAttribute(`#reply-${RPL_ROOT}`, "aria-controls"), `rf-${RPL_ROOT}`, "Reply does not control its reply box");
+  const atEnd = await page.locator(`#reply-${RPL_ROOT}`).evaluate((b) => { const li = b.closest("li.askc"), end = b.closest(".replyend"), th = li && li.querySelector(".thread"); return !!end && !!th && !!(th.compareDocumentPosition(end) & Node.DOCUMENT_POSITION_FOLLOWING); });
+  assert.equal(atEnd, true, "Reply is not at the end of its thread, after .thread");
+  await shownBox(page, waiting.text);
+  assert.equal(await page.locator(`#reply-${waiting.id}`).count(), 0, "Reply shows on a waiting ask");
+  await shownBox(page, seen.text);
+  await mustHave(page, `button.frow[data-ask="${seen.id}"]`, "folded row of the seen answer");
+  assert.equal(await page.locator(`#reply-${seen.id}`).count(), 0, "Reply shows on a folded row");
+  await page.click(`button.frow[data-ask="${seen.id}"]`);
+  await mustHave(page, `#reply-${seen.id}`, "Reply after Show answer on the seen answer");
+});
+
+test("reply to an answer: Send reply writes one asks record {id, text, at, re} and nothing else, and the parent is never written", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await replyTo(page, RPL_ROOT, RPL_TEXT);
+  const log = await page.evaluate(() => window.__log);
+  const writes = log.filter((l) => l[0] === "set" || l[0] === "delete");
+  assert.deepEqual(writes.map((l) => [l[0], l[1]]), [["set", "asks"]], "Send reply made these writes: " + JSON.stringify(writes.map((l) => [l[0], l[1]])));
+  const [, , key, body] = writes[0];
+  assert.match(key, /^ask-[0-9a-z]+$/, "the key is not ask-<id>: " + key);
+  assert.deepEqual(Object.keys(body).sort(), ["at", "id", "re", "text"], "the record holds " + Object.keys(body).join(", "));
+  assert.equal(body.id, key, "the id field is not the key");
+  assert.equal(body.text, RPL_TEXT, "the text is not the owner's words");
+  assert.equal(body.re, RPL_ROOT, "re is " + JSON.stringify(body.re) + ", not the ask the reply follows");
+  assert.match(body.at, RPL_ISO, "at is not an ISO time: " + body.at);
+  assert.equal(log.some((l) => l[2] === RPL_ROOT), false, "the parent record was written or deleted");
+});
+
+test("reply to an answer: a reply to a reply's answer names that newest answered record in re, not the root ask", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED, [RPL_DEEP.id]: RPL_DEEP } }, storage: RPL_NEW }); if (!page) return;
+  await replyTo(page, RPL_ROOT, "A second question about the rail guard.");
+  const body = (await askWrites(page))[0];
+  assert.equal(body.re, RPL_DEEP.id, "re is " + JSON.stringify(body.re) + ", not the newest answered record " + RPL_DEEP.id);
+});
+
+test("reply to an answer: the wake comment names the reply's id, the re id and the parent's owner, in the notes' words", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await replyTo(page, RPL_ROOT, RPL_TEXT);
+  const key = await rplLast(page);
+  const words = `Replied on the waiting page. Writer: triage. Ask ${key} re ${RPL_ROOT}, answered by triage: ${RPL_TEXT}`;
+  assert.equal(await wakeHas(page, words), true, "no wake comment with the words " + JSON.stringify(words) + "; sent: " + JSON.stringify((await sent(page)).map((s) => s.text)));
+});
+
+test("reply to an answer: the wake comment of a reply to a reply's answer names that answer's owner, so the writer routes to it", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED, [RPL_DEEP.id]: RPL_DEEP } }, storage: RPL_NEW }); if (!page) return;
+  const text = "A second question about the rail guard.";
+  await replyTo(page, RPL_ROOT, text);
+  const key = await rplLast(page);
+  const words = `Replied on the waiting page. Writer: triage. Ask ${key} re ${RPL_DEEP.id}, answered by lane tier-fold: ${text}`;
+  assert.equal(await wakeHas(page, words), true, "no wake comment with the words " + JSON.stringify(words) + "; sent: " + JSON.stringify((await sent(page)).map((s) => s.text)));
+});
+
+test("reply to an answer: Undo within 8 s deletes only the reply's record, never the parent, and the words go back in the reply box", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await replyTo(page, RPL_ROOT, RPL_TEXT);
+  const key = await rplLast(page);
+  await mustHave(page, "#askUndo", "Undo control on the reply's line");
+  await page.click("#askUndo");
+  await waitAskDeletes(page, 1);
+  const dels = await page.evaluate(() => window.__log.filter((l) => l[0] === "delete").map((l) => [l[1], l[2]]));
+  assert.deepEqual(dels, [["asks", key]], "Undo deleted " + JSON.stringify(dels) + ", not only the reply " + key);
+  await mustHave(page, `#rt-${RPL_ROOT}`, "reply box after Undo");
+  assert.equal(await page.inputValue(`#rt-${RPL_ROOT}`), RPL_TEXT, "Undo did not put the words back in the reply box");
+  assert.equal(await rplLineHas(page, "Undone. Your reply is back in the box, not sent."), true, "the reply's line does not say it was undone");
+  assert.equal(await wakeHas(page, `Undone on the waiting page. Ask ${key} is withdrawn.`), true, "no withdrawn wake for the reply " + key);
+});
+
+test("reply to an answer: a reply's Undo count holds Send ask off, with the hint that says so", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await replyTo(page, RPL_ROOT, RPL_TEXT);
+  await mustHave(page, ASK.box, "Ask box");
+  await page.fill(ASK.box, ASK_TEXT);
+  await mustHave(page, ASK.send, "Send ask button");
+  assert.equal(await page.locator(ASK.send).isDisabled(), true, "Send ask is on while the reply's Undo count runs");
+  assert.match((await page.textContent("#askHint")) ?? "", /Send turns on when the Undo count ends\./, "the Ask box does not say why Send ask is off");
+});
+
+test("reply to an answer: an ask's Undo count holds Send reply off, with the reply's hint that says so", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await sendTyped(page, ASK_TEXT);
+  await openReply(page, RPL_ROOT);
+  await page.fill(`#rt-${RPL_ROOT}`, RPL_TEXT);
+  await mustHave(page, `#rs-${RPL_ROOT}`, "Send reply button");
+  assert.equal(await page.locator(`#rs-${RPL_ROOT}`).isDisabled(), true, "Send reply is on while the ask's Undo count runs");
+  assert.match((await page.textContent(`#rh-${RPL_ROOT}`)) ?? "", /Send reply turns on when the Undo count ends\./, "the reply box does not say why Send reply is off");
+});
+
+test("reply to an answer: a waiting reply counts in the Ask count and the rail, shows under its folded parent, and is never behind Show older asks", async (t) => {
+  const parent = { id: "ask-rpl-old", text: "An old question, answered long ago", at: "2026-10-20T09:00:00Z", owner: "triage", answered: "2026-10-21T10:00:00Z", reply: "The old answer." };
+  const mine = { id: "ask-rpl-mine", text: "My reply under the old answer", at: "2026-10-31T08:00:00Z", re: parent.id };
+  // Three newer answers fill the three shown, so the old thread is the fourth: older than all of them.
+  const newer = [
+    { id: "ask-rpl-n1", text: "A newer answer 1", at: "2026-10-27T09:00:00Z", owner: "triage", answered: "2026-10-27T10:00:00Z", reply: "A newer reply 1." },
+    { id: "ask-rpl-n2", text: "A newer answer 2", at: "2026-10-26T09:00:00Z", owner: "triage", answered: "2026-10-26T10:00:00Z", reply: "A newer reply 2." },
+    { id: "ask-rpl-n3", text: "A newer answer 3", at: "2026-10-25T09:00:00Z", owner: "triage", answered: "2026-10-25T10:00:00Z", reply: "A newer reply 3." },
+  ];
+  const asks = Object.fromEntries([parent, mine, ...newer].map((a) => [a.id, a]));
+  const page = await open(t, { dbExtra: { asks }, storage: RPL_SEEN }); if (!page) return;
+  assert.equal((await page.textContent("#askCount")).trim(), "1", "the Ask count does not count the waiting reply");
+  assert.equal((await page.textContent('a.ov-head[href="#asks"] .ct')).trim(), "1", "the rail's Ask count does not count the waiting reply");
+  assert.equal(await page.locator(`button.frow[data-ask="${parent.id}"]`).count(), 1, "the old answer's thread is not on the page: it sits behind Show older asks");
+  assert.equal(await page.locator("#askOlder").count(), 0, "a Show older asks button still hides the thread with a waiting reply");
+  const fwait = page.locator(`li.askc.folded:has(button.frow[data-ask="${parent.id}"]) p.fwait`);
+  assert.equal(await fwait.count(), 1, "the waiting reply does not show under its folded parent");
+  const line = (await fwait.textContent()) ?? "";
+  assert.ok(line.includes("Your reply: " + mine.text) && line.includes("Waiting for triage to read it."), "the line under the parent says: " + JSON.stringify(line));
+  assert.equal(await page.locator("#askList li.askc:not(.folded)", { hasText: mine.text }).count(), 0, "the waiting reply shows as its own row, not only under its parent");
+});
+
+test("reply to an answer: a reply the store refuses keeps its words in the box, and Copy reply copies its re id and words", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW, failSetText: "Refused reply" }); if (!page) return;
+  const text = "Refused reply: can the rail guard change?";
+  await openReply(page, RPL_ROOT);
+  await page.fill(`#rt-${RPL_ROOT}`, text);
+  await mustHave(page, `#rs-${RPL_ROOT}`, "Send reply button");
+  await page.click(`#rs-${RPL_ROOT}`);
+  await page.waitForFunction((id) => /Not saved/.test(document.getElementById(id)?.textContent || ""), `rh-${RPL_ROOT}`, { timeout: 3000 }).catch(() => {});
+  const hint = ((await page.textContent(`#rh-${RPL_ROOT}`)) ?? "").trim();
+  assert.match(hint, /^Not saved \(/, "the refused reply's hint does not say it was not saved: " + JSON.stringify(hint));
+  assert.match(hint, /Your reply is still in the box/, "the hint does not say the reply is still in the box: " + JSON.stringify(hint));
+  assert.equal(await page.inputValue(`#rt-${RPL_ROOT}`), text, "the refused reply lost its words");
+  assert.equal(await page.locator(`#rs-${RPL_ROOT}`).isDisabled(), false, "Send reply is off after a refused save, so it cannot try again");
+  await mustHave(page, `#rc-${RPL_ROOT}`, "Copy reply button");
+  await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async (s) => { window.__copied = s; } } }); });
+  await page.click(`#rc-${RPL_ROOT}`);
+  await page.waitForFunction(() => typeof window.__copied === "string", null, { timeout: 3000 }).catch(() => {});
+  assert.equal(await page.evaluate(() => window.__copied), `re ${RPL_ROOT}: ${text}`, "Copy reply did not copy the re id and the words");
+});
+
+test("reply to an answer: an empty reply box keeps Send reply off and says why; over 4000 characters it is off with the limit words and nothing is cut", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await openReply(page, RPL_ROOT);
+  await mustHave(page, `#rs-${RPL_ROOT}`, "Send reply button");
+  assert.equal(await page.locator(`#rs-${RPL_ROOT}`).isDisabled(), true, "Send reply is on with an empty box");
+  assert.match((await page.textContent(`#rh-${RPL_ROOT}`)) ?? "", /Send reply turns on once you type\./, "the empty box does not say why Send reply is off");
+  const over = "Reply word. ".repeat(400).trim();
+  await page.fill(`#rt-${RPL_ROOT}`, over);
+  assert.equal(await page.locator(`#rs-${RPL_ROOT}`).isDisabled(), true, "Send reply is on over 4000 characters");
+  const hint = ((await page.textContent(`#rh-${RPL_ROOT}`)) ?? "").trim();
+  assert.ok(hint.includes(`Your reply is ${over.length} characters. The limit is 4000.`) && hint.includes("Nothing was cut."), "the over-limit hint says: " + JSON.stringify(hint));
+  assert.equal(await page.inputValue(`#rt-${RPL_ROOT}`), over, "the words in the reply box were cut");
+  assert.deepEqual(await rplKeys(page), [], "a write happened while Send reply was off");
+});
+
+test("reply to an answer: a reply closed as a draft is in the reply box after a reload, and its Send names the same re", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await openReply(page, RPL_ROOT);
+  await page.fill(`#rt-${RPL_ROOT}`, RPL_TEXT);
+  await mustHave(page, `#rx-${RPL_ROOT}`, "Close button of the reply box");
+  await page.click(`#rx-${RPL_ROOT}`);
+  await page.reload();
+  await page.waitForFunction("state.items.length > 0");
+  await openReply(page, RPL_ROOT);
+  assert.equal(await page.inputValue(`#rt-${RPL_ROOT}`), RPL_TEXT, "the draft did not survive the reload");
+  await sendReply(page, RPL_ROOT);
+  const body = (await askWrites(page))[0];
+  assert.equal(body.text, RPL_TEXT, "the reply sent after the reload has the words " + JSON.stringify(body.text));
+  assert.equal(body.re, RPL_ROOT, "the reply sent after the reload names re " + JSON.stringify(body.re) + ", not " + RPL_ROOT);
+});
+
+test("reply to an answer: Reply stays at the thread's end while a reply waits, and a second reply names the same re", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await replyTo(page, RPL_ROOT, RPL_TEXT);
+  const first = await rplLast(page);
+  // The first reply's Undo count ends, as it does for a visit that waits: the reply then waits in its thread.
+  await jump(page, 9000);
+  await mustHave(page, `.thread .myreply[id="${first}"]`, "the waiting reply in its thread");
+  await openReply(page, RPL_ROOT);
+  await page.fill(`#rt-${RPL_ROOT}`, "A second reply in the same thread.");
+  await sendReply(page, RPL_ROOT);
+  const bodies = await askWrites(page);
+  assert.equal(bodies.length, 2, "the second reply made " + bodies.length + " asks writes in all");
+  assert.equal(bodies[1].re, RPL_ROOT, "the second reply names re " + JSON.stringify(bodies[1].re) + ", not the root ask " + RPL_ROOT);
+});
+
+test("reply to an answer: words typed while the reply saves stay in the box", async (t) => {
+  const LATER = "Also, does the Status tab show it?";
+  // The reply's write waits at the hold, so the words typed next land while it saves.
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW, hold: { set: 0 } }); if (!page) return;
+  await openReply(page, RPL_ROOT);
+  await page.fill(`#rt-${RPL_ROOT}`, RPL_TEXT);
+  await mustHave(page, `#rs-${RPL_ROOT}`, "Send reply button");
+  await page.click(`#rs-${RPL_ROOT}`);
+  assert.equal(await page.waitForFunction(() => window.__held > 0).then(() => true, () => false), true, "the reply's write never reached the store");
+  await mustHave(page, `#rt-${RPL_ROOT}`, "reply box while the reply saves");
+  await page.click(`#rt-${RPL_ROOT}`);
+  await page.keyboard.press("End");
+  await page.keyboard.type(" " + LATER);
+  await page.evaluate(() => window.__release());
+  await mustHave(page, "#askUndo", "Undo control once the reply saved");
+  // A send closes the box, and Reply reopens the words that were not sent (notes, sections 1 and 2).
+  const draft = (await page.evaluate((key) => localStorage.getItem(key), `waiting.replyDraft.${RPL_ROOT}`)) ?? "";
+  assert.equal(draft.trim(), LATER, "the stored draft after the send is " + JSON.stringify(draft) + ", not the words typed while the reply saved");
+  await openReply(page, RPL_ROOT);
+  const box = await page.inputValue(`#rt-${RPL_ROOT}`);
+  assert.equal(box.trim(), LATER, "the reply box holds " + JSON.stringify(box) + ", not the words typed while the reply saved");
+});
+
+test("reply to an answer: a refused reply keeps focus in the reply form", async (t) => {
+  const text = "Refused reply: can the rail guard change?";
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW, failSetText: "Refused reply" }); if (!page) return;
+  await openReply(page, RPL_ROOT);
+  await page.fill(`#rt-${RPL_ROOT}`, text);
+  await mustHave(page, `#rs-${RPL_ROOT}`, "Send reply button");
+  await page.click(`#rs-${RPL_ROOT}`);
+  const refused = await page.waitForFunction((id) => /Not saved/.test(document.getElementById(id)?.textContent || ""), `rh-${RPL_ROOT}`, { timeout: 3000 }).then(() => true, () => false);
+  assert.equal(refused, true, "the refused reply's hint does not say Not saved");
+  const active = await page.evaluate(() => { const a = document.activeElement; return a && a !== document.body ? a.id || a.tagName : "BODY"; });
+  assert.ok([`rt-${RPL_ROOT}`, `rs-${RPL_ROOT}`].includes(active), "after the refused reply focus is on " + active + ", not the reply form");
+});
+
 // ---------------------------------------------------------------- the ask stack: Add to list, one Send, one Undo for the batch
 
 // The reach line of the ask row that holds the text, or "" when no row holds it. Reads the page, never waits.

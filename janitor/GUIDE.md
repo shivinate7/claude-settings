@@ -26,11 +26,10 @@ A simulator is machine-wide. The sweep stops only a device that a session booted
 that is idle, and that the owner did not boot (decision
 `sweep-shuts-down-idle-simulators`, the sweep stops idle simulators).
 
-The sweep never runs code that your repository supplies. It reads one file
-from your repository, and it reads that file as data. The npm reaper
-(`reap:worktrees`, run by `run_repo_reaper` in `janitor/sweep.py`) departs
-from this. It is to be removed, by decision uniform-over-variants (a shared
-tool never grows a per-repo exception).
+The sweep never runs code that your repository supplies, not even an npm
+script such as `reap:worktrees` (decisions `the-janitor-is-one-machine-wide-sweep`
+and `uniform-over-variants`). It reads one file from your repository, and it
+reads that file as data.
 
 The sweep deletes no branch that holds the only copy of its work.
 
@@ -360,18 +359,10 @@ break. Run either installer from your main checkout.
 Both installers write a fixed, generic name for the job: never a path, never
 a branch. Only one job must exist per machine.
 
-## Other tiers and their records
-
-Each tier below has its own record in `docs/decisions/`. The Windows temp
-folder: `windows-temp-sweep`. Agent end: `agent-end-reap-stops-what-a-finished-agent-left`
-(processes, and the scratchpad at session end) and `build-dirs-reaped-at-agent-end`
-(build folders). Process tiers: `unattended-sweep-stops-proven-orphans`. Idle
-simulators: `sweep-shuts-down-idle-simulators`.
-
 ## How you add a tier of your own
 
-The sweep holds the generic half: branches and worktrees, which are git plus
-a liveness read. It does not hold your servers, your background programs
+The sweep holds the generic half: branches and worktrees, which are pure git
+plus a liveness read. It does not hold your servers, your background programs
 or your own build output. Those name your repository, and they belong to you.
 
 Write your own tier in your own repository. Call the generic sweep first, then

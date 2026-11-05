@@ -80,7 +80,7 @@ small, M medium, L large).
 | Idle simulator tier | Lists devices and runs `xcrun simctl shutdown` under `--confirm` (checked: `sweep.py` lines 1787 and 1906). The guard `simulator-boot-cap` refuses at two booted devices (record `sweep-shuts-down-idle-simulators`; code unchecked). | Q4. | 4 | S |
 | Agent-end reap | Runs on SubagentStop, timeout 60 s (checked: `settings.json`). Its build pass deletes trash in a detached child. That child has no time bound (record `build-dirs-reaped-at-agent-end`; the bound is unchecked). | Bound the child by time. State the cost. Split the record by stage. | no | M |
 | Agent-end payload log | Written under a lock file, one row per run (record `agent-end-reap-stops-what-a-finished-agent-left`). No reader is named. | Q5. | 5 | S |
-| Repo reaper (npm `reap:worktrees`) | `run_repo_reaper` in `janitor/sweep.py` runs the repository's npm script in a full `--confirm` run without `--attended`. This departs from the rule that the sweep never runs repository code (`the-janitor-is-one-machine-wide-sweep`). | Remove the reaper (Q7, decided). Lane watchers-remove-repo-reaper. | no | S |
+| Repo reaper (npm `reap:worktrees`) | Removed. The sweep ignores a repository's `reap:worktrees` script (`janitor/test_sweep.py`). | None. Q7 is decided. | no | none |
 | `install_schtasks.resolve_primary_checkout` | `janitor/install_schtasks.py` keeps a local copy. `install_launchd.py` calls `guard.primary_checkout`. | Both installers call `guard.primary_checkout`. This is code work for a builder. | no | S |
 | `sim-lease` (`bin/sim-lease`) | A 2 s poll inside `take` (from the map; unchecked). | Keep it. Add a cost test. Fix the docstring. | no | S |
 | `sim_boot_record` | Its cost is not stated (rows are in the table above). | Record the cost. | no | S |
@@ -140,7 +140,7 @@ Lane 1 needs no answer. A lane that waits on a question says so in its report.
 ## 6. Owner questions
 
 **Status: open.** Item 180 is on the Cockpit. So are the new items below: Q2 (model-call hooks), Q4
-(SessionEnd scope) and Q5 (unread logs). Q7 (repo reaper) is decided by an earlier ruling and needs no Cockpit item.
+(SessionEnd scope) and Q5 (unread logs). Q7 (repo reaper) is decided by an earlier ruling, and the reaper is removed.
 
 **Q1a. Stall watcher.** Options: (a) delete it, and keep the Stop check and `wait-pid`; (b) keep it with
 a cost cap and a test; (c) leave it as is. Q1b decides between them. Recommendation: (b), until Q1b
@@ -174,11 +174,10 @@ with a rotating cap.
 **Q6. Load definition. Low value.** Options: (a) one shared definition; (b) keep the two definitions, and
 one record that says why. Recommendation: (b). `sim-lease` already states its own definition.
 
-**Q7. Repo reaper.** The rule says the sweep never runs code a repository supplies. The npm reaper
-(`reap:worktrees`, `run_repo_reaper` in `janitor/sweep.py`) runs repository code, in a full `--confirm`
-run without `--attended`. **Decided: remove the reaper**, and keep the rule without exception. Decision
-uniform-over-variants (a shared tool never grows a per-repo exception; owner, 2026-10-27 12:51 CDT)
-rules it out as a per-repo exception. Lane watchers-remove-repo-reaper removes it.
+**Q7. Repo reaper. Decided and done.** The rule says the sweep never runs code a repository supplies.
+Decision uniform-over-variants (a shared tool never grows a per-repo exception; owner, 2026-10-27 12:51
+CDT) rules out the npm reaper as a per-repo exception. The reaper is removed, and the rule has no
+exception.
 
 ## 7. Stale prose left open
 

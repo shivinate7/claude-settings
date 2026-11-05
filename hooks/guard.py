@@ -137,6 +137,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
 Other tools, in `judge` order:
   worktree-home        deny. A call from an agent whose shell cwd or write target is outside its
                        own recorded worktree. Read and Grep pass, so a stranded agent can report.
+                       A Write or Edit strictly inside the caller's own `agent-<id>-<suffix>`
+                       red-run folder passes.
                        No record (a non-isolated agent, or the orchestrator) allows everything.
                        No override lifts it. (an-agent-outside-its-home-tree-must-stop)
   other-checkout       deny. Any session's write whose target sits in a checkout of this clone
@@ -149,7 +151,9 @@ Other tools, in `judge` order:
                        A Bash or PowerShell `cd`, `pushd` or `Set-Location` into another
                        checkout is refused too, bare or chained; the cd target in the caller's
                        recorded home, a session's recorded home, or the caller's own
-                       `agent-<id>-<suffix>` red-run folder passes that act.
+                       `agent-<id>-<suffix>` red-run folder passes that act. A write strictly
+                       inside that red-run folder passes too, here and in worktree-home; the
+                       folder root does not (no `rm -rf <red>`).
                        A write or `cd` into a separate clone of the same repo (same origin, read
                        from the config files) is refused too, as is a write from a cwd stranded
                        in one while `CLAUDE_PROJECT_DIR` names the home clone; a git verb that
@@ -212,6 +216,15 @@ Other tools, in `judge` order:
                        deny. A simulator boot past the cap, or one that duplicates an idle device.
                        They judge only `xcodebuild -destination` and the simulator MCP `launch`.
                        (sweep-shuts-down-idle-simulators)
+  simulator-boot-route
+                       deny. An `xcodebuild -destination` that names a shut-down simulator. Judged
+                       after the cap and twin rules. The remedy is `sim-test` for the `test` action,
+                       else the generic destination. An override lifts it. (sim-test-is-the-one-boot-path)
+  simulator-boot-lease
+                       deny. A simulator MCP `launch` of a shut-down device, lock or no lock: no session
+                       holds a lease for it. The remedy is `sim-test`. Judged after the cap and twin
+                       rules. A launch of a booted device passes. An override lifts it.
+                       (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
   env-file, frozen-path, config-edit, agent-model-cap
@@ -262,6 +275,7 @@ import importlib
 import json
 import os
 import re
+import shlex
 import sys
 import time
 
@@ -3618,24 +3632,45 @@ def _simctl_boot_args(word: str, rest: list):
     return None
 
 
-def _sim_boot_names(segment: str) -> list:
-    """The device names or UDIDs a segment boots by `xcodebuild -destination`, by the command word. Empty when it boots none."""
+def _sim_commands(segment: str):
+    """(command word as written, its arguments) at each command of SEGMENT and, through `inner_commands`, of each
+    command a wrapper hands on (`bash -c`, `sh -lc`, `sudo`, `$(...)`). The one walk of the simulator rules.
+    A quoted or echoed text is not a command and is not read."""
     tokens = segment_tokens(segment)
-    index = resolve_command(tokens) if tokens else None
-    if index is None:
-        return []
-    word, rest = basename(tokens[index]), tokens[index + 1:]
-    if word == "xcodebuild":
-        found = []
-        for i, token in enumerate(rest):
-            value = rest[i + 1] if token == "-destination" and i + 1 < len(rest) else (
-                token[len("-destination="):] if token.startswith("-destination=") else "")
-            fields = dict(p.split("=", 1) for p in value.split(",") if "=" in p)
-            if "iOS Simulator" in fields.get("platform", "") and (fields.get("id") or fields.get("name")):
-                os_ = fields.get("OS", "")  # a numeric OS= filters a name; an id, or OS=latest, filters nothing
-                found.append((fields.get("id") or fields["name"], "" if fields.get("id") or not re.fullmatch(r"[0-9.]+", os_) else os_))
-        return found
-    return []
+    if not tokens:
+        return
+    for start in command_indexes(tokens):
+        yield tokens[start], tokens[start + 1:]
+    for text in inner_commands(tokens):
+        for part in split_segments(text):
+            yield from _sim_commands(part)
+
+
+def _xcodebuild_boot_names(rest: list) -> list:
+    """The device names or UDIDs the arguments of an `xcodebuild` boot by `-destination`. Empty when it boots none."""
+    found = []
+    for i, token in enumerate(rest):
+        value = rest[i + 1] if token == "-destination" and i + 1 < len(rest) else (
+            token[len("-destination="):] if token.startswith("-destination=") else "")
+        # The tokens keep no quote marks, so a shell operator glued after the closing quote
+        # (`'id=X'&`, `"id=X">/dev/null`, `(cd ios && xcodebuild ... 'OS=17.0')`) is read into the value.
+        # Cut it at the first `&`, `<`, `>`, `|` or `;`, then drop each trailing `)` that no `(` opens,
+        # so "iPhone SE (3rd generation)" keeps its own paren.
+        value = re.split(r"[&<>|;]", value, maxsplit=1)[0]
+        while value.endswith(")") and value.count(")") > value.count("("):
+            value = value[:-1]
+        fields = dict(p.split("=", 1) for p in value.split(",") if "=" in p)
+        if "iOS Simulator" in fields.get("platform", "") and (fields.get("id") or fields.get("name")):
+            os_ = fields.get("OS", "")  # a numeric OS= filters a name; an id, or OS=latest, filters nothing
+            os_ = "" if fields.get("id") or not re.fullmatch(r"[0-9.]+", os_) else os_
+            found.append((fields.get("id") or fields["name"], os_))
+    return found
+
+
+def _sim_boots(segment: str) -> list:
+    """[(name or (name, OS), remedy)] for each simulator the xcodebuild commands of SEGMENT boot by `-destination`."""
+    return [(n, _sim_route_remedy(rest)) for command, rest in _sim_commands(segment)
+            if basename(command) == "xcodebuild" for n in _xcodebuild_boot_names(rest)]
 
 
 def _simulator_app_open(rest: list) -> bool:
@@ -3656,18 +3691,14 @@ def _simulator_app_open(rest: list) -> bool:
 def sim_bypass_hit(segment: str) -> str:
     """The matched text when one segment boots a simulator outside sim-test, else ''. Judged by the
     command word, at each command of the segment and in each command a wrapper hands on
-    (`inner_commands`), so `bash -c`, `sudo` and `$(...)` are read and a quoted or echoed text is not."""
-    tokens = segment_tokens(segment)
-    if not tokens:
-        return ""
-    for start in command_indexes(tokens):
-        word, rest = basename(tokens[start]), tokens[start + 1:]
+    (`_sim_commands`), so `bash -c`, `sudo` and `$(...)` are read and a quoted or echoed text is not."""
+    for command, rest in _sim_commands(segment):
+        word = basename(command)
         if word == "open" and _simulator_app_open(rest):
             return ("open " + " ".join(rest))[:100]
         if _simctl_boot_args(word, rest) is not None:
-            return " ".join([tokens[start]] + rest)[:100]
-    return next((hit for text in inner_commands(tokens) for part in split_segments(text)
-                 if (hit := sim_bypass_hit(part))), "")
+            return " ".join([command] + rest)[:100]
+    return ""
 
 
 SIM_BYPASS_REASON = (
@@ -3677,8 +3708,57 @@ SIM_BYPASS_REASON = (
 )
 
 
-def sim_boot_refusal(tool: str, names: list) -> None:
-    """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted."""
+# The xcodebuild options that take the next word as their value, written from memory of `man xcodebuild` and
+# not checked against it. Any other dash word is a flag with no value, so the word after it can be the action.
+# A wrong entry changes only the remedy text, never the verdict. A colon or `=` form
+# (`-only-testing:X`, `-scheme=X`) holds its value in the same word and is in no list.
+SIM_ROUTE_VALUE_FLAGS = frozenset({
+    "-project", "-workspace", "-target", "-scheme", "-configuration", "-xcconfig", "-arch", "-sdk", "-toolchain",
+    "-destination", "-destination-timeout", "-jobs", "-derivedDataPath", "-resultBundlePath", "-resultBundleVersion",
+    "-resultStreamPath", "-archivePath", "-exportPath", "-exportOptionsPlist", "-testPlan", "-xctestrun",
+    "-testProductsPath", "-only-testing", "-skip-testing", "-only-test-configuration", "-skip-test-configuration",
+    "-testLanguage", "-testRegion", "-test-iterations", "-parallel-testing-enabled", "-parallel-testing-worker-count",
+    "-maximum-parallel-testing-workers", "-maximum-concurrent-test-device-destinations",
+    "-maximum-concurrent-test-simulator-destinations", "-test-timeouts-enabled",
+    "-default-test-execution-time-allowance", "-maximum-test-execution-time-allowance",
+    "-test-repetition-relaunch-enabled", "-collect-test-diagnostics", "-enableCodeCoverage",
+    "-enableAddressSanitizer", "-enableThreadSanitizer", "-enableUndefinedBehaviorSanitizer",
+    "-enablePerformanceTestsDiagnostics", "-localizationPath", "-exportLanguage", "-clonedSourcePackagesDirPath",
+    "-packageCachePath", "-scmProvider", "-defaultPackageRegistryURL", "-packageAuthorizationProvider",
+    "-authenticationKeyPath", "-authenticationKeyID", "-authenticationKeyIssuerID", "-framework", "-library",
+    "-headers", "-debug-symbols", "-output", "-find-executable", "-find-library", "-importPlatform",
+    "-downloadPlatform", "-buildVersion", "-architectureVariant", "-exportPlatform", "-platform",
+})
+
+
+def _sim_route_remedy(rest: list) -> str:
+    """The remedy for an `xcodebuild -destination` command with arguments REST: `sim-test` with its arguments (no
+    -destination, no `test` action: sim-test adds it) when the action is `test`, else the generic
+    destination. The action is the word `test` that no option takes as its value. The shell's redirects
+    (`2>&1`, `> out.log`) and a lone `&` are no xcodebuild arguments, so the remedy drops them."""
+    args, action, skip = [], False, False
+    for i, token in enumerate(rest):
+        if skip:
+            skip = False
+        elif token in ("-destination", "&") or token.startswith("-destination="):
+            skip = token == "-destination"
+        elif re.fullmatch(r"\d*[<>&|]+", token):
+            skip = True  # a bare redirect operator (`>`, `2>`, `>&`, `&>`): its target is the next word
+        elif REDIRECTION.fullmatch(token):
+            pass
+        elif token == "test" and not (i and rest[i - 1] in SIM_ROUTE_VALUE_FLAGS):
+            action = True
+        else:
+            args.append(token)
+    if action:
+        return "Run `sim-test %s` instead." % " ".join(shlex.quote(a) for a in args)
+    return "Use `-destination 'generic/platform=iOS Simulator'` instead, and boot nothing."
+
+
+def sim_boot_refusal(tool: str, names: list, remedies: dict = None) -> None:
+    """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted. After those two
+    rules, an `xcodebuild -destination` boot (REMEDIES maps a name to its remedy) is refused as
+    simulator-boot-route, and an MCP launch as simulator-boot-lease."""
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "janitor"))
         import sweep
@@ -3689,9 +3769,11 @@ def sim_boot_refusal(tool: str, names: list) -> None:
     devices = sweep.sim_read_devices()
     if devices is None:
         return
+    shut_down = []
     for name in names:
         name, os_ = name if isinstance(name, tuple) else (name, "")  # a destination's OS= picks a runtime
-        hits = [d for d in devices if name.upper() == d["udid"].upper() or name == d["name"]]  # a UDID has no case
+        key = name.strip().casefold()  # a name compares without case or outer spaces; a UDID has no case
+        hits = [d for d in devices if key == d["udid"].casefold() or key == d["name"].strip().casefold()]
         if os_:  # not importable from sim_boot_record: its version() is nested in by_name_ok
             hits = [d for d in hits if (v := d["runtime"].split("SimRuntime.")[-1].split("-", 1)[-1].replace("-", ".")) == os_
                     or v.startswith(os_ + ".")] or hits  # no runtime matches: judge them all
@@ -3713,6 +3795,18 @@ def sim_boot_refusal(tool: str, names: list) -> None:
                 refuse(tool, "deny", "simulator-boot-twin",
                        "An idle booted simulator of the same type and runtime exists: %s (%s). Use it "
                        "instead of booting another." % (twin["name"], twin["udid"]), name)
+        shut_down.append(name)
+    for name in shut_down:
+        if tool == SIM_MCP:
+            refuse(tool, "deny", "simulator-boot-lease",
+                   "A launch of the shut-down simulator %s boots it outside the one lock: the Mac "
+                   "shares one simulator across repos, and `sim-test` holds that lock. Run `sim-test`, "
+                   "which boots it under the lock, or launch a simulator that is already booted. "
+                   "(decision sim-test-is-the-one-boot-path)" % name, name)
+        elif (remedies or {}).get(name):
+            refuse(tool, "deny", "simulator-boot-route",
+                   "`xcodebuild -destination` boots %s outside the `sim-test` lock. %s "
+                   "(decision sim-test-is-the-one-boot-path)" % (name, remedies[name]), name)
 
 
 def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
@@ -3745,7 +3839,8 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
             except Exception:
                 resolved_target = write_target
             if (path_is_inside(resolved_target, home_primary) is True
-                    and path_is_inside(resolved_target, home) is False):
+                    and path_is_inside(resolved_target, home) is False
+                    and not _own_red_run(payload, home_primary, resolved_target, False)):
                 return "write target outside recorded agent home"
     return ""
 
@@ -3948,18 +4043,33 @@ def _cd_home_exempt(payload, cwd: str, target: str) -> bool:
     return bool(held) and path_is_inside(target, held) is True
 
 
-def _cd_red_run(payload, roots, owner: str) -> bool:
-    """True when OWNER, the checkout a `cd` moves into, is the caller's own test-author red-run
-    folder `<primary>/.claude/worktrees/agent-<its agent id>-<suffix>`. The id and its dash match
-    whole, so a sibling whose id only starts with this one does not pass."""
+# The shell verbs that may name the red-run folder's own root: `cp x <red>/` writes inside it. No
+# other verb may, so `rm -rf <red>` stays refused (an-agent-outside-its-home-tree-must-stop).
+RED_RUN_ROOT_VERBS = ("cp",)
+
+
+def _own_red_run(payload, primary: str, path: str, root_ok: bool = True) -> bool:
+    """True when PATH is inside the caller's own test-author red-run folder
+    `<primary>/.claude/worktrees/agent-<its agent id>-<suffix>`. The one home for that test: the
+    `cd` act and the write act of other-checkout, and worktree-home's Write target, all ask it.
+    PRIMARY is the primary checkout alone, so a folder under a linked worktree never counts. The id and
+    its dash match whole, so a sibling whose id only starts with this one does not pass. ROOT_OK False
+    leaves the folder itself out: a write passes only strictly inside it, so a delete of the folder
+    is still refused. Both sides compare case-folded and realpath'd (`path_is_inside`)."""
     agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
-    if not isinstance(agent_id, str) or not agent_id or not owner:
+    if not isinstance(agent_id, str) or not agent_id or not primary or not path:
         return False
-    folder = os.path.dirname(owner)
-    return (os.path.basename(owner).startswith("agent-" + agent_id + "-")
-            and os.path.basename(folder) == "worktrees"
-            and os.path.basename(os.path.dirname(folder)) == ".claude"
-            and os.path.dirname(os.path.dirname(folder)) in roots)
+    holder = os.path.join(primary, ".claude", "worktrees")
+    folder = path
+    while True:
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return False
+        if (path_is_inside(parent, holder) is True and path_is_inside(holder, parent) is True
+                and os.path.normcase(os.path.basename(folder)).startswith(
+                    os.path.normcase("agent-" + agent_id + "-"))):
+            return root_ok or folder != path
+        folder = parent
 
 
 def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = "",
@@ -3971,7 +4081,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     valid `session_id`; a caller that omits `has_agent` gets no exemption. An unreadable git
     state, or a cwd in no checkout, is unknown and passes. One git read per call that can write.
     A shell `cd`, `pushd` or `Set-Location` that moves into another checkout is refused too, unless
-    `payload` marks the target as the caller's own home or red-run folder; a `cd` toward a folder
+    `payload` marks the target as the caller's own home or red-run folder (a write strictly inside that red-run
+    folder passes too, a shell `cp` may also name its root); a `cd` toward a folder
     under another `.git` entry spends the git read. A target in a separate clone of the same repo
     (the nearest `.git` above it names another common dir with the same origin, read by file) is
     refused the same way; the clone check spawns no git. Liftable by an owner override, unlike `worktree_home_hit`
@@ -4009,7 +4120,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     temp = os.path.realpath(tempfile.gettempdir())
     clone_hit = {}   # target -> True when the hit was a separate clone, not a checkout of this one
 
-    def elsewhere(target, at):
+    def elsewhere(target, at, verb=""):
         try:
             resolved = _resolved(target, at)
             owner = _owning_checkout(resolved, roots)
@@ -4029,13 +4140,14 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
             return True
         # The primary's `.git` is the clone's common directory, shared by every checkout.
         return (bool(owner) and owner != own
-                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)
+                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True
+                and not _own_red_run(payload, roots[0], resolved, verb in RED_RUN_ROOT_VERBS))
 
     for move in moves:
-        if elsewhere(move, where) and not _cd_red_run(payload, roots, _owning_checkout(move, roots)):
+        if elsewhere(move, where) and not _own_red_run(payload, roots[0], move):
             return (OTHER_CLONE_CD_DETAIL if clone_hit.get(move) else OTHER_CHECKOUT_CD_DETAIL) + move
     if targets is None:
-        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True) if writes else ""
+        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True, predicate_command=True) if writes else ""
         if not hit:
             # A git verb that changes files, run in a separate clone or from a stranded cwd. The one
             # reader of such verbs is session_home_git_hit; only the folder test differs.
@@ -4451,9 +4563,13 @@ def judge(payload) -> None:
             matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")
             if matched:
                 refuse(tool, "deny", "simulator-boot-bypass", SIM_BYPASS_REASON, matched)
-            names = [n for seg in segments for n in _sim_boot_names(seg)]
+            names, remedies = [], {}
+            for seg in segments:
+                for n, remedy in _sim_boots(seg):
+                    names.append(n)
+                    remedies.setdefault(n[0], remedy)
             if names:
-                sim_boot_refusal(tool, names)
+                sim_boot_refusal(tool, names, remedies)
         return
     if tool == SIM_MCP:
         # `udid` is an alias of `device`: judge each non-empty name, so one field hides no other.
