@@ -44,7 +44,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import time
 import unittest
 import uuid
 
@@ -162,7 +161,7 @@ SUITE_WITH_SUB = ("import sys\n"
 SUITE_CRASH = "from calc import sub\nprint(sub(5, 2) + 1)\n"
 # The select script names the suite that pins calc.py. It is part of the commit, so a checkout at head has it.
 SELECT_SRC = "import sys\nif sys.argv[1] == 'calc.py':\n    print('test_calc.py')\n"
-# The clean sub returns 3 at once. A mutant whose sub returns None hangs here, so only the budget can end its run.
+# The clean sub returns 3 at once. A mutant whose sub returns None hangs here until a kill: the budget's deadline, which comes first.
 SUITE_HANGS_ON_NONE = ("import sys\n"
                        "import time\n"
                        "from calc import sub\n\n"
@@ -542,16 +541,14 @@ class ChangedTests(unittest.TestCase):
         want = mutants_on(text, [unique_line(text, "    return a - b")])
         self.assertGreater(want, 0, "the fixture needs mutants on sub")
         folder, log = fixture_log()
-        started = time.monotonic()
-        code, out, err = changed_run(repo, CHANGED, extra=["--budget", "3"], log=log)
-        elapsed = time.monotonic() - started
+        # The suite timeout is past the budget, so only the deadline kill can end a hung mutant before it; it keeps a red run short.
+        code, out, err = changed_run(repo, CHANGED, extra=["--budget", "3", "--suite-timeout", "5"], log=log)
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
         data = read_log(log)
         self.assertEqual(data["not_run"], want,
                          "a suite the budget passes while it runs is killed and counts not_run\n" + out)
         self.assertEqual((data["killed"], data["survived"], data["crashed"]), (0, 0, 0),
                          "a mutant the budget killed is neither a kill, a survivor nor a crash")
-        self.assertLessEqual(elapsed, 3 + 10, "the call ends within the budget plus 10 s: it took %.1f s" % elapsed)
 
     def test_the_log_writes_one_json_file_and_nothing_into_the_repository(self):
         repo = partial_repo()
