@@ -500,10 +500,10 @@ on this path gets no new options.
   `page_grant.py` can never count it for a receiver. The routing session tells the owner in its reply that the receiver needs
   the owner's grant typed in the receiver's own session.
 
-Never-ending wait. The owning session checks the receiver at each turn start while it holds a lane item. It finds the receiver
-with `list_sessions`, by its `cs-step:<lane>` tag, or for a standing session by its `cs-build:<tier>` tag and the same
-`cs-repo:` tag. Then it reads the receiver with `get_session`. Cost: one `list_sessions` and one `get_session` per lane item, at
-turn start, with no timer. The writer's `--items` lane line is the page-side sign. If the owning session itself ended, the
+Never-ending wait. The owning session checks the receiver at each turn start while it holds a lane item. It reads every page
+of `list_sessions`, with no `tags` argument, and picks the row whose `tags` hold `cs-step:<lane>`, or for a standing session
+`cs-build:<tier>` and the same `cs-repo:` tag. Then it reads the receiver with `get_session`. Cost: every page once per turn
+start, shared by all lane items, and one `get_session` per lane item, with no timer. The writer's `--items` lane line is the page-side sign. If the owning session itself ended, the
 inherit rule applies (see "Read the answers", the watch bullet). The receiver's status is `ended` when it ended, failed or was
 archived, and `unknown` when the read cannot run or finds no session, never `ended`. For either status with no done report,
 never re-run or re-route the act on the kept answer. Check whether the act landed (for example, the PR merged or the setting
