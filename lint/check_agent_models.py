@@ -44,7 +44,7 @@ HEADER_WORD = re.compile(r"\b(?:PASS|FAIL|PARTIAL)\b")
 MODEL_SLOT = re.compile(r"<model>|\bthe model\b", re.IGNORECASE)
 # A backtick that opens straight onto the header word, with no backtick inside: a stray backtick earlier in the text
 # opens no span here, as a pairing of backticks in order would have it.
-HEADER_SPAN = re.compile(r"`(?:PASS|FAIL|PARTIAL)\b[^`\n]*`")
+HEADER_SPAN = re.compile(r"`(?:PASS|FAIL|PARTIAL)\b[^`]*`")
 SOURCE_PHRASE = re.compile(r"powered by the model named", re.IGNORECASE)
 CHUNK_START = re.compile(r"\s*(?:[-*+]\s|\d+[.)]\s|#|\|)")
 SENTENCE = re.compile(r"\S.*?(?:[.!?](?=\s|\Z)|\Z)", re.DOTALL)
@@ -131,7 +131,7 @@ def body_problems(text: str) -> list:
         word = HEADER_WORD.search(sentence)
         if slot_line is None and word and MODEL_SLOT.search(sentence):
             slot_line = line + sentence.count("\n", 0, word.start())
-    if slot_line is not None and not SOURCE_PHRASE.search(body):
+    if slot_line is not None and not SOURCE_PHRASE.search(" ".join(body.split())):
         found.append((slot_line, "the report header has a model slot, and no body line names the source with "
                       "`powered by the model named`."))
     return sorted(found)
