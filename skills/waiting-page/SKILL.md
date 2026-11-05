@@ -329,8 +329,10 @@ the waiting page. A page that moves loses its read access, and the repo then hol
 3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --all <repo root> --fetched <folder> --worktree <worktree>`.
    It prints one line per artifact, `<id>: <verdict>`, with the verdicts of a single export, or
    `<id>: skipped - no export` for an entry held with `"export": false`, which needs no folder. When the session
-   can read only one account's pages, add `--account <label>`: an entry of another account prints
-   `<id>: skipped - account <its account>`, needs no folder and writes nothing. The page and each
+   can read only one account's pages, pass `--account <label>` with its own account's label from the registry; without
+   it, each page the session cannot fetch prints `<id>: unknown`. An entry of another account prints
+   `<id>: skipped - account <its account>`, needs no folder and writes nothing. A label no entry holds, or an empty
+   one, prints one `unknown` line, writes nothing and exits 2. The page and each
    text file are scanned like the docs; a find refuses that artifact only.
 4. Run `git add` on the export folder of each artifact whose line says `changed`. Then commit and push the record
    branch. A `refused` or `unknown` artifact wrote nothing, so its folder is as it was. Say each such line in

@@ -57,8 +57,10 @@ also exports its designData block. A supporting file no longer fetched stays in 
 An entry with `"export": false` prints `<id>: skipped - no export`, needs no folder in DIR, writes nothing and
 counts as exit 0. An entry with `"collections": []` is page-only: its page and files export, and no database does.
 With --account LABEL, an entry whose account differs prints `<id>: skipped - account <its account>` and is treated the
-same way, so a session that can read only one account's pages exports those and holds the rest. Without the flag every
-entry exports. Each other artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
+same way, so a session that can read only one account's pages exports those and holds the rest. A LABEL that is empty or
+that no entry's account holds prints one line, `unknown - --account ... matches no registry entry's account ...`, writes
+nothing and exits 2. Without the flag every entry exports. A page-only entry whose fetched folder has no `page.html`
+prints `<id>: unknown - ...` that names `page.html`, writes nothing and counts as exit 2. Each other artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
 unknown leaves its own folder as it was and holds back no other. Exit: 0 when every artifact is changed or same; else
 the worst of 1 (refused), 2 (unknown: also a registry that is missing, empty or unreadable) and 3 (a crash).
 
@@ -435,6 +437,9 @@ def export_all(root, fetched, worktree, allow_empty, account=None):
         raise Stop("unknown - the artifacts registry cannot be read: %s" % err, UNKNOWN)
     if not entries:
         raise Stop("unknown - %s has no artifacts registry entry to export" % root, UNKNOWN)
+    if account is not None and account not in {entry["account"] for entry in entries}:
+        # a mistyped or empty label would otherwise skip every entry and still exit 0, which reads as a clean copy
+        raise Stop("unknown - --account %r matches no registry entry's account, so nothing was exported" % account, UNKNOWN)
     worst = 0
     for entry in entries:
         name = entry["id"]
@@ -450,6 +455,8 @@ def export_all(root, fetched, worktree, allow_empty, account=None):
         try:
             if not os.path.isdir(folder):
                 raise Stop("unknown - the fetched folder has no %s folder" % name, UNKNOWN)
+            if not entry["collections"] and not os.path.isfile(page):  # a page-only entry has nothing else to export, so "same" would hide a failed fetch
+                raise Stop("unknown - the fetched folder has no %s, and this page-only entry exports nothing else" % PAGE_FILE, UNKNOWN)
             verdict = export(folder, os.path.join(worktree, *entry["export"].split("/")),
                              page if os.path.isfile(page) else None, allow_empty, tuple(entry["collections"]), "%s: " % name,
                              entry["role"] == layout.WAITING_ROLE, supporting_files(files) if os.path.isdir(files) else None)
