@@ -2,18 +2,25 @@
 
 ## The ruling
 
-Owner, 2026-10-26 (waiting-page item 15, answer b): a lane that touches a screen gets two design
-agents, both on Opus, except a text-only change (owner, 2026-11-03: design reviewer only).
+Owner, 2026-11-04 07:56 CST (Cockpit item 204 a): the design reviewer runs beside review round 1,
+on the first built head, so design fixes ride the normal review rounds. Owner, 2026-10-26 (waiting-page
+item 15, answer b): a lane that touches a screen gets two design agents, both on Opus, except a
+text-only change (owner, 2026-11-03: design reviewer only).
 
 - The designer (`agents/designer.md`) runs before the builder. It draws one HTML mockup per changed
   screen, with a notes file, in the repo's design folder (the `design` kind in `lint/layout.json`).
   home's `docs/design/` is the working pattern.
 - The builder builds to the step's mockup when one exists (`agents/builder.md`).
-- The design reviewer (`agents/design-reviewer.md`) runs after the build. It judges each built screen
-  against the mockup and the repo's design rules, at every size and theme, with a verdict per screen.
+- The design reviewer (`agents/design-reviewer.md`) runs beside review round 1, on the first built
+  head. It judges each built screen against the mockup and the repo's design rules, at every size and
+  theme, with a verdict per screen. Its fixes go to the builder with the round-1 code findings.
+  - Coordinator's reading, for the owner to correct: when round 1 changes a screen, the round-2 reviewer
+    checks that the design reviewer's findings still hold. No second design review runs unless
+    round 1 changed a screen's layout.
+    Open for the owner: they judge what counts as a layout change, and so when a second design review runs.
 - Routing has one test, one exception: does the lane touch a screen (`roles-one-role-per-agent`). `agents/reviewer.md`
   still reviews the code. Exception: a text-only change skips the designer. The design
-  reviewer still runs after the build. Owner ask `ask-mw18vywh8g` (small text changes on existing
+  reviewer still runs beside round 1. Owner ask `ask-mw18vywh8g` (small text changes on existing
   screens), 2026-11-03 16:13 CST.
   - A text-only change edits an existing screen's files and changes only user-visible copy. User-visible
     copy is text nodes, locale values, and an element's visible or read-aloud label, placeholder, title or
@@ -45,10 +52,15 @@ extends the role scopes of `builders-cannot-edit-tests`, and logs a designer's d
 stop the same way (`designer-diff`). Risk: likely. A designer that writes product code becomes a
 second builder, unreviewed as one. Landed 2026-10-26.
 
-Reason: the owner wants each screen seen before it is built, and judged after against what was
-seen. A text-only change is the exception: no designer sees it first, and the design reviewer judges it against main's screenshots. Reopen when the owner rules on `/design`, or when a design agent's Opus cost shows in a cull.
+Reason: the owner wants each screen seen before it is built, and judged on the first built head against
+what was seen. Beside round 1, its fixes ride the normal review rounds. In the degen repo, PRs 385 and
+386, the design reviewer ran after review round 3 (owner, Cockpit item 204 a). A text-only change is the exception: no designer sees it first, and the design
+reviewer judges it against main's screenshots. Reopen when the owner rules on `/design`, or when a design
+agent's Opus cost shows in a cull.
 
 Kind: process
 Home: agents/designer.md
 Home: agents/design-reviewer.md
+Home: agents/reviewer.md
+Home: skills/design-review/SKILL.md
 Home: skills/design-explore/SKILL.md

@@ -666,6 +666,30 @@ class HookSweepsNothingWhenTooLittleBudgetRemains(unittest.TestCase):
         self.assertNotIn("--attended", calls[0])  # strict is the default
 
 
+def hook_starts(mod, repo, elapsed, every_call=False):
+    """The argv of each sweep subprocess `handle` starts, or with `every_call`, the argv of every
+    process `handle` starts, git reads included, in order. The sweep is not run: its start is
+    answered with an empty success. The git reads run for real, through the patched `run`."""
+    calls = []
+    real_run = mod.subprocess.run
+
+    def record_call(*args, **kwargs):
+        argv = args[0] if args else kwargs.get("args")
+        is_sweep = isinstance(argv, list) and mod.SWEEP_PATH in argv
+        if every_call or is_sweep:
+            calls.append(argv)
+        if is_sweep:
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+        return real_run(*args, **kwargs)
+
+    mod.subprocess.run = record_call
+    try:
+        mod.handle({"hook_event_name": "SessionEnd", "cwd": repo}, elapsed_seconds=elapsed)
+    finally:
+        mod.subprocess.run = real_run
+    return calls
+
+
 def deadline_value(argv):
     """The number after `--deadline-seconds` (as two arguments or as `=N`), or None when absent."""
     for i, arg in enumerate(argv):
@@ -687,22 +711,7 @@ class SweepIsToldItsTimeLeftAsADeadline(unittest.TestCase):
         self.mod = session_end_sweep
 
     def sweep_argv_for(self, repo, elapsed):
-        calls = []
-        real_run = self.mod.subprocess.run
-
-        def record_call(*args, **kwargs):
-            argv = args[0] if args else kwargs.get("args")
-            if isinstance(argv, list) and self.mod.SWEEP_PATH in argv:
-                calls.append(argv)
-                return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
-            return real_run(*args, **kwargs)
-
-        self.mod.subprocess.run = record_call
-        try:
-            self.mod.handle({"hook_event_name": "SessionEnd", "cwd": repo}, elapsed_seconds=elapsed)
-        finally:
-            self.mod.subprocess.run = real_run
-        return calls
+        return hook_starts(self.mod, repo, elapsed)
 
     def test_the_sweep_is_passed_the_time_left_as_a_deadline_flag(self):
         repo = os.path.join(ROOT, "deadline_flag_repo")
@@ -715,6 +724,43 @@ class SweepIsToldItsTimeLeftAsADeadline(unittest.TestCase):
                 value = deadline_value(calls[0])
                 self.assertIsNotNone(value, "the sweep got no --deadline-seconds: %r" % (calls[0],))
                 self.assertAlmostEqual(value, self.mod.remaining_sweep_timeout_seconds(elapsed))
+
+    def test_the_sweep_is_told_it_is_the_session_end_run(self):
+        """The SessionEnd run scopes the sweep to this session's own repository. Without
+        `--session-end` the sweep reads every machine-wide tier, which is the daily job's job."""
+        repo = os.path.join(ROOT, "session_end_flag_repo")
+        make_repo(repo)
+        calls = self.sweep_argv_for(repo, 0.0)
+        self.assertEqual(len(calls), 1, "the hook ran the sweep %d times" % len(calls))
+        self.assertIn("--session-end", calls[0],
+                      "the SessionEnd sweep was not told it is session-scoped: %r" % (calls[0],))
+
+
+class SessionEndHookStartsOneSweepProcess(unittest.TestCase):
+    """Cost of the SessionEnd path (rule outcomes-mechanize-rules: a test proves the cost a hook
+    states). One payload with a cwd and no scratchpad, the case every session end takes.
+
+    Measured on main before the SessionEnd scope change, with `hook_starts(..., every_call=True)`, one fixture
+    repository with one commit: 3 process starts in all, 2 git (`git_reads.primary_checkout`) and
+    1 sweep subprocess, with 0 `ps` reads (no scratchpad in the payload). The sweep's own pid-list
+    reads are measured by SessionEndScopeTests in janitor/test_sweep.py.
+    """
+
+    def setUp(self):
+        import session_end_sweep
+        self.mod = session_end_sweep
+
+    def test_the_hook_starts_exactly_one_sweep_subprocess_and_no_ps(self):
+        repo = os.path.join(ROOT, "cost_one_sweep_repo")
+        make_repo(repo)
+        starts = hook_starts(self.mod, repo, 0.0, every_call=True)
+        sweeps = [a for a in starts if isinstance(a, list) and self.mod.SWEEP_PATH in a]
+        ps = [a for a in starts if isinstance(a, list) and a and a[0] == "ps"]
+        git = [a for a in starts if isinstance(a, list) and a and a[0] == "git"]
+        self.assertEqual(len(sweeps), 1, "the hook started %d sweep subprocesses" % len(sweeps))
+        self.assertEqual(len(ps), 0, "the hook started %d ps reads with no scratchpad" % len(ps))
+        self.assertEqual(len(git), 2, "the hook started %d git reads, expected the 2 of "
+                                      "git_reads.primary_checkout" % len(git))
 
 
 from sweep import FETCH_THROTTLE_SECONDS  # noqa: E402  the window, read from its one home

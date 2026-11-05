@@ -738,8 +738,15 @@ MUTATIONS = [
      '    if stash_takes_the_stack(args):\n        stack = stash_stack(where)',
      '    if stash_action(args) in ("drop", "clear"):\n        stack = stash_stack(where)', "guard", 'subject: popping a real entry from a CLEAN checkout still denies'),
     ("shared-tree: reset collapses back to a name match, --hard or not",
-     '    return "--hard" in args',
+     '    return any(flag in args for flag in RESET_DISCARD_FLAGS)',
      '    return True', "guard", 'reset: a plain reset only unstages, the working tree is untouched'),
+    # Each mutant drops ONE flag from the one constant, so each form's own case must go red.
+    ("shared-tree: reset --merge no longer takes --hard's verdict",
+     'RESET_DISCARD_FLAGS = ("--hard", "--merge", "--keep")',
+     'RESET_DISCARD_FLAGS = ("--hard", "--keep")', "guard", 'reset: --merge at HEAD over a staged edit and a staged new file refuses'),
+    ("shared-tree: reset --keep no longer takes --hard's verdict",
+     'RESET_DISCARD_FLAGS = ("--hard", "--merge", "--keep")',
+     'RESET_DISCARD_FLAGS = ("--hard", "--merge")', "guard", 'reset: --keep at another commit moves the branch, so a shared checkout refuses'),
     # Added: the subject read. One per arm. Each mutation blinds ONE subject read, which must
     # turn that arm's empty-subject case red: a guard that refuses without reading its subject is
     # the defect these arms fix.
@@ -1278,9 +1285,11 @@ MUTATIONS = [
      "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: a write outside the recorded home, inside the clone, is allowed through",
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                    and path_is_inside(resolved_target, home) is False):',
+     '                    and path_is_inside(resolved_target, home) is False\n'
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                    and path_is_inside(resolved_target, home) is None):',
+     '                    and path_is_inside(resolved_target, home) is None\n'
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
      "guard", "worktree-home: a /c/ cwd inside the home is inside"),
     # The next two anchors sit in worktree_home_hit, which returns a log detail and lets judge()
     # refuse; a mutant that returns a detail for a status that allows is a deny.
@@ -1304,10 +1313,12 @@ MUTATIONS = [
      '            try:\n                resolved_target = _resolved(write_target, home_cwd)\n'
      '            except Exception:\n                resolved_target = write_target\n'
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                    and path_is_inside(resolved_target, home) is False):',
+     '                    and path_is_inside(resolved_target, home) is False\n'
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
      '            resolved_target = write_target\n'
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                    and path_is_inside(resolved_target, home) is False):',
+     '                    and path_is_inside(resolved_target, home) is False\n'
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
      "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: the write-target loop judges only the first path field",
      '        for write_target in (write_targets(tool_input) if home_primary else ()):',
@@ -1323,12 +1334,14 @@ MUTATIONS = [
      "        return (bool(owner) and owner == own",
      "guard", "worktree-home: any session's write into another checkout"),
     ("other-checkout: the clone's common git directory is judged as the primary's own files",
-     '                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)',
-     '                and True)',
+     '                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True\n'
+     '                and not _own_red_run(',
+     '                and True\n'
+     '                and not _own_red_run(',
      "guard", "worktree-home: any session's write into another checkout"),
     ("other-checkout: a shell target ignores a leading cd",
-     "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True)",
-     "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=False)",
+     "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True, predicate_command=True)",
+     "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=False, predicate_command=True)",
      "guard", "worktree-home: any session's write into another checkout"),
     ("other-checkout: a quiet redirect pays the git read",
      '        writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))\n        moves =',
@@ -1336,8 +1349,8 @@ MUTATIONS = [
      "guard", "worktree-home: the cross-checkout read costs"),
     # The `cd` act: `worktree_home_cd_*_case`.
     ("other-checkout: a cd into another checkout is not judged",
-     "        if elsewhere(move, where) and not _cd_red_run(",
-     "        if False and not _cd_red_run(",
+     "        if elsewhere(move, where) and not _own_red_run(",
+     "        if False and not _own_red_run(",
      "guard", "worktree-home: a cd into another checkout of the clone is refused"),
     ("other-checkout: a bare cd with no write word is skipped like a read",
      "    if not moves and not writes:\n        return \"\"\n    roots =",
@@ -1356,17 +1369,34 @@ MUTATIONS = [
      '    if False and path_is_inside(target, home) is True:\n        return True\n    if isinstance(payload, dict)',
      "guard", "worktree-home: the cd exemptions pass"),
     ("other-checkout: the session's recorded home is not exempt from the cd act",
-     "    return bool(held) and path_is_inside(target, held) is True\n\n\ndef _cd_red_run(",
-     "    return False\n\n\ndef _cd_red_run(",
+     "    return bool(held) and path_is_inside(target, held) is True\n\n\n# The shell verbs",
+     "    return False\n\n\n# The shell verbs",
      "guard", "worktree-home: the cd exemptions pass"),
     ("other-checkout: the agent's own red-run folder is not exempt from the cd act",
-     '    return (os.path.basename(owner).startswith("agent-" + agent_id + "-")',
-     '    return (False and os.path.basename(owner).startswith("agent-" + agent_id + "-")',
+     '                and os.path.normcase(os.path.basename(folder)).startswith(',
+     '                and False and os.path.normcase(os.path.basename(folder)).startswith(',
      "guard", "worktree-home: the cd exemptions pass"),
     ("other-checkout: the red-run exemption matches a prefix of the agent id",
-     '    return (os.path.basename(owner).startswith("agent-" + agent_id + "-")',
-     '    return (os.path.basename(owner).startswith("agent-" + agent_id)',
+     '                    os.path.normcase("agent-" + agent_id + "-"))):',
+     '                    os.path.normcase("agent-" + agent_id))):',
      "guard", "worktree-home: an agent's cd into a sibling agent tree"),
+    # The write act's exemption: `worktree_home_red_write_case`.
+    ("other-checkout: a write into the agent's own red-run folder is refused",
+     '                and not _own_red_run(payload, roots[0], resolved, verb in RED_RUN_ROOT_VERBS))',
+     '                and True)',
+     "guard", "worktree-home: an agent's write into its own red-run folder"),
+    ("worktree-home: a Write into the agent's own red-run folder is refused",
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
+     '                    and True):',
+     "guard", "worktree-home: an agent's write into its own red-run folder"),
+    ("other-checkout: the red-run folder's own root is exempt, so rm and mv may name it",
+     "            return root_ok or folder != path",
+     "            return True",
+     "guard", "worktree-home: the own red-run folder's root is refused"),
+    ("other-checkout: the red-run folder is anchored on the owning checkout, not the primary",
+     '                and not _own_red_run(payload, roots[0], resolved, verb in RED_RUN_ROOT_VERBS))',
+     '                and not _own_red_run(payload, owner, resolved, verb in RED_RUN_ROOT_VERBS))',
+     "guard", "worktree-home: a red-run folder nested under another linked worktree"),
     ("other-checkout: a cd within its own checkout pays the git read",
      '                 if own_root and _checkout_root_by_stat(m) not in ("", own_root) and not _cd_home_exempt(payload, where, m)]',
      "                 if own_root and not _cd_home_exempt(payload, where, m)]",
@@ -2123,11 +2153,43 @@ MUTATIONS = [
      'elif low.endswith("/simulator.app") or low == "simulator.app":',
      'elif False:', "guard", 'simulator-boot-bypass: open of the Simulator.app path'),
     ("simulator-boot-bypass: a command a wrapper hands on is not read",
-     'return next((hit for text in inner_commands(tokens) for part in split_segments(text)\n                 if (hit := sim_bypass_hit(part))), "")',
-     'return ""', "guard", 'simulator-boot-bypass: bash -c wraps the boot'),
+     '    for text in inner_commands(tokens):\n        for part in split_segments(text):\n            yield from _sim_commands(part)',
+     '    return', "guard", 'simulator-boot-bypass: bash -c wraps the boot'),
     ("simulator-boot-bypass: the refusal is never raised",
      '                refuse(tool, "deny", "simulator-boot-bypass", SIM_BYPASS_REASON, matched)',
      '                pass', "guard", 'simulator-boot-bypass: xcrun simctl boot'),
+    # RULE simulator-boot-route (decision sim-test-is-the-one-boot-path, ruling 5).
+    # Each mutant breaks one arm of its rule. The named case is the one that must die.
+    ("simulator-boot-route: an xcodebuild boot of a shut-down device is never refused",
+     '        elif (remedies or {}).get(name):',
+     '        elif False:', "guard",
+     "route: a test of a shut-down simulator by id names sim-test"),
+    ("simulator-boot-route: the test action is never read, so every test gets the generic remedy",
+     'elif token == "test" and not (',
+     'elif False and not (', "guard",
+     "route: a test with the action after its options, a shut-down simulator by name, names sim-test"),
+    ("simulator-boot-route: a test gets the generic remedy, not sim-test",
+     '    if action:\n        return "Run `sim-test',
+     '    if not action:\n        return "Run `sim-test', "guard",
+     "route: a test of a shut-down simulator by id names sim-test"),
+    ("simulator-boot-route: a build names a destination that is not the generic one",
+     "`-destination 'generic/platform=iOS Simulator'` instead, and boot nothing.",
+     "`-destination 'generic/platform=iOS'` instead, and boot nothing.", "guard",
+     "route: a build of a shut-down simulator names the generic destination"),
+    # RULE simulator-boot-lease (decision sim-test-is-the-one-boot-path, ruling 5). Each mutant breaks one arm.
+    ("simulator-boot-lease: the refusal is an ask, not a deny",
+     'refuse(tool, "deny", "simulator-boot-lease",',
+     'refuse(tool, "ask", "simulator-boot-lease",', "guard",
+     "lease: one booted, an MCP launch of a shut-down device with no lock is refused by the lease"),
+    ("simulator-boot-lease: a booted device is judged by the lease too",
+     '        hits = [d for d in hits if d["state"] != "Booted"]',
+     '        hits = list(hits)', "guard",
+     "lease: an MCP launch of a booted device with no lock is allowed"),
+    # The name arm compares exactly: a name without the case or outer-space fold matches no device. The UDID arm stays.
+    ("simulator-boot-lease: a device name compares exactly, without the case and outer-space fold",
+     '        hits = [d for d in devices if key == d["udid"].casefold() or key == d["name"].strip().casefold()]',
+     '        hits = [d for d in devices if key == d["udid"].casefold() or name == d["name"]]', "guard",
+     "lease: an MCP launch naming the shut-down device in lowercase is refused by the lease"),
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
     ("handoff-unread: the refusal is never printed",
@@ -2166,6 +2228,7 @@ MUTATIONS = [
 REPORT_TARGETS = [
     ("lint/report_guard.py", ["lint/test_report_guard.py", "lint/test_report_guard_route.py",
                              "lint/test_report_guard_landing.py",
+                             "lint/test_report_guard_refusal.py",
                              "hooks/test_reply_judge.py", "hooks/test_wrappers.py",
                              "lint/test_rule_audit.py", "lint/test_settings_matcher.py"]),
     ("hooks/feedback_guard.py", ["hooks/test_feedback_inbox.py", "lint/test_settings_matcher.py"]),
@@ -2241,6 +2304,9 @@ if not passed:
     print(result.detail)
     sys.exit(1)
 """
+# banchi's per-file selector (scripts/tests-for.py), named by both parts. A commit that lacks the script has no
+# copy in its checkout, so a replay reads the clone's HEAD copy (`_select_suites`, hooks/mutate_shared.py).
+BANCHI_SELECT = ["python3", "scripts/tests-for.py", "{path}"]
 REPLAY_PROFILES = {
     "q_max": {
         "code": r"^(src|harness|app)/.*\.(ts|tsx|mts|mjs|js)$", "code_not": r"^harness/tests/|\.(test|spec)\.(mjs|js|ts|tsx|mts)$",
@@ -2257,7 +2323,7 @@ REPLAY_PROFILES = {
                      "{suite}"],
             "classify": "playwright", "cwd": "app",
             "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"], "lockfile": "app/package-lock.json",
-            "sparse_skip": ["demo-assets", "vendor"],
+            "sparse_skip": ["demo-assets", "vendor"], "select": BANCHI_SELECT,
         },
         "py": {
             "code": r"^(?!harness/tests/).*\.py$", "code_not": r"^scripts/(.*/)?[^/]*selftest\.py$",
@@ -2268,6 +2334,7 @@ REPLAY_PROFILES = {
                         ["{deps}/venv/bin/pip", "install", "--quiet", "--disable-pip-version-check", "-r",
                          "requirements.txt"]],
             "lockfile": "requirements.txt", "link": None, "sparse_skip": ["demo-assets", "vendor"],
+            "select": BANCHI_SELECT,
         },
     }},
 }
@@ -2399,12 +2466,23 @@ def run_mutant(sources, work: str, entry):
         return label, None, [], required, skip
     _path, suite, variable, stem = TARGETS[target]
     if target == "guard":
-        # The whole guard family goes in the mutant's own folder, and the anchor lands in the one
-        # module that holds it. The suite loads the copied guard.py, which finds its siblings.
-        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
+        # module that holds it. The suite loads the copied guard.py, which finds its siblings. The
+        # simulator refusal imports janitor/sweep.py from ../janitor and fails open when it cannot, so
+        # the copy takes sweep.py and temp_sweep.py beside its hooks folder, as a checkout has them.
+        # Without them every simulator arm would be judged against a guard that allows everything.
+        root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        tree = os.path.join(root, "hooks")
         mutate_shared.guard_tree(tree)
         mutate_shared.apply_mutant(tree, old, new)
         copy_path = os.path.join(tree, "guard.py")
+        os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
+        for name in ("sweep.py", "temp_sweep.py"):
+            shutil.copy(os.path.join(HERE, "..", "janitor", name), os.path.join(root, "janitor"))
+        # guard.py reads lint/layout.py from ../lint (_layout_module), which is root/lint for this copy. Without
+        # it the role-model table reads as unread and every role-model arm passes unjudged.
+        shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
         mutated = sources[target].replace(old, new, 1)
@@ -2516,9 +2594,9 @@ def main() -> int:
     # failure this file exists to catch. MEASURED: before this line, all seven `watch` mutants
     # printed the identical nine-case failure list, whatever the mutation.
     mutate_shared.guard_tree(work)
-    # Every guard copy sits one folder below `work`, so its `../lint` is work/lint. guard.py imports
-    # lint/layout.py from there (role_model_table, the waiting-page check). Without this folder the import
-    # fails, the guard exits silently and allows, and the role-model deny cases go red whatever the mutation.
+    # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint:
+    # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The ruling and
+    # decision copies read their own tree/lint instead (above). A guard copy carries its own lint folder (run_mutant).
     shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(work, "lint"),
                     ignore=shutil.ignore_patterns("__pycache__"))
 

@@ -17,6 +17,9 @@ scaffold's hooks/ folder, and a mutant aimed at a sibling lands there.
 The third part pins `staged_suite`'s stage-1 verdict: when stage 1 runs the required case, its result
 is the verdict and the full suite never runs. The full suite runs only when no line names the case,
 or when MUTATE_FULL=1 asks for it.
+
+The fourth part pins the layout of a guard mutant's folder: its copy must import lint/layout.py from
+its own root, the folder beside its hooks/.
 """
 import contextlib
 import io
@@ -31,6 +34,9 @@ from unittest import mock
 HOOKS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HOOKS)
 sys.path.insert(0, os.path.join(os.path.dirname(HOOKS), "janitor"))
+sys.path.insert(0, os.path.join(os.path.dirname(HOOKS), "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import mutate_guard  # noqa: E402
 import mutate_shared  # noqa: E402
 import mutate_sweep  # noqa: E402
 
@@ -184,6 +190,44 @@ class GuardTreeImportsTests(unittest.TestCase):
                 [sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import " + module, dest],
                 capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, module + ": " + result.stderr[-300:])
+
+
+class GuardMutantLayoutTests(unittest.TestCase):
+    """A guard mutant runs from <root>/hooks, so its ../lint is <root>/lint. guard.py reads lint/layout.py
+    from there (role_model_table, record_branch_of). Without that folder the import fails, the role-model
+    table reads as unread, and every role-model arm passes unjudged: a survivor that has no bearing on
+    its mutation."""
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+
+    def test_copied_guard_imports_the_lint_layout_from_its_own_root(self):
+        entry = next(e for e in mutate_guard.MUTATIONS
+                     if mutate_guard.mutation_parts(e)[0].startswith("role-model: Explore loses its audit exemption"))
+        copies = []
+
+        def record(suite, variable, copy_path, config_dir, only=None):
+            copies.append(copy_path)
+            return 0, [], []
+
+        def one_stage(run, required):
+            run(None)
+            return 0, []
+
+        with mock.patch.object(mutate_guard, "run_suite", side_effect=record), \
+                mock.patch.object(mutate_shared, "staged_suite", side_effect=one_stage):
+            mutate_guard.run_mutant({}, self.run, entry)
+        self.assertEqual(len(copies), 1)
+        hooks = os.path.dirname(copies[0])
+        # -I drops the cwd from sys.path, so a lint/ in the working directory cannot satisfy the import.
+        result = subprocess.run(
+            [sys.executable, "-I", "-c",
+             "import sys; sys.path.insert(0, sys.argv[1]); import guard; guard._layout_module()",
+             hooks],
+            capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0,
+                         "the copied guard cannot import lint/layout.py from its root: " + result.stderr[-300:])
 
 
 class BuildScaffoldSiblingTests(unittest.TestCase):
