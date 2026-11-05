@@ -14,7 +14,7 @@ inputs:
     description: "A REPLAY_PROFILES name in hooks/mutate_guard.py: how to read the caller's repository."
     required: true
   known-defects:
-    description: "The caller's JSON list of planted defects. A missing file names no defect, and passes."
+    description: "The caller's JSON list of planted defects. A missing file is UNKNOWN and fails the action. An empty list [] passes."
     required: false
     default: .github/known-defects.json
   limit:
@@ -22,7 +22,7 @@ inputs:
     required: false
     default: "10"
   budget:
-    description: Seconds after which a mutant not yet started counts as not run.
+    description: Wall seconds per profile part. When they pass, running suites are killed and each mutant left counts as not run.
     required: false
     default: "300"
   suite-timeout:
