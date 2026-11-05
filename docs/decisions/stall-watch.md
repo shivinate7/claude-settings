@@ -69,9 +69,10 @@ guard rule, so the watcher does the waiting and the session is told once.
   until then, so nothing is removed at stall time), and when the original calls `exit N` (the exit code is
   kept). The wrapper creates both files and opens both before the job starts. The watcher inherits those
   handles, so a job that ends at once loses no output, and the STALL report reads its tail from the
-  handle. An EXIT trap in the job does the removal. Limits: an original that execs drops the trap, and
-  so does one that sets its own EXIT trap. The exec'd command must stay the job's one process, so the job
-  gets no subshell. A stalled job of that kind leaves its two files. A job killed before it can run its
+  handle. An EXIT trap in the job does the removal. The job runs as a `( )` subshell because bash 3.2
+  (macOS `/bin/sh` and `/bin/bash`) runs an EXIT trap at a subshell's normal end only there. Limits: an original that execs drops the trap, and
+  so does one that sets its own EXIT trap. The exec'd command replaces the job's subshell and keeps its pid, so
+  the report still lists one process. A stalled job of that kind leaves its two files. A job killed before it can run its
   trap leaves them too. A job that never stalls is cleaned by the wrapper after `wait`. The report's
   `Log:` line says the file is usually removed when the job ends. Cost: two small files created per job
   and two held handles in the watcher, no new process. In a wrapped run the watcher no longer polls for the beat file. Run by hand with no beat handle, it still tries one open a second.
