@@ -2793,8 +2793,9 @@ def review_state(rec, head):
     final allowed round whatever the verdict, and owes the later rounds when the first fails, even if it only deletes. Net value negative holds the change.
     A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round or delete-only done names it.
     A fix check (rec["fix"], decision hold-unsafe-after-round-3) is not a round and is read after the held rule. A FAIL is open, whatever the
-    rounds say. A PASS counts only after the last round, which is round 3, or round 1 of a delete-only change with Guard or check no; after
-    any other round it is open. Where it counts, the rules above run as written: it keeps the net value round 3 gave and settles none that is owed."""
+    rounds say. A PASS counts only after the last round: the final allowed round, or the first of a delete-only change with Guard or check no.
+    After any other round it is open. Where it counts, the rules above run as written: it keeps the net value the final round gave and settles
+    none that is owed."""
     if rec is None:
         return "bad", "the newest record does not parse"
     if rec["head"] != head:
