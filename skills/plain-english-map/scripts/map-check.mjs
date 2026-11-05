@@ -1218,7 +1218,7 @@ export const mapChecks = ({ cfg, root, read, files = () => gitLsFiles(root) }) =
     const problems = [], pairs = new Map();
     for (const f of mapFilePaths(all)) {
       const { entries, orphans } = subLineEntries(read(f), re);
-      for (const o of orphans) problems.push(`${f}:${o.line} a tested-by line sits under no map line of a code file: ${o.text}`);
+      for (const o of orphans) problems.push(`${f}:${o.line} a tested-by line sits under no file map line (a table line, a screen line and a home are none): ${o.text}`);
       for (const e of entries) {
         for (const b of e.testsBad) problems.push(`${f}:${b.line} tested-by line is not "  - Tested by: \`PATH\`, \`PATH\`": ${b.text}`);
         for (const test of e.tests) {
