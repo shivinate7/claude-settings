@@ -623,12 +623,13 @@ class KnownDefectsTests(unittest.TestCase):
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
         self.assertEqual(len(out.strip().splitlines()), 1, "an empty list prints one line:\n" + out)
 
-    def test_a_missing_file_exits_0_and_says_no_known_defects_listed(self):
+    def test_a_missing_file_reads_unknown_naming_the_path_and_exits_1(self):
         repo = defect_repo()
         absent = os.path.join(fresh(), "absent.json")
         code, out, err = run_cli(["--known-defects", absent, "--repo", repo])
-        self.assertEqual(code, 0, "a missing file is not a failure: exit %d\n%s%s" % (code, out, err))
-        self.assertIn("no known defects listed", out)
+        self.assertEqual(code, 1, "a missing list reads UNKNOWN, and UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
+        unknown = [line for line in out.splitlines() if line.startswith("UNKNOWN")]
+        self.assertTrue(any(absent in line for line in unknown), "no UNKNOWN line names %s:\n%s" % (absent, out))
 
     def test_the_repository_is_left_as_found_and_the_plant_runs_on_head(self):
         repo = defect_repo()
