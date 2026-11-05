@@ -6,7 +6,7 @@ ArtifactData, so the session fetches first, then runs this checker:
 
     ArtifactData get collection=answers doc_id=ID out_dir=DIR   (an absent doc saves no file)
     ArtifactData get collection=items   doc_id=ID out_dir=DIR
-    python3 ~/.claude/skills/waiting-page/owner_word.py --root REPO_ROOT --page-url URL --item ID --fetched DIR [--pick KEY]
+    python3 ~/.claude/skills/waiting-page/page_grant.py --root REPO_ROOT --page-url URL --item ID --fetched DIR [--pick KEY]
 
 DIR holds `answers/ID.json` and `items/ID.json`, the data object of each doc. REPO_ROOT is the repo of the page; its
 extras file holds the artifacts registry (lint/layout.py `artifacts()`). --pick binds the pick a peer relayed: a key,
