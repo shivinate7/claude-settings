@@ -1341,3 +1341,5 @@
 - merge-body-unlink-untested: no test fails if `Host.api` stops deleting its `--input` temp file (merge/merge.py `Host.api`). Decision: none yet.
 - gh-cmd-shim-claim-split: the `Host.api` docstring says gh on Windows runs through a `.cmd` wrapper, but the GhLockTest skip says real gh.exe is native. If the wrapper is real, `GhLock.api` still sends the lock's two-line message as `-f`. Decision: none yet.
 - alarm-renamed-workflow-unknown: after a workflow file rename, actions/ci-alarm/alarm.sh reads the workflow at its current path, gets a 404 and prints unknown, never red; merge/merge.py reads the run's own path. Decision: no-merge-onto-red-main.
+- docs-only-design-fail-open: a `docs-only` review record that has rounds and a last design-reviewer FAIL or PARTIAL now reads open, where main read done. A docs-only change rarely gets a design review (lane merge-design-fail-open, review round 3). Decision: pr-review-record
+- review-state-docstring-width: the `review_state` docstring in merge/merge.py has a 233-character line. Width lint does not flag it today (lane merge-design-fail-open, review round 3). Decision: pr-review-record

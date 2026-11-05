@@ -2767,10 +2767,11 @@ def parse_review(text):
 
 def review_state(rec, head):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
-    The done rules follow roles-review-cap-three and the decision pr-review-record: the last round is all PASS; or the final allowed round is done
-    and Guard or check is no; or the final allowed round is done, Guard or check is yes and Net value is zero or positive; or Kind is delete-only,
+    The done rules follow roles-review-cap-three and the decision pr-review-record: the last round is all PASS and the last design-reviewer line
+    (by position, across all rounds) is PASS or absent; or the final allowed round is done and Guard or check is no; or the final allowed round is done, Guard or check is yes and Net value is zero or positive; or Kind is delete-only,
     Guard or check is no and the first round is done; or Kind is docs-only with no round. A guard or check change owes the net-value test after the
-    final allowed round whatever the verdict, and owes the later rounds when the first fails, even if it only deletes. Net value negative holds the change."""
+    final allowed round whatever the verdict, and owes the later rounds when the first fails, even if it only deletes. Net value negative holds the change.
+    A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round or delete-only done names it."""
     if rec is None:
         return "bad", "the newest record does not parse"
     if rec["head"] != head:
@@ -2779,16 +2780,22 @@ def review_state(rec, head):
         return "held", "net value is negative"
     rounds = rec["rounds"]
     top = max((i for i, *_ in rounds), default=0)
+    design = next(((i, v) for i, role, _, v in reversed(rounds) if role == REVIEW_ROLES[1]), None)  # the last design-reviewer line, by position
+    bad = design if design and design[1] != "PASS" else None
+    note = f"; the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}" if bad else ""
     if top >= REVIEW_LAST_ROUND:  # before the PASS rule: a final-round PASS on a guard or check change still owes the net-value test
         if rec["guard"] == "no":
-            return "done", "round 3 is done, no guard or check changed"
+            return "done", "round 3 is done, no guard or check changed" + note
         if rec["net"] in ("zero", "positive"):
-            return "done", f"round 3 is done, net value {rec['net']}"
+            return "done", f"round 3 is done, net value {rec['net']}" + note
         return "open", "round 3 is done on a guard or check change, and its net value is owed"
-    if top and all(v == "PASS" for i, _, _, v in rounds if i == top):
+    passed = top and all(v == "PASS" for i, _, _, v in rounds if i == top)
+    if passed and not bad:
         return "done", f"round {top} passed"
-    if rec["kind"] == "delete-only" and rec["guard"] == "no" and top >= 1:
-        return "done", "delete-only change, round 1 is done"
+    if rec["kind"] == "delete-only" and rec["guard"] == "no" and top >= 1:  # before the design hold: the first review closes a delete-only change with no guard or check
+        return "done", "delete-only change, round 1 is done" + note
+    if passed:
+        return "open", f"round {top} passed, but the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}"
     if rec["kind"] == "delete-only" and top == 1:
         return "open", "round 1 failed on a guard or check change, so rounds 2 and 3 are owed"
     if rec["kind"] == "docs-only" and not rounds:
