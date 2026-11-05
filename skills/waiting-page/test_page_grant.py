@@ -14,7 +14,7 @@ Verdict, one line on stdout:
   counted item=<ID> n=<n> choice=<choice> at=<at> [note=<json string>]   exit 0
   not counted: <reason>                                                  exit 1
   unknown: <reason>                                                      exit 2 (no readable registry, a fetched file not one JSON object)
-The rules are SKILL.md "Read the answers" ("An answer is clear only when") and "Route and close".
+The rules are SKILL.md "Read the answers" ("A decision answer is clear only when") and "Route and close".
 """
 import json
 import os
@@ -206,6 +206,11 @@ class Counted(Base):
     def test_open_item_with_lane_set_counted(self):
         """The relay case: a lane took the answer, so the item is still open with its lane set. Green on the old code too."""
         r = self.check(self.repo(), self.pair(item_fields={"lane": "owner-word-relay"}), pick="a")
+        self.assertCounted(r, verdict("a"))
+
+    def test_item_with_no_status_field_counted(self):
+        """An item with no `status` field at all is open, as the page reads it. Red on a checker whose default status is closed."""
+        r = self.check(self.repo(), self.pair(item_fields={"status": ABSENT}), pick="a")
         self.assertCounted(r, verdict("a"))
 
     def test_closed_arbiter_ruling_overturn_counted(self):
