@@ -1,9 +1,9 @@
 {
  "title": "A red nightly run is cleared by a push, not held by PR-only jobs",
  "phase": "now",
- "status": "doing",
+ "status": "done",
  "order": 103.2105,
  "why": "merge.py base_state and the alarm.sh clear rule skip PR-only jobs (coordinator, Nov 4 15:22 CST).",
- "note": "One home for the clear rule: actions/ci-alarm/clear_rule.py. Lane session_013NEJKzqhfAos9tqAGa6GFL.",
- "updatedAt": "2026-11-04T21:25:00Z"
+ "note": "Done: PR #1245 merged in batch 10, main 59bff081 (Nov 5 06:36 CST). One home for the clear rule: actions/ci-alarm/clear_rule.py; merge.py base_state and alarm.sh skip PR-only jobs.",
+ "updatedAt": "2026-11-05T12:40:00Z"
 }

@@ -1,9 +1,9 @@
 {
  "title": "The owner can reply to an answered ask on the waiting page",
  "phase": "now",
- "status": "todo",
+ "status": "done",
  "order": 103.2106,
  "why": "Owner ask ask-mw2rl21hpt, Nov 4 17:45 CST: there's no way to reply back to \"Your ask\" threads. An answered ask shows its reply, but the page gives no box to answer it, so a follow-up needs a new ask.",
- "note": "The waiting-page template (skills/waiting-page) adds a reply box to each answered ask. A reply saves as a new ask that names the ask it follows (a `re` field), so no session replaces an ask, as the skill requires. The page writer reads it like any ask. Screen change: designer before the builder. Until it lands, the owner sends a new ask that starts \"re ask-<id>\".",
- "updatedAt": "2026-11-04T23:48:00Z"
+ "note": "Done: PR #1248 merged in batch 10, main 59bff081 (Nov 5 06:36 CST). The waiting-page template adds a reply box to each answered ask; a reply saves as a new ask that names the ask it follows (a `re` field). Each repo's page gets it on its next republish.",
+ "updatedAt": "2026-11-05T12:40:00Z"
 }
