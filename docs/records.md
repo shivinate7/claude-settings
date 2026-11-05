@@ -311,6 +311,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ci-wake-export-gh-repo-unread` | ci_wake reads GH_REPO only as a command prefix. | [`docs/debts/ci-wake-export-gh-repo-unread.md`](../docs/debts/ci-wake-export-gh-repo-unread.md) |
 | `ci-wake-gh-host-bare-repo` | For a github.com PR, ci_wake passes a bare -R owner/repo. | [`docs/debts/ci-wake-gh-host-bare-repo.md`](../docs/debts/ci-wake-gh-host-bare-repo.md) |
 | `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs again until a run that ran is judged. | [`docs/debts/ci-wake-lists-runs-once.md`](../docs/debts/ci-wake-lists-runs-once.md) |
+| `code-check-pin-drift` | `bin/ste-changed` warns when CI pins the ste-lint or zizmor action at a commit whose files differ from the session's copy. | [`docs/debts/code-check-pin-drift.md`](../docs/debts/code-check-pin-drift.md) |
 | `comment-check-changed-from` | The comment check flags "changed from the previous/original/old …" as history. | [`docs/debts/comment-check-changed-from.md`](../docs/debts/comment-check-changed-from.md) |
 | `departs-word-list-limits` | `question-departs` reads a no-change word in the first clause of the change side. | [`docs/debts/departs-word-list-limits.md`](../docs/debts/departs-word-list-limits.md) |
 | `design-branch-deleted-unmerged` | An unmerged design branch was deleted, and its mockup is on no ref. | [`docs/debts/design-branch-deleted-unmerged.md`](../docs/debts/design-branch-deleted-unmerged.md) |
@@ -368,6 +369,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `record-code-spans-unindexed` | The restates check strips code spans from the record side too, so owner words that a record keeps in backticks are never indexed. | [`docs/debts/record-code-spans-unindexed.md`](../docs/debts/record-code-spans-unindexed.md) |
 | `refresh-lock-untested` | The SessionStart refresh holds a lock directory in the config dir. | [`docs/debts/refresh-lock-untested.md`](../docs/debts/refresh-lock-untested.md) |
 | `refusal-route-around-guard` | A test-author gets a refusal on an Edit of a path, then writes the same file with Bash and Python. | [`docs/debts/refusal-route-around-guard.md`](../docs/debts/refusal-route-around-guard.md) |
+| `refusal-settle-reads` | When the refusals file holds a row with a `tool_use_id`, each Stop reads the whole transcript and every `<session>/subagents/*.jsonl` file, to tell an agent's refused call from the orchestrator's. | [`docs/debts/refusal-settle-reads.md`](../docs/debts/refusal-settle-reads.md) |
 | `refusal-shapes-missed` | The PreCompact digest's refusal match misses four denial lines that Claude Code 2.1.316 writes: "Permission to read <path> has been denied.", "Permission to edit <path> has been denied.", "Permission for this tool use was denied: it requires interactive approval", and "Permission for this command was denied by a built-in Claude Code safety check". | [`docs/debts/refusal-shapes-missed.md`](../docs/debts/refusal-shapes-missed.md) |
 | `replay-big-file-unknown` | A file that does not parse is listed as skipped, and its row can still show a kill rate. | [`docs/debts/replay-big-file-unknown.md`](../docs/debts/replay-big-file-unknown.md) |
 | `report-guard-gh-api-merge` | A turn that merges with `gh api -X PUT repos/o/r/pulls/N/merge` or `gh api repos/o/r/merges` lands a commit. | [`docs/debts/report-guard-gh-api-merge.md`](../docs/debts/report-guard-gh-api-merge.md) |
@@ -389,7 +391,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `verdict-rewritten-xcode-output` | `verdict` needs a sign of a test run to fail a run with no test count. | [`docs/debts/verdict-rewritten-xcode-output.md`](../docs/debts/verdict-rewritten-xcode-output.md) |
 | `verdict-skip-colon-line` | `bin/verdict` counts marker lines that start `SKIP ` or `SKIPPED`. | [`docs/debts/verdict-skip-colon-line.md`](../docs/debts/verdict-skip-colon-line.md) |
 | `wp-batch-reads-installed-copy` | `stale_pages.py` batch mode (no `--page`) compares each live page with the `page.html` installed at session start, not with claude-settings main. | [`docs/debts/wp-batch-reads-installed-copy.md`](../docs/debts/wp-batch-reads-installed-copy.md) |
-| `zizmor-pin-drift-unchecked` | `bin/ste-changed` warns when CI pins the ste-lint action at a commit whose lint differs from the session's copy. | [`docs/debts/zizmor-pin-drift-unchecked.md`](../docs/debts/zizmor-pin-drift-unchecked.md) |
 
 ## Plans
 

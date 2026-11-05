@@ -53,6 +53,9 @@ const extractSection = (text, headingTest) => {
 };
 
 const LIST_ITEM_TOKEN_RE = /^[ \t]*[-*+]\s+`([^`]+)`/;
+// A `##` heading of a trace page, and the text after the `—` that ends the path of a map line or a step.
+const H2_RE = /^##\s+(.*\S)/;
+const afterDash = (rest) => rest.replace(/^\s*—\s*/, '').trim();
 
 const listTokens = (lines) => {
   const found = [];
@@ -76,6 +79,15 @@ export const mapCodeLines = (text, re) => {
   return text.split('\n').flatMap((l, i) => {
     const m = l.match(LIST_ITEM_TOKEN_RE);
     return m && use.test(m[1]) ? [{ line: i + 1, path: m[1] }] : [];
+  });
+};
+
+// Reads each map line whose path `re` accepts, as { path, sentence }. It reads the same list lines as `mapCodePaths`. `sentence` is the rest of the line after the ` — `, whole.
+export const mapLines = (text, re) => {
+  if (!(re instanceof RegExp)) throw new TypeError('mapLines: the second argument must be a RegExp');
+  return text.split('\n').flatMap((l) => {
+    const m = l.match(LIST_ITEM_TOKEN_RE);
+    return m && re.test(m[1]) ? [{ path: m[1], sentence: afterDash(l.slice(m[0].length)) }] : [];
   });
 };
 
@@ -171,12 +183,19 @@ const unclosedFence = (text) => {
   return open ? [`line ${open}: unclosed ${'`'.repeat(3)} fence`] : [];
 };
 
-// Reads the backticked path of each numbered item in a trace page, in order. A fenced line is no step.
-export const traceSteps = (text) =>
-  unfenced(text).flatMap(([, l]) => {
+// Reads each numbered item of a trace page, in order, as { path, text, heading }: `text` is what follows the ` — `, `heading` the `##` it sits under. A fenced line is no step.
+export const traceStepItems = (text) => {
+  let heading = '';
+  return unfenced(text).flatMap(([, l]) => {
+    const h = l.match(H2_RE);
+    if (h) heading = h[1];
     const m = l.match(TRACE_STEP_RE);
-    return m ? [m[1]] : [];
+    return m ? [{ path: m[1], text: afterDash(l.slice(m[0].length)), heading }] : [];
   });
+};
+
+// Reads the backticked path of each numbered item in a trace page, in order.
+export const traceSteps = (text) => traceStepItems(text).map((s) => s.path);
 
 // A numbered-looking line that is not in the one step form, so MAP5 would not read it.
 export const stepFormErrors = (text) =>
@@ -189,7 +208,7 @@ export const actionsWithoutStep = (text) => {
   const out = [];
   let open = null;
   for (const [, l] of unfenced(text)) {
-    const h = l.match(/^##\s+(.*\S)/);
+    const h = l.match(H2_RE);
     if (h) {
       if (open !== null) out.push(open);
       open = h[1];
@@ -1066,7 +1085,7 @@ export const aiCallRows = (sources, cfg = repoMapConfig()) => {
 };
 
 // ---- The 9 MAP checks. One home for each body: a host may register them with its own check, and the command below runs them. ----
-const TRACE_PAGE_RE = /^docs\/map\/traces\/([^/]+)\.md$/;
+export const TRACE_PAGE_RE = /^docs\/map\/traces\/([^/]+)\.md$/;
 
 /** The files this repository tracks in `root`, from `git ls-files`. */
 export const gitLsFiles = (root) =>
@@ -1077,7 +1096,7 @@ export const gitLsFiles = (root) =>
 
 // Top-level docs/map/*.md only. A trace page under docs/map/traces/ has its own checks, MAP5 and MAP6.
 // A bullet under a trace heading that says "tables" or "screens" would else add a fake MAP3 or MAP4 line.
-const mapFilePaths = (files) => files.filter((f) => /^docs\/map\/[^/]+\.md$/.test(f));
+export const mapFilePaths = (files) => files.filter((f) => /^docs\/map\/[^/]+\.md$/.test(f));
 
 const skip = (key, what) => ({ skipped: `map.config.json has no "${key}" setting, so there is no ${what} to check` });
 
