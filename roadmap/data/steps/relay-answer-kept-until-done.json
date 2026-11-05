@@ -1,9 +1,9 @@
 {
  "title": "A routed page answer stays until the receiving session reports done",
  "phase": "now",
- "status": "todo",
+ "status": "doing",
  "order": 103.27,
  "why": "Today the waiting-page skill's Route and close step deletes answers/<id> and closes the item at routing (item 242's answer was gone at 07:58 CST), so the relayed-grant check finds nothing to count. Serves the owner's relay ask ask-mw3lqb8bwx. Debt: relay-answer-deleted-on-route.",
- "note": "Nov 5 09:22 CST (coordinator): starts after #1258 (step owner-word-relay) merges. Fix: the owning session keeps the item open and its answer until the receiver reports done. After #1258 merges, triage adds an owner task: paste the Relayed Grant autoMode.allow entry (text in #1258's body or decision relayed-grant-read-from-page) into settings.json on GitHub.",
- "updatedAt": "2026-11-05T15:22:00Z"
+ "note": "Nov 5 10:26 CST: lane started by the coordinator. Nov 5 09:22 CST (coordinator): starts after #1258 (step owner-word-relay) merges. Fix: the owning session keeps the item open and its answer until the receiver reports done. After #1258 merges, triage adds an owner task: paste the Relayed Grant autoMode.allow entry (text in #1258's body or decision relayed-grant-read-from-page) into settings.json on GitHub.",
+ "updatedAt": "2026-11-05T16:27:00Z"
 }
