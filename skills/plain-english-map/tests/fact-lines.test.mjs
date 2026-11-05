@@ -29,7 +29,7 @@
 //       the scanner rule needs strings too, and case R7 asserts it), then a literal parse.
 //       A set comes back as an array, in any order. A missing python3 or a file that does not parse is ok: false, never ok: true.
 //
-//   scripts/map-check.mjs, MAP_FORMAT_VERSION in scripts/lib/map-config.mjs: 4, after the decision-id bump.
+//   scripts/map-check.mjs, MAP_FORMAT_VERSION in scripts/lib/map-config.mjs: 5, after the tested-by bump.
 //   scripts/lib/map-config.mjs, validateMapConfig: the optional key `mapPaths`, a list of path prefixes. See map-paths.test.mjs.
 //
 // The fixture (tests/fixture/) gained: src/retry.py, src/caller.py, config.json, docs/map/homes.md, and fact lines in core.md.
@@ -309,7 +309,7 @@ console.log(JSON.stringify(m.readValues([{ file: 'src/retry.py', symbol: 'RETRY_
 test('M0. on the fixture every check passes, MAP9 included, and the command exits 0', () => {
   needFile('scripts/map-check.mjs');
   const r = check(scratchRepo());
-  assert.equal(verdicts(r.out), expected(), `each of MAP1 to MAP9 must print one PASS line\n${out1500(r)}`);
+  assert.equal(verdicts(r.out), expected(), `each of MAP1 to MAP11 must print one PASS line\n${out1500(r)}`);
   assert.equal(r.status, 0, `the command must exit 0 on a clean fixture\n${out1500(r)}`);
 });
 

@@ -60,7 +60,7 @@ export const gitIn = (dir, ...a) =>
   execFileSync('git', ['-c', 'core.autocrlf=false', ...a], { cwd: dir, env: cleanEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
 
 // The files of `tests/fixture/` that the scratch repository must track.
-const FIXTURE_TRACKED = ['map.config.json', 'src/home.ts', 'src/notes.ts', 'src/screens.ts', 'src/retry.py', 'src/caller.py', 'config.json', 'docs/map/core.md', 'docs/map/homes.md', 'docs/map/traces/home.md'];
+const FIXTURE_TRACKED = ['map.config.json', 'src/home.ts', 'src/notes.ts', 'src/screens.ts', 'src/retry.py', 'src/caller.py', 'config.json', 'docs/map/core.md', 'docs/map/homes.md', 'docs/map/traces/home.md', 'src/home.spec.ts', 'src/pkg/index.ts', 'src/pkg.spec.ts','src/test_retry.py', 'src/test_run_retry.py'];
 /** Commits every change of `dir`. With `epoch` (unix seconds) the author time is that epoch in UTC, which is what `git blame` and `git log %at` read. Without it, the commit has the current time. The commit runs with an empty hooks folder. */
 export const commitAt = (dir, epoch, message) => {
   gitIn(dir, 'add', '-A');
@@ -123,7 +123,7 @@ export const dropMapLine = (dir, file) => {
   writeFileSync(p, kept.join('\n'));
 };
 
-export const IDS = ['MAP1', 'MAP2', 'MAP3', 'MAP4', 'MAP5', 'MAP6', 'MAP7', 'MAP8', 'MAP9', 'MAP10'];
+export const IDS = ['MAP1', 'MAP2', 'MAP3', 'MAP4', 'MAP5', 'MAP6', 'MAP7', 'MAP8', 'MAP9', 'MAP10', 'MAP11'];
 
 // The verdict a check prints when the fixture leaves its setting out. MAP10 skips when no decision key is set.
 const DEFAULT_VERDICT = { MAP10: 'SKIP' };
