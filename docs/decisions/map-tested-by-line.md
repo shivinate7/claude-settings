@@ -8,7 +8,7 @@ How does the shared plain-English map say which tests reach a code file, and wha
 
 Lane `map-tested-by-line`, 2026-11-05. Banchi's retired `docs/map.py` held `tested_by` links on 81 records. It lost them when the file retired. The shared map had no line for them.
 
-- **The line.** `  - Tested by: ` + test paths from the repository root, each in backticks, joined by `, `. It sits under a code-file map line, like the decisions line. Paths only, never registry ids: a second form would go against decision `uniform-over-variants` (a repo matches a shared format).
+- **The line.** `  - Tested by: ` + test paths from the repository root, each in backticks, joined by `, `. It sits under a map line in `## Code files`, like the decisions line. A tested-by line anywhere else fails MAP11. Paths only, never registry ids: a second form would go against decision `uniform-over-variants` (a repo matches a shared format).
 - **Optional.** A map line with no tested-by line passes. The line is a claim, and MAP11 checks claims only. Requiring it on every file would fail each repo's untested files.
 - **MAP11.** Each named test is a tracked file and loads the mapped file:
   - It imports the file, through the import reader that MAP9 uses. A type-only import does not count.
@@ -28,13 +28,19 @@ Banchi checked two things. Each id was in its harness `TESTS` registry. And the 
 - That a path named in a string is run, and not only read as data.
 - That a file is untested: the old empty `tested_by: []` has no form here.
 
+- A Python test that imports a package loads that package's `__init__.py`. MAP9 `uses` facts read the same way.
+
 ## Cost
 
 No new process. MAP11's reads join the one `readFacts` call of a check run, so one `python3` start at most.
 
 ## Safety holes, named
 
-Debt `map-tested-by-no-shell` (MAP11 cannot read a shell test, so a tested-by line naming one fails).
+Debts:
+- `map-tested-by-no-shell` (MAP11 cannot read a shell test, so a tested-by line naming one fails).
+- `map-import-alias-unread` (a test that imports by a path alias, such as `@/src/y`, fails MAP11).
+- `map-tested-by-path-pieces` (a test that builds the path by `os.path.join` or `path.join` fails MAP11).
+- `map-py-base-name-match` (a test with stdlib `import queue` passes for a mapped `jobs/queue.py`; MAP9 shares the reader).
 
 Kind: process
 Home: skills/plain-english-map/SKILL.md
