@@ -4,16 +4,16 @@
 
 Owner, 2026-11-05 07:41 CST (waiting-page item 163, Cockpit item `mutation-ci-job`, pick d): "Report only, plus known-bug replay". Note with the pick: "we also reopen this in a while after logging for a bit".
 
-The shared action `actions/mutation-report` runs on each batch's integration pull request (head ref `batch-*`) and on workflow_dispatch. It has two steps:
+The shared action `actions/mutation-report` runs on each batch's integration pull request and on workflow_dispatch. The scope step (`.github/scripts/ci-scope.sh`, output `mutation_report`) knows a batch by its head ref `batch-*`, the name every batch branch has used (batch-10, batch-11, batch-63e). No code fixes that name, so a batch branch named otherwise skips both steps and its job reads passed. Push and schedule runs skip both steps too. It has two steps:
 
-- **Report.** `hooks/mutate_guard.py --changed` mutates only the product lines the batch added (merge base to head). Each mutated file runs every suite that the profile's `select` lists for it, changed or not. The step prints the catch share (killed over ran; a crash is not a kill) and one `untested: path:line` line per line whose mutant survived or reached no suite. It exits 0 whatever the share. A low share never fails the job.
-- **Known-defect replay.** `hooks/mutate_guard.py --known-defects .github/known-defects.json` re-plants each named past defect in a copy of the head tree and runs the suite named to catch it. CAUGHT needs an assertion red. A green run or a crash is MISS. A red clean run, or a plant text that is missing or not unique, is UNKNOWN. A MISS or an UNKNOWN fails the job.
+- **Report.** `hooks/mutate_guard.py --changed` mutates only the product lines the batch added (merge base to head). Each mutated file runs every suite that the profile's `select` lists for it, changed or not. The step prints the catch share, which is the kill rate of decision `mutation-report-scores-suites` (killed over ran; a crash is not a kill). It prints one `untested: path:line` line per line whose mutant survived or reached no suite. A line whose mutants only crashed is in the share but not in the list. The budget is a wall deadline: a suite still running when it passes is killed, and its mutant counts as not run. The step exits 0 whatever the share. A low share never fails the job. A report that cannot run prints UNKNOWN and a warning, and exits 0: the report-only pick exempts it from decision `ci-unknown-is-red`.
+- **Known-defect replay.** `hooks/mutate_guard.py --known-defects .github/known-defects.json` re-plants each named past defect in a copy of the head tree and runs the suite named to catch it. CAUGHT needs an assertion red. A green run or a crash is MISS. A red clean run, or a plant text that is missing or not unique, is UNKNOWN. A missing list file is UNKNOWN too. An empty list `[]` names no defect and passes. A MISS or an UNKNOWN fails the job.
 
 The modes are part of the one home of mutation testing (`hooks/mutate_guard.py` with `hooks/mutate_shared.py`, decision `mutation-report-scores-suites`). `replay_pr` keeps its changed-suites-only default.
 
-## Why a replay miss fails the job
+## Why a known-defect miss fails the job
 
-A replay miss means that a test which once caught a real defect no longer catches it. The two named incidents were such losses: 3297d8fa (a lane deleted the test that pinned merge.py's ten-minute lock spare) and df25a68d (a fix deleted the tests that pinned its own two fixes). The suites that catch them are back on main, and the replay keeps them there.
+A known-defect miss means that a test which once caught a real defect no longer catches it. The two named incidents were such losses: 3297d8fa (a lane deleted the test that pinned merge.py's ten-minute lock spare) and df25a68d (a fix deleted the tests that pinned its own two fixes). The suites that catch them are back on main, and the known-defect replay keeps them there. (The replay of merged pull requests in decision `mutation-report-scores-suites` is another mode.)
 
 Evidence, 2026-11-05, main 0497265b, each plant applied by hand in a copy of the tree:
 
@@ -23,7 +23,7 @@ Evidence, 2026-11-05, main 0497265b, each plant applied by hand in a copy of the
 | `df25a68d-pw-timeout`: the timeout and closed-target test dropped from `classify_playwright` | `hooks/test_mutate_replay.py PlaywrightClassifyTests` | green | 3 red, assertion (87-90 s, whole file) | 3 red |
 | `3297d8fa-take-spare`: `+ 10` dropped from the lock take call | `merge/test_merge.py LockProseStatesTheCode` | 1 green | 3 red, assertion | 3 red |
 
-Every run was the same, and none needed the network. A fixture suite in `hooks/test_mutate_ci.py` proves that a catcher which pins nothing reads MISS. So a red replay names a lost test, not a flake. An UNKNOWN is red under decision `ci-unknown-is-red`. A plant text that a refactor moved is re-pointed in `.github/known-defects.json`, red then green (`outcomes-tests-are-statements`).
+Every run was the same, and none needed the network. A fixture suite in `hooks/test_mutate_ci.py` proves that a catcher which pins nothing reads MISS. So a known-defect miss names a lost test, not a flake. An UNKNOWN is red under decision `ci-unknown-is-red`. A plant text that a refactor moved is re-pointed in `.github/known-defects.json`, red then green (`outcomes-tests-are-statements`).
 
 The silent-undo check (`lint/check_silent_undo.py`) does not see these losses. Its read of the two batches that landed them (PRs 1082 and 1075) flagged other files only. The waiting item `no-undo-net-loss-dial` holds the read that would.
 
