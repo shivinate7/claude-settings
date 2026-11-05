@@ -797,6 +797,23 @@ class Registry(Tree):
         self.assertIn("collections", str(caught.exception), "the refusal does not name the missing collections")
         self.assertIn("ext001", str(caught.exception), "the refusal does not name its entry")
 
+    def test_a_page_only_entry_with_empty_collections_is_read(self):
+        """A page-only artifact gives `collections` []: its page and files export, and it holds no database."""
+        self.registry([self.queue_entry(collections=[])])
+        found = self.read_registry("a page-only entry with collections []")
+        self.assertEqual([e["id"] for e in found], ["queue02"], "the page-only entry was not read")
+        self.assertEqual(found[0]["collections"], [], "the page-only entry was not read with no collections")
+
+    def test_a_page_only_entry_exports_to_its_artifact_folder(self):
+        self.registry([self.queue_entry(collections=[])])
+        found = self.read_registry("a page-only entry with collections []")
+        self.assertEqual(found[0]["export"], "artifacts/queue02", "a page-only entry does not export to artifacts/<id>")
+
+    def test_a_waiting_page_entry_with_empty_collections_is_still_refused_and_named(self):
+        """Control: the waiting page exports its five collections, so an empty list on its role is refused, not read."""
+        self.registry([self.page_entry(collections=[])])
+        self.assertReported("page01", "a waiting-page entry with collections []")
+
     def test_an_export_path_entry_keeps_its_path(self):
         """Control: an entry with a path exports to that path, as it does today."""
         self.registry([self.queue_entry(export="artifacts/custom")])
