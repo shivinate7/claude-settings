@@ -385,7 +385,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `short-copy-passes` | A child line that copies a claude-settings grant in under 12 words passes the restates group. | [`docs/debts/short-copy-passes.md`](../docs/debts/short-copy-passes.md) |
 | `skill-copy-no-typescript` | A copy of the skill folder outside the clone finds no `node_modules`, so `map-check.mjs` and `map-picture.mjs` cannot load `typescript` there. | [`docs/debts/skill-copy-no-typescript.md`](../docs/debts/skill-copy-no-typescript.md) |
 | `squash-lane-branch-kept` | A squash-merged lane has no merge commit parent. | [`docs/debts/squash-lane-branch-kept.md`](../docs/debts/squash-lane-branch-kept.md) |
-| `stall-message-repeats-every-stop` | There is no dedupe. | [`docs/debts/stall-message-repeats-every-stop.md`](../docs/debts/stall-message-repeats-every-stop.md) |
 | `stamp-shallow-depth-two` | `stamp.mjs --check` off the default branch needs `fetch-depth: 0`. | [`docs/debts/stamp-shallow-depth-two.md`](../docs/debts/stamp-shallow-depth-two.md) |
 | `start-detached-not-main` | hooks/session_start.sh counts a detached checkout as on main only when HEAD equals local `refs/heads/main`. | [`docs/debts/start-detached-not-main.md`](../docs/debts/start-detached-not-main.md) |
 | `step-shell-programs-partial` | Guard rule `command-in-item` reads a backtick span in a step as a shell line only when its first word is in a fixed program list. | [`docs/debts/step-shell-programs-partial.md`](../docs/debts/step-shell-programs-partial.md) |
