@@ -567,8 +567,8 @@ A park answer (`answers/<item id>` with `act: "park"`): the same wait and re-rea
 unique in the list, else a new slug. `ref` is the item's home and title in plain words, and `note` is the answer's note.
 Then it closes the item with `lastAnswer` `{act: "park", note, at}`, so the owning session sees at its wake that the item is parked and stops
 waiting, and it deletes the answer. When the item has `lane`, the same close update drops it (`{"lane": {"__delete__": true}}`): a Park
-withdraws the item, so no card says it waits on a lane. At its wake, the owning session that sees its lane item closed with `lastAnswer.act`
-`park` tells the receiver by `send_message` that the act is withdrawn, with the page URL and the item id only. It does not reopen or
+withdraws the item, so no card says it waits on a lane. At its wake, the owning session may see its lane item closed with `lastAnswer.act`
+`park`. It then tells the receiver by `send_message` that the act is withdrawn, with the page URL and the item id only. It does not reopen or
 re-route the item. Unpark (an `unpark` answer on that line) reopens `items/<id>` (status `open`, `added` now, a new `n`, no `lane`).
 In the same wake it removes the entry and deletes the answer. At each wake while `meta/page.parked` is not empty, the writer
 saves `meta/page`, `items` and `answers` to a folder and runs `stale_pages.py --parked <folder>`.
