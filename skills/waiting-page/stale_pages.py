@@ -60,12 +60,26 @@ It prints one line when the stamp an allowed publish wrote (<git common dir>/wai
 page.html blob sha) differs from main's blob sha, and nothing else: no stamp, or an unreadable main, prints
 nothing. It always exits 0. One python process and one read-only git process.
 
+Parked mode, run by the writer at each wake when meta/page.parked is not empty (SKILL.md, "Route and close"):
+
+    python3 ~/.claude/skills/waiting-page/stale_pages.py --parked <dir> [--now <iso>]
+
+<dir> holds three files the session saved from the store: meta.json (the data of meta/page), items.json and
+answers.json (a list of {"id", "data"} entries each). One line per stale thing, then exit 1:
+`parked-open <id>` for a parked entry whose item is open (status other than closed, as the page reads it),
+and `park-answer-old <key>` for a park answer (answers/park.<id>, or answers/<item id> with act park) whose `at` is
+more than 10 minutes before --now (default: the clock). With none, `parked: clean` and exit 0. A missing or unreadable
+file, a file of the wrong shape (meta not an object, items or answers not a list), or a park answer with no readable
+`at` prints an `unknown:` line and exits 2.
+Cost: one python process, reads 3 files, writes none, starts no git, no timer.
+
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
 file written without --write, no timer, thread or child left running. Single-page mode never imports `layout`; batch and session-line modes do.
 Without --items: 0 gh processes. With it: one gh process per open item with a `waits` field, at most WAIT_CAP, each
 run to its end or its 30 s cap before the next; no file written, no timer, no process left running.
 """
 import argparse
+import datetime
 import json
 import os
 import re
@@ -563,14 +577,72 @@ def session_mode(argv):
     return 0
 
 
+PARK_ANSWER_MAX_AGE = 600  # seconds: a park answer the writer has not closed in 10 minutes is stale
+
+
+def parse_utc(text):
+    """An ISO time with a Z (as the store writes it) as epoch seconds, or None when it cannot be read."""
+    try:
+        return datetime.datetime.fromisoformat(str(text).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def parked_mode(argv):
+    """`--parked <dir> [--now <iso>]`: name each parked entry whose item is open and each park answer older than 10 minutes."""
+    ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
+    ap.add_argument("--parked", required=True)
+    ap.add_argument("--now")
+    args = ap.parse_args(argv)
+    now = parse_utc(args.now) if args.now else datetime.datetime.now(datetime.timezone.utc).timestamp()
+    if now is None:
+        print("unknown: --now is not an ISO time (%s)" % args.now)
+        return 2
+    try:
+        loaded = {}
+        for name in ("meta", "items", "answers"):
+            with open(os.path.join(args.parked, name + ".json"), encoding="utf-8") as f:
+                loaded[name] = json.load(f)
+    except (OSError, ValueError) as err:
+        print("unknown: cannot read %s.json in %s (%s)" % (name, args.parked, err))
+        return 2
+    meta, items, answers = loaded["meta"], loaded["items"], loaded["answers"]
+    for name, ok in (("meta", isinstance(meta, dict)), ("items", isinstance(items, list)), ("answers", isinstance(answers, list))):
+        if not ok:  # a file of the wrong shape is never read as clean or stale
+            print("unknown: %s.json is not %s" % (name, "an object" if name == "meta" else "a list"))
+            return 2
+    entries = lambda rows: [r for r in rows if isinstance(r, dict)]
+    data = lambda r: r.get("data") if isinstance(r.get("data"), dict) else {}
+    open_ids = {r.get("id") for r in entries(items) if data(r).get("status") != "closed"}
+    parked = meta.get("parked") if isinstance(meta.get("parked"), list) else []
+    lines = ["parked-open %s" % p["id"] for p in parked if isinstance(p, dict) and p.get("id") in open_ids]
+    unknown = []
+    for r in entries(answers):
+        key = str(r.get("id", ""))
+        # A parked line's answer is keyed park.<id>. An item's answer is a park answer only with act park; any other act is never read.
+        if not (key.startswith("park.") or data(r).get("act") == "park"):
+            continue
+        at = parse_utc(data(r).get("at"))
+        if at is None:  # an unreadable time is never counted fresh or old
+            unknown.append("unknown: the park answer %s has no readable at" % key)
+        elif now - at > PARK_ANSWER_MAX_AGE:
+            lines.append("park-answer-old %s" % key)
+    out = lines + unknown
+    print("\n".join(out) if out else "parked: clean")
+    return 2 if unknown else 1 if lines else 0
+
+
 def main(argv):
+    if "--parked" in argv:
+        return parked_mode(argv)
     if "--session-line" in argv:
         return session_mode(argv)
     if "--page" in argv:
         return single_page(argv)
     if not argv:
         sys.exit("usage: stale_pages.py <fetched-dir> [<repo root> ...]\n"
-                 "       stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]")
+                 "       stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]\n"
+                 "       stale_pages.py --parked <dir> [--now <iso>]")
     import layout  # batch mode only
     fetched, roots = argv[0], argv[1:] or default_roots()
     with open(TEMPLATE, encoding="utf-8") as f:
