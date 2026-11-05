@@ -41,8 +41,8 @@ action actions/mutation-report.
 `--changed <repo> (--profile NAME | --profile-file JSON) --base REF [--head REF] [--limit N] [--budget S] [--suite-timeout S]
 [--jobs N] [--log PATH]` mutates the product lines a change adds past merge-base(base, head), runs the suites the profile's `select`
 lists for each file, and prints `catch share: K/R` and each `untested: path:line`. Exit 0 whatever the share.
-`--known-bugs FILE --repo REPO [--suite-timeout S] [--log PATH]` plants each listed bug in a checkout of HEAD and runs its catcher
-suite: `CAUGHT`, `MISS` or `UNKNOWN` per bug. Exit 1 when any bug is MISS or UNKNOWN.
+`--known-bugs FILE --repo REPO [--suite-timeout S] [--log PATH]` plants each listed defect in a checkout of HEAD and runs its catcher
+suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. Exit 1 when any defect is MISS or UNKNOWN.
 `--tests-for PATH` prints the suites that test one file: the select command of the `claude_settings` profile.
 """
 
@@ -2471,34 +2471,35 @@ def changed_main(argv) -> int:
     return 0
 
 
-def known_bugs_main(argv) -> int:
-    """Replay the planted bugs of a list (`.github/known-bugs.json`) against a repository's HEAD. One line per bug:
-    `CAUGHT`, `MISS` or `UNKNOWN`. Exit 1 when any bug is MISS or UNKNOWN (decision ci-unknown-is-red). A missing list names
-    no bug and exits 0; a list that cannot be read exits 2."""
+def known_bugs_main(argv) -> int:  # glossary-ok: the entry point name is pinned by hooks/test_mutate_ci.py
+    """Replay the planted defects of a list (`.github/known-bugs.json`) against a repository's HEAD. One line per defect:
+    `CAUGHT`, `MISS` or `UNKNOWN`. Exit 1 when any defect is MISS or UNKNOWN (decision ci-unknown-is-red). A missing list names
+    no defect and exits 0; a list that cannot be read exits 2."""
     import argparse
     import json
     parser = argparse.ArgumentParser(prog="mutate_guard.py --known-bugs")
-    parser.add_argument("--known-bugs", required=True, metavar="FILE", help="a JSON list of planted bugs")
-    parser.add_argument("--repo", required=True, help="a clone of the repository the bugs are planted in")
+    parser.add_argument("--known-bugs", dest="list_path", required=True, metavar="FILE",  # glossary-ok: the flag is the mode's interface
+                        help="a JSON list of planted defects")
+    parser.add_argument("--repo", required=True, help="a clone of the repository the defects are planted in")
     parser.add_argument("--suite-timeout", type=float, default=120, help="seconds before a suite run is killed")
     parser.add_argument("--log", default=None, metavar="PATH", help="write the results as one JSON file")
     args = parser.parse_args(argv)
-    bugs = []
-    if os.path.exists(args.known_bugs):
+    defects = []
+    if os.path.exists(args.list_path):
         try:
-            with open(args.known_bugs, encoding="utf-8") as handle:
-                bugs = json.load(handle)
-            if not isinstance(bugs, list):
+            with open(args.list_path, encoding="utf-8") as handle:
+                defects = json.load(handle)
+            if not isinstance(defects, list):
                 raise ValueError("the top level is not a list")
         except (OSError, ValueError) as error:
-            print("ERROR cannot read %s: %s" % (args.known_bugs, error))
+            print("ERROR cannot read %s: %s" % (args.list_path, error))
             return 2
     with stop_on_signals():
-        results = mutate_shared.run_known_bugs(os.path.abspath(args.repo), bugs, suite_timeout=args.suite_timeout)
-    print(mutate_shared.format_known_bugs(results))
+        results = mutate_shared.run_known_defects(os.path.abspath(args.repo), defects, suite_timeout=args.suite_timeout)
+    print(mutate_shared.format_known_defects(results))
     if args.log:
         with open(args.log, "w", encoding="utf-8") as handle:
-            json.dump({"repo": os.path.abspath(args.repo), "bugs": results}, handle, indent=1)
+            json.dump({"repo": os.path.abspath(args.repo), "defects": results}, handle, indent=1)
     return 1 if any(result["verdict"] != "CAUGHT" for result in results) else 0
 
 
@@ -2664,9 +2665,12 @@ def main() -> int:
         return report_main(sys.argv[1:])
     if "--replay" in sys.argv[1:]:
         return replay_main(sys.argv[1:])
-    for flag, mode in (("--changed", changed_main), ("--known-bugs", known_bugs_main), ("--tests-for", tests_for_main)):
-        if flag in sys.argv[1:]:
-            return mode(sys.argv[1:])
+    if "--changed" in sys.argv[1:]:
+        return changed_main(sys.argv[1:])
+    if "--known-bugs" in sys.argv[1:]:
+        return known_bugs_main(sys.argv[1:])  # glossary-ok: the entry point name is pinned by hooks/test_mutate_ci.py
+    if "--tests-for" in sys.argv[1:]:
+        return tests_for_main(sys.argv[1:])
     sources = {}
     for name, (path, _suite, _variable, _stem) in TARGETS.items():
         with open(path, encoding="utf-8") as handle:

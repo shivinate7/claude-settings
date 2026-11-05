@@ -96,7 +96,7 @@ def guard_tree(dest: str) -> None:
 def find_anchor(folder: str, old: str, files=None):
     """Return (path, text) of the one guard module or git_reads.py in `folder` that holds `old`
     exactly once. Raise StaleMutant on zero matches, AmbiguousMutant on two or more, across all.
-    `files` (folder-relative names) replaces that list: a known bug names the file it plants in."""
+    `files` (folder-relative names) replaces that list: a known defect names the file it plants in."""
     hits = []
     paths = anchor_files(folder) if files is None else [os.path.join(folder, name) for name in files]
     for path in paths:
@@ -1250,35 +1250,35 @@ def format_changed(rows) -> str:
     return "\n".join(lines)
 
 
-def run_known_bugs(repo: str, bugs, suite_timeout: float = 120) -> list:
-    """Replay planted bugs against a clone's HEAD. Each bug is {id, name, file, old, new, argv, classify}: `old` is the one
+def run_known_defects(repo: str, defects, suite_timeout: float = 120) -> list:
+    """Replay planted defects against a clone's HEAD. Each defect is {id, name, file, old, new, argv, classify}: `old` is the one
     text in `file` that the plant replaces with `new`, and `argv` is the catcher suite, read by the classifier `classify`.
     Returns [{id, name, verdict, reason}] with the verdict CAUGHT (the suite prints an assertion on the planted copy), MISS
     (the suite passed, crashed or timed out on it) or UNKNOWN (the anchor is stale or ambiguous, the entry is malformed, or the
     suite is not green on the clean copy). Only an assertion catches, as in a replay. The run is in a checkout of HEAD made like
     a replay's, so the working tree and the repository are left as found."""
-    if not bugs:
+    if not defects:
         return []
     sha = _git(repo, "rev-parse", "HEAD").strip()
-    own = tempfile.mkdtemp(prefix="mutate_bugs_")
+    own = tempfile.mkdtemp(prefix="mutate_defects_")
     dest = os.path.join(own, "w")
     results = []
     try:
         _make_checkout(repo, sha, dest, set(), {}, None, {})
-        for bug in bugs:
-            results.append(_known_bug(dest, bug, suite_timeout))
+        for defect in defects:
+            results.append(_known_defect(dest, defect, suite_timeout))
     finally:
         _drop_checkout(repo, dest)
         shutil.rmtree(own, ignore_errors=True)
     return results
 
 
-def _known_bug(dest: str, bug: dict, suite_timeout: float) -> dict:
-    """One planted bug in checkout `dest`, which is left as it was found."""
-    result = {"id": str(bug.get("id", "?")), "name": str(bug.get("name", "")), "verdict": "UNKNOWN", "reason": ""}
+def _known_defect(dest: str, defect: dict, suite_timeout: float) -> dict:
+    """One planted defect in checkout `dest`, which is left as it was found."""
+    result = {"id": str(defect.get("id", "?")), "name": str(defect.get("name", "")), "verdict": "UNKNOWN", "reason": ""}
     try:
-        file, old, new, argv = bug["file"], bug["old"], bug["new"], list(bug["argv"])
-        classify = CLASSIFIERS[bug["classify"]]
+        file, old, new, argv = defect["file"], defect["old"], defect["new"], list(defect["argv"])
+        classify = CLASSIFIERS[defect["classify"]]
     except (KeyError, TypeError) as error:
         result["reason"] = "the entry is malformed: %s %s" % (type(error).__name__, error)
         return result
@@ -1302,13 +1302,13 @@ def _known_bug(dest: str, bug: dict, suite_timeout: float) -> dict:
         return result
     result["verdict"] = "CAUGHT" if kind == "assert" else "MISS"
     if kind != "assert":
-        result["reason"] = {"pass": "the suite passed on the planted bug", "crash": "the suite crashed with no assertion",
+        result["reason"] = {"pass": "the suite passed on the planted defect", "crash": "the suite crashed with no assertion",
                             "timeout": "the suite passed the timeout"}.get(kind, kind)
     return result
 
 
-def format_known_bugs(results) -> str:
-    """One `CAUGHT|MISS|UNKNOWN id: name [reason]` line for each bug, then a totals line. No bug reads one line."""
+def format_known_defects(results) -> str:
+    """One `CAUGHT|MISS|UNKNOWN id: name [reason]` line for each defect, then a totals line. No defect reads one line."""
     if not results:
         return "no known bugs listed"
     lines = ["%s %s: %s%s" % (r["verdict"], r["id"], r["name"], " [%s]" % r["reason"] if r["reason"] else "")

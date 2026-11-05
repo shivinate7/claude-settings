@@ -25,7 +25,7 @@ A mutant that never ran counts as `not_run`: no changed suite reaches its file, 
 
 Each pull request is checked out as a detached `git worktree` of the clone in a temp folder, written from the index so the clone's settings stay as found. One install runs per lockfile hash into a shared deps folder, linked into each checkout. A suite writes no bytecode: a mutant of the same size and second as the clean file would load the clean bytecode. The clone is left as found. Every npm install runs with `--ignore-scripts`, banchi's included, and pip has no such flag. An install script is code from a past commit, and the unit tier launches no browser, so it needs none. The install and each suite run in their own process group, killed whole at the timeout. SIGTERM and SIGINT end a replay through its `finally` blocks, which kill the live groups and remove each checkout. SIGKILL cannot run them, so it can leave a worktree record in the clone. `git worktree prune` removes it, once its temp folder is gone. The `banchi` profile has two parts. Its TypeScript part runs one file through the Playwright unit config. Its Python part runs one `harness/tests/tN_*.py` module through its `run()` under `isolated_home()`, as `harness/run.py` does. A module is a suite only when it is green on a clean checkout. T6 reads `demo-assets/extra/photos/0000.jpg`, which the checkout leaves out, so T6 still reads UNKNOWN. T7 runs for minutes whole. A changed `harness/tests/t7/<group>.py` that defines `CHECKS` is a suite of its own. Its runner loads `harness/tests/t7_store_and_seams.py` and runs only that group's checks, in T7's order, each inside `hermetic()`. A helper with no `CHECKS` is no suite. A group with empty `CHECKS` reads unusable, and a check that raises is a crash. A changed `t7_store_and_seams.py` still runs T7 whole.
 
-The report and the replay refuse nothing. No timer starts them, they start no long-lived process, and neither is a required CI job. `hooks/test_mutate_report.py` pins the two counts (fixture suites that pin nothing, catch a mutant, crash, are red on the clean source, and an unrunnable file). `hooks/test_mutate_js.py` pins the JS engine, the filter and the TAP classes. `hooks/test_mutate_replay.py` pins the replay on fixture repositories of merged pull requests.
+The report and the replay refuse nothing. No timer starts them, they start no long-lived process, and neither is a CI job. The CI report (below) is a third mode: it refuses only on a known defect. `hooks/test_mutate_report.py` pins the two counts (fixture suites that pin nothing, catch a mutant, crash, are red on the clean source, and an unrunnable file). `hooks/test_mutate_js.py` pins the JS engine, the filter and the TAP classes. `hooks/test_mutate_replay.py` pins the replay on fixture repositories of merged pull requests.
 
 ## The scores
 
@@ -78,7 +78,17 @@ Open items, each a debt:
 
 - `replay-big-file-unknown`: a file that does not parse is skipped, and its row still gives a rate.
 
-On 2026-11-02 no CI check reads the replay. The owner rules on one.
+## The CI report
+
+Owner, item `mutation-ci-job`, pick d, 2026-11-05 07:41 CST: "Report only, plus known-bug replay". Three modes of the same home (`hooks/mutate_guard.py` with `hooks/mutate_shared.py`) carry it. The shared action `actions/mutation-report` runs the first two, and the `mutation-report` job of `checks.yml` calls it on a pull request from a `batch-` branch and on workflow_dispatch.
+
+- `--changed` mutates the product lines a change adds past its merge base with the base ref (`replay_pr` with `base` and `select_all`; `changed_lines`, the engines and the classifiers are the replay's). It runs, on the mutants of each file, every suite the profile's `select` lists for it, changed or not. It prints `catch share: K/R`: K mutants killed over R that ran, a crash is no kill, and 0/0 prints no rate. It prints each line with a surviving or not-run mutant as `untested: path:line`. It exits 0 whatever the share. The share is a report: it moves with the mutants sampled, the budget and the load of the machine.
+- `--known-bugs` plants each defect of `.github/known-bugs.json` in a checkout of HEAD and runs its catcher suite. A suite that goes red with an assertion on the planted copy is CAUGHT. A suite that passes, crashes or times out is a MISS. A stale or ambiguous anchor, and a catcher not green on the clean copy, are UNKNOWN. It exits 1 on any MISS or UNKNOWN (decision `ci-unknown-is-red`), and is the only part of the job that can fail it. The owner chose this because each of the three plants was deterministic: 3 runs each, caught every time, offline.
+- `--tests-for PATH` prints the suites that test one file: the `REPORT_TARGETS` suites when the file is listed, else each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it. It is the `select` of the `claude_settings` profile in `REPLAY_PROFILES`.
+
+`hooks/test_mutate_ci.py` pins the three modes and the list. A file with no `test_<stem>` beside it has no suite, so its mutants are not run and its lines read untested: an untested line may be a file `--tests-for` does not map.
+
+On 2026-11-02 no CI check read the replay. The CI report above is the first.
 
 ## Cost
 
