@@ -1,5 +1,5 @@
 {
-  "formatVersion": 3,
+  "formatVersion": 4,
   "title": "claude-settings",
   "codeExtensions": ["py", "mjs", "sh", "js", "ts"],
   "mapPaths": [

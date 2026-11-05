@@ -11,7 +11,7 @@ import { MAP_FORMAT_VERSION, readFormatVersion } from './lib/map-config.mjs';
 
 /**
  * The steps, in order. Each `run` takes one map file's text and answers it in the next version.
- * Step 2 to 3: no file changes (see its comment).
+ * Steps 3 to 4 and 2 to 3: no file changes (see their comments).
  * Step 1 to 2: version 1 map lines carried line references, and a line number goes stale with the next edit.
  * It removes the three forms of them. A reference that was rewritten by hand into other words is not a form it can find.
  * `run` takes the config too: a ":N" goes only after a name whose extension is in `codeExtensions`, so `example.com:3000` stays.
@@ -34,6 +34,8 @@ export const STEPS = [
   // Version 3 adds the fact line, the Homes section and MAP9. A version 2 map holds none of them, so no file changes: the step only moves the version.
   // The check then refuses a copy of the skill that is older than 3, instead of passing a map whose facts it never reads.
   { from: 2, run: (text) => text },
+  // Version 4 adds the `decisionsDir` and `decisionIdPattern` keys and MAP10. A version 3 map sets neither key, so no file changes: the step only moves the version.
+  { from: 3, run: (text) => text },
 ];
 
 const mapFilesOf = (root) => {
