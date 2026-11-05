@@ -1285,9 +1285,11 @@ MUTATIONS = [
      "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: a write outside the recorded home, inside the clone, is allowed through",
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                    and path_is_inside(resolved_target, home) is False):',
+     '                    and path_is_inside(resolved_target, home) is False\n'
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                    and path_is_inside(resolved_target, home) is None):',
+     '                    and path_is_inside(resolved_target, home) is None\n'
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
      "guard", "worktree-home: a /c/ cwd inside the home is inside"),
     # The next two anchors sit in worktree_home_hit, which returns a log detail and lets judge()
     # refuse; a mutant that returns a detail for a status that allows is a deny.
@@ -1311,10 +1313,12 @@ MUTATIONS = [
      '            try:\n                resolved_target = _resolved(write_target, home_cwd)\n'
      '            except Exception:\n                resolved_target = write_target\n'
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                    and path_is_inside(resolved_target, home) is False):',
+     '                    and path_is_inside(resolved_target, home) is False\n'
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
      '            resolved_target = write_target\n'
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                    and path_is_inside(resolved_target, home) is False):',
+     '                    and path_is_inside(resolved_target, home) is False\n'
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
      "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: the write-target loop judges only the first path field",
      '        for write_target in (write_targets(tool_input) if home_primary else ()):',
@@ -1330,12 +1334,14 @@ MUTATIONS = [
      "        return (bool(owner) and owner == own",
      "guard", "worktree-home: any session's write into another checkout"),
     ("other-checkout: the clone's common git directory is judged as the primary's own files",
-     '                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)',
-     '                and True)',
+     '                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True\n'
+     '                and not _own_red_run(',
+     '                and True\n'
+     '                and not _own_red_run(',
      "guard", "worktree-home: any session's write into another checkout"),
     ("other-checkout: a shell target ignores a leading cd",
-     "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True)",
-     "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=False)",
+     "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True, predicate_command=True)",
+     "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=False, predicate_command=True)",
      "guard", "worktree-home: any session's write into another checkout"),
     ("other-checkout: a quiet redirect pays the git read",
      '        writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))\n        moves =',
@@ -1343,8 +1349,8 @@ MUTATIONS = [
      "guard", "worktree-home: the cross-checkout read costs"),
     # The `cd` act: `worktree_home_cd_*_case`.
     ("other-checkout: a cd into another checkout is not judged",
-     "        if elsewhere(move, where) and not _cd_red_run(",
-     "        if False and not _cd_red_run(",
+     "        if elsewhere(move, where) and not _own_red_run(",
+     "        if False and not _own_red_run(",
      "guard", "worktree-home: a cd into another checkout of the clone is refused"),
     ("other-checkout: a bare cd with no write word is skipped like a read",
      "    if not moves and not writes:\n        return \"\"\n    roots =",
@@ -1363,17 +1369,34 @@ MUTATIONS = [
      '    if False and path_is_inside(target, home) is True:\n        return True\n    if isinstance(payload, dict)',
      "guard", "worktree-home: the cd exemptions pass"),
     ("other-checkout: the session's recorded home is not exempt from the cd act",
-     "    return bool(held) and path_is_inside(target, held) is True\n\n\ndef _cd_red_run(",
-     "    return False\n\n\ndef _cd_red_run(",
+     "    return bool(held) and path_is_inside(target, held) is True\n\n\n# The shell verbs",
+     "    return False\n\n\n# The shell verbs",
      "guard", "worktree-home: the cd exemptions pass"),
     ("other-checkout: the agent's own red-run folder is not exempt from the cd act",
-     '    return (os.path.basename(owner).startswith("agent-" + agent_id + "-")',
-     '    return (False and os.path.basename(owner).startswith("agent-" + agent_id + "-")',
+     '                and os.path.normcase(os.path.basename(folder)).startswith(',
+     '                and False and os.path.normcase(os.path.basename(folder)).startswith(',
      "guard", "worktree-home: the cd exemptions pass"),
     ("other-checkout: the red-run exemption matches a prefix of the agent id",
-     '    return (os.path.basename(owner).startswith("agent-" + agent_id + "-")',
-     '    return (os.path.basename(owner).startswith("agent-" + agent_id)',
+     '                    os.path.normcase("agent-" + agent_id + "-"))):',
+     '                    os.path.normcase("agent-" + agent_id))):',
      "guard", "worktree-home: an agent's cd into a sibling agent tree"),
+    # The write act's exemption: `worktree_home_red_write_case`.
+    ("other-checkout: a write into the agent's own red-run folder is refused",
+     '                and not _own_red_run(payload, roots[0], resolved, verb in RED_RUN_ROOT_VERBS))',
+     '                and True)',
+     "guard", "worktree-home: an agent's write into its own red-run folder"),
+    ("worktree-home: a Write into the agent's own red-run folder is refused",
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
+     '                    and True):',
+     "guard", "worktree-home: an agent's write into its own red-run folder"),
+    ("other-checkout: the red-run folder's own root is exempt, so rm and mv may name it",
+     "            return root_ok or folder != path",
+     "            return True",
+     "guard", "worktree-home: the own red-run folder's root is refused"),
+    ("other-checkout: the red-run folder is anchored on the owning checkout, not the primary",
+     '                and not _own_red_run(payload, roots[0], resolved, verb in RED_RUN_ROOT_VERBS))',
+     '                and not _own_red_run(payload, owner, resolved, verb in RED_RUN_ROOT_VERBS))',
+     "guard", "worktree-home: a red-run folder nested under another linked worktree"),
     ("other-checkout: a cd within its own checkout pays the git read",
      '                 if own_root and _checkout_root_by_stat(m) not in ("", own_root) and not _cd_home_exempt(payload, where, m)]',
      "                 if own_root and not _cd_home_exempt(payload, where, m)]",
