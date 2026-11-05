@@ -57,9 +57,8 @@ SETTINGS = os.path.join(ROOT, "settings.json")
 CLOCK = "CLAUDE_DAILY_NOTE_NOW"
 MAX_LINE = 240
 LONG_CONFIG = 150  # a long CLAUDE_CONFIG_DIR path; the agent-end tail is one path, so it fits the cap
-SWEEP_CONFIG = 65  # the sweep tail names the config dir twice: the tail fits the cap, the whole line does not
 TAIL_CONFIG = 220  # so long that the agent-end tail alone is past the cap
-LONG_HOOK_FOLDER = 170  # a long hook folder: the crash line's tail carries its reader path, from that folder
+LONG_HOOK_FOLDER = 190  # a long hook folder: the reader tail with a short head is past the cap
 
 YESTERDAY = "2026-10-13"  # the Central day before MORNING
 TODAY = "2026-10-14"
@@ -100,6 +99,16 @@ def reader_path(hook_folder):
     return os.path.normpath(os.path.join(os.path.abspath(hook_folder), "..", "lint", "guard_log_report.py"))
 
 
+def unreadable_error(path):
+    """The name of the error a read of PATH raises on this platform, so a case expects the name the note prints."""
+    try:
+        with open(path, encoding="utf-8"):
+            pass
+    except OSError as err:
+        return type(err).__name__
+    raise AssertionError("control: %s opened as a file, so it is not an unreadable log" % path)
+
+
 def session_start_commands():
     """Commands under SessionStart matchers that cover startup and that name daily_note.py."""
     with open(SETTINGS, encoding="utf-8") as handle:
@@ -133,7 +142,9 @@ class NoteCase(unittest.TestCase):
 
     def long_path(self, length, prefix):
         """A scratch folder whose absolute path is `length` characters long, padded from this case's root."""
-        return self.scratch(prefix + "x" * (length - len(os.path.join(self.root, prefix))))
+        pad = length - len(os.path.join(self.root, prefix))
+        self.assertGreater(pad, 0, "control: the root is too long for a %d-character path" % length)
+        return self.scratch(prefix + "x" * pad)
 
     def require_file(self, path):
         if not os.path.isfile(path):
@@ -202,12 +213,36 @@ class NoteCase(unittest.TestCase):
         self.assertEqual(result.stderr, "")
         return result.stdout.splitlines()
 
-    def assert_short_head_and_whole_tail(self, line, short, tail):
-        """Lane ruling, 06:27 CST: past the cap, a line is its short head and its whole Read: tail, nothing
-        more. The control first: the pair must be past the cap, or this assert checks nothing."""
-        self.assertGreater(len(short + " " + tail), MAX_LINE, "control: the short head and tail must pass the cap")
-        self.assertEqual(line, short + " " + tail,
-                         "the line is not its short head plus its whole tail: %r" % line)
+    def assert_short_head_kept(self, line, short, tail, keep):
+        """The cut rule from the real lengths, so no temp root length is assumed. KEEP (the count or the
+        lead) and the whole TAIL always print. Past the cap, the line is exactly SHORT and TAIL (lane
+        ruling, 06:27 CST). Within the cap, the line fits, with its full head or the short one."""
+        self.assertIn(keep, line, "the cut lost %r: %r" % (keep, line))
+        self.assertTrue(line.endswith(tail), "the cut lost the Read: tail: %r" % line)
+        self.assertLessEqual(len(line), max(MAX_LINE, len(short) + 1 + len(tail)),
+                             "the line passes the cap by more than its short head and tail: %r" % line)
+        if len(short) + 1 + len(tail) > MAX_LINE:
+            self.assertEqual(line, short + " " + tail,
+                             "the line is not its short head plus its whole tail: %r" % line)
+
+    def load_note(self):
+        self.require_file(NOTE)
+        spec = importlib.util.spec_from_file_location("daily_note_under_test", NOTE)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def in_process(self, module, now):
+        """One start of the note in this process, with the env a child would get. Returns stdout and stderr."""
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.dict(os.environ):
+            for key in SCRUBBED:
+                os.environ.pop(key, None)
+            os.environ.update(self.env(self.config))
+            os.environ[CLOCK] = now
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                module.main()
+        return out.getvalue(), err.getvalue()
 
     def snapshot(self):
         tree = {}
@@ -326,8 +361,19 @@ class ReaderPathTests(NoteCase):
         self.assertLessEqual(len(tail), MAX_LINE, "control: the reader tail alone must fit the cap")
         lines = self.failure_lines(self.run_note(MORNING, script=os.path.join(layout, "hooks", "daily_note.py")))
         self.assertEqual(len(lines), 1, "want one crash line, got %r" % lines)
-        self.assertTrue(lines[0].endswith(tail), "the cap cut the crash line's Read: tail: %r" % lines[0])
-        self.assertLessEqual(len(lines[0]), MAX_LINE)
+        self.assert_short_head_kept(lines[0], "1 guard crash line(s):", tail, keep="1 guard crash line(s)")
+
+    def test_a_long_hook_folder_keeps_the_unknown_lead_and_the_whole_tail_when_guard_log_is_unreadable(self):
+        layout = self.long_path(LONG_HOOK_FOLDER, "claude-layout-")
+        tracked_tree.copy_tracked(layout, "hooks", "lint")  # the note and every module it reaches
+        guard = os.path.join(self.config, "guard.log")
+        os.makedirs(guard)  # a directory cannot be read as a log
+        err = unreadable_error(guard)
+        tail = "Read: python " + reader_path(os.path.join(layout, "hooks"))
+        lines = self.failure_lines(self.run_note(MORNING, script=os.path.join(layout, "hooks", "daily_note.py")))
+        self.assertEqual(len(lines), 1, "want one unknown line, got %r" % lines)
+        self.assert_short_head_kept(lines[0], "guard.log cannot be read (%s):" % err, tail,
+                                    keep="cannot be read (%s)" % err)
 
 
 class CrashTests(NoteCase):
@@ -344,6 +390,34 @@ class CrashTests(NoteCase):
         self.assertEqual(result.stdout, "")
         self.assertEqual(len([line for line in result.stderr.splitlines() if line.strip()]), 1,
                          result.stderr)
+
+
+class FitTests(NoteCase):
+    """The cut on fit() itself, with synthetic strings: a full line of exactly MAX_LINE keeps its head, one
+    character more swaps to the short head. Both tail lengths sit on either side of the sweep and agent-end
+    tails the integration cases use."""
+
+    def fit_band(self, tail_len, full_len):
+        fit = self.load_note().fit
+        tail = "Read: " + "t" * (tail_len - len("Read: "))
+        head = "h" * (full_len - tail_len - 1)
+        self.assertEqual(len(tail), tail_len, "control: the synthetic tail")
+        self.assertEqual(len(head + " " + tail), full_len, "control: the synthetic full line")
+        short = "daily sweep errors (12345 bytes):"
+        want = head + " " + tail if full_len <= MAX_LINE else short + " " + tail
+        self.assertEqual(fit(head, short, tail), want, "fit() at a %d-character full line" % full_len)
+
+    def test_a_211_tail_keeps_the_full_head_at_exactly_240(self):
+        self.fit_band(211, 240)
+
+    def test_a_211_tail_swaps_to_the_short_head_at_241(self):
+        self.fit_band(211, 241)
+
+    def test_a_215_tail_keeps_the_full_head_at_exactly_240(self):
+        self.fit_band(215, 240)
+
+    def test_a_215_tail_swaps_to_the_short_head_at_241(self):
+        self.fit_band(215, 241)
 
 
 class WiringTests(NoteCase):
@@ -489,7 +563,18 @@ class AgentEndTests(NoteCase):
         self.write_payload([started_row(run_id(pid, YESTERDAY_NOON)) for pid in (151, 152, 153)])
         lines = self.failure_lines(self.run_note(MORNING))
         self.assertEqual(len(lines), 1, "want one agent-end line, got %r" % lines)
-        self.assert_short_head_and_whole_tail(lines[0], "3 agent-end reap run(s) killed or crashed:", tail)
+        self.assert_short_head_kept(lines[0], "3 agent-end reap run(s) killed or crashed:", tail,
+                                    keep="3 agent-end reap run(s)")
+
+    def test_a_long_config_dir_keeps_the_unknown_lead_and_the_whole_tail_when_the_payload_log_is_unreadable(self):
+        self.config = self.long_path(175, "claude-config-")  # the tail is 212 characters: past the cap with any error
+        os.makedirs(self.payload_path())  # a directory cannot be read as a log
+        err = unreadable_error(self.payload_path())
+        tail = "Read: " + self.payload_path()
+        lines = self.failure_lines(self.run_note(MORNING))
+        self.assertEqual(len(lines), 1, "want one unknown line, got %r" % lines)
+        self.assert_short_head_kept(lines[0], "agent-end payload log cannot be read (%s):" % err, tail,
+                                    keep="cannot be read (%s)" % err)
 
 
 class SweepErrorLogTests(NoteCase):
@@ -514,24 +599,39 @@ class SweepErrorLogTests(NoteCase):
     def test_missing_logs_are_silent(self):
         self.assert_silent(self.run_note(MORNING))
 
-    def test_a_long_config_dir_keeps_the_sweep_line_within_the_cap_with_its_whole_tail(self):
-        self.config = self.long_path(SWEEP_CONFIG, "claude-config-")
+    def test_a_long_config_dir_keeps_the_sweep_count_and_the_whole_tail(self):
+        self.config = self.scratch("claude-config-" + "x" * 100)  # a fixed name: its tail is past the cap anywhere
         tail = "Read: tail %s; stdout: %s" % (self.sweep_err_path(), self.sweep_out_path())
-        self.assertLessEqual(len(tail), MAX_LINE, "control: the sweep tail alone must fit the cap")
-        self.write_sweep_err("sweep failed\n", YESTERDAY_NOON)
-        lines = self.failure_lines(self.run_note(MORNING))
-        self.assertEqual(len(lines), 1, "want one sweep-error line, got %r" % lines)
-        self.assertTrue(lines[0].endswith(tail), "the cap cut the sweep line's Read: tail: %r" % lines[0])
-        self.assertLessEqual(len(lines[0]), MAX_LINE)
-
-    def test_a_67_character_config_dir_keeps_the_sweep_count_and_the_whole_tail(self):
-        self.config = self.long_path(67, "claude-config-")  # the tail is 2 x 67 + 77 characters
-        tail = "Read: tail %s; stdout: %s" % (self.sweep_err_path(), self.sweep_out_path())
-        self.assertEqual(len(tail), 211, "control: the sweep tail must be 211 characters")
         self.write_sweep_err("e" * 12345, YESTERDAY_NOON)  # 12345 bytes
         lines = self.failure_lines(self.run_note(MORNING))
         self.assertEqual(len(lines), 1, "want one sweep-error line, got %r" % lines)
-        self.assert_short_head_and_whole_tail(lines[0], "daily sweep errors (12345 bytes):", tail)
+        self.assert_short_head_kept(lines[0], "daily sweep errors (12345 bytes):", tail, keep="12345 bytes")
+
+    def test_a_default_config_dir_keeps_the_sweep_count_and_the_whole_tail(self):
+        tail = "Read: tail %s; stdout: %s" % (self.sweep_err_path(), self.sweep_out_path())
+        self.write_sweep_err("e" * 12345, YESTERDAY_NOON)  # 12345 bytes
+        lines = self.failure_lines(self.run_note(MORNING))
+        self.assertEqual(len(lines), 1, "want one sweep-error line, got %r" % lines)
+        self.assert_short_head_kept(lines[0], "daily sweep errors (12345 bytes):", tail, keep="12345 bytes")
+
+    def test_an_unstatable_sweep_log_is_unknown_with_its_whole_tail(self):
+        self.config = self.scratch("claude-config-" + "x" * 100)
+        tail = "Read: tail %s; stdout: %s" % (self.sweep_err_path(), self.sweep_out_path())
+        err_path = os.path.abspath(self.sweep_err_path())
+        real_stat = os.stat
+
+        def failing_stat(path, *args, **kwargs):
+            if os.path.abspath(os.fsdecode(path)) == err_path:
+                raise PermissionError(13, "Permission denied", err_path)
+            return real_stat(path, *args, **kwargs)
+
+        with mock.patch("os.stat", failing_stat):
+            out, err = self.in_process(self.load_note(), MORNING)
+        self.assertEqual(err, "", "the note raised: %r" % err)
+        lines = out.splitlines()
+        self.assertEqual(len(lines), 1, "want one unknown line, got %r" % lines)
+        self.assert_short_head_kept(lines[0], "launchd-sweep.err.log cannot be read (PermissionError):", tail,
+                                    keep="cannot be read (PermissionError)")
 
 
 class StartCostTests(NoteCase):
@@ -541,25 +641,6 @@ class StartCostTests(NoteCase):
     def fail_both_checks(self):
         self.write_payload([started_row(run_id(131, YESTERDAY_NOON))])
         self.write_sweep_err("sweep failed\n", YESTERDAY_NOON)
-
-    def load_note(self):
-        self.require_file(NOTE)
-        spec = importlib.util.spec_from_file_location("daily_note_under_test", NOTE)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-
-    def in_process(self, module, now):
-        """One start of the note in this process, with the env a child would get. Returns stdout and stderr."""
-        out, err = io.StringIO(), io.StringIO()
-        with mock.patch.dict(os.environ):
-            for key in SCRUBBED:
-                os.environ.pop(key, None)
-            os.environ.update(self.env(self.config))
-            os.environ[CLOCK] = now
-            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                module.main()
-        return out.getvalue(), err.getvalue()
 
     def touched_paths(self, module, now):
         """Every path the note opens or stats during one start, as absolute paths, with what it printed."""
