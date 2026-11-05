@@ -5787,19 +5787,19 @@ class AgentWorktreeReapTests(unittest.TestCase):
     case here forbids one of their removals. The agent rule removes a tree only when ALL hold:
     its path is `<repo>/.claude/worktrees/agent-*` (a branch or a detached HEAD); it is clean
     (no uncommitted, no untracked file); no process has a cwd inside it; its last change is 4
-    hours old or more; its HEAD commit is reachable from a remote-tracking ref. A repo whose
-    package.json defines `reap:worktrees` gets that script run with `--remove` instead. A read
-    that fails keeps the tree. A tree that should go below is pushed and not merged, which the
+    hours old or more; its HEAD commit is reachable from a remote-tracking ref. The sweep never
+    runs code a repository supplies: a `reap:worktrees` script in its package.json is ignored, and
+    npm is never run. A read that fails keeps the tree. A tree that should go below is pushed and not merged, which the
     older rulings keep before 24 hours, so its removal at 5 hours can only be the agent rule's,
     and its keep can only be that rule's refusal.
 
     The incident shape: a lane pushes `HEAD:<lane>` from a local branch of another name, so a
-    remover that trusts the branch's upstream reads the tree as never pushed.
+    check that trusts the branch's upstream reads the tree as never pushed.
 
     Seams. Clock: `time.time` runs HOURS ahead, so no file is touched and nothing sleeps.
     Process table: `sweep.list_all_pids` and `sweep.process_cwd` (darwin: `_all_cwds_macos`).
-    npm: a stub `npm` first on PATH logs argv and cwd. It is a real executable, so the sweep
-    may reach it by any call form. Failed git read: `subprocess.run` answers 128 for one tree.
+    npm: a stub `npm` first on PATH logs argv and cwd; the sweep must never call it. It is a real
+    executable, so the sweep may reach it by any call form. Failed git read: `subprocess.run` answers 128 for one tree.
     A kept tree must also see no `git worktree remove` call: git refuses a dirty tree on its own,
     and that refusal is not the sweep's guard. Every keep case also holds a control tree (`agent-ctl`) that must be removed in the same run,
     so a sweep that does nothing, or stops early, cannot pass a keep case."""
@@ -5935,7 +5935,7 @@ class AgentWorktreeReapTests(unittest.TestCase):
                       "the sweep touched the remote")
         self.assertEqual(run_vcs(self.repo, "cat-file", "-e", sha + "^{commit}").returncode, 0,
                          "the lane's commit is gone from the repository")
-        self.assertEqual(self.npm_calls(), [], "a repo with no `reap:worktrees` script ran npm")
+        self.assertEqual(self.npm_calls(), [], "the sweep ran npm: it never runs code a repository supplies")
 
     # ---- (b) the 4 hour floor
 
@@ -6001,24 +6001,46 @@ class AgentWorktreeReapTests(unittest.TestCase):
         self.assertTrue(self.listed(self.repo))
         self.assertRemoved(ctl, out)
 
-    # ---- (g) the repo's own remover
+    # ---- (g) a repo's package.json script is never run; the agent rule judges its trees
 
-    def test_g_runs_the_repos_remover_with_remove_and_removes_nothing_itself(self):
-        write(os.path.join(self.repo, "package.json"),
-              json.dumps({"name": "x", "scripts": {"reap:worktrees": "node reap.mjs"}}))
+    SCRIPTED_PACKAGE_JSON = b'{"name": "x", "scripts": {"reap:worktrees": "node reap.mjs"}}'
+
+    def main_package_json(self, raw):
+        """Commit RAW as the repo's package.json on main, and push main. A tree made after this
+        call starts from that file."""
+        with open(os.path.join(self.repo, "package.json"), "wb") as handle:
+            handle.write(raw)
         run_vcs(self.repo, "add", "-A")
-        self.assertEqual(run_vcs(self.repo, *IDENT, "commit", "-q", "-m", "reaper").returncode, 0)
+        require(run_vcs(self.repo, *IDENT, "commit", "-q", "-m", "package.json").returncode == 0,
+                "commit of package.json failed")
         require(run_vcs(self.repo, "push", "-q", "origin", "main").returncode == 0, "push of main failed")
-        tree = self.agent("g")  # the built-in rule would remove it at 5 hours
+
+    def test_g_a_repo_package_json_script_is_never_run(self):
+        self.main_package_json(self.SCRIPTED_PACKAGE_JSON)
+        self.agent("g")  # idle 5 hours: the agent rule's to remove, whatever the script says
+        self.run_sweep(5)
+        self.assertEqual(self.npm_calls(), [], "the sweep ran npm for a repo whose package.json "
+                         "holds a `reap:worktrees` script: it never runs code a repository supplies")
+
+    def test_g_the_agent_rule_removes_the_tree_despite_a_repo_package_json_script(self):
+        self.main_package_json(self.SCRIPTED_PACKAGE_JSON)
+        tree = self.agent("g")
         out = self.run_sweep(5)
-        calls = self.npm_calls()
-        self.assertEqual(len(calls), 1, "npm calls: %r\n%s" % (calls, out))
-        argv = calls[0]["argv"]
-        self.assertIn("reap:worktrees", argv)
-        self.assertIn("--remove", argv)
-        self.assertLess(argv.index("reap:worktrees"), argv.index("--remove"), argv)
-        self.assertEqual(_norm_path(calls[0]["cwd"]), _norm_path(self.repo))
-        self.assertKept(tree, out)
+        self.assertRemoved(tree, out)
+
+    def test_g_an_unparseable_package_json_keeps_the_agent_rule_and_runs_no_npm(self):
+        self.main_package_json(b'{"scripts": {"reap:worktrees": "node reap.mjs"')  # cut short
+        tree = self.agent("g")
+        out = self.run_sweep(5)
+        self.assertEqual(self.npm_calls(), [], "the sweep ran npm for an unparseable package.json")
+        self.assertRemoved(tree, out)
+
+    def test_g_an_unreadable_package_json_keeps_the_agent_rule_and_runs_no_npm(self):
+        self.main_package_json(b'\xff\xfe{"scripts": {}}')  # not UTF-8: the read fails
+        tree = self.agent("g")
+        out = self.run_sweep(5)
+        self.assertEqual(self.npm_calls(), [], "the sweep ran npm for an unreadable package.json")
+        self.assertRemoved(tree, out)
 
     # ---- (i) a detached tree: the red-run checkout a test-author makes under .claude/worktrees
 
