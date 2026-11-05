@@ -14,7 +14,8 @@ Contract the builder codes against. Each case fails until hooks/refusal_note.py 
 - Stdin: one JSON object with session_id, tool_name, tool_input, tool_use_id, reason, cwd and
   hook_event_name ("PermissionDenied", Claude Code's own event name).
 - Writes one JSON line to <CLAUDE_CONFIG_DIR>/state/refusals/<session_id>.jsonl, with the keys ts,
-  tool_name and reason. With CLAUDE_CONFIG_DIR unset, the folder is <HOME>/.claude.
+  tool_name, reason and tool_use_id (the payload's own). agent_id is added when the payload has one
+  (hooks/test_refusal_note_agent.py). With CLAUDE_CONFIG_DIR unset, the folder is <HOME>/.claude.
 - A reason that starts with "Auto mode could not evaluate this action" or "Classifier unavailable"
   is a no-verdict refusal (a classifier outage). It writes nothing.
 - A tool_name already in the file is not appended again.
@@ -119,7 +120,7 @@ class RefusalNoteTests(HookCase):
         self.assertEqual(run.stdout.strip(), "", "the hook printed on a refusal: %r" % run.stdout)
         rows = self.refusal_rows()
         self.assertEqual(len(rows), 1, rows)
-        self.assertEqual(set(rows[0]), {"ts", "tool_name", "reason"})
+        self.assertEqual(set(rows[0]), {"ts", "tool_name", "reason", "tool_use_id"})
         self.assertEqual(rows[0]["tool_name"], ARCHIVE)
         self.assertEqual(rows[0]["reason"], CLAUDE_DENIAL)
         self.assertTrue(isinstance(rows[0]["ts"], str) and rows[0]["ts"], rows[0])

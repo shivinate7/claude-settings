@@ -10,6 +10,7 @@ actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
 import ast, atexit, contextlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import ctypes  # the Windows-branch test patches os.name; ctypes' own import would then take the Windows path on Linux, so it loads here first
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -299,6 +300,10 @@ class Env(unittest.TestCase):
     def lock_ref(self):
         return "refs/heads/merge-lock/main" in self.refs()
 
+    def lock_text(self):
+        sh(self.co, "git", "fetch", "-q", "origin", "refs/heads/merge-lock/main")
+        return sh(self.co, "git", "log", "-1", "--format=%B", "FETCH_HEAD")
+
     def worktrees(self):
         return sh(self.co, "git", "worktree", "list").count("\n") + 1
 
@@ -314,6 +319,14 @@ class Env(unittest.TestCase):
         p = os.path.join(self.t, "hook.sh")
         put(p, fn_script)
         os.environ["MERGE_TEST_HOOK"] = p
+
+    PUSH_REFUSAL = "refused by the test"  # the text the refusing pre-receive hook prints on stderr
+
+    def refuse_pushes(self, text=PUSH_REFUSAL):
+        """Every ref update to the origin is refused from here on: a pre-receive hook that prints `text` and exits 1."""
+        hook = os.path.join(self.bare, "hooks", "pre-receive")
+        put(hook, f"#!/bin/sh\necho '{text}' >&2\nexit 1\n")
+        os.chmod(hook, 0o755)
 
 class Flow(Env):
     def test_preview_presses_nothing(self):
@@ -794,7 +807,13 @@ class Race(Env):
         # Both runs read "no lock" before either wrote. Only the create-only push can tell them apart.
         self.lock.acquire("main", 600)
         lock2 = merge.GitLock(self.other, now=lambda: self.now)
-        lock2.read = lambda b, ref=None: None
+        real_read, stale = lock2.read, [True]
+        def stale_first_read(b, ref=None):  # the stale view answers the first read of the main ref only; the re-read after the push is real
+            if stale and ref is None:
+                stale.clear()
+                return None
+            return real_read(b, ref)
+        lock2.read = stale_first_read
         with self.assertRaises(merge.Held):
             lock2.acquire("main", 600)
 
@@ -825,10 +844,6 @@ class CloudProxy(Env):
                   "  case $ref in refs/heads/*) ;; *) echo 'proxy: 403 ref' >&2; exit 1;; esac\n"
                   "done\n")
         os.chmod(hook, 0o755)
-
-    def lock_text(self):
-        sh(self.co, "git", "fetch", "-q", "origin", "refs/heads/merge-lock/main")
-        return sh(self.co, "git", "log", "-1", "--format=%B", "FETCH_HEAD")
 
     def test_a_full_merge_through_the_proxy_lands_and_leaves_an_expired_lock(self):
         rc, out = self.run_merge("7", "--confirm")
@@ -881,6 +896,93 @@ class CloudProxy(Env):
             self.assertIsInstance(merge.default_lock(self.co), merge.GitLock)
         with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE": ""}):
             self.assertIsInstance(merge.default_lock(self.co), merge.GhLock)
+
+class LockRetake(Env):
+    """GitLock.acquire when its lease push fails (decision merge-lock). The ref is read again: a moved ref is another run's take and stays Held;
+    an unchanged ref is a refused push, which stops and prints the push output. Held is a Stop too, so each refusal case asserts it is not a Held."""
+    EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+    def released_lock(self):
+        """A released lock on origin, pushed by the product's own release, so its expiry reads 0. -> its sha."""
+        c, out = merge.GitLock(self.other, now=lambda: self.now).released("main", "--force-with-lease=refs/heads/merge-lock/main:")
+        self.assertEqual(c, 0, out)
+        self.assertEqual(merge.expiry_of(self.lock_text()), 0)
+        return self.head("merge-lock/main")
+
+    def rival_lock(self, lease):
+        """Another run's live lock, pushed by the other clone under `lease`. -> its sha."""
+        sha = sh(self.other, "git", "commit-tree", self.EMPTY_TREE, "-m", merge.lock_message(600, self.now))
+        sh(self.other, "git", "push", "-q", lease, "origin", f"{sha}:refs/heads/merge-lock/main")
+        return sha
+
+    def move_after_first_read(self, lock):
+        """`lock`'s first read of the main ref answers as the ref stands, then another run moves the ref before the push. Later reads are real.
+        -> the list that receives the rival's sha once it has moved."""
+        real, moved = lock.read, []
+        def read(b, ref=None):
+            if ref is not None or moved:
+                return real(b, ref)
+            got = real(b, ref)
+            moved.append(self.rival_lock(f"--force-with-lease={merge.lock_ref(b)}:{got[0] if got else ''}"))
+            return got
+        lock.read = read
+        return moved
+
+    def assert_refused_push_stops(self):
+        """acquire on a ref the origin refuses: a Stop that is not a Held, holding the push output and the lock cite."""
+        with self.assertRaises(merge.Stop) as cm:
+            self.lock.acquire("main", 600)
+        self.assertNotIsInstance(cm.exception, merge.Held, "a refused push on an unchanged lock reads as another run's take")
+        self.assertIn(self.PUSH_REFUSAL, str(cm.exception), "the Stop drops the push output")
+        self.assertIn(merge.LOCK_CITE, str(cm.exception), "the Stop drops the lock cite")
+
+    def test_a_released_lock_the_remote_refuses_stops_and_names_the_push(self):
+        released = self.released_lock()
+        self.refuse_pushes()
+        self.assert_refused_push_stops()
+        self.assertEqual(self.head("merge-lock/main"), released, "the refused push moved the released lock")
+
+    def test_no_lock_ref_the_remote_refuses_stops_and_names_the_push(self):
+        self.assertFalse(self.lock_ref())  # scope: no lock ref on origin before the take
+        self.refuse_pushes()
+        self.assert_refused_push_stops()
+        self.assertFalse(self.lock_ref(), "the refused push created a lock ref")
+
+    def test_a_ref_absent_at_the_read_and_present_at_the_push_is_held(self):
+        self.assertFalse(self.lock_ref())  # scope: no lock ref on origin before the take
+        lock2 = merge.GitLock(self.other, now=lambda: self.now)
+        moved = self.move_after_first_read(lock2)
+        with self.assertRaises(merge.Held):
+            lock2.acquire("main", 600)
+        self.assertEqual(len(moved), 1, "the rival never moved the ref, so the case proves nothing")
+        self.assertEqual(self.head("merge-lock/main"), moved[0], "the Held take left the rival's lock in place")
+
+    def test_a_released_lock_that_moves_before_the_push_is_held(self):
+        self.released_lock()  # scope: the released lock is on origin before the take
+        lock2 = merge.GitLock(self.other, now=lambda: self.now)
+        moved = self.move_after_first_read(lock2)
+        with self.assertRaises(merge.Held):
+            lock2.acquire("main", 600)
+        self.assertEqual(len(moved), 1, "the rival never moved the ref, so the case proves nothing")
+        self.assertEqual(self.head("merge-lock/main"), moved[0], "the Held take left the rival's lock in place")
+
+    def test_a_released_lock_is_retaken_by_one_push_and_no_delete(self):
+        released = self.released_lock()
+        self.assertEqual(self.head("merge-lock/main"), released)  # scope: the released lock is on origin before the take
+        with unittest.mock.patch.object(merge, "git", side_effect=merge.git) as calls:
+            sha = self.lock.acquire("main", 600)
+        pushes = [c.args for c in calls.call_args_list if "push" in c.args]
+        self.assertEqual(len(pushes), 1, pushes)
+        self.assertFalse([a for args in pushes for a in args if a.startswith(":refs/heads/merge-lock/")], pushes)
+        self.assertEqual(self.head("merge-lock/main"), sha)
+        self.assertGreater(merge.expiry_of(self.lock_text()), self.now)
+
+    def test_a_live_lock_is_still_held(self):
+        held = merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
+        self.assertEqual(self.head("merge-lock/main"), held)  # scope: the live lock is on origin before the take
+        with self.assertRaises(merge.Held):
+            self.lock.acquire("main", 600)
+        self.assertEqual(self.head("merge-lock/main"), held)
 
 class Guards(Env):
     def test_moved_head_is_refused_and_nothing_is_claimed(self):
@@ -2793,10 +2895,7 @@ class Unlock(Env):
     def test_an_unlock_that_the_remote_refuses_stops_and_names_the_push(self):
         sha = sh(self.co, "git", "commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "held, not ours")
         sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/heads/merge-lock/main")
-        hook = os.path.join(self.bare, "hooks", "pre-receive")  # every ref update to the origin is refused from here on
-        with open(hook, "w") as f:
-            f.write("#!/bin/sh\necho 'refused by the test' >&2\nexit 1\n")
-        os.chmod(hook, 0o755)
+        self.refuse_pushes()
         with self.assertRaises(merge.Stop) as caught:
             self.lock.unlock("main")
         assert_cites(self, "unlock-failed", str(caught.exception))
@@ -2898,6 +2997,8 @@ class GhLockTest(unittest.TestCase):
 #     whole). `--slurp` (needs `--paginate`, refuses `--jq`) prints the pages as one array of pages.
 #   - `--jq` knows only: `.`  `.a.b`  `.a[]`  `.[]`  `.a[].b`  (applied to each page).
 #   - an argument holding `&` is refused: the Windows `.cmd` shim of this suite lets cmd.exe split the command there. Send query values with `-f`.
+#   - an argument holding a newline (`\n` or `\r`), a `-f` value included, is refused for the same reason: cmd.exe cuts the command at it. Send a multi-line value as JSON with `--input <file>`.
+#   - `--input <file>` reads a JSON object and merges its keys into the fields (gh's own body-from-file rule, so a PUT or POST sends it). `--input -` (stdin) is refused.
 #   - GraphQL (`gh pr ...`, `gh repo view`, `gh api graphql`, any other gh command) answers the HTTP 403 a Claude Code cloud session gives.
 GH_REST_LIB = r'''
 import json, re
@@ -2917,8 +3018,11 @@ def api_error(code, message):
     return "%sgh: %s (HTTP %d)" % (body, message, code)
 
 def parse(argv):
-    """The args after `gh api` -> (method, path, params, flags, jq). Query values in the path and -f/-F fields land in params."""
-    method, path, params, flags, jq, typed = None, None, {}, set(), None, False
+    """The args after `gh api` -> (method, path, params, flags, jq). Query values in the path and -f/-F fields land in params. --input FILE merges its JSON object into params."""
+    for x in argv:  # every argument, a -f value too: cmd.exe cuts any argument at a newline
+        if "\n" in x or "\r" in x:
+            raise Refused("fake gh api: an argument holds a newline (%r). The Windows .cmd shim of this suite lets cmd.exe cut the command there. Send a multi-line value as JSON with --input <file>." % x)
+    method, path, params, flags, jq, typed, body = None, None, {}, set(), None, False, None
     argv = [part for x in argv for part in (x.split("=", 1) if x.startswith("--") and "=" in x else [x])]  # --method=PUT is --method PUT
     i = 0
     while i < len(argv):
@@ -2931,6 +3035,10 @@ def parse(argv):
             k, _, v = argv[i + 1].partition("="); params[k] = v; typed = True; i += 2
         elif x in ("-q", "--jq"):
             jq = argv[i + 1]; i += 2
+        elif x == "--input":
+            if argv[i + 1] == "-":
+                raise Refused("fake gh api: --input - (stdin) is not supported by this fake: give a file path")
+            body = argv[i + 1]; typed = True; i += 2
         elif x in ("-H", "--header"):
             i += 2
         elif x in ("-i", "--include"):
@@ -2948,6 +3056,15 @@ def parse(argv):
     path, _, query = path.lstrip("/").partition("?")
     for pair in filter(None, query.split("&")):
         k, _, v = pair.partition("="); params.setdefault(k, v)
+    if body is not None:
+        try:
+            with open(body, encoding="utf-8") as f:
+                obj = json.load(f)
+        except (OSError, ValueError) as e:
+            raise Refused("fake gh api: --input %s is not a readable JSON file (%s)" % (body, e))
+        if not isinstance(obj, dict):
+            raise Refused("fake gh api: --input %s holds JSON that is not an object" % body)
+        params.update(obj)
     if "slurp" in flags and "paginate" not in flags:
         raise Refused("the `--slurp` option requires `--paginate`")
     if "slurp" in flags and jq:
@@ -6146,6 +6263,41 @@ class LockHolder(Env):
 
     def test_the_lock_records_the_boot(self):
         self.assertIn(f"boot: {merge.boot_stamp()}", self.peek()[0].splitlines())
+
+    def test_the_windows_lock_boot_matches_a_later_read_across_a_second(self):  # Windows stamps are whole seconds, so two reads can straddle a second; cache_clear keeps a cached stamp from hiding that
+        reads, now, kernel32 = [], [1000.0], types.SimpleNamespace(GetTickCount64=lambda: 500)  # 500 ms of uptime
+        def clock():  # a fake clock: each read steps 0.2 s, and the lock's boot line must still equal a stamp read after it
+            now[0] = round(now[0] + 0.2, 1)
+            reads.append(now[0])
+            return now[0]
+        getattr(merge.boot_stamp, "cache_clear", lambda: None)()
+        try:
+            with unittest.mock.patch.object(merge.sys, "platform", "win32"), unittest.mock.patch.object(merge.os, "name", "nt"), \
+                    unittest.mock.patch.object(ctypes, "WinDLL", lambda name: kernel32, create=True), unittest.mock.patch.object(merge.time, "time", clock):
+                msg = merge.lock_message(600, 1000, {"pr": 7, "branch": "b"})
+                self.assertTrue(reads, "the Windows branch of boot_stamp never read the clock")
+                stamp = merge.boot_stamp()
+                self.assertTrue(stamp, "the Windows branch gave no boot stamp")
+                self.assertIn("boot: " + stamp, msg.splitlines(), f"the lock's boot line is not the stamp read after it, {stamp}:\n{msg}")
+        finally:
+            getattr(merge.boot_stamp, "cache_clear", lambda: None)()
+
+    def test_the_windows_boot_stamp_is_the_same_on_every_call(self):  # Windows stamps are whole seconds, so a read can land either side of a second; the memo must give every call the first answer
+        now, kernel32 = [1000.2], types.SimpleNamespace(GetTickCount64=lambda: 500)  # 500 ms of uptime
+        def clock():  # returns 1000.2, 1000.4, 1000.6, ...: the stamp int(t - 0.5) is 999, 999, then 1000
+            t = now[0]
+            now[0] = round(t + 0.2, 1)
+            return t
+        getattr(merge.boot_stamp, "cache_clear", lambda: None)()
+        try:
+            with unittest.mock.patch.object(merge.sys, "platform", "win32"), unittest.mock.patch.object(merge.os, "name", "nt"), \
+                    unittest.mock.patch.object(ctypes, "WinDLL", lambda name: kernel32, create=True), unittest.mock.patch.object(merge.time, "time", clock):
+                first = merge.boot_stamp()
+                self.assertTrue(first, "the Windows branch of boot_stamp gave no boot stamp")
+                for _ in range(2):  # the clock passes 1000.5 on the third call, so a boot_stamp without a memo fails there
+                    self.assertEqual(merge.boot_stamp(), first, "boot_stamp gave a different stamp on a later call in one process: its memo is missing")
+        finally:
+            getattr(merge.boot_stamp, "cache_clear", lambda: None)()
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "the pid namespace link is Linux's")
     def test_the_linux_boot_stamp_names_the_pid_namespace(self):  # the same boot id runs under any container's own pid numbers
