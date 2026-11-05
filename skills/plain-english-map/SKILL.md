@@ -30,6 +30,7 @@ the version it reads in `MAP_FORMAT_VERSION`, in `scripts/lib/map-config.mjs`. A
 - **Newer map.** Every command refuses, and the message says to update the skill. No command writes a downgrade.
 
 To change the map format: raise `MAP_FORMAT_VERSION`, and add one step to the list in `scripts/map-upgrade.mjs`.
+Version 4 to 5 changes no file: version 5 adds the tested-by line and MAP11. It makes an older copy of the skill refuse the map.
 Version 3 to 4 changes no file: version 4 adds the two decision keys, the decisions line and MAP10. It makes an older copy of the skill refuse the map.
 Version 2 to 3 changes no file: version 3 adds the fact line, the `## Homes` section and MAP9, and it makes an older copy of the skill refuse the map.
 Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines carried. It strips a `:N` after a file name only when its extension is in `codeExtensions`: `example.com:3000` stays.
@@ -50,8 +51,8 @@ Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines c
    changed after the line. Read the worst ones first. It is advice: it always exits 0.
 
 Before you answer how code in this repo works, run `node ~/.claude/skills/plain-english-map/scripts/map-show.mjs <path|area|folder/|decision-id> [--full]` from
-the repository root. It is the cheap read: it prints the map, and you open no file. A file path prints its area, its map line, its fact lines,
-its Homes lines and its trace steps. An area id prints its map lines. A folder, with a `/` at the end, prints every map line under it.
+the repository root. It is the cheap read: it prints the map, and you open no file. A file path prints its area, its map line, its fact lines, its tested-by line,
+its Homes lines and its trace steps. A test path also prints the files whose tested-by line names it. An area id prints its map lines. A folder, with a `/` at the end, prints every map line under it.
 With no match it prints `no map line for <arg>` and exits 1.
 
 ## Formats
@@ -66,6 +67,8 @@ With no match it prints `no map line for <arg>` and exits 1.
   The sentence shows each number of the cite, and names each item of a set or a list. A number outside backticks anywhere else in the map fails MAP9.
 - **A decisions line.** Indented under a map line: `  - Decisions: ` + each id in backticks, joined by `, `. An id names a record, a `.md` file directly in `decisionsDir`,
   when the file name without `.md` is the id or starts with the id and `-`. A run of digits compares by value: `D7` names `D007-x.md`.
+- **A tested-by line.** Indented under a code-file map line: `  - Tested by: ` + each test path from the repository root in backticks, joined by `, `.
+  The line is optional: a map line with no tested-by line passes. MAP11 checks each test the line names.
 - **A home.** Under `## Homes`: `- ` + the capability in words + ` — ` + backtick `FILE:SYMBOL`. Read this section before you build, and extend the home.
 - **A trace step.** In `docs/map/traces/<screen-key>.md`, under a `## <path name>` heading, a numbered line:
   `1. ` + backtick path + ` — ` + what the step does. Each step must be reached from an earlier step,
@@ -73,9 +76,13 @@ With no match it prints `no map line for <arg>` and exits 1.
 
 ## Files
 
-- `scripts/map-check.mjs` reads the map and the code, and holds the bodies of the 10 MAP checks. Run it from a repository root, and it runs the 10 checks there. It prints one line for each check, and exits non-zero on a FAIL.
+- `scripts/map-check.mjs` reads the map and the code, and holds the bodies of the 11 MAP checks. Run it from a repository root, and it runs the 11 checks there. It prints one line for each check, and exits non-zero on a FAIL.
 - MAP10 runs only when both decision keys are set, and otherwise it passes with a skip note. It fails in two cases.
   A mapped file's comments cite an id that names a record, and the file's decisions line lacks it. Or an id on a decisions line names no record. Comments are read through `scripts/lib/source-text.mjs`: JS and TS by `blankComments`, Python by `blankPython`, shell by `blankShell`. A string is no cite, a Python triple-quoted string included. A file of any other extension is read as JS.
+- MAP11 fails when a test on a tested-by line is not a tracked file, or does not load the map line's file. A test loads a file in one of two ways.
+  It imports the file (a type-only import does not count), or one `__init__.py` or `index.*` that it imports re-exports the file. Or a string in its code, never in a comment or a docstring, is the file's path, from the test's folder or the repository root.
+  JS and TS are read by the TypeScript parser, and Python by `ast` in `py-facts.py`. A test in any other language, or a run with no `python3`, is an unknown read, and MAP11 fails: an unknown read is never a pass.
+  A tested-by line under a table line, a screen line or a home fails.
 - `scripts/map-fix.mjs` adds the ids that MAP10 finds missing, and never removes or reorders one. With no flag it prints each file and id it would add and writes nothing. With `--write` it adds them, and creates the decisions line right under the map line when there is none. A second `--write` changes no byte.
 - `scripts/map-picture.mjs` builds the picture data and the page, and it is the page command. It reads no decision records, so the rulings tab is empty.
 - `scripts/map-show.mjs` is the show command. It prints the map for one file, area, folder or decision id (`--full` adds the record line for an id), through the readers of `map-check.mjs`.
@@ -90,6 +97,6 @@ With no match it prints `no map line for <arg>` and exits 1.
 
 ## What a host repository may add
 
-A host may register the 10 check bodies with its own check, and it may bind its own readers. The model-call
+A host may register the 11 check bodies with its own check, and it may bind its own readers. The model-call
 readers go in through `bindConfig` and `bindSeamReader`, and the page readers go in through `bindReaders`.
 With no model-call reader bound, the AI calls tab is empty. A host pins the install link, never a copy of this folder.
