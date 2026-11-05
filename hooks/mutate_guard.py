@@ -2584,7 +2584,8 @@ def tests_for_main(argv) -> int:
 
 
 def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=None):
-    """Run one fixture suite against one mutated copy. Return (exit code, FAIL lines, case lines).
+    """Run one fixture suite against one mutated copy. Return (exit code, FAIL lines, case lines,
+    ERROR lines from `mutate_shared.diagnostic_lines`).
 
     The case lines are one per case run, passed or failed: `mutate_shared.staged_suite` reads them
     to know whether stage 1 ran the required case."""
@@ -2610,7 +2611,7 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     red = [line for line in lines if line.startswith("FAIL")]
     # "PASS" and "FAIL" start each case line in every suite here; "ok " is test_call_judge.py's pass.
     ran = [line for line in lines if line.startswith(("PASS", "FAIL", "ok "))]
-    return result.returncode, red, ran
+    return result.returncode, red, ran, mutate_shared.diagnostic_lines(result.stdout)
 
 
 def mutation_parts(entry):
@@ -2639,7 +2640,7 @@ def mutation_parts(entry):
 
 def run_mutant(sources, work: str, entry):
     """Apply one mutation, run its suite against it, and return (label, code, FAIL lines,
-    required, skip).
+    required, skip, ERROR lines).
 
     `required` is the case name (or a distinctive fragment of it) the caller must find among the
     FAIL lines before trusting this mutant's death: see `mutate_shared.report_verdict`. `skip`,
@@ -2714,9 +2715,9 @@ def run_mutant(sources, work: str, entry):
             handle.write(mutated)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))
     os.makedirs(config_dir, exist_ok=True)
-    code, red = mutate_shared.staged_suite(
+    code, red, seen = mutate_shared.staged_suite_seen(
         lambda only: run_suite(suite, variable, copy_path, config_dir, only), required)
-    return label, code, red, required, None
+    return label, code, red, required, None, seen
 
 
 def main() -> int:
