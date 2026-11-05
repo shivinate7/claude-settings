@@ -1,0 +1,9 @@
+{
+ "title": "Debt: a triage session on the owner's Mac or PC cannot prove its tier",
+ "phase": "now",
+ "status": "todo",
+ "order": 103.211,
+ "why": "Owner answer on page item 213 (Nov 5 07:44 CST): \"it'd have to be working on mac or windows if file version. else build nothing for now on this is ok too put this as a debt\".",
+ "note": "Page item 213. Build nothing now. A record-writer lane writes one debt record in docs/debts/: the guard proves a tier only from cloud tags, so a Mac or Windows triage's roadmap push is refused. The named fix is a tier file that only the computer's setup writes (install.sh and install.ps1), and it must work on both Mac and Windows. Owner rulings on 213: no tier word to type, not cloud-only (2026-11-04 17:44 CST).",
+ "updatedAt": "2026-11-05T13:48:00Z"
+}
