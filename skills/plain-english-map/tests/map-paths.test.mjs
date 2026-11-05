@@ -1,14 +1,15 @@
-// The scope key `mapPaths` of map.config.json (step 7 of c146). It is a list of path prefixes that MAP1, MAP2 and MAP7 cover.
-// Its default is the whole repository, and a repository with no such key is checked as before.
+// The scope key `mapPaths` of map.config.json (step 7 of c146). It is a list of path prefixes that MAP1 and MAP7 cover.
+// MAP2 reads every tracked code file, unscoped. Its default is the whole repository, and a repository with no such key is checked as before.
 //
 //   P1. With `"mapPaths": ["src/"]`, a tracked code file outside src/ and with no map line is no MAP1 failure. Every check passes.
 //   P2. With the same key, a tracked code file inside src/ and with no map line still fails MAP1, and the output names it.
-//   P3. The scope covers MAP2 too: a map line that names a missing file inside src/ still fails MAP2.
+//   P3. MAP2 is unscoped: with the same key, a tracked file outside src/ that has a map line passes MAP2. Every check passes.
 //   P4. A `mapPaths` that is not a list is refused, the message names the key, and it is no "unknown key" error.
 //   P5. With `"mapPaths": ["src/"]`, a tracked file outside src/ that holds an "In plain words" note is no MAP7 failure. Every check passes.
 //   P6. MAP7 reads no file outside src/: with the same key, its body returns true, and the one file it reads is inside src/.
 //   P7. The scope covers MAP7 for a file inside src/: a note there still fails MAP7, and the output names it.
 //   P8. With no `mapPaths`, a note in a file outside src/ still fails MAP7, and the output names it.
+//   P9. With `"mapPaths": ["src/", "lib/"]`, a note in lib/x.ts fails MAP7 and a tracked lib/y.ts with no map line fails MAP1: every prefix of the list is in scope.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -64,13 +65,18 @@ test('P2. with mapPaths ["src/"], a tracked code file inside src/ with no map li
   assert.ok(r.out.includes('src/extra.ts'), `the output must name src/extra.ts\n${out1500(r)}`);
 });
 
-test('P3. the scope covers MAP2 too: a map line that names a missing file inside src/ still fails MAP2', () => {
+test('P3. MAP2 is unscoped: with mapPaths ["src/"], a tracked file outside src/ that has a map line passes MAP2, and every check passes', () => {
   needFile('scripts/map-check.mjs');
   const dir = withConfig(scratchRepo(), { mapPaths: ['src/'] });
-  addMapLine(dir, 'src/gone.ts', 'Holds nothing.');
+  addTracked(dir, 'tools/extra.ts');
+  addMapLine(dir, 'tools/extra.ts', 'Holds a helper.');
+  // The scope first: the config names src/ alone, the file is tracked, and its map line names it, so MAP2 must read it outside the scope.
+  assert.deepEqual(loadMapConfig(join(dir, 'map.config.json'), dir).mapPaths, ['src/'], 'the config must scope the check to src/');
+  assert.ok(gitIn(dir, 'ls-files').split('\n').includes('tools/extra.ts'), 'the file must be tracked');
+  assert.match(readFileSync(join(dir, CORE), 'utf8'), /`tools\/extra\.ts`/, 'the map line must name tools/extra.ts');
   const r = run([CHECK], dir);
-  assert.equal(verdicts(r.out), expected({ MAP2: 'FAIL' }), `only MAP2 must fail\n${out1500(r)}`);
-  assert.ok(r.out.includes('src/gone.ts'), `the output must name src/gone.ts\n${out1500(r)}`);
+  assert.equal(verdicts(r.out), expected(), `a map line for a file outside the scope must pass MAP2\n${out1500(r)}`);
+  assert.equal(r.status, 0, `the command must exit 0\n${out1500(r)}`);
 });
 
 test('P4. a mapPaths that is not a list is refused: the message names mapPaths and is no "unknown key" error', () => {
@@ -102,7 +108,7 @@ test('P6. MAP7 reads no file outside mapPaths: with ["src/"], it returns true, a
   const files = () => Object.keys(bodies);
   // The scope first: the config names src/ alone, and both files are code files of the list.
   assert.deepEqual(cfg.mapPaths, ['src/'], 'the config must scope the check to src/');
-  assert.deepEqual(trackedCodeFiles(files(), cfg), ['src/x.ts', 'tools/x.ts'], 'both files must be code files of trackedCodeFiles, which MAP2 reads unscoped, so it must not take the scope');
+  assert.deepEqual(trackedCodeFiles(files(), cfg), ['src/x.ts', 'tools/x.ts'], 'trackedCodeFiles must list both files: MAP2 reads it unscoped, and MAP7 applies mapPaths itself, through inMapPaths');
   const reads = [];
   const read = (f) => {
     reads.push(f);
@@ -140,4 +146,20 @@ test('P8. with no mapPaths, a note in a file outside src/ still fails MAP7, and 
   const r = run([CHECK], dir);
   assert.equal(verdicts(r.out), expected({ MAP7: 'FAIL' }), `only MAP7 must fail\n${out1500(r)}`);
   assert.ok(r.out.includes('tools/x.ts'), `the output must name tools/x.ts\n${out1500(r)}`);
+});
+
+test('P9. with mapPaths ["src/", "lib/"], a note in lib/x.ts fails MAP7 and a tracked lib/y.ts with no map line fails MAP1: every prefix of the list is in scope', () => {
+  needFile('scripts/map-check.mjs');
+  const dir = withConfig(scratchRepo(), { mapPaths: ['src/', 'lib/'] });
+  addTracked(dir, 'lib/x.ts', `${NOTE}export const x = 1;\n`);
+  addMapLine(dir, 'lib/x.ts', 'Holds a helper.');
+  addTracked(dir, 'lib/y.ts');
+  // The scope first: the list holds two prefixes, the note sits under the second, and no map line names lib/y.ts.
+  assert.deepEqual(loadMapConfig(join(dir, 'map.config.json'), dir).mapPaths, ['src/', 'lib/'], 'the config must scope the check to src/ and lib/');
+  assert.deepEqual(plainWordsNotes({ 'lib/x.ts': `${NOTE}export const x = 1;\n` }), ['lib/x.ts:1'], 'the text must hold a note that MAP7 reads');
+  assert.doesNotMatch(readFileSync(join(dir, CORE), 'utf8'), /`lib\/y\.ts`/, 'no map line may name lib/y.ts');
+  const r = run([CHECK], dir);
+  assert.equal(verdicts(r.out), expected({ MAP1: 'FAIL', MAP7: 'FAIL' }), `only MAP1 and MAP7 must fail\n${out1500(r)}`);
+  assert.ok(r.out.includes('lib/x.ts'), `the output must name lib/x.ts, the note\n${out1500(r)}`);
+  assert.ok(r.out.includes('lib/y.ts'), `the output must name lib/y.ts, the missing map line\n${out1500(r)}`);
 });
