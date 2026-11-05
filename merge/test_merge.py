@@ -11515,7 +11515,7 @@ def record_text(rounds=REVIEW_PASS, head=REVIEW_HEAD, kind="normal", guard="no",
     return "\n".join([marker, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
                       *rounds, *fix, f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
 
-def fix_line(verdict="PASS", head=REVIEW_OLD_HEAD, role="reviewer", model="haiku"):
+def fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD, role="reviewer", model="haiku"):
     """The one literal of the fix check line: the reviewed head the fix diff starts from, the role, the model and the verdict."""
     return f"Fix check: {head}, {role}, {model}, {verdict}"
 
@@ -11584,7 +11584,7 @@ class ReviewFixForm(unittest.TestCase):
     Each refusal sits beside a well-formed sibling that must parse, so the case is red until the parser knows the line."""
 
     def test_the_fix_line_parses_to_its_four_fields(self):
-        rec = parse_text(self, record_text(rounds=REVIEW_PASS, fix=(fix_line(),)))
+        rec = parse_text(self, record_text(rounds=REVIEW_PASS, fix=(fix_check_line(),)))
         self.assertEqual(rec.get("fix"), REVIEW_FIX_PASS, f"the fix line did not parse to its four fields: {rec.get('fix')!r}")
 
     def test_a_record_with_no_fix_line_has_no_fix(self):
@@ -11600,43 +11600,43 @@ class ReviewFixForm(unittest.TestCase):
     def test_review_body_prints_the_fix_line_after_the_rounds_and_before_net_value(self):
         body = body_with_fix(self, [(1, "reviewer", "sonnet", "PASS")], "not owed", REVIEW_FIX_PASS)
         self.assertEqual(body.splitlines(), [REVIEW_MARKER, "PR: #7", f"Head: {REVIEW_HEAD}", "Kind: normal", "Guard or check: no",
-                                             "Round 1: reviewer, sonnet, PASS", fix_line(), "Net value: not owed", REVIEW_CI_LINE])
+                                             "Round 1: reviewer, sonnet, PASS", fix_check_line(), "Net value: not owed", REVIEW_CI_LINE])
 
     def test_the_full_form_with_a_fix_line_round_trips(self):
         # full size: three rounds with design-reviewer lines, then the fix line, a guard change with a positive net value
         rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PASS", "Round 2: reviewer, sonnet, FAIL",
                   "Round 2: design-reviewer, opus, PASS", "Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, PASS")
-        text = record_text(rounds=rounds, guard="yes", net="positive", fix=(fix_line(),))
+        text = record_text(rounds=rounds, guard="yes", net="positive", fix=(fix_check_line(),))
         rec = parse_text(self, text)
         self.assertEqual(rec.get("fix"), REVIEW_FIX_PASS, f"the fix line did not parse to its four fields: {rec.get('fix')!r}")
         self.assertEqual(review_fn(self, "review_body")(**rec).splitlines(), text.splitlines())
 
     def test_a_malformed_fix_line_is_not_a_record(self):
-        good = record_text(rounds=REVIEW_PASS, fix=(fix_line(),))
+        good = record_text(rounds=REVIEW_PASS, fix=(fix_check_line(),))
         self.assertEqual(parse_text(self, good).get("fix"), REVIEW_FIX_PASS, "the well-formed fix line did not parse")
-        bad_lines = {"verdict PARTIAL": fix_line(verdict="PARTIAL"), "verdict MAYBE": fix_line(verdict="MAYBE"),
-                     "role design-reviewer": fix_line(role="design-reviewer"), "a 39-character head": fix_line(head=REVIEW_OLD_HEAD[:39]),
-                     "an upper-case head": fix_line(head=REVIEW_OLD_HEAD.upper()), "no model": f"Fix check: {REVIEW_OLD_HEAD}, reviewer, PASS"}
+        bad_lines = {"verdict PARTIAL": fix_check_line(verdict="PARTIAL"), "verdict MAYBE": fix_check_line(verdict="MAYBE"),
+                     "role design-reviewer": fix_check_line(role="design-reviewer"), "a 39-character head": fix_check_line(head=REVIEW_OLD_HEAD[:39]),
+                     "an upper-case head": fix_check_line(head=REVIEW_OLD_HEAD.upper()), "no model": f"Fix check: {REVIEW_OLD_HEAD}, reviewer, PASS"}
         for cause, line in bad_lines.items():
             with self.subTest(cause=cause):
                 self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=REVIEW_PASS, fix=(line,))), f"parse_review accepted a fix line with {cause}")
 
     def test_two_fix_lines_are_not_a_record(self):
-        good = record_text(rounds=REVIEW_PASS, fix=(fix_line(),))
+        good = record_text(rounds=REVIEW_PASS, fix=(fix_check_line(),))
         self.assertEqual(parse_text(self, good).get("fix"), REVIEW_FIX_PASS, "the well-formed fix line did not parse")
-        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=REVIEW_PASS, fix=(fix_line(), fix_line(verdict="FAIL")))),
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=REVIEW_PASS, fix=(fix_check_line(), fix_check_line(verdict="FAIL")))),
                           "parse_review accepted two fix lines")
 
     def test_a_fix_line_before_a_round_line_is_not_a_record(self):
-        good = record_text(rounds=REVIEW_PASS, fix=(fix_line(),))
+        good = record_text(rounds=REVIEW_PASS, fix=(fix_check_line(),))
         self.assertEqual(parse_text(self, good).get("fix"), REVIEW_FIX_PASS, "the well-formed fix line did not parse")
-        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=(fix_line(), "Round 1: reviewer, sonnet, PASS"))),
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=(fix_check_line(), "Round 1: reviewer, sonnet, PASS"))),
                           "parse_review accepted a fix line before a round line")
 
     def test_a_fix_line_whose_reviewed_head_is_the_record_head_is_not_a_record(self):
-        good = record_text(rounds=REVIEW_PASS, fix=(fix_line(),))
+        good = record_text(rounds=REVIEW_PASS, fix=(fix_check_line(),))
         self.assertEqual(parse_text(self, good).get("fix"), REVIEW_FIX_PASS, "the well-formed fix line did not parse")
-        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=REVIEW_PASS, fix=(fix_line(head=REVIEW_HEAD),))),
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=REVIEW_PASS, fix=(fix_check_line(head=REVIEW_HEAD),))),
                           "parse_review accepted a fix line whose reviewed head is the record's Head")
 
 class ReviewRecordForm(unittest.TestCase):
@@ -11866,10 +11866,10 @@ class ReviewRecordRules(unittest.TestCase):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, head=REVIEW_OLD_HEAD), head=REVIEW_HEAD), "stale")
 
 class ReviewFixRules(unittest.TestCase):
-    """review_state with a fix check (decision hold-unsafe-after-round-3). A fix check is not a round. A FAIL is open. A PASS counts only after
-    the last round: round 3, or a delete-only change with guard no after round 1. After round 3 the fix check keeps the net value that round 3
-    gave, and does not settle a net value that is still owed. The rule cases build their record with fix_state(); the last case reads the fix
-    line from the text."""
+    """review_state with a fix check (decision hold-unsafe-after-round-3). A fix check is not a round of review. A FAIL is open. A PASS
+    counts only on the last round: the third, or the single round of a delete-only change with guard no. On the third round the fix check
+    keeps the net value that round gave, and does not settle a net value that is still owed. The rule cases build their record with
+    fix_state(); the last case reads the fix line from the text."""
 
     def test_a_fix_fail_after_round_three_is_open_and_says_new_lane(self):
         state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=REVIEW_FAILED_THREE, guard="no")
@@ -11917,7 +11917,7 @@ class ReviewFixRules(unittest.TestCase):
                 self.assertEqual(state, "done", f"round 3's net value {net} must carry through the fix check: {why!r}")
 
     def test_a_fix_pass_after_round_three_with_guard_yes_keeps_the_net_value_owed(self):
-        # the fix check does not settle a net value that round 3 left owed
+        # the fix check does not settle a net value that the third round left owed
         state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="yes", net="not owed")
         self.assertEqual(state, "open", f"a fix check settled a net value round 3 left owed: {why!r}")
 
@@ -11938,7 +11938,7 @@ class ReviewFixRules(unittest.TestCase):
                  (REVIEW_PASS, "no", "not owed", "PASS", "open"))
         for rounds, guard, net, verdict, want in cases:
             with self.subTest(rounds=rounds, guard=guard, net=net, verdict=verdict):
-                text = record_text(rounds=rounds, guard=guard, net=net, fix=(fix_line(verdict=verdict),))
+                text = record_text(rounds=rounds, guard=guard, net=net, fix=(fix_check_line(verdict=verdict),))
                 self.assertEqual(record_state(self, text), want)
 
 class ReviewEnv(Env):
@@ -12076,7 +12076,7 @@ class ReviewFixFlag(ReviewEnv):
     def test_the_printed_record_carries_the_fix_line_after_the_rounds(self):
         rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value())
         self.assertEqual(rc, 0, "merge refused --fix-check:\n" + out + err)
-        self.assertEqual(posted_body(self, out).splitlines()[5:], ["Round 1: reviewer, sonnet, PASS", fix_line(), "Net value: not owed", REVIEW_CI_LINE])
+        self.assertEqual(posted_body(self, out).splitlines()[5:], ["Round 1: reviewer, sonnet, PASS", fix_check_line(), "Net value: not owed", REVIEW_CI_LINE])
 
     def test_the_printed_fix_line_parses_back_to_the_flag_value(self):
         rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value())
