@@ -426,8 +426,9 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   answer's `at` before you route it. An "Undone on the waiting page" notice withdraws the items it
   names.
 - On a comment wake, read `answers/` for your own items only (by `owner` and `n`). Route them as
-  below. The writer also reads each `answers/park.<id>` whenever `meta/page.parked` is not empty, and routes it
-  by the parked branch below. If no item in the comment is yours and you are not the writer of a page with parked lines, stay silent.
+  below. The writer also reads each `answers/park.<id>` whenever `meta/page.parked` is not empty. At each wake it also reads each item answer
+  with `act: "park"`, whoever owns the item. It routes both by the parked branch below, and the item's owner skips a park answer.
+  If no item in the comment is yours and you are not the writer, stay silent.
 - Never reply in a comment thread: a rebuilt page drops its threads (decision
   questions-go-to-owner, "Answer on the page, not in a comment thread"). When a comment or an
   answer's note adds something to an item, rewrite that item with what the reply would have said.
@@ -512,10 +513,11 @@ item and leaves it open until the lane takes the answer. Then it closes the item
 
    Then delete `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
 
-A parked answer (`answers/park.<id>`): the writer waits 10 seconds after its `at`, as for an item's answer, so it never routes an act inside the Undo window.
-Then it reads `answers/park.<id>` again (`ArtifactData get`). If it is gone, the owner undid or withdrew it: leave the entry, and rule nothing.
+A parked answer (`answers/park.<id>`, or an item's answer with `act: "park"` under `answers/<item id>`): the writer waits 10 seconds after its `at`, as for an item's answer, so it never routes an act inside the Undo window.
+Then it reads the answer again (`ArtifactData get`). If it is gone, the owner undid or withdrew it: leave the entry, and rule nothing.
 This re-read saves nothing to the inbox, because the hook skips a document with `parked: true`. Then the writer finds the entry in `meta/page.parked` by `id`.
 A chat word on a parked line takes the same branch. That word is the Copy text (`Unpark "<ref>"` or `Drop "<ref>"`).
+A Copy word `<n> park (<note>)` parks the open item numbered `<n>`, with that note, by the park answer branch below.
 The writer finds the entry by its `ref`, or by its `id` when the word names it. Nothing is in `answers/`, so it skips the wait, the re-read and the answer delete.
 - `unpark`: put the line back in the work: move it back to its roadmap step, or add a fresh item.
 - `drop`: file the abandon at the home the entry's `ref` names (rule `building-land-design-or-abandon`). When `ref` names no home, ask the owner where it goes and leave the entry and the answer in place until he answers.

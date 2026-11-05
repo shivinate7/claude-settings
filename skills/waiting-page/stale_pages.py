@@ -56,8 +56,10 @@ Parked mode, run by the writer at each wake when meta/page.parked is not empty (
 <dir> holds three files the session saved from the store: meta.json (the data of meta/page), items.json and
 answers.json (a list of {"id", "data"} entries each). One line per stale thing, then exit 1:
 `parked-open <id>` for a parked entry whose item is open (status other than closed, as the page reads it),
-and `park-answer-old <key>` for an answers/park.* record whose `at` is more than 10 minutes before --now
-(default: the clock). With none, `parked: clean` and exit 0. A missing or unreadable file prints `unknown: ...` and exits 2.
+and `park-answer-old <key>` for a park answer (answers/park.<id>, or answers/<item id> with act park) whose `at` is
+more than 10 minutes before --now (default: the clock). With none, `parked: clean` and exit 0. A missing or unreadable
+file, a file of the wrong shape (meta not an object, items or answers not a list), or a park answer with no readable
+`at` prints an `unknown:` line and exits 2.
 Cost: one python process, reads 3 files, writes none, starts no git, no timer.
 
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
@@ -481,20 +483,30 @@ def parked_mode(argv):
     except (OSError, ValueError) as err:
         print("unknown: cannot read %s.json in %s (%s)" % (name, args.parked, err))
         return 2
-    meta, entries = loaded["meta"], lambda rows: [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+    meta, items, answers = loaded["meta"], loaded["items"], loaded["answers"]
+    for name, ok in (("meta", isinstance(meta, dict)), ("items", isinstance(items, list)), ("answers", isinstance(answers, list))):
+        if not ok:  # a file of the wrong shape is never read as clean or stale
+            print("unknown: %s.json is not %s" % (name, "an object" if name == "meta" else "a list"))
+            return 2
+    entries = lambda rows: [r for r in rows if isinstance(r, dict)]
     data = lambda r: r.get("data") if isinstance(r.get("data"), dict) else {}
-    open_ids = {r.get("id") for r in entries(loaded["items"]) if data(r).get("status") != "closed"}
-    parked = meta.get("parked") if isinstance(meta, dict) and isinstance(meta.get("parked"), list) else []
+    open_ids = {r.get("id") for r in entries(items) if data(r).get("status") != "closed"}
+    parked = meta.get("parked") if isinstance(meta.get("parked"), list) else []
     lines = ["parked-open %s" % p["id"] for p in parked if isinstance(p, dict) and p.get("id") in open_ids]
-    for r in entries(loaded["answers"]):
+    unknown = []
+    for r in entries(answers):
         key = str(r.get("id", ""))
-        if not key.startswith("park."):
+        # A parked line's answer is keyed park.<id>. An item's answer is a park answer only with act park; any other act is never read.
+        if not (key.startswith("park.") or data(r).get("act") == "park"):
             continue
         at = parse_utc(data(r).get("at"))
-        if at is None or now - at > PARK_ANSWER_MAX_AGE:  # an unreadable time is never counted fresh
+        if at is None:  # an unreadable time is never counted fresh or old
+            unknown.append("unknown: the park answer %s has no readable at" % key)
+        elif now - at > PARK_ANSWER_MAX_AGE:
             lines.append("park-answer-old %s" % key)
-    print("\n".join(lines) if lines else "parked: clean")
-    return 1 if lines else 0
+    out = lines + unknown
+    print("\n".join(out) if out else "parked: clean")
+    return 2 if unknown else 1 if lines else 0
 
 
 def main(argv):
