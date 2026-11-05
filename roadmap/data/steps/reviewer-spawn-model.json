@@ -1,0 +1,9 @@
+{
+ "title": "A reviewer reports the model it really runs on",
+ "phase": "now",
+ "status": "doing",
+ "order": 103.32,
+ "why": "A round-2 reviewer spawned on sonnet reported haiku. Measured: the spawn model works (it served claude-sonnet-5-5); the wrong name came from fixed text in agents/reviewer.md.",
+ "note": "Nov 5 16:10 CST (lane session_013NEJL34nXMtBDYee1XbFKp): draft PR #1280 at head ea9fde64, with the batch runner.",
+ "updatedAt": "2026-11-05T22:10:00Z"
+}
