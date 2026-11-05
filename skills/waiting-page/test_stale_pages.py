@@ -778,5 +778,115 @@ class CarriesData(unittest.TestCase):
         self.assertTrue(load_stale_pages().carries_data(PAGE, set_body(PAGE, MOCK_BODY)), "a live mockup is not counted as data")
 
 
+# --parked: the on-demand pass over the parked block (waiting-page SKILL.md, the parked branch). It reads three saved
+# files in one folder and writes none. Each list file holds [{"id", "data"}] entries, the shape an ArtifactData list
+# returns for a collection (one entry per doc). meta.json holds the data of meta/page alone, not an entry:
+#   meta.json     {"writer": ..., "parked": [{"id", "ref", "note"}, ...]}
+#   items.json    [{"id": "<item id>", "data": {"status": "open" | "closed", ...}}, ...]
+#   answers.json  [{"id": "park.<item id>", "data": {"parked", "id", "act", "ref", "note", "at"}}, ...]
+# One line per stale thing, then exit 1: `parked-open <id>` for a parked entry whose item is open, and
+# `park-answer-old <key>` for an answers/park.* record whose `at` is more than 10 minutes before --now. With none,
+# `parked: clean` and exit 0. Times are ISO strings with a Z, as the store writes them.
+NOW = "2026-11-05T13:10:00Z"
+PARKED_W = {"id": "windows-live-checks", "ref": "Step windows-live-checks, the Windows live checks", "note": "Triage removes this line."}
+PARKED_GONE = {"id": "no-such-item", "ref": "Step no-such-item, a line whose item is gone", "note": "Gone."}
+
+
+def item_entry(item_id, status):
+    return {"id": item_id, "data": {"id": item_id, "kind": "decision", "status": status, "n": 10, "title": "Windows live checks"}}
+
+
+def park_answer_entry(item_id, at):
+    return {"id": "park." + item_id, "data": {"parked": True, "id": item_id, "act": "unpark", "ref": "Step " + item_id, "note": "Wait.", "at": at}}
+
+
+def output_lines(out):
+    return [line for line in out.splitlines() if line.strip()]
+
+
+class ParkedStale(unittest.TestCase):
+    """The --parked mode. Each case writes its own three files, then runs the script on them."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: never the system temp dir
+        self.addCleanup(self.tmp.cleanup)
+        self.folder = os.path.join(self.tmp.name, "parked")
+        os.mkdir(self.folder)
+
+    def store(self, meta=None, items=(), answers=()):
+        """Writes the three files the mode reads."""
+        meta = {"writer": "triage", "parked": []} if meta is None else meta
+        write_text(os.path.join(self.folder, "meta.json"), json.dumps(meta))
+        write_text(os.path.join(self.folder, "items.json"), json.dumps(list(items)))
+        write_text(os.path.join(self.folder, "answers.json"), json.dumps(list(answers)))
+
+    def run_parked(self, now=NOW):
+        """Runs the mode on the folder. Stale.run_script is the one runner of CMD in this file; it reads no state of its case.
+        Without the mode, the script runs its batch mode on the folder, so that output is named as the cause."""
+        r = Stale.run_script(self, "--parked", self.folder, "--now", now)
+        self.assertNotIn("waiting pages:", r.stdout + r.stderr, "the --parked mode did not run: stale_pages.py ran its batch mode")
+        self.assertIn(r.returncode, (0, 1), "the --parked mode did not run (exit %d): %s" % (r.returncode, r.stdout + r.stderr))
+        return r.returncode, r.stdout
+
+    def tree(self):
+        """Every file under the test folder, as {relative path: bytes}."""
+        out = {}
+        for root, _, files in os.walk(self.tmp.name):
+            for name in files:
+                path = os.path.join(root, name)
+                with open(path, "rb") as f:
+                    out[os.path.relpath(path, self.tmp.name)] = f.read()
+        return out
+
+    def test_an_open_item_under_a_parked_entry_is_named_and_the_mode_exits_1(self):
+        self.store(meta={"writer": "triage", "parked": [PARKED_W]}, items=[item_entry("windows-live-checks", "open")])
+        rc, out = self.run_parked()
+        self.assertEqual(rc, 1, "a parked entry whose item is open did not exit 1:\n" + out)
+        self.assertEqual(output_lines(out), ["parked-open windows-live-checks"], "the parked entry whose item is open was not the one line named")
+
+    def test_a_park_answer_more_than_ten_minutes_old_is_named_by_its_key(self):
+        self.store(answers=[park_answer_entry("ci-cap-raise", "2026-11-05T12:59:59Z")])
+        rc, out = self.run_parked()
+        self.assertEqual(rc, 1, "a park answer 10 minutes and 1 second old did not exit 1:\n" + out)
+        self.assertEqual(output_lines(out), ["park-answer-old park.ci-cap-raise"], "the old park answer was not the one line named")
+
+    def test_a_park_answer_exactly_ten_minutes_old_is_not_named(self):
+        self.store(answers=[park_answer_entry("ci-cap-raise", "2026-11-05T13:00:00Z")])
+        rc, out = self.run_parked()
+        self.assertEqual((rc, output_lines(out)), (0, ["parked: clean"]), "a park answer exactly 10 minutes old was named: " + out)
+
+    def test_a_parked_entry_whose_item_is_closed_or_missing_is_not_named(self):
+        self.store(meta={"writer": "triage", "parked": [PARKED_W, PARKED_GONE]}, items=[item_entry("windows-live-checks", "closed")])
+        rc, out = self.run_parked()
+        self.assertEqual((rc, output_lines(out)), (0, ["parked: clean"]), "a parked entry with no open item was named: " + out)
+
+    def test_a_fresh_park_answer_and_a_closed_item_leave_nothing_stale(self):
+        self.store(meta={"writer": "triage", "parked": [PARKED_W]}, items=[item_entry("windows-live-checks", "closed")],
+                   answers=[park_answer_entry("windows-live-checks", "2026-11-05T13:05:00Z")])
+        rc, out = self.run_parked()
+        self.assertEqual((rc, output_lines(out)), (0, ["parked: clean"]), "a fresh park answer under a closed item was named: " + out)
+
+    def test_each_stale_thing_gets_one_line_and_the_mode_exits_1(self):
+        self.store(meta={"writer": "triage", "parked": [PARKED_W]}, items=[item_entry("windows-live-checks", "open")],
+                   answers=[park_answer_entry("ci-cap-raise", "2026-11-05T12:00:00Z")])
+        rc, out = self.run_parked()
+        self.assertEqual(rc, 1, "two stale things did not exit 1:\n" + out)
+        self.assertEqual(sorted(output_lines(out)), ["park-answer-old park.ci-cap-raise", "parked-open windows-live-checks"],
+                         "the two stale things were not named one line each")
+
+    def test_the_mode_reads_its_three_files_writes_none_and_starts_no_git(self):
+        self.store(meta={"writer": "triage", "parked": [PARKED_W]}, items=[item_entry("windows-live-checks", "open")])
+        write_text(os.path.join(self.folder, "other.json"), "{ not json")  # a file the mode never reads
+        before = self.tree()
+        # No PATH: a git start would fail, so a clean run shows the mode starts no git process.
+        r = subprocess.run([sys.executable, CMD, "--parked", self.folder, "--now", NOW], capture_output=True, text=True,
+                           timeout=30, env={"PATH": "", "PYTHONDONTWRITEBYTECODE": "1", "HOME": self.tmp.name})
+        self.assertNotIn("waiting pages:", r.stdout, "the --parked mode did not run: stale_pages.py ran its batch mode")
+        self.assertIn(r.returncode, (0, 1), "the --parked mode did not run with no PATH (exit %d): %s" % (r.returncode, r.stderr))
+        self.assertEqual(r.stderr, "", "the --parked mode wrote to stderr, so it needs a process it does not own: " + r.stderr)
+        self.assertEqual(output_lines(r.stdout), ["parked-open windows-live-checks"], "the mode did not read its three files")
+        self.assertEqual(self.tree(), before, "the --parked mode wrote or removed a file")
+
+
 if __name__ == "__main__":
     unittest.main()
