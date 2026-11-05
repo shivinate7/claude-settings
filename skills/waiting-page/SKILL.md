@@ -486,8 +486,8 @@ item and leaves it open until the lane takes the answer. Then it closes the item
 
 While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `answers/<id>`. End of a wait: when the
 `--items` line for the item says `ended` ("Keep the page on main's code", step 2), the writer, in that wake, drops
-`waits` (`ArtifactData update items/<id> {"waits": {"__delete__": true}}`), then closes or rewrites the item, then
-deletes `answers/<id>`.
+`waits` (`ArtifactData update items/<id> {"waits": {"__delete__": true}}`). Then it closes or rewrites the item
+and deletes `answers/<id>`.
 
 1. Write `receipts/<id>` with `read` set to now. Then move the answer to the item's home: the
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
