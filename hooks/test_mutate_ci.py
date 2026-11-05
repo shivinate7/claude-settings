@@ -179,6 +179,26 @@ CHANGED = {"code": r"^calc\.py$", "tests": r"^test_[^/]+\.py$", "argv": [PY, "{s
            "classify": "fail_line", "install": None, "sparse_skip": []}
 SELECTED = dict(CHANGED, select=[PY, "select_for.py", "{path}"])
 
+# The profile a case names when it installs nothing: the one known_run passes by default.
+NO_INSTALL = {"install": None}
+# A profile's install writes kb_oracle.py into node_modules, in the deps folder it runs in. The catcher beside
+# the lockfile imports it from node_modules, and so reads the install. The module name is this fixture's alone.
+ORACLE_MODULE = "def add(a, b):\n    return a + b\n"
+ORACLE_INSTALL = [PY, "-c", "import pathlib\npathlib.Path('node_modules').mkdir(exist_ok=True)\n"
+                  "pathlib.Path('node_modules', 'kb_oracle.py').write_text(%r, encoding='utf-8')" % ORACLE_MODULE]
+ORACLE_SUITE = ("import os\n"
+                "import sys\n\n"
+                "HERE = os.path.dirname(os.path.abspath(__file__))\n"
+                "sys.path.insert(0, os.path.join(HERE, 'node_modules'))\n"
+                "from calc import add\n"
+                "import kb_oracle\n\n"
+                "if add(1, 2) != kb_oracle.add(1, 2):\n"
+                "    print('FAIL: add(1, 2) is not the installed oracle value')\n"
+                "    sys.exit(1)\n"
+                "print('ok')\n")
+ROOT_LOCK, APP_LOCK = "requirements.lock", "app/deps.lock"  # committed, so their hashes are the cache keys
+LOCK_TEXT = "kb-oracle==1.0\n"
+
 
 # ---------------------------------------------------------------------------------------------------
 # Fixture repositories. Each one is a base commit on main, and a change cut from it on branch feat.
@@ -268,11 +288,11 @@ def replayed(files):
     return repo, sha
 
 
-def defect_repo():
+def defect_repo(extra_files=None):
     """main holds calc.py and six suites. Each suite is green on the clean source, except test_red.py and
-    test_boom.py, which are red and crashing on it."""
+    test_boom.py, which are red and crashing on it. `extra_files` ({path: text}) are committed with them."""
     repo = new_repo()
-    put(repo, {
+    files = {
         "calc.py": CALC_BASE,
         "test_calc.py": SUITE,
         "test_nothing.py": "print('ok')\n",
@@ -280,7 +300,9 @@ def defect_repo():
         "test_hang.py": "from calc import add\nwhile add(1, 2) != 3:\n    pass\nprint('ok')\n",
         "test_red.py": "print('FAIL: the clean code is wrong')\nraise SystemExit(1)\n",
         "test_boom.py": "raise RuntimeError('the clean suite crashes')\n",
-    })
+    }
+    files.update(extra_files or {})
+    put(repo, files)
     commit(repo, "Base")
     return repo
 
@@ -330,12 +352,14 @@ def changed_run(repo, profile, base="main", head="feat", extra=(), log=None, lim
     return run_cli(args + list(extra))
 
 
-def known_run(defects, repo, extra=(), log=None):
-    """`--known-defects` on `defects`, a list of planted defects, against `repo`."""
+def known_run(defects, repo, extra=(), log=None, profile=None):
+    """`--known-defects` on `defects`, a list of planted defects, against `repo`, under `profile` (a plain profile or a
+    profile of parts). With no profile it installs nothing: NO_INSTALL."""
     spec = os.path.join(fresh(), "known-defects.json")
     with open(spec, "w", encoding="utf-8") as handle:
         json.dump(defects, handle)
-    args = ["--known-defects", spec, "--repo", repo] + list(extra)
+    profile = NO_INSTALL if profile is None else profile
+    args = ["--known-defects", spec, "--repo", repo, "--profile-file", profile_file(profile)] + list(extra)
     if log is not None:
         args += ["--log", log]
     return run_cli(args)
@@ -671,7 +695,7 @@ class KnownDefectsTests(unittest.TestCase):
     def test_a_missing_file_reads_unknown_naming_the_path_and_exits_1(self):
         repo = defect_repo()
         absent = os.path.join(fresh(), "absent.json")
-        code, out, err = run_cli(["--known-defects", absent, "--repo", repo])
+        code, out, err = run_cli(["--known-defects", absent, "--repo", repo, "--profile-file", profile_file(NO_INSTALL)])
         self.assertEqual(code, 1, "a missing list reads UNKNOWN, and UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
         unknown = [line for line in out.splitlines() if line.startswith("UNKNOWN")]
         self.assertTrue(any(absent in line for line in unknown), "no UNKNOWN line names %s:\n%s" % (absent, out))
@@ -711,8 +735,53 @@ class KnownDefectsTests(unittest.TestCase):
 
     def test_known_defects_without_repo_is_a_bad_argument_exit_2(self):
         spec = profile_file([defect("kb-caught", "return a + b", "return a - b", "test_calc.py")])
-        code, out, err = run_cli(["--known-defects", spec])
+        code, out, err = run_cli(["--known-defects", spec, "--profile-file", profile_file(NO_INSTALL)])
         self.assertEqual(code, 2, "--repo is required: exit %d" % code)
+
+    def test_a_profile_install_that_writes_a_module_lets_the_catcher_import_it_and_reads_caught(self):
+        repo = defect_repo(extra_files={ROOT_LOCK: LOCK_TEXT, "test_oracle.py": ORACLE_SUITE})
+        profile = {"install": ORACLE_INSTALL, "lockfile": ROOT_LOCK}
+        code, out, err = known_run([defect("kb-deps", "return a + b", "return a - b", "test_oracle.py")], repo,
+                                   profile=profile)
+        self.assertIn("kb-deps", verdicts_of(out), "no verdict line for kb-deps (exit %d):\n%s%s" % (code, out, err))
+        self.assertEqual(verdicts_of(out), {"kb-deps": "CAUGHT"},
+                         "the catcher imports a module the profile's install wrote into node_modules, so it reads "
+                         "CAUGHT, not UNKNOWN\n" + out + err)
+        self.assertEqual(code, 0, "all defects caught must exit 0: exit %d\n%s%s" % (code, out, err))
+
+    def test_a_parts_profile_links_the_install_of_its_part_beside_its_lockfile_and_reads_caught(self):
+        repo = defect_repo(extra_files={"app/calc.py": CALC_BASE, "app/test_oracle.py": ORACLE_SUITE,
+                                        APP_LOCK: LOCK_TEXT})
+        profile = {"parts": {"oracle": {"install": ORACLE_INSTALL, "lockfile": APP_LOCK},
+                             "plain": {"install": None}}}
+        defects = [defect("kb-part", "return a + b", "return a - b", "app/test_oracle.py", file="app/calc.py")]
+        code, out, err = known_run(defects, repo, profile=profile)
+        self.assertIn("kb-part", verdicts_of(out), "no verdict line for kb-part (exit %d):\n%s%s" % (code, out, err))
+        self.assertEqual(verdicts_of(out), {"kb-part": "CAUGHT"},
+                         "the install of the part with a lockfile is linked beside that lockfile, so the catcher "
+                         "reads CAUGHT\n" + out + err)
+        self.assertEqual(code, 0, "all defects caught must exit 0: exit %d\n%s%s" % (code, out, err))
+
+    def test_a_failed_install_reads_every_defect_unknown_naming_the_install_and_exits_1(self):
+        repo = defect_repo(extra_files={ROOT_LOCK: LOCK_TEXT, "test_oracle.py": ORACLE_SUITE})
+        profile = {"install": [PY, "-c", "import sys\nsys.exit(3)"], "lockfile": ROOT_LOCK}
+        defects = [defect("kb-dep", "return a + b", "return a - b", "test_oracle.py"),
+                   defect("kb-plain", "return a * b", "return a + b", "test_calc.py")]
+        code, out, err = known_run(defects, repo, profile=profile)
+        self.assertEqual(verdicts_of(out), {"kb-dep": "UNKNOWN", "kb-plain": "UNKNOWN"},
+                         "a failed install makes every defect UNKNOWN, the install-free catcher too\n" + out + err)
+        lines = [line for line in out.splitlines() if line.startswith("UNKNOWN kb-")]
+        self.assertEqual(len(lines), 2, "one UNKNOWN line per defect:\n" + out)
+        for line in lines:
+            self.assertIn("install", line, "the UNKNOWN reason must name the install: " + line)
+        self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
+
+    def test_known_defects_without_a_profile_is_a_bad_argument_exit_2(self):
+        repo = defect_repo()
+        spec = profile_file([defect("kb-caught", "return a + b", "return a - b", "test_calc.py")])
+        code, out, err = run_cli(["--known-defects", spec, "--repo", repo])
+        self.assertEqual(code, 2, "--known-defects takes --profile or --profile-file, and exits 2 without one: "
+                         "exit %d\n%s%s" % (code, out, err))
 
 
 class RealListTests(unittest.TestCase):
