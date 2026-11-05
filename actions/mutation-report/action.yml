@@ -4,8 +4,9 @@ description: >
   caller's repository. Runs hooks/mutate_guard.py from this repo against the caller's checkout.
   `--changed` mutates the lines the checkout adds past its merge base with the pull request base, runs the suites
   the profile selects for each file, and writes the catch share and the untested lines to the job summary. A low
-  share never fails the action. `--known-defects` plants each defect of the list in a checkout of HEAD and runs its
-  catcher suite. A defect that is MISS or UNKNOWN fails the action (decision ci-unknown-is-red): that step is the
+  share never fails the action. `--known-defects` plants each defect of the list in a checkout of HEAD, installs the
+  profile's packages into it and runs its catcher suite. That is a second install, because the `--changed` step
+  removes its own. A defect that is MISS or UNKNOWN fails the action (decision ci-unknown-is-red): that step is the
   only one that can. Both JSON logs go up as one artifact, `mutation-report`. The caller needs actions/checkout
   with fetch-depth 0 so the history reaches the base. A workflow_dispatch run reads the default branch. A push or a
   schedule has no batch to report, so the action skips there.
@@ -81,6 +82,7 @@ runs:
       env:
         TOOL: ${{ github.action_path }}/../../hooks/mutate_guard.py
         KNOWN_DEFECTS: ${{ inputs.known-defects }}
+        PROFILE: ${{ inputs.profile }}
         SUITE_TIMEOUT: ${{ inputs.suite-timeout }}
         EVENT: ${{ github.event_name }}
         OUT: ${{ runner.temp }}/mutation-report
@@ -88,7 +90,7 @@ runs:
         set +e  # the summary is written before the step exits with the tool's code
         case "$EVENT" in pull_request|workflow_dispatch) ;; *) echo "mutation-report: no batch pull request, skipped"; exit 0 ;; esac
         mkdir -p "$OUT"
-        python3 "$TOOL" --known-defects "$KNOWN_DEFECTS" --repo . --suite-timeout "$SUITE_TIMEOUT" \
+        python3 "$TOOL" --known-defects "$KNOWN_DEFECTS" --repo . --profile "$PROFILE" --suite-timeout "$SUITE_TIMEOUT" \
           --log "$OUT/known-defects.json" 2>&1 | tee "$OUT/known-defects.txt"
         status=${PIPESTATUS[0]}
         {
