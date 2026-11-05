@@ -2550,17 +2550,22 @@ def _known_defects_base_ids(repo: str, list_path: str, base: str):
             raise ValueError("the top level is not a list")
     except ValueError as error:
         return None, ("ERROR", "cannot read %s: %s" % (spec, error))
-    return {str(entry["id"]) for entry in entries if isinstance(entry, dict) and "id" in entry}, None
+    for position, entry in enumerate(entries, 1):
+        if not isinstance(entry, dict) or "id" not in entry:
+            return None, ("UNKNOWN", "%s: entry %d of the base list has no id, so a drop of it could not be told" % (spec, position))
+    return {str(entry["id"]) for entry in entries}, None
 
 
 def known_defects_main(argv) -> int:
     """Replay the planted defects of a list (`.github/known-defects.json`) against a repository's HEAD. One line per defect:
     `CAUGHT`, `MISS` or `UNKNOWN`. Exit 1 when any defect is MISS or UNKNOWN (decision ci-unknown-is-red). A missing list file
-    prints one UNKNOWN line that names its path and exits 1; an empty list exits 0; a list that cannot be read exits 2.
+    prints one UNKNOWN line that names its path and exits 1; an empty list exits 0 (with `--base`, only when REF's list names
+    no entry); a list that cannot be read exits 2.
     With `--base REF` the head list is also compared with the list at REF (decision mutation-ci-report-and-replay): each id
     there needs a result row, unless a commit in REF..HEAD carries the exact trailer `Known-defect-removed: <id>`, else
     `MISSING <id>` prints and the exit is 1. A ref that does not resolve, or a list outside the repository, is UNKNOWN (exit
-    1); a ref with no list file has nothing to compare; a base list that cannot be read exits 2."""
+    1); a ref with no list file has nothing to compare; a base list that cannot be read exits 2. A base entry that is not an
+    object or has no `id` is UNKNOWN (exit 1), never skipped. One trailer line names one id."""
     import argparse
     import json
     parser = argparse.ArgumentParser(prog="mutate_guard.py --known-defects")
@@ -2605,7 +2610,7 @@ def known_defects_main(argv) -> int:
         missing = sorted(base_ids - listed - removed)
         for known_id in missing:
             print("MISSING %s: %s lists it, the head list has no row for it, and no commit in %s..HEAD has the trailer "
-                  "`Known-defect-removed: %s`" % (known_id, args.base, args.base, known_id))
+                  "`Known-defect-removed: %s` (one trailer line names exactly one id)" % (known_id, args.base, args.base, known_id))
     if args.log:
         with open(args.log, "w", encoding="utf-8") as handle:
             json.dump({"repo": os.path.abspath(args.repo), "defects": results, "missing": missing}, handle, indent=1)
