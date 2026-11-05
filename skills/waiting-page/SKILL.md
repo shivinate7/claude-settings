@@ -526,10 +526,10 @@ A park answer (`answers/<item id>` with `act: "park"`): the same wait and re-rea
 `meta/page.parked` in one update pinned with `if_version`. `id` is the item's id when it is a slug of 32 characters or fewer and
 unique in the list, else a new slug. `ref` is the item's home and title in plain words, and `note` is the answer's note.
 Then it closes the item with `lastAnswer` `{act: "park", note, at}`, so the owning session sees at its wake that the item is parked and stops
-waiting, and it deletes the answer. Unpark (an `unpark` answer on that line) reopens `items/<id>` (status `open`, `added` now, a new `n`),
-removes the entry and deletes the answer, all in the same wake. At each wake while `meta/page.parked` is not empty, the writer
-saves `meta/page`, `items` and `answers` to a folder and runs `stale_pages.py --parked <folder>`, then finishes what it names:
-`parked-open <id>` is an entry to remove, and `park-answer-old <key>` is an answer to route or delete.
+waiting, and it deletes the answer. Unpark (an `unpark` answer on that line) reopens `items/<id>` (status `open`, `added` now, a new `n`).
+In the same wake it removes the entry and deletes the answer. At each wake while `meta/page.parked` is not empty, the writer
+saves `meta/page`, `items` and `answers` to a folder and runs `stale_pages.py --parked <folder>`.
+It then finishes what that names: `parked-open <id>` is an entry to remove, and `park-answer-old <key>` is an answer to route or delete.
 
 ## Route an ask
 
