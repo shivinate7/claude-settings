@@ -114,8 +114,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     it writes `lastAnswer` again without `choice`: the old key may now name another option.
   - `lane` (a lane's branch slug) is set when an answer is filed while its lane is busy. The card shows "waits on lane <slug>"
     in its top row. The item stays open until the lane takes the answer, and then the writer closes it.
-  - `waits` (`{repo, run}` or `{repo, pr}`: a CI run id or a PR number) is set while the item waits on that run or PR. An item
-    with `waits` and `lastAnswer` reads as answered on the page. No `answers/` logic reads it.
+  - `waits` (`{repo, run}` or `{repo, pr}`: a CI run id or a PR number) is set while the item waits on that run or PR. `run` and
+    `pr` are a whole number above zero, or a string of digits with no leading zero; any other value reads as no wait. An item
+    with `waits` and `lastAnswer` reads as answered on the page.
     `stale_pages.py --items` names each open item's wait `ended`, `waiting` or `unknown` (see "Route and close").
   - Before writing `reply`, `lastAnswer`, `lane` or `waits`, the writer checks that the page is current with `stale_pages.py`, the same
     gate as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the four.

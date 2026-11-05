@@ -42,7 +42,9 @@ saves main's page with the live designData and roadmap blocks kept (splice.carry
 the `@<path>` line in ~/.claude/CLAUDE.md names. With neither, or with no hooks/_nowindow.py to
 start git, the verdict is unknown: the installed copy never stands in for main.
 --items names the items the session saved with `ArtifactData list items`: a JSON list file, or the folder of
-<id>.json files that call saves. For each open item (status not `closed`) with a `waits` field, `{repo, run}`
+<id>.json files that call saves. A folder without the .complete marker reads every wait `unknown`, with no gh call.
+--items needs hooks/_nowindow.py to start gh; without it every wait reads `unknown`. A `run` or `pr` is a whole
+number above zero, or a string of digits with no leading zero; anything else reads `unknown`. For each open item (status not `closed`) with a `waits` field, `{repo, run}`
 or `{repo, pr}`, one gh call runs through the program named by WAITING_PAGE_GH (default `gh`):
 `run view <id> --repo <repo> --json status,conclusion` or `pr view <n> --repo <repo> --json state,mergedAt`.
 Each such item prints one line after the verdict line, `wait: item <n> (<what>): <word> (<detail>)`. The word is
@@ -84,6 +86,7 @@ TEMPLATE_IN_GIT = "skills/waiting-page/page.html"
 GIT_TIMEOUT = 30
 WAIT_CAP = 50  # most gh calls one --items run makes
 REPO_NAME = re.compile(r"[\w.-]+/[\w.-]+")
+WAIT_NUMBER = re.compile(r"[1-9][0-9]*")  # a run id or PR number: a whole number above zero, with no leading zero (page.html waitsOf reads the same form)
 # One piece of the text before the template: white space or a document skeleton tag (no event-handler
 # attributes). A style piece counts only inside the leading head; skeleton_before() keeps that state.
 ATTRS = r'(?:\s+(?!on)[a-z][\w:-]*(?:\s*=\s*(?:"[^"<>]*"|\'[^\'<>]*\'|[^\s"\'<>=]+))?)*'
@@ -385,8 +388,9 @@ def session_line(root, main_checkout=None):
 
 
 def load_items(path):
-    """The saved items as a list: a JSON list file, or the folder `ArtifactData list` saves. Raises ValueError with the cause."""
-    from export_page import Stop, docs_in, load_json  # lazy: only --items reads a folder
+    """(items, complete): the saved items as a list from a JSON list file, or the folder `ArtifactData list` saves. `complete` is False
+    for a folder without the marker the session leaves after the last list page, since a stopped fetch may lack items. Raises ValueError with the cause."""
+    from export_page import MARKER, Stop, docs_in, load_json  # lazy: only --items reads a folder
     try:
         data = list(docs_in(path, path).values()) if os.path.isdir(path) else load_json(path, path)
     except Stop as err:
@@ -395,7 +399,7 @@ def load_items(path):
         raise ValueError(err.strerror or str(err))
     if not isinstance(data, list):
         raise ValueError("%s is not a JSON list of items" % path)
-    return data
+    return data, not os.path.isdir(path) or os.path.isfile(os.path.join(path, MARKER))
 
 
 def parse_waits(waits):
@@ -406,7 +410,7 @@ def parse_waits(waits):
     number = waits[kind]
     if isinstance(number, int) and not isinstance(number, bool):
         number = str(number)
-    if not (isinstance(repo, str) and REPO_NAME.fullmatch(repo) and isinstance(number, str) and number.isascii() and number.isdigit()):
+    if not (isinstance(repo, str) and REPO_NAME.fullmatch(repo) and isinstance(number, str) and WAIT_NUMBER.fullmatch(number)):
         raise ValueError("waits names a repo or %s that is not valid" % kind)
     fields = "status,conclusion" if kind == "run" else "state,mergedAt"
     return [kind, "view", number, "--repo", repo, "--json", fields], "%s %s in %s" % (kind, number, repo)
@@ -437,7 +441,10 @@ def wait_word(argv, answer):
         status = answer.get("status")
         if not isinstance(status, str) or not status:
             raise ValueError("gh gave no run status")
-        return ("ended", "completed") if status == "completed" else ("waiting", status)
+        if status != "completed":
+            return "waiting", status
+        conclusion = answer.get("conclusion")
+        return "ended", "completed, %s" % conclusion if isinstance(conclusion, str) and conclusion else "completed"
     state = answer.get("state")
     if answer.get("mergedAt") or state == "MERGED":
         return "ended", "merged"
@@ -448,8 +455,8 @@ def wait_word(argv, answer):
     raise ValueError("gh gave no pr state")
 
 
-def wait_lines(items):
-    """One line per open item with a `waits` field, in order; at most WAIT_CAP gh calls."""
+def wait_lines(items, complete=True):
+    """One line per open item with a `waits` field, in order; at most WAIT_CAP gh calls. With complete False, none: every wait reads unknown."""
     lines, calls = [], 0
     for item in items:
         if not isinstance(item, dict):
@@ -460,6 +467,8 @@ def wait_lines(items):
         name, label = "item %s" % item.get("n", item.get("id", "?")), json.dumps(item["waits"])
         try:
             argv, label = parse_waits(item["waits"])
+            if not complete:
+                raise ValueError("not asked: the items folder has no .complete marker, so its list may be cut short")
             if calls >= WAIT_CAP:
                 raise ValueError("not asked: more than %d gh calls" % WAIT_CAP)
             calls += 1
@@ -482,7 +491,7 @@ def single_page(argv):
     code = page_verdict(args)
     if args.items is not None:
         try:
-            lines = wait_lines(load_items(args.items))
+            lines = wait_lines(*load_items(args.items))
         except ValueError as err:
             lines = ["wait: the items cannot be read: unknown (%s)" % err]
         for line in lines:
