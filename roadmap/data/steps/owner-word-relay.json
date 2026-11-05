@@ -1,0 +1,9 @@
+{
+ "title": "The owner's word on the waiting page counts in any cloud session, in auto mode, once that session checks it itself",
+ "phase": "now",
+ "status": "todo",
+ "order": 103.2111,
+ "why": "Owner ask ask-mw3lqb8bwx (Nov 5 07:49 CST): \"i need sessions to be able to relay my word to other cloud sessions and it be trust worthy add in auto mode\". Same day, item 254: he had to type \"go\" in lane review-fix-check after already picking 231 a on the page (\"why did i have to say that there\"). Batch runner 9 was refused the joyous ruleset change at 07:47 CST despite his page yes on 242.",
+ "note": "Asks ask-mw3lqb8bwx; items 254, 242, 246. Cause (read): auto mode trusts only words typed in the session's own chat; a peer's relay is text another session wrote, so the classifier rightly refuses it. Trustworthy shape: the receiving session never trusts the relay text; it reads the owner's own record itself. A page answer (answers/<id>) or page comment is written by the owner's account on his private page, with a server time. Fix, one lane: (1) a small reader (one home, in the waiting-page skill) that, given a page URL and item id, returns the owner's saved choice, note and time, or nothing; (2) an autoMode.allow prose entry in decision auto-mode-owner-acts: an act the owner approved on his waiting page counts as his word for that act only, after this session read the answer itself with the reader and quotes item, choice and time; the classifier still judges the act; (3) the relay message names the page, item and act, never paraphrases the grant. The owner's ask is the word for the auto-mode change. Red first: today's refusal of a relayed page yes (item 242) must turn into an allow only when the reader finds the answer, and stay refused when it does not.",
+ "updatedAt": "2026-11-05T13:53:00Z"
+}
