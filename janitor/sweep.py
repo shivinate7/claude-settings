@@ -3194,6 +3194,10 @@ def main(argv=None) -> int:
     parser.add_argument("--root", metavar="PATH",
                          help="sweep the one repository PATH belongs to (PATH may be a linked "
                               "worktree or a folder inside it); adds to any ROOT given")
+    parser.add_argument("--session-end", action="store_true", dest="session_end",
+                         help="the SessionEnd run only: judges branches and worktrees in its "
+                              "own repository only, stops proven orphans machine-wide like the "
+                              "scheduled job, and skips the loose-process report")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--tier1", action="store_true",
                        help="only stale registrations and husks. The one mode that acts "
@@ -3297,7 +3301,8 @@ def _sweep_roots(args, roots, restore_log_path, mode):
         return 0
     dead = find_dead_rooted()
     print_dead_rooted_report(dead)
-    if not _past_deadline():
+    # SessionEnd skips the loose-process report: the hook discards its output.
+    if not getattr(args, "session_end", False) and not _past_deadline():
         print_loose_processes_report(find_loose_processes())
     if args.confirm:
         reaped = reaped_listener_decisions(results)
