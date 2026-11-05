@@ -1264,6 +1264,28 @@ class SkippedCaseLeavesNoHolder(unittest.TestCase):
         self.assert_skips_and_leaves_no_holder("sess-no-ps", no_ps)
 
 
+class KillHolderStopsOnce(unittest.TestCase):
+    """kill_holder sends one kill per holder. A later call for the same holder does nothing: its pid may
+    belong to another process by then."""
+
+    def test_a_second_kill_of_one_holder_sends_no_second_kill(self):
+        beat = os.path.join(ROOT, uuid.uuid4().hex + ".beat")
+        sent = []
+
+        def record(argv, timeout, **kwargs):
+            sent.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with mock.patch.object(sys.modules[__name__], "HOLDERS", [(4242, beat)]), \
+                mock.patch.object(sys.modules[__name__], "run_capped", record):
+            kill_holder(4242)
+            kill_holder(4242)
+        self.assertTrue(os.path.exists(beat + ".stop"), "kill_holder wrote no stop file for its holder")
+        shell_kills = [argv for argv in sent if argv[:1] == ["sh"]]
+        self.assertEqual(len(shell_kills), 0 if os.name == "nt" else 1,
+                         "two kill_holder calls for one holder sent %d shell kills" % len(shell_kills))
+
+
 class SweepGetsNoPipes(unittest.TestCase):
     """handle() hands the sweep no pipe: stdin, stdout and stderr are DEVNULL, and nothing is captured. A
     pipe a grandchild inherits is what held the session open on Windows after a timeout kill."""
