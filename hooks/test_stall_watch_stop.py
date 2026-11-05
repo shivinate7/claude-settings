@@ -58,8 +58,8 @@ atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
 NOW = int(time.time())  # the clock every case passes as STALL_WATCH_NOW, so no case sleeps
 ADVICE = "stop it or tell the owner"
 RESUME_SUMMARY = "Background shell command didn't finish before the previous session ended"
-WIN_DIR = (r"C:\Users\SHIVAM~1\AppData\Local\Temp\claude"
-           r"\C--Users-ShivamSemwal-Clones-claude-settings\58b19313-e243-4dfd-b256-23ef68a15564\tasks")
+WIN_DIR = (r"C:\Users\EXAMPL~1\AppData\Local\Temp\claude"
+           r"\C--Users-ExampleUser-Clones-claude-settings\00000000-0000-4000-8000-000000000000\tasks")
 CASES = []
 NT_DRIVER = ("import json, os, runpy, shlex, shutil, subprocess, sys, tempfile, time, uuid\n"
              "os.name = 'nt'\n"
