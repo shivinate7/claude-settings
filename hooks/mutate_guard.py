@@ -738,8 +738,15 @@ MUTATIONS = [
      '    if stash_takes_the_stack(args):\n        stack = stash_stack(where)',
      '    if stash_action(args) in ("drop", "clear"):\n        stack = stash_stack(where)', "guard", 'subject: popping a real entry from a CLEAN checkout still denies'),
     ("shared-tree: reset collapses back to a name match, --hard or not",
-     '    return "--hard" in args',
+     '    return any(flag in args for flag in RESET_DISCARD_FLAGS)',
      '    return True', "guard", 'reset: a plain reset only unstages, the working tree is untouched'),
+    # Each mutant drops ONE flag from the one constant, so each form's own case must go red.
+    ("shared-tree: reset --merge no longer takes --hard's verdict",
+     'RESET_DISCARD_FLAGS = ("--hard", "--merge", "--keep")',
+     'RESET_DISCARD_FLAGS = ("--hard", "--keep")', "guard", 'reset: --merge at HEAD over a staged edit and a staged new file refuses'),
+    ("shared-tree: reset --keep no longer takes --hard's verdict",
+     'RESET_DISCARD_FLAGS = ("--hard", "--merge", "--keep")',
+     'RESET_DISCARD_FLAGS = ("--hard", "--merge")', "guard", 'reset: --keep at another commit moves the branch, so a shared checkout refuses'),
     # Added: the subject read. One per arm. Each mutation blinds ONE subject read, which must
     # turn that arm's empty-subject case red: a guard that refuses without reading its subject is
     # the defect these arms fix.
