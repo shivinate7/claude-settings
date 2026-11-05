@@ -1100,10 +1100,10 @@ def kill_holder(pid):
     if not beats:
         return
     for beat in beats:
-        STOPPED.add(beat)
         write(beat + ".stop", "")
     if os.name != "nt":
         run_capped(["sh", "-c", 'kill "$1" 2>/dev/null; true', "sh", str(pid)], timeout=10)
+    STOPPED.update(beats)  # last: a stop that raised is retried by the next call, not skipped
 
 
 def spawn_orphan(cwd, env_entries=()):
@@ -1289,6 +1289,53 @@ class KillHolderStopsOnce(unittest.TestCase):
         shell_kills = [argv for argv in sent if argv[:1] == ["sh"]]
         self.assertEqual(len(shell_kills), 0 if os.name == "nt" else 1,
                          "two kill_holder calls for one holder sent %d shell kills" % len(shell_kills))
+
+
+class KillHolderRetriesAFailedStop(unittest.TestCase):
+    """A stop that raised did not stop its holder, so the next kill_holder call for that holder tries again.
+    Otherwise the at-exit stop skips the holder, and it runs on."""
+
+    def test_a_failed_stop_file_write_is_retried(self):
+        beat = os.path.join(ROOT, uuid.uuid4().hex + ".beat")
+        real_write = write
+        calls = []
+
+        def flaky_write(path, text):
+            calls.append(path)
+            if len(calls) == 1:
+                raise OSError("the first stop write fails")
+            real_write(path, text)
+
+        def no_kill(argv, timeout, **kwargs):
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with mock.patch.object(sys.modules[__name__], "HOLDERS", [(4343, beat)]), \
+                mock.patch.object(sys.modules[__name__], "write", flaky_write), \
+                mock.patch.object(sys.modules[__name__], "run_capped", no_kill):
+            with self.assertRaises(OSError):
+                kill_holder(4343)
+            kill_holder(4343)
+        self.assertTrue(os.path.exists(beat + ".stop"),
+                        "the retry after a failed stop write wrote no stop file, so the holder is never stopped")
+
+    def test_a_failed_kill_is_retried(self):
+        if os.name == "nt":
+            self.skipTest("Windows sends no shell kill, so there is no kill to fail")
+        beat = os.path.join(ROOT, uuid.uuid4().hex + ".beat")
+        sent = []
+
+        def flaky_kill(argv, timeout, **kwargs):
+            sent.append(list(argv))
+            if len(sent) == 1:
+                raise OSError("the first kill fails")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with mock.patch.object(sys.modules[__name__], "HOLDERS", [(4444, beat)]), \
+                mock.patch.object(sys.modules[__name__], "run_capped", flaky_kill):
+            with self.assertRaises(OSError):
+                kill_holder(4444)
+            kill_holder(4444)
+        self.assertEqual(len(sent), 2, "a failed kill was not retried: %d kill attempts" % len(sent))
 
 
 class SweepGetsNoPipes(unittest.TestCase):
