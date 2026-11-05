@@ -1126,8 +1126,10 @@ const isSaved = (it) => !!savedOf(it) && !state.changing[it.id];
 const waitsOf = (it) => {
   const w = it.waits;
   if (!w || typeof w !== "object" || typeof w.repo !== "string" || !/^[\w.-]+\/[\w.-]+$/.test(w.repo)) return null;
-  if (Number.isInteger(w.run) && w.run > 0) return { repo: w.repo, run: w.run };
-  if (Number.isInteger(w.pr) && w.pr > 0) return { repo: w.repo, pr: w.pr };
+  // A run id or PR number is a whole number above zero, or a string of digits with no leading zero (stale_pages.py parse_waits reads the same form).
+  const num = (v) => (Number.isInteger(v) && v > 0) || (typeof v === "string" && /^[1-9][0-9]*$/.test(v));
+  if (num(w.run)) return { repo: w.repo, run: w.run };
+  if (num(w.pr)) return { repo: w.repo, pr: w.pr };
   return null;
 };
 const answeredByWait = (it) => !!waitsOf(it) && !!lastOf(it);
@@ -1207,7 +1209,7 @@ function problem(it) {
   return null;
 }
 const blocked = (it) => { const p = problem(it); return !!(p && p.blocks); };
-const staged = () => [...answerable(), ...parkItems()].filter((it) => !isSaved(it) && draftReady(it));
+const staged = () => [...answerable(), ...parkItems()].filter((it) => !isAnswered(it) && draftReady(it));
 // A changed answer whose draft the owner emptied: Send withdraws the saved record.
 const withdrawing = (it) => !!savedOf(it) && !!state.changing[it.id] && !state.draft[it.id];
 const withdrawn = () => [...answerable(), ...parkItems()].filter(withdrawing);
@@ -1559,7 +1561,7 @@ function buildCard(it) {
   const card = h("article", { class: "card" + (sunk ? "" : " " + T) + (saved ? " answered" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id, "data-seen": isSeen(it) ? "true" : null });
   const top = h("div", { class: "top" }, h("span", { class: "num", "aria-label": "No. " + it.n + ", " + (it.kind === "decision" ? "decision" : "task") + ", from " + it.owner, title: "From " + it.owner }, "No. " + it.n),
     // The section head says "Answered", so its pill drops the word: the ring or tick carries it.
-    byWait ? h("span", { class: "ans" }, h("span", { class: "t" }, "Sent" + (fmt(lastOf(it).at) ? " " + fmt(lastOf(it).at) : "")))
+    byWait ? h("span", { class: "ans" }, (sunk ? "" : "Answered, "), h("span", { class: "t" }, "Sent" + (fmt(lastOf(it).at) ? " " + fmt(lastOf(it).at) : "")))
     : saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? (sunk ? "Filed in " : "Answered, filed in ") + it.home + " " : sunk ? "Filing pending, sent " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at))) : h("span", {}, waited(it.added)));
   if (it.minutes && !saved) top.append(h("span", {}, minutesText(it.minutes)));
   if (it.group) { const m = mates(it).filter((x) => x.id !== it.id); if (m.length) top.append(h("span", { class: "inbundle" }, "goes with No. " + m.map((x) => x.n).join(", No. "))); }
