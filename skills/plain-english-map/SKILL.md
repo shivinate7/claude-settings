@@ -67,7 +67,7 @@ With no match it prints `no map line for <arg>` and exits 1.
   The sentence shows each number of the cite, and names each item of a set or a list. A number outside backticks anywhere else in the map fails MAP9.
 - **A decisions line.** Indented under a map line: `  - Decisions: ` + each id in backticks, joined by `, `. An id names a record, a `.md` file directly in `decisionsDir`,
   when the file name without `.md` is the id or starts with the id and `-`. A run of digits compares by value: `D7` names `D007-x.md`.
-- **A tested-by line.** Indented under a code-file map line: `  - Tested by: ` + each test path from the repository root in backticks, joined by `, `.
+- **A tested-by line.** Indented under a map line in `## Code files`: `  - Tested by: ` + each test path from the repository root in backticks, joined by `, `.
   The line is optional: a map line with no tested-by line passes. MAP11 checks each test the line names.
 - **A home.** Under `## Homes`: `- ` + the capability in words + ` — ` + backtick `FILE:SYMBOL`. Read this section before you build, and extend the home.
 - **A trace step.** In `docs/map/traces/<screen-key>.md`, under a `## <path name>` heading, a numbered line:
