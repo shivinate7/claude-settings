@@ -3,7 +3,7 @@
 // or holds a string literal that is the file's path. A comment or a docstring never counts (rule `building-scanner-respects-strings`).
 //
 // Fixture: `tests/fixture/`. Its tested-by lines (docs/map/core.md) name src/home.spec.ts and src/pkg.spec.ts for src/home.ts, and
-// src/test_retry.py and src/test_run_retry.py for src/retry.py. Each failing case edits its own scratch copy of the fixture, and each
+// src/retry_check.py and src/run_retry_check.py for src/retry.py. Each failing case edits its own scratch copy of the fixture, and each
 // run goes through `scripts/map-check.mjs`. The spec file for T9 (the 4 to 5 upgrade) is format-version.test.mjs, case 2d: one home for the step.
 //
 // Red on the old code. The fixture holds formatVersion 5, and the old validator refuses a newer map before any check runs. So each case
@@ -218,10 +218,10 @@ test('T5a. a path that appears only in a TS comment fails, and names the test an
 test('T5b. a path that appears only in a Python docstring fails, and names the test and the file', () => {
   needFile(REL);
   const dir = scratchRepo();
-  writeAt(dir, 'src/test_retry.py', '"""Tests the retry wait. It runs src/retry.py and reads retry, in this docstring only."""\n\n\ndef test_wait():\n    assert True\n');
-  assert.doesNotMatch(readAt(dir, 'src/test_retry.py'), /^(import|from) /m, 'the test must hold no import');
-  setTestedBy(dir, 'src/retry.py', tested('src/test_retry.py'));
-  mustFail(check(dir), 'src/test_retry.py', 'src/retry.py');
+  writeAt(dir, 'src/retry_check.py', '"""Tests the retry wait. It runs src/retry.py and reads retry, in this docstring only."""\n\n\ndef test_wait():\n    assert True\n');
+  assert.doesNotMatch(readAt(dir, 'src/retry_check.py'), /^(import|from) /m, 'the test must hold no import');
+  setTestedBy(dir, 'src/retry.py', tested('src/retry_check.py'));
+  mustFail(check(dir), 'src/retry_check.py', 'src/retry.py');
 });
 
 test('T5c. control: a `//` inside a string, before a real import on the same line, is no comment: the import counts and the test passes', () => {
@@ -235,8 +235,8 @@ test('T5c. control: a `//` inside a string, before a real import on the same lin
 test('T5d. control: a `#` inside a string, before a real import on the same line, is no comment: the import counts and the test passes', () => {
   needFile(REL);
   const dir = scratchRepo();
-  writeAt(dir, 'src/test_retry.py', 'marker = "#"; import retry\n\n\ndef test_wait():\n    assert retry.RETRY_WAIT_S == 30\n');
-  setTestedBy(dir, 'src/retry.py', tested('src/test_retry.py'));
+  writeAt(dir, 'src/retry_check.py', 'marker = "#"; import retry\n\n\ndef test_wait():\n    assert retry.RETRY_WAIT_S == 30\n');
+  setTestedBy(dir, 'src/retry.py', tested('src/retry_check.py'));
   mustPass(check(dir));
 });
 
@@ -251,8 +251,8 @@ test('T5e. control: a lone quote in a TS comment does not open a string that hid
 test('T5f. control: a lone quote in a Python comment does not hide the import on the next line: the test passes', () => {
   needFile(REL);
   const dir = scratchRepo();
-  writeAt(dir, 'src/test_retry.py', "# don't stop here: the import is on the next line\nimport retry\n\n\ndef test_wait():\n    assert retry.RETRY_WAIT_S == 30\n");
-  setTestedBy(dir, 'src/retry.py', tested('src/test_retry.py'));
+  writeAt(dir, 'src/retry_check.py', "# don't stop here: the import is on the next line\nimport retry\n\n\ndef test_wait():\n    assert retry.RETRY_WAIT_S == 30\n");
+  setTestedBy(dir, 'src/retry.py', tested('src/retry_check.py'));
   mustPass(check(dir));
 });
 
@@ -277,11 +277,11 @@ test('T5h. control: the same multi-line template literal, then a real import aft
 test('T6a. a shell test fails MAP11 as an unknown read, and names the test', () => {
   needFile(REL);
   const dir = scratchRepo();
-  writeAt(dir, 'src/test_retry.sh', '#!/bin/sh\npython3 src/retry.py\n');
-  gitIn(dir, 'add', '-N', 'src/test_retry.sh');
-  setTestedBy(dir, 'src/retry.py', tested('src/test_retry.sh'));
+  writeAt(dir, 'src/retry_check.sh', '#!/bin/sh\npython3 src/retry.py\n');
+  gitIn(dir, 'add', '-N', 'src/retry_check.sh');
+  setTestedBy(dir, 'src/retry.py', tested('src/retry_check.sh'));
   const r = check(dir);
-  mustFail(r, 'src/test_retry.sh');
+  mustFail(r, 'src/retry_check.sh');
   assert.match(map11(r), /unknown|could not read/i, `the shell test must fail as an unknown read\n${map11(r)}`);
 });
 
@@ -298,7 +298,7 @@ test('T6b. with no python3 on PATH, a Python test fails MAP11 as an unknown read
   const r = check(dir, { PATH: bin });
   const line = map11(r);
   assert.match(line, /^\[FAIL\] MAP11\b/, `MAP11 must FAIL with no python3 on PATH\n${shown(r)}`);
-  assert.ok(line.includes('src/test_retry.py'), `the failure must name the Python test\n${line}`);
+  assert.ok(line.includes('src/retry_check.py'), `the failure must name the Python test\n${line}`);
   assert.match(line, /unknown|could not read/i, `the failure must say the read is unknown\n${line}`);
   mustPass(check(dir));
 });
@@ -327,21 +327,21 @@ test('T7c. a tested-by line under a home fails, and the output names the page', 
 test('T7d. an unindented tested-by line fails, and the output names the page', () => {
   needFile(REL);
   const dir = scratchRepo();
-  setTestedBy(dir, 'src/retry.py', '- Tested by: `src/test_retry.py`');
+  setTestedBy(dir, 'src/retry.py', '- Tested by: `src/retry_check.py`');
   mustFail(check(dir), CORE);
 });
 
 test('T7e. a tested-by line with no backticks fails, and the output names the page', () => {
   needFile(REL);
   const dir = scratchRepo();
-  setTestedBy(dir, 'src/retry.py', '  - Tested by: src/test_retry.py');
+  setTestedBy(dir, 'src/retry.py', '  - Tested by: src/retry_check.py');
   mustFail(check(dir), CORE);
 });
 
 test('T7f. a tested-by line whose paths are joined by `;` fails, and the output names the page', () => {
   needFile(REL);
   const dir = scratchRepo();
-  setTestedBy(dir, 'src/retry.py', '  - Tested by: `src/test_retry.py`; `src/test_run_retry.py`');
+  setTestedBy(dir, 'src/retry.py', '  - Tested by: `src/retry_check.py`; `src/run_retry_check.py`');
   mustFail(check(dir), CORE);
 });
 
@@ -400,9 +400,9 @@ test('T8d. one hop, Python: a test that imports a package passes when its __init
   needFile(REL);
   const dir = scratchRepo();
   writeAt(dir, 'src/pkgpy/__init__.py', 'from retry import RETRY_WAIT_S\n');
-  writeAt(dir, 'src/test_pkgpy.py', 'import pkgpy\n\n\ndef test_wait():\n    assert pkgpy.RETRY_WAIT_S == 30\n');
-  gitIn(dir, 'add', '-N', 'src/pkgpy', 'src/test_pkgpy.py');
-  setTestedBy(dir, 'src/retry.py', tested('src/test_pkgpy.py'));
+  writeAt(dir, 'src/pkgpy_check.py', 'import pkgpy\n\n\ndef test_wait():\n    assert pkgpy.RETRY_WAIT_S == 30\n');
+  gitIn(dir, 'add', '-N', 'src/pkgpy', 'src/pkgpy_check.py');
+  setTestedBy(dir, 'src/retry.py', tested('src/pkgpy_check.py'));
   mustPass(check(dir));
 });
 
@@ -410,11 +410,11 @@ test('T8e. one hop, Python, without the re-export: the __init__.py no longer re-
   needFile(REL);
   const dir = scratchRepo();
   writeAt(dir, 'src/pkgpy/__init__.py', 'OTHER = 1\n');
-  writeAt(dir, 'src/test_pkgpy.py', 'import pkgpy\n\n\ndef test_wait():\n    assert pkgpy.RETRY_WAIT_S == 30\n');
-  gitIn(dir, 'add', '-N', 'src/pkgpy', 'src/test_pkgpy.py');
+  writeAt(dir, 'src/pkgpy_check.py', 'import pkgpy\n\n\ndef test_wait():\n    assert pkgpy.RETRY_WAIT_S == 30\n');
+  gitIn(dir, 'add', '-N', 'src/pkgpy', 'src/pkgpy_check.py');
   assert.doesNotMatch(readAt(dir, 'src/pkgpy/__init__.py'), /retry/, 'the __init__.py must not name retry');
-  setTestedBy(dir, 'src/retry.py', tested('src/test_pkgpy.py'));
-  mustFail(check(dir), CORE, 'src/test_pkgpy.py');
+  setTestedBy(dir, 'src/retry.py', tested('src/pkgpy_check.py'));
+  mustFail(check(dir), CORE, 'src/pkgpy_check.py');
 });
 
 test('C0. control, green on the old code: the import reader MAP11 uses reads the fixture imports the way these cases assume', async () => {

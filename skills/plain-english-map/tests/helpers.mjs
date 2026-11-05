@@ -60,7 +60,7 @@ export const gitIn = (dir, ...a) =>
   execFileSync('git', ['-c', 'core.autocrlf=false', ...a], { cwd: dir, env: cleanEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
 
 // The files of `tests/fixture/` that the scratch repository must track.
-const FIXTURE_TRACKED = ['map.config.json', 'src/home.ts', 'src/notes.ts', 'src/screens.ts', 'src/retry.py', 'src/caller.py', 'config.json', 'docs/map/core.md', 'docs/map/homes.md', 'docs/map/traces/home.md', 'src/home.spec.ts', 'src/pkg/index.ts', 'src/pkg.spec.ts','src/test_retry.py', 'src/test_run_retry.py'];
+const FIXTURE_TRACKED = ['map.config.json', 'src/home.ts', 'src/notes.ts', 'src/screens.ts', 'src/retry.py', 'src/caller.py', 'config.json', 'docs/map/core.md', 'docs/map/homes.md', 'docs/map/traces/home.md', 'src/home.spec.ts', 'src/pkg/index.ts', 'src/pkg.spec.ts','src/retry_check.py', 'src/run_retry_check.py'];
 /** Commits every change of `dir`. With `epoch` (unix seconds) the author time is that epoch in UTC, which is what `git blame` and `git log %at` read. Without it, the commit has the current time. The commit runs with an empty hooks folder. */
 export const commitAt = (dir, epoch, message) => {
   gitIn(dir, 'add', '-A');

@@ -12,7 +12,7 @@
 - `src/notes.ts` — Holds the saved notes (`notes`). Each note's text keeps any `//` or `#` mark that it has.
 - `src/retry.py` — Holds the retry wait.
   - A failed call waits 30 s before its next try. — `RETRY_WAIT_S = 30`
-  - Tested by: `src/test_retry.py`, `src/test_run_retry.py`
+  - Tested by: `src/retry_check.py`, `src/run_retry_check.py`
 - `src/caller.py` — Calls the retry module, and reads its retry wait.
   - The caller reads the retry wait of the retry module. — `uses src/retry.py:RETRY_WAIT_S`
 - `config.json` — Holds the retry settings as JSON.
