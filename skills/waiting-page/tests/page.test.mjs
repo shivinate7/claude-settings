@@ -5892,7 +5892,6 @@ const ANSWERED = { choice: "a", at: WT_AT };
 const wordsOf = (s) => flat(s.replace(/↗/g, "").replace(/, opens in a new tab/g, ""));
 const linkWords = async (loc) => wordsOf(await loc.textContent());
 const chipLabel = (page, it) => page.locator("#c-" + it.id).getAttribute("aria-label");
-const recordAt = (it, at) => ({ [it.id]: { item: it.id, n: it.n, at, choice: "a", note: "" } });
 
 test("page-item-waits-on: No. 154 as stored today, answered on lastAnswer with no waits, is an owner ask in its tier (control)", async (t) => {
   const it = no154({ lastAnswer: ANSWERED });
@@ -5905,7 +5904,8 @@ test("page-item-waits-on: No. 154 as stored today, answered on lastAnswer with n
 
 test("page-item-waits-on: No. 154 waiting on a CI run sits in the Answered section, with a Sent badge, the run link and an answered chip", async (t) => {
   const it = no154({ lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: WT_RUN } });
-  const page = await open(t, { items: [it] }); if (!page) return;
+  // A stale filed receipt for the item (its answer was closed once): the badge still reads Sent, never filed.
+  const page = await open(t, { items: [it], receipts: { [it.id]: { filed: "2026-11-03T21:30:00Z" } } }); if (!page) return;
   assert.equal(await sectionOf(page, it), "tier-answered", "No. 154 is not in the Answered section");
   const c = card(page, it), badge = c.locator(".top .ans");
   await need(badge, "No. 154 has no badge in its top row");
@@ -5967,7 +5967,7 @@ test("page-item-waits-on: No. 154 waiting on a run is never folded under Asked b
 test("page-item-waits-on: in the Answered section No. 154 sorts by its lastAnswer time among the items with answer records", async (t) => {
   const it = no154({ lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: WT_RUN } });
   const newer = mk("wt-rec-new", 2, { added: at(5) }), older = mk("wt-rec-old", 3, { added: at(5) });
-  const records = { ...recordAt(newer, "2026-11-04T08:00:00Z"), ...recordAt(older, "2026-10-26T01:00:00Z") };
+  const records = { ...answerOf(newer, "a", { at: "2026-11-04T08:00:00Z" }), ...answerOf(older, "a", { at: "2026-10-26T01:00:00Z" }) };
   const page = await open(t, { items: [it, newer, older], answers: records }); if (!page) return;
   assert.deepEqual(await cardsIn(page, "#tier-answered"), [newer.id, it.id, older.id], "the Answered section is not newest first, with No. 154 at its lastAnswer time");
 });
@@ -5980,20 +5980,22 @@ test("page-item-waits-on: itemFields lists waits, and No. 154 with waits draws n
   assert.doesNotMatch(await card(page, it).innerText(), /does not draw/, "No. 154 draws the unknown-field warning for waits");
 });
 
-test("page-item-waits-on: No. 154 waiting on a run has no Withdraw, and Change reopens it on lastAnswer, then a Send writes its answer", async (t) => {
+test("page-item-waits-on: No. 154 waiting on a run: Change reopens it on lastAnswer, an emptied pick offers no Withdraw, and a Send writes its answer and deletes nothing", async (t) => {
   const it = no154({ lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: WT_RUN } });
   const page = await open(t, { items: [it] }); if (!page) return;
   const c = card(page, it), change = c.getByRole("button", { name: "Change", exact: true });
   await need(change, "No. 154 has no Change button");
-  assert.equal(await c.getByRole("button", { name: /Withdraw/ }).count(), 0, "No. 154 offers a Withdraw");
-  assert.doesNotMatch(await page.locator("#send").textContent(), /Withdraw/, "the bar offers to withdraw No. 154");
   await change.click();
   await need(c.locator(".opts"), "Change did not open No. 154's options");
   assert.equal(await page.isChecked(`#o-${it.id}-a`), true, "Change did not reopen No. 154 on its last pick");
+  // A click on the chosen option empties the pick, as it does on a saved answer. Send would withdraw only a saved answer.
+  await choose(page, it, "a");
+  assert.doesNotMatch(await page.locator("#send").textContent(), /Withdraw/, "an emptied pick on No. 154 offers to withdraw an answer");
   await choose(page, it, "b");
   await send(page);
   assert.ok(await holds(page, (id) => !!window.__answers()[id], it.id), "Send wrote no answer for No. 154");
   assert.equal((await answers(page))[it.id].choice, "b", "the answer written for No. 154 is not its new pick");
+  assert.deepEqual(await page.evaluate(() => window.__log.filter((l) => l[0] === "delete")), [], "Send deleted a record for No. 154");
 });
 
 // An arbiter ruling (decision session-tiers, Arbiter, "On the page"): the writer files it as a closed item with arbiter: true,
