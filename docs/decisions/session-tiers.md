@@ -145,10 +145,10 @@ Mechanics that carry out the rulings above. They are not owner rulings.
 - **Live-coordinator check.** A session that would act as coordinator reads every page of `list_sessions`. It looks for one session with both tags whose `session_status` is not archived. That session is the active coordinator.
   - The `tags` filter of `list_sessions` errors inside a session, so the check filters the rows itself.
   - `list_sessions` leaves out runs a scheduled task started. The check misses a coordinator started that way.
-- **Session start** (lane L3). In a cloud session (`CLAUDE_CODE_REMOTE=true`), `hooks/session_start.sh` prints one fixed line, in any working folder, git or not. The line tells the session to read its own record with `get_session`, and gives the check above.
+- **Session start** (lane L3). In a cloud session (`CLAUDE_CODE_REMOTE=true`), or in a session whose `CLAUDE_CODE_REMOTE_SESSION_ID` is set, `hooks/session_start.sh` prints one fixed line, in any working folder, git or not. The line tells the session to read its own record with `get_session`, and gives the check above.
   - The hook cannot read the tier itself. `get_session` and `list_sessions` are MCP tools only, and a hook never calls the sessions API with a token.
-  - Outside the cloud the hook prints no line. The gate is that one env value.
-  - Cost: one env read in the hook already running. No network, no new process, no timer, no file written. `hooks/test_session_start.py` proves the line prints once in cloud, in a git folder or not, and never outside the cloud.
+  - A session with neither value prints no line. A local lane with an own id needs the line, so that the load brake can read its own record (decision `machine-load-brake`, the machine-load brake).
+  - Cost: at most two env reads in the hook already running. No network, no new process, no timer, no file written. `hooks/test_session_start.py` proves the line prints once in cloud or with an own id, in a git folder or not, and never with neither.
 
 ## Why
 
