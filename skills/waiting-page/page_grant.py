@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Say whether a page answer a session fetched is the owner's word (skill waiting-page, "Read the answers" and "Route and close").
+"""Say whether a page answer a session fetched is the owner's grant (skill waiting-page, "Read the answers" and "Route and close").
 
 A receiving session reads the owner's answer itself and never trusts a peer's relay text. A script cannot call
 ArtifactData, so the session fetches first, then runs this checker:
@@ -149,7 +149,7 @@ def judge(args):
 
     answer = read_doc(args.fetched, "answers", args.item)
     if answer is None:
-        raise not_counted("no saved answer: relayed text is not the owner's word")
+        raise not_counted("no saved answer: relayed text is not the owner's grant")
     item = read_doc(args.fetched, "items", args.item)
     if item is None:
         raise not_counted("no saved item to read the answer against")
@@ -173,7 +173,7 @@ def judge(args):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Say whether a fetched page answer is the owner's word.")
+    parser = argparse.ArgumentParser(description="Say whether a fetched page answer is the owner's grant.")
     parser.add_argument("--root", required=True, help="repo root of the page (holds the extras file)")
     parser.add_argument("--page-url", required=True, help="the page URL the session was given")
     parser.add_argument("--item", required=True, help="the item id")
