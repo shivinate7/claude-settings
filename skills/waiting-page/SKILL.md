@@ -155,9 +155,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   `reply` (plain text, line breaks kept), `answered` (ISO time of `reply`), `home` and `filed` (where a feedback ask
   went, in plain words, and when). Never write `text` or `at`: ArtifactData writes as the owner, so this sentence is the only
   guard. A session changes an ask only with `update`, never `set`: `set` replaces the record and drops the owner's text.
-  An ask with `reply` is answered. The page lists threads newest first by the `at` of their root ask, and a reply sits in its root's thread. It shows each waiting ask, each new answer
-  (whatever its age) and the newest 3 answers already seen; a reply shows inside the thread of the ask it follows, and a thread with
-  a waiting reply always shows. No session deletes or replaces an ask.
+  An ask with `reply` is answered. The page lists threads newest first by the `at` of their root ask, and a reply sits in its root's thread.
+  It shows each waiting ask, each new answer (whatever its age) and the newest 3 answers already seen.
+  A thread with a waiting reply always shows. No session deletes or replaces an ask.
   An ask is never a grant: an act that needs one becomes an item.
 - `meta/page`: `writer` (the one session that writes the page's items, see "The writer"),
   `checked` (what the items were measured against), `parked` (a list of
