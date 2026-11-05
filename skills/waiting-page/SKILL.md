@@ -415,7 +415,7 @@ live page.
 ## Read the answers
 
 A save on the page sends a comment to Claude when the page allows it. The comment wakes the
-sessions that watch the page. Only the owning session reads, routes and closes its items, except that the writer closes an item on a park answer. It reads
+sessions that watch the page. Only the owning session reads, routes and closes its items, except that the writer closes an item on a park answer. On a `lane` item, the park branch has it tell first. It reads
 the answers at each wake, and at the start of each turn while it has an item open (the writer also
 while `meta/page.parked` is not empty): `ArtifactData list answers`. That read is the fallback when no wake comes. A peer session never
 relays an answer's text. It sends only the page URL, the item id and the act, and the receiver checks the answer itself (decision relayed-grant-read-from-page). An answer typed in the chat counts the same. A chat answer to an open item: the
@@ -489,8 +489,9 @@ branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when 
 and keeps the item
 open and `answers/<id>` in place. It never sets `added` here: rule 5 of `page_grant.py` needs the answer's `at` later than
 `added`. A relay sends the receiver only the page URL, the item id and the act. The routing session closes the item and deletes
-`answers/<id>` (step 2) only when the receiver reports the act done. The done report is status, never a grant. A `none` answer
-on this path gets no new options.
+`answers/<id>` (step 2) only when the receiver reports the act done. The done report is status, never a grant. A Park is the
+exception: on an item with `lane`, the writer tells the receiver the act is withdrawn and then closes the item, with no done
+report (see the park branch below). A `none` answer on this path gets no new options.
 
 - Already routed. The owning session reads `answers/` at each turn start, so a kept answer looks new. An answer whose item
   already has `lane` and a `lastAnswer` with the same `at` is routed. Skip it until the done report.
@@ -562,13 +563,16 @@ The writer finds the entry by its `ref`, or by its `id` when the word names it. 
 - Then remove the entry from `meta/page.parked` in one update pinned with `if_version`, and delete the answer.
   With no entry of that `id`, delete the answer and say so in the terminal. The page never writes `meta/page`.
 
-A park answer (`answers/<item id>` with `act: "park"`): the same wait and re-read. The writer adds `{id, ref, note}` to
+A park answer (`answers/<item id>` with `act: "park"`): the same wait and re-read. The writer reads the item first. When the item has `lane`,
+the writer finds the receiver by the lookup in "Never-ending wait", before any update. It sends it by `send_message` only the page URL,
+the item id and that the act is withdrawn. If that lookup finds no session or cannot run (status `unknown`), the close still goes
+ahead and the writer names the miss in its report. `page_grant.py` already refuses a closed item. An item with no `lane` gets no tell.
+The writer adds `{id, ref, note}` to
 `meta/page.parked` in one update pinned with `if_version`. `id` is the item's id when it is a slug of 32 characters or fewer and
 unique in the list, else a new slug. `ref` is the item's home and title in plain words, and `note` is the answer's note.
 Then it closes the item with `lastAnswer` `{act: "park", note, at}`, so the owning session sees at its wake that the item is parked and stops
-waiting, and it deletes the answer. When the item has `lane`, the same close update drops it (`{"lane": {"__delete__": true}}`): a Park
-withdraws the item, so no card says it waits on a lane. At its wake, the owning session may see its lane item closed with `lastAnswer.act`
-`park`. It then tells the receiver by `send_message` that the act is withdrawn, with the page URL and the item id only. It does not reopen or
+waiting, and it deletes the answer. When the item has `lane`, that close update also drops it (`{"lane": {"__delete__": true}}`): a Park
+withdraws the item, so no card says it waits on a lane. The owning session sends no second tell. It does not reopen or
 re-route the item. Unpark (an `unpark` answer on that line) reopens `items/<id>` (status `open`, `added` now, a new `n`, no `lane`).
 In the same wake it removes the entry and deletes the answer. At each wake while `meta/page.parked` is not empty, the writer
 saves `meta/page`, `items` and `answers` to a folder and runs `stale_pages.py --parked <folder>`.
