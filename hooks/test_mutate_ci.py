@@ -12,11 +12,13 @@ The modes, as the builder implements them. This file is their interface.
   runs every suite that `select` lists for a file, changed or not. Without `select`, only the changed suites run,
   as `--replay` does. It prints the replay row, then `catch share: K/R (P%)` (K killed over R ran; a crash is not a
   kill), then one `untested: path:line` line per line whose mutant survived or was not run. It exits 0 whatever the
-  share. `--log PATH` writes one JSON file with the keys base, head, profile, made, killed, crashed, survived,
-  not_run and untested, and writes nothing else into REPO. With no changed mutant the share reads `0/0` with no
-  percentage.
+  share. `--budget S` is a wall deadline counted from the start of the run: a mutant not started by then is not_run, and
+  a suite still running then is killed, its mutant not_run too. `--log PATH` writes one JSON file with the keys base,
+  head, profile, made, killed, crashed, survived, not_run and untested, and writes nothing else into REPO. With no
+  changed mutant the share reads `0/0` with no percentage.
 - `--known-defects FILE --repo REPO [--suite-timeout S] [--log PATH]`. FILE is a JSON list of planted defects. Each defect
-  prints one line, `CAUGHT|MISS|UNKNOWN id: name [reason]`. It exits 1 when any defect is MISS or UNKNOWN, else 0.
+  prints one line, `CAUGHT|MISS|UNKNOWN id: name [reason]`. It exits 1 when any defect is MISS or UNKNOWN, else 0. A
+  missing FILE prints one `UNKNOWN` line that names the path, and exits 1. An empty list prints one line and exits 0.
 - `--tests-for PATH`. It prints the REPORT_TARGETS suites for PATH when listed, else each tracked `test_<stem>.py`
   and `test_<stem>_*.py` beside it.
 
