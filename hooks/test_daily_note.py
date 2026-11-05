@@ -55,6 +55,10 @@ import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists fi
 SETTINGS = os.path.join(ROOT, "settings.json")
 CLOCK = "CLAUDE_DAILY_NOTE_NOW"
 MAX_LINE = 240
+LONG_CONFIG = 150  # a long CLAUDE_CONFIG_DIR path; the agent-end tail is one path, so it fits the cap
+SWEEP_CONFIG = 65  # the sweep tail names the config dir twice: the tail fits the cap, the whole line does not
+TAIL_CONFIG = 220  # so long that the agent-end tail alone is past the cap
+LONG_HOOK_FOLDER = 170  # a long hook folder: the crash line's tail carries its reader path, from that folder
 
 YESTERDAY = "2026-10-13"  # the Central day before MORNING
 TODAY = "2026-10-14"
@@ -125,6 +129,10 @@ class NoteCase(unittest.TestCase):
         path = os.path.join(self.root, name)
         os.makedirs(path)
         return path
+
+    def long_path(self, length, prefix):
+        """A scratch folder whose absolute path is `length` characters long, padded from this case's root."""
+        return self.scratch(prefix + "x" * (length - len(os.path.join(self.root, prefix))))
 
     def require_file(self, path):
         if not os.path.isfile(path):
@@ -302,6 +310,17 @@ class ReaderPathTests(NoteCase):
         self.assertNotIn(os.path.normcase(reader_path(os.path.join(ROOT, "hooks"))),
                          os.path.normcase(lines[0]))
 
+    def test_a_long_hook_folder_keeps_the_crash_line_within_the_cap_with_its_whole_reader_tail(self):
+        layout = self.long_path(LONG_HOOK_FOLDER, "claude-layout-")
+        tracked_tree.copy_tracked(layout, "hooks", "lint")  # the note and every module it reaches
+        self.write_log(healthy_log() + [guard_crash(CRASH_AT)])
+        tail = "Read: python " + reader_path(os.path.join(layout, "hooks"))
+        self.assertLessEqual(len(tail), MAX_LINE, "control: the reader tail alone must fit the cap")
+        lines = self.failure_lines(self.run_note(MORNING, script=os.path.join(layout, "hooks", "daily_note.py")))
+        self.assertEqual(len(lines), 1, "want one crash line, got %r" % lines)
+        self.assertTrue(lines[0].endswith(tail), "the cap cut the crash line's Read: tail: %r" % lines[0])
+        self.assertLessEqual(len(lines[0]), MAX_LINE)
+
 
 class CrashTests(NoteCase):
     def test_a_crash_in_the_note_exits_zero_with_one_stderr_line(self):
@@ -440,6 +459,21 @@ class AgentEndTests(NoteCase):
         self.assertIn("unknown", lines[0].lower())
         self.assertTrue(lines[0].endswith("Read: " + self.payload_path()), lines[0])
 
+    def test_a_long_config_dir_keeps_the_agent_end_line_within_the_cap_with_its_whole_reader_tail(self):
+        self.config = self.long_path(LONG_CONFIG, "claude-config-")
+        tail = "Read: " + self.payload_path()
+        self.assertLessEqual(len(tail), MAX_LINE, "control: the reader tail alone must fit the cap")
+        self.write_payload([started_row(run_id(141, YESTERDAY_NOON))])
+        line = self.assert_one_run_line(self.run_note(MORNING), 1)
+        self.assertLessEqual(len(line), MAX_LINE)
+
+    def test_a_config_dir_so_long_that_the_reader_tail_alone_is_past_the_cap_still_prints_the_whole_tail(self):
+        self.config = self.long_path(TAIL_CONFIG, "claude-config-")
+        tail = "Read: " + self.payload_path()
+        self.assertGreater(len(tail), MAX_LINE, "control: the reader tail alone must be past the cap")
+        self.write_payload([started_row(run_id(142, YESTERDAY_NOON))])
+        self.assert_one_run_line(self.run_note(MORNING), 1)
+
 
 class SweepErrorLogTests(NoteCase):
     """The daily sweep's error log: one line when it is not empty and was last written on a window day."""
@@ -462,6 +496,16 @@ class SweepErrorLogTests(NoteCase):
 
     def test_missing_logs_are_silent(self):
         self.assert_silent(self.run_note(MORNING))
+
+    def test_a_long_config_dir_keeps_the_sweep_line_within_the_cap_with_its_whole_tail(self):
+        self.config = self.long_path(SWEEP_CONFIG, "claude-config-")
+        tail = "Read: tail %s; stdout: %s" % (self.sweep_err_path(), self.sweep_out_path())
+        self.assertLessEqual(len(tail), MAX_LINE, "control: the sweep tail alone must fit the cap")
+        self.write_sweep_err("sweep failed\n", YESTERDAY_NOON)
+        lines = self.failure_lines(self.run_note(MORNING))
+        self.assertEqual(len(lines), 1, "want one sweep-error line, got %r" % lines)
+        self.assertTrue(lines[0].endswith(tail), "the cap cut the sweep line's Read: tail: %r" % lines[0])
+        self.assertLessEqual(len(lines[0]), MAX_LINE)
 
 
 class StartCostTests(NoteCase):
