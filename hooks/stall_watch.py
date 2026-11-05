@@ -12,12 +12,12 @@ Hook: stall_watch.py --hook
   (no permissionDecision), with this command, run by the harness shell:
 
     : > LOG; : > BEAT; {
-    {
+    (
     trap 'rm -f LOG BEAT' EXIT; export STALL_WATCH_BEAT=BEAT
     { <original>
 
     }
-    } >| LOG 2>&1 9<&- 8<&- & pid=$!; python3 stall_watch.py --watch-pid $pid --log LOG --quiet N --beat BEAT
+    ) >| LOG 2>&1 9<&- 8<&- & pid=$!; python3 stall_watch.py --watch-pid $pid --log LOG --quiet N --beat BEAT
       --log-fd 9 --beat-fd 8;
     rc=$?; [ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; rm -f LOG BEAT; exit $rc
     } 9< LOG 8< BEAT
@@ -353,10 +353,11 @@ def hook():
     # the files when it ends, also after the watcher gave up on a stall, and for the original's `exit N`.
     # Limit: an original that execs, or sets its own EXIT trap, drops that trap; the wrapper's own
     # `rm -f` after `wait` still cleans up a job that never stalled.
+    # The job group is `( )`: bash 3.2 (macOS /bin/sh) runs an EXIT trap only in a `( )` subshell.
     cleanup = "rm -f " + q(log) + " " + q(beat)
     wrapped = (
-        ": > " + q(log) + "; : > " + q(beat) + "; {\n{\ntrap " + q(cleanup) + " EXIT; export STALL_WATCH_BEAT=" + q(beat)
-        + "\n{ " + original + "\n\n}\n} >| " + q(log) + " 2>&1 9<&- 8<&- & pid=$!; "
+        ": > " + q(log) + "; : > " + q(beat) + "; {\n(\ntrap " + q(cleanup) + " EXIT; export STALL_WATCH_BEAT=" + q(beat)
+        + "\n{ " + original + "\n\n}\n) >| " + q(log) + " 2>&1 9<&- 8<&- & pid=$!; "
         + " ".join(q(a) for a in [sys.executable, os.path.abspath(__file__)])
         + " --watch-pid $pid --log " + q(log) + " --quiet " + q(quiet) + " --beat " + q(beat)
         + " --log-fd 9 --beat-fd 8"
