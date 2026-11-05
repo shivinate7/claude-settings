@@ -56,9 +56,9 @@ today's Send path: the 8-second Undo, the "Send waits until Undo ends" lock and 
 ## 4. Where a reply sits: nested in the thread (pick)
 
 - Option "Nested in the thread" (`#s=answered`, focus `#pick-nested`). The reply sits in its root's card, inside `.thread`, after
-  the answer it follows, in a `.myreply` inset on `--surface` (the ground of "You asked"), so the owner's words and a session's
-  differ by ground. Its answer follows it as today's `.lhead` and `.reply`. The card keeps its place, ordered by the root's `at`.
-- Why: the thread reads top to bottom in one card; the reply appears where Reply was pressed; the parent never moves; and a
+  the answer it follows. It sits in a `.myreply` inset on `--surface`, the ground of "You asked". So the owner's words and a
+  session's differ by ground. Its answer follows it as today's `.lhead` and `.reply`. The card keeps its place, ordered by the root's `at`.
+- Why: the thread reads top to bottom in one card. The reply appears where Reply was pressed. The parent never moves. A
   reply to an old ask is never split from it. Loss: the card grows; rows below move down. Their order holds, so
   "a reply never moves a row" (page-ask-box-notes item 8, ux-order-holds-still) is kept; the growth is the Change precedent (item 1).
 - Option "Own row, Re: link" (`#s=re-row`, focus `#pick-rerow`). The reply is its own row at the top (newest first by `at`), with
@@ -111,12 +111,12 @@ today's Send path: the 8-second Undo, the "Send waits until Undo ends" lock and 
 - `check_designs.mjs` on main's page with this mockup in `designData` and a two-option item (`answered` with `#pick-nested`,
   `re-row` with `#pick-rerow`): exit 0, `problem: null`.
 - `label_once.py` on each state at 390: no hit.
-- impeccable critique, single context (no sub-agent tool): the detector found nothing. Fixed: the reply and its answer showed a bare
+- impeccable critique, in one context (no tool to start an agent): the detector found nothing. Fixed: the reply and its answer showed a bare
   time while "You asked" showed the day; both now show the day. Waited figures now use today's `waited` words ("under an hour").
   The Re: link is now 44 px tall, measured (about 42 by its CSS before).
 
 ## 10. Work outside this folder (for the builder)
 
 - page.html: Reply, the reply box, threads in `askAll` and `renderAskList`, `.myreply`, `.fwait`, the reply draft key, `where` in the sent slot.
-- SKILL.md, "The database" and "Route an ask": the `re` field; the page writes it once at Send; the writer routes a reply to the `owner`
-  of the record `re` names, or takes it when that session is gone.
+- SKILL.md, "The database" and "Route an ask": the `re` field. The page writes it once at Send. The writer routes a reply to the
+  `owner` of the record `re` names, or takes it when that session is gone.
