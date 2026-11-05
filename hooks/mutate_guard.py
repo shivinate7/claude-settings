@@ -2342,21 +2342,19 @@ def report_main(argv) -> int:
 # module, harness/tests/t7/<group>.py, is a suite of its own when it defines CHECKS (`suite_filter` below; a
 # helper without CHECKS is none). Its runner loads harness/tests/t7_store_and_seams.py and calls its `run()` with
 # an `order` that keeps only that group's checks, so they run in T7's order, each inside T7's hermetic().
-# The select script of mailaudit, home, ios_adblock, joyous and degen does not exist yet: each child repo adds it in
-# its own lane (coordinator ruling). Until then select exits nonzero and every changed suite runs.
+# A failed or missing select runs every changed suite.
 # mailaudit: suites are plain node scripts. check-docs, check-records, ci-wiring, milestone-due and send-key print
 # FAIL on red; rules, golden, view-rules, worker/core, photoget and app print only a cross mark, so they cannot kill
-# until mailaudit prints FAIL. app.test timed out at 120 s, so it reads unusable.
+# until mailaudit prints FAIL. app.test runs past the suite timeout, so it reads unusable.
 # home: parts js and py. The addon is left out: it has no requirements or lock file, its pins sit inline in its
-# workflow. The 30 node files run 0.1 to 3.4 s; the 5 python files are green alone.
+# workflow.
 # ios_adblock: parts node and shell. Left out: test_chrome_slice.sh (TAP, covered by the node part),
-# test_build_rules.sh and test_export_lists.sh (zsh), test_merge_chunks.sh (needs macOS Swift). The chrome tests run
-# 0.1 to 1.5 s; the shell suites are green and print FAIL on red (chrome_check takes 37 s).
-# joyous: 35 files run under 2 s each. no-public-price, redirects, phone-first and tour-pages need dist/ or a
-# browser, so they read unusable. The node_tap kill is measured.
-# degen: py only. The app/ Playwright specs need a browser: unmeasured, left out. Modules run alone green; the
-# slowest, test_jd_heal.py, takes 95 s; test_ig_spike*.py is red on a clean checkout. A module that imports dev-only
-# pins (PyYAML, openapi_core, jsonschema; requirements-dev.txt) reads unusable: the install folder holds one lockfile.
+# test_build_rules.sh and test_export_lists.sh (zsh), test_merge_chunks.sh (needs macOS Swift). The shell suites
+# print FAIL on red.
+# joyous: no-public-price, redirects, phone-first and tour-pages need dist/ or a browser, so they read unusable.
+# degen: py only. The app/ Playwright specs need a browser, so they are left out. test_ig_spike*.py is red on a
+# clean checkout. A module that imports dev-only pins (PyYAML, openapi_core, jsonschema; requirements-dev.txt) reads
+# unusable: the install folder holds one lockfile.
 BANCHI_MODULE_RUNNER = """\
 import importlib, os, sys
 sys.path.insert(0, os.getcwd())
@@ -2449,7 +2447,7 @@ REPLAY_PROFILES = {
             "lockfile": "chrome/package-lock.json", "sparse_skip": [], "select": IOS_ADBLOCK_SELECT,
         },
         "shell": {
-            "code": r"^(chrome/check\.mjs|ios/WebExtension/src/(content|strictmode)\.js)$",
+            "code": r"^(chrome/check\.mjs|ios/WebExtension/src/(background|content|strictmode)\.js)$",
             "tests": r"^tests/test_(chrome_check|content_early|strictmode)\.sh$",
             "argv": ["bash", "{suite}"], "classify": "fail_line", "install": None, "sparse_skip": [],
             "select": IOS_ADBLOCK_SELECT,
