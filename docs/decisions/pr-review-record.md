@@ -74,6 +74,7 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 - Open: an integration PR has no record of its own.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
+- One fix check per record. A second fix on a fixed head starts a new lane at round 1. The tool does not check this.
 
 ## Lane picks
 

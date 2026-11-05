@@ -20,6 +20,7 @@ Owner, 2026-10-15 12:00 CDT. The owner's words:
   - A fix check is a fresh reviewer that reads only the diff from the reviewed head to the new head (`git diff <reviewed-head>..<head>`). It confirms the diff fixes the named finding and adds nothing else.
   - PASS: the head merges on green, with no further round.
   - FAIL, or a diff wider than the finding: the fix starts a new lane at round 1.
+  - FAIL also when the diff touches a guard or check path (the list below) while the review record says `Guard or check: no`. The merge tool reads no diff, so a wrong `no` would skip the net-value test (owner, 2026-11-05 07:45 CST, typed "go" in the lane).
   - A fix check is not a review round. It runs on the reviewer row of the model table (decision `agent-model-cap`), haiku. Its brief carries no `Round N of 3` marker, so no guard changes.
   - "Last round" includes the single round of a delete-only change.
   - A passing fix check is the review of the new head. It does not repeat the net-value test (owner, 2026-11-05 08:41 CST, typed in the lane; page item 232 a). A guard or check change keeps the net value that round 3 gave it.
