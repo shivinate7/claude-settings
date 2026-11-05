@@ -426,20 +426,19 @@ class ModelSlot(unittest.TestCase):
                          "a header with no model slot is flagged for the missing phrase")
 
 
-class ReviewerFile(unittest.TestCase):
-    # Red on main, where the check has no self-model rule. Goes red again once reviewer.md is fixed: re-point it then.
-    def test_real_reviewer_file_is_flagged(self):
-        path = os.path.join(ROOT, "agents", "reviewer.md")
-        with open(path, encoding="utf-8") as handle:
-            text = handle.read()
-        self.assertIn("`FAIL, round 2 of 3, sonnet`", text,
-                      "agents/reviewer.md no longer has the fixed report header this case probes: re-point the case")
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            code = C.main([path])
-        self.assertEqual(code, 1, "agents/reviewer.md passes the check, though its body states its own model")
-        self.assertTrue(any(re.search(r"reviewer\.md:\d+", line) for line in out.getvalue().splitlines()),
-                        "no line names reviewer.md:<line>: %r" % out.getvalue())
+class RealAgentFiles(unittest.TestCase):
+    # Each real agent file is checked alone, so a finding fails only that file's subtest, and the subtest names it.
+    def test_every_real_agent_file_passes_the_check(self):
+        folder = os.path.join(ROOT, "agents")
+        names = sorted(name for name in os.listdir(folder) if name.endswith(".md"))
+        self.assertTrue(names, "agents/ holds no agent file to check")
+        for name in names:
+            with self.subTest(agent=name):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    code = C.main([os.path.join(folder, name)])
+                self.assertEqual(code, 0, "agents/%s fails the check: %r" % (name, out.getvalue()))
+                self.assertEqual(out.getvalue(), "", "agents/%s exits 0 but prints a finding" % name)
 
 
 def tearDownModule():
