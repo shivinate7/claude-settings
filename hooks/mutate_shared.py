@@ -654,7 +654,9 @@ def format_report(rows, gold=None) -> str:
 # mode hold here: a crash is not a kill, and a suite red on the clean source is not a killer.
 # Cost per pull request: one control run per suite, one run per suite per mutant, one `git worktree`
 # per job, one install per lockfile hash. Written: a temp folder of checkouts and one deps folder
-# per lockfile hash, all removed at the end. The target repository is left as found.
+# per lockfile hash, all removed at the end. The target repository is left as found. A profile with a `select`
+# adds, per pull request, one git read for each script path in its argv that the commit lacks, and one folder
+# extract for a script that HEAD holds.
 #
 # A PROFILE says how one repository is read: {"code": regex of product files, "code_not": regex of
 # files to leave out (optional), "tests": regex of suite files, "argv": the command with {suite} (the
@@ -664,7 +666,10 @@ def format_report(rows, gold=None) -> str:
 # "link": the folder the install makes, linked into each checkout beside the lockfile (None for none),
 # "select": argv with {path}, run in a checkout at the pull request's commit, that prints the suites which
 # test one product file (a changed suite is run on the mutants of that file only when its line is listed; a select
-# that fails, or is missing, runs every changed suite and adds a row note),
+# that fails, or is missing, runs every changed suite and adds a row note). A script the argv names that the commit
+# lacks is read from the clone's HEAD instead, with its whole folder, so the siblings it loads come along; the row
+# names it. The commit's own copy wins. Only a part with a "/" is a script path: a bare command name resolves on
+# PATH, so a bare root name such as `select.sh` is never served from HEAD; `./select.sh` is, with the whole tree,
 # "suite_filter": {"paths": regex, "keep": a SUITE_FILTERS name} (optional); a changed file that "tests" matches
 # and "paths" matches is a suite only when the filter reads its text as one,
 # "sparse_skip": top folders left out of each checkout}. A profile of {"parts": {name: profile}} runs
@@ -917,14 +922,40 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
         shutil.rmtree(own, ignore_errors=True)
 
 
-def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float):
+def _head_copy(repo: str, rel: str, own: str):
+    """The absolute path of repo-relative file `rel` as the clone's HEAD holds it, extracted into `own` with its whole
+    folder so a sibling it loads from beside itself is there too; None when HEAD has no such file. `git archive`
+    leaves out an export-ignore sibling, and a symlinked sibling is not copied."""
+    import io
+    import tarfile
+    try:
+        archive = _git(repo, "archive", "HEAD", "--", os.path.dirname(rel) or rel, binary=True)
+    except ValueError:
+        return None
+    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+        for member in tar.getmembers():
+            if member.isfile():
+                target = os.path.join(own, member.name)
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with open(target, "wb") as handle:
+                    handle.write(tar.extractfile(member).read())
+    found = os.path.join(own, rel)
+    return found if os.path.isfile(found) else None
+
+
+def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float, head=None):
     """The changed `suites` that the profile's `select` lists for product file `path`, run in checkout `dest`:
     (suites or None, note). None means no list: select is missing from the profile, or failed, and the note says why
-    for a failure. A suite name is a line of the output; any other line is ignored."""
+    for a failure. A suite name is a line of the output; any other line is ignored.
+    `head(part)` serves a select argv part that has a "/" and no `{` and that `dest` lacks (a script the commit
+    lacks): the absolute path of the copy at the clone's HEAD, or None. A bare command name is left to PATH.
+    The run stays in `dest`."""
     select = profile.get("select")
     if not select:
         return None, ""
-    argv = [part.replace("{path}", path) for part in select]
+    argv = [head(part) or part if head and "/" in part and "{" not in part
+            and not os.path.exists(os.path.join(dest, part)) else part for part in select]
+    argv = [part.replace("{path}", path) for part in argv]
     try:
         code, output, timed_out = run_in_group(argv, dest, timeout)
     except OSError as error:
@@ -1024,8 +1055,17 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
         # The suites to run on the mutants of each file: the usable changed suites that `select` lists for it, or
         # all of them when there is no list. A file no usable changed suite reaches gets none: its mutants are not_run.
         allowed = {}
+        head_copies = {}  # select argv part -> its copy at HEAD (None when HEAD has none), read once per replay
+
+        def head(part):
+            if part not in head_copies:
+                head_copies[part] = _head_copy(repo, part, os.path.join(own, "head"))
+                if head_copies[part]:
+                    row["notes"].append("%s: missing at the commit, read from HEAD" % part)
+            return head_copies[part]
+
         for path in sorted({mutant[0] for mutant in mutants}):
-            listed, note = borrow(lambda dest: _select_suites(profile, dest, path, suites, suite_timeout))
+            listed, note = borrow(lambda dest: _select_suites(profile, dest, path, suites, suite_timeout, head))
             if note:
                 row["notes"].append(note)
             if listed is None:

@@ -137,6 +137,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
 Other tools, in `judge` order:
   worktree-home        deny. A call from an agent whose shell cwd or write target is outside its
                        own recorded worktree. Read and Grep pass, so a stranded agent can report.
+                       A Write or Edit strictly inside the caller's own `agent-<id>-<suffix>`
+                       red-run folder passes.
                        No record (a non-isolated agent, or the orchestrator) allows everything.
                        No override lifts it. (an-agent-outside-its-home-tree-must-stop)
   other-checkout       deny. Any session's write whose target sits in a checkout of this clone
@@ -149,7 +151,9 @@ Other tools, in `judge` order:
                        A Bash or PowerShell `cd`, `pushd` or `Set-Location` into another
                        checkout is refused too, bare or chained; the cd target in the caller's
                        recorded home, a session's recorded home, or the caller's own
-                       `agent-<id>-<suffix>` red-run folder passes that act.
+                       `agent-<id>-<suffix>` red-run folder passes that act. A write strictly
+                       inside that red-run folder passes too, here and in worktree-home; the
+                       folder root does not (no `rm -rf <red>`).
                        A write or `cd` into a separate clone of the same repo (same origin, read
                        from the config files) is refused too, as is a write from a cwd stranded
                        in one while `CLAUDE_PROJECT_DIR` names the home clone; a git verb that
@@ -216,9 +220,10 @@ Other tools, in `judge` order:
                        deny. An `xcodebuild -destination` that names a shut-down simulator. Judged
                        after the cap and twin rules. The remedy is `sim-test` for the `test` action,
                        else the generic destination. An override lifts it. (sim-test-is-the-one-boot-path)
-  simulator-boot-locked
-                       deny. A simulator MCP `launch` of a shut-down device while the sim-test lock
-                       has a live holder. Judged after the cap and twin rules. An override lifts it.
+  simulator-boot-lease
+                       deny. A simulator MCP `launch` of a shut-down device, lock or no lock: no session
+                       holds a lease for it. The remedy is `sim-test`. Judged after the cap and twin
+                       rules. A launch of a booted device passes. An override lifts it.
                        (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
@@ -3750,36 +3755,10 @@ def _sim_route_remedy(rest: list) -> str:
     return "Use `-destination 'generic/platform=iOS Simulator'` instead, and boot nothing."
 
 
-def sim_lock_holder():
-    """The holder of <config>/state/sim-test.lock as a string (a live pid, or "unknown" for a lock folder with no
-    readable pid file under 60 s old), or "" when the lock is free. The lock is the one bin/sim-test takes."""
-    try:
-        lock = os.path.join(guard_core.config_dir(), "state", "sim-test.lock")
-        age = time.time() - os.stat(lock).st_mtime
-        try:
-            with open(os.path.join(lock, "pid"), encoding="utf-8") as f:
-                text = f.read().strip()
-        except OSError:
-            text = ""
-        if text.isdigit() and int(text) > 0:
-            try:
-                os.kill(int(text), 0)
-            except ProcessLookupError:
-                return ""
-            except PermissionError:
-                return ""  # bin/sim-test reads a failed `kill -0`, EPERM too, as a holder that is gone
-            except OSError:
-                pass
-            return text
-        return "unknown" if age < 60 else ""
-    except Exception:
-        return ""  # fail open: an unreadable lock is not held
-
-
 def sim_boot_refusal(tool: str, names: list, remedies: dict = None) -> None:
     """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted. After those two
     rules, an `xcodebuild -destination` boot (REMEDIES maps a name to its remedy) is refused as
-    simulator-boot-route, and an MCP launch while the sim-test lock is held as simulator-boot-locked."""
+    simulator-boot-route, and an MCP launch as simulator-boot-lease."""
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "janitor"))
         import sweep
@@ -3793,7 +3772,8 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None) -> None:
     shut_down = []
     for name in names:
         name, os_ = name if isinstance(name, tuple) else (name, "")  # a destination's OS= picks a runtime
-        hits = [d for d in devices if name.upper() == d["udid"].upper() or name == d["name"]]  # a UDID has no case
+        key = name.strip().casefold()  # a name compares without case or outer spaces; a UDID has no case
+        hits = [d for d in devices if key == d["udid"].casefold() or key == d["name"].strip().casefold()]
         if os_:  # not importable from sim_boot_record: its version() is nested in by_name_ok
             hits = [d for d in hits if (v := d["runtime"].split("SimRuntime.")[-1].split("-", 1)[-1].replace("-", ".")) == os_
                     or v.startswith(os_ + ".")] or hits  # no runtime matches: judge them all
@@ -3818,12 +3798,11 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None) -> None:
         shut_down.append(name)
     for name in shut_down:
         if tool == SIM_MCP:
-            holder = sim_lock_holder()
-            if holder:
-                refuse(tool, "deny", "simulator-boot-locked",
-                       "`sim-test` holds the one simulator lock (pid %s). A launch of a shut-down simulator "
-                       "boots outside that lock. Wait for sim-test to end, or launch a simulator that is "
-                       "already booted. (decision sim-test-is-the-one-boot-path)" % holder, name)
+            refuse(tool, "deny", "simulator-boot-lease",
+                   "A launch of the shut-down simulator %s boots it outside the one lock: the Mac "
+                   "shares one simulator across repos, and `sim-test` holds that lock. Run `sim-test`, "
+                   "which boots it under the lock, or launch a simulator that is already booted. "
+                   "(decision sim-test-is-the-one-boot-path)" % name, name)
         elif (remedies or {}).get(name):
             refuse(tool, "deny", "simulator-boot-route",
                    "`xcodebuild -destination` boots %s outside the `sim-test` lock. %s "
@@ -3860,7 +3839,8 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
             except Exception:
                 resolved_target = write_target
             if (path_is_inside(resolved_target, home_primary) is True
-                    and path_is_inside(resolved_target, home) is False):
+                    and path_is_inside(resolved_target, home) is False
+                    and not _own_red_run(payload, home_primary, resolved_target, False)):
                 return "write target outside recorded agent home"
     return ""
 
@@ -4063,18 +4043,33 @@ def _cd_home_exempt(payload, cwd: str, target: str) -> bool:
     return bool(held) and path_is_inside(target, held) is True
 
 
-def _cd_red_run(payload, roots, owner: str) -> bool:
-    """True when OWNER, the checkout a `cd` moves into, is the caller's own test-author red-run
-    folder `<primary>/.claude/worktrees/agent-<its agent id>-<suffix>`. The id and its dash match
-    whole, so a sibling whose id only starts with this one does not pass."""
+# The shell verbs that may name the red-run folder's own root: `cp x <red>/` writes inside it. No
+# other verb may, so `rm -rf <red>` stays refused (an-agent-outside-its-home-tree-must-stop).
+RED_RUN_ROOT_VERBS = ("cp",)
+
+
+def _own_red_run(payload, primary: str, path: str, root_ok: bool = True) -> bool:
+    """True when PATH is inside the caller's own test-author red-run folder
+    `<primary>/.claude/worktrees/agent-<its agent id>-<suffix>`. The one home for that test: the
+    `cd` act and the write act of other-checkout, and worktree-home's Write target, all ask it.
+    PRIMARY is the primary checkout alone, so a folder under a linked worktree never counts. The id and
+    its dash match whole, so a sibling whose id only starts with this one does not pass. ROOT_OK False
+    leaves the folder itself out: a write passes only strictly inside it, so a delete of the folder
+    is still refused. Both sides compare case-folded and realpath'd (`path_is_inside`)."""
     agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
-    if not isinstance(agent_id, str) or not agent_id or not owner:
+    if not isinstance(agent_id, str) or not agent_id or not primary or not path:
         return False
-    folder = os.path.dirname(owner)
-    return (os.path.basename(owner).startswith("agent-" + agent_id + "-")
-            and os.path.basename(folder) == "worktrees"
-            and os.path.basename(os.path.dirname(folder)) == ".claude"
-            and os.path.dirname(os.path.dirname(folder)) in roots)
+    holder = os.path.join(primary, ".claude", "worktrees")
+    folder = path
+    while True:
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return False
+        if (path_is_inside(parent, holder) is True and path_is_inside(holder, parent) is True
+                and os.path.normcase(os.path.basename(folder)).startswith(
+                    os.path.normcase("agent-" + agent_id + "-"))):
+            return root_ok or folder != path
+        folder = parent
 
 
 def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = "",
@@ -4086,7 +4081,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     valid `session_id`; a caller that omits `has_agent` gets no exemption. An unreadable git
     state, or a cwd in no checkout, is unknown and passes. One git read per call that can write.
     A shell `cd`, `pushd` or `Set-Location` that moves into another checkout is refused too, unless
-    `payload` marks the target as the caller's own home or red-run folder; a `cd` toward a folder
+    `payload` marks the target as the caller's own home or red-run folder (a write strictly inside that red-run
+    folder passes too, a shell `cp` may also name its root); a `cd` toward a folder
     under another `.git` entry spends the git read. A target in a separate clone of the same repo
     (the nearest `.git` above it names another common dir with the same origin, read by file) is
     refused the same way; the clone check spawns no git. Liftable by an owner override, unlike `worktree_home_hit`
@@ -4124,7 +4120,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     temp = os.path.realpath(tempfile.gettempdir())
     clone_hit = {}   # target -> True when the hit was a separate clone, not a checkout of this one
 
-    def elsewhere(target, at):
+    def elsewhere(target, at, verb=""):
         try:
             resolved = _resolved(target, at)
             owner = _owning_checkout(resolved, roots)
@@ -4144,13 +4140,14 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
             return True
         # The primary's `.git` is the clone's common directory, shared by every checkout.
         return (bool(owner) and owner != own
-                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)
+                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True
+                and not _own_red_run(payload, roots[0], resolved, verb in RED_RUN_ROOT_VERBS))
 
     for move in moves:
-        if elsewhere(move, where) and not _cd_red_run(payload, roots, _owning_checkout(move, roots)):
+        if elsewhere(move, where) and not _own_red_run(payload, roots[0], move):
             return (OTHER_CLONE_CD_DETAIL if clone_hit.get(move) else OTHER_CHECKOUT_CD_DETAIL) + move
     if targets is None:
-        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True) if writes else ""
+        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True, predicate_command=True) if writes else ""
         if not hit:
             # A git verb that changes files, run in a separate clone or from a stranded cwd. The one
             # reader of such verbs is session_home_git_hit; only the folder test differs.

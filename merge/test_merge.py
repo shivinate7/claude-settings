@@ -9,7 +9,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import ast, atexit, contextlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import ast, atexit, base64, contextlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
 import ctypes  # the Windows-branch test patches os.name; ctypes' own import would then take the Windows path on Linux, so it loads here first
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -9852,19 +9852,57 @@ def main_job(name, conclusion, minutes=1):
             "html_url": f"https://github.com/o/r/actions/runs/1/job/{len(name)}"}
 
 
+# The workflow file a head serves when a case gives none: one job with no if:, so every job name reads as one that may run.
+NO_IF_WORKFLOW = "\n".join(["name: checks", "on: push", "jobs:", "  checks:", "    runs-on: ubuntu-latest", "    steps:", "      - run: echo ok"]) + "\n"
+CHECKS_PATH = ".github/workflows/checks.yml"
+REAL_CHECKS = os.path.join(os.path.dirname(HERE), ".github", "workflows", "checks.yml")  # the file as it is on disk, never a stub
+# The live nightly case: schedule run LIVE_R failed on checks-windows-merge-3, all-jobs-passed and ci-done skipped; the newer push run LIVE_N
+# passed merge-3 and skipped the same two. Their jobs and conclusions are the ones test_action.sh's live case gives too.
+LIVE_R, LIVE_N = 41817705653, 41905916525
+LIVE_N_SHA = f"{LIVE_N:040x}"
+
+
+def real_checks():
+    with open(REAL_CHECKS, encoding="utf-8") as f:
+        return f.read()
+
+
+def live_nightly():
+    """-> (main_runs, jobs) of the live nightly case, newest run first, as GET actions/runs and the jobs read give them."""
+    runs = [main_run(LIVE_N, "success", sha=LIVE_N_SHA, path=CHECKS_PATH), main_run(LIVE_R, "failure", event="schedule", path=CHECKS_PATH)]
+    jobs = {LIVE_R: [main_job("checks-windows-merge-3", "failure", 19), main_job("all-jobs-passed", "skipped"), main_job("ci-done", "skipped")],
+            LIVE_N: [main_job("checks-windows-merge-3", "success", 19), main_job("all-jobs-passed", "skipped"), main_job("ci-done", "skipped")]}
+    return runs, jobs
+
+
 class MainRunsHost(FakeHost, merge.Host):
     """FakeHost for the flow; the real Host.base_state over scripted REST. `main_runs`: main's push runs, newest first. `jobs`: run id -> jobs.
-    `runs_fail` / `jobs_fail`: that read fails with this text. `jobs_fail_of`: run id -> the text its jobs read fails with."""
+    `runs_fail` / `jobs_fail`: that read fails with this text. `jobs_fail_of`: run id -> the text its jobs read fails with.
+    `texts`: head sha -> the workflow file's text on that head (a head not in it reads as NO_IF_WORKFLOW). `text_fail`: every file read fails with this text."""
     base_state = getattr(merge.Host, "base_state", None)
 
-    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None):
+    def __init__(self, root, other, main_runs, jobs, runs_fail=None, jobs_fail=None, jobs_fail_of=None, texts=None, text_fail=None):
         FakeHost.__init__(self, root, other)
         self.ignore, self.cwd, self.warned = {}, root, set()
         self.main_runs, self.jobs, self.runs_fail, self.jobs_fail, self.reads = main_runs, jobs, runs_fail, jobs_fail, []
         self.jobs_fail_of = jobs_fail_of or {}
+        self.texts, self.text_fail = texts or {}, text_fail
+
+    def file_at_head(self, rel, extra, fields):
+        """`contents/<path>` read at a head: the ref is a field or a query. Raw when the Accept header asks for raw, else the JSON reply with base64 content."""
+        query = re.search(r"[?&]ref=([0-9a-f]+)", rel)
+        ref = fields.get("ref") or (query and query.group(1))
+        if self.text_fail:
+            return 1, self.text_fail
+        text = self.texts.get(ref, NO_IF_WORKFLOW)
+        if any("vnd.github.raw" in a for a in extra):
+            return 0, text
+        return 0, json.dumps({"encoding": "base64", "content": base64.b64encode(text.encode("utf-8")).decode("ascii")})
 
     def api(self, rel, *extra, method="GET", fields=None):
         self.reads.append(rel)
+        if rel.startswith("contents/"):
+            return self.file_at_head(rel, extra, fields or {})
         assert (rel, method, fields.get("branch")) == ("actions/runs", "GET", "main"), (rel, fields)
         if self.runs_fail:
             return 1, self.runs_fail
@@ -10068,6 +10106,84 @@ class RedMainBrake(Env):
                               main_run(930, "failure", name="links", event="schedule", path=LINKS_PATH)],
                              {930: [main_job("readme-links", "failure", 20)], 931: [main_job("readme-links", "success", 20)]})
         self.merged(rc, out)
+
+    # The failed-run clear, job by job: a job the red run did not fail, whose job-level if: names another event, is not needed by a green run of
+    # that event. A red job always is. The workflow file is read at the green run's head (GET contents, ref = its head sha).
+    def test_a_newer_push_run_clears_a_red_nightly_whose_pull_request_jobs_it_skipped(self):
+        runs, jobs = live_nightly()
+        rc, out, _ = self.go(runs, jobs, texts={LIVE_N_SHA: real_checks()})
+        self.merged(rc, out)
+
+    def test_the_live_nightly_is_green_on_the_red_main_read(self):
+        # the same live case as test_action.sh's live case: base_verdict, the red-main check's read, judges it green, with no merge
+        runs, jobs = live_nightly()
+        self.host = MainRunsHost(self.co, self.other, runs, jobs, texts={LIVE_N_SHA: real_checks()})
+        verdict, detail = merge.base_verdict(self.co, self.host, "main")
+        self.assertEqual(verdict, "green", detail)
+
+    def test_a_red_job_skipped_in_the_push_run_still_blocks_the_clear_when_its_if_names_no_event(self):
+        # lint failed in the nightly and was skipped in the push run. It has no if:, so it may run and stays needed.
+        sha = "c" * 40
+        lint = "\n".join(["name: checks", "on: [push, schedule]", "jobs:",
+                          "  checks-windows-merge-3:", "    runs-on: windows-latest", "    steps:", "      - run: echo ok",
+                          "  lint:", "    runs-on: ubuntu-latest", "    needs: checks-windows-merge-3", "    steps:", "      - run: echo ok",
+                          "  all-jobs-passed:", "    runs-on: ubuntu-latest", "    needs: [lint, checks-windows-merge-3]",
+                          "    if: ${{ always() && github.event_name == 'pull_request' }}", "    steps:", "      - run: echo ok"]) + "\n"
+        runs = [main_run(1211, "success", sha=sha), main_run(1210, "failure", event="schedule")]
+        jobs = {1210: [main_job("checks-windows-merge-3", "success", 19), main_job("lint", "failure", 3), main_job("all-jobs-passed", "skipped")],
+                1211: [main_job("checks-windows-merge-3", "success", 19), main_job("lint", "skipped"), main_job("all-jobs-passed", "skipped")]}
+        rc, out, before = self.go(runs, jobs, texts={sha: lint})
+        self.refused(rc, out, before)
+        self.assertIn("run 1210", out)
+        self.assertIn("lint: fail", out)
+
+    def test_a_red_job_whose_if_excludes_the_push_event_is_never_dropped(self):
+        # all-jobs-passed is pull_request-only, so the push run skips it. It failed in the nightly: it stays needed, and the clear is refused.
+        sha = "d" * 40
+        runs = [main_run(1221, "success", sha=sha), main_run(1220, "failure", event="schedule")]
+        jobs = {1220: [main_job("checks-windows-merge-3", "success", 19), main_job("all-jobs-passed", "failure", 2)],
+                1221: [main_job("checks-windows-merge-3", "success", 19), main_job("all-jobs-passed", "skipped")]}
+        rc, out, before = self.go(runs, jobs, texts={sha: real_checks()})
+        self.refused(rc, out, before)
+        self.assertIn("run 1220", out)
+        self.assertIn("all-jobs-passed: fail", out)
+
+    def test_a_job_whose_if_names_the_push_event_inside_an_or_still_blocks_the_clear(self):
+        # checks-extra's if: is an ||, so it may run. It is skipped in the push run, so it stays needed and the clear is refused.
+        sha = "e" * 40
+        checks_extra = "\n".join(["name: checks", "on: [push, schedule]", "jobs:",
+                          "  checks-windows-merge-3:", "    runs-on: windows-latest", "    steps:", "      - run: echo ok",
+                          "  checks-extra:", "    runs-on: ubuntu-latest", "    if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}",
+                          "    steps:", "      - run: echo ok"]) + "\n"
+        runs = [main_run(1231, "success", sha=sha), main_run(1230, "failure", event="schedule")]
+        jobs = {1230: [main_job("checks-windows-merge-3", "failure", 19), main_job("checks-extra", "skipped")],
+                1231: [main_job("checks-windows-merge-3", "success", 19), main_job("checks-extra", "skipped")]}
+        rc, out, before = self.go(runs, jobs, texts={sha: checks_extra})
+        self.refused(rc, out, before)
+        self.assertIn("run 1230", out)
+        self.assertIn("checks-windows-merge-3: fail", out)
+
+    def test_a_failed_read_of_the_workflow_file_is_unknown_and_refuses_the_clear(self):
+        runs, jobs = live_nightly()
+        rc, out, before = self.go(runs, jobs, text_fail="HTTP 500: Internal Server Error (fake contents read)")
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out, "a failed read of the workflow file is unknown: never red, and never a clear")
+        self.assertIn("the read failed", out)
+
+    def test_a_red_job_the_green_run_lacks_or_did_not_pass_is_red_not_unknown_when_the_workflow_read_fails(self):
+        # A certain red needs no workflow file: a green run that lacks a red job, or did not pass it, clears nothing whatever the if:.
+        # The read fails here and must not turn the red into unknown. The control is the test above: a green run that passed the red job needs the file.
+        red_run = main_run(1310, "failure", event="schedule")
+        red_jobs = [main_job("checks-windows-merge-3", "failure", 19), main_job("all-jobs-passed", "skipped")]
+        for variant, green_jobs in (("the red job is missing", [main_job("all-jobs-passed", "skipped")]),
+                                    ("the red job is skipped", [main_job("checks-windows-merge-3", "skipped"), main_job("all-jobs-passed", "skipped")])):
+            with self.subTest(variant=variant):
+                rc, out, before = self.go([main_run(1311, "success"), red_run], {1310: red_jobs, 1311: green_jobs},
+                                          text_fail="HTTP 500: Internal Server Error (fake contents read)")
+                self.refused(rc, out, before)
+                self.assertNotIn("UNKNOWN", out, "a certain red reads as unknown: the workflow read ran first, and its failure came before the red check")
+                self.assertIn("latest completed run is red", out)
+                self.assertIn("checks-windows-merge-3: fail", out)
 
     def test_a_green_schedule_run_with_every_job_of_a_red_push_run_clears_it(self):
         rc, out, _ = self.go([main_run(941, "success", event="schedule"), main_run(940, "failure")],
@@ -11410,9 +11526,12 @@ def parse_text(test, text):
     test.assertIsNotNone(rec, "parse_review refused a well-formed record:\n" + text)
     return rec
 
+def record_verdict(test, text, head=REVIEW_HEAD):
+    """-> (state, why) of the record, as review_state gives them."""
+    return review_fn(test, "review_state")(parse_text(test, text), head)
+
 def record_state(test, text, head=REVIEW_HEAD):
-    state, _why = review_fn(test, "review_state")(parse_text(test, text), head)
-    return state
+    return record_verdict(test, text, head)[0]
 
 def posted_body(test, out):
     """The record printed in `out`, from its marker line through its CI line: the text a lane posts."""
@@ -11519,10 +11638,10 @@ class ReviewRecordForm(unittest.TestCase):
             self.assertIsNone(review_fn(self, "parse_review")(record_text(kind="bogus").rstrip("\n") + REVIEW_FOOTER))
 
 class ReviewRecordRules(unittest.TestCase):
-    """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS,
-    or the third round is done and Guard or check is no, or the third round is done with Guard or check yes and a Net value of zero or
-    positive. Net value negative is held. The third round with Guard or check yes and no Net value is open. A first-round FAIL is open.
-    The verdicts are PASS, FAIL and PARTIAL."""
+    """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS
+    and the last design-reviewer line is PASS or absent, or the third round is done and Guard or check is no, or the third round is done
+    with Guard or check yes and a Net value of zero or positive. Net value negative is held. The third round with Guard or check yes and no
+    Net value is open. A first-round FAIL is open. The verdicts are PASS, FAIL and PARTIAL."""
 
     def test_a_pass_in_the_last_round_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS)), "done")
@@ -11555,7 +11674,48 @@ class ReviewRecordRules(unittest.TestCase):
     def test_a_design_reviewer_fail_in_round_three_with_guard_no_is_done(self):
         # The review cap rule (roles-review-cap-three) ends the review after the third round when Guard or check is no, even when that round fails.
         rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, FAIL")
-        self.assertEqual(record_state(self, record_text(rounds=rounds, guard="no")), "done")
+        state, why = record_verdict(self, record_text(rounds=rounds, guard="no"))
+        self.assertEqual(state, "done", "round 3 is done whatever its verdict, so the state must stay done")
+        self.assertIn("in round 3 is FAIL", why, f"why does not name the design reviewer's round 3 FAIL: {why!r}")
+
+    def test_a_reviewer_pass_in_the_last_round_does_not_clear_a_design_fail_in_round_one(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds))
+        self.assertEqual(state, "open", "the last design-reviewer line is FAIL, but the record reads done")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
+    def test_a_design_fail_in_round_one_is_not_cleared_by_a_later_reviewer_pass(self):
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds))
+        self.assertEqual(state, "open", "the last design-reviewer line is FAIL, but the record reads done")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
+    def test_a_design_partial_in_round_one_is_not_cleared_by_a_later_reviewer_pass(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PARTIAL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds))
+        self.assertEqual(state, "open", "the last design-reviewer line is PARTIAL, so the record must not read done")
+        self.assertIn("in round 1 is PARTIAL", why, f"why does not name the design reviewer's round 1 PARTIAL: {why!r}")
+
+    def test_a_design_pass_in_a_later_round_after_a_design_fail_is_done(self):
+        # Pinning: the last design-reviewer line is PASS, so the design rule holds and the record reads done.
+        rounds = ("Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS", "Round 2: design-reviewer, opus, PASS")
+        self.assertEqual(record_state(self, record_text(rounds=rounds)), "done")
+
+    def test_a_reviewer_fail_then_a_reviewer_pass_with_no_design_line_is_done(self):
+        # Pinning: no design-reviewer line at all, so the design rule does not apply to the record.
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds, guard="no"))
+        self.assertEqual(state, "done", "a record with no design line must read done")
+        self.assertEqual(why, "round 2 passed", f"the no-design record must say exactly 'round 2 passed': {why!r}")
+
+    def test_a_design_reviewer_role_with_a_space_or_capitals_does_not_parse(self):
+        # Pinning: the role is exactly "design-reviewer". A misspelled role makes the record bad, so it can never read as done.
+        for role in ("design reviewer", "Design-Reviewer"):
+            with self.subTest(role=role):
+                text = record_text(rounds=("Round 1: reviewer, sonnet, PASS", f"Round 1: {role}, opus, FAIL"))
+                rec = review_fn(self, "parse_review")(text)
+                self.assertIsNone(rec, f"parse_review accepted the role {role!r}")
+                self.assertEqual(review_fn(self, "review_state")(rec, REVIEW_HEAD)[0], "bad", f"a record with the role {role!r} did not read bad")
 
     def test_a_delete_only_change_passed_in_round_one_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, kind="delete-only")), "done")
@@ -11565,6 +11725,36 @@ class ReviewRecordRules(unittest.TestCase):
             with self.subTest(verdict=verdict):
                 rec = record_text(rounds=(f"Round 1: reviewer, sonnet, {verdict}",), kind="delete-only", guard="no")
                 self.assertEqual(record_state(self, rec), "done")
+
+    def test_a_delete_only_guard_no_change_with_a_design_fail_in_round_one_is_done_and_names_design(self):
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL")
+        state, why = record_verdict(self, record_text(rounds=rounds, kind="delete-only", guard="no"))
+        self.assertEqual(state, "done", "a delete-only change with guard no is done after round 1, so the state must stay done")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
+    def test_a_round_three_guard_no_with_a_design_fail_in_round_one_is_done_and_names_round_one(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, opus, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds, guard="no"))
+        self.assertEqual(state, "done", "round 3 is done whatever its verdict, so the state must stay done")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
+    def test_a_delete_only_guard_no_with_a_design_fail_in_round_one_and_a_round_two_fail_is_done_and_names_round_one(self):
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, FAIL")
+        state, why = record_verdict(self, record_text(rounds=rounds, kind="delete-only", guard="no"))
+        self.assertEqual(state, "done", "a delete-only change with guard no is done after round 1, so the state must stay done")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
+
+    def test_a_round_three_guard_yes_net_positive_with_a_design_partial_in_round_one_is_done_and_names_round_one(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PARTIAL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, opus, FAIL")
+        state, why = record_verdict(self, record_text(rounds=rounds, guard="yes", net="positive"))
+        self.assertEqual(state, "done", "round 3 with a net value of positive is done, so the state must stay done")
+        self.assertIn("in round 1 is PARTIAL", why, f"why does not name the design reviewer's round 1 PARTIAL: {why!r}")
+
+    def test_a_delete_only_guard_no_with_a_design_fail_in_round_one_is_done_whatever_round_two_is(self):
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS")
+        state, why = record_verdict(self, record_text(rounds=rounds, kind="delete-only", guard="no"))
+        self.assertEqual(state, "done", "a delete-only change with guard no stays done after round 1, whatever round 2 is")
+        self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
 
     def test_a_delete_only_change_with_guard_yes_and_a_round_one_fail_is_open(self):
         # A guard or check change owes the second and third rounds when the first round fails, even if it only deletes.

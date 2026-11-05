@@ -95,7 +95,7 @@ gloss here. The reader did not return the titles.
 
 | # | Guard (file:symbol, what it stops) | Record | Incident | Verdict | Home or fact |
 |---|---|---|---|---|---|
-| 1 | guard-shell.py: clause_checkout, clause_stash, clause_reset. Stops a checkout or restore path, a stash pop or drop, and reset --hard over a dirty tree. | D179, D173 | 2026-09-06 checkout lost about 240 lines | PROMOTE (reset --merge, --keep); DUPLICATE ? (Codex half) | cs hooks/guard_shared_tree.py:shared_tree_hit misses reset --merge and --keep. Promote those two (not placed). Skipped in Claude Code. The Codex half has no cs runner (D135). Waits on owner question 1 |
+| 1 | guard-shell.py: clause_checkout, clause_stash, clause_reset. Stops a checkout or restore path, a stash pop or drop, and reset --hard over a dirty tree. | D179, D173 | 2026-09-06 checkout lost about 240 lines | PROMOTE (reset --merge, --keep); DUPLICATE ? (Codex half) | cs hooks/guard_shared_tree.py:shared_tree_hit missed reset --merge and --keep. Those two are placed in hooks/guard_shared_tree.py reset_discards by lane guard-reset-merge-keep. Skipped in Claude Code. The Codex half has no cs runner (D135). Waits on owner question 1 |
 | 2 | guard-shell.py: clause_tree_bash, clause_tree_write. Stops a write outside this checkout. | D179 | 2026-09-06 about 1,500 lines written into the main checkout | DUPLICATE | cs hooks/guard.py rule other-checkout. Double fire live in Claude Code |
 | 3 | guard-shell.py: clause_wait. Stops a sleep or poll loop, and a waiter that matches itself in pgrep. | D179, D173 | 2026-09-12 pgrep waiter; 119-round merge loop | DUPLICATE | cs hooks/guard_stream.py:waiter_verdict. Double fire live |
 | 4 | guard-shell.py: clause_narrate (NARRATORS). Stops make merge piped into tail. | D235, D179 | 2026-09-20 | PROMOTE (--confirm spelling); DUPLICATE (rest) | cs hooks/guard_stream.py:narrated_tail_hit misses make merge with --confirm piped into tail (probed). Promote that spelling (not placed). The rest double fires live |
@@ -413,7 +413,6 @@ copy, so no CI gap.
 
 These items have no lane and no owner question yet. Each needs a lane or an owner call:
 
-- banchi row 1: promote the reset --merge and --keep part into hooks/guard_shared_tree.py.
 - banchi row 4: promote the --confirm spelling into hooks/guard_stream.py.
 - banchi row 7: promote the file and bash-c clauses into hooks/guard.py silent_write_hit.
 - banchi row 21 (zeroth hook copy) and row 47 (fixed sleeps in Playwright specs).

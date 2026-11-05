@@ -763,12 +763,11 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     worktree also needs to be merged and idle 1 hour, so a stale installed job fails safe.
     ATTENDED (a person's run) skips those two keeps. AGENT_RULE (on by default) lets a clean,
     fully pushed tree under `.claude/worktrees/agent-*` go after 4 idle hours even when those two
-    keeps hold it. A repo's own `reap:worktrees` script turns it off. BATCH (`merged_batch`) is
-    the one read that says which commits are in the default branch. FAST reads no remote and no
-    push state: the tree goes only when its HEAD is in the default branch (and idle 1 hour,
-    unless attended), and with no BATCH nothing is proven, so it stays. OWN_LOCK_RULE (on by
-    default) frees the calling session's own agent lock once the tree is clean, merged, idle 30
-    minutes and unused; the agent-end reap turns it off."""
+    keeps hold it. BATCH (`merged_batch`) is the one read that says which commits are in the
+    default branch. FAST reads no remote and no push state: the tree goes only when its HEAD is
+    in the default branch (and idle 1 hour, unless attended), and with no BATCH nothing is
+    proven, so it stays. OWN_LOCK_RULE (on by default) frees the calling session's own agent
+    lock once the tree is clean, merged, idle 30 minutes and unused; the agent-end reap turns it off."""
     lock_idle = None  # an agent lock's idle is read even when attended, and before any status
     if AGENT_LOCK_RE.match(entry.get("locked_reason") or ""):
         lock_idle = entry["idle"] if "idle" in entry else worktree_idle_seconds(entry["path"])
@@ -2709,47 +2708,6 @@ def _is_toplevel(path: str) -> bool:
 MODES = ("full", "tier1", "branches")
 
 
-REAPER_SCRIPT = "reap:worktrees"
-# session_end_sweep.py kills this sweep at 25 s (SWEEP_TIMEOUT_SECONDS). The repo's own script has
-# to end well inside that, or the kill orphans its npm child, so it gets 15 s. After a timeout the
-# older rules alone judge the trees.
-REAPER_TIMEOUT_SECONDS = 15
-
-
-def repo_reaper(root: str):
-    """The repo's own agent-worktree remover: ("none", None) when `<root>/package.json` is absent
-    or defines no `reap:worktrees` script, ("script", None) when it does, ("unreadable", why) when
-    package.json cannot be read or parsed. The agent rule needs "none"."""
-    package = os.path.join(root, "package.json")
-    if not os.path.isfile(package):
-        return "none", None
-    try:
-        with open(package, encoding="utf-8") as handle:
-            scripts = json.load(handle).get("scripts") or {}
-        return ("script" if REAPER_SCRIPT in scripts else "none"), None
-    except Exception as exc:
-        return "unreadable", "package.json unreadable: %s" % exc
-
-
-def run_repo_reaper(root: str):
-    """Run `npm run reap:worktrees -- --remove` in ROOT. Returns None on success, else why it
-    failed. npm is resolved with shutil.which (npm.cmd on Windows); prompts are off."""
-    npm = shutil.which("npm")
-    if npm is None:
-        return "npm not found"
-    try:
-        done = _nowindow.run(
-            [npm, "run", REAPER_SCRIPT, "--", "--remove"], cwd=root, capture_output=True,
-            text=True, encoding="utf-8", errors="replace", timeout=REAPER_TIMEOUT_SECONDS,
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"})
-    except Exception as exc:
-        return "npm run %s failed: %s" % (REAPER_SCRIPT, exc)
-    if done.returncode != 0:
-        return "npm run %s exited %d: %s" % (REAPER_SCRIPT, done.returncode,
-                                             (done.stderr or done.stdout).strip()[-200:])
-    return None
-
-
 # Only the SessionEnd run has a deadline. session_end_sweep.py kills its sweep after min(25 s,
 # the time its hook has left) and passes that number as `--deadline-seconds N`. The budget counts
 # from the start of the pass: the pass judges trees until min(JUDGE_BUDGET_SECONDS, N minus
@@ -2890,23 +2848,9 @@ def sweep_repo(root: str, confirm: bool, restore_log_path: str, mode: str = "ful
     if mode not in ("branches", "fast"):
         result["pruned"] = prune_registrations(root, confirm)
 
-    # The agent rule (when-a-worktree-may-be-removed) is the default remover of finished agent
-    # trees. A repo with its own `reap:worktrees` script gets that script instead, run before the
-    # list is read so the trees it removes are not judged; an unreadable package.json turns the
-    # rule off.
+    # The agent rule (when-a-worktree-may-be-removed) is the remover of finished agent trees in
+    # every repo: the sweep never runs code a repository supplies, so no repo script replaces it.
     agent_rule = mode == "full" and not attended
-    if agent_rule:
-        reaper, why = repo_reaper(root)
-        if reaper != "none":
-            agent_rule = False
-            if reaper == "unreadable":
-                result["reaper"] = why
-            elif confirm and _past_deadline():
-                result["reaper"] = "not run: deadline"
-            elif confirm:
-                result["reaper"] = run_repo_reaper(root) or "ran"
-            else:
-                result["reaper"] = "would run"
 
     entries = parse_worktree_list(root)
     if entries is None:
@@ -3070,8 +3014,6 @@ def print_sweep_report(results, confirm: bool, out=sys.stdout):
         if not result["branches"] and not result["worktrees"] and not result["listeners"] \
                 and not has_prune and result.get("husks", []) == [] and result.get("strays", []) == []:  # None is unknown
             print("  nothing to examine", file=out)
-        if result.get("reaper"):
-            print("  reaper    %s: %s" % (REAPER_SCRIPT, result["reaper"]), file=out)
         if pruned and pruned["names"] is None:
             print("  prune     UNREADABLE -- %s; nothing pruned" % pruned["error"], file=out)
         elif pruned:
@@ -3252,6 +3194,10 @@ def main(argv=None) -> int:
     parser.add_argument("--root", metavar="PATH",
                          help="sweep the one repository PATH belongs to (PATH may be a linked "
                               "worktree or a folder inside it); adds to any ROOT given")
+    parser.add_argument("--session-end", action="store_true", dest="session_end",
+                         help="the SessionEnd run only: judges branches and worktrees in its "
+                              "own repository only, stops proven orphans machine-wide like the "
+                              "scheduled job, and skips the loose-process report")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--tier1", action="store_true",
                        help="only stale registrations and husks. The one mode that acts "
@@ -3355,7 +3301,8 @@ def _sweep_roots(args, roots, restore_log_path, mode):
         return 0
     dead = find_dead_rooted()
     print_dead_rooted_report(dead)
-    if not _past_deadline():
+    # SessionEnd skips the loose-process report: the hook discards its output.
+    if not getattr(args, "session_end", False) and not _past_deadline():
         print_loose_processes_report(find_loose_processes())
     if args.confirm:
         reaped = reaped_listener_decisions(results)
