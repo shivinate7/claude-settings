@@ -29,6 +29,9 @@ const pinTable = (...a) => config.pinTable(...a);
 // The model-call sites of { path: text }. the host's own reader of them.
 const seamSites = (...a) => config.seamSites(...a);
 
+// The files under `mapPaths` (path prefixes). With no `mapPaths`, every file. MAP1 and MAP7 both read it, before they read any file.
+export const inMapPaths = (allFiles, cfg) => allFiles.filter((f) => !cfg.mapPaths || cfg.mapPaths.some((p) => f.startsWith(p)));
+
 // The one list of code extensions, from `codeExtensions` (required in every config, and checked to be plain words). MAP1 and MAP2 both read it.
 // No module state holds it: the regex is built from the validated config on each call.
 export const extRe = (cfg) => new RegExp(`\\.(${cfg.codeExtensions.join('|')})$`);
@@ -1185,7 +1188,7 @@ export const mapChecks = ({ cfg, root, read, files = () => gitLsFiles(root) }) =
 
   return {
     MAP1: () => {
-      const all = trackedCodeFiles(files(), cfg).filter((f) => !cfg.mapPaths || cfg.mapPaths.some((p) => f.startsWith(p)));
+      const all = inMapPaths(trackedCodeFiles(files(), cfg), cfg);
       const mapped = new Set(mapTexts().flatMap((t) => mapCodePaths(t, extRe(cfg))));
       const missing = all.filter((f) => !mapped.has(f));
       if (missing.length)
@@ -1243,7 +1246,7 @@ export const mapChecks = ({ cfg, root, read, files = () => gitLsFiles(root) }) =
     },
 
     MAP7: () => {
-      const code = Object.fromEntries(trackedCodeFiles(files(), cfg).map((f) => [f, read(f)]));
+      const code = Object.fromEntries(inMapPaths(trackedCodeFiles(files(), cfg), cfg).map((f) => [f, read(f)]));
       const notes = plainWordsNotes(code);
       if (notes.length)
         throw new Error(
