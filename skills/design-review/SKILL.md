@@ -93,8 +93,8 @@ It is not a review of a built screen.
    style changed; else `new`. It names the parts that decide the verdict. In an iOS repo, it also gives
    each mockup the `native` or `web-like` line of step 7.
 3. When every mockup is `same`, the orchestrator puts one flag at the top of the owner's list: the set
-   holds no new structure. It offers one more round of blind lanes, from the template.
-4. When a blind mockup is `same`, the orchestrator reads that lane's brief against the template
+   holds no new structure. It offers one more round of blind designers, from the template.
+4. When a blind mockup is `same`, the orchestrator reads that designer's brief against the template
    (`blind_brief.py`) and names any fault beside the verdict.
 
 ## Rules

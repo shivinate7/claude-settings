@@ -4,7 +4,7 @@
 
 Owner, 2026-10-16 01:47 CDT ("Status read only") and 03:00 CDT ("Change them too"): no program and no agent runs `gh run watch`, in the foreground or the background. Each wait reads the run's status until the run ends or its deadline passes. `bin/merge` reads once every 30 s. The CI wake reads 30 s apart for the first 4 minutes, then at gaps that grow to 120 s (owner, 2026-10-21, back-off).
 
-- `merge/merge.py`, `block`: no watch. It pauses 30 s. The next pass of the wait loop reads the checks and runs.
+- `merge/merge.py`, `block`: no watch. It pauses 30 s when a check has an Actions run, else a minute. The next pass of the wait loop reads the checks and runs.
 - `hooks/ci_wake.py`, `watch_run`: no watch. It reads `gh run view <id> --json status` on one schedule (`pauses`): 30 s apart through 240 s, then gaps that grow by 30 s up to 120 s, never shorter than the gap before. `wait_for` lists the head's runs on the same schedule. The watch returns when the status is `completed` or the deadline passes. The deadline stays 3300 s, and `watch_run` makes no status read at or after it. A failed read gets one retry after a 30 s pause, never past the deadline. A second failure ends the wait as unknown, never green.
 - A session waits on CI through the CI-wake notice that follows `gh pr ready`. The guard's remedy never names `bin/merge`, because it merges when the wait ends.
 
@@ -26,10 +26,10 @@ Why: sessions waited for CI with long background commands that ran on for hours.
 
 ### The cloud wake
 
-A cloud session has no `gh` and no PostToolUse hook, so it waits through the PR subscription. A watched PR wakes its session on a new comment, a review, and a run whose jobs all passed. A run with a red job sends no "all checks done" wake, and a green job alone wakes nobody. Batch 649's macOS job went red while its other jobs ran on. The build advisor set no check-in, so no session moved for about 2.5 hours (owner gripe, 2026-10-26, step c88).
+A cloud session has no `gh` and no PostToolUse hook, so it waits through the PR subscription. A watched PR wakes its session on a new comment, a review, and a run whose jobs all passed. A run with a red job sends no "all checks done" wake, and a green job alone wakes nobody. Why: a red job can go unseen for hours when no session sets a check-in (owner gripe, 2026-10-26: about 2.5 hours).
 
 - `checks.yml`'s last job, `ci-done`, needs every other job and runs when no run was cancelled. When a job ended `failure` or `cancelled`, it posts one PR comment: the head, each red job and the run link. A green run posts nothing. A superseded run posts nothing. `actions/ci-done-comment` holds the script, and other repos call it.
-- Measured on batch 663 (2026-10-27): a red run's `ci-done` comment by `github-actions[bot]` reached the watching session as `issue_comment.created`, about 2 minutes after the post. A run that a newer push cancelled posted no comment, as designed.
+- Measured 2026-10-27: a red run's `ci-done` comment by `github-actions[bot]` reached the watching session as `issue_comment.created`, about 2 minutes after the post. A run that a newer push cancelled posted no comment, as designed.
 - The fallback: a session that waits on CI sets a `send_later` check-in when it starts to wait, and again after each red job, each wider apart (rule `git-ci-wait-checks-in`). A check-in costs one read, and it catches a lost wake.
 
 Kind: build
