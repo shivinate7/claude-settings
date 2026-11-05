@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Cases for skills/waiting-page/owner_word.py, the checker that says whether a fetched page answer is the owner's grant.
+"""Cases for skills/waiting-page/page_grant.py, the checker that says whether a fetched page answer is the owner's grant.
 
-    python3 -m unittest skills/waiting-page/test_owner_word.py
+    python3 -m unittest skills/waiting-page/test_page_grant.py
 
-OWNER_WORD_UNDER_TEST names the script to run (default: owner_word.py beside this file), so the same cases run
+PAGE_GRANT_UNDER_TEST names the script to run (default: page_grant.py beside this file), so the same cases run
 against another checkout and show red there.
 
 The checker reads only what a session fetched with ArtifactData (DIR/answers/<ID>.json, DIR/items/<ID>.json) and the
@@ -25,7 +25,7 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CMD = os.environ.get("OWNER_WORD_UNDER_TEST") or os.path.join(HERE, "owner_word.py")
+CMD = os.environ.get("PAGE_GRANT_UNDER_TEST") or os.path.join(HERE, "page_grant.py")
 LINT = os.path.realpath(os.path.join(HERE, "..", "..", "lint"))
 sys.path.insert(0, LINT)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
