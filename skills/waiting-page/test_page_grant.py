@@ -43,6 +43,7 @@ ITEM_N = 231
 ADDED = "2026-11-04T12:00:00Z"  # the item's `added`, before the answer
 AT = "2026-11-04T13:56:29.078Z"  # the answer's `at`, as the live answer of item 231 holds it
 ABSENT = object()  # set a field to ABSENT to leave it out of a fixture
+PICK = "a"  # the pick every case passes unless it names another; a decision with no pick is not counted
 
 
 def setUpModule():
@@ -76,7 +77,7 @@ def answer(**fields):
 
 
 def verdict(choice, note=None):
-    """The counted line for item 231. `choice` is a key, `a+c` for a list, or `done` for a task."""
+    """The counted line for item 231. `choice` is a key, or `a+c` for a list."""
     line = "counted item=%s n=%d choice=%s at=%s" % (ITEM_ID, ITEM_N, choice, AT)
     return line if note is None else line + " note=" + json.dumps(note)
 
@@ -144,7 +145,7 @@ class Base(unittest.TestCase):
         return self.fetch(items={ITEM_ID: item(**(item_fields or {}))},
                           answers={ITEM_ID: answer(**(answer_fields or {}))})
 
-    def check(self, root, fetched, page=PAGE_URL, item_id=ITEM_ID, pick=None):
+    def check(self, root, fetched, page=PAGE_URL, item_id=ITEM_ID, pick=PICK):
         args = [sys.executable, CMD, "--root", root, "--page-url", page, "--item", item_id, "--fetched", fetched]
         if pick is not None:
             args += ["--pick", pick]
@@ -156,12 +157,15 @@ class Base(unittest.TestCase):
                          % (r.returncode, r.stdout, r.stderr))
         self.assertEqual(r.stdout.splitlines(), [line], "the counted line differs from the answer")
 
-    def assertNotCounted(self, r, case):
+    def assertNotCounted(self, r, case, reason=None):
+        """`reason`, a lower-case word, must appear in the verdict's reason, so the case fails for its own rule."""
         self.assertEqual(r.returncode, 1, "%s: expected exit 1, got %d, stdout %r, stderr %r"
                          % (case, r.returncode, r.stdout, r.stderr))
         lines = r.stdout.splitlines()
         self.assertEqual(len(lines), 1, "%s: expected one verdict line, got %r" % (case, lines))
         self.assertTrue(lines[0].startswith("not counted: "), "%s: verdict is not `not counted:`: %r" % (case, lines[0]))
+        if reason is not None:
+            self.assertIn(reason, lines[0].lower(), "%s: the reason does not name %r: %r" % (case, reason, lines[0]))
 
     def assertUnknown(self, r, case):
         self.assertEqual(r.returncode, 2, "%s: expected exit 2, got %d, stdout %r, stderr %r"
@@ -174,34 +178,46 @@ class Base(unittest.TestCase):
 
 class Counted(Base):
     def test_replay_item_231_counted(self):
-        r = self.check(self.repo(), self.pair())
+        r = self.check(self.repo(), self.pair(), pick="a")
         self.assertCounted(r, "counted item=review-fix-check-go n=231 choice=a at=2026-11-04T13:56:29.078Z")
 
     def test_code_artifact_form_of_the_page_counted(self):
-        r = self.check(self.repo(), self.pair(), page=PAGE_CODE_URL)
+        r = self.check(self.repo(), self.pair(), page=PAGE_CODE_URL, pick="a")
         self.assertCounted(r, verdict("a"))
 
     def test_note_printed_as_json_string(self):
-        r = self.check(self.repo(), self.pair(answer_fields={"note": 'Ship "it" now'}))
+        r = self.check(self.repo(), self.pair(answer_fields={"note": 'Ship "it" now'}), pick="a")
         self.assertCounted(r, verdict("a", note='Ship "it" now'))
 
     def test_at_later_by_milliseconds_in_same_second_counted(self):
-        r = self.check(self.repo(), self.pair(item_fields={"added": "2026-11-04T13:56:29Z"}))
+        r = self.check(self.repo(), self.pair(item_fields={"added": "2026-11-04T13:56:29Z"}), pick="a")
         self.assertCounted(r, verdict("a"))
 
     def test_multi_list_counted_as_joined_keys(self):
         r = self.check(self.repo(), self.pair(item_fields={"multi": True, "options": options("abc")},
-                                              answer_fields={"choice": ["a", "c"]}))
+                                              answer_fields={"choice": ["a", "c"]}), pick="a+c")
         self.assertCounted(r, verdict("a+c"))
 
-    def test_task_with_done_counted_as_done(self):
-        r = self.check(self.repo(), self.pair(item_fields={"kind": "task", "options": []},
-                                              answer_fields={"choice": ABSENT, "done": True}))
-        self.assertCounted(r, verdict("done"))
-
     def test_overturn_on_arbiter_ruling_counted(self):
-        r = self.check(self.repo(), self.pair(item_fields={"arbiter": True}, answer_fields={"choice": "overturn"}))
+        r = self.check(self.repo(), self.pair(item_fields={"arbiter": True}, answer_fields={"choice": "overturn"}),
+                       pick="overturn")
         self.assertCounted(r, verdict("overturn"))
+
+    def test_open_item_with_lane_set_counted(self):
+        """The relay case: a lane took the answer, so the item is still open with its lane set. Green on the old code too."""
+        r = self.check(self.repo(), self.pair(item_fields={"lane": "owner-word-relay"}), pick="a")
+        self.assertCounted(r, verdict("a"))
+
+    def test_closed_arbiter_ruling_overturn_counted(self):
+        """An arbiter ruling is written closed; its overturn still counts. Green on the old code too."""
+        r = self.check(self.repo(), self.pair(item_fields={"status": "closed", "arbiter": True},
+                                              answer_fields={"choice": "overturn"}), pick="overturn")
+        self.assertCounted(r, verdict("overturn"))
+
+    def test_added_with_explicit_offset_counted(self):
+        """06:00 at -06:00 is 12:00Z, so the answer at 13:56Z is still later. Green on the old code too."""
+        r = self.check(self.repo(), self.pair(item_fields={"added": "2026-11-04T06:00:00-06:00"}), pick="a")
+        self.assertCounted(r, verdict("a"))
 
     def test_pick_matching_counted(self):
         r = self.check(self.repo(), self.pair(), pick="a")
@@ -214,17 +230,17 @@ class Counted(Base):
 
     def test_full_size_options_answer_last_key_counted(self):
         r = self.check(self.repo(), self.pair(item_fields={"options": options("abcdefghijkl")},
-                                              answer_fields={"choice": "l"}))
+                                              answer_fields={"choice": "l"}), pick="l")
         self.assertCounted(r, verdict("l"))
 
     def test_full_size_registry_waiting_page_last_counted(self):
-        r = self.check(self.repo(artifacts=full_registry()), self.pair())
+        r = self.check(self.repo(artifacts=full_registry()), self.pair(), pick="a")
         self.assertCounted(r, verdict("a"))
 
     def test_checker_writes_nothing(self):
         root, fetched = self.repo(), self.pair()
         before = (snapshot(root), snapshot(fetched))
-        r = self.check(root, fetched)
+        r = self.check(root, fetched, pick="a")
         self.assertCounted(r, verdict("a"))
         self.assertEqual((snapshot(root), snapshot(fetched)), before, "the checker changed a file under root or fetched")
 
@@ -318,6 +334,32 @@ class NotCounted(Base):
     def test_pick_mismatch(self):
         r = self.check(self.repo(), self.pair(), pick="b")
         self.assertNotCounted(r, "page pick is a, the relayed pick is b")
+
+    def test_status_closed_decision_not_counted(self):
+        r = self.check(self.repo(), self.pair(item_fields={"status": "closed"}))
+        self.assertNotCounted(r, "item status closed: only an open item takes an answer", reason="status")
+
+    def test_closed_arbiter_ruling_answer_not_overturn_not_counted(self):
+        r = self.check(self.repo(), self.pair(item_fields={"status": "closed", "arbiter": True}))
+        self.assertNotCounted(r, "closed arbiter ruling answered with a pick: only overturn passes", reason="status")
+
+    def test_answer_at_zone_less_not_counted(self):
+        r = self.check(self.repo(), self.pair(answer_fields={"at": "2026-11-04T13:56:29.078"}))
+        self.assertNotCounted(r, "answer at has no zone", reason="zone")
+
+    def test_item_added_zone_less_not_counted(self):
+        r = self.check(self.repo(), self.pair(item_fields={"added": "2026-11-04T10:00:00"}))
+        self.assertNotCounted(r, "item added has no zone", reason="zone")
+
+    def test_decision_without_pick_not_counted(self):
+        r = self.check(self.repo(), self.pair(), pick=None)
+        self.assertNotCounted(r, "decision run with no --pick", reason="pick")
+
+    def test_task_with_done_not_counted(self):
+        """Re-pointed from the task-done case that counted: a task answer grants no act, done or not."""
+        r = self.check(self.repo(), self.pair(item_fields={"kind": "task", "options": []},
+                                              answer_fields={"choice": ABSENT, "done": True}), pick="done")
+        self.assertNotCounted(r, "task answer with done true", reason="task")
 
 
 class Unknown(Base):
