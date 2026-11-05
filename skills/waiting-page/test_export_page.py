@@ -25,6 +25,10 @@ Contract the page cases assume (the builder builds to it):
   --all, a page-only entry (`collections` []) exports its page and files and no database.
   --all --account LABEL. An entry whose account differs prints `<id>: skipped - account <its account>`, needs no fetched
     folder, writes nothing and exits 0 for it. Without the flag every entry exports as before.
+    A LABEL no registry entry holds, the empty label included, prints one `unknown` line that names the label, writes
+    nothing, exits 2.
+  --all, a page-only entry whose fetched folder holds no page.html prints `<id>: unknown - ...` that names page.html,
+    writes nothing for it, and the run exits 2.
   Retina names are not emails: `logo@2x.png`, as a file name or in page text, exports; `jane@2x.com` refuses.
   Digit-led domains are emails: jane@1st.example.com, jane@12.34.example.com and jane@1.2.3.com refuse in page text.
   URL credentials refuse on an IP host as on a host name: postgres://app:<password>@10.0.0.5:5432/db refuses; an IP
@@ -1102,6 +1106,31 @@ class All(Base):
         self.assertEqual(second.returncode, 0, "the second run of a page-only entry failed. Output:\n" + shown(second))
         self.assertVerdictOf(second, self.QUEUE, r"\bsame\b")
 
+    def test_a_page_only_entry_with_no_page_html_is_unknown_and_writes_nothing(self):
+        """--all --account work, with a page-only entry (`collections` []) whose fetched folder exists and holds no page.html:
+        its line is `<id>: unknown - ...` naming page.html, nothing lands under its export path, and the run exits 2."""
+        fetched = self.fetched_all({self.WAIT: self.docs()[self.WAIT], self.QUEUE: None})  # the queue's folder: no page.html
+        root, worktree = self.repo(queue=self.queue_entry(collections=[])), self.out("worktree")
+        r = self.run_cmd("--all", root, "--fetched", fetched, "--worktree", worktree, "--account", "work")
+        line = self.verdict_of(r, self.QUEUE)  # the scope: the page-only artifact's own verdict line
+        self.assertTrue(line.startswith(self.QUEUE + ": unknown - "),
+                        "a page-only entry whose folder has no page.html is not unknown: %r. Output:\n%s" % (line, shown(r)))
+        self.assertIn("page.html", line, "the unknown line does not name the missing page.html: %r" % line)
+        self.assertEqual(r.returncode, 2, "an unknown artifact must make the run exit 2. Output:\n" + shown(r))
+        self.assertFalse(os.path.exists(self.export_folder(worktree, self.QUEUE)),
+                         "the page-only entry wrote into its export path although its page is missing")
+
+    def test_a_page_only_entry_with_page_html_still_exports_its_page_and_exits_0(self):
+        """Control beside the case above: the same page-only entry with its page.html exports as today, `changed 1`, exit 0."""
+        fetched = self.fetched_all({self.WAIT: self.docs()[self.WAIT], self.QUEUE: None}, pages={self.QUEUE: QUEUE_PAGE})
+        root, worktree = self.repo(queue=self.queue_entry(collections=[])), self.out("worktree")
+        r = self.run_cmd("--all", root, "--fetched", fetched, "--worktree", worktree, "--account", "work")
+        self.assertEqual(r.returncode, 0, "a page-only entry with its page.html must exit 0. Output:\n" + shown(r))
+        self.assertVerdictOf(r, self.QUEUE, r"changed\s+1\b")
+        landed = os.path.join(self.export_folder(worktree, self.QUEUE), "page", "page.html")
+        self.assertTrue(os.path.isfile(landed), "page/page.html was not exported for the page-only entry. Output:\n" + shown(r))
+        self.assertEqual(read_bytes(landed), QUEUE_PAGE, "the page-only entry's page/page.html is not byte-identical")
+
     def test_a_secret_in_an_artifacts_page_refuses_only_that_artifact(self):
         root, worktree = self.repo(), self.out("worktree")
         pages = {self.WAIT: PAGE_BYTES, self.QUEUE: QUEUE_PAGE}
@@ -1326,6 +1355,33 @@ class NoExport(Base):
                       "an other-account entry did not export without the flag. Output:\n" + shown(r))
         self.assertEqual([line for line in verdict_lines(r) if "skipped - account" in line], [],
                          "a run without --account skipped an entry")
+
+    def label_run(self, label):
+        """--all --account LABEL over the waiting page and one other-account entry, both fetched: the run and its worktree."""
+        worktree, other = self.out("worktree"), self.EXTERNAL[0]
+        entries = [self.waiting(), self.external(other, held=False, collections=["items"])]
+        return self.run_all(self.repo(entries), self.fetched_waiting(also=(other,)), worktree, account=label), worktree
+
+    def test_an_account_label_no_entry_holds_is_one_unknown_line_and_exits_2(self):
+        """--account LABEL that no registry entry holds: one `unknown` line that names the label, exit 2, and nothing written,
+        though the fetched folders are there for the run to export."""
+        r, worktree = self.label_run("nobody")
+        unknown = [line for line in verdict_lines(r) if line.startswith("unknown")]
+        self.assertTrue(unknown, "a label no entry holds printed no `unknown` line. Output:\n" + shown(r))
+        self.assertIn("nobody", unknown[0], "the unknown line does not name the label. Output:\n" + shown(r))
+        self.assertEqual(len(verdict_lines(r)), 1, "a label no entry holds must print one line. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 2, "a label no entry holds must exit 2. Output:\n" + shown(r))
+        self.assertFalse(os.path.exists(worktree), "a run whose label matched no entry wrote into the copy")
+
+    def test_an_empty_account_label_is_one_unknown_line_and_exits_2(self):
+        """--account "" (an empty label), which no registry entry holds: one `unknown` line, exit 2, and nothing written."""
+        r, worktree = self.label_run("")
+        lines = verdict_lines(r)
+        unknown = [line for line in lines if line.startswith("unknown")]
+        self.assertTrue(unknown, "an empty label printed no `unknown` line. Output:\n" + shown(r))
+        self.assertEqual(len(lines), 1, "an empty label must print one line. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 2, "an empty label must exit 2. Output:\n" + shown(r))
+        self.assertFalse(os.path.exists(worktree), "a run whose empty label matched no entry wrote into the copy")
 
 
 if __name__ == "__main__":
