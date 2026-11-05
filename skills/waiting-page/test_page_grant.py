@@ -208,6 +208,13 @@ class Counted(Base):
         r = self.check(self.repo(), self.pair(item_fields={"lane": "owner-word-relay"}), pick="a")
         self.assertCounted(r, verdict("a"))
 
+    def test_open_item_with_lane_and_last_answer_and_answer_kept_counted(self):
+        """The answer is kept until the receiver reports done: the item is open with `lane` and `lastAnswer` set, and
+        answers/<id> is still there. Counted on the relayed pick. Green on the old code too: the checker never reads those two fields."""
+        last = {"choice": "a", "note": "", "at": AT}
+        r = self.check(self.repo(), self.pair(item_fields={"lane": "owner-word-relay", "lastAnswer": last}), pick="a")
+        self.assertCounted(r, verdict("a"))
+
     def test_item_with_no_status_field_counted(self):
         """An item with no `status` field at all is open, as the page reads it. Red on a checker whose default status is closed."""
         r = self.check(self.repo(), self.pair(item_fields={"status": ABSENT}), pick="a")
