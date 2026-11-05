@@ -937,7 +937,7 @@ class Stale(unittest.TestCase):
                 self.assert_wait_line(r, 154, RUN, "ended")
 
 
-# The item 154 history: run 41861801325 ended completed/failure, and PR 1011 was its PR. Fixtures for the --items cases.
+# Fixtures for the --items cases: a repo, a run that ended completed/failure, and the PR that run gated.
 REPO, RUN, PR = "shivinate7/q_max", "41861801325", 1011
 RUN_ARGV = "run view %s --repo %s --json status,conclusion" % (RUN, REPO)
 
