@@ -41,7 +41,7 @@ action actions/mutation-report.
 `--changed <repo> (--profile NAME | --profile-file JSON) --base REF [--head REF] [--limit N] [--budget S] [--suite-timeout S]
 [--jobs N] [--log PATH]` mutates the product lines a change adds past merge-base(base, head), runs the suites the profile's `select`
 lists for each file, and prints `catch share: K/R` and each `untested: path:line`. Exit 0 whatever the share.
-`--known-bugs FILE --repo REPO [--suite-timeout S] [--log PATH]` plants each listed defect in a checkout of HEAD and runs its catcher
+`--known-defects FILE --repo REPO [--suite-timeout S] [--log PATH]` plants each listed defect in a checkout of HEAD and runs its catcher
 suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. Exit 1 when any defect is MISS or UNKNOWN.
 `--tests-for PATH` prints the suites that test one file: the select command of the `claude_settings` profile.
 """
@@ -2471,14 +2471,14 @@ def changed_main(argv) -> int:
     return 0
 
 
-def known_bugs_main(argv) -> int:  # glossary-ok: the entry point name is pinned by hooks/test_mutate_ci.py
-    """Replay the planted defects of a list (`.github/known-bugs.json`) against a repository's HEAD. One line per defect:
+def known_defects_main(argv) -> int:
+    """Replay the planted defects of a list (`.github/known-defects.json`) against a repository's HEAD. One line per defect:
     `CAUGHT`, `MISS` or `UNKNOWN`. Exit 1 when any defect is MISS or UNKNOWN (decision ci-unknown-is-red). A missing list names
     no defect and exits 0; a list that cannot be read exits 2."""
     import argparse
     import json
-    parser = argparse.ArgumentParser(prog="mutate_guard.py --known-bugs")
-    parser.add_argument("--known-bugs", dest="list_path", required=True, metavar="FILE",  # glossary-ok: the flag is the mode's interface
+    parser = argparse.ArgumentParser(prog="mutate_guard.py --known-defects")
+    parser.add_argument("--known-defects", dest="list_path", required=True, metavar="FILE",
                         help="a JSON list of planted defects")
     parser.add_argument("--repo", required=True, help="a clone of the repository the defects are planted in")
     parser.add_argument("--suite-timeout", type=float, default=120, help="seconds before a suite run is killed")
@@ -2667,8 +2667,8 @@ def main() -> int:
         return replay_main(sys.argv[1:])
     if "--changed" in sys.argv[1:]:
         return changed_main(sys.argv[1:])
-    if "--known-bugs" in sys.argv[1:]:
-        return known_bugs_main(sys.argv[1:])  # glossary-ok: the entry point name is pinned by hooks/test_mutate_ci.py
+    if "--known-defects" in sys.argv[1:]:
+        return known_defects_main(sys.argv[1:])
     if "--tests-for" in sys.argv[1:]:
         return tests_for_main(sys.argv[1:])
     sources = {}

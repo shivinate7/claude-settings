@@ -1169,9 +1169,9 @@ jobs:
   # a pull request from a `batch-` branch (the scope flag mutation_report, set from the head ref) and on workflow_dispatch.
   # A pull request from any other branch skips its steps, so the job reads passed. A push or a schedule reaches the action,
   # which skips there itself: the scope rules read a scoped job as running on those events.
-  # It reports the catch share of the changed lines and never fails on it. It fails only when a known bug (.github/known-bugs.json)
+  # It reports the catch share of the changed lines and never fails on it. It fails only when a known defect (.github/known-defects.json)
   # is MISS or UNKNOWN. Cap (ci-job-caps): measured locally on batch 11 (59bff081..0497265b), `--changed` with limit 10,
-  # budget 300 s and suite timeout 180 s took 337 s, and `--known-bugs` 7 s, with a checkout and setup around 1 min. That is
+  # budget 300 s and suite timeout 180 s took 337 s, and `--known-defects` 7 s, with a checkout and setup around 1 min. That is
   # about 7 min, so the cap is about 2x, 15 min. The first CI run on a batch replaces this figure.
   mutation-report:
     runs-on: ubuntu-latest
@@ -1189,7 +1189,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Mutation report and known bugs
+      - name: Mutation report and known defects
         if: ${{ needs.scope.outputs.mutation_report == 'true' || github.event_name != 'pull_request' }}
         uses: $/actions/mutation-report
         with:

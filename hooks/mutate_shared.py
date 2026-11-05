@@ -1310,9 +1310,9 @@ def _known_defect(dest: str, defect: dict, suite_timeout: float) -> dict:
 def format_known_defects(results) -> str:
     """One `CAUGHT|MISS|UNKNOWN id: name [reason]` line for each defect, then a totals line. No defect reads one line."""
     if not results:
-        return "no known bugs listed"
+        return "no known defects listed"
     lines = ["%s %s: %s%s" % (r["verdict"], r["id"], r["name"], " [%s]" % r["reason"] if r["reason"] else "")
              for r in results]
     counts = {verdict: sum(1 for r in results if r["verdict"] == verdict) for verdict in ("CAUGHT", "MISS", "UNKNOWN")}
-    lines.append("known bugs: %d caught, %d miss, %d unknown" % (counts["CAUGHT"], counts["MISS"], counts["UNKNOWN"]))
+    lines.append("known defects: %d caught, %d miss, %d unknown" % (counts["CAUGHT"], counts["MISS"], counts["UNKNOWN"]))
     return "\n".join(lines)

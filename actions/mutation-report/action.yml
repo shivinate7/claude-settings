@@ -1,10 +1,10 @@
 name: Mutation report
 description: >
-  Reports how well the suites catch a wrong edit in the lines a change adds, then replays the known bugs of the
+  Reports how well the suites catch a wrong edit in the lines a change adds, then replays the known defects of the
   caller's repository. Runs hooks/mutate_guard.py from this repo against the caller's checkout.
   `--changed` mutates the lines the checkout adds past its merge base with the pull request base, runs the suites
   the profile selects for each file, and writes the catch share and the untested lines to the job summary. A low
-  share never fails the action. `--known-bugs` plants each defect of the list in a checkout of HEAD and runs its
+  share never fails the action. `--known-defects` plants each defect of the list in a checkout of HEAD and runs its
   catcher suite. A defect that is MISS or UNKNOWN fails the action (decision ci-unknown-is-red): that step is the
   only one that can. Both JSON logs go up as one artifact, `mutation-report`. The caller needs actions/checkout
   with fetch-depth 0 so the history reaches the base. A workflow_dispatch run reads the default branch. A push or a
@@ -13,10 +13,10 @@ inputs:
   profile:
     description: "A REPLAY_PROFILES name in hooks/mutate_guard.py: how to read the caller's repository."
     required: true
-  known-bugs:  # glossary-ok: the input name is part of the action's interface
-    description: "The caller's JSON list of planted bugs. A missing file names no bug, and passes."
+  known-defects:
+    description: "The caller's JSON list of planted defects. A missing file names no defect, and passes."
     required: false
-    default: .github/known-bugs.json  # glossary-ok: the list's path is named by hooks/test_mutate_ci.py
+    default: .github/known-defects.json
   limit:
     description: Mutants in all. The default is the figure measured for this repository's profile.
     required: false
@@ -76,11 +76,11 @@ runs:
         [ "$status" = 0 ] || echo "::warning title=Mutation report::the catch share could not be read (exit $status)"
         exit 0
 
-    - name: Replay the known bugs
+    - name: Replay the known defects
       shell: bash
       env:
         TOOL: ${{ github.action_path }}/../../hooks/mutate_guard.py
-        KNOWN_DEFECTS: ${{ inputs.known-bugs }}  # glossary-ok: the input name is part of the action's interface
+        KNOWN_DEFECTS: ${{ inputs.known-defects }}
         SUITE_TIMEOUT: ${{ inputs.suite-timeout }}
         EVENT: ${{ github.event_name }}
         OUT: ${{ runner.temp }}/mutation-report
@@ -88,14 +88,14 @@ runs:
         set +e  # the summary is written before the step exits with the tool's code
         case "$EVENT" in pull_request|workflow_dispatch) ;; *) echo "mutation-report: no batch pull request, skipped"; exit 0 ;; esac
         mkdir -p "$OUT"
-        python3 "$TOOL" --known-bugs "$KNOWN_DEFECTS" --repo . --suite-timeout "$SUITE_TIMEOUT" \
-          --log "$OUT/known-bugs.json" 2>&1 | tee "$OUT/known-bugs.txt"
+        python3 "$TOOL" --known-defects "$KNOWN_DEFECTS" --repo . --suite-timeout "$SUITE_TIMEOUT" \
+          --log "$OUT/known-defects.json" 2>&1 | tee "$OUT/known-defects.txt"
         status=${PIPESTATUS[0]}
         {
           echo "### Known defects replayed"
           echo
           echo '```'
-          cat "$OUT/known-bugs.txt"
+          cat "$OUT/known-defects.txt"
           echo '```'
         } >> "$GITHUB_STEP_SUMMARY"
         exit "$status"
