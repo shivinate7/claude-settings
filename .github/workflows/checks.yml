@@ -373,6 +373,8 @@ jobs:
 
       - name: Waiting page export fixture suite
         run: python3 skills/waiting-page/test_export_page.py
+      - name: Waiting page grant check suite
+        run: python3 skills/waiting-page/test_page_grant.py
 
       - name: Artifact cite fixture suite
         run: python3 lint/test_check_artifact_cites.py
