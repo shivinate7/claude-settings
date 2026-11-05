@@ -492,7 +492,8 @@ def wait_lines(items, complete=True):
 
 def single_page(argv):
     """Exit 0 current, 1 behind, 2 unknown for one fetched page. Writes a file only with --write, never on unknown.
-    With --items, prints one wait line per open item with a `waits` field after the verdict line; the exit code stays the verdict's."""
+    With --items, prints after the verdict line one wait line per open item with a `waits` field, and one lane line per open
+    item with a `lane` and a `lastAnswer` and no `waits`; the exit code stays the verdict's."""
     ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
     ap.add_argument("--page", required=True)
     ap.add_argument("--write")
