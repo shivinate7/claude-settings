@@ -2,7 +2,7 @@
 
 **What.** A plain Opus ask is refused when the UserPromptSubmit payload's `source` names a non-owner origin, such as `loop_wakeup`. Claude Code 2.1.308 sent no `source` on a typed prompt in one hook dump (review, 2026-11-04). 2.1.318 declares the field optional, and is unmeasured. So the normal path is the transcript fallback. That fallback catches a check-in or seed only if its record is in the transcript at hook time, and that is unmeasured. A Claude-written Opus ask in such text then reaches the judge. The haiku judge granted on 3 of 10 such asks, and a grant gives every role Opus for 2h.
 
-**Where.** `hooks/override.py` `grant_opus_ask`, `_system_prompt_last` and `_owner_turn_in`.
+**Where.** `hooks/override.py` `grant_opus_ask`, `_system_prompt_last` and `_seed_record`.
 
 **Decision.** `owner-override` (the owner override and its Opus form).
 

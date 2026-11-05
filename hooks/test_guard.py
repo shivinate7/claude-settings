@@ -420,6 +420,7 @@ SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktr
 SUBJDIRTY = os.path.join(ROOT, "subjdirty")  # a real checkout with real uncommitted work
 SUBJSTASH = os.path.join(ROOT, "subjstash")  # a clean tree carrying one real stash entry
 SUBJSTASHWT = os.path.join(ROOT, "subjstashlane")  # a linked worktree of it: same stack
+SUBJSTAGED = os.path.join(ROOT, "subjstaged")  # a real checkout: a staged edit, a staged new file
 GITBLIND = os.path.join(ROOT, "gitblind")  # a git that answers the repo test and no status read
 # A repository under a scratchpad named after one session. ROOT already sits under the system
 # temporary directory, which is the other half of the path test.
@@ -574,6 +575,19 @@ PUSHUP = os.path.join(ROOT, "pushup")
 PUSHUPSELF = os.path.join(ROOT, "pushupself")
 PUSHNOUP = os.path.join(ROOT, "pushnoup")
 PUSHMATCH = os.path.join(ROOT, "pushmatch")
+# Owner rulings 206 a and 207 a. PUSHSTRAY sits on `mylocal`, which tracks
+# origin/lane/x, with a `fork` remote the upstream does not name and push.default simple. PUSHLANE and
+# PUSHLANEMASTER sit on lanes cut from origin/main and origin/master: their upstreams are inherited, so
+# the stray-branch rule stays silent there. PUSHSELF sits on `feat`, which tracks origin/feat.
+PUSHSTRAY = os.path.join(ROOT, "pushstray")
+PUSHLANE = os.path.join(ROOT, "pushlane")
+PUSHLANEMASTER = os.path.join(ROOT, "pushlanemaster")
+PUSHSELF = os.path.join(ROOT, "pushself")
+PUSHMAINUP = os.path.join(ROOT, "pushmainup")  # main itself, tracking origin/main
+PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/base: its upstream is another lane
+# The rule ids the two new asks name. Each is the one home for its id in this file.
+PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
+PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
 # roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
 # and its extras file names that branch as the record branch, so `roadmap` is not its record.
 RECROADMAP = os.path.join(ROOT, "recroadmap")
@@ -847,6 +861,27 @@ def _real_process_start_ms(pid):
     parts = [0] * (3 - len(parts)) + parts
     elapsed = int(days or 0) * 86400 + parts[0] * 3600 + parts[1] * 60 + parts[2]
     return int(now_ms - elapsed * 1000)
+
+
+def _require_staged(where, tracked, untracked):
+    """Stop the suite unless `where` holds a STAGED edit to `tracked` (index column M, worktree
+    column clean) and a STAGED new file `untracked` (index column A).
+
+    The `--merge` cases that use SUBJSTAGED depend on exactly this state: git reverts the staged
+    edit and deletes the staged new file. Unstaged work would pass them for the wrong reason, so
+    both are read back with git itself.
+    """
+    lines = _porcelain(where)
+    if not any(line[:2] == "M " and line[3:].strip() == tracked for line in lines):
+        sys.exit(
+            "fixture setup failed in _build_subject: %r is not staged as modified in %r. git "
+            "status --porcelain shows: %r" % (tracked, where, lines)
+        )
+    if not any(line[:2] == "A " and line[3:].strip() == untracked for line in lines):
+        sys.exit(
+            "fixture setup failed in _build_subject: %r is not staged as new in %r. git status "
+            "--porcelain shows: %r" % (untracked, where, lines)
+        )
 
 
 def make_repo(where, files):
@@ -1342,11 +1377,32 @@ def _build_ctxrepo():
     run_vcs(CTXREPO, "branch", "done")
 
 
+GHDEV_CHECK = {}  # the delay check's thread, and the error it raised, if it raised one
+
+
+def _run_ghdev_check():
+    try:
+        _verify_fake_gh_delay(GHDEV, delay=1)
+    except BaseException as exc:  # _build_ghdev raises it, on the thread that needs the answer
+        GHDEV_CHECK["error"] = exc
+
+
+def _start_ghdev_check():
+    """Run the delay check on a daemon thread. Called once, after build_fixtures has written GHDEV's fake."""
+    thread = threading.Thread(target=_run_ghdev_check, name="ghdev-delay-check", daemon=True)
+    GHDEV_CHECK["thread"] = thread
+    thread.start()
+
+
 def _build_ghdev():
-    # Trust this delay only once it is proven, not assumed: run it now, under the guard's own
-    # narrow PATH, and fail fixture setup outright if it does not really delay. See
-    # _verify_fake_gh_delay's docstring for the defect this catches.
-    _verify_fake_gh_delay(GHDEV, delay=1)
+    # Trust this delay only once it is proven, not assumed: the check runs under the guard's own
+    # narrow PATH and fails fixture setup outright if it does not really delay. See
+    # _verify_fake_gh_delay's docstring for the defect this catches. It takes about a second and starts
+    # with the fixtures, so this waits only for what is left of it, and a run that never names
+    # GHDEV never waits.
+    GHDEV_CHECK["thread"].join()
+    if "error" in GHDEV_CHECK:
+        raise GHDEV_CHECK["error"]
 
 
 def _build_gitmain():
@@ -1422,7 +1478,8 @@ def _build_gitmain():
 
 
 def _build_subject():
-    """SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH and SUBJSTASHWT: the subject-read repos."""
+    """The subject-read repos: SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT and
+    SUBJSTAGED."""
     # THE SUBJECT READ. Each arm gets both sides, built with real state: a real clean tree, a
     # real uncommitted edit, a real untracked file, a real one-entry stash stack.
     make_repo(SUBJCLEAN, {"f.txt": "base\n", "keep.txt": "base\n"})
@@ -1451,6 +1508,14 @@ def _build_subject():
     # worktree sees the same one-entry stack, and a drop there destroys the primary's entry.
     run_vcs(SUBJSTASH, "worktree", "add", "-q", SUBJSTASHWT, "-b", "stashlane")
     _require_stash(SUBJSTASHWT, 1)
+
+    # A STAGED edit to a tracked file and a STAGED new file: the state `reset --merge HEAD` reverts
+    # and deletes. The tree is dirty, and its work is all in the index.
+    make_repo(SUBJSTAGED, {"f.txt": "base\n", "keep.txt": "base\n"})
+    write(os.path.join(SUBJSTAGED, "f.txt"), "staged\n")
+    write(os.path.join(SUBJSTAGED, "new.txt"), "staged new\n")
+    run_vcs(SUBJSTAGED, "add", "f.txt", "new.txt")
+    _require_staged(SUBJSTAGED, "f.txt", "new.txt")
 
 def _build_privrepo():
     """PRIVREPO: a dirty repository under a scratchpad named after one session."""
@@ -1777,6 +1842,53 @@ def _build_push():
         if run_vcs(where, "config", "--get", "push.default").stdout.strip() != mode:
             sys.exit("fixture setup failed in build_fixtures: push.default in %r" % where)
 
+    # The upstream shapes of rulings 206 a and 207 a. Each upstream is set by git itself (--track and
+    # --set-upstream-to), then read back, so a case never judges a fixture that lacks its upstream.
+    make_repo(PUSHSTRAY, {"base.txt": "base\n"})
+    run_vcs(PUSHSTRAY, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHSTRAY, "remote", "add", "fork", slash(BRANCHREMOTE))
+    run_vcs(PUSHSTRAY, "update-ref", "refs/remotes/origin/lane/x", "HEAD")
+    run_vcs(PUSHSTRAY, "checkout", "-q", "-b", "mylocal")
+    run_vcs(PUSHSTRAY, "branch", "--set-upstream-to=origin/lane/x", "mylocal")
+    run_vcs(PUSHSTRAY, "config", "push.default", "simple")
+
+    make_repo(PUSHSELF, {"base.txt": "base\n"})
+    run_vcs(PUSHSELF, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHSELF, "update-ref", "refs/remotes/origin/feat", "HEAD")
+    run_vcs(PUSHSELF, "checkout", "-q", "--track", "-b", "feat", "origin/feat")
+
+    for where, lane, base in ((PUSHLANE, "lane/foo", "main"), (PUSHLANEMASTER, "lane/bar", "master")):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "update-ref", "refs/remotes/origin/" + base, "HEAD")
+        run_vcs(where, "checkout", "-q", "--track", "-b", lane, "origin/" + base)
+
+    make_repo(PUSHSTACK, {"base.txt": "base\n"})
+    run_vcs(PUSHSTACK, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHSTACK, "update-ref", "refs/remotes/origin/lane/base", "HEAD")
+    run_vcs(PUSHSTACK, "checkout", "-q", "--track", "-b", "lane/fix", "origin/lane/base")
+
+    make_repo(PUSHMAINUP, {"base.txt": "base\n"})
+    run_vcs(PUSHMAINUP, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHMAINUP, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHMAINUP, "branch", "--set-upstream-to=origin/main", "main")
+
+    for where, upstream in ((PUSHSTRAY, "origin/lane/x"), (PUSHSELF, "origin/feat"),
+                            (PUSHLANE, "origin/main"), (PUSHLANEMASTER, "origin/master"),
+                            (PUSHSTACK, "origin/lane/base"), (PUSHMAINUP, "origin/main")):
+        got = run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip()
+        if got != upstream:
+            sys.exit("fixture setup failed in build_fixtures: %r needs upstream %s, reads %r"
+                     % (where, upstream, got))
+    # The no-upstream cases ride on these two checkouts, so each must read back with no upstream.
+    for where in (PUSHFEAT, PUSHMAIN):
+        if run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
+            sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % where)
+    if (sorted(run_vcs(PUSHSTRAY, "remote").stdout.split()) != ["fork", "origin"]
+            or run_vcs(PUSHSTRAY, "config", "--get", "push.default").stdout.strip() != "simple"):
+        sys.exit("fixture setup failed in build_fixtures: PUSHSTRAY needs remotes fork and origin "
+                 "and push.default simple")
+
 def _build_worktrees():
     """The worktree remove and prune repos: locked, live, dead, stale and clean linked trees."""
     # ----------------------------------------------------------------- worktree remove/prune
@@ -2058,6 +2170,7 @@ def _build_links():
 
 
 build_fixtures()
+_start_ghdev_check()
 _mark("build_fixtures: eager config, fake gh writes, GHNONE and the link probe")
 
 # Each builder runs the first time a case names one of its paths (see lazy_fixture). A builder's
@@ -2067,7 +2180,8 @@ lazy_fixture([CTXREPO], _build_ctxrepo)
 lazy_fixture([CURREPO], _build_currepo)
 lazy_fixture([GHDEV], _build_ghdev)
 lazy_fixture([GITMAIN, GITWT, AGENTWT, FARWT, SYMWT, DECOYMAIN], _build_gitmain)
-lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT], _build_subject)
+lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT, SUBJSTAGED],
+             _build_subject)
 lazy_fixture([PRIVREPO], _build_privrepo)
 lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, PTRNOORIGIN,
               PTRNOORIGINCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
@@ -2075,7 +2189,8 @@ lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
-              PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK],
+              PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
+              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -2173,20 +2288,19 @@ sh("stash: branch consumes the entry it builds from", VCS + " stash branch lane"
 sh("reset: throws the tree away", VCS + " reset --hard origin/main", "deny", "shared-tree",
    cwd=NOGIT)
 sh("reset: --hard with no argument", VCS + " reset --hard", "deny", "shared-tree", cwd=NOGIT)
-# A bare reset, and every flag except `--hard`, leaves the working tree alone, or aborts rather
-# than overwrite a local change (MEASURED against a real uncommitted change, 2026-09-17: `--keep`
-# and `--merge` both stopped with "Entry not up to date. Cannot merge." and the change survived).
-# Only `--hard` rewrites the tree unconditionally, so it alone stays denied.
+# A bare reset, `--soft` and `--mixed` leave the working tree alone, and `--hard` rewrites it.
+# `--merge` rewrites it too: it reverts a staged edit and deletes a staged new file. `--keep` and
+# `--merge` both move the branch at another commit, so they take `--hard`'s verdict.
 sh("reset: a plain reset only unstages, the working tree is untouched", VCS + " reset HEAD~1",
    "allow", cwd=NOGIT)
 sh("reset: a bare reset with no argument", VCS + " reset", "allow", cwd=NOGIT)
 sh("reset: an explicit mixed reset", VCS + " reset --mixed HEAD~1", "allow", cwd=NOGIT)
 sh("reset: a soft reset moves the branch and touches nothing else", VCS + " reset --soft HEAD~1",
    "allow", cwd=NOGIT)
-sh("reset: --keep aborts rather than overwrite a local change", VCS + " reset --keep HEAD~1",
-   "allow", cwd=NOGIT)
-sh("reset: --merge aborts rather than overwrite a local change", VCS + " reset --merge HEAD~1",
-   "allow", cwd=NOGIT)
+sh("reset: --keep at another commit refuses where there is no git tree",
+   VCS + " reset --keep HEAD~1", "deny", "shared-tree", cwd=NOGIT)
+sh("reset: --merge at another commit refuses where there is no git tree",
+   VCS + " reset --merge HEAD~1", "deny", "shared-tree", cwd=NOGIT)
 sh("reset: a reset naming a path only touches the index",
    VCS + " reset -- app/src/50_engine.js", "allow", cwd=NOGIT)
 sh("reset: a reset at a commit naming a path only touches the index",
@@ -2268,6 +2382,31 @@ sh("subject: a hard reset at a raw sha in a clean worktree asks",
    cwd=SUBJCLEANWT)
 sh("subject: a quiet hard reset at HEAD is still a pass in a clean tree",
    VCS + " reset -q --hard HEAD", "allow", cwd=SUBJCLEAN)
+# THE `--merge` AND `--keep` FORMS TAKE `--hard`'s VERDICT. Each form has its own deny or ask line,
+# so dropping either flag alone turns a line red. SUBJSTAGED holds a staged edit and a staged new
+# file, so any change denies.
+sh("reset: --merge at HEAD over a staged edit and a staged new file refuses",
+   VCS + " reset --merge HEAD", "deny", "shared-tree", cwd=SUBJSTAGED)
+sh("reset: a bare --merge over a staged edit refuses", VCS + " reset --merge", "deny",
+   "shared-tree", cwd=SUBJSTAGED)
+sh("reset: --merge at HEAD in a clean tree takes nothing", VCS + " reset --merge HEAD", "allow",
+   cwd=SUBJCLEAN)
+sh("reset: --keep at HEAD in a clean tree takes nothing", VCS + " reset --keep HEAD", "allow",
+   cwd=SUBJCLEAN)
+sh("reset: --keep at another commit moves the branch, so a shared checkout refuses",
+   VCS + " reset --keep HEAD~1", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("reset: --keep at another commit asks in a clean worktree", VCS + " reset --keep HEAD~1",
+   "ask", "shared-tree", cwd=SUBJCLEANWT)
+sh("reset: --merge at another commit asks in a clean worktree", VCS + " reset --merge HEAD~1",
+   "ask", "shared-tree", cwd=SUBJCLEANWT)
+sh("reset: a flag after the commit still counts, --merge refuses", VCS + " reset HEAD~1 --merge",
+   "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("reset: --merge aimed at a dirty checkout with -C refuses",
+   VCS + " -C " + slash(SUBJSTAGED) + " reset --merge", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("reset: an echo that quotes a merge reset is not a call", 'echo "git reset --merge"', "allow",
+   cwd=SUBJSTAGED)
+sh("reset: a soft reset over a staged edit stays allowed", VCS + " reset --soft HEAD~1", "allow",
+   cwd=SUBJSTAGED)
 sh("subject: setting aside a clean tree takes nothing", VCS + " stash push -u -m lane", "allow",
    cwd=SUBJCLEAN)
 sh("subject: setting aside real uncommitted work still denies", VCS + " stash push -u -m lane",
@@ -2925,8 +3064,9 @@ sh("worktree: a stash push in a dirty worktree denies, the stack is clone-wide",
 sh("worktree: stash save in a dirty worktree denies, the stack is clone-wide",
    VCS + " stash save lane", "deny", "shared-tree", cwd=GITWT)
 
-# THE TABLE'S ALLOW ROWS, checked in a linked worktree. A read, a reset that keeps the tree, or a
-# restore of one staged file is allowed whichever tree the call runs in.
+# THE TABLE'S ROWS, checked in a linked worktree. A read, a reset that keeps the tree, or a
+# restore of one staged file is allowed whichever tree the call runs in. A reset that moves the
+# branch to another commit asks here, as `--hard` does.
 sh("stash: list allows in the worktree", VCS + " stash list", "allow", cwd=GITWT)
 sh("stash: show allows in the worktree", VCS + " stash show", "allow", cwd=GITWT)
 sh("stash: apply over an empty stack allows in the worktree", VCS + " stash apply", "allow",
@@ -2935,8 +3075,10 @@ sh("stash: pop over an empty stack allows in the worktree", VCS + " stash pop", 
    cwd=GITWT)
 sh("reset: a plain reset allows in the worktree", VCS + " reset HEAD~1", "allow", cwd=GITWT)
 sh("reset: --soft allows in the worktree", VCS + " reset --soft HEAD~1", "allow", cwd=GITWT)
-sh("reset: --keep allows in the worktree", VCS + " reset --keep HEAD~1", "allow", cwd=GITWT)
-sh("reset: --merge allows in the worktree", VCS + " reset --merge HEAD~1", "allow", cwd=GITWT)
+sh("reset: --keep at another commit asks in a dirty linked worktree",
+   VCS + " reset --keep HEAD~1", "ask", "shared-tree", cwd=GITWT)
+sh("reset: --merge at another commit asks in a dirty linked worktree",
+   VCS + " reset --merge HEAD~1", "ask", "shared-tree", cwd=GITWT)
 sh("reset: naming a path allows in the worktree", VCS + " reset -- f.txt", "allow", cwd=GITWT)
 sh("restore: --staged alone allows in the worktree", VCS + " restore --staged f.txt", "allow",
    cwd=GITWT)
@@ -6671,10 +6813,12 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
 REMEDY = "retry with --force-with-lease --force-if-includes"
 
 
-def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash"):
+def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=()):
+    """One `git push` case. An ask names `rule` when one is given (rulings 206 a and 207 a), else
+    force-push. `silent` marks an allow that must print nothing."""
     sh("push: " + name, VCS + " push " + tail, expected,
-       "force-push" if expected != "allow" else None, cwd=cwd, tool=tool,
-       carries=REMEDY if expected == "deny" else ())
+       rule or ("force-push" if expected != "allow" else None), cwd=cwd, tool=tool,
+       carries=REMEDY if expected == "deny" else (), silent=silent, lacks=lacks)
 
 
 # ALLOW: a lease that cannot overwrite newer work, off the default branch.
@@ -6732,6 +6876,8 @@ for form, tail in (
         ("--mirror alone, which forces by itself", "--mirror"),
         ("--all", "--all --force"),
         ("--all with a lease", "--all" + LEASE),
+        ("--branches, git's alias of --all", "--branches --force"),
+        ("--branches with a lease", "--branches" + LEASE),
         ("a glob refspec", "--force origin refs/heads/*:refs/heads/*"),
         ("the short flag", "-f origin HEAD:main")):
     push_case("forced to the default branch asks: " + form, tail, "ask",
@@ -6852,8 +6998,10 @@ sh("push: lease with -c push.default=matching asks",
    VCS + " -c push.default=matching push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
 
 # FALSE ALARMS: a guard that cries wolf is spent.
-push_case("a non-forced push of main", "origin main", "allow", cwd=PUSHMAIN)
-push_case("a non-forced bare push on main", "", "allow", cwd=PUSHMAIN)
+# Re-pointed from allow by ruling 207 a: a non-forced push of main asks.
+push_case("a non-forced push of main asks, on main", "origin main", "ask", cwd=PUSHMAIN, rule=PUSH_MAIN_RULE)
+# PUSHMAIN has no upstream, so git refuses a bare push itself ("has no upstream branch"): no ask is needed.
+push_case("a bare push on main with no upstream is git's refusal, allows", "", "allow", cwd=PUSHMAIN)
 push_case("a non-forced push with -u of the current branch", "-u origin HEAD", "allow")
 push_case("a non-forced push with -u where git cannot be read", "-u origin HEAD", "allow", cwd=NOGIT)
 push_case("a push of a branch whose name holds force", "origin force-fix", "allow")
@@ -6873,6 +7021,123 @@ sh("false alarm: a lease to main-fix", VCS + " push --force-with-lease --force-i
 sh("push: a force push inside a loop's do-block still counts",
    "while true; do " + VCS + " push --force; done", "deny", "force-push", cwd=PUSHFEAT,
    carries=REMEDY)
+
+# ASK, owner rulings 206 a. An implied destination (a bare push, HEAD, @, or a
+# colon-less refspec naming the current branch) that lands off the branch's upstream asks, unless the push
+# carries -u and names the local branch (the silent cases below). PUSHSTRAY is `mylocal`, whose upstream is
+# origin/lane/x.
+push_case("stray branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
+push_case("stray branch, @ asks", "origin @", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
+push_case("stray branch, the current branch named by its colon-less refspec asks", "origin mylocal", "ask",
+          cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
+# The same pushes without -u still ask: -u is what makes a new upstream on purpose.
+push_case("stacked lane, HEAD without -u asks", "origin HEAD", "ask", cwd=PUSHSTACK, rule=PUSH_STRAY_RULE)
+push_case("stacked lane, the local name without -u asks", "origin lane/fix", "ask", cwd=PUSHSTACK,
+          rule=PUSH_STRAY_RULE)
+push_case("stray branch, HEAD with an output tail is one clean ask", "origin HEAD 2>&1 | tail -1", "ask",
+          cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE, lacks=(CHAIN_ASK,))
+# Two refspecs: the explicit one is fine, the second is implied, so the call still asks.
+push_case("stray branch, a second refspec that names the current branch asks",
+          "origin HEAD:push-guard-asks mylocal", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
+sh("push: stray branch, a bare push under push.default current asks",
+   VCS + " -c push.default=current push", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
+
+# ASK, owner rulings 207 a. A non-forced push whose destination is the literal
+# name main or master asks. The name is literal: origin/HEAD does not decide it.
+push_case("main, HEAD:main from a feature branch asks", "origin HEAD:main", "ask", rule=PUSH_MAIN_RULE)
+push_case("main, a push of main from a feature branch asks", "origin main", "ask", rule=PUSH_MAIN_RULE)
+push_case("main, a full ref to refs/heads/main asks", "origin x:refs/heads/main", "ask", rule=PUSH_MAIN_RULE)
+push_case("master, a push to master asks", "origin master", "ask", rule=PUSH_MAIN_RULE)
+push_case("main, a second refspec that reaches main asks", "origin HEAD:push-guard-asks HEAD:main", "ask",
+          rule=PUSH_MAIN_RULE)
+push_case("main, --all reaches main and asks", "--all origin", "ask", rule=PUSH_MAIN_RULE)
+push_case("main, --branches reaches main and asks", "--branches origin", "ask", rule=PUSH_MAIN_RULE)
+# A -u push of the local name writes main when the checkout is main, and -u does not hide a second refspec to main.
+push_case("main, -u HEAD on main asks", "-u origin HEAD", "ask", cwd=PUSHMAIN, rule=PUSH_MAIN_RULE)
+push_case("stacked lane, -u HEAD with a second refspec to main asks", "-u origin HEAD main", "ask",
+          cwd=PUSHSTACK, rule=PUSH_MAIN_RULE)
+push_case("main, HEAD:main asks where origin/HEAD names trunk", "origin HEAD:main", "ask", cwd=PUSHTRUNK,
+          rule=PUSH_MAIN_RULE)
+# A branch that tracks main writes main on a bare push. The upstream is main, so 206 a stays silent here.
+push_case("main tracking origin/main, a bare push asks", "", "ask", cwd=PUSHMAINUP, rule=PUSH_MAIN_RULE)
+push_case("main tracking origin/main, HEAD asks", "origin HEAD", "ask", cwd=PUSHMAINUP, rule=PUSH_MAIN_RULE)
+sh("push: main, a bare push under push.default current on main asks",
+   VCS + " -c push.default=current push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
+sh("push: main, a bare push under push.default upstream from a branch tracking main asks",
+   VCS + " push", "ask", PUSH_MAIN_RULE, cwd=PUSHUP)
+
+# SILENT, the false alarms of both rulings. Each is an allow that prints nothing.
+# Inherited and own upstreams: a lane cut from main or master, and a branch that tracks its own name.
+push_case("lane from main, -u HEAD is silent", "-u origin HEAD", "allow", cwd=PUSHLANE, silent=True)
+push_case("lane from main, HEAD is silent", "origin HEAD", "allow", cwd=PUSHLANE, silent=True)
+push_case("lane from master, HEAD is silent", "origin HEAD", "allow", cwd=PUSHLANEMASTER, silent=True)
+push_case("own upstream, HEAD is silent", "origin HEAD", "allow", cwd=PUSHSELF, silent=True)
+# No upstream yet: the first push of a branch.
+push_case("first push with no upstream, -u HEAD is silent", "-u origin HEAD", "allow", silent=True)
+push_case("first push with no upstream, HEAD is silent", "origin HEAD", "allow", silent=True)
+# Explicit destinations, the form agents push by, from a branch whose upstream differs.
+push_case("explicit destination from a mismatched upstream is silent", "origin HEAD:push-guard-asks", "allow",
+          cwd=PUSHSTRAY, silent=True)
+push_case("archive, feat named to archive/feat is silent", "origin feat:archive/feat", "allow", silent=True)
+push_case("archive, HEAD to archive/x from a mismatched upstream is silent", "origin HEAD:archive/x", "allow",
+          cwd=PUSHSTRAY, silent=True)
+# A bare push that git itself refuses: push.default simple, the upstream names another branch.
+push_case("push.default simple, a bare push with a mismatched upstream is git's refusal, silent", "", "allow",
+          cwd=PUSHSTRAY, silent=True)
+# Another remote than the upstream's remote: the rule reads only branch.<cur>.remote.
+push_case("another remote than the upstream's is silent", "fork HEAD", "allow", cwd=PUSHSTRAY, silent=True)
+# A -u push whose destination is the local branch's own name sets that upstream on purpose (ruling 206 a).
+# PUSHSTACK is lane/fix, cut from origin/lane/base. PUSHSTRAY is `mylocal`,
+# tracking origin/lane/x: its -u push writes `mylocal` by the same rule, so it is silent too.
+push_case("stacked lane, -u HEAD is silent", "-u origin HEAD", "allow", cwd=PUSHSTACK, silent=True)
+push_case("stacked lane, --set-upstream HEAD is silent", "--set-upstream origin HEAD", "allow", cwd=PUSHSTACK,
+          silent=True)
+push_case("stacked lane, -u naming the local branch is silent", "-u origin lane/fix", "allow", cwd=PUSHSTACK,
+          silent=True)
+sh("push: stacked lane, a bare -u under push.default current writes the local name, is silent",
+   VCS + " -c push.default=current push -u origin", "allow", cwd=PUSHSTACK, silent=True)
+push_case("stray branch, -u with HEAD writes the local name, is silent", "-u origin HEAD", "allow",
+          cwd=PUSHSTRAY, silent=True)
+# A push that moves no branch: tags are not a branch destination, even on main.
+push_case("--tags on main is silent", "origin --tags", "allow", cwd=PUSHMAIN, silent=True)
+push_case("a tag name on main is silent", "origin v1.0", "allow", cwd=PUSHMAIN, silent=True)
+# A dry run moves nothing, so it stays silent even at main. The dry-run check before push_ask_hit in
+# guard.py is what keeps these silent.
+push_case("a dry run to main, --dry-run origin HEAD:main, is silent", "--dry-run origin HEAD:main", "allow",
+          silent=True)
+push_case("a dry run to main, -n origin main, is silent", "-n origin main", "allow", silent=True)
+push_case("a dry run of --branches, --branches --dry-run origin, is silent", "--branches --dry-run origin",
+          "allow", silent=True)
+# Tags move no branch. On main tracking origin/main a bare push would ask main, so the tags check is what
+# keeps this one silent.
+push_case("--tags on main tracking origin/main is silent", "origin --tags", "allow", cwd=PUSHMAINUP, silent=True)
+# The main rule reads literal names. trunk is the default here, so a push to it is ordinary.
+push_case("trunk, named by origin/HEAD, is ordinary for the main rule", "origin HEAD:trunk", "allow",
+          cwd=PUSHTRUNK, silent=True)
+# A plain push whose destination cannot be resolved stays allowed, as it is today.
+push_case("a plain push, detached HEAD, no destination to read, stays allowed", "origin HEAD", "allow",
+          cwd=PUSHDETACHED, silent=True)
+push_case("a plain bare push, push.default matching, no destination to read, stays allowed", "", "allow",
+          cwd=PUSHMATCH, silent=True)
+push_case("a plain push where git cannot be read stays allowed", "origin HEAD", "allow", cwd=NOGIT, silent=True)
+
+# Quoted and heredoc push text is data, never a push. The rules judge the command, not its text.
+sh("push: text, a commit message that names a push to main, is silent",
+   VCS + ' commit -m "git push origin main"', "allow", cwd=PUSHFEAT, silent=True)
+sh("push: text, an echo that names a push of HEAD:main, is silent",
+   'echo "' + VCS + ' push origin HEAD:main"', "allow", cwd=PUSHFEAT, silent=True)
+sh("push: text, a heredoc body naming a push to main, is silent",
+   "cat <<'EOF'\n" + VCS + " push origin main\nEOF", "allow", cwd=PUSHFEAT, silent=True)
+sh("push: text, a multi-line quoted string naming a push to main, is silent",
+   'echo "one line\n' + VCS + ' push origin main"', "allow", cwd=PUSHFEAT, silent=True)
+# A comment opener inside a string does not hide the real push after it, and a lone quote in a message
+# does not either (building-scanner-respects-strings). The push is a second command, so it denies alone.
+chained_ask("push: a comment opener inside a string does not hide a push to main that follows it",
+            'echo "#" && ' + VCS + " push origin main", cwd=PUSHMAIN)
+chained_ask("push: a lone quote in a commit message does not hide a push to main that follows it",
+            VCS + ' commit -m "don\'t" && ' + VCS + " push origin main", cwd=PUSHFEAT)
+chained_ask("push: a lone quote in a commit message does not hide a stray push that follows it",
+            VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHSTRAY)
 
 sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", cwd=NOGIT)
 
@@ -9419,8 +9684,10 @@ record_allow("a commit message that names a push to roadmap is text",
 
 def record_push_cost_case():
     """roadmap-one-writer's stated cost (session-tiers, the Cost line): per `git push` call, one
-    `git rev-parse --show-toplevel`. A HEAD push adds `git symbolic-ref`. A bare push adds that and a
-    `git config` read of push.default, and a HEAD push reads no push.default. The layout and extras files
+    `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
+    `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
+    `git symbolic-ref` and two `git config` reads, and reads push.default. A literal destination
+    (`origin main`, `HEAD:main`, `HEAD:<branch>`) adds no read. The layout and extras files
     are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The
     transcript is read only when the push reaches the record branch: a push to another branch passes
     with an unreadable transcript, and a push to the record branch with one is refused. A stand-in git
@@ -9452,9 +9719,12 @@ def record_push_cost_case():
         return kinds, lines
 
     for label, tail, want in (
-        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1}),
-        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 1}),
-        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 1, "config": 1}),
+        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1}),
+        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1}),
+        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2}),
+        ("a literal destination, origin main", "push origin main", {"rev-parse": 1}),
+        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1}),
+        ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1}),
     ):
         kinds, lines = spawn_kinds(VCS + " " + tail, PUSHFEAT)
         if kinds != want:
@@ -19608,6 +19878,162 @@ def worktree_home_cd_exempt_case():
     return True, "the recorded home, the own red-run folder and the session's recorded home pass"
 
 
+def worktree_home_red_write_case():
+    """Rule 0, other-checkout, the write act's exemption for the caller's own red-run folder: an
+    agent's writes into `agent-<its id>-red` pass from its home, as a `cd` chained to a write, a `cp`,
+    a Write and an Edit. The same four writes into a sibling agent's red-run folder, into a folder
+    whose name only starts with the agent's id, into the primary, or from a call with no agent_id are
+    refused. A test-author writes its tests in its red-run folder, so the write act must match the
+    cd act that worktree_home_cd_exempt_case already allows."""
+    primary, home, _, _ = _cross_checkout_fixture(
+        "xcored", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    red = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "-red")[0]
+    sibling_red = sh_add_lane(primary, "agent-" + CD_AGENT_SIBLING + "-red")[0]
+    prefix_trap = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "b-red")[0]
+    write(os.path.join(home, "t.py"), "print(1)\n")
+    problems = []
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow":
+        problems.append("the agent's recording call: want allow, got %s (%s)" % (got, reason[:120]))
+    if not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        problems.append("the agent's recording call wrote no home record")
+
+    def writes_into(folder):
+        """(tool, tool input) for the four writes into FOLDER: a chained cd, a cp, a Write and an Edit."""
+        return (
+            ("Bash", {"command": "cd %s && echo x > f" % slash(folder)}),
+            ("Bash", {"command": "cp t.py %s/" % slash(folder)}),
+            ("Write", {"file_path": os.path.join(folder, "f"), "content": "x"}),
+            ("Edit", {"file_path": os.path.join(folder, "f"), "old_string": "1", "new_string": "2"}),
+        )
+
+    def label(tool, tool_input):
+        return "%s %r" % (tool, tool_input.get("command") or tool_input["file_path"])
+
+    for tool, tool_input in writes_into(red):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if got != "allow":
+            problems.append("%s into the agent's own red-run folder: want allow, got %s (%s)"
+                            % (label(tool, tool_input), got, reason[:120]))
+    for target in (sibling_red, prefix_trap, primary):
+        for tool, tool_input in writes_into(target):
+            got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+            if got != "deny" or any(text in reason for text in (ROOT, slash(ROOT), target, slash(target))):
+                problems.append("%s: want deny naming no path, got %s (%s)"
+                                % (label(tool, tool_input), got, reason[:120]))
+    for tool, tool_input in writes_into(red):
+        got, reason = _decide_full(tool, home, **tool_input)
+        problems += _other_checkout_problems("no agent_id: " + label(tool, tool_input), got, reason,
+                                             (ROOT, slash(ROOT), red, slash(red)))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an agent's writes into its own red-run folder pass; the same writes elsewhere are refused"
+
+
+def worktree_home_red_root_case():
+    """Rule 0, other-checkout, the folder root of the caller's own red-run folder: a write may land
+    inside it, never remove or move it. `rm -rf` of the folder, with or without a trailing slash, a
+    `cd` into it chained to `rm -rf .`, `mv` of it and a Write on its path are refused. A `cp` into
+    it, a `cd` into it chained to a `cp`, and a Write inside it pass. Decision:
+    an-agent-outside-its-home-tree-must-stop."""
+    primary, home, _, _ = _cross_checkout_fixture(
+        "xcoredroot", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    red = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "-red")[0]
+    write(os.path.join(home, "t.py"), "print(1)\n")
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow" or not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        return False, ("the agent's recording call: want allow and a home record, got %s (%s)"
+                       % (got, reason[:120]))
+    paths = (ROOT, slash(ROOT), red, slash(red))
+    problems = []
+    for label, tool, tool_input in (
+        ("rm -rf <red>", "Bash", {"command": "rm -rf %s" % slash(red)}),
+        ("rm -rf <red>/", "Bash", {"command": "rm -rf %s/" % slash(red)}),
+        ("cd <red> && rm -rf .", "Bash", {"command": "cd %s && rm -rf ." % slash(red)}),
+        ("mv <red> x", "Bash", {"command": "mv %s x" % slash(red)}),
+        ("Write on <red>", "Write", {"file_path": red, "content": "x"}),
+    ):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if tool == "Bash":
+            problems += _other_checkout_problems(label, got, reason, paths)
+        elif got != "deny" or any(text in reason for text in paths):
+            problems.append("%s: want deny naming no path, got %s (%s)" % (label, got, reason[:120]))
+    for label, tool, tool_input in (
+        ("cp t.py <red>/", "Bash", {"command": "cp t.py %s/" % slash(red)}),
+        ("cd <red> && cp x .", "Bash", {"command": "cd %s && cp x ." % slash(red)}),
+        ("Write inside <red>", "Write", {"file_path": os.path.join(red, "f"), "content": "x"}),
+    ):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (label, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the red-run folder's root is refused to rm, mv and a Write; a cp into it and a write inside it pass"
+
+
+def worktree_home_red_nested_case():
+    """Rule 0, other-checkout, the red-run folder is the primary's alone: a folder named
+    `agent-<its id>-red` under another linked worktree's `.claude/worktrees/` belongs to that
+    worktree, so a `cd` into it, a shell write into it and a Write into it are refused. Decision:
+    an-agent-outside-its-home-tree-must-stop."""
+    primary, home, lane_b, _ = _cross_checkout_fixture(
+        "xcorednest", lanes=("agent-" + CD_AGENT_HOME, "lane-b"))
+    nested = os.path.join(lane_b, ".claude", "worktrees", "agent-" + CD_AGENT_HOME + "-red")
+    os.makedirs(nested, exist_ok=True)
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow" or not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        return False, ("the agent's recording call: want allow and a home record, got %s (%s)"
+                       % (got, reason[:120]))
+    paths = (ROOT, slash(ROOT), nested, slash(nested), lane_b, slash(lane_b))
+    problems = []
+    for label, tool, tool_input in (
+        ("cd <nested>", "Bash", {"command": "cd %s" % slash(nested)}),
+        ("echo x > <nested>/f", "Bash", {"command": "echo x > %s/f" % slash(nested)}),
+        ("Write <nested>/f", "Write", {"file_path": os.path.join(nested, "f"), "content": "x"}),
+    ):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if tool == "Bash":
+            problems += _other_checkout_problems(label, got, reason, paths)
+        elif got != "deny" or any(text in reason for text in paths):
+            problems.append("%s: want deny naming no path, got %s (%s)" % (label, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a red-run folder nested under another linked worktree is refused to a cd, a shell write and a Write"
+
+
+RED_CASE_OFF_WINDOWS = ("Windows folds path case, so another spelling of the red-run folder is that "
+                        "folder only there; on POSIX it is another folder, so this case does not run")
+
+
+def worktree_home_red_case_fold_case():
+    """Rule 0, other-checkout, the write act's exemption on Windows: the caller's own red-run folder
+    spelled in other letters of case is the same folder, so a Write into it and a `cd` into it
+    chained to a write pass. Decision: an-agent-outside-its-home-tree-must-stop."""
+    if os.name != "nt":
+        return SKIP, RED_CASE_OFF_WINDOWS
+    primary, home, _, _ = _cross_checkout_fixture(
+        "xcorecase", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "-red")
+    upper = os.path.join(primary, ".claude", "worktrees", "AGENT-" + CD_AGENT_HOME.upper() + "-RED")
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow" or not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        return False, ("the agent's recording call: want allow and a home record, got %s (%s)"
+                       % (got, reason[:120]))
+    problems = []
+    for label, tool, tool_input in (
+        ("Write into the upper-case red-run folder", "Write",
+         {"file_path": os.path.join(upper, "f"), "content": "x"}),
+        ("cd into the upper-case red-run folder chained to a write", "Bash",
+         {"command": "cd %s && echo x > f" % slash(upper)}),
+    ):
+        got, reason = _decide_full(tool, home, agent_id=CD_AGENT_HOME, **tool_input)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (label, got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a write into the red-run folder spelled in other letters of case passes"
+
+
 # Text is not a move: a `cd` in a comment, in quotes or in a heredoc body is never run. A real `cd`
 # after one of those still is, and a comment opener or a lone quote inside a string must not hide it.
 CD_TEXT_ALLOW = (
@@ -20520,8 +20946,9 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_override_case),
     ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
      worktree_home_cross_checkout_cost_case),
-    ("roadmap-one-writer: a push starts one rev-parse, symbolic-ref for HEAD and bare, push.default for bare "
-     "only, and reads the transcript only at the record branch", record_push_cost_case),
+    ("roadmap-one-writer: a push starts one rev-parse, symbolic-ref for a refspec, HEAD and bare, push.default "
+     "for bare only, no read for a literal destination, and reads the transcript only at the record branch",
+     record_push_cost_case),
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
      "a write or a mkdir, from a lane or the primary, and names no path",
      worktree_home_cd_into_other_checkout_case),
@@ -20533,6 +20960,15 @@ LOG_CHECKS = (
      "clone's .git passes", worktree_home_cd_allowed_case),
     ("worktree-home: the cd exemptions pass: an agent's recorded home from outside it, its own red-run "
      "folder, a session's recorded home", worktree_home_cd_exempt_case),
+    ("worktree-home: an agent's write into its own red-run folder, by a cd chained to it, a cp, a Write "
+     "or an Edit, is allowed; the same writes into a sibling's red-run folder, a prefix-named folder, "
+     "the primary, or with no agent_id are refused", worktree_home_red_write_case),
+    ("worktree-home: the own red-run folder's root is refused to rm, mv and a Write, and a cp into it "
+     "or a write inside it passes", worktree_home_red_root_case),
+    ("worktree-home: a red-run folder nested under another linked worktree, not the primary's, is "
+     "refused to a cd, a shell write and a Write", worktree_home_red_nested_case),
+    ("worktree-home: a write into the own red-run folder spelled in other letters of case passes on "
+     "Windows, and is a skip elsewhere", worktree_home_red_case_fold_case),
     ("worktree-home: a cd in a comment, in quotes or in a heredoc body is text, and a real cd after one "
      "is refused", worktree_home_cd_text_case),
     ("worktree-home: an owner override lifts a bare cd into another checkout",
@@ -22623,6 +23059,11 @@ OV_ACTS = (
      "kill %d" % FOREIGN, NOGIT, "deny", "machine-wide-kill", None),
     ("ask-linked-discard", "a hard reset in a linked worktree, which asks",
      VCS + " reset --hard", GITWT, "ask", "shared-tree", None),
+    # The two new asks of rulings 206 a and 207 a are lifted by an owner override like any ask.
+    ("push-stray", "a non-forced push that lands on a stray branch",
+     VCS + " push origin HEAD", PUSHSTRAY, "ask", PUSH_STRAY_RULE, None),
+    ("push-main", "a non-forced push of main",
+     VCS + " push origin main", PUSHMAIN, "ask", PUSH_MAIN_RULE, None),
 )
 
 
@@ -27292,6 +27733,10 @@ LOG_RULE_FAMILY = (
     ("worktree-home: an agent's cd into a sibling agent tree", "worktree-home"),
     ("worktree-home: a cd to a checkout's own root", "worktree-home"),
     ("worktree-home: the cd exemptions pass", "worktree-home"),
+    ("worktree-home: an agent's write into its own red-run folder", "worktree-home"),
+    ("worktree-home: the own red-run folder's root", "worktree-home"),
+    ("worktree-home: a red-run folder nested under another linked worktree", "worktree-home"),
+    ("worktree-home: a write into the own red-run folder spelled", "worktree-home"),
     ("worktree-home: a cd in a comment, in quotes", "worktree-home"),
     ("worktree-home: an owner override lifts a bare cd", "worktree-home"),
     ("worktree-home: a later path field", "worktree-home"),
