@@ -5870,6 +5870,132 @@ test("items with only listed fields show no unknown-field warning, new fields in
   assert.equal(await page.locator(".status.broken, [role=alert]").count(), 0, "a sound item shows a warning");
 });
 
+// ---------------------------------------------------------------- lane page-item-waits-on: an item that waits on a CI run or a PR
+// Spec: docs/design/page-item-waits-notes.md (its picks: plain words for a run, "PR #n" for a PR, one span with a lane,
+// the ring badge, Change kept) and the mockup docs/design/page-item-waits.html. The field `waits` is {repo, run} or {repo, pr}.
+// An item with waits, a lastAnswer and no answers record is answered by its wait: it sinks to the Answered section, its badge
+// reads "Sent <lastAnswer time>", and its rail chip says answered and waits. With waits and no lastAnswer it stays an open ask in
+// its tier, with the wait span. Each case reads the card, its rail chip or its section, by where the part sits.
+const WT_REPO = "shivinate7/q_max";
+const WT_RUN = 41861801325;
+const WT_AT = "2026-11-03T20:10:00Z"; // 14:10 CST: the time of the item's last answer
+const WT_RUN_URL = `https://github.com/${WT_REPO}/actions/runs/${WT_RUN}`;
+const WT_PR_URL = (pr) => `https://github.com/${WT_REPO}/pull/${pr}`;
+// The copy may name the repo as " in q_max", since the page does not know its own repo yet (notes, section 1). Either form is the copy.
+const RUN_COPY = /^waits on a CI run( in q_max)?$/;
+const PR_COPY = (pr) => new RegExp(`^waits on PR #${pr}( in q_max)?$`);
+const OPEN_TIERS = ["tier-holds", "tier-due", "tier-calm", "tier-stands"];
+// No. 154 as the writer keeps it: a decision with its last answer on lastAnswer and no answers record. Each case adds the fields it tests.
+const no154 = (over = {}) => mk("wt-154", 154, { title: "Pick the merge order for the q_max fix", ...over });
+const ANSWERED = { choice: "a", at: WT_AT };
+// A link's words as a reader hears them: its text without the arrow and the screen-reader words after it.
+const wordsOf = (s) => flat(s.replace(/↗/g, "").replace(/, opens in a new tab/g, ""));
+const linkWords = async (loc) => wordsOf(await loc.textContent());
+const chipLabel = (page, it) => page.locator("#c-" + it.id).getAttribute("aria-label");
+const recordAt = (it, at) => ({ [it.id]: { item: it.id, n: it.n, at, choice: "a", note: "" } });
+
+test("page-item-waits-on: No. 154 as stored today, answered on lastAnswer with no waits, is an owner ask in its tier (control)", async (t) => {
+  const it = no154({ lastAnswer: ANSWERED });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const home = await sectionOf(page, it);
+  assert.equal(home, "tier-calm", `No. 154 without waits is in ${home}, not in its open tier`);
+  assert.doesNotMatch(await card(page, it).getAttribute("class"), /answered/, "No. 154 without waits is drawn as answered");
+  assert.match(await chipLabel(page, it), /, open$/, "the rail chip of No. 154 without waits does not say open");
+});
+
+test("page-item-waits-on: No. 154 waiting on a CI run sits in the Answered section, with a Sent badge, the run link and an answered chip", async (t) => {
+  const it = no154({ lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: WT_RUN } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", "No. 154 is not in the Answered section");
+  const c = card(page, it), badge = c.locator(".top .ans");
+  await need(badge, "No. 154 has no badge in its top row");
+  assert.equal(flat(await badge.textContent()), "Sent Nov 3, 14:10 CST", "the badge is not Sent with the last answer's time");
+  assert.doesNotMatch(await badge.getAttribute("class"), /filed/, "the badge draws a filed tick");
+  const link = c.locator(`.top a[href="${WT_RUN_URL}"]`);
+  await need(link, "No. 154's top row has no link to its CI run");
+  assert.match(await linkWords(link), RUN_COPY, "the run link does not read 'waits on a CI run'");
+  const chip = await chipLabel(page, it);
+  assert.match(chip, /, answered, waits on a CI run( in q_max)?$/, `the rail chip reads "${chip}", not answered and waiting on a CI run`);
+  const cls = await page.locator("#c-" + it.id).getAttribute("class");
+  assert.match(cls, /\bsent\b/, "the rail chip is not drawn as sent");
+  assert.doesNotMatch(cls, /filed/, "the rail chip is drawn as filed");
+  assert.match(flat(await c.locator(".receipt").innerText()), /You chose A: Red\./, "the answer line is not drawn from lastAnswer");
+});
+
+test("page-item-waits-on: No. 154 waiting on PR #1011 links the PR, and its copy reads waits on PR #1011", async (t) => {
+  const it = no154({ lastAnswer: ANSWERED, waits: { repo: WT_REPO, pr: 1011 } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const link = card(page, it).locator(`.top a[href="${WT_PR_URL(1011)}"]`);
+  await need(link, "No. 154's top row has no link to PR #1011");
+  assert.match(await linkWords(link), PR_COPY(1011), "the PR link does not read 'waits on PR #1011'");
+});
+
+test("page-item-waits-on: No. 154 with a lane and a wait shows one span, 'waits on lane cache-split and PR #1011', and only PR #1011 is its link", async (t) => {
+  const it = no154({ lastAnswer: ANSWERED, lane: "cache-split", waits: { repo: WT_REPO, pr: 1011 } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const spans = card(page, it).locator(".top .onlane");
+  const n = await spans.count();
+  assert.equal(n, 1, `the top row has ${n} lane or wait spans, not one`);
+  assert.match(wordsOf(await spans.first().textContent()), /^waits on lane cache-split and PR #1011( in q_max)?$/, "the span does not read 'waits on lane cache-split and PR #1011'");
+  const inner = spans.first().locator("a");
+  await need(inner, "the span has no link");
+  assert.equal(await inner.getAttribute("href"), WT_PR_URL(1011), "the span's link is not PR #1011");
+  assert.match(await linkWords(inner), /^PR #1011( in q_max)?$/, "the link holds more than PR #1011");
+});
+
+test("page-item-waits-on: No. 154 with waits and no lastAnswer stays an open ask in its tier, with the wait span and an open chip", async (t) => {
+  const it = no154({ waits: { repo: WT_REPO, pr: 1011 } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const home = await sectionOf(page, it);
+  assert.ok(OPEN_TIERS.includes(home), `No. 154 with no lastAnswer is in ${home}, not in an open tier`);
+  const link = card(page, it).locator(`.top a[href="${WT_PR_URL(1011)}"]`);
+  await need(link, "No. 154 with no lastAnswer has no wait span linking PR #1011");
+  assert.match(await linkWords(link), PR_COPY(1011), "the wait span does not read 'waits on PR #1011'");
+  assert.doesNotMatch(await card(page, it).getAttribute("class"), /answered/, "No. 154 with no lastAnswer is drawn as answered");
+  assert.match(await chipLabel(page, it), /, open$/, "the rail chip of No. 154 with no lastAnswer does not say open");
+});
+
+test("page-item-waits-on: No. 154 waiting on a run is never folded under Asked before, though it was added before the last answer", async (t) => {
+  const seenOpen = mk("wt-seen-open", 2, { added: at(5) });
+  const it = no154({ added: at(5), lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: WT_RUN } });
+  const page = await open(t, { items: [it, seenOpen] }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", "No. 154 is not in the Answered section, so it can sit under Asked before");
+  assert.equal(await card(page, it).getAttribute("data-seen"), null, "No. 154 is marked seen");
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), [seenOpen.id], "No. 154 is in the Whenever tier, under the Asked before line");
+});
+
+test("page-item-waits-on: in the Answered section No. 154 sorts by its lastAnswer time among the items with answer records", async (t) => {
+  const it = no154({ lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: WT_RUN } });
+  const newer = mk("wt-rec-new", 2, { added: at(5) }), older = mk("wt-rec-old", 3, { added: at(5) });
+  const records = { ...recordAt(newer, "2026-11-04T08:00:00Z"), ...recordAt(older, "2026-10-26T01:00:00Z") };
+  const page = await open(t, { items: [it, newer, older], answers: records }); if (!page) return;
+  assert.deepEqual(await cardsIn(page, "#tier-answered"), [newer.id, it.id, older.id], "the Answered section is not newest first, with No. 154 at its lastAnswer time");
+});
+
+test("page-item-waits-on: itemFields lists waits, and No. 154 with waits draws no unknown-field warning", async (t) => {
+  const it = no154({ lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: WT_RUN } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const list = JSON.parse(await page.locator("script#itemFields").textContent());
+  assert.ok(list.includes("waits"), "itemFields does not list waits");
+  assert.doesNotMatch(await card(page, it).innerText(), /does not draw/, "No. 154 draws the unknown-field warning for waits");
+});
+
+test("page-item-waits-on: No. 154 waiting on a run has no Withdraw, and Change reopens it on lastAnswer, then a Send writes its answer", async (t) => {
+  const it = no154({ lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: WT_RUN } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const c = card(page, it), change = c.getByRole("button", { name: "Change", exact: true });
+  await need(change, "No. 154 has no Change button");
+  assert.equal(await c.getByRole("button", { name: /Withdraw/ }).count(), 0, "No. 154 offers a Withdraw");
+  assert.doesNotMatch(await page.locator("#send").textContent(), /Withdraw/, "the bar offers to withdraw No. 154");
+  await change.click();
+  await need(c.locator(".opts"), "Change did not open No. 154's options");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), true, "Change did not reopen No. 154 on its last pick");
+  await choose(page, it, "b");
+  await send(page);
+  assert.ok(await holds(page, (id) => !!window.__answers()[id], it.id), "Send wrote no answer for No. 154");
+  assert.equal((await answers(page))[it.id].choice, "b", "the answer written for No. 154 is not its new pick");
+});
+
 // An arbiter ruling (decision session-tiers, Arbiter, "On the page"): the writer files it as a closed item with arbiter: true,
 // home = the ruling's record id, pick = the ruled option, why and ruled. Every case keeps DECISION open and first: open() waits
 // for an open card, so a red run fails on the arbiter assertions, not on that wait.
