@@ -1,6 +1,7 @@
 // The show command: prints one part of `docs/map/` as short plain text.
 // Use: node <skill>/scripts/map-show.mjs <path|area|folder/|decision-id> [--full], run from the root of a repository that has `map.config.json`.
-//   a file path  prints its area, its map line, its fact lines, its Homes lines and its trace steps.
+//   a file path  prints its area, its map line, its fact lines, its tested-by line, its Homes lines and its trace steps.
+//                A test path also prints `Named as a test of:` and the files whose tested-by line names it. A test with no map line prints that alone.
 //   an area id   prints each map line of that area as `path — sentence`.
 //   a folder     (ends with `/`) prints each map line whose path starts with it.
 //   a decision id  (the config sets `decisionsDir` and `decisionIdPattern`, and the arg wholly matches the pattern) prints each map line
@@ -15,7 +16,7 @@
 // A map the skill cannot read (a bad config, or a page that is tracked and not on disk): one plain stderr line, exit 3.
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import { decisionEntries, extRe, factLines, gitLsFiles, homeLines, mapFilePaths, mapLines, TRACE_PAGE_RE, traceStepItems } from './map-check.mjs';
+import { extRe, factLines, gitLsFiles, homeLines, mapFilePaths, mapLines, subLineEntries, TRACE_PAGE_RE, traceStepItems } from './map-check.mjs';
 import { repoMapConfig } from './lib/map-config.mjs';
 import { idKey, recordFiles } from './lib/decisions.mjs';
 
@@ -37,7 +38,7 @@ try {
   // One entry per area page, in the order git lists them.
   areas = mapFilePaths(files).map((f) => {
     const text = read(f);
-    return { id: path.posix.basename(f, '.md'), text, lines: mapLines(text, re), cites: decisionEntries(text, re) };
+    return { id: path.posix.basename(f, '.md'), text, lines: mapLines(text, re), cites: subLineEntries(text, re).entries };
   });
   traces = files.flatMap((f) => {
     const m = f.match(TRACE_PAGE_RE);
@@ -93,18 +94,27 @@ if (cfg.decisionsDir && new RegExp(`^(?:${cfg.decisionIdPattern})$`).test(arg)) 
 } else if (want.endsWith('/')) {
   for (const a of areas) for (const l of a.lines) if (l.path.startsWith(want)) out.push(row(l));
 } else {
+  const entries = areas.flatMap((a) => a.cites);
+  const tests = [...new Set(entries.filter((e) => e.file === want).flatMap((e) => e.tests))];
+  // A test path: the files whose tested-by line names it.
+  const named = [...new Set(entries.filter((e) => e.tests.includes(want)).map((e) => e.file))];
+  const namedLines = named.length ? ['Named as a test of:', ...named.map((f) => `  ${f}`)] : [];
   for (const a of areas) {
     for (const l of a.lines) {
       if (l.path !== want) continue;
       out.push(`${want} — area ${a.id}`, l.sentence);
       const facts = factLines(a.text).filter((f) => f.parent === want);
       if (facts.length) out.push('Facts:', ...facts.map((f) => `  ${f.prose}`));
+      if (tests.length) out.push('Tested by:', ...tests.map((t) => `  ${t}`));
+      out.push(...namedLines);
       const homes = areas.flatMap((h) => homeLines(h.text)).filter((h) => h.file === want);
       if (homes.length) out.push('Homes:', ...homes.map((h) => `  ${h.capability} — ${h.file}${h.symbol ? `:${h.symbol}` : ''}`));
       const steps = traces.flatMap((t) => t.steps.filter((s) => s.path === want).map((s) => `  ${t.key} / ${s.heading}: ${s.text}`));
       if (steps.length) out.push('Trace:', ...steps);
     }
   }
+  // A test that has no map line of its own still prints the files that name it.
+  if (!out.length) out.push(...namedLines);
   if (!out.length) for (const a of areas) if (a.id === want) out.push(...a.lines.map(row));
 }
 
