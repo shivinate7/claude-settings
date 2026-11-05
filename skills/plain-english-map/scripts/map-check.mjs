@@ -291,26 +291,26 @@ const backticked = (s) => [...s.matchAll(/`([^`]+)`/g)].map((x) => x[1]);
 /**
  * The map lines of one docs/map/ page, as `entries`, each { file, line, code, ids, at, bad, tests, testsAt, testsBad }. `line` is the 1-based number of the map line.
  * A map line is a backtick list line outside a Tables or a Screens section. `code` is true when `re` accepts its path: only a code line reads decisions lines,
- * so MAP10 is the same for a file whose extension the config leaves out. A tested-by line goes under any map line, as the fact lines do.
+ * so MAP10 is the same for a file whose extension the config leaves out. A tested-by line is valid only under a map line in `## Code files` (`placed`): any other place makes it an orphan.
  * `ids` are the ids on its decisions lines, `at` is the number of the first one or null, and `bad` holds each decisions line that is not in the form: a bad line adds no id.
  * `tests`, `testsAt` and `testsBad` are the same for its tested-by lines.
- * `orphans` holds each tested-by line that sits under no map line, a table line, a screen line or a home included, as { line, text }.
+ * `orphans` holds each tested-by line that sits under no `placed` map line (a table line, a screen line, a home and a line in another section included), as { line, text }.
  */
 export const subLineEntries = (text, re) => {
   const entries = [], orphans = [];
-  let entry = null, inFiles = true;
+  let entry = null, inFiles = true, inCode = false;
   for (const [line, l] of unfenced(text)) {
-    if (/^#{1,6}\s/.test(l)) { entry = null; inFiles = !/\b(?:tables|screens)\b/i.test(l); continue; }
+    if (/^#{1,6}\s/.test(l)) { entry = null; inFiles = !/\b(?:tables|screens)\b/i.test(l); inCode = /^#{1,6}\s+code files\s*$/i.test(l); continue; }
     const mapLine = l.match(LIST_ITEM_TOKEN_RE);
     if (mapLine) {
       const code = re.test(mapLine[1]);
-      entry = inFiles || code ? { file: mapLine[1], line, code, ids: [], at: null, bad: [], tests: [], testsAt: null, testsBad: [] } : null;
+      entry = inFiles || code ? { file: mapLine[1], line, code, placed: inCode, ids: [], at: null, bad: [], tests: [], testsAt: null, testsBad: [] } : null;
       if (entry) entries.push(entry);
       continue;
     }
     if (TESTED_LABEL_RE.test(l)) {
       const m = l.match(TESTED_LINE_RE);
-      if (!entry) orphans.push({ line, text: l.trim() });
+      if (!entry?.placed) orphans.push({ line, text: l.trim() });
       else if (!m) entry.testsBad.push({ line, text: l.trim() });
       else { entry.testsAt ??= line; entry.tests.push(...backticked(m[1])); }
       continue;
@@ -1218,11 +1218,13 @@ export const mapChecks = ({ cfg, root, read, files = () => gitLsFiles(root) }) =
     const problems = [], pairs = new Map();
     for (const f of mapFilePaths(all)) {
       const { entries, orphans } = subLineEntries(read(f), re);
-      for (const o of orphans) problems.push(`${f}:${o.line} a tested-by line sits under no file map line (a table line, a screen line and a home are none): ${o.text}`);
+      for (const o of orphans) problems.push(`${f}:${o.line} a tested-by line sits under no map line in "## Code files" (a table line, a screen line, a home and a line in another section are none): ${o.text}`);
       for (const e of entries) {
         for (const b of e.testsBad) problems.push(`${f}:${b.line} tested-by line is not "  - Tested by: \`PATH\`, \`PATH\`": ${b.text}`);
-        for (const test of e.tests) {
-          if (!tracked.has(test)) problems.push(`${f}:${e.testsAt} ${e.file} names the test ${test}, and git does not track it`);
+        for (const named of e.tests) {
+          // `./tests/x.py` and `tests/x.py` name one tracked file.
+          const test = named.startsWith('./') ? path.posix.normalize(named) : named;
+          if (!tracked.has(test)) problems.push(`${f}:${e.testsAt} ${e.file} names the test ${named}, and git does not track it`);
           // An untracked mapped file is MAP2's finding, and no test can be judged against it.
           else if (tracked.has(e.file) && !pairs.has(`${e.file}\0${test}`)) pairs.set(`${e.file}\0${test}`, { page: f, at: e.testsAt, file: e.file, test });
         }
