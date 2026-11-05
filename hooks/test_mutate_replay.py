@@ -1275,6 +1275,39 @@ BANCHI_STATUS_TEXT = "def status(count):\n    return count >= 1\n"
 BANCHI_ROUTES = "server/send_routes.py"
 BANCHI_ROUTES_TEXT = 'def route(path):\n    return path == "/status"\n'
 BANCHI_BASE = {"README.md": "base\n", **banchi_harness(BANCHI_GREEN)}
+# claude_settings: each case's base holds only README.md, and its pull request adds one file with its own suite, so
+# NO_PRODUCT can come only from the product decision. A suite imports its module from its own folder.
+CS_SUITE_HEAD = """import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+"""
+CS_STALE = "skills/waiting-page/stale_pages.py"
+CS_STALE_TEXT = "def stale(count):\n    return count >= 1\n"
+CS_STALE_SUITE = "skills/waiting-page/test_stale_pages.py"
+CS_STALE_SUITE_TEXT = CS_SUITE_HEAD + """import stale_pages  # noqa: E402
+
+sys.exit(0 if stale_pages.stale(1) and not stale_pages.stale(0) else 1)
+"""
+CS_STALE_SUITE_CHANGED = CS_STALE_SUITE_TEXT + "# this change touches the suite too\n"
+CS_FIXTURE = "skills/plain-english-map/tests/fixture/src/retry.py"
+CS_FIXTURE_TEXT = "def retry(count):\n    return count < 3\n"
+CS_HELPER = "skills/waiting-page/tests/merged_page.py"
+CS_HELPER_TEXT = "def merged(page):\n    return page is not None\n"
+CS_GUARD = "hooks/guard.py"
+CS_GUARD_TEXT = "def allowed(n):\n    return n >= 1\n"
+CS_GUARD_SUITE = "hooks/test_guard_scope.py"
+CS_GUARD_SUITE_TEXT = CS_SUITE_HEAD + """import guard  # noqa: E402
+
+sys.exit(0 if guard.allowed(1) and not guard.allowed(0) else 1)
+"""
+CS_LINT = "lint/check_scope.py"
+CS_LINT_TEXT = "def scope(n):\n    return n >= 1\n"
+CS_LINT_SUITE = "lint/test_check_scope.py"
+CS_LINT_SUITE_TEXT = CS_SUITE_HEAD + """import check_scope  # noqa: E402
+
+sys.exit(0 if check_scope.scope(1) and not check_scope.scope(0) else 1)
+"""
 
 
 def qmax_profile():
@@ -1282,7 +1315,13 @@ def qmax_profile():
     return dict(mutate_guard.REPLAY_PROFILES["q_max"], install=None)
 
 
-PRODUCT_PROFILES = {"q_max": qmax_profile, "banchi": banchi_profile}
+def claude_settings_profile():
+    """The claude_settings profile as hooks/mutate_guard.py names it. Its `code` and `code_not` are read here, never
+    copied, so a widened scope changes these cases with it."""
+    return dict(mutate_guard.REPLAY_PROFILES["claude_settings"])
+
+
+PRODUCT_PROFILES = {"q_max": qmax_profile, "banchi": banchi_profile, "claude_settings": claude_settings_profile}
 # case: (profile name, the base commit's files, the pull request's files). A new case adds one entry here.
 PRODUCT_CASES = {
     "qmax_test_file": ("q_max", QMAX_BASE,
@@ -1295,6 +1334,18 @@ PRODUCT_CASES = {
                         {BANCHI_SELFTEST: BANCHI_SELFTEST_TEXT, BANCHI_SUITE: BANCHI_SUITE_CHANGED}),
     "banchi_status": ("banchi", BANCHI_BASE, {BANCHI_STATUS: BANCHI_STATUS_TEXT, BANCHI_SUITE: BANCHI_SUITE_CHANGED}),
     "banchi_routes": ("banchi", BANCHI_BASE, {BANCHI_ROUTES: BANCHI_ROUTES_TEXT, BANCHI_SUITE: BANCHI_SUITE_CHANGED}),
+    "cs_skills_source": ("claude_settings", {"README.md": "base\n"},
+                         {CS_STALE: CS_STALE_TEXT, CS_STALE_SUITE: CS_STALE_SUITE_TEXT}),
+    "cs_hooks_source": ("claude_settings", {"README.md": "base\n"},
+                        {CS_GUARD: CS_GUARD_TEXT, CS_GUARD_SUITE: CS_GUARD_SUITE_TEXT}),
+    "cs_lint_source": ("claude_settings", {"README.md": "base\n"},
+                       {CS_LINT: CS_LINT_TEXT, CS_LINT_SUITE: CS_LINT_SUITE_TEXT}),
+    "cs_fixture_out": ("claude_settings", {"README.md": "base\n"},
+                       {CS_FIXTURE: CS_FIXTURE_TEXT, CS_STALE_SUITE: CS_STALE_SUITE_TEXT}),
+    "cs_helper_out": ("claude_settings", {"README.md": "base\n"},
+                      {CS_HELPER: CS_HELPER_TEXT, CS_STALE_SUITE: CS_STALE_SUITE_TEXT}),
+    "cs_suite_out": ("claude_settings", {"README.md": "base\n", CS_STALE_SUITE: CS_STALE_SUITE_TEXT},
+                     {CS_STALE_SUITE: CS_STALE_SUITE_CHANGED}),
 }
 
 
@@ -1347,6 +1398,57 @@ class BanchiSelftestTests(unittest.TestCase):
     def test_a_server_module_is_product(self):
         row = product_row("banchi_routes")
         self.assertEqual(row["status"], "OK", api("format_replay_row")(row))
+
+
+class ClaudeSettingsScopeTests(unittest.TestCase):
+    """The claude_settings profile's `code` pattern names the product folders. A .py file under skills/ is product
+    unless it is a suite, a helper or a fixture under a tests/ folder. The skills/ case is red on main, where the
+    pattern does not reach skills/. The other cases pin the scope that stays as it is."""
+
+    def test_a_skills_source_file_is_product(self):
+        row = product_row("cs_skills_source")
+        self.assertEqual(row["status"], "OK", "%s reads %s, not product: %s"
+                         % (CS_STALE, row["status"], api("format_replay_row")(row)))
+
+    def test_a_hooks_source_file_is_still_product(self):
+        row = product_row("cs_hooks_source")
+        self.assertEqual(row["status"], "OK", "%s reads %s, not product: %s"
+                         % (CS_GUARD, row["status"], api("format_replay_row")(row)))
+
+    def test_a_lint_source_file_is_still_product(self):
+        row = product_row("cs_lint_source")
+        self.assertEqual(row["status"], "OK", "%s reads %s, not product: %s"
+                         % (CS_LINT, row["status"], api("format_replay_row")(row)))
+
+    def test_a_fixture_under_a_skills_tests_folder_is_not_product(self):
+        row = product_row("cs_fixture_out")
+        self.assertEqual(row["status"], "NO_PRODUCT", "%s reads %s, not NO_PRODUCT: %s"
+                         % (CS_FIXTURE, row["status"], api("format_replay_row")(row)))
+
+    def test_a_helper_under_a_skills_tests_folder_is_not_product(self):
+        row = product_row("cs_helper_out")
+        self.assertEqual(row["status"], "NO_PRODUCT", "%s reads %s, not NO_PRODUCT: %s"
+                         % (CS_HELPER, row["status"], api("format_replay_row")(row)))
+
+    def test_a_suite_under_skills_is_not_product(self):
+        row = product_row("cs_suite_out")
+        self.assertEqual(row["status"], "NO_PRODUCT", "%s reads %s, not NO_PRODUCT: %s"
+                         % (CS_STALE_SUITE, row["status"], api("format_replay_row")(row)))
+
+
+class ClaudeSettingsSelectPinTests(unittest.TestCase):
+    """A pin, green on main, not a red case. The select command of the real claude_settings profile prints the suite
+    beside a skills/ file. It runs in this checkout, so the suite must be tracked here."""
+
+    def test_the_selector_names_the_suite_beside_a_skills_file(self):
+        select = mutate_guard.REPLAY_PROFILES["claude_settings"]["select"]
+        argv = [part.replace("{path}", CS_STALE) for part in select]
+        done = subprocess.run(argv, cwd=REPO, capture_output=True, text=True, encoding="utf-8", timeout=120)
+        self.assertEqual(done.returncode, 0, "the select command of claude_settings exited %d: %s"
+                         % (done.returncode, done.stderr.strip()))
+        listed = [line.strip() for line in done.stdout.splitlines()]
+        self.assertIn(CS_STALE_SUITE, listed, "the select command of claude_settings does not name %s for %s; it "
+                      "printed %r" % (CS_STALE_SUITE, CS_STALE, listed))
 
 
 class EdgeTests(unittest.TestCase):
