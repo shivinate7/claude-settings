@@ -27,6 +27,7 @@
 //   T6   a shell test fails as an unknown read (T6a). With no python3 on PATH, a Python test fails as an unknown read, and with python3 it passes (T6b).
 //   T7   placement and form. A tested-by line under a table line (T7a), a screen line (T7b) or a home (T7c) fails. Unindented (T7d), with no
 //        backticks (T7e), or with a `;` separator (T7f), it fails. Under a map line after a decisions line (T7g), it passes.
+//        Under a backtick line in a Notes section it is an orphan and fails (T7h): a tested-by line is valid only under a Code files map line.
 //   T8   one hop. Through `src/pkg/index.ts`, the test passes (T8a). Without the re-export, it fails (T8b). Two hops fail (T8c).
 //        Through `src/pkgpy/__init__.py`, the test passes (T8d). Without the re-export, it fails (T8e).
 //   C0   control, green on the old code: the import reader MAP11 uses reads the fixture's imports the way these cases assume.
@@ -352,6 +353,16 @@ test('T7g. control: a tested-by line after a decisions line under a map line pas
   const ls = linesAt(dir, CORE);
   assert.ok(ls.findIndex((l) => l.startsWith('  - Decisions:')) < ls.findIndex((l) => l.includes('Tested by:')), 'the decisions line must come first');
   mustPass(check(dir));
+});
+
+test('T7h. a tested-by line under a backtick line in a Notes section is an orphan: MAP11 fails, and names the page and the test', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  // The scope first: the test loads home.ts, so the only fault left in the case is where the line sits.
+  assert.match(readAt(dir, 'src/home.spec.ts'), /from '\.\/home'/, 'src/home.spec.ts must load home.ts');
+  writeAt(dir, CORE, `${readAt(dir, CORE).trimEnd()}\n\n## Notes\n\n- \`src/home.ts\` — A note that names the file.\n${tested('src/home.spec.ts')}\n`);
+  assert.match(readAt(dir, CORE), /^## Notes$/m, 'the page must hold a Notes section');
+  mustFail(check(dir), CORE, 'src/home.spec.ts');
 });
 
 test('T8a. one hop: a test that imports the package passes when the package re-exports the file', () => {
