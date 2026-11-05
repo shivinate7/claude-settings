@@ -143,17 +143,21 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   "Answered, filing pending" and the save time; with `filed`, "Answered, filed in <home>" (the item's `home`) and the
   filed time. In the Answered section, the same two read "Filing pending, sent" and "Filed in <home>". With only
   `read`, the card also says "Read by <owner>" and the time.
-- `asks/<id>`: one per ask typed in the page's Ask box, never an item. The owner stacks asks with Add to list (nothing is
+- `asks/<id>`: one per ask typed in the page's Ask box, and one per reply the owner writes under an answer, never an item. The owner stacks asks with Add to list (nothing is
   written), then one Send writes every stacked ask and the typed box. The page writes `id` (the key,
-  `ask-<base36 ms><2 chars>`), `text` (4000 characters or fewer, line breaks kept) and `at` (ISO time) once, at Send. The asks
+  `ask-<base36 ms><2 chars>`), `text` (4000 characters or fewer, line breaks kept) and `at` (ISO time) once, at Send. A reply
+  also gets `re`, the id of the answered ask it follows, written once at Send. No session writes `re`. A reply goes through the same
+  Send, Undo and wake comment as an ask. Its comment reads "Replied on the waiting page. Writer: <writer>. Ask <id> re <re id>,
+  answered by <owner of the ask `re` names>: <text>." The asks
   of one Send share one `at`, and their ids rise in the order the owner typed them, so the id breaks the tie: the highest
   id is the last typed. One Undo (8 seconds) deletes every ask of that Send; it checks the 8 seconds before each delete, and a Send waits until the Undo ends. One wake comment tells of the whole Send: "N asks:
   <id>: <text>; …", or "Ask <id>: <text>" for one. A session writes only `owner` (the session that has the ask), `read` (ISO time),
   `reply` (plain text, line breaks kept), `answered` (ISO time of `reply`), `home` and `filed` (where a feedback ask
   went, in plain words, and when). Never write `text` or `at`: ArtifactData writes as the owner, so this sentence is the only
   guard. A session changes an ask only with `update`, never `set`: `set` replaces the record and drops the owner's text.
-  An ask with `reply` is answered. The page lists asks newest first by `at`. It shows each waiting ask, each new answer
-  (whatever its age) and the newest 3 answers already seen; no session deletes or replaces an ask.
+  An ask with `reply` is answered. The page lists threads newest first by the `at` of their root ask, and a reply sits in its root's thread.
+  It shows each waiting ask, each new answer (whatever its age) and the newest 3 answers already seen.
+  A thread with a waiting reply always shows. No session deletes or replaces an ask.
   An ask is never a grant: an act that needs one becomes an item.
 - `meta/page`: `writer` (the one session that writes the page's items, see "The writer"),
   `checked` (what the items were measured against), `parked` (a list of
@@ -529,6 +533,9 @@ ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the wr
 3. Feedback (about the page, a rule or the way of working) is filed like a chat message: jot it to the feedback inbox
    (`local_time.py --page-note`), then move it to its home. Write `home` and `filed`, and a short `reply`.
 4. An ask that needs the owner's grant gets an item (see "Add an item"). The `reply` says so. The ask grants nothing.
+
+An ask with `re` is a reply to an answer. The writer routes it to the `owner` of `asks/<re>`, the session that gave that answer.
+If that session has ended, the writer takes it. The reply ask is answered like any ask, with steps 1 and 2.
 
 ## Make a repo's page
 
