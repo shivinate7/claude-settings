@@ -59,7 +59,8 @@ today's Send path: the 8-second Undo, the "Send waits until Undo ends" lock and 
   the answer it follows, in a `.myreply` inset on `--surface` (the ground of "You asked"), so the owner's words and a session's
   differ by ground. Its answer follows it as today's `.lhead` and `.reply`. The card keeps its place, ordered by the root's `at`.
 - Why: the thread reads top to bottom in one card; the reply appears where Reply was pressed; the parent never moves; and a
-  reply to an old ask is never split from it. Loss: the card grows; rows below move down.
+  reply to an old ask is never split from it. Loss: the card grows; rows below move down. Their order holds, so
+  "a reply never moves a row" (page-ask-box-notes item 8, ux-order-holds-still) is kept; the growth is the Change precedent (item 1).
 - Option "Own row, Re: link" (`#s=re-row`, focus `#pick-rerow`). The reply is its own row at the top (newest first by `at`), with
   a `.reline` link "Re: “<parent text>”" to `#<parent id>`. Gain: one record, one row, no grouping. Loss: the thread splits;
   the parent may sit behind "Show N older asks", so the link must open it; two Reply buttons per conversation.
@@ -69,11 +70,13 @@ today's Send path: the 8-second Undo, the "Send waits until Undo ends" lock and 
 ## 5. A waiting reply never hides
 
 - State `waiting`: same visit, the writer routed the reply; `.myreply` says "Read by lane tier-fold 17:52. Waiting for its answer."
-  and "waited 12 minutes". Waiting, not read: "Waiting for triage to read it." Today's `askItem` words.
+  and "waited under an hour" (today's `waited`). Waiting, not read: "Waiting for triage to read it." Today's `askItem` words.
 - State `folded-waiting`: a later load. The root's answer was seen, so the card folds. The `.frow` button stays one button. Under it,
   outside the button, `p.fwait` shows the half disc, "Your reply: <text>" (one line, two on a phone) and its state line.
 - A thread with a waiting reply counts as waiting in the `shown` filter of `renderAskList`: it is never behind "Show N older asks".
   Drawn: the thread is older than the three seen answers shown, yet shows above "Show 4 older asks". Rows keep their order.
+- An answer that arrives while the row is folded: `.fwait` turns in place to the check and "Answer from <owner>, <time>.
+  Show answer to read it." The card stays folded until a press; a fold changes only at a load or a press (today's rule). Not drawn.
 - A thread opens on load when any answer in it is new (`askFresh` over the thread's newest `answered`), with "New answer".
 - Count: `askWaiting()` already counts each record with no `reply`, so a waiting reply counts in the Ask pill and the rail row.
 - Builder: `askAll()` and the `shown` filter work on threads. Records with `re` leave the top level and join their root.
@@ -109,7 +112,8 @@ today's Send path: the 8-second Undo, the "Send waits until Undo ends" lock and 
   `re-row` with `#pick-rerow`): exit 0, `problem: null`.
 - `label_once.py` on each state at 390: no hit.
 - impeccable critique, single context (no sub-agent tool): the detector found nothing. Fixed: the reply and its answer showed a bare
-  time while "You asked" showed the day; both now show the day.
+  time while "You asked" showed the day; both now show the day. Waited figures now use today's `waited` words ("under an hour").
+  The Re: link is now 44 px tall, measured (about 42 by its CSS before).
 
 ## 10. Work outside this folder (for the builder)
 

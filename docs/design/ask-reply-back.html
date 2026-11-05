@@ -911,7 +911,7 @@ html.coarse .askhint .kbd { display: none; } /* Mockup stand-in for @media (poin
 @media (max-width: 520px) { .askc.folded .fwait .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
 /* Option "Own row": a reply is its own row, newest first, with a link to the ask it follows. */
 .reline { display: flex; align-items: center; min-height: 44px; margin: 0; font-size: 14.5px; min-width: 0; }
-.reline a { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; padding-block: 10px; }
+.reline a { display: block; line-height: 24px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; padding-block: 10px; }
 
 /* Sample labels: dashed "Today:" for what exists, "New:" for what this step adds. */
 [data-new], [data-today] { position: relative; outline: 2px dashed #7c3aed; outline-offset: 3px; }
@@ -936,7 +936,7 @@ const R1 = { id: "ask-mw0a1k7q", at: "Nov 4, 16:20 CST", text: "Why did lane tie
 // The reply: a new asks/<id> record whose `re` names the ask it follows.
 const RP = { id: "ask-mw0q7c2x", at: "17:50", text: "Did round 3 change the rail guard? If it did, which PR has it?", re: R1.id };
 const RPA = { owner: "lane tier-fold", answered: "18:02", reply: "No. The rail guard is unchanged. Round 3 only re-ran the net-value test on the batch head." };
-const N1 = { id: "ask-mw0p2m9d", at: "Nov 4, 17:30 CST", text: "Please batch the two hook lanes into one PR.", waited: "20 minutes" };
+const N1 = { id: "ask-mw0p2m9d", at: "Nov 4, 17:30 CST", text: "Please batch the two hook lanes into one PR.", waited: "under an hour" };
 const SEEN = [
   { text: "The rail chips feel small on my phone. I miss them with my thumb.", answered: "Nov 3, 16:31" },
   { text: "What does “Pick stands” mean on the page?", answered: "Nov 2, 11:09" },
@@ -965,7 +965,7 @@ const waitingAsk = (a) => `<li class="askc"><div class="ahead">${g("wait")}<span
 
 // The owner's reply inside the thread. st: wait, read, answered.
 function myReply(st, lab, labText) {
-  const head = `<p class="lhead">${st === "answered" ? "" : g("wait")}<span>Your reply, Nov 4, ${RP.at} CST</span>${st === "answered" ? "" : `<span>waited ${st === "read" ? "12 minutes" : "1 minute"}</span>`}</p>`;
+  const head = `<p class="lhead">${st === "answered" ? "" : g("wait")}<span>Your reply, Nov 4, ${RP.at} CST</span>${st === "answered" ? "" : "<span>waited under an hour</span>"}</p>`;
   const state = st === "wait" ? `<p class="astate">Waiting for ${WRITER} to read it.</p>` : st === "read" ? `<p class="astate">Read by ${RPA.owner} <span class="t">17:52</span>. Waiting for its answer.</p>` : "";
   return `<div class="myreply" id="${RP.id}"${lbl(lab, labText)}>${head}<p class="reply">${esc(RP.text)}</p>${state}</div>`;
 }
@@ -1021,7 +1021,7 @@ const CAP = {
   "open-over": "A paste over 4000 characters. Nothing is cut. Send reply is off and the hint gives the length.",
   "just-sent": "Send reply pressed at 17:50. The reply shows in the thread at once. Undo counts at the thread's end. The Ask box's Send waits for the same Undo.",
   undone: "Undo deleted the record. The words are back in the reply box, not sent.",
-  waiting: "Two minutes on, same visit. The writer routed the reply to lane tier-fold, which read it. Reply stays, for a second thought.",
+  waiting: "Twelve minutes on, same visit. The writer routed the reply to lane tier-fold, which read it. Reply stays, for a second thought.",
   answered: "Option \"Nested in the thread\" (pick). The answer follows the reply in the parent's card. The card keeps its place; New answer opens it at the next load.",
   "re-row": "Option \"Own row, Re: link\". The reply is its own row at the top, newest first. Its Re: link jumps to the ask it follows. The parent keeps its place.",
   "folded-waiting": "Next morning. The parent's answer was seen, so the card folds, but its waiting reply shows under the fold row. The thread is older than the three answers shown, yet it is not behind Show older asks.",
@@ -1050,7 +1050,7 @@ function asksBody(s, lab) {
     return box + ol([row, waitingAsk(N1), threadCard({ id: R1.id, end: replyBtn() }), ...tail]);
   }
   if (s === "folded-waiting") {
-    const n2 = { at: "Nov 5, 09:02 CST", text: "Why is the batch runner idle?", waited: "8 minutes" };
+    const n2 = { at: "Nov 5, 09:02 CST", text: "Why is the batch runner idle?", waited: "under an hour" };
     return box + ol([waitingAsk(n2), ...LATER.map((a) => folded(a)), folded({ ...R1, answered: "Nov 4, 16:31" }, { wait: { text: RP.text, state: `Read by ${RPA.owner} <span class="t">Nov 4, 17:52</span>. Waiting for its answer.` }, lab, labText: "a waiting reply shows outside the fold" })], 4);
   }
   if (s === "failed") return box + ol([waitingAsk(N1), threadCard({ end: replyForm({ h: "Not saved (permission-denied). Your reply is still in the box: copy it and paste it in chat.", bad: true, val: RP.text, on: true, copy: true, lab, labText: "Copy reply: the words, with the ask they follow" }) }), ...tail]);
