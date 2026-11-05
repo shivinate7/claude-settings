@@ -42,6 +42,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 import unittest
 import uuid
 
@@ -153,6 +154,16 @@ SUITE_WITH_SUB = ("import sys\n"
 SUITE_CRASH = "from calc import sub\nprint(sub(5, 2) + 1)\n"
 # The select script names the suite that pins calc.py. It is part of the commit, so a checkout at head has it.
 SELECT_SRC = "import sys\nif sys.argv[1] == 'calc.py':\n    print('test_calc.py')\n"
+# The clean sub returns 3 at once. A mutant whose sub returns None hangs here, so only the budget can end its run.
+SUITE_HANGS_ON_NONE = ("import sys\n"
+                       "import time\n"
+                       "from calc import sub\n\n"
+                       "if sub(5, 2) is None:\n"
+                       "    time.sleep(30)\n"
+                       "if sub(5, 2) != 3:\n"
+                       "    print('FAIL: sub(5, 2) is not 3')\n"
+                       "    sys.exit(1)\n"
+                       "print('ok')\n")
 
 CHANGED = {"code": r"^calc\.py$", "tests": r"^test_[^/]+\.py$", "argv": [PY, "{suite}"],
            "classify": "fail_line", "install": None, "sparse_skip": []}
@@ -198,6 +209,15 @@ def crash_repo():
     put(repo, {"calc.py": CALC_BASE, "test_calc.py": SUITE})
     commit(repo, "Base: add and mul")
     topic(repo, "feat", {"calc.py": CALC_SUB_ONLY, "test_calc.py": SUITE_CRASH}, "Add sub and call it")
+    return repo
+
+
+def budget_repo():
+    """feat adds sub, and its changed suite hangs on a sub that returns None: every mutant of sub runs into the budget."""
+    repo = new_repo()
+    put(repo, {"calc.py": CALC_BASE, "test_calc.py": SUITE})
+    commit(repo, "Base: add and mul")
+    topic(repo, "feat", {"calc.py": CALC_SUB_ONLY, "test_calc.py": SUITE_HANGS_ON_NONE}, "Add sub and wait on it")
     return repo
 
 
@@ -507,6 +527,23 @@ class ChangedTests(unittest.TestCase):
         self.assertEqual(data["not_run"], total, "every mutant the budget stopped is not_run")
         self.assertEqual(sorted(untested_of(out)), sorted(["calc.py:%d" % facts["sub"], "calc.py:%d" % facts["div"]]),
                          "a not_run line is untested")
+
+    def test_the_budget_is_a_wall_deadline_that_kills_the_suite_still_running(self):
+        repo = budget_repo()
+        text = show(repo, "feat", "calc.py")
+        want = mutants_on(text, [unique_line(text, "    return a - b")])
+        self.assertGreater(want, 0, "the fixture needs mutants on sub")
+        folder, log = fixture_log()
+        started = time.monotonic()
+        code, out, err = changed_run(repo, CHANGED, extra=["--budget", "3"], log=log)
+        elapsed = time.monotonic() - started
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        data = read_log(log)
+        self.assertEqual(data["not_run"], want,
+                         "a suite the budget passes while it runs is killed and counts not_run\n" + out)
+        self.assertEqual((data["killed"], data["survived"], data["crashed"]), (0, 0, 0),
+                         "a mutant the budget killed is neither a kill, a survivor nor a crash")
+        self.assertLessEqual(elapsed, 3 + 10, "the call ends within the budget plus 10 s: it took %.1f s" % elapsed)
 
     def test_the_log_writes_one_json_file_and_nothing_into_the_repository(self):
         repo = partial_repo()
