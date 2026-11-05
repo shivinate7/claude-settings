@@ -363,6 +363,19 @@ class OwnModelInBody(unittest.TestCase):
             with self.subTest(header=header):
                 self.assertFlagged("Under Done, the first line is %s.\n" % header, header)
 
+    def test_report_header_wrapped_onto_its_model_is_flagged(self):
+        # The header span crosses a line break before its model word, so a match on one line misses it.
+        for header, start in (("`FAIL, round 2 of 3,\nhaiku`", "FAIL, round 2 of 3,"),
+                              ("`PASS, fix check,\nsonnet`", "PASS, fix check,")):
+            with self.subTest(header=header):
+                text = agent_text("Under Done, the first line is %s.\n" % header)
+                first = line_of(text, start)
+                self.assertEqual(len(first), 1, "fixture error: the header start is not on one line")
+                code, out = verdict("agents/fixture.md", text=text)
+                self.assertEqual(code, 1, "a header wrapped onto its model passes the check: %r" % header)
+                self.assertTrue(names_line(out, "fixture.md", [first[0], first[0] + 1]),
+                                "the failure does not name fixture.md:%d for the header: %r" % (first[0], out))
+
     def test_defect_after_a_comment_opener_or_a_stray_quote_is_flagged(self):
         cases = (("It's the first round. Round 1 runs on your frontmatter model, haiku.\n", "your frontmatter model"),
                  ("Use `//` and `#` in prose. Round 1 runs on your frontmatter model, haiku.\n",
@@ -424,6 +437,14 @@ class ModelSlot(unittest.TestCase):
     def test_header_without_a_model_slot_needs_no_phrase(self):
         self.assertEqual(self.check("Under Done, the first line is `PASS, fix check`.\n"), (0, ""),
                          "a header with no model slot is flagged for the missing phrase")
+
+    def test_phrase_wrapped_over_a_line_break_still_counts(self):
+        # A line break inside the phrase is a space in the prose, so the wrapped phrase is in the body.
+        for wrapped in ("You are powered by the model\nnamed in your system prompt.",
+                        "You are powered by\nthe model named in your system prompt."):
+            with self.subTest(wrapped=wrapped):
+                self.assertEqual(self.check(wrapped + "\n\n" + SLOT + "\n"), (0, ""),
+                                 "a model-slot header is flagged for a phrase that wraps across a line break")
 
 
 class RealAgentFiles(unittest.TestCase):
