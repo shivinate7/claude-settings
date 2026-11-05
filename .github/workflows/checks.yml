@@ -1170,9 +1170,10 @@ jobs:
   # A pull request from any other branch skips its steps, so the job reads passed. A push or a schedule reaches the action,
   # which skips there itself: the scope rules read a scoped job as running on those events.
   # It reports the catch share of the changed lines and never fails on it. It fails only when a known defect (.github/known-defects.json)
-  # is MISS or UNKNOWN. Cap (ci-job-caps): measured locally on batch 11 (59bff081..0497265b), `--changed` with limit 10,
-  # budget 300 s and suite timeout 180 s took 337 s, and `--known-defects` 7 s, with a checkout and setup around 1 min. That is
-  # about 7 min, so the cap is about 2x, 15 min. The first CI run on a batch replaces this figure.
+  # is MISS or UNKNOWN. Cap (ci-job-caps): the budget is a wall deadline, so the `--changed` step lasts at most the budget (300 s) plus
+  # its setup (installs and control runs, before the deadline's mutants), not the 337 s the old start-only budget took on batch 11
+  # (59bff081..0497265b, limit 10, suite timeout 180 s). `--known-defects` took 7 s there, with a checkout and setup around
+  # 1 min. That is about 7 min at most, so the cap is about 2x, 15 min. The first CI run on a batch replaces this figure.
   mutation-report:
     runs-on: ubuntu-latest
     needs: scope

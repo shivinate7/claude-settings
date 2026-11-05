@@ -2423,7 +2423,7 @@ def replay_main(argv) -> int:
 def changed_main(argv) -> int:
     """The CI report of a change: mutate the product lines it adds past the merge base, run the suites the profile's `select`
     lists for each file, print the replay row, `catch share: K/R` and each `untested: path:line`. Exit 0 whatever the share:
-    a low share is a report, never a failure. A bad argument, or a ref the repository cannot read, exits 2."""
+    a low share is a report, never a failure. `--budget` is a wall deadline (see `replay_pr`, `wall_deadline`). A bad argument, or a ref the repository cannot read, exits 2."""
     import argparse
     import json
     parser = argparse.ArgumentParser(prog="mutate_guard.py --changed")
@@ -2435,7 +2435,8 @@ def changed_main(argv) -> int:
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--limit", type=int, default=20, help="mutants in all")
     parser.add_argument("--budget", type=float, default=None, metavar="SECONDS",
-                        help="mutants not started this long after the run began count as not_run")
+                        help="a wall deadline: after this long from the start of the run, suites still running are killed and "
+                             "mutants not finished count as not_run")
     parser.add_argument("--suite-timeout", type=float, default=120, help="seconds before a suite run is killed")
     parser.add_argument("--jobs", type=int, default=None)
     parser.add_argument("--log", default=None, metavar="PATH", help="write the totals as one JSON file")
@@ -2458,7 +2459,8 @@ def changed_main(argv) -> int:
         try:
             rows = mutate_shared.replay_profile(repo, head, profile, limit=args.limit, suite_timeout=args.suite_timeout,
                                                 jobs=args.jobs, deps=deps, pr_budget=args.budget, base=base,
-                                                select_all=True, progress=lambda line: print(line, flush=True))
+                                                select_all=True, wall_deadline=True,
+                                                progress=lambda line: print(line, flush=True))
         finally:
             shutil.rmtree(deps, ignore_errors=True)
     print()
@@ -2473,8 +2475,8 @@ def changed_main(argv) -> int:
 
 def known_defects_main(argv) -> int:
     """Replay the planted defects of a list (`.github/known-defects.json`) against a repository's HEAD. One line per defect:
-    `CAUGHT`, `MISS` or `UNKNOWN`. Exit 1 when any defect is MISS or UNKNOWN (decision ci-unknown-is-red). A missing list names
-    no defect and exits 0; a list that cannot be read exits 2."""
+    `CAUGHT`, `MISS` or `UNKNOWN`. Exit 1 when any defect is MISS or UNKNOWN (decision ci-unknown-is-red). A missing list file
+    prints one UNKNOWN line that names its path and exits 1; an empty list exits 0; a list that cannot be read exits 2."""
     import argparse
     import json
     parser = argparse.ArgumentParser(prog="mutate_guard.py --known-defects")
@@ -2484,16 +2486,17 @@ def known_defects_main(argv) -> int:
     parser.add_argument("--suite-timeout", type=float, default=120, help="seconds before a suite run is killed")
     parser.add_argument("--log", default=None, metavar="PATH", help="write the results as one JSON file")
     args = parser.parse_args(argv)
-    defects = []
-    if os.path.exists(args.list_path):
-        try:
-            with open(args.list_path, encoding="utf-8") as handle:
-                defects = json.load(handle)
-            if not isinstance(defects, list):
-                raise ValueError("the top level is not a list")
-        except (OSError, ValueError) as error:
-            print("ERROR cannot read %s: %s" % (args.list_path, error))
-            return 2
+    if not os.path.exists(args.list_path):
+        print("UNKNOWN %s: the known-defects list is missing, so no planted defect was replayed" % args.list_path)
+        return 1
+    try:
+        with open(args.list_path, encoding="utf-8") as handle:
+            defects = json.load(handle)
+        if not isinstance(defects, list):
+            raise ValueError("the top level is not a list")
+    except (OSError, ValueError) as error:
+        print("ERROR cannot read %s: %s" % (args.list_path, error))
+        return 2
     with stop_on_signals():
         results = mutate_shared.run_known_defects(os.path.abspath(args.repo), defects, suite_timeout=args.suite_timeout)
     print(mutate_shared.format_known_defects(results))

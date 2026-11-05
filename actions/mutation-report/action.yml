@@ -107,3 +107,4 @@ runs:
         name: mutation-report
         path: ${{ runner.temp }}/mutation-report/*.json
         if-no-files-found: warn
+        overwrite: true

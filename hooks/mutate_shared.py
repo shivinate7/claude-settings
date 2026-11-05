@@ -478,6 +478,7 @@ def run_suite_file(folder: str, rel: str, timeout: float, argv=None, classify=No
 _LIVE_GROUPS = set()  # process group ids of the children running now, so a signal can kill them
 _LIVE_LOCK = threading.RLock()  # re-entrant: a signal handler runs on the main thread, which may hold it
 _STOP = threading.Event()  # set by `request_stop`: no child starts after it
+CUT = object()  # a mutant the budget cut: `_replay_in` scores it not_run and counts it in a note
 
 
 def run_in_group(command, cwd: str, timeout: float, env=None):
@@ -889,7 +890,8 @@ def _replay_row(repo: str, sha: str) -> dict:
 
 
 def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0, suite_timeout: float = 120,
-              jobs=None, deps=None, pr_budget=None, progress=None, base=None, select_all: bool = False) -> dict:
+              jobs=None, deps=None, pr_budget=None, progress=None, base=None, select_all: bool = False,
+              wall_deadline: bool = False) -> dict:
     """Score the suites the pull request merged at `sha` changed against mechanical mutants of the product
     lines it added. Returns a row: pr, sha, title, status ("OK", "UNKNOWN", "NO_PRODUCT" for no product
     file changed, "NO_TESTS" for product code with no suite changed), reason, made, killed, crashed,
@@ -904,7 +906,10 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
     change that is no merge commit can be scored from its merge base. `select_all` (the `--changed` mode)
     runs, on the mutants of each file, every suite the profile's `select` lists for it, changed or not;
     a change with no suite is then no NO_TESTS row, and a mutant no suite reaches is not_run, with its
-    line in `not_run_at`. Without `select_all`, only changed suites run."""
+    line in `not_run_at`. Without `select_all`, only changed suites run.
+    `wall_deadline` makes `pr_budget` a wall deadline: when it passes, the suites still running are killed
+    (`request_stop`), and each mutant they ran is not_run, never crashed or survived. A note counts the
+    mutants the budget cut. The stop is cleared on the way out. Without it, a running mutant is let finish."""
     started = time.time()
     row = _replay_row(repo, sha)
     code_re, tests_re = re.compile(profile["code"]), re.compile(profile["tests"])
@@ -929,7 +934,7 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
     try:
         return _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, suite_timeout,
                           jobs or job_count(), deps or os.path.join(own, "deps"),
-                          None if pr_budget is None else started + pr_budget, progress, select_all)
+                          None if pr_budget is None else started + pr_budget, progress, select_all, wall_deadline)
     finally:
         shutil.rmtree(own, ignore_errors=True)
 
@@ -983,7 +988,7 @@ def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float, 
 
 
 def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, suite_timeout, jobs, deps,
-               deadline=None, progress=None, select_all=False):
+               deadline=None, progress=None, select_all=False, wall_deadline=False):
     """The body of `replay_pr`, inside the temp folder `own`."""
     clean = {}  # path -> the text a clean run holds: the source, or its normalized form for Python
     found, parse_errors = [], {}
@@ -1106,10 +1111,14 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
                 row["notes"].append("%s: %s" % (path, "no %s reaches it" % who if not listed else
                                                 "the %ss that reach it are unusable" % who))
 
+        expired = threading.Event()  # set by the deadline timer, after it has stopped the live suites
+
         def score(dest, mutant):
             path, label, text = mutant
-            if not allowed[path] or (deadline is not None and time.time() > deadline):
+            if not allowed[path]:
                 return None
+            if deadline is not None and (time.time() > deadline or expired.is_set()):
+                return CUT
             _write(os.path.join(dest, path), text)
             try:
                 kinds = set()
@@ -1118,24 +1127,48 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
                     kinds.add(kind)
                     if kind == "assert":
                         break
+            except RuntimeError:  # `run_in_group` refuses a start after `request_stop`
+                if expired.is_set():
+                    return CUT
+                raise
             finally:
                 _write(os.path.join(dest, path), clean[path])
+            if "assert" not in kinds and expired.is_set():
+                return CUT  # the deadline killed a suite part way: its exit says nothing about the mutant
             if progress:
                 verdict = ("killed" if "assert" in kinds else "crashed" if kinds & {"crash", "timeout"}
                            else "survived")
                 progress("  #%d mutant %s  %s:%d %s" % (row["pr"], verdict, path, _line_of(label), label))
             return kinds
 
-        with ThreadPoolExecutor(max_workers=count) as pool:
-            outcomes = list(pool.map(lambda mutant: borrow(lambda dest: score(dest, mutant)), mutants))
+        timer = None
+        if wall_deadline and deadline is not None:
+            def expire():
+                expired.set()
+                request_stop()
+
+            timer = threading.Timer(max(0.0, deadline - time.time()), expire)
+            timer.daemon = True
+            timer.start()
+        try:
+            with ThreadPoolExecutor(max_workers=count) as pool:
+                outcomes = list(pool.map(lambda mutant: borrow(lambda dest: score(dest, mutant)), mutants))
+        finally:
+            if timer is not None:
+                timer.cancel()
+                timer.join()  # the callback is short: after this, `expired` is final
+                if expired.is_set():
+                    clear_stop()
     finally:
         for dest in made_dirs:
             _drop_checkout(repo, dest)
 
+    cut = 0
     for (path, label, _text), kinds in zip(mutants, outcomes):
-        if kinds is None:
+        if kinds is None or kinds is CUT:
             row["not_run"] += 1
             row["not_run_at"].append((path, _line_of(label), label))
+            cut += kinds is CUT
         elif "assert" in kinds:
             row["killed"] += 1
         elif kinds & {"crash", "timeout"}:
@@ -1144,6 +1177,8 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
             row["survived"] += 1
             row["survivors"].append((path, _line_of(label), label))
     row["made"] = len(mutants)
+    if cut:
+        row["notes"].append("the budget cut %d of %d mutants: not_run" % (cut, len(mutants)))
     if row["not_run"] == row["made"]:
         row["reason"] = "no mutant ran (%d not run)" % row["not_run"]
         return row
