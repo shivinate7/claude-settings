@@ -435,7 +435,7 @@ test('M6. cause 6 controls: a digit in backticks, a fact line digit and a trace 
 test('M7. cause 7: with no python3 on PATH, MAP9 fails as unknown, names python3, and never reads PASS', POSIX_ONLY, () => {
   needFile('scripts/map-check.mjs');
   const r = check(scratchRepo(), { PATH: gitOnlyBin() });
-  assert.equal(verdicts(r.out), expected({ MAP9: 'FAIL' }), `only MAP9 must fail\n${out1500(r)}`);
+  assert.equal(verdicts(r.out), expected({ MAP9: 'FAIL', MAP11: 'FAIL' }), `MAP9 and MAP11 must fail\n${out1500(r)}`);
   const line = mapLine(r.out);
   assert.match(line, /^\[FAIL\] MAP9/, `an unknown read must fail\n${out1500(r)}`);
   assert.match(line, /python3/, `MAP9 must name python3\n${line}`);
