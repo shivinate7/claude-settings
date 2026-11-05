@@ -321,10 +321,10 @@ the waiting page. A page that moves loses its read access, and the repo then hol
 
 1. Check out the record branch in its own worktree, as "Keep a copy in the repo" step 1 says.
 2. Make one new folder. For each entry of the registry, make `<folder>/<id>/`. In it, run `ArtifactData list` for
-   each collection the entry lists, with `out_dir` set to `<folder>/<id>/<collection>`, `query.limit` 1000, and
+   each collection the entry lists, with `out_dir` set to `<folder>/<id>`, `query.limit` 1000, and
    `next_cursor` followed until it is empty. A list call that errors, or that ends with a cursor still pending,
    stops the run for that artifact: touch no `.complete` for it. After the last page of a collection, touch
-   `.complete` in its folder. Also save the page from `Artifact` action `read` to `<folder>/<id>/page.html`,
+   `<folder>/<id>/<collection>/.complete`. Make the folder by hand if the tool wrote none. Also save the page from `Artifact` action `read` to `<folder>/<id>/page.html`,
    and each file of `Artifact` action `list` scope `files` to `<folder>/<id>/files/<path>`.
 3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --all <repo root> --fetched <folder> --worktree <worktree>`.
    It prints one line per artifact, `<id>: <verdict>`, with the verdicts of a single export, or

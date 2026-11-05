@@ -2123,11 +2123,49 @@ MUTATIONS = [
      'elif low.endswith("/simulator.app") or low == "simulator.app":',
      'elif False:', "guard", 'simulator-boot-bypass: open of the Simulator.app path'),
     ("simulator-boot-bypass: a command a wrapper hands on is not read",
-     'return next((hit for text in inner_commands(tokens) for part in split_segments(text)\n                 if (hit := sim_bypass_hit(part))), "")',
-     'return ""', "guard", 'simulator-boot-bypass: bash -c wraps the boot'),
+     '    for text in inner_commands(tokens):\n        for part in split_segments(text):\n            yield from _sim_commands(part)',
+     '    return', "guard", 'simulator-boot-bypass: bash -c wraps the boot'),
     ("simulator-boot-bypass: the refusal is never raised",
      '                refuse(tool, "deny", "simulator-boot-bypass", SIM_BYPASS_REASON, matched)',
      '                pass', "guard", 'simulator-boot-bypass: xcrun simctl boot'),
+    # RULES simulator-boot-route and simulator-boot-locked (decision sim-test-is-the-one-boot-path, rulings 2 and 5).
+    # Each mutant breaks one arm of its rule. The named case is the one that must die.
+    ("simulator-boot-route: an xcodebuild boot of a shut-down device is never refused",
+     '        elif (remedies or {}).get(name):',
+     '        elif False:', "guard",
+     "route: a test of a shut-down simulator by id names sim-test"),
+    ("simulator-boot-route: the test action is never read, so every test gets the generic remedy",
+     'elif token == "test" and not (',
+     'elif False and not (', "guard",
+     "route: a test with the action after its options, a shut-down simulator by name, names sim-test"),
+    ("simulator-boot-route: a test gets the generic remedy, not sim-test",
+     '    if action:\n        return "Run `sim-test',
+     '    if not action:\n        return "Run `sim-test', "guard",
+     "route: a test of a shut-down simulator by id names sim-test"),
+    ("simulator-boot-route: a build names a destination that is not the generic one",
+     "`-destination 'generic/platform=iOS Simulator'` instead, and boot nothing.",
+     "`-destination 'generic/platform=iOS'` instead, and boot nothing.", "guard",
+     "route: a build of a shut-down simulator names the generic destination"),
+    ("simulator-boot-locked: an MCP launch under a live lock is never refused",
+     '            if holder:\n                refuse(tool, "deny", "simulator-boot-locked",',
+     '            if False:\n                refuse(tool, "deny", "simulator-boot-locked",', "guard",
+     "lock: a live holder refuses an MCP launch of a shut-down device, naming its pid and sim-test"),
+    ("simulator-boot-locked: a dead holder pid still holds the lock",
+     '            except ProcessLookupError:\n                return ""',
+     '            except ProcessLookupError:\n                return text', "guard",
+     "lock: a dead holder is not held, so an MCP launch with room goes through"),
+    ("simulator-boot-locked: a pid-less lock folder is held for ever, not for 60 s",
+     'return "unknown" if age < 60 else ""',
+     'return "unknown"', "guard",
+     "lock: a folder with no pid file, 10 minutes old, is not held: the launch goes through"),
+    ("simulator-boot-locked: a pid-less lock folder is never held",
+     'return "unknown" if age < 60 else ""',
+     'return "unknown" if age < 0 else ""', "guard",
+     "lock: a folder with no pid file, 10 s old, is held: an MCP launch of a shut-down device is refused"),
+    ("simulator-boot-locked: a launch of a booted device is refused under the lock",
+     '    for name in shut_down:\n        if tool == SIM_MCP:',
+     '    for name in names:\n        if tool == SIM_MCP:', "guard",
+     "lock: a live holder does not refuse an MCP launch of a booted device"),
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
     ("handoff-unread: the refusal is never printed",
@@ -2166,6 +2204,7 @@ MUTATIONS = [
 REPORT_TARGETS = [
     ("lint/report_guard.py", ["lint/test_report_guard.py", "lint/test_report_guard_route.py",
                              "lint/test_report_guard_landing.py",
+                             "lint/test_report_guard_refusal.py",
                              "hooks/test_reply_judge.py", "hooks/test_wrappers.py",
                              "lint/test_rule_audit.py", "lint/test_settings_matcher.py"]),
     ("hooks/feedback_guard.py", ["hooks/test_feedback_inbox.py", "lint/test_settings_matcher.py"]),
@@ -2399,12 +2438,23 @@ def run_mutant(sources, work: str, entry):
         return label, None, [], required, skip
     _path, suite, variable, stem = TARGETS[target]
     if target == "guard":
-        # The whole guard family goes in the mutant's own folder, and the anchor lands in the one
-        # module that holds it. The suite loads the copied guard.py, which finds its siblings.
-        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
+        # module that holds it. The suite loads the copied guard.py, which finds its siblings. The
+        # simulator refusal imports janitor/sweep.py from ../janitor and fails open when it cannot, so
+        # the copy takes sweep.py and temp_sweep.py beside its hooks folder, as a checkout has them.
+        # Without them every simulator arm would be judged against a guard that allows everything.
+        root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        tree = os.path.join(root, "hooks")
         mutate_shared.guard_tree(tree)
         mutate_shared.apply_mutant(tree, old, new)
         copy_path = os.path.join(tree, "guard.py")
+        os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
+        for name in ("sweep.py", "temp_sweep.py"):
+            shutil.copy(os.path.join(HERE, "..", "janitor", name), os.path.join(root, "janitor"))
+        # guard.py reads lint/layout.py from ../lint (_layout_module), which is root/lint for this copy. Without
+        # it the role-model table reads as unread and every role-model arm passes unjudged.
+        shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
         mutated = sources[target].replace(old, new, 1)
@@ -2516,9 +2566,9 @@ def main() -> int:
     # failure this file exists to catch. MEASURED: before this line, all seven `watch` mutants
     # printed the identical nine-case failure list, whatever the mutation.
     mutate_shared.guard_tree(work)
-    # Every guard copy sits one folder below `work`, so its `../lint` is work/lint. guard.py imports
-    # lint/layout.py from there (role_model_table, the waiting-page check). Without this folder the import
-    # fails, the guard exits silently and allows, and the role-model deny cases go red whatever the mutation.
+    # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint:
+    # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The ruling and
+    # decision copies read their own tree/lint instead (above). A guard copy carries its own lint folder (run_mutant).
     shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(work, "lint"),
                     ignore=shutil.ignore_patterns("__pycache__"))
 
