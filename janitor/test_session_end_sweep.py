@@ -1089,16 +1089,21 @@ def assert_heartbeat_stops(case, path, what):
         last = now
 
 
+STOPPED = set()  # beat paths already stopped, so kill_holder stops each holder once
+
+
 def kill_holder(pid):
-    """Stop one holder this suite started, two ways, and need no ps. Its stop file ends its loop with no
-    pid, so the stop works where the shell's pid space and this Python's differ (Windows). The `kill`
-    runs in the shell's own pid space, because the pid is the shell's `$!`: os.kill from this Python
-    would read it as a Windows pid and could stop an unrelated process. A `kill` that finds no process
-    does nothing, so a holder that already ended is fine."""
-    for held, beat in HOLDERS:
-        if held == pid:
-            write(beat + ".stop", "")
-    run_capped(["sh", "-c", 'kill "$1" 2>/dev/null; true', "sh", str(pid)], timeout=10)
+    """Stop each holder this suite started with `pid`, once. The stop file ends the holder's loop on every
+    platform. Off Windows a shell `kill` also runs, since the pid is the shell's `$!`; a `kill` that finds
+    no process does nothing. On Windows the MSYS pid is not a Windows pid, so only the stop file is used."""
+    beats = [beat for held, beat in HOLDERS if held == pid and beat not in STOPPED]
+    if not beats:
+        return
+    for beat in beats:
+        STOPPED.add(beat)
+        write(beat + ".stop", "")
+    if os.name != "nt":
+        run_capped(["sh", "-c", 'kill "$1" 2>/dev/null; true', "sh", str(pid)], timeout=10)
 
 
 def spawn_orphan(cwd, env_entries=()):
