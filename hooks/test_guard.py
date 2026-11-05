@@ -26704,8 +26704,10 @@ FAMILY = "simulator"
 #   The cap counts EVERY booted device, owner-booted and unrecorded included.
 #   simulator-boot-route   refuses an xcodebuild -destination that names a shut-down device, judged after
 #                          cap and twin. The remedy is sim-test for `test`, else the generic destination.
-#   simulator-boot-locked  refuses an MCP launch of a shut-down device while the sim-test lock is held by
-#                          a live pid, or by a pid-less folder under 60 s old. A booted device is never refused.
+#   simulator-boot-lease   refuses an MCP launch of a shut-down device, held lock or not: a launch needs a lease,
+#                          and the Mac shares one simulator across repos (decision sim-test-is-the-one-boot-path,
+#                          ruling 5). Judged after cap and twin. The reason names sim-test and the lease. A booted
+#                          device is never refused.
 # A fake `xcrun` and `ps` on PATH answer `simctl list devices` and the process table. A reason names
 # UDIDs and device names only, never the config folder or the record file.
 
@@ -26798,12 +26800,12 @@ def register_simulator_boot_cases():
                  [twin_idle_rec]),
         "twin_recent": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_recent"), twin_rows()),
                         [dict(twin_idle_rec, at=sim_iso(10 * 60))]),
-        "twin_unrecorded": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_unrec"), twin_rows()),
+        "twin_unrecorded": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_unrecorded"), twin_rows()),
                             []),
-        "twin_other_runtime": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_rt"),
+        "twin_other_runtime": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_other_runtime"),
                                                twin_rows(state_of_ut0_runtime=SIM_RT_OLD)),
                                [dict(twin_idle_rec, runtime=SIM_RT_OLD)]),
-        "twin_other_type": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_type"),
+        "twin_other_type": (make_fake_xcrun(os.path.join(ROOT, "sim_twin_other_type"),
                                             twin_rows(type_of_ut0=SIM_TYPE_AIR)),
                             [dict(twin_idle_rec, deviceTypeIdentifier=SIM_TYPE_AIR)]),
         # The twin was booted 2 hours ago and shut down, then booted by hand: the live launchd_sim
@@ -26942,11 +26944,39 @@ def register_simulator_boot_cases():
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC
        + ",OS=26.0'", "deny", rule="simulator-boot-cap", env_path=os_split_path,
        config=os_split_cfg, carries=(SIM_UA, SIM_UE))
-    # The controls from here to the twin section boot through the simulator MCP launch, with no lock held.
-    # simulator-boot-route judges only xcodebuild destinations, so an xcodebuild boot of a shut-down device
-    # would be refused by it before the cap or twin rule is read. The MCP launch runs the same cap and twin code.
-    add("control: one booted, a second boot by MCP launch is allowed",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UC, env_path=one_path, config=one_cfg)
+    # The MCP launch cases from here to the twin section boot through the simulator MCP tool, with no lock
+    # held. simulator-boot-route judges only xcodebuild destinations, so an xcodebuild boot of a shut-down
+    # device would be refused by it before the cap or twin rule is read. Every MCP launch of a shut-down device
+    # is refused by simulator-boot-lease once cap and twin pass, so the refusal here is the lease: it shows
+    # that cap and twin did not fire.
+    add("lease: one booted, an MCP launch of a shut-down device with no lock is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("lease: one booted, an MCP launch that names the shut-down device by udid is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", udid=SIM_UC,
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("lease: an MCP launch of a booted device with no lock is allowed",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UA, env_path=one_path, config=one_cfg)
+    # A name that differs from the device's name only in case or in outer spaces still names that device.
+    add("lease: an MCP launch naming the shut-down device in lowercase is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device="gamma mini",
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("lease: an MCP launch naming the shut-down device with a leading space is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=" Gamma Mini",
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("lease: an MCP launch naming the shut-down device with a trailing space is refused by the lease",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device="Gamma Mini ",
+        env_path=one_path, config=one_cfg, carries=("sim-test", "lease"))
+    add("control: an MCP launch of a name no device holds is allowed, the name matches nothing",
+        "allow", tool=SIM_MCP, action="launch", device="Zeta Mini", env_path=one_path, config=one_cfg)
+    # Devices unreadable: a failing `simctl list` leaves no device list, so the boot rules fail open, the lease too.
+    unreadable = os.path.join(ROOT, "sim_unreadable")
+    os.makedirs(unreadable, exist_ok=True)
+    write(os.path.join(unreadable, "xcrun"), "#!/bin/sh\nexit 1\n")
+    os.chmod(os.path.join(unreadable, "xcrun"), 0o755)
+    add("control: an MCP launch of a shut-down device with an unreadable device list is allowed (fail open)",
+        "allow", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=unreadable + os.pathsep + PY_PATH, config=one_cfg)
     sh("boot a second simulator with one booted: bash simctl boot, bypass first",
        "xcrun simctl boot " + SIM_UC, "deny", rule="simulator-boot-bypass",
        env_path=one_path, config=one_cfg, carries="sim-test")
@@ -26972,21 +27002,23 @@ def register_simulator_boot_cases():
     add("boot a device with an idle booted twin: simulator MCP launch names it by udid",
         "deny", rule="simulator-boot-twin", tool=SIM_MCP, action="launch", udid=SIM_UT1,
         env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
-    add("control: the twin booted 10 minutes ago is not idle",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_recent"),
-        config=cfgs["twin_recent"][1])
-    add("control: an unrecorded booted twin is not idle",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_unrecorded"),
-        config=cfgs["twin_unrecorded"][1])
-    add("control: an idle twin on another runtime does not match",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_other_runtime"),
-        config=cfgs["twin_other_runtime"][1])
-    add("control: an idle twin of another device type does not match",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_other_type"),
-        config=cfgs["twin_other_type"][1])
-    add("boot a device with a twin booted by hand after its recorded boot: the record is older",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1, env_path=folder_path("twin_rebooted"),
-        config=cfgs["twin_rebooted"][1])
+    # Each launch below is refused by the lease, so the twin rule did not fire: the lease is the rule named.
+    add("twin not idle: a twin booted 10 minutes ago does not fire the twin rule; the lease refuses the launch",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_recent"), config=cfgs["twin_recent"][1], carries=("sim-test", "lease"))
+    add("twin not idle: an unrecorded booted twin does not fire the twin rule; the lease refuses the launch",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_unrecorded"), config=cfgs["twin_unrecorded"][1], carries=("sim-test", "lease"))
+    add("twin not matched: an idle twin on another runtime does not fire the twin rule; the lease refuses",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_other_runtime"), config=cfgs["twin_other_runtime"][1],
+        carries=("sim-test", "lease"))
+    add("twin not matched: an idle twin of another device type does not fire the twin rule; the lease refuses",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_other_type"), config=cfgs["twin_other_type"][1], carries=("sim-test", "lease"))
+    add("twin not idle: a twin booted by hand after its recorded boot does not fire the twin rule; the lease refuses",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=folder_path("twin_rebooted"), config=cfgs["twin_rebooted"][1], carries=("sim-test", "lease"))
 
     # Rule simulator-boot-route (decision sim-test-is-the-one-boot-path, ruling 5). An xcodebuild whose
     # -destination names a shut-down simulator is refused after the cap and twin rules. The remedy depends
@@ -27083,59 +27115,29 @@ def register_simulator_boot_cases():
        "xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=17.0'",
        "allow", env_path=os_two_path, config=os_two_cfg)
 
-    # Rule simulator-boot-locked (decision sim-test-is-the-one-boot-path, rulings 2 and 5). A simulator MCP
-    # launch that names a shut-down device is refused while <config>/state/sim-test.lock is held by a live
-    # pid. Held: a pid file naming a live pid, or, with no pid file, a lock folder under 60 s old. A dead
-    # pid is not held. A launch of a booted device is never refused by the lock.
-    def lock_config(name, pid_text=None, age=None):
+    # The sim-test lock does not decide an MCP launch: a shut-down device is refused by the lease whether the
+    # lock is held or free. So the held case names the lease, and no case reads the lock's age or its holder's
+    # liveness. The lock is one fixture, built just before its case.
+    def lock_config(name, pid_text):
         cfg = os.path.join(ROOT, "simcfg_lock_" + name)
         lock = os.path.join(cfg, "state", "sim-test.lock")
 
         def build():
-            # Built just before the case that names cfg runs (lazy_fixture), so `age` is the age at that run.
             os.makedirs(lock, exist_ok=True)
-            if pid_text is not None:
-                write(os.path.join(lock, "pid"), pid_text + "\n")
-            if age is not None:
-                stamp = time.time() - age
-                os.utime(lock, (stamp, stamp))
+            write(os.path.join(lock, "pid"), pid_text + "\n")
         lazy_fixture([cfg], build)
         return cfg
 
-    # The test runner's own pid is alive for as long as the cases run.
+    # The test runner's own pid is alive for as long as the cases run, so the lock is held.
     live_cfg = lock_config("live", str(os.getpid()))
-    add("lock: a live holder refuses an MCP launch of a shut-down device, naming its pid and sim-test",
-        "deny", rule="simulator-boot-locked", tool=SIM_MCP, action="launch", device=SIM_UC,
-        env_path=one_path, config=live_cfg, carries=(str(os.getpid()), "sim-test"))
-    add("lock: a live holder refuses an MCP launch that names the shut-down device by udid",
-        "deny", rule="simulator-boot-locked", tool=SIM_MCP, action="launch", udid=SIM_UC,
-        env_path=one_path, config=live_cfg, carries=(str(os.getpid()), "sim-test"))
-    add("lock: a live holder does not refuse an MCP launch of a booted device",
+    add("lease: a live lock holder does not lift the lease: an MCP launch of a shut-down device is refused",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UC,
+        env_path=one_path, config=live_cfg, carries=("sim-test", "lease"))
+    add("lease: a live lock holder does not lift the lease: an MCP launch by udid is refused",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", udid=SIM_UC,
+        env_path=one_path, config=live_cfg, carries=("sim-test", "lease"))
+    add("lease: a live lock holder does not refuse an MCP launch of a booted device",
         "allow", tool=SIM_MCP, action="launch", device=SIM_UA, env_path=one_path, config=live_cfg)
-
-    # A holder that has exited and been reaped is not held: the cap and twin rules judge the launch alone.
-    gone = subprocess.Popen([sys.executable, "-c", "pass"])
-    gone.wait(timeout=10)
-    dead_cfg = lock_config("dead", str(gone.pid))
-    add("lock: a dead holder is not held, so an MCP launch with two booted goes to the cap",
-        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=SIM_UC,
-        env_path=cap_path, config=dead_cfg, carries=(SIM_UA, SIM_UB))
-    add("lock: a dead holder is not held, so an MCP launch with room goes through",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UC, env_path=one_path, config=dead_cfg)
-
-    # A lock folder with no pid file is held for 60 s by its mtime, then it is not held.
-    fresh_cfg = lock_config("nopid_fresh", None, age=10)
-    add("lock: a folder with no pid file, 10 s old, is held: an MCP launch of a shut-down device is refused",
-        "deny", rule="simulator-boot-locked", tool=SIM_MCP, action="launch", device=SIM_UC,
-        env_path=one_path, config=fresh_cfg, carries="sim-test")
-    stale_cfg = lock_config("nopid_stale", None, age=600)
-    add("lock: a folder with no pid file, 10 minutes old, is not held: the launch goes through",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UC, env_path=one_path, config=stale_cfg)
-    # The partner of the allow above: the same stale folder, with two booted, so the cap refuses. An
-    # allow that a guard reaches by failing open would not show the cap, so this case shows the cap ran.
-    add("lock: a folder with no pid file, 10 minutes old, is not held: the cap still judges the launch",
-        "deny", rule="simulator-boot-cap", tool=SIM_MCP, action="launch", device=SIM_UC,
-        env_path=cap_path, config=stale_cfg, carries=(SIM_UA, SIM_UB))
 
 
 def folder_path(name):
@@ -27207,12 +27209,14 @@ def register_simulator_hold_cases():
         ("a twin is not idle while Xcode.app runs", quiet + [
             ("600", "1", "0", "/Applications/Xcode.app/Contents/MacOS/Xcode")]),
     ]
+    # Each launch is refused by the lease, so the twin rule did not fire on the held or unreadable twin.
     for index, (label, rows) in enumerate(holds):
-        add("control: " + label, "allow", tool=SIM_MCP, action="launch", device=SIM_UT1,
-            env_path=env_for("hold_%d" % index, rows), config=cfg)
-    add("control: a twin is not idle when the process table cannot be read",
-        "allow", tool=SIM_MCP, action="launch", device=SIM_UT1,
-        env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg)
+        add(label + ": the twin rule does not fire; the lease refuses the launch",
+            "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+            env_path=env_for("hold_%d" % index, rows), config=cfg, carries=("sim-test", "lease"))
+    add("a twin is not idle when the process table cannot be read: the twin rule does not fire; the lease refuses",
+        "deny", rule="simulator-boot-lease", tool=SIM_MCP, action="launch", device=SIM_UT1,
+        env_path=env_for("hold_ps_rc", [], ps_rc=1), config=cfg, carries=("sim-test", "lease"))
 
 
 def register_simulator_bypass_cases():
@@ -27293,19 +27297,14 @@ def sim_bypass_override_check(timed):
     return check
 
 
-def sim_route_override_check():
-    """The owner override lifts simulator-boot-route. With no override a test of a shut-down device is
-    refused. After `override` the same call is allowed once, and the second call is refused again. The
-    call runs on the "one" fixture PATH (one booted, one shut down), so the route rule is what refuses it."""
+def sim_override_check(name, rule, tool, tool_input, path):
+    """The owner override lifts RULE. With no override the call is refused. After `override` the same call
+    is allowed once, and the second call is refused again. The call runs on PATH, so RULE is what refuses it."""
     def check():
-        config, session = ov_config("sim-route-override"), "ov-sim-route-override"
-        rule = "simulator-boot-route"
-        path = folder_path("one")
-        command = "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'"
+        config, session = ov_config(name), "ov-" + name
 
         def call(seconds):
-            return lambda: ov_call("Bash", {"command": command}, NOGIT, config, session, seconds,
-                                   env_path=path)
+            return lambda: ov_call(tool, tool_input, NOGIT, config, session, seconds, env_path=path)
 
         ok, why = ov_story([("with no override", call(0), "deny", rule)])
         if not ok:
@@ -27319,27 +27318,19 @@ def sim_route_override_check():
     return check
 
 
-def sim_lock_eperm_check():
-    """A lock whose pid the guard cannot signal is not held. bin/sim-test reads a failed `kill -0`, EPERM
-    included, as the holder being gone, and takes the lock over, so the guard must read the same. Root can
-    signal any pid, so no real pid gives EPERM in this sandbox: os.kill is patched to raise PermissionError,
-    in process, and the lock's pid is this process's own pid."""
-    guard = _load_guard_module()
-    cfg = os.path.join(ROOT, "simcfg_lock_eperm")
-    lock = os.path.join(cfg, "state", "sim-test.lock")
-    os.makedirs(lock, exist_ok=True)
-    write(os.path.join(lock, "pid"), str(os.getpid()) + "\n")
-    with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": cfg}):
-        # Scope first: with the real os.kill, the lock is read and this process is its live holder. Without
-        # this, a "" below could mean the lock was never read rather than that EPERM reads as free.
-        read = guard.sim_lock_holder()
-        if read != str(os.getpid()):
-            return False, "fixture not read: sim_lock_holder() returned %r before the patch, want this pid" % read
-        with mock.patch("os.kill", side_effect=PermissionError(1, "Operation not permitted")):
-            got = guard.sim_lock_holder()
-    if got != "":
-        return False, "sim_lock_holder() returned %r, want \"\": a pid the guard cannot signal reads as free" % got
-    return True, "a lock whose pid cannot be signalled reads as free"
+def sim_route_override_check():
+    """The owner override lifts simulator-boot-route. A test of a shut-down device is refused with no override.
+    The call runs on the "one" fixture (one booted, one shut down), so the route rule is what refuses it."""
+    command = "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'"
+    return sim_override_check("sim-route-override", "simulator-boot-route", "Bash",
+                              {"command": command}, folder_path("one"))
+
+
+def sim_lease_override_check():
+    """The owner override lifts simulator-boot-lease. An MCP launch of a shut-down device, with no lock held, is
+    refused with no override. The "one" fixture has one booted device, so the cap does not fire."""
+    return sim_override_check("sim-lease-override", "simulator-boot-lease", SIM_MCP,
+                              {"action": "launch", "device": SIM_UC}, folder_path("one"))
 
 
 # The simulator cases need a POSIX shell for the fake xcrun and ps. Windows has neither to fake, so
@@ -27359,9 +27350,9 @@ if os.name != "nt":
     sim_route_label = "simulator: an owner override lifts a test of a shut-down device (simulator-boot-route)"
     LOG_FAMILY[sim_route_label] = FAMILY
     LOG_CHECKS = LOG_CHECKS + ((sim_route_label, sim_route_override_check()),)
-    sim_eperm_label = "simulator: a lock whose pid the guard cannot signal (EPERM) reads as free"
-    LOG_FAMILY[sim_eperm_label] = FAMILY
-    LOG_CHECKS = LOG_CHECKS + ((sim_eperm_label, sim_lock_eperm_check),)
+    sim_lease_label = "simulator: an owner override lifts an MCP launch of a shut-down device (simulator-boot-lease)"
+    LOG_FAMILY[sim_lease_label] = FAMILY
+    LOG_CHECKS = LOG_CHECKS + ((sim_lease_label, sim_lease_override_check()),)
 else:
     skip_case("simulator: the boot, hold and bypass rules, every case of the family", NO_SIMULATOR)
 
