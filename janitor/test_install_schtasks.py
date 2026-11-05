@@ -139,8 +139,10 @@ class GeneratesTaskXmlForAnOrdinaryCheckout(unittest.TestCase):
         self.assertEqual(root.find(trigger + NS + "StartBoundary").text, "2024-01-01T05:42:00")
         self.assertEqual(root.find(trigger + "%sScheduleByDay/%sDaysInterval" % (NS, NS)).text, "1")
         arguments = root.find("%sActions/%sExec/%sArguments" % (NS, NS, NS)).text
-        # Exactly sweep.py (not session_end_sweep.py), quoted whole, then the one flag.
+        # Exactly sweep.py (not session_end_sweep.py), quoted whole, then the one flag. The daily
+        # job never carries --session-end: that flag scopes the SessionEnd run only.
         self.assertEqual(arguments, '"%s" --confirm' % os.path.join(repo, "janitor", "sweep.py"))
+        self.assertNotIn("--session-end", arguments)
 
     def test_prints_the_real_schtasks_command_and_never_calls_it(self):
         out_dir = os.path.join(ROOT, "out_print_check")

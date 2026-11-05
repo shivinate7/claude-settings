@@ -30,7 +30,7 @@ the minute read and the merge with its head guard. Every read is a `gh api` REST
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, ast, contextlib, datetime, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, contextlib, datetime, functools, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -139,10 +139,13 @@ def shared_deadline(seconds):
     finally:
         _READ_DEADLINE = prior
 
-def sh(args, cwd=None, input=None, env=None, timeout=None):
+def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
     args = [resolve_program(args[0], env), *args[1:]]
     limits = [t for t in (SH_TIMEOUT, timeout) if t is not None]
     timeout = max(0.05, _READ_DEADLINE - time.monotonic()) if _READ_DEADLINE is not None else min(limits) if limits else None
+    if live_stderr:  # the child's stderr goes straight to ours; only its stdout is read
+        r = _nowindow.run(args, cwd=cwd, input=input, env=env, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+        return r.returncode, r.stdout.strip()
     r =_nowindow.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     return r.returncode, (r.stdout + r.stderr).strip()
 
@@ -336,10 +339,11 @@ def refuse_old_lock(b, old, now):
     if old and old[1] > now:
         raise Held(holder_text(b, old, now) + " It holds the lock under the old name: that run is on merge.py from before c53. " + LOCK_CITE)
 
+@functools.lru_cache(maxsize=None)
 def boot_stamp():
     """One text per boot of this machine, or "" when it cannot be read. Cloud VMs share a hostname and each has its own pid numbers, so a pid
     absent here proves a holder dead only on the machine that booted when the lock was taken. Linux: the boot id. macOS: kern.boottime
-    seconds. Windows: boot time from the tick count (seconds; same_boot allows the drift)."""
+    seconds. Windows: boot time from the tick count (seconds; same_boot allows the drift). Read once per process, so every read in a run agrees."""
     try:
         if sys.platform.startswith("linux"):
             with open("/proc/sys/kernel/random/boot_id", encoding="ascii") as f:
@@ -370,8 +374,9 @@ def lock_message(ttl, now, holder=None):
     if holder:
         lines += [f"pr: {holder['pr']}", "branch: " + " ".join(str(holder["branch"]).split()), f"host: {socket.gethostname()}", f"platform: {sys.platform}",
                   f"pid: {os.getpid()}", f"started: {int(now)}"]
-        if boot_stamp():
-            lines.append("boot: " + boot_stamp())
+        boot = boot_stamp()
+        if boot:
+            lines.append("boot: " + boot)
         session = " ".join(holder.get("session", "").split())[:SESSION_MAX]  # fold first, then test: a blank one writes no line
         if session:
             lines.append("session: " + session)
@@ -542,7 +547,10 @@ class GitLock(Lock):
         lease = f"--force-with-lease={ref}:{cur[0] if cur else ''}"
         c, out = git(self.root, "push", "-q", lease, "origin", f"{sha}:{ref}")
         if c:
-            raise Held("another run took the merge lock first " + LOCK_CITE)
+            now_cur = self.read(b)  # a moved ref is another run's take. An unchanged ref is a push the remote refused.
+            if (now_cur[0] if now_cur else None) != (cur[0] if cur else None):
+                raise Held("another run took the merge lock first " + LOCK_CITE)
+            raise Stop("the remote refused the push that takes the merge lock " + LOCK_CITE + ": " + out)
         self._take(b, sha, tree, msg, now)
         return sha
 
@@ -708,15 +716,26 @@ class Host:
     def _repo_args(self):
         return ["-R", self.repo] if self.repo else []
 
-    def api(self, rel, *extra, method="GET", fields=None):
+    def api(self, rel, *extra, method="GET", fields=None, body=None):
         """-> (code, output) of one REST call, through Host.gh so its retries hold. The repo is Host.repo, else the repo of the working directory.
         `fields` go out as -f fields: a GET must say -X GET, or gh sends them as a POST body. A query value never goes in the route, because the
-        Windows .cmd shim of gh lets cmd.exe split an argument at '&'."""
+        Windows .cmd shim of gh lets cmd.exe split an argument at '&'.
+        `body` (a dict) goes out as JSON through `--input <tempfile>`, for a value that can hold a newline: the same shim cuts an argument there.
+        The file is in the system temp dir, never the repo, and is removed after the call, also when it raises."""
         route = f"repos/{self.repo}" if self.repo else "repos/{owner}/{repo}"
         args = ["api", f"{route}/{rel}" if rel else route, "-X", method]
         for key, value in (fields or {}).items():
             args += ["-f", f"{key}={value}"]
-        return self.gh([*args, *extra], self.cwd)
+        if body is None:
+            return self.gh([*args, *extra], self.cwd)
+        fd, tmp = tempfile.mkstemp(prefix="merge-body-", suffix=".json")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(body, f)
+            return self.gh([*args, "--input", tmp, *extra], self.cwd)
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
 
     def pages(self, rel, key=None, fields=None):
         """-> every item of a list read, all pages. `key` names the field that holds the page in an object reply (check_runs, statuses); None is an array reply.
@@ -1072,8 +1091,13 @@ class Host:
         not in it is never judged), the newest completed run on `base`, or a re-run in flight (not completed, `run_attempt` above 1) when one is newer: it
         makes the verdict unknown, never green, since the older run under it is the one being re-run. A dispatch clears an older failed push (one group). A failed run R
         with at least one red job is cleared by a run N of the same file and another group only when N is newer than R, is the newest completed
-        run of its own group, concluded success, and every job name in R's jobs is in N's jobs, compared exactly, each with conclusion success (a
-        skipped job is no pass). So a green nightly that ran other jobs never clears a failed push. An R with no red job (no jobs, all passed,
+        run of its own group, concluded success, and every job name in R's jobs that may run in N is in N's jobs, compared exactly, each entry with
+        conclusion success (a skipped job is no pass). So a green nightly that ran other jobs never clears a failed push. A job of R is left out of
+        that need (clear_rule.clears, the one home of the rule, which the CI alarm calls too) when it is not red in R and its job-level `if:` has a
+        top-level `&&` conjunct `github.event_name == 'X'` with X not N's event: it cannot run in N, as `all-jobs-passed` and `ci-done`, which are
+        pull_request-only, never run in a push or schedule run. So a newer green push run clears a red nightly. A red job is never left out; a test inside
+        `||`, a `!=`, an `if:` that cannot be parsed, and a job name that maps to no job of the file all keep the job needed. The file is read at N's head
+        (`contents/<path>`, ref = N's head_sha): one read per such N, cached, none for a cancelled R; a failed read is unknown. An R with no red job (no jobs, all passed,
         cancelled or skipped jobs only) is never cleared by the failed-run rule; an unknown R stays unknown, except a cancelled R with jobs (below). N's jobs are read only
         when R has a red job or is cancelled with no red job, and such an N exists (one read each, cached); a failed read is unknown. A newer first-attempt run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
         Red: a job whose bucket is a fail, or one gh adds later (classify). A cancelled or skipped job is not red, nor one timed out at its cap.
@@ -1084,6 +1108,9 @@ class Host:
         unknown. Any other run that did not succeed is red (a broken workflow file runs no job).
         One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A failed read is unknown."""
         try:
+            if os.path.dirname(ALARM_EVENTS) not in sys.path:
+                sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
+            import clear_rule  # actions/ci-alarm/clear_rule.py, beside events.json: the one home of the failed-run clear, which the CI alarm calls too. Loaded here, not at the top, as the records generator is not: a copy of this file alone still loads
             c, out = self.api("actions/runs", fields={"branch": base, "per_page": 50})
             if c:
                 raise Stop(out)
@@ -1098,16 +1125,33 @@ class Host:
             newest = {(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(judged)}
             age = {r["id"]: i for i, r in enumerate(judged)}  # `judged` is newest first
 
+            texts = {}
+
+            def text_of(n):  # the workflow file at n's head, read once; a failed or empty read is a Stop, never a text
+                key = (n["path"].split("@")[0], n.get("head_sha"))
+                if key not in texts:
+                    c, out = self.api(f"contents/{key[0]}", "-H", "Accept: application/vnd.github.raw+json", fields={"ref": key[1]})
+                    if c or not out:
+                        raise Stop(f"reading {key[0]} at {str(key[1])[:9]} from GitHub failed, so the clear is unknown (decision no-merge-onto-red-main): {out}")
+                    texts[key] = out
+                return texts[key]
+
             def cleared(r, cancelled=False):
-                """True when a newer, newest-of-its-group, successful run of another group of r's file passed every job name of r. Call it only for an r with a red job,
+                """True when a newer, newest-of-its-group, successful run of another group of r's file passed what r needs. Call it only for an r with a red job,
                 or, with `cancelled`, for an r cancelled with no red job: the run must then also be on another head than r's, pass every job r ran
-                (not skipped) and contain every job r skipped."""
+                (not skipped) and contain every job r skipped. A failed r is judged by clear_rule: red_stays first (no file read), then clears, with the workflow file at n's head."""
                 names = {j["name"] for j in jobs_of(r)}
                 need = {j["name"] for j in jobs_of(r) if j.get("conclusion") != "skipped"} if cancelled else names
                 for n in newest.values():
                     if (not names or n["path"].split("@")[0] != r["path"].split("@")[0] or self.BASE_EVENTS[n["event"]] == self.BASE_EVENTS[r["event"]]
                             or age[n["id"]] >= age[r["id"]] or n["conclusion"] != "success"
                             or (cancelled and (not r.get("head_sha") or n.get("head_sha") == r["head_sha"]))):
+                        continue
+                    if not cancelled:
+                        if clear_rule.red_stays(jobs_of(r), jobs_of(n)):
+                            continue  # a certain red: no workflow read, so a failed read cannot turn it into unknown
+                        if clear_rule.clears(jobs_of(r), jobs_of(n), n["event"], text_of(n)):
+                            return True
                         continue
                     theirs = {}
                     for j in jobs_of(n):
@@ -1135,7 +1179,7 @@ class Host:
                         unknown.append(f"{where} was cancelled with no red job")
                 else:
                     red.append(f"{where} ended {r['conclusion']} with no red job")
-        except (Stop, ValueError, KeyError, TypeError, AttributeError) as e:
+        except (Stop, ValueError, KeyError, TypeError, AttributeError, ImportError) as e:
             return "unknown", " ".join(str(e).split())
         return ("red", " | ".join(red)) if red else ("unknown", " | ".join(unknown)) if unknown else ("green", "")
 
@@ -1247,7 +1291,7 @@ class Host:
             return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
         lost = False
         try:
-            c, out = self.api(f"pulls/{n}/merge", method="PUT", fields={"merge_method": method, "sha": sha, **({"commit_message": self.commit_message} if self.commit_message else {})})
+            c, out = self.api(f"pulls/{n}/merge", method="PUT", body={"merge_method": method, "sha": sha, **({"commit_message": self.commit_message} if self.commit_message else {})})
         except NetStop as e:
             lost, c, out = True, 1, str(e)
         try:
@@ -2301,6 +2345,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
+    ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line."""
     if target.isdigit():
         info = (host or Host()).pr(int(target))
@@ -2312,13 +2357,13 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
         env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
         try:
-            c, out = sh([sys.executable, CI_JOB, "checks", "--lint", "--base", f"origin/{base}"], cwd=wt, env=env, timeout=LINT_SECONDS)
+            c, out = sh([sys.executable, CI_JOB, "checks", "--lint", "--base", f"origin/{base}"], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
         except subprocess.TimeoutExpired:
             raise Stop(f"the lint of {head[:9]} did not finish in {LINT_SECONDS} s, so it is unknown, not a pass. {LANE_LINT_REMEDY}")
     finally:
         drop_worktree(root, tmp, wt)
     lines = out.splitlines()
-    log = [l for l in lines if l.startswith("log=")][-1:]  # ci-job's log line, the last one: the FAIL lines name it too, but a heartbeat can follow it
+    log = [l for l in lines if l.startswith("log=")][-1:]  # ci-job's log line, the last one: the FAIL lines name it too
     fails = [l.rstrip() for l in lines if l.startswith("FAIL")]
     unknown = [l.rstrip() for l in lines if l.startswith("unknown")]
     short = head[:9]
@@ -2726,10 +2771,11 @@ def parse_review(text):
 
 def review_state(rec, head):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
-    The done rules follow roles-review-cap-three and the decision pr-review-record: the last round is all PASS; or the final allowed round is done
-    and Guard or check is no; or the final allowed round is done, Guard or check is yes and Net value is zero or positive; or Kind is delete-only,
+    The done rules follow roles-review-cap-three and the decision pr-review-record: the last round is all PASS and the last design-reviewer line
+    (by position, across all rounds) is PASS or absent; or the final allowed round is done and Guard or check is no; or the final allowed round is done, Guard or check is yes and Net value is zero or positive; or Kind is delete-only,
     Guard or check is no and the first round is done; or Kind is docs-only with no round. A guard or check change owes the net-value test after the
-    final allowed round whatever the verdict, and owes the later rounds when the first fails, even if it only deletes. Net value negative holds the change."""
+    final allowed round whatever the verdict, and owes the later rounds when the first fails, even if it only deletes. Net value negative holds the change.
+    A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round or delete-only done names it."""
     if rec is None:
         return "bad", "the newest record does not parse"
     if rec["head"] != head:
@@ -2738,16 +2784,22 @@ def review_state(rec, head):
         return "held", "net value is negative"
     rounds = rec["rounds"]
     top = max((i for i, *_ in rounds), default=0)
+    design = next(((i, v) for i, role, _, v in reversed(rounds) if role == REVIEW_ROLES[1]), None)  # the last design-reviewer line, by position
+    bad = design if design and design[1] != "PASS" else None
+    note = f"; the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}" if bad else ""
     if top >= REVIEW_LAST_ROUND:  # before the PASS rule: a final-round PASS on a guard or check change still owes the net-value test
         if rec["guard"] == "no":
-            return "done", "round 3 is done, no guard or check changed"
+            return "done", "round 3 is done, no guard or check changed" + note
         if rec["net"] in ("zero", "positive"):
-            return "done", f"round 3 is done, net value {rec['net']}"
+            return "done", f"round 3 is done, net value {rec['net']}" + note
         return "open", "round 3 is done on a guard or check change, and its net value is owed"
-    if top and all(v == "PASS" for i, _, _, v in rounds if i == top):
+    passed = top and all(v == "PASS" for i, _, _, v in rounds if i == top)
+    if passed and not bad:
         return "done", f"round {top} passed"
-    if rec["kind"] == "delete-only" and rec["guard"] == "no" and top >= 1:
-        return "done", "delete-only change, round 1 is done"
+    if rec["kind"] == "delete-only" and rec["guard"] == "no" and top >= 1:  # before the design hold: the first review closes a delete-only change with no guard or check
+        return "done", "delete-only change, round 1 is done" + note
+    if passed:
+        return "open", f"round {top} passed, but the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}"
     if rec["kind"] == "delete-only" and top == 1:
         return "open", "round 1 failed on a guard or check change, so rounds 2 and 3 are owed"
     if rec["kind"] == "docs-only" and not rounds:

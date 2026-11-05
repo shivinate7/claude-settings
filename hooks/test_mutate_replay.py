@@ -538,18 +538,50 @@ test('passY is exported', () => {
 });
 """
 SELECT_PROFILE = dict(JS_PROFILE, select=["node", "harness/tests-for.mjs", "{path}"])
+BANCHI_SELECT = ["python3", "scripts/tests-for.py", "{path}"]  # the per-file selector both banchi parts name
+# A selector that a later pull request adds at HEAD. Its lists live in harness/lists.mjs, a sibling it imports, so a
+# copy of the selector alone cannot run.
+SELECTOR_IMPORTS_LISTS = """\
+import { LISTS } from './lists.mjs';
+const path = process.argv[2];
+console.log('tests for ' + path);
+for (const suite of LISTS[path] || []) {
+  console.log(suite);
+}
+"""
+LISTS_MODULE = """\
+export const LISTS = {
+  'src/x.mjs': ['test/a.test.mjs', 'test/unchanged.test.mjs'],
+  'src/y.mjs': ['test/b.test.mjs'],
+};
+"""
+# A selector at HEAD that lists both suites for both files. The commit's own selector must win over it.
+SELECTOR_LISTS_BOTH = """\
+const path = process.argv[2];
+console.log('tests for ' + path);
+console.log('test/a.test.mjs');
+console.log('test/b.test.mjs');
+"""
+LATER_IMPORTS = {"harness/tests-for.mjs": SELECTOR_IMPORTS_LISTS, "harness/lists.mjs": LISTS_MODULE}
+LATER_BOTH = {"harness/tests-for.mjs": SELECTOR_LISTS_BOTH}
+# A root file named node at HEAD. The select argv's `node` is a command PATH resolves, never this file.
+LATER_BARE_NODE = dict(LATER_IMPORTS, node="not a program\n")
 
 
-def select_fixture(name, selector=SELECTOR_LISTS, pr_deletes_selector=False):
+def select_fixture(name, selector=SELECTOR_LISTS, pr_deletes_selector=False, later=None):
     """One merged pull request, 1, that changes src/x.mjs, src/y.mjs, test/a.test.mjs and test/b.test.mjs. Its base
-    holds `selector` at harness/tests-for.mjs. With `pr_deletes_selector` the pull request deletes that file, so the
-    selector is missing at its commit. Built once per `name`."""
+    holds `selector` at harness/tests-for.mjs, or no selector when `selector` is None. With `pr_deletes_selector` the
+    pull request deletes that file, so the selector is missing at its commit. With `later`, a {path: text} map, a
+    second merged pull request, 2, writes those files after pull request 1: the repository's HEAD is then pull
+    request 2's merge, and `sha` stays pull request 1's. Built once per `name`."""
     key = "select-" + name
     if key not in CACHE:
         repo = new_repo(name)
-        put(repo, {"README.md": "base\n", "src/x.mjs": SELECT_X_BASE, "src/y.mjs": SELECT_Y_BASE,
-                   "test/a.test.mjs": SELECT_A_BASE, "test/b.test.mjs": SELECT_B_BASE,
-                   "harness/tests-for.mjs": selector})
+        base = {"README.md": "base\n", "src/x.mjs": SELECT_X_BASE, "src/y.mjs": SELECT_Y_BASE,
+                "test/a.test.mjs": SELECT_A_BASE, "test/b.test.mjs": SELECT_B_BASE}
+        if selector is not None:
+            base["harness/tests-for.mjs"] = selector
+        put(repo, base)
         commit(repo, "Base")
         logs = {"a": os.path.join(fresh(), "runs-a.txt"), "b": os.path.join(fresh(), "runs-b.txt")}
         files = {"src/x.mjs": SELECT_X_PR, "src/y.mjs": SELECT_Y_PR,
@@ -560,6 +592,8 @@ def select_fixture(name, selector=SELECTOR_LISTS, pr_deletes_selector=False):
         sha = pull_request(repo, 1, "Select per file", files)
         mutants = {"x": expected_mutants(repo, sha, "src/x.mjs", lines=changed(repo, sha, "src/x.mjs")),
                    "y": expected_mutants(repo, sha, "src/y.mjs", lines=changed(repo, sha, "src/y.mjs"))}
+        if later:
+            pull_request(repo, 2, "Add the later selector", later)
         CACHE[key] = {"repo": repo, "sha": sha, "logs": logs, "mutants": mutants}
     return CACHE[key]
 
@@ -684,12 +718,12 @@ BANCHI_METHOD = ("class Odd:\n    detail = 'odd'\n\n    def passed(self):\n     
                  "def run():\n    return Odd()\n")
 
 
-def banchi_part():
-    """The banchi per-module runner's profile part, as hooks/mutate_guard.py names it."""
+def banchi_part(part="py"):
+    """The banchi runner's profile part `part` ("py" or "ts"), as hooks/mutate_guard.py names it."""
     try:
-        return mutate_guard.REPLAY_PROFILES["banchi"]["parts"]["py"]
+        return mutate_guard.REPLAY_PROFILES["banchi"]["parts"][part]
     except (KeyError, TypeError):
-        raise AssertionError("REPLAY_PROFILES has no banchi py part")
+        raise AssertionError("REPLAY_PROFILES has no banchi %s part" % part)
 
 
 def banchi_profile():
@@ -1406,10 +1440,12 @@ class EarlyStopTests(unittest.TestCase):
 
 
 class SelectTests(unittest.TestCase):
-    """The profile's `select` argv names the suites to run against each product file's mutants."""
+    """The profile's `select` argv names the suites to run against each product file's mutants, and the selector a
+    replay reads when its commit has none."""
 
-    def test_a_changed_suite_the_selector_does_not_list_for_a_file_never_runs_on_its_mutants(self):
-        row, runs, fixture = select_run("main")
+    def assert_per_file_runs(self, row, runs, fixture):
+        """The row reads OK with both suites green on the clean source. Each suite ran its clean run and the mutants of
+        the one file its selector lists: suite a on src/x.mjs, suite b on src/y.mjs."""
         made_x, made_y = len(fixture["mutants"]["x"]), len(fixture["mutants"]["y"])
         self.assertGreater(made_x, 0, "src/x.mjs needs mutants")
         self.assertGreater(made_y, 0, "src/y.mjs needs mutants")
@@ -1420,6 +1456,38 @@ class SelectTests(unittest.TestCase):
                          "src/x.mjs only" % (runs["a"], made_x))
         self.assertEqual(runs["b"], 1 + made_y, "suite b ran %d times, want its clean run and the %d mutants of "
                          "src/y.mjs only" % (runs["b"], made_y))
+
+    def test_a_changed_suite_the_selector_does_not_list_for_a_file_never_runs_on_its_mutants(self):
+        row, runs, fixture = select_run("main")
+        self.assert_per_file_runs(row, runs, fixture)
+
+    def test_a_selector_missing_at_the_pr_commit_runs_the_copy_at_head(self):
+        """The commit has no selector, so the copy at HEAD runs, with its folder: the sibling it imports comes along.
+        The row names the file it read from HEAD."""
+        row, runs, fixture = select_run("added-later", selector=None, later=LATER_IMPORTS)
+        self.assert_per_file_runs(row, runs, fixture)
+        notes = repr(row.get("notes"))
+        self.assertIn("harness/tests-for.mjs", notes, "the row must name the selector it read from HEAD")
+        self.assertNotIn("every changed suite runs", notes, "the row fell back to every changed suite")
+
+    def test_a_bare_command_name_is_never_served_from_head(self):
+        """A select argv part with no slash is a command PATH resolves. A root file named node at HEAD is not that
+        command: the run keeps `node`, each suite runs on its own file's mutants, and no note names node."""
+        row, runs, fixture = select_run("bare-node", selector=None, later=LATER_BARE_NODE)
+        self.assert_per_file_runs(row, runs, fixture)
+        notes = row.get("notes") or []
+        self.assertFalse([note for note in notes if re.search(r"\bnode\b", note)],
+                         "a note names the bare command node: %r" % notes)
+        self.assertTrue(any("harness/tests-for.mjs" in note for note in notes),
+                        "the note for the selector read from HEAD is missing: %r" % notes)
+
+    def test_a_selector_at_the_pr_commit_wins_over_a_later_one_at_head(self):
+        """Passes on the old code too: the commit's own selector is read first, so the later one at HEAD never runs.
+        It pins that order: a replay that read HEAD first would run both suites on both files."""
+        row, runs, fixture = select_run("commit-wins", later=LATER_BOTH)
+        self.assert_per_file_runs(row, runs, fixture)
+        self.assertNotIn("harness/tests-for.mjs", repr(row.get("notes")),
+                         "the row names a selector read from HEAD, but the commit's own selector should run")
 
     def test_a_selector_that_fails_for_one_file_runs_every_changed_suite_on_that_file(self):
         row, runs, fixture = select_run("fails", selector=SELECTOR_FAILS_FOR_Y)
@@ -1440,6 +1508,12 @@ class SelectTests(unittest.TestCase):
         notes = repr(row.get("notes"))
         self.assertIn("src/x.mjs", notes, "the row must record the fallback for src/x.mjs")
         self.assertIn("src/y.mjs", notes, "the row must record the fallback for src/y.mjs")
+
+    def test_the_banchi_ts_part_names_the_per_file_selector(self):
+        self.assertEqual(banchi_part("ts").get("select"), BANCHI_SELECT, "the banchi ts part has no per-file selector")
+
+    def test_the_banchi_py_part_names_the_per_file_selector(self):
+        self.assertEqual(banchi_part("py").get("select"), BANCHI_SELECT, "the banchi py part has no per-file selector")
 
 
 class PrBudgetTests(unittest.TestCase):
