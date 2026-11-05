@@ -1088,8 +1088,13 @@ class Host:
         not in it is never judged), the newest completed run on `base`, or a re-run in flight (not completed, `run_attempt` above 1) when one is newer: it
         makes the verdict unknown, never green, since the older run under it is the one being re-run. A dispatch clears an older failed push (one group). A failed run R
         with at least one red job is cleared by a run N of the same file and another group only when N is newer than R, is the newest completed
-        run of its own group, concluded success, and every job name in R's jobs is in N's jobs, compared exactly, each with conclusion success (a
-        skipped job is no pass). So a green nightly that ran other jobs never clears a failed push. An R with no red job (no jobs, all passed,
+        run of its own group, concluded success, and every job name in R's jobs that may run in N is in N's jobs, compared exactly, each entry with
+        conclusion success (a skipped job is no pass). So a green nightly that ran other jobs never clears a failed push. A job of R is left out of
+        that need (clear_rule.clears, the one home of the rule, which the CI alarm calls too) when it is not red in R and its job-level `if:` has a
+        top-level `&&` conjunct `github.event_name == 'X'` with X not N's event: it cannot run in N, as `all-jobs-passed` and `ci-done`, which are
+        pull_request-only, never run in a push or schedule run. So a newer green push run clears a red nightly. A red job is never left out; a test inside
+        `||`, a `!=`, an `if:` that cannot be parsed, and a job name that maps to no job of the file all keep the job needed. The file is read at N's head
+        (`contents/<path>`, ref = N's head_sha): one read per such N, cached, none for a cancelled R; a failed read is unknown. An R with no red job (no jobs, all passed,
         cancelled or skipped jobs only) is never cleared by the failed-run rule; an unknown R stays unknown, except a cancelled R with jobs (below). N's jobs are read only
         when R has a red job or is cancelled with no red job, and such an N exists (one read each, cached); a failed read is unknown. A newer first-attempt run still going waits its turn. A file gone from the base is not judged: its last run is never replaced. Per file, not per name: a rename keeps the file.
         Red: a job whose bucket is a fail, or one gh adds later (classify). A cancelled or skipped job is not red, nor one timed out at its cap.
@@ -1100,6 +1105,9 @@ class Host:
         unknown. Any other run that did not succeed is red (a broken workflow file runs no job).
         One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A failed read is unknown."""
         try:
+            if os.path.dirname(ALARM_EVENTS) not in sys.path:
+                sys.path.insert(0, os.path.dirname(ALARM_EVENTS))
+            import clear_rule  # actions/ci-alarm/clear_rule.py, beside events.json: the one home of the failed-run clear, which the CI alarm calls too. Loaded here, not at the top, as the records generator is not: a copy of this file alone still loads
             c, out = self.api("actions/runs", fields={"branch": base, "per_page": 50})
             if c:
                 raise Stop(out)
@@ -1114,16 +1122,33 @@ class Host:
             newest = {(r["path"], self.BASE_EVENTS[r["event"]]): r for r in reversed(judged)}
             age = {r["id"]: i for i, r in enumerate(judged)}  # `judged` is newest first
 
+            texts = {}
+
+            def text_of(n):  # the workflow file at n's head, read once; a failed or empty read is a Stop, never a text
+                key = (n["path"].split("@")[0], n.get("head_sha"))
+                if key not in texts:
+                    c, out = self.api(f"contents/{key[0]}", "-H", "Accept: application/vnd.github.raw+json", fields={"ref": key[1]})
+                    if c or not out:
+                        raise Stop(f"reading {key[0]} at {str(key[1])[:9]} from GitHub failed, so the clear is unknown (decision no-merge-onto-red-main): {out}")
+                    texts[key] = out
+                return texts[key]
+
             def cleared(r, cancelled=False):
-                """True when a newer, newest-of-its-group, successful run of another group of r's file passed every job name of r. Call it only for an r with a red job,
+                """True when a newer, newest-of-its-group, successful run of another group of r's file passed what r needs. Call it only for an r with a red job,
                 or, with `cancelled`, for an r cancelled with no red job: the run must then also be on another head than r's, pass every job r ran
-                (not skipped) and contain every job r skipped."""
+                (not skipped) and contain every job r skipped. A failed r is judged by clear_rule: red_stays first (no file read), then clears, with the workflow file at n's head."""
                 names = {j["name"] for j in jobs_of(r)}
                 need = {j["name"] for j in jobs_of(r) if j.get("conclusion") != "skipped"} if cancelled else names
                 for n in newest.values():
                     if (not names or n["path"].split("@")[0] != r["path"].split("@")[0] or self.BASE_EVENTS[n["event"]] == self.BASE_EVENTS[r["event"]]
                             or age[n["id"]] >= age[r["id"]] or n["conclusion"] != "success"
                             or (cancelled and (not r.get("head_sha") or n.get("head_sha") == r["head_sha"]))):
+                        continue
+                    if not cancelled:
+                        if clear_rule.red_stays(jobs_of(r), jobs_of(n)):
+                            continue  # a certain red: no workflow read, so a failed read cannot turn it into unknown
+                        if clear_rule.clears(jobs_of(r), jobs_of(n), n["event"], text_of(n)):
+                            return True
                         continue
                     theirs = {}
                     for j in jobs_of(n):
@@ -1151,7 +1176,7 @@ class Host:
                         unknown.append(f"{where} was cancelled with no red job")
                 else:
                     red.append(f"{where} ended {r['conclusion']} with no red job")
-        except (Stop, ValueError, KeyError, TypeError, AttributeError) as e:
+        except (Stop, ValueError, KeyError, TypeError, AttributeError, ImportError) as e:
             return "unknown", " ".join(str(e).split())
         return ("red", " | ".join(red)) if red else ("unknown", " | ".join(unknown)) if unknown else ("green", "")
 
