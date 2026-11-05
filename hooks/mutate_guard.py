@@ -2610,7 +2610,7 @@ def known_defects_main(argv) -> int:
         missing = sorted(base_ids - listed - removed)
         for known_id in missing:
             print("MISSING %s: %s lists it, the head list has no row for it, and no commit in %s..HEAD has the trailer "
-                  "`Known-defect-removed: %s` (one trailer line names exactly one id)" % (known_id, args.base, args.base, known_id))
+                  "`Known-defect-removed: %s` (one id per line, in the message's last block, beside Co-Authored-By)" % (known_id, args.base, args.base, known_id))
     if args.log:
         with open(args.log, "w", encoding="utf-8") as handle:
             json.dump({"repo": os.path.abspath(args.repo), "defects": results, "missing": missing}, handle, indent=1)
