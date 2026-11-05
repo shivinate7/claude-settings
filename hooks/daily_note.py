@@ -27,7 +27,8 @@ lint/guard_log_report.py, beside this hook's folder, so the path holds from any 
   day. The line names it and launchd-sweep.log, its stdout log. A missing file is not a failure.
 Both read files already on disk, after the done-today stamp check: they start no process and write
 nothing beyond the stamp.
-There is no volume check: refusals grew with use, and a count check fired on 6 of 14 real days.
+There is no volume check: refusals grow with use, so a count jump over a 7-day baseline
+fires on ordinary days (debt note daily-note-no-volume-check).
 A line carries its UTC offset (an old line has none). Its day is the date of the reader-local `when`.
 
 Before the done-today stamp check, at every start, it also prints the one line of

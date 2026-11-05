@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
-"""Claude Code hook: decision/guard/settings watch (Stop). Replaces the `type: agent` guardrail.
+"""Claude Code hook: decision/guard/settings watch (Stop).
 
-WHAT THIS FILE DOES. A command hook. Command hooks receive the same Stop JSON
-(`transcript_path`, `session_id`, `cwd`) with no permission check at all, so the `auto`-mode
-failure cannot happen here. It answers the cheap part of the question itself,
+WHAT THIS FILE DOES. A command hook. A command hook receives the Stop JSON (`transcript_path`,
+`session_id`, `cwd`) with no permission check at all, so it cannot fail in `auto` mode the way a
+`type: agent` hook can. It answers the cheap part of the question itself,
 from `git status` and the transcript, and calls a model only for the residual judgment a
 file diff cannot make: whether an approval for this exact change is visible in the chat.
 
 THE CHEAP PATH, FIRST. `changed_paths` reads this turn's dirty files from `git status
---porcelain` against HEAD, scoped by mtime against the last human message the same way
-the old markdown sweep did (see `docs/decisions/predicate-is-the-act.md`: a shape list of
-write commands can only grow, so this hook reads the filesystem's own act instead of
-parsing Bash text). `looks_protected` then asks, per file, whether the name or location
+--porcelain` against HEAD, scoped by mtime against the last human message (see
+`docs/decisions/predicate-is-the-act.md`: a shape list of write commands can only grow, so this
+hook reads the filesystem's own act instead of parsing Bash text). `looks_protected` then asks, per file, whether the name or location
 marks it a decision, a guard, a CLAUDE.md, or a settings file. Settings files use
 `guard.is_settings_file`, the constant the guard itself emits (rule `building-allow-list-is-the-constant`); the rest (`decisions/`, `CLAUDE.md`, a "gate"/"guard"/"build-
 order"/"rule"/"policy" name) has no such constant to import, because no code in this repo
@@ -38,8 +37,8 @@ WHEN SOMETHING PROTECTED IS TOUCHED. `invoke_model` runs `claude -p` with an exp
 empty tool set and an isolated `cwd`/`CLAUDE_CONFIG_DIR` (see "THE ISOLATION" below), fed
 the diff (or, for a new file, its full text) and the chat text since the last human
 message directly, never a path for the model to `Read` itself: reading a path is exactly
-the step that fails in `auto` mode. It asks for the same ALLOW/FLAG judgment the old
-prompt asked for, on the same criteria: additive or consistent, or surfaced as a question
+the step that fails in `auto` mode. It asks for an ALLOW/FLAG judgment on these
+criteria: additive or consistent, or surfaced as a question
 and approved, is ALLOW; silently changed, weakened, removed, or reversed with no visible
 approval is FLAG.
 
@@ -359,16 +358,12 @@ def looks_concerning(tool_use):
     """True when an outbound SendMessage/Task this turn names a protected file together
     with an instruction to act on it.
 
-    AMENDED 2026-09-22, against the independent audit. This used to be a trigger on its
-    own: a SendMessage with no matching disk change was enough to spend a model call. The
-    audit found that shape produced a false positive (an instruction sent to a peer that
-    had not yet executed) and named the same shape in two of the three false positives
-    overall (a role question, and a probe of a scratch copy rather than the real file). A
-    peer being TOLD to do something is not the act CLAUDE.md's Verification rule protects
-    against; a real write to the real path is. `run` below now spends a model call only on
-    `protected` (an actual on-disk change) being non-empty, full stop. This function still
-    runs, but only to ENRICH the evidence a real protected change already triggered on,
-    never to trigger by itself.
+    It never triggers a model call by itself: a SendMessage with no matching disk change is a
+    peer being TOLD to do something, not the act CLAUDE.md's Verification rule protects against
+    (that is a real write to the real path), and such a shape gave false positives (an
+    instruction the peer had not yet executed). `run` spends a model call only when `protected`
+    (an actual on-disk change) is non-empty. This function only ENRICHES the evidence a real
+    protected change already triggered on.
     """
     if not isinstance(tool_use, dict):
         return False
@@ -786,9 +781,8 @@ def run(hook, model_call=invoke_model, expect_key=None):
     protected += [rel for rel in committed if rel not in protected]
 
     # TRIGGER: an actual on-disk change to a protected path, full stop. An outbound
-    # SendMessage/Task alone no longer triggers a model call (see looks_concerning's
-    # docstring for why the independent audit corrected this). Nothing executed yet is
-    # not the act this hook exists to catch.
+    # SendMessage/Task alone never triggers a model call (see looks_concerning's
+    # docstring). Nothing executed yet is not the act this hook exists to catch.
     if not protected:
         return ""
 
