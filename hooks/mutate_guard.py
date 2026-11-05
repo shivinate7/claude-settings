@@ -2560,7 +2560,9 @@ def _loads_module(source: str, stem: str) -> bool:
     a string or a docstring that names the module is not a load). The forms: `import`, `from ... import`,
     `importlib.import_module` and `__import__` with a literal name, and `spec_from_file_location`, `SourceFileLoader` and
     `runpy.run_path` with a string literal of the basename `<stem>.py` in the path argument (never the module-name argument),
-    directly or through a module-level name bound to such an expression.
+    directly or through a name bound to such an expression by an assignment in any scope of the file (module, function or
+    class level; one name bound in two scopes pools both values). A path that arrives as a function parameter is not
+    followed, so a loader fed only by a parameter reads False (debt tests-for-misses-param-loads).
 
     It assumes module stems are unique across the repository, so a name match is a load of this file (only
     `test_action.py` repeats a stem today). A text that does not parse reads False."""
@@ -2570,8 +2572,8 @@ def _loads_module(source: str, stem: str) -> bool:
     except (SyntaxError, ValueError, RecursionError):
         return False
     base = stem + ".py"
-    bound = {}  # a module-level name -> the expressions it is bound to
-    for node in tree.body:
+    bound = {}  # a name -> the expressions it is bound to, in any scope
+    for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name):
