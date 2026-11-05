@@ -783,10 +783,13 @@ class CarriesData(unittest.TestCase):
 # returns for a collection (one entry per doc). meta.json holds the data of meta/page alone, not an entry:
 #   meta.json     {"writer": ..., "parked": [{"id", "ref", "note"}, ...]}
 #   items.json    [{"id": "<item id>", "data": {"status": "open" | "closed", ...}}, ...]
-#   answers.json  [{"id": "park.<item id>", "data": {"parked", "id", "act", "ref", "note", "at"}}, ...]
+#   answers.json  [{"id": "park.<item id>", "data": {"parked", "id", "act", "ref", "note", "at"}}, ...]   a parked line's answer
+#                 [{"id": "<item id>", "data": {"item", "n", "at", "act": "park", "note"}}, ...]          a Park press on a card
 # One line per stale thing, then exit 1: `parked-open <id>` for a parked entry whose item is open, and
-# `park-answer-old <key>` for an answers/park.* record whose `at` is more than 10 minutes before --now. With none,
-# `parked: clean` and exit 0. Times are ISO strings with a Z, as the store writes them.
+# `park-answer-old <key>` for a park answer (either key form) whose `at` is more than 10 minutes before --now. With none,
+# `parked: clean` and exit 0. An answer whose act is not park is never read. A file of the wrong shape (items or answers
+# not a list, meta not a dict), or a park answer with no readable `at`, prints `unknown: <what>` and exits 2: the mode
+# never calls such a thing clean or stale. Times are ISO strings with a Z, as the store writes them.
 NOW = "2026-11-05T13:10:00Z"
 PARKED_W = {"id": "windows-live-checks", "ref": "Step windows-live-checks, the Windows live checks", "note": "Triage removes this line."}
 PARKED_GONE = {"id": "no-such-item", "ref": "Step no-such-item, a line whose item is gone", "note": "Gone."}
@@ -798,6 +801,22 @@ def item_entry(item_id, status):
 
 def park_answer_entry(item_id, at):
     return {"id": "park." + item_id, "data": {"parked": True, "id": item_id, "act": "unpark", "ref": "Step " + item_id, "note": "Wait.", "at": at}}
+
+
+def item_answer_entry(item_id, at):
+    """An item's answer under its own key, as a Park press on its card writes it: {item, n, at, act: "park", note}."""
+    return {"id": item_id, "data": {"item": item_id, "n": 27, "at": at, "act": "park", "note": "Later."}}
+
+
+def pick_answer_entry(item_id, at):
+    """An item's answer to a pick under its own key: {item, n, at, choice, note}, with no act."""
+    return {"id": item_id, "data": {"item": item_id, "n": 27, "at": at, "choice": "a", "note": ""}}
+
+
+def without_at(entry):
+    """The same entry with no `at` field."""
+    del entry["data"]["at"]
+    return entry
 
 
 def output_lines(out):
@@ -814,19 +833,42 @@ class ParkedStale(unittest.TestCase):
         os.mkdir(self.folder)
 
     def store(self, meta=None, items=(), answers=()):
-        """Writes the three files the mode reads."""
-        meta = {"writer": "triage", "parked": []} if meta is None else meta
-        write_text(os.path.join(self.folder, "meta.json"), json.dumps(meta))
-        write_text(os.path.join(self.folder, "items.json"), json.dumps(list(items)))
-        write_text(os.path.join(self.folder, "answers.json"), json.dumps(list(answers)))
+        """Writes the three files the mode reads, each from its entries."""
+        self.store_raw(meta, list(items), list(answers))
 
-    def run_parked(self, now=NOW):
+    def store_raw(self, meta=None, items=None, answers=None):
+        """Writes the three files exactly as given (a file left out is empty), so a case can hand the mode a value of the wrong shape."""
+        meta = {"writer": "triage", "parked": []} if meta is None else meta
+        items = [] if items is None else items
+        answers = [] if answers is None else answers
+        write_text(os.path.join(self.folder, "meta.json"), json.dumps(meta))
+        write_text(os.path.join(self.folder, "items.json"), json.dumps(items))
+        write_text(os.path.join(self.folder, "answers.json"), json.dumps(answers))
+
+    def run_parked(self, now=NOW, codes=(0, 1)):
         """Runs the mode on the folder. Stale.run_script is the one runner of CMD in this file; it reads no state of its case.
         Without the mode, the script runs its batch mode on the folder, so that output is named as the cause."""
         r = Stale.run_script(self, "--parked", self.folder, "--now", now)
         self.assertNotIn("waiting pages:", r.stdout + r.stderr, "the --parked mode did not run: stale_pages.py ran its batch mode")
-        self.assertIn(r.returncode, (0, 1), "the --parked mode did not run (exit %d): %s" % (r.returncode, r.stdout + r.stderr))
+        self.assertIn(r.returncode, codes, "the --parked mode exited %d, want one of %s: %s" % (r.returncode, codes, r.stdout + r.stderr))
         return r.returncode, r.stdout
+
+    def assert_unknown(self, rc, out, *names):
+        """The run exits 2 and prints an unknown line naming each of `names`: never a clean or a stale line for the same cause."""
+        lines = output_lines(out)
+        self.assertEqual(rc, 2, "exit %d, want 2 for an unknown read: %s" % (rc, out))
+        unknown = [line for line in lines if line.startswith("unknown:")]
+        self.assertTrue(unknown, "no unknown: line was printed: %r" % out)
+        for name in names:
+            self.assertTrue(any(name in line for line in unknown), "the unknown line does not name %s: %r" % (name, unknown))
+
+    def assert_unknown_key(self, entry, key):
+        """A park answer with no readable `at` is unknown and names its key. It is not named old."""
+        self.store(answers=[entry])
+        rc, out = self.run_parked(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, key)
+        self.assertEqual([line for line in output_lines(out) if line.startswith("park-answer-old")], [],
+                         "a park answer with no readable at was named old, not unknown: " + out)
 
     def tree(self):
         """Every file under the test folder, as {relative path: bytes}."""
@@ -873,6 +915,51 @@ class ParkedStale(unittest.TestCase):
         self.assertEqual(rc, 1, "two stale things did not exit 1:\n" + out)
         self.assertEqual(sorted(output_lines(out)), ["park-answer-old park.ci-cap-raise", "parked-open windows-live-checks"],
                          "the two stale things were not named one line each")
+
+    def test_an_item_park_answer_more_than_ten_minutes_old_is_named_by_its_item_id(self):
+        self.store(answers=[item_answer_entry("pick-a-colour", "2026-11-05T12:59:59Z")])
+        rc, out = self.run_parked()
+        self.assertEqual(rc, 1, "an item's park answer 10 minutes and 1 second old did not exit 1: " + out)
+        self.assertEqual(output_lines(out), ["park-answer-old pick-a-colour"], "the old item park answer was not the one line named: " + out)
+
+    # Control: passes on the code as it stands. A fresh item park answer is not named, so the old-answer check cannot name every answer.
+    def test_a_fresh_item_park_answer_is_not_named(self):
+        self.store(answers=[item_answer_entry("pick-a-colour", "2026-11-05T13:05:00Z")])
+        rc, out = self.run_parked()
+        self.assertEqual((rc, output_lines(out)), (0, ["parked: clean"]), "a fresh item park answer was named: " + out)
+
+    # Control: passes on the code as it stands. An item answer with no act park is never read, however old or however it is stamped.
+    def test_an_item_answer_without_act_park_is_never_named(self):
+        self.store(answers=[pick_answer_entry("pick-a-colour", "2026-11-05T12:00:00Z"), without_at(pick_answer_entry("ci-cap-raise", "2026-11-05T12:00:00Z"))])
+        rc, out = self.run_parked()
+        self.assertEqual((rc, output_lines(out)), (0, ["parked: clean"]), "an item answer with no act park was named: " + out)
+
+    def test_items_not_a_list_is_unknown_and_exits_2(self):
+        self.store_raw(items={})
+        rc, out = self.run_parked(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, "items.json")
+
+    def test_answers_not_a_list_is_unknown_and_exits_2(self):
+        self.store_raw(answers={})
+        rc, out = self.run_parked(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, "answers.json")
+
+    def test_meta_not_a_dict_is_unknown_and_exits_2(self):
+        self.store_raw(meta=[PARKED_W], items=[item_entry("windows-live-checks", "open")])
+        rc, out = self.run_parked(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, "meta.json")
+
+    def test_a_parked_line_answer_with_no_at_is_unknown_and_names_its_key(self):
+        self.assert_unknown_key(without_at(park_answer_entry("ci-cap-raise", "2026-11-05T12:00:00Z")), "park.ci-cap-raise")
+
+    def test_an_item_park_answer_with_no_at_is_unknown_and_names_its_key(self):
+        self.assert_unknown_key(without_at(item_answer_entry("pick-a-colour", "2026-11-05T12:00:00Z")), "pick-a-colour")
+
+    def test_a_parked_line_answer_with_an_unparseable_at_is_unknown_and_names_its_key(self):
+        self.assert_unknown_key(park_answer_entry("ci-cap-raise", "not-a-time"), "park.ci-cap-raise")
+
+    def test_an_item_park_answer_with_an_unparseable_at_is_unknown_and_names_its_key(self):
+        self.assert_unknown_key(item_answer_entry("pick-a-colour", "not-a-time"), "pick-a-colour")
 
     def test_the_mode_reads_its_three_files_writes_none_and_starts_no_git(self):
         self.store(meta={"writer": "triage", "parked": [PARKED_W]}, items=[item_entry("windows-live-checks", "open")])
