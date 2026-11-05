@@ -9,11 +9,11 @@ same day prints nothing and writes nothing. The window is the days since the sta
 through the day before today, at most 7 days. With no stamp, or a stamp that is not before today,
 the window is the day before today. A day with no session start keeps its lines for the next start.
 
-Checks, each over the window. Each failure is one stdout line of at most 240 characters, ending
-with `Read:` and its reader by absolute path. A line over the limit swaps its head for a short
-head, its count and what failed, such as "3 guard crash line(s):". The short head and the `Read:` tail
-are never cut, so a line passes the limit only when those two are longer than it. The guard.log checks name lint/guard_log_report.py,
-beside this hook's folder, so the path holds from any working folder.
+Checks, each over the window. Each failure is one stdout line of 240 characters or fewer, unless
+the short head plus the whole tail is longer. It ends with `Read:` and its reader by absolute path.
+A line over 240 swaps its head for a short head, its count and what failed, such as
+"3 guard crash line(s):". The short head and the `Read:` tail are never cut. The guard.log checks name
+lint/guard_log_report.py, beside this hook's folder, so the path holds from any working folder.
 - a `crash` line: a guard hook crashed.
 - guard.log exists and cannot be read: unknown. A missing guard.log is not a failure.
 - agent-end reap runs killed or crashed. The reader is the agent-end payload log,
