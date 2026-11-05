@@ -35,8 +35,18 @@ demand and refuses nothing: no timer, no CI job.
 REPLAY MODE (step tci-6): `python hooks/mutate_guard.py --replay <repo> --profile <name> [--prs N] [--limit N]
 [--suite-timeout S] [--jobs N] [--pr-budget S]` scores the suites each recent merged pull request changed against mutants of the
 product lines it added (`REPLAY_PROFILES` below, `replay_pr` in hooks/mutate_shared.py). Exit 0 whatever the scores.
+
+CI MODES (decision mutation-report-scores-suites, owner item mutation-ci-job): three modes of the same home, run by the shared
+action actions/mutation-report.
+`--changed <repo> (--profile NAME | --profile-file JSON) --base REF [--head REF] [--limit N] [--budget S] [--suite-timeout S]
+[--jobs N] [--log PATH]` mutates the product lines a change adds past merge-base(base, head), runs the suites the profile's `select`
+lists for each file, and prints `catch share: K/R` and each `untested: path:line`. Exit 0 whatever the share.
+`--known-bugs FILE --repo REPO [--suite-timeout S] [--log PATH]` plants each listed bug in a checkout of HEAD and runs its catcher
+suite: `CAUGHT`, `MISS` or `UNKNOWN` per bug. Exit 1 when any bug is MISS or UNKNOWN.
+`--tests-for PATH` prints the suites that test one file: the select command of the `claude_settings` profile.
 """
 
+import contextlib
 import os
 import shutil
 import signal
@@ -2308,6 +2318,14 @@ if not passed:
 # copy in its checkout, so a replay reads the clone's HEAD copy (`_select_suites`, hooks/mutate_shared.py).
 BANCHI_SELECT = ["python3", "scripts/tests-for.py", "{path}"]
 REPLAY_PROFILES = {
+    # claude_settings: the CI report (`--changed`) reads this repository by it. A suite is a `test_*.py` file anywhere;
+    # `--tests-for` (below) names the suites of a file. No install: the suites use the standard library.
+    "claude_settings": {
+        "code": r"^(hooks|lint|merge|janitor|actions)/.*\.py$", "code_not": r"(^|/)(test_|_test_)[^/]*\.py$",
+        "tests": r"(^|/)test_[^/]*\.py$",
+        "argv": ["python3", "{suite}"], "classify": "fail_line", "install": None, "sparse_skip": [],
+        "select": ["python3", "hooks/mutate_guard.py", "--tests-for", "{path}"],
+    },
     "q_max": {
         "code": r"^(src|harness|app)/.*\.(ts|tsx|mts|mjs|js)$", "code_not": r"^harness/tests/|\.(test|spec)\.(mjs|js|ts|tsx|mts)$",
         "tests": r"^harness/tests/[^/]+\.test\.mjs$",
@@ -2340,6 +2358,28 @@ REPLAY_PROFILES = {
 }
 
 
+@contextlib.contextmanager
+def stop_on_signals():
+    """SIGTERM and SIGINT become an exit, so the `finally` blocks of the caller run: the suite groups are killed first, then
+    the caller removes its checkouts. The handlers and the stop flag are put back on the way out."""
+    def stop(signum, _frame):
+        mutate_shared.request_stop()
+        raise SystemExit(128 + signum)
+
+    saved = {}
+    try:
+        for number in (signal.SIGTERM, signal.SIGINT):
+            saved[number] = signal.signal(number, stop)
+    except ValueError:  # not the main thread: no handler, the default stays
+        pass
+    try:
+        yield
+    finally:
+        for number, handler in saved.items():
+            signal.signal(number, handler)
+        mutate_shared.clear_stop()
+
+
 def replay_main(argv) -> int:
     """Replay the last merged pull requests of a repository, print each row as it ends, then the table.
     Exit 0 whatever the scores: a replay is not a check. A bad argument is the only nonzero exit."""
@@ -2364,34 +2404,129 @@ def replay_main(argv) -> int:
     print("replaying %d merged pull requests of %s with profile %s" % (len(prs), repo, args.profile), flush=True)
     deps = tempfile.mkdtemp(prefix="mutate_deps_")
     rows = []
-
-    def stop(signum, _frame):
-        # SIGTERM and SIGINT become an exit, so the `finally` blocks run: the suite groups are killed first,
-        # then each checkout is removed and the deps folder with it.
-        mutate_shared.request_stop()
-        raise SystemExit(128 + signum)
-
-    saved = {}
-    try:
-        for number in (signal.SIGTERM, signal.SIGINT):
-            saved[number] = signal.signal(number, stop)
-    except ValueError:  # not the main thread: no handler, the default stays
-        pass
-    try:
-        for sha, _number, _title in prs:
-            for row in mutate_shared.replay_profile(repo, sha, profile, limit=args.limit,
-                                                    suite_timeout=args.suite_timeout, jobs=args.jobs, deps=deps,
-                                                    pr_budget=args.pr_budget,
-                                                    progress=lambda line: print(line, flush=True)):
-                rows.append(row)
-                print(mutate_shared.format_replay_row(row), flush=True)  # a killed run keeps the rows already scored
-    finally:
-        shutil.rmtree(deps, ignore_errors=True)
-        for number, handler in saved.items():
-            signal.signal(number, handler)
-        mutate_shared.clear_stop()
+    with stop_on_signals():
+        try:
+            for sha, _number, _title in prs:
+                for row in mutate_shared.replay_profile(repo, sha, profile, limit=args.limit,
+                                                        suite_timeout=args.suite_timeout, jobs=args.jobs, deps=deps,
+                                                        pr_budget=args.pr_budget,
+                                                        progress=lambda line: print(line, flush=True)):
+                    rows.append(row)
+                    print(mutate_shared.format_replay_row(row), flush=True)  # a killed run keeps the rows already scored
+        finally:
+            shutil.rmtree(deps, ignore_errors=True)
     print()
     print(mutate_shared.format_replay(rows))
+    return 0
+
+
+def changed_main(argv) -> int:
+    """The CI report of a change: mutate the product lines it adds past the merge base, run the suites the profile's `select`
+    lists for each file, print the replay row, `catch share: K/R` and each `untested: path:line`. Exit 0 whatever the share:
+    a low share is a report, never a failure. A bad argument, or a ref the repository cannot read, exits 2."""
+    import argparse
+    import json
+    parser = argparse.ArgumentParser(prog="mutate_guard.py --changed")
+    parser.add_argument("--changed", required=True, metavar="REPO", help="a clone of the repository holding the change")
+    which = parser.add_mutually_exclusive_group(required=True)
+    which.add_argument("--profile", choices=sorted(REPLAY_PROFILES))
+    which.add_argument("--profile-file", metavar="JSON", help="a profile as a JSON file, in place of a named one")
+    parser.add_argument("--base", required=True, help="the ref the change is cut from: the lines past its merge base with --head")
+    parser.add_argument("--head", default="HEAD")
+    parser.add_argument("--limit", type=int, default=20, help="mutants in all")
+    parser.add_argument("--budget", type=float, default=None, metavar="SECONDS",
+                        help="mutants not started this long after the run began count as not_run")
+    parser.add_argument("--suite-timeout", type=float, default=120, help="seconds before a suite run is killed")
+    parser.add_argument("--jobs", type=int, default=None)
+    parser.add_argument("--log", default=None, metavar="PATH", help="write the totals as one JSON file")
+    args = parser.parse_args(argv)
+    repo = os.path.abspath(args.changed)
+    try:
+        if args.profile_file:
+            with open(args.profile_file, encoding="utf-8") as handle:
+                profile = json.load(handle)
+        else:
+            profile = REPLAY_PROFILES[args.profile]
+        head = mutate_shared._git(repo, "rev-parse", "--verify", "--quiet", "%s^{commit}" % args.head).strip()
+        base = mutate_shared._git(repo, "merge-base", args.base, head).strip()
+    except (OSError, ValueError) as error:  # a JSONDecodeError is a ValueError
+        print("ERROR %s" % error)
+        return 2
+    print("scoring the lines %s adds past %s in %s" % (head[:8], base[:8], repo), flush=True)
+    deps = tempfile.mkdtemp(prefix="mutate_deps_")
+    with stop_on_signals():
+        try:
+            rows = mutate_shared.replay_profile(repo, head, profile, limit=args.limit, suite_timeout=args.suite_timeout,
+                                                jobs=args.jobs, deps=deps, pr_budget=args.budget, base=base,
+                                                select_all=True, progress=lambda line: print(line, flush=True))
+        finally:
+            shutil.rmtree(deps, ignore_errors=True)
+    print()
+    print(mutate_shared.format_changed(rows))
+    if args.log:
+        total = mutate_shared.changed_summary(rows)
+        total.update({"base": base, "head": head, "profile": args.profile or args.profile_file})
+        with open(args.log, "w", encoding="utf-8") as handle:
+            json.dump(total, handle, indent=1)
+    return 0
+
+
+def known_bugs_main(argv) -> int:
+    """Replay the planted bugs of a list (`.github/known-bugs.json`) against a repository's HEAD. One line per bug:
+    `CAUGHT`, `MISS` or `UNKNOWN`. Exit 1 when any bug is MISS or UNKNOWN (decision ci-unknown-is-red). A missing list names
+    no bug and exits 0; a list that cannot be read exits 2."""
+    import argparse
+    import json
+    parser = argparse.ArgumentParser(prog="mutate_guard.py --known-bugs")
+    parser.add_argument("--known-bugs", required=True, metavar="FILE", help="a JSON list of planted bugs")
+    parser.add_argument("--repo", required=True, help="a clone of the repository the bugs are planted in")
+    parser.add_argument("--suite-timeout", type=float, default=120, help="seconds before a suite run is killed")
+    parser.add_argument("--log", default=None, metavar="PATH", help="write the results as one JSON file")
+    args = parser.parse_args(argv)
+    bugs = []
+    if os.path.exists(args.known_bugs):
+        try:
+            with open(args.known_bugs, encoding="utf-8") as handle:
+                bugs = json.load(handle)
+            if not isinstance(bugs, list):
+                raise ValueError("the top level is not a list")
+        except (OSError, ValueError) as error:
+            print("ERROR cannot read %s: %s" % (args.known_bugs, error))
+            return 2
+    with stop_on_signals():
+        results = mutate_shared.run_known_bugs(os.path.abspath(args.repo), bugs, suite_timeout=args.suite_timeout)
+    print(mutate_shared.format_known_bugs(results))
+    if args.log:
+        with open(args.log, "w", encoding="utf-8") as handle:
+            json.dump({"repo": os.path.abspath(args.repo), "bugs": results}, handle, indent=1)
+    return 1 if any(result["verdict"] != "CAUGHT" for result in results) else 0
+
+
+def tests_for_main(argv) -> int:
+    """Print the suites that test one file, a line each: the REPORT_TARGETS suites when the file is listed there, else each
+    tracked `test_<stem>.py` and `test_<stem>_*.py` beside it (in the repository of the working folder). It is the `select`
+    command of the `claude_settings` profile. A file with no suite prints nothing."""
+    import argparse
+    import re
+    parser = argparse.ArgumentParser(prog="mutate_guard.py --tests-for")
+    parser.add_argument("--tests-for", required=True, metavar="PATH", help="a repository-relative path")
+    args = parser.parse_args(argv)
+    path = os.path.normpath(args.tests_for).replace(os.sep, "/")
+    listed = dict(REPORT_TARGETS)
+    if path in listed:
+        names = list(listed[path])
+    else:
+        folder, name = os.path.split(path)
+        wanted = re.compile(r"test_%s(_[^/]*)?\.py" % re.escape(os.path.splitext(name)[0]))
+        done = _nowindow.run(["git", "ls-files", "-z", "--", folder or "."], capture_output=True, text=True,
+                             encoding="utf-8", stdin=subprocess.DEVNULL)
+        if done.returncode != 0:
+            print("ERROR git ls-files failed: %s" % done.stderr.strip())
+            return 2
+        names = sorted(tracked for tracked in done.stdout.split("\0")
+                       if tracked and os.path.dirname(tracked) == folder and wanted.fullmatch(os.path.basename(tracked)))
+    for name in names:
+        print(name)
     return 0
 
 
@@ -2529,6 +2664,9 @@ def main() -> int:
         return report_main(sys.argv[1:])
     if "--replay" in sys.argv[1:]:
         return replay_main(sys.argv[1:])
+    for flag, mode in (("--changed", changed_main), ("--known-bugs", known_bugs_main), ("--tests-for", tests_for_main)):
+        if flag in sys.argv[1:]:
+            return mode(sys.argv[1:])
     sources = {}
     for name, (path, _suite, _variable, _stem) in TARGETS.items():
         with open(path, encoding="utf-8") as handle:

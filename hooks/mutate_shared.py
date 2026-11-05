@@ -93,14 +93,21 @@ def guard_tree(dest: str) -> None:
         shutil.copy(path, dest)
 
 
-def find_anchor(folder: str, old: str):
+def find_anchor(folder: str, old: str, files=None):
     """Return (path, text) of the one guard module or git_reads.py in `folder` that holds `old`
-    exactly once. Raise StaleMutant on zero matches, AmbiguousMutant on two or more, across all."""
+    exactly once. Raise StaleMutant on zero matches, AmbiguousMutant on two or more, across all.
+    `files` (folder-relative names) replaces that list: a known bug names the file it plants in."""
     hits = []
-    for path in anchor_files(folder):
+    paths = anchor_files(folder) if files is None else [os.path.join(folder, name) for name in files]
+    for path in paths:
         # Universal newlines: a checkout may hold CRLF, and an anchor spells a line break "\n".
-        with open(path, encoding="utf-8") as handle:
-            text = handle.read()
+        try:
+            with open(path, encoding="utf-8") as handle:
+                text = handle.read()
+        except FileNotFoundError:
+            if files is None:
+                raise
+            raise StaleMutant("STALE: %s is not in %s" % (os.path.relpath(path, folder), folder))
         hits.extend([(path, text)] * text.count(old))
     if not hits:
         raise StaleMutant("STALE: anchor text is in no guard module in %s" % folder)
@@ -110,10 +117,10 @@ def find_anchor(folder: str, old: str):
     return hits[0]
 
 
-def apply_mutant(tree: str, old: str, new: str) -> str:
-    """Replace `old` with `new` in the one guard module in `tree` that holds it. Return its path.
-    Write nothing when the anchor is stale or ambiguous (see find_anchor)."""
-    path, text = find_anchor(tree, old)
+def apply_mutant(tree: str, old: str, new: str, files=None) -> str:
+    """Replace `old` with `new` in the one guard module in `tree` that holds it (or in `files`, see
+    find_anchor). Return its path. Write nothing when the anchor is stale or ambiguous."""
+    path, text = find_anchor(tree, old, files)
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(text.replace(old, new, 1))
     return path
@@ -877,12 +884,12 @@ def _drop_checkout(repo: str, dest: str) -> None:
 def _replay_row(repo: str, sha: str) -> dict:
     number, title = _pr_of(repo, sha)
     return {"pr": number, "sha": sha, "title": title, "status": "UNKNOWN", "reason": "", "made": 0,
-            "killed": 0, "crashed": 0, "survived": 0, "not_run": 0, "survivors": [], "unusable": {},
-            "skipped": {}, "notes": []}
+            "killed": 0, "crashed": 0, "survived": 0, "not_run": 0, "survivors": [], "not_run_at": [],
+            "unusable": {}, "skipped": {}, "notes": []}
 
 
 def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0, suite_timeout: float = 120,
-              jobs=None, deps=None, pr_budget=None, progress=None) -> dict:
+              jobs=None, deps=None, pr_budget=None, progress=None, base=None, select_all: bool = False) -> dict:
     """Score the suites the pull request merged at `sha` changed against mechanical mutants of the product
     lines it added. Returns a row: pr, sha, title, status ("OK", "UNKNOWN", "NO_PRODUCT" for no product
     file changed, "NO_TESTS" for product code with no suite changed), reason, made, killed, crashed,
@@ -892,12 +899,17 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
     `pr_budget` seconds, counted from the start of this call, had passed before it started. It is never
     a survivor. `progress(line)`, when given, gets one line as each mutant finishes.
     `deps` is a folder shared by many calls, for the installs; None makes one and removes it.
-    A run is read as in report mode: only an assertion kills, and an unusable suite is not a killer."""
+    A run is read as in report mode: only an assertion kills, and an unusable suite is not a killer.
+    `base` is the commit the added lines are read against (default: the first parent of `sha`), so a
+    change that is no merge commit can be scored from its merge base. `select_all` (the `--changed` mode)
+    runs, on the mutants of each file, every suite the profile's `select` lists for it, changed or not;
+    a change with no suite is then no NO_TESTS row, and a mutant no suite reaches is not_run, with its
+    line in `not_run_at`. Without `select_all`, only changed suites run."""
     started = time.time()
     row = _replay_row(repo, sha)
     code_re, tests_re = re.compile(profile["code"]), re.compile(profile["tests"])
     not_re = re.compile(profile["code_not"]) if profile.get("code_not") else None
-    base = "%s^1" % sha
+    base = base or "%s^1" % sha
     try:
         files = _changed_files(repo, base, sha)
     except ValueError as error:
@@ -909,7 +921,7 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
     if not code:
         row["status"] = "NO_PRODUCT"
         return row
-    if not suites:
+    if not suites and not select_all:
         row["status"] = "NO_TESTS"
         return row
 
@@ -917,7 +929,7 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
     try:
         return _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, suite_timeout,
                           jobs or job_count(), deps or os.path.join(own, "deps"),
-                          None if pr_budget is None else started + pr_budget, progress)
+                          None if pr_budget is None else started + pr_budget, progress, select_all)
     finally:
         shutil.rmtree(own, ignore_errors=True)
 
@@ -946,7 +958,8 @@ def _head_copy(repo: str, rel: str, own: str):
 def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float, head=None):
     """The changed `suites` that the profile's `select` lists for product file `path`, run in checkout `dest`:
     (suites or None, note). None means no list: select is missing from the profile, or failed, and the note says why
-    for a failure. A suite name is a line of the output; any other line is ignored.
+    for a failure. A suite name is a line of the output; any other line is ignored. With `suites` None, every
+    listed line that the profile's `tests` regex matches and `dest` holds is a suite, changed or not.
     `head(part)` serves a select argv part that has a "/" and no `{` and that `dest` lacks (a script the commit
     lacks): the absolute path of the copy at the clone's HEAD, or None. A bare command name is left to PATH.
     The run stays in `dest`."""
@@ -963,11 +976,14 @@ def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float, 
     if timed_out or code != 0:
         return None, "%s: select %s, every changed suite runs" % (path, "timed out" if timed_out else "exited %d" % code)
     listed = {line.strip() for line in output.splitlines()}
+    if suites is None:
+        return sorted(name for name in listed if name and re.search(profile["tests"], name)
+                      and os.path.isfile(os.path.join(dest, name))), ""
     return [suite for suite in suites if suite in listed], ""
 
 
 def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, suite_timeout, jobs, deps,
-               deadline=None, progress=None):
+               deadline=None, progress=None, select_all=False):
     """The body of `replay_pr`, inside the temp folder `own`."""
     clean = {}  # path -> the text a clean run holds: the source, or its normalized form for Python
     found, parse_errors = [], {}
@@ -1036,6 +1052,30 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
             return run_suite_file(dest, suite, bound, argv=command(suite), classify=classify,
                                   cwd=os.path.join(dest, cwd_rel))
 
+        # The suites that `select` lists for each file. None for a file means no list (no select, or it failed): the
+        # changed suites run. With `select_all` the listed suites are the ones to run, so they take the control run.
+        changed = list(suites)
+        paths = sorted({mutant[0] for mutant in mutants})
+        head_copies = {}  # select argv part -> its copy at HEAD (None when HEAD has none), read once per replay
+
+        def head(part):
+            if part not in head_copies:
+                head_copies[part] = _head_copy(repo, part, os.path.join(own, "head"))
+                if head_copies[part]:
+                    row["notes"].append("%s: missing at the commit, read from HEAD" % part)
+            return head_copies[part]
+
+        listed_by = {}
+        for path in paths:
+            listed, note = borrow(lambda dest: _select_suites(profile, dest, path, None if select_all else changed,
+                                                              suite_timeout, head))
+            if note:
+                row["notes"].append(note)
+            listed_by[path] = listed
+        if select_all:
+            suites = sorted({name for path in paths for name in (changed if listed_by[path] is None
+                                                                  else listed_by[path])})
+
         with ThreadPoolExecutor(max_workers=count) as pool:
             control = list(pool.map(lambda suite: borrow(lambda dest: run_one(dest, suite, suite_timeout)), suites))
         usable = []
@@ -1046,35 +1086,25 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
                 slowest = max(slowest, seconds)
             else:
                 row["unusable"][suite] = "not green on the clean source (%s)" % kind
-        if not usable:
+        if not usable and not select_all:
             row["reason"] = "no suite is green on the clean source"
             return row
         usable = [suite for _seconds, suite in sorted(usable)]  # the quickest first: the first assertion ends a mutant
         bound = min(suite_timeout, max(10.0, 5 * slowest))
 
-        # The suites to run on the mutants of each file: the usable changed suites that `select` lists for it, or
-        # all of them when there is no list. A file no usable changed suite reaches gets none: its mutants are not_run.
+        # The suites to run on the mutants of each file: the usable suites that `select` lists for it, or the usable
+        # changed ones when there is no list. A file no usable suite reaches gets none: its mutants are not_run.
         allowed = {}
-        head_copies = {}  # select argv part -> its copy at HEAD (None when HEAD has none), read once per replay
-
-        def head(part):
-            if part not in head_copies:
-                head_copies[part] = _head_copy(repo, part, os.path.join(own, "head"))
-                if head_copies[part]:
-                    row["notes"].append("%s: missing at the commit, read from HEAD" % part)
-            return head_copies[part]
-
-        for path in sorted({mutant[0] for mutant in mutants}):
-            listed, note = borrow(lambda dest: _select_suites(profile, dest, path, suites, suite_timeout, head))
-            if note:
-                row["notes"].append(note)
+        for path in paths:
+            listed = listed_by[path]
             if listed is None:
-                allowed[path] = list(usable)
+                allowed[path] = [suite for suite in usable if suite in changed]
                 continue
             allowed[path] = [suite for suite in usable if suite in listed]
             if not allowed[path]:
-                row["notes"].append("%s: %s" % (path, "no changed suite reaches it" if not listed else
-                                                "the changed suites that reach it are unusable"))
+                who = "suite" if select_all else "changed suite"
+                row["notes"].append("%s: %s" % (path, "no %s reaches it" % who if not listed else
+                                                "the %ss that reach it are unusable" % who))
 
         def score(dest, mutant):
             path, label, text = mutant
@@ -1105,6 +1135,7 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
     for (path, label, _text), kinds in zip(mutants, outcomes):
         if kinds is None:
             row["not_run"] += 1
+            row["not_run_at"].append((path, _line_of(label), label))
         elif "assert" in kinds:
             row["killed"] += 1
         elif kinds & {"crash", "timeout"}:
@@ -1193,4 +1224,95 @@ def format_replay(rows) -> str:
             len(scored), sum(r["killed"] for r in scored), sum(r["made"] - r.get("not_run", 0) for r in scored),
             sum(r["crashed"] for r in scored), sum(r["survived"] for r in scored),
             ", %d not_run" % not_run if not_run else ""))
+    return "\n".join(lines)
+
+
+def changed_summary(rows) -> dict:
+    """The totals of the rows that `--changed` scored: made, killed, crashed, survived, not_run, and `untested`, the
+    sorted unique `path:line` of each line with a mutant that survived or was not run. A line with one killed and one
+    surviving mutant is untested: the share counts mutants, and the list names the lines where a wrong edit got through."""
+    total = {key: sum(row.get(key, 0) for row in rows) for key in ("made", "killed", "crashed", "survived", "not_run")}
+    lines = {(path, line) for row in rows for path, line, _label in row.get("survivors", []) + row.get("not_run_at", [])}
+    total["untested"] = ["%s:%d" % pair for pair in sorted(lines)]
+    return total
+
+
+def format_changed(rows) -> str:
+    """The `--changed` report: each row as `format_replay_row` writes it, then one `catch share: K/R` line (K killed over R
+    mutants that ran, a crash is no kill; a percentage only when R is above 0, so UNKNOWN never reads as a rate), then one
+    `untested: path:line` line for each untested line."""
+    total = changed_summary(rows)
+    ran = total["made"] - total["not_run"]
+    lines = [format_replay_row(row) for row in rows]
+    share = "%.1f%%" % (100.0 * total["killed"] / ran) if ran else ""
+    lines.append("catch share: %d/%d%s" % (total["killed"], ran, " (%s)" % share if share else ""))
+    lines.extend("untested: %s" % where for where in total["untested"])
+    return "\n".join(lines)
+
+
+def run_known_bugs(repo: str, bugs, suite_timeout: float = 120) -> list:
+    """Replay planted bugs against a clone's HEAD. Each bug is {id, name, file, old, new, argv, classify}: `old` is the one
+    text in `file` that the plant replaces with `new`, and `argv` is the catcher suite, read by the classifier `classify`.
+    Returns [{id, name, verdict, reason}] with the verdict CAUGHT (the suite prints an assertion on the planted copy), MISS
+    (the suite passed, crashed or timed out on it) or UNKNOWN (the anchor is stale or ambiguous, the entry is malformed, or the
+    suite is not green on the clean copy). Only an assertion catches, as in a replay. The run is in a checkout of HEAD made like
+    a replay's, so the working tree and the repository are left as found."""
+    if not bugs:
+        return []
+    sha = _git(repo, "rev-parse", "HEAD").strip()
+    own = tempfile.mkdtemp(prefix="mutate_bugs_")
+    dest = os.path.join(own, "w")
+    results = []
+    try:
+        _make_checkout(repo, sha, dest, set(), {}, None, {})
+        for bug in bugs:
+            results.append(_known_bug(dest, bug, suite_timeout))
+    finally:
+        _drop_checkout(repo, dest)
+        shutil.rmtree(own, ignore_errors=True)
+    return results
+
+
+def _known_bug(dest: str, bug: dict, suite_timeout: float) -> dict:
+    """One planted bug in checkout `dest`, which is left as it was found."""
+    result = {"id": str(bug.get("id", "?")), "name": str(bug.get("name", "")), "verdict": "UNKNOWN", "reason": ""}
+    try:
+        file, old, new, argv = bug["file"], bug["old"], bug["new"], list(bug["argv"])
+        classify = CLASSIFIERS[bug["classify"]]
+    except (KeyError, TypeError) as error:
+        result["reason"] = "the entry is malformed: %s %s" % (type(error).__name__, error)
+        return result
+    try:
+        path, text = find_anchor(dest, old, [file])
+    except (StaleMutant, AmbiguousMutant) as error:
+        result["reason"] = str(error)
+        return result
+    try:
+        control = run_suite_file(dest, "", suite_timeout, argv=argv, classify=classify, cwd=dest)[0]
+        if control != "pass":
+            result["reason"] = "the suite is not green on the clean copy (%s)" % control
+            return result
+        apply_mutant(dest, old, new, [file])
+        try:
+            kind = run_suite_file(dest, "", suite_timeout, argv=argv, classify=classify, cwd=dest)[0]
+        finally:
+            _write(path, text)
+    except OSError as error:
+        result["reason"] = "the suite did not run: %s" % error
+        return result
+    result["verdict"] = "CAUGHT" if kind == "assert" else "MISS"
+    if kind != "assert":
+        result["reason"] = {"pass": "the suite passed on the planted bug", "crash": "the suite crashed with no assertion",
+                            "timeout": "the suite passed the timeout"}.get(kind, kind)
+    return result
+
+
+def format_known_bugs(results) -> str:
+    """One `CAUGHT|MISS|UNKNOWN id: name [reason]` line for each bug, then a totals line. No bug reads one line."""
+    if not results:
+        return "no known bugs listed"
+    lines = ["%s %s: %s%s" % (r["verdict"], r["id"], r["name"], " [%s]" % r["reason"] if r["reason"] else "")
+             for r in results]
+    counts = {verdict: sum(1 for r in results if r["verdict"] == verdict) for verdict in ("CAUGHT", "MISS", "UNKNOWN")}
+    lines.append("known bugs: %d caught, %d miss, %d unknown" % (counts["CAUGHT"], counts["MISS"], counts["UNKNOWN"]))
     return "\n".join(lines)
