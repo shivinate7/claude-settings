@@ -1,9 +1,9 @@
 {
  "title": "Unpark on the waiting page brings the item back in one step, with nothing left parked",
  "phase": "now",
- "status": "todo",
+ "status": "doing",
  "order": 103.2112,
  "why": "Owner ask ask-mw3lqbojbc (Nov 5 07:49 CST): \"hitting unpark doesn't seem to reprovide options\". Item 10 (windows-live-checks): his Unpark at Nov 4 17:44 CST reopened the item, but its line stayed in meta/page.parked and answers/park.windows-live-checks stayed, so the page still showed it parked until triage removed both at 07:51 CST Nov 5.",
- "note": "Cause (read, waiting-page SKILL.md parked branch): unpark takes three writes by hand (reopen the item, remove the meta/page.parked entry, delete the answer), and nothing checks that all three happened; triage did only the first. Fix, one lane, waiting-page only: (1) the page itself shows an item as open whenever items/<id> is open, even if a stale parked entry names it; (2) the stale_pages pass (on demand, no timer) lists any parked entry whose item is open and any park answer older than 10 minutes, so the writer finishes it that wake. Red first on item 10's exact state. Pairs with step page-park-any-item (lane session_013NEJKz8PjcPMADEhbh6uh9), which can carry it.",
- "updatedAt": "2026-11-05T13:53:00Z"
+ "note": "Nov 5 07:52 CST: carried by lane page-park-any-item (session_013NEJKz8PjcPMADEhbh6uh9). Cause (read, waiting-page SKILL.md parked branch): unpark takes three writes by hand (reopen the item, remove the meta/page.parked entry, delete the answer), and nothing checks that all three happened; triage did only the first. Fix, one lane, waiting-page only: (1) the page itself shows an item as open whenever items/<id> is open, even if a stale parked entry names it; (2) the stale_pages pass (on demand, no timer) lists any parked entry whose item is open and any park answer older than 10 minutes, so the writer finishes it that wake. Red first on item 10's exact state. Pairs with step page-park-any-item (lane session_013NEJKz8PjcPMADEhbh6uh9), which can carry it.",
+ "updatedAt": "2026-11-05T13:55:00Z"
 }
