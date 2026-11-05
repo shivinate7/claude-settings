@@ -23,7 +23,9 @@ asks for the score. The failure classes under test:
   whole t7_store_and_seams.py still score whole;
 - a file the real q_max or banchi profile does not read as product (a `*.test.mjs` browser test, a
   `scripts/*-selftest.py`) is never mutated: a pull request that changes only such files and a suite reads NO_PRODUCT,
-  and a product file beside them still reads OK.
+  and a product file beside them still reads OK;
+- a child repository's profile (REPLAY_PROFILES mailaudit, home, ios_adblock, joyous, degen) names its sample product
+  file and suite, uses only the keys the claude_settings, q_max and banchi profiles use, and reads no suite as product.
 
 The JavaScript cases need the typescript package: `npm ci --ignore-scripts --no-audit --no-fund` at the
 repository root. A missing package is a FAIL, never a skip. A contract name missing from
@@ -1347,6 +1349,151 @@ class BanchiSelftestTests(unittest.TestCase):
     def test_a_server_module_is_product(self):
         row = product_row("banchi_routes")
         self.assertEqual(row["status"], "OK", api("format_replay_row")(row))
+
+
+# The child repositories' profiles: the REPLAY_PROFILES keys mailaudit, home, ios_adblock, joyous and degen. A row is
+# (key, part, sample product file, sample suite). `part` is None for a repository with one profile; home and
+# ios_adblock name each part. The samples are hardcoded paths, since CI has no child clones.
+CHILD_ROWS = [
+    ("mailaudit", None, "src/view-rules.mjs", "test/view-rules.test.mjs"),
+    ("home", "js", "web/model.js", "web/model.test.js"),
+    ("home", "py", "tools/switchbot-ble-gaps.py", "tools/test_switchbot_ble_gaps.py"),
+    ("ios_adblock", "node", "chrome/slice.mjs", "chrome/test/slice.test.mjs"),
+    ("ios_adblock", "shell", "ios/WebExtension/src/strictmode.js", "tests/test_strictmode.sh"),
+    ("joyous", None, "src/lib/conversions/normalize.ts", "tests/conversions/normalize.test.ts"),
+    ("degen", None, "server/jd.py", "tests/addon/test_jd_heal.py"),
+]
+# Suites the spec leaves out of ios_adblock: a zsh script, a script that needs macOS Swift, and a TAP script that the
+# node part covers.
+IOS_LEFT_OUT = ["tests/test_chrome_slice.sh", "tests/test_build_rules.sh", "tests/test_export_lists.sh",
+                "tests/test_merge_chunks.sh"]
+
+
+def child_label(key, part):
+    return key if part is None else "%s %s" % (key, part)
+
+
+def child_profile(key, part):
+    """The child profile `key`, or its `part`, as hooks/mutate_guard.py names it. A missing key or part is a FAIL
+    line."""
+    entry = mutate_guard.REPLAY_PROFILES.get(key)
+    if entry is None:
+        raise AssertionError("REPLAY_PROFILES has no %s key" % key)
+    if part is None:
+        return entry
+    try:
+        return entry["parts"][part]
+    except (KeyError, TypeError):
+        raise AssertionError("REPLAY_PROFILES %s has no %s part" % (key, part))
+
+
+def known_profile_keys():
+    """The keys the claude_settings, q_max and banchi entries use. A child profile uses no other key: no new field."""
+    banchi = mutate_guard.REPLAY_PROFILES.get("banchi", {})
+    entries = [mutate_guard.REPLAY_PROFILES.get("claude_settings", {}), mutate_guard.REPLAY_PROFILES.get("q_max", {}),
+               banchi, *banchi.get("parts", {}).values()]
+    return set().union(*entries)
+
+
+def child_pattern(profile, field, label):
+    """The regex in `field` of a child profile. A missing or non-text field is a FAIL line, never a KeyError."""
+    value = profile.get(field)
+    if not isinstance(value, str):
+        raise AssertionError("%s has no %s regex" % (label, field))
+    return re.compile(value)
+
+
+def child_is_product(profile, label, path):
+    """`code` matches `path` and `code_not` does not: the rule replay_pr applies to each changed file."""
+    code = child_pattern(profile, "code", label)
+    not_code = child_pattern(profile, "code_not", label) if profile.get("code_not") else None
+    return bool(code.search(path)) and not (not_code and not_code.search(path))
+
+
+class ChildProfileTests(unittest.TestCase):
+    """Each child repository's profile, pinned by its sample paths and read here, never run: a child clone is not in
+    CI. A red here on main means the key is missing, which is the defect, not a stale case."""
+
+    def test_each_child_profile_key_exists(self):
+        for key, part, _, _ in CHILD_ROWS:
+            with self.subTest(profile=child_label(key, part)):
+                child_profile(key, part)
+
+    def test_each_child_profile_uses_only_the_known_keys(self):
+        known = known_profile_keys()
+        for key, part, _, _ in CHILD_ROWS:
+            label = child_label(key, part)
+            with self.subTest(profile=label):
+                extra = (set(child_profile(key, part)) | set(mutate_guard.REPLAY_PROFILES[key])) - known
+                self.assertFalse(extra, "%s uses keys no claude_settings, q_max or banchi entry uses: %s"
+                                 % (label, sorted(extra)))
+
+    def test_each_child_profile_code_matches_the_sample_product_file(self):
+        for key, part, product, _ in CHILD_ROWS:
+            label = child_label(key, part)
+            with self.subTest(profile=label):
+                self.assertTrue(child_is_product(child_profile(key, part), label, product),
+                                "%s: code does not match the sample product file %s" % (label, product))
+
+    def test_each_child_profile_code_skips_the_sample_suite(self):
+        for key, part, _, suite in CHILD_ROWS:
+            label = child_label(key, part)
+            with self.subTest(profile=label):
+                self.assertFalse(child_is_product(child_profile(key, part), label, suite),
+                                 "%s: code matches the sample suite %s, so a suite is mutated as product"
+                                 % (label, suite))
+
+    def test_each_child_profile_tests_matches_the_sample_suite(self):
+        for key, part, _, suite in CHILD_ROWS:
+            label = child_label(key, part)
+            with self.subTest(profile=label):
+                tests = child_pattern(child_profile(key, part), "tests", label)
+                self.assertTrue(tests.search(suite), "%s: tests does not match the sample suite %s" % (label, suite))
+
+    def test_each_child_profile_classify_is_a_known_classifier(self):
+        for key, part, _, _ in CHILD_ROWS:
+            label = child_label(key, part)
+            with self.subTest(profile=label):
+                classify = child_profile(key, part).get("classify")
+                self.assertTrue(isinstance(classify, str) and classify in mutate_shared.CLASSIFIERS,
+                                "%s: classify %r is not a mutate_shared.CLASSIFIERS name" % (label, classify))
+
+    def test_each_child_profile_select_is_a_list_holding_the_path(self):
+        for key, part, _, _ in CHILD_ROWS:
+            label = child_label(key, part)
+            with self.subTest(profile=label):
+                select = child_profile(key, part).get("select")
+                self.assertTrue(isinstance(select, list) and "{path}" in select,
+                                "%s: select is not a list holding {path}" % label)
+
+    def test_mailaudit_code_skips_a_worker_test_file(self):
+        self.assertFalse(child_is_product(child_profile("mailaudit", None), "mailaudit", "worker/core.test.mjs"),
+                         "mailaudit code reads the suite worker/core.test.mjs as product")
+
+    def test_joyous_code_skips_astro_files(self):
+        self.assertFalse(child_is_product(child_profile("joyous", None), "joyous", "src/pages/index.astro"),
+                         "joyous code reads a .astro file as product")
+
+    def test_degen_tests_skip_the_web_folder(self):
+        tests = child_pattern(child_profile("degen", None), "tests", "degen")
+        self.assertIsNone(tests.search("tests/web/test_feed.py"),
+                          "degen tests reads tests/web/test_feed.py, a browser suite, as a unittest suite")
+
+    def test_home_code_skips_its_suites(self):
+        for part, suite in (("js", "web/model.test.js"), ("py", "tools/test_switchbot_ble_gaps.py")):
+            label = child_label("home", part)
+            with self.subTest(profile=label):
+                self.assertFalse(child_is_product(child_profile("home", part), label, suite),
+                                 "%s code reads the suite %s as product" % (label, suite))
+
+    def test_ios_adblock_tests_skip_the_suites_the_spec_leaves_out(self):
+        for part in ("node", "shell"):
+            label = child_label("ios_adblock", part)
+            for path in IOS_LEFT_OUT:
+                with self.subTest(profile=label, suite=path):
+                    tests = child_pattern(child_profile("ios_adblock", part), "tests", label)
+                    self.assertIsNone(tests.search(path), "%s tests selects %s, a suite the spec leaves out"
+                                      % (label, path))
 
 
 class EdgeTests(unittest.TestCase):
