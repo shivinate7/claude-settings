@@ -5998,6 +5998,46 @@ test("page-item-waits-on: No. 154 waiting on a run: Change reopens it on lastAns
   assert.deepEqual(await page.evaluate(() => window.__log.filter((l) => l[0] === "delete")), [], "Send deleted a record for No. 154");
 });
 
+// A wait value is valid when it is a positive whole number, or a string of digits with no leading zero. Any other value is malformed.
+const WT_BAD = [0, "0", "012", -5, "abc"];
+
+test("page-item-waits-on: No. 154 with stands, waits and lastAnswer is staged for nothing: the bar counts only the other item, and Send writes no answer for No. 154", async (t) => {
+  const it = no154({ stands: true, lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: WT_RUN } });
+  const other = mk("wt-other", 2, { added: "2026-11-04T09:00:00Z" }); // added after the last answer, so it is new and unfolded
+  const page = await open(t, { items: [it, other] }); if (!page) return;
+  await need(card(page, it), "No. 154 has no card");
+  assert.equal(await page.locator("#send").isDisabled(), true, "No. 154 is staged though nothing is picked for the other item");
+  await choose(page, other, "b");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "the bar counts No. 154 among the ready answers");
+  await send(page);
+  assert.ok(await holds(page, (id) => !!window.__answers()[id], other.id), "Send wrote no answer for the other item");
+  assert.equal(it.id in (await answers(page)), false, "Send wrote answers/wt-154 for an item answered by its wait");
+});
+
+test("page-item-waits-on: a run or PR number that is malformed with lastAnswer stays an open ask in its tier", async (t) => {
+  const bad = [];
+  WT_BAD.forEach((v, i) => {
+    bad.push(mk("wt-bad-run-" + i, 160 + i, { title: "Malformed run " + JSON.stringify(v), lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: v } }));
+    bad.push(mk("wt-bad-pr-" + i, 170 + i, { title: "Malformed pr " + JSON.stringify(v), lastAnswer: ANSWERED, waits: { repo: WT_REPO, pr: v } }));
+  });
+  const page = await open(t, { items: bad }); if (!page) return;
+  for (const it of bad) {
+    const home = await sectionOf(page, it);
+    assert.ok(OPEN_TIERS.includes(home), `${it.title} is in ${home}, not in an open tier`);
+    assert.equal(await card(page, it).locator(".top a").count(), 0, `${it.title} draws a wait link`);
+  }
+});
+
+test("page-item-waits-on: a run or PR given as a string of digits with no leading zero reads answered, as a number does", async (t) => {
+  const run = no154({ lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: String(WT_RUN) } });
+  const pr = mk("wt-str-pr", 155, { title: "Pick the PR order", lastAnswer: ANSWERED, waits: { repo: WT_REPO, pr: "1011" } });
+  const page = await open(t, { items: [run, pr] }); if (!page) return;
+  assert.equal(await sectionOf(page, run), "tier-answered", "No. 154 with a string run is not in the Answered section");
+  await need(card(page, run).locator(`.top a[href="${WT_RUN_URL}"]`), "No. 154 with a string run has no link to its CI run");
+  assert.equal(await sectionOf(page, pr), "tier-answered", "No. 155 with a string PR is not in the Answered section");
+  await need(card(page, pr).locator(`.top a[href="${WT_PR_URL(1011)}"]`), "No. 155 with a string PR has no link to PR #1011");
+});
+
 // An arbiter ruling (decision session-tiers, Arbiter, "On the page"): the writer files it as a closed item with arbiter: true,
 // home = the ruling's record id, pick = the ruled option, why and ruled. Every case keeps DECISION open and first: open() waits
 // for an open card, so a red run fails on the arbiter assertions, not on that wait.

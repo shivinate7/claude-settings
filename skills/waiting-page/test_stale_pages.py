@@ -936,6 +936,67 @@ class Stale(unittest.TestCase):
                 self.assert_page_word(r, word, code)
                 self.assert_wait_line(r, 154, RUN, "ended")
 
+    def test_a_run_completed_with_failure_names_the_conclusion_in_its_line(self):
+        current, _ = self.current_and_behind()
+        env, _ = self.gh_env({RUN_ARGV: RUN_DONE})
+        r = self.items_run(current, self.items_file([wait_item(154, {"repo": REPO, "run": RUN})]), env)
+        self.assert_page_word(r, "current", 0)
+        lines = self.wait_lines(r, 154)
+        self.assertEqual(len(lines), 1, "want one wait line for item 154:\n" + r.stdout + r.stderr)
+        self.assertIn("failure", lines[0], "the wait line does not name the run's conclusion:\n" + lines[0])
+
+    def test_a_run_or_pr_number_is_valid_only_as_a_whole_number_or_digits_without_a_leading_zero(self):
+        current, _ = self.current_and_behind()
+        valid = [("run", int(RUN), RUN, RUN_ARGV, RUN_DONE, "ended"), ("run", RUN, RUN, RUN_ARGV, RUN_DONE, "ended"),
+                 ("pr", PR, PR, PR_ARGV, PR_OPEN, "waiting"), ("pr", str(PR), PR, PR_ARGV, PR_OPEN, "waiting")]
+        for kind, value, target, argv, answer, word in valid:
+            with self.subTest(valid=(kind, value)):
+                env, folder = self.gh_env({argv: answer})
+                r = self.items_run(current, self.items_file([wait_item(154, {"repo": REPO, kind: value})]), env)
+                self.assert_page_word(r, "current", 0)
+                self.assert_wait_line(r, 154, target, word)
+                self.assertEqual(self.gh_calls(folder), [argv], "gh calls for a valid %s of %r" % (kind, value))
+        for kind in ("run", "pr"):
+            for value in ("0", "012", 0, -5, "abc"):
+                with self.subTest(malformed=(kind, value)):
+                    env, folder = self.gh_env({RUN_ARGV: RUN_DONE, PR_ARGV: PR_OPEN})
+                    r = self.items_run(current, self.items_file([wait_item(154, {"repo": REPO, kind: value})]), env)
+                    self.assert_page_word(r, "current", 0)
+                    lines = self.wait_lines(r, 154)
+                    self.assertEqual(len(lines), 1, "want one wait line for item 154:\n" + r.stdout + r.stderr)
+                    self.assertRegex(lines[0], r"\bunknown\b", "a malformed %s reads as something other than unknown: %s" % (kind, lines[0]))
+                    self.assertEqual(self.gh_calls(folder), [], "gh was called for a malformed %s of %r" % (kind, value))
+
+    def test_an_items_folder_with_no_complete_marker_reads_every_wait_unknown_and_calls_no_gh(self):
+        current, behind = self.current_and_behind()
+        folder = self.items_folder([wait_item(154, {"repo": REPO, "run": RUN}), wait_item(155, {"repo": REPO, "pr": PR})])
+        os.remove(os.path.join(folder, ".complete"))
+        for word, page, code in (("current", current, 0), ("behind", behind, 1)):
+            with self.subTest(page=word):
+                env, calls_folder = self.gh_env({RUN_ARGV: RUN_DONE, PR_ARGV: PR_MERGED})
+                r = self.items_run(page, folder, env)
+                self.assert_page_word(r, word, code)
+                self.assert_wait_line(r, 154, RUN, "unknown")
+                self.assert_wait_line(r, 155, PR, "unknown")
+                self.assertEqual(self.gh_calls(calls_folder), [], "gh was called for an items folder with no .complete marker")
+
+    def test_fifty_one_open_waits_items_make_exactly_the_cap_of_gh_calls_and_the_last_line_is_unknown(self):
+        cap = load_stale_pages().WAIT_CAP
+        current, _ = self.current_and_behind()
+        items, answers, want = [], {}, []
+        for i in range(cap + 1):  # every item waits on an open PR, and gh would answer each one
+            pr = 3001 + i
+            items.append(wait_item(501 + i, {"repo": REPO, "pr": pr}))
+            answers[pr_argv(pr)] = PR_OPEN
+            if i < cap:
+                want.append(pr_argv(pr))
+        env, folder = self.gh_env(answers)
+        r = self.items_run(current, self.items_file(items), env)
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(self.gh_calls(folder), want, "gh calls for %d open waits items" % (cap + 1))
+        self.assert_wait_line(r, 501 + cap - 1, 3001 + cap - 1, "waiting")
+        self.assert_wait_line(r, 501 + cap, 3001 + cap, "unknown")
+
 
 # Fixtures for the --items cases: a repo, a run that ended completed/failure, and the PR that run gated.
 REPO, RUN, PR = "shivinate7/q_max", "41861801325", 1011
