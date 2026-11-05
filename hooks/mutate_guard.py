@@ -2342,6 +2342,21 @@ def report_main(argv) -> int:
 # module, harness/tests/t7/<group>.py, is a suite of its own when it defines CHECKS (`suite_filter` below; a
 # helper without CHECKS is none). Its runner loads harness/tests/t7_store_and_seams.py and calls its `run()` with
 # an `order` that keeps only that group's checks, so they run in T7's order, each inside T7's hermetic().
+# The select script of mailaudit, home, ios_adblock, joyous and degen does not exist yet: each child repo adds it in
+# its own lane (coordinator ruling). Until then select exits nonzero and every changed suite runs.
+# mailaudit: suites are plain node scripts. check-docs, check-records, ci-wiring, milestone-due and send-key print
+# FAIL on red; rules, golden, view-rules, worker/core, photoget and app print only a cross mark, so they cannot kill
+# until mailaudit prints FAIL. app.test timed out at 120 s, so it reads unusable.
+# home: parts js and py. The addon is left out: it has no requirements or lock file, its pins sit inline in its
+# workflow. The 30 node files run 0.1 to 3.4 s; the 5 python files are green alone.
+# ios_adblock: parts node and shell. Left out: test_chrome_slice.sh (TAP, covered by the node part),
+# test_build_rules.sh and test_export_lists.sh (zsh), test_merge_chunks.sh (needs macOS Swift). The chrome tests run
+# 0.1 to 1.5 s; the shell suites are green and print FAIL on red (chrome_check takes 37 s).
+# joyous: 35 files run under 2 s each. no-public-price, redirects, phone-first and tour-pages need dist/ or a
+# browser, so they read unusable. The node_tap kill is measured.
+# degen: py only. The app/ Playwright specs need a browser: unmeasured, left out. Modules run alone green; the
+# slowest, test_jd_heal.py, takes 95 s; test_ig_spike*.py is red on a clean checkout. A module that imports dev-only
+# pins (PyYAML, openapi_core, jsonschema; requirements-dev.txt) reads unusable: the install folder holds one lockfile.
 BANCHI_MODULE_RUNNER = """\
 import importlib, os, sys
 sys.path.insert(0, os.getcwd())
@@ -2366,6 +2381,8 @@ if not passed:
 # banchi's per-file selector (scripts/tests-for.py), named by both parts. A commit that lacks the script has no
 # copy in its checkout, so a replay reads the clone's HEAD copy (`_select_suites`, hooks/mutate_shared.py).
 BANCHI_SELECT = ["python3", "scripts/tests-for.py", "{path}"]
+HOME_SELECT = ["node", "scripts/tests-for.mjs", "{path}"]
+IOS_ADBLOCK_SELECT = ["node", "scripts/tests-for.mjs", "{path}"]
 REPLAY_PROFILES = {
     # claude_settings: the CI report (`--changed`) reads this repository by it. A suite is a `test_*.py` file anywhere;
     # `--tests-for` (below) names the suites of a file. No install: the suites use the standard library.
@@ -2404,6 +2421,58 @@ REPLAY_PROFILES = {
             "select": BANCHI_SELECT,
         },
     }},
+    "mailaudit": {
+        "code": r"^(src/[^/]+\.(mjs|jsx)|worker/[^/]+\.mjs|scripts/[^/]+\.mjs|build\.mjs|check-[^/]+\.mjs)$",
+        "code_not": r"\.test\.mjs$", "tests": r"^(test/[^/]+|worker/core)\.test\.mjs$",
+        "argv": ["node", "{suite}"], "classify": "fail_line",
+        "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"], "lockfile": "package-lock.json",
+        "sparse_skip": [], "select": ["node", "scripts/tests-for.mjs", "{path}"],
+    },
+    "home": {"parts": {
+        "js": {
+            "code": r"^(web|tools)/[^/]+\.(js|mjs)$", "code_not": r"\.test\.(js|mjs)$",
+            "tests": r"^(web/[^/]+\.test\.js|tools/[^/]+\.test\.mjs)$",
+            "argv": ["node", "--test", "--test-reporter=tap", "{suite}"], "classify": "node_tap", "install": None,
+            "sparse_skip": [], "select": HOME_SELECT,
+        },
+        "py": {
+            "code": r"^tools/[^/]+\.py$", "code_not": r"(^|/)test_[^/]*\.py$", "tests": r"^tools/test_[^/]*\.py$",
+            "argv": ["python3", "{suite}"], "classify": "fail_line", "install": None, "sparse_skip": [],
+            "select": HOME_SELECT,
+        },
+    }},
+    "ios_adblock": {"parts": {
+        "node": {
+            "code": r"^chrome/(build\.mjs|slice\.mjs|src/[^/]+\.js)$", "tests": r"^chrome/test/[^/]+\.test\.mjs$",
+            "argv": ["node", "--test", "--test-reporter=tap", "{suite}"], "classify": "node_tap",
+            "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+            "lockfile": "chrome/package-lock.json", "sparse_skip": [], "select": IOS_ADBLOCK_SELECT,
+        },
+        "shell": {
+            "code": r"^(chrome/check\.mjs|ios/WebExtension/src/(content|strictmode)\.js)$",
+            "tests": r"^tests/test_(chrome_check|content_early|strictmode)\.sh$",
+            "argv": ["bash", "{suite}"], "classify": "fail_line", "install": None, "sparse_skip": [],
+            "select": IOS_ADBLOCK_SELECT,
+        },
+    }},
+    "joyous": {
+        "code": r"^src/.*\.(ts|tsx|mts|mjs|js)$", "code_not": r"^tests/|\.(test|spec)\.(mjs|js|ts|tsx|mts)$",
+        "tests": r"^tests/(?:[^/]+\.test\.mjs|[^/]+/[^/]+\.test\.ts)$",
+        "argv": ["node", "--experimental-strip-types", "--test", "--test-reporter=tap", "{suite}"],
+        "classify": "node_tap",
+        "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"], "lockfile": "package-lock.json",
+        "sparse_skip": [], "select": ["node", "scripts/tests-for.mjs", "{path}"],
+    },
+    "degen": {
+        "code": r"^server/(?:[^/]+/)*[^/]+\.py$", "tests": r"^tests/(?!(?:web|tokens)/).*test_[^/]*\.py$",
+        "argv": ["env", "FEED_FREE_FLOOR_GB=0", "{deps}/venv/bin/python", "-m", "unittest", "{suite}"],
+        "classify": "fail_line",
+        "install": [[sys.executable, "-m", "venv", "{deps}/venv"],
+                    ["{deps}/venv/bin/pip", "install", "--quiet", "--disable-pip-version-check", "-r",
+                     "requirements.txt"]],
+        "lockfile": "requirements.txt", "link": None, "sparse_skip": [],
+        "select": ["python3", "scripts/tests-for.py", "{path}"],
+    },
 }
 
 
