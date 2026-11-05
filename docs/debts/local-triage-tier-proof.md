@@ -2,7 +2,7 @@
 
 **What.** The guard takes a session's tier only from its cloud tags, read from its own get_session record. A triage session on the owner's Mac or Windows PC has no such record, so the guard refuses each push it makes to the roadmap branch. Harm: local triage cannot keep the roadmap current, and its step notes wait for a cloud triage session.
 
-**Where.** `hooks/guard.py` rule `roadmap-one-writer` (one writer for the roadmap branch). Roadmap step `mac-triage-tier-debt` (local triage tier proof).
+**Where.** `hooks/guard.py` rule `roadmap-one-writer` (one writer for the roadmap branch). Roadmap step `local-triage-tier-proof` (local triage tier proof).
 
 **Decision.** `session-tiers` (the session shapes).
 
