@@ -1514,7 +1514,8 @@ CASE_LINE = re.compile(r"^\w+ \([\w.]+\)")
 
 
 def run_suite(suite_path: str, config_dir: str, only=None):
-    """Run one scaffold's test_sweep.py. Return (exit code, FAIL lines from stdout+stderr, case lines).
+    """Run one scaffold's test_sweep.py. Return (exit code, FAIL lines from stdout+stderr, case lines,
+    ERROR lines from `mutate_shared.diagnostic_lines`).
 
     janitor/test_sweep.py is a plain `unittest.main(verbosity=2)`, which writes its per-case
     progress and its failure headings to STDERR by default -- unlike hooks/test_guard.py's own
@@ -1536,12 +1537,12 @@ def run_suite(suite_path: str, config_dir: str, only=None):
     lines = (result.stdout + result.stderr).splitlines()
     red = [line for line in lines if "FAIL" in line]
     ran = [line for line in lines if CASE_LINE.match(line)]
-    return result.returncode, red, ran
+    return result.returncode, red, ran, mutate_shared.diagnostic_lines("\n".join(lines))
 
 
 def run_mutant(sources, work: str, index: int, entry):
     """Apply one mutation in its own scaffold, run the suite there, and return
-    (label, code, FAIL lines, required, skip).
+    (label, code, FAIL lines, required, skip, ERROR lines).
 
     `skip`, when not None, is why this mutant did not run on this platform at all: its one
     proving case cannot be driven here (see `skip_reason`). The caller reports it and counts it
@@ -1557,9 +1558,9 @@ def run_mutant(sources, work: str, index: int, entry):
     try:
         build_scaffold(scaffold, sources, target, mutated_text)
         suite_path = os.path.join(scaffold, "janitor", SUITE_FOR_TARGET[target])
-        code, red = mutate_shared.staged_suite(
+        code, red, seen = mutate_shared.staged_suite_seen(
             lambda only: run_suite(suite_path, config_dir, only), required)
-        return label, code, red, required, None
+        return label, code, red, required, None, seen
     finally:
         shutil.rmtree(scaffold, ignore_errors=True)
 

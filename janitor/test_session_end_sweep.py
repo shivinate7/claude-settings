@@ -1089,16 +1089,21 @@ def assert_heartbeat_stops(case, path, what):
         last = now
 
 
+STOPPED = set()  # beat paths already stopped, so kill_holder stops each holder once
+
+
 def kill_holder(pid):
-    """Stop one holder this suite started, two ways, and need no ps. Its stop file ends its loop with no
-    pid, so the stop works where the shell's pid space and this Python's differ (Windows). The `kill`
-    runs in the shell's own pid space, because the pid is the shell's `$!`: os.kill from this Python
-    would read it as a Windows pid and could stop an unrelated process. A `kill` that finds no process
-    does nothing, so a holder that already ended is fine."""
-    for held, beat in HOLDERS:
-        if held == pid:
-            write(beat + ".stop", "")
-    run_capped(["sh", "-c", 'kill "$1" 2>/dev/null; true', "sh", str(pid)], timeout=10)
+    """Stop each holder this suite started with `pid`, once. The stop file ends the holder's loop on every
+    platform. Off Windows a shell `kill` also runs, since the pid is the shell's `$!`; a `kill` that finds
+    no process does nothing. On Windows the MSYS pid is not a Windows pid, so only the stop file is used."""
+    beats = [beat for held, beat in HOLDERS if held == pid and beat not in STOPPED]
+    if not beats:
+        return
+    for beat in beats:
+        write(beat + ".stop", "")
+    if os.name != "nt":
+        run_capped(["sh", "-c", 'kill "$1" 2>/dev/null; true', "sh", str(pid)], timeout=10)
+    STOPPED.update(beats)  # last: a stop that raised is retried by the next call, not skipped
 
 
 def spawn_orphan(cwd, env_entries=()):
@@ -1262,6 +1267,75 @@ class SkippedCaseLeavesNoHolder(unittest.TestCase):
         def no_ps(argv):
             raise FileNotFoundError(2, "No such file or directory", argv[0])
         self.assert_skips_and_leaves_no_holder("sess-no-ps", no_ps)
+
+
+class KillHolderStopsOnce(unittest.TestCase):
+    """kill_holder sends one kill per holder. A later call for the same holder does nothing: its pid may
+    belong to another process by then."""
+
+    def test_a_second_kill_of_one_holder_sends_no_second_kill(self):
+        beat = os.path.join(ROOT, uuid.uuid4().hex + ".beat")
+        sent = []
+
+        def record(argv, timeout, **kwargs):
+            sent.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with mock.patch.object(sys.modules[__name__], "HOLDERS", [(4242, beat)]), \
+                mock.patch.object(sys.modules[__name__], "run_capped", record):
+            kill_holder(4242)
+            kill_holder(4242)
+        self.assertTrue(os.path.exists(beat + ".stop"), "kill_holder wrote no stop file for its holder")
+        shell_kills = [argv for argv in sent if argv[:1] == ["sh"]]
+        self.assertEqual(len(shell_kills), 0 if os.name == "nt" else 1,
+                         "two kill_holder calls for one holder sent %d shell kills" % len(shell_kills))
+
+
+class KillHolderRetriesAFailedStop(unittest.TestCase):
+    """A stop that raised did not stop its holder, so the next kill_holder call for that holder tries again.
+    Otherwise the at-exit stop skips the holder, and it runs on."""
+
+    def test_a_failed_stop_file_write_is_retried(self):
+        beat = os.path.join(ROOT, uuid.uuid4().hex + ".beat")
+        real_write = write
+        calls = []
+
+        def flaky_write(path, text):
+            calls.append(path)
+            if len(calls) == 1:
+                raise OSError("the first stop write fails")
+            real_write(path, text)
+
+        def no_kill(argv, timeout, **kwargs):
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with mock.patch.object(sys.modules[__name__], "HOLDERS", [(4343, beat)]), \
+                mock.patch.object(sys.modules[__name__], "write", flaky_write), \
+                mock.patch.object(sys.modules[__name__], "run_capped", no_kill):
+            with self.assertRaises(OSError):
+                kill_holder(4343)
+            kill_holder(4343)
+        self.assertTrue(os.path.exists(beat + ".stop"),
+                        "the retry after a failed stop write wrote no stop file, so the holder is never stopped")
+
+    def test_a_failed_kill_is_retried(self):
+        if os.name == "nt":
+            self.skipTest("Windows sends no shell kill, so there is no kill to fail")
+        beat = os.path.join(ROOT, uuid.uuid4().hex + ".beat")
+        sent = []
+
+        def flaky_kill(argv, timeout, **kwargs):
+            sent.append(list(argv))
+            if len(sent) == 1:
+                raise OSError("the first kill fails")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with mock.patch.object(sys.modules[__name__], "HOLDERS", [(4444, beat)]), \
+                mock.patch.object(sys.modules[__name__], "run_capped", flaky_kill):
+            with self.assertRaises(OSError):
+                kill_holder(4444)
+            kill_holder(4444)
+        self.assertEqual(len(sent), 2, "a failed kill was not retried: %d kill attempts" % len(sent))
 
 
 class SweepGetsNoPipes(unittest.TestCase):
