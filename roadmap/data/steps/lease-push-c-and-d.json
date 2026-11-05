@@ -1,9 +1,9 @@
 {
  "title": "A lane can fix its own branch: the red-run check stops asking for a force push, and auto mode lets a lease push to a lane's own branch",
  "phase": "now",
- "status": "todo",
+ "status": "doing",
  "order": 103.2109,
  "why": "Owner answer on page item 257 (Nov 5 07:44 CST): \"shouldn't it be c and d\". 9 lease-push refusals and 8 replacement PRs, Nov 2 to 4; 5 of 9 came from the red-run check's remedy naming a bare --force-with-lease.",
- "note": "Page item 257. Build d first: lint/check_red_run.py's remedy points at a route with no force push (or the trailer is checked before the first push), so its remedy and the force-push guard's stop disagreeing. Then c: an autoMode.allow prose entry in decision auto-mode-owner-acts, like Archived Branch Delete: a lease push to a branch this session pushed earlier, never default, archive/, roadmap or merge-lock; the classifier still judges. c is a permission change only the owner can make; his page answer is the word. Try c on a real lane fix and record whether the classifier lets it through. Owner session for the question: lane restore-roadmap-fork-test.",
+ "note": "Lane session_013NEJL37QndQaqk1XZCmK4x, started Nov 5 07:47 CST (coordinator). Page item 257. Build d first: lint/check_red_run.py's remedy points at a route with no force push (or the trailer is checked before the first push), so its remedy and the force-push guard's stop disagreeing. Then c: an autoMode.allow prose entry in decision auto-mode-owner-acts, like Archived Branch Delete: a lease push to a branch this session pushed earlier, never default, archive/, roadmap or merge-lock; the classifier still judges. c is a permission change only the owner can make; his page answer is the word. Try c on a real lane fix and record whether the classifier lets it through. Owner session for the question: lane restore-roadmap-fork-test.",
  "updatedAt": "2026-11-05T13:48:00Z"
 }
