@@ -2788,6 +2788,42 @@ test("reply to an answer: Reply stays at the thread's end while a reply waits, a
   assert.equal(bodies[1].re, RPL_ROOT, "the second reply names re " + JSON.stringify(bodies[1].re) + ", not the root ask " + RPL_ROOT);
 });
 
+test("reply to an answer: words typed while the reply saves stay in the box", async (t) => {
+  const LATER = "Also, does the Status tab show it?";
+  // The reply's write waits at the hold, so the words typed next land while it saves.
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW, hold: { set: 0 } }); if (!page) return;
+  await openReply(page, RPL_ROOT);
+  await page.fill(`#rt-${RPL_ROOT}`, RPL_TEXT);
+  await mustHave(page, `#rs-${RPL_ROOT}`, "Send reply button");
+  await page.click(`#rs-${RPL_ROOT}`);
+  assert.equal(await page.waitForFunction(() => window.__held > 0).then(() => true, () => false), true, "the reply's write never reached the store");
+  await mustHave(page, `#rt-${RPL_ROOT}`, "reply box while the reply saves");
+  await page.click(`#rt-${RPL_ROOT}`);
+  await page.keyboard.press("End");
+  await page.keyboard.type(" " + LATER);
+  await page.evaluate(() => window.__release());
+  await mustHave(page, "#askUndo", "Undo control once the reply saved");
+  // A send closes the box, and Reply reopens the words that were not sent (notes, sections 1 and 2).
+  const draft = (await page.evaluate((key) => localStorage.getItem(key), `waiting.replyDraft.${RPL_ROOT}`)) ?? "";
+  assert.equal(draft.trim(), LATER, "the stored draft after the send is " + JSON.stringify(draft) + ", not the words typed while the reply saved");
+  await openReply(page, RPL_ROOT);
+  const box = await page.inputValue(`#rt-${RPL_ROOT}`);
+  assert.equal(box.trim(), LATER, "the reply box holds " + JSON.stringify(box) + ", not the words typed while the reply saved");
+});
+
+test("reply to an answer: a refused reply keeps focus in the reply form", async (t) => {
+  const text = "Refused reply: can the rail guard change?";
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW, failSetText: "Refused reply" }); if (!page) return;
+  await openReply(page, RPL_ROOT);
+  await page.fill(`#rt-${RPL_ROOT}`, text);
+  await mustHave(page, `#rs-${RPL_ROOT}`, "Send reply button");
+  await page.click(`#rs-${RPL_ROOT}`);
+  const refused = await page.waitForFunction((id) => /Not saved/.test(document.getElementById(id)?.textContent || ""), `rh-${RPL_ROOT}`, { timeout: 3000 }).then(() => true, () => false);
+  assert.equal(refused, true, "the refused reply's hint does not say Not saved");
+  const active = await page.evaluate(() => { const a = document.activeElement; return a && a !== document.body ? a.id || a.tagName : "BODY"; });
+  assert.ok([`rt-${RPL_ROOT}`, `rs-${RPL_ROOT}`].includes(active), "after the refused reply focus is on " + active + ", not the reply form");
+});
+
 // ---------------------------------------------------------------- the ask stack: Add to list, one Send, one Undo for the batch
 
 // The reach line of the ask row that holds the text, or "" when no row holds it. Reads the page, never waits.
