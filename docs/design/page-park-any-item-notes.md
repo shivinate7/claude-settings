@@ -1,9 +1,10 @@
 # Waiting page, step page-park-any-item: design notes
 
 Mockup: `docs/design/page-park-any-item.html`. Screen: `skills/waiting-page/page.html` (main 0497265b): `buildCard` (the `.alts` row), `readyText`, `receipt`, `lastAnswerEl`, `renderBar`, `answerLine`, and the parked-line code (`pressPark`, `ACT_NAME`, `pkLine`, `parkedEl`).
-Deep links: `#s=today|open|park|stood-park|task-park|sent|answered|moved|back|seen|blocked|copy|hint-ready|seen-out|ruling-park|count-plain|copy-word`,
+Deep links: `#s=today|open|park|stood-park|task-park|sent|answered|moved|back|seen|blocked|ruling|copy|hint-ready|seen-out|ruling-park|count-plain|copy-word`,
 `&w=all|390|1280`, `&t=light|dark`, `&lab=off`, `&hide=<state>,...`. Sizes: phone 390 and wide 1280. Themes: light and dark.
 Focus ids: `#b-park-<item id>` (in the mockup: `#b-park-rail-count`, `#b-park-duo-sim`, `#b-park-chip-colour`), `#rc-rail-count` (the receipt), `#pk-line-rail-count` (the moved line).
+Focus per choice: cards and wording `#b-park-rail-count`; the hint `#rd-rail-count` (`#s=park` against `#s=hint-ready`); the seen card `#unfold-rail-count` (`#s=seen` against `#s=seen-out`); rulings `#ralts-rule-7` (`#s=ruling` against `#s=ruling-park`); counts `#barStatus`; copy text `#copyBox`.
 The page CSS in the mockup is page.html's own style block at 0497265b. This step adds no CSS. Where the mockup and page.html differ, page.html and these notes win.
 The fixed contract is unchanged.
 
@@ -14,9 +15,9 @@ Departs from: `skills/waiting-page/SKILL.md` "Route and close". A new branch for
 ## 1. Which cards get Park
 
 - Open decision and task cards (pick, `#s=open`): Park sits after None of these or after Mark done. This covers a card in the Answered section after Change. It also covers each member of a group, and Park parks that member only. Gain: the owner can park any question, as asked. Loss: parking one member of a group splits the bundle, and the other members stay under the group title.
-- Seen card, Park inside the fold (pick, `#s=seen`): Park sits in `.alts` with None of these, behind "Show the N options". Gain: one home for the control. A park draft locks the fold open through `foldLocked` (`!!eff(it)`), and the fold is already open when the owner presses Park, so nothing moves. Loss: one more press on a seen card.
+- Seen card, Park inside the fold (pick, `#s=seen`): Park sits in `.alts` with None of these, behind "Show the N options". The mockup draws the fold open. Gain: one home for the control. A park draft locks the fold open through `foldLocked` (`!!eff(it)`), and the fold is already open when the owner presses Park, so nothing moves. Loss: one more press on a seen card.
 - Option "Park beside the fold control" (`#s=seen-out`): Park sits outside the fold. Gain: one press. Loss: `foldLocked` opens the fold on the press, and all content below it moves (`ux-press-moves-nothing`). Avoiding that needs a second rule that exempts a park draft from the lock. It also gives the control a second home.
-- Ruling cards: no Park (pick). Option "Park on a ruling" (`#s=ruling-park`). Loss: `savedOf` keeps a ruling's record only when `choice === OVERTURN`, so a park record would draw no receipt and count as no answer. A ruling already stands with no act, so a park would change nothing the owner sees.
+- Ruling cards: no Park (pick, `#s=ruling`). Option "Park on a ruling" (`#s=ruling-park`). Loss: `savedOf` keeps a ruling's record only when `choice === OVERTURN`, so a park record would draw no receipt and count as no answer. A ruling already stands with no act, so a park would change nothing the owner sees.
 - Blocked cards (pick, `#s=blocked`): Park is disabled with None of these and Mark done (add `.parkbtn` to the `blocked(it)` selector in `buildCard`). The status alert above the options gives the reason, and the ready line says "This item cannot be sent." Gain: same as today's controls. `answerBody` writes `n`, and a blocked card can lack `n`. Loss: a broken item cannot be parked from the page. The owner pastes "park <n>" in chat, as in the step's interim.
 
 ## 2. Wording and hint
@@ -45,7 +46,7 @@ Departs from: `skills/waiting-page/SKILL.md` "Route and close". A new branch for
 
 - Park is `.btn.dash` with `aria-pressed`, as None of these is. Pressed, only its edge turns from dashed to solid. There is no ✓ label, because None of these and Mark done have none.
 - Measured in headless Chrome at 390 and 1280, in `open`, `park`, `stood-park` and `task-park`: each `.alts` row is one 44px row. Each button keeps its place and size, and each card keeps its height. A press moves nothing.
-- Stood pick, then Park (`#s=stood-park`): the pick is unselected, the gold "my pick" box stays as text, and the ready line reads "Ready to send: park." The bar's stood count drops by one. A second press clears Park, and the stood pick stands again, as before the press. Park does not set `unstood`.
+- Stood pick, then Park (`#s=stood-park`): the pick is unselected, the gold "my pick" box stays as text, and the ready line reads "Ready to send: park." The bar's stood count drops by one. A second press clears Park, and the stood pick stands again, as before the press. Park does not set `unstood`. This is no contract change. It makes one reading of the contract explicit for the test-author.
 
 ## 6. After Send
 
@@ -78,4 +79,6 @@ Owner grant: yes (a SKILL.md change: `lastAnswer` may hold `act: "park"`).
 - `receipt()`: check `sv.act === "park"` first ("Parked."). Today a task would read "Not marked done" and a decision "You chose an option". Its Change handler copies `act`.
 - `lastAnswerEl`: `la.act === "park"` reads "Parked."
 - `renderBar`: count card parks as "N to park". `answerLine`: "<n> park (<note>)".
+- `undoSend` puts back the saved draft as `w.draft`. Keep `act` in it, or an undone park comes back as "none of these, with your note" or "note, not done".
+- `noticeText`: a park entry reads "<n> park (<note>)". Today an entry with no choice and no done reads "note, not done".
 - Park inherits `.btn.dash`'s `--line` edge, which is under the 3:1 state-cue floor. None of these and Mark done have that gap today, and fixing it is outside this step.

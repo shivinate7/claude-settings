@@ -44,6 +44,7 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
     <button data-s="back">Unparked: back with its last answer</button>
     <button data-s="seen">Seen card: Park in the fold</button>
     <button data-s="blocked">Blocked card: Park off</button>
+    <button data-s="ruling">Ruling: no Park</button>
     <button data-s="copy">No store: copy text</button>
     <button data-s="hint-ready">Hint in the ready line</button>
     <button data-s="seen-out">Park beside the fold control</button>
@@ -65,7 +66,7 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
     <button data-t="light">Light</button><button data-t="dark">Dark</button>
     <button id="labBtn">Labels on</button>
   </div>
-  <p>Deep links: <code>#s=today|open|park|stood-park|task-park|sent|answered|moved|back|seen|blocked|copy|hint-ready|seen-out|ruling-park|count-plain|copy-word</code>, <code>&amp;w=all|390|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=&lt;state&gt;,...</code>. Focus ids: <code>#b-park-&lt;item id&gt;</code> (here <code>#b-park-rail-count</code>, <code>#b-park-duo-sim</code>, <code>#b-park-chip-colour</code>), <code>#rc-rail-count</code> (the receipt), <code>#pk-line-rail-count</code>. Drawn from page.html at main 0497265b. Notes: page-park-any-item-notes.md.</p>
+  <p>Deep links: <code>#s=today|open|park|stood-park|task-park|sent|answered|moved|back|seen|blocked|ruling|copy|hint-ready|seen-out|ruling-park|count-plain|copy-word</code>, <code>&amp;w=all|390|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=&lt;state&gt;,...</code>. Focus ids: <code>#b-park-&lt;item id&gt;</code> (here <code>#b-park-rail-count</code>, <code>#b-park-duo-sim</code>, <code>#b-park-chip-colour</code>), <code>#rc-rail-count</code> (the receipt), <code>#pk-line-rail-count</code>, <code>#rd-rail-count</code> (the ready line), <code>#unfold-rail-count</code>, <code>#ralts-rule-7</code>. Drawn from page.html at main 0497265b. Notes: page-park-any-item-notes.md.</p>
 </header>
 <main id="stage"></main>
 
@@ -982,7 +983,7 @@ function optCard(it, o, chosen) {
 const cardTop = (it, extra) => `<div class="top"><span class="num" title="From ${WRITER}">No. ${it.n}</span>${extra || `<span>${esc(it.waited)}</span>`}</div><h3 class="title" id="t-${it.id}">${esc(it.title)}</h3>`;
 const noteBox = (it, text) => `<div class="note"><label for="n-${it.id}">Note to the session (optional)</label><textarea id="n-${it.id}" placeholder="Anything the session should know"${it.off ? " disabled" : ""}>${esc(text || "")}</textarea></div>`;
 const dest = (it) => `<p class="dest">${esc("Lands in " + it.home + ". Added " + fmt(it.added) + ".")}</p>`;
-const readyEl = (it, st) => `<p class="ready${readyOn(it, st) ? " on" : ""}" aria-live="polite"${lab("new", st.readyTag)}>${esc(readyText(it, st))}</p>`;
+const readyEl = (it, st) => `<p id="rd-${it.id}" class="ready${readyOn(it, st) ? " on" : ""}" aria-live="polite"${lab("new", st.readyTag)}>${esc(readyText(it, st))}</p>`;
 // The answer parts of a card: options or steps, the ready line, the alts row, the note box. A seen card folds them.
 function answerParts(it, st) {
   const tag = st.tag === undefined ? "Park" : st.tag, park = st.today ? "" : parkBtn(it, st, tag);
@@ -1020,11 +1021,11 @@ function choseReceipt(it, sunk) {
   return `<article class="card${sunk ? "" : " " + it.tier} answered" id="item-${it.id}" aria-labelledby="t-${it.id}">${cardTop(it, `<span class="ans">${sunk ? "Filing pending, sent " : "Answered, filing pending "}<span class="t">${esc(fmt(SENT_AT))}</span></span>`)}<div class="receipt"><div class="line">${G("done")}<b>You chose ${o.letter}: ${esc(o.label)}.</b><button class="btn quiet changebtn" type="button">Change</button></div></div></article>`;
 }
 // A ruling card (only for the "Park on a ruling" option).
-function rulingCard(park) {
-  return `<article class="card rcard" id="item-rule-7" aria-labelledby="t-rule-7"><div class="top"><span class="num">No. 7</span><span>ruled ${esc(fmt("2026-11-04T20:00:00Z"))}</span></div><h3 class="title" id="t-rule-7">Where the Copy answers button sits</h3><p class="ruledline"><span class="sr">The arbiter ruled </span><span class="key">B</span><b>Beside Send, in the bar</b></p><p class="rwhy">One place for each act that leaves the page.</p><p class="ready${park ? " on" : ""}" aria-live="polite">${park ? "Ready to send: park." : ""}</p><div class="rfoot"><p class="dest">Recorded in the copy-answers decision.</p><div class="alts"${lab("new", "Park on a ruling")}><button class="btn dash overturn" type="button" aria-pressed="false">Overturn</button><button class="btn dash parkbtn" type="button" id="b-park-rule-7" aria-pressed="${park}">Park</button></div></div></article>`;
+function rulingCard(withPark, park) {
+  return `<article class="card rcard" id="item-rule-7" aria-labelledby="t-rule-7"><div class="top"><span class="num">No. 7</span><span>ruled ${esc(fmt("2026-11-04T20:00:00Z"))}</span></div><h3 class="title" id="t-rule-7">Where the Copy answers button sits</h3><p class="ruledline"><span class="sr">The arbiter ruled </span><span class="key">B</span><b>Beside Send, in the bar</b></p><p class="rwhy">One place for each act that leaves the page.</p><p class="ready${park ? " on" : ""}" aria-live="polite">${park ? "Ready to send: park." : ""}</p><div class="rfoot"><p class="dest">Recorded in the copy-answers decision.</p><div class="alts" id="ralts-rule-7"${withPark ? lab("new", "Park on a ruling") : lab("today", "Overturn only")}><button class="btn dash overturn" type="button" id="b-over-rule-7" aria-pressed="false">Overturn</button>${withPark ? `<button class="btn dash parkbtn" type="button" id="b-park-rule-7" aria-pressed="${park}">Park</button>` : ""}</div></div></article>`;
 }
-function rulingsSection(park) {
-  return `<section class="tier ruled" id="tier-ruled" aria-labelledby="th-ruled"><header><h2 id="th-ruled"><button class="rhead" type="button" aria-expanded="true" aria-controls="rb"><span class="chev" aria-hidden="true"></span>${G("ruled")}Arbiter rulings<span class="ct">1</span></button></h2><p class="rsub">Each stands unless you overturn it.</p></header><div class="rlist" id="rb">${rulingCard(park)}</div></section>`;
+function rulingsSection(withPark) {
+  return `<section class="tier ruled" id="tier-ruled" aria-labelledby="th-ruled"><header><h2 id="th-ruled"><button class="rhead" type="button" aria-expanded="true" aria-controls="rb"><span class="chev" aria-hidden="true"></span>${G("ruled")}Arbiter rulings<span class="ct">1</span></button></h2><p class="rsub">Each stands unless you overturn it.</p></header><div class="rlist" id="rb">${rulingCard(withPark, false)}</div></section>`;
 }
 function tier(k, name, cards, count, seenAt) {
   const body = cards.map((c, i) => (i === seenAt ? `<p class="seenhead" id="seen-div">${EYE}<span class="w">Seen before, not answered</span><span class="seenrule" aria-hidden="true"></span></p>` : "") + c).join("");
@@ -1067,7 +1068,7 @@ ${bar(o.bar)}`;
 }
 
 /* ---------- States ---------- */
-const STATES = ["today", "open", "park", "stood-park", "task-park", "sent", "answered", "moved", "back", "seen", "blocked", "copy", "hint-ready", "seen-out", "ruling-park", "count-plain", "copy-word"].map((id) => ({ id }));
+const STATES = ["today", "open", "park", "stood-park", "task-park", "sent", "answered", "moved", "back", "seen", "blocked", "ruling", "copy", "hint-ready", "seen-out", "ruling-park", "count-plain", "copy-word"].map((id) => ({ id }));
 const chipOf = (it, cls) => ({ id: it.id, n: it.n, title: it.title, cls });
 function railFor(sent, total, ready, cls) {
   const c = cls || {}, open = (it) => (c[it.id] === "sent" ? 0 : 1);
@@ -1103,7 +1104,7 @@ function screen(s) {
     bar: { status: "<b>2</b> stay open.", send: "Send answers", off: true } });
   if (s === "seen" || s === "seen-out") {
     const out = s === "seen-out";
-    return chrome({ count: 3, rail: R0, list: [tier("calm", "Whenever", [openCard(TASK, {}), openCard(DEC, { seen: true, outside: out, tag: out ? "" : "Park" })], 2, 1), tier("stands", "Pick stands", [openCard(STOOD, {})], 1)],
+    return chrome({ count: 3, rail: R0, list: [tier("calm", "Whenever", [openCard(TASK, {}), openCard(DEC, { seen: true, foldOpen: !out, outside: out, tag: out ? "" : "Park" })], 2, 1), tier("stands", "Pick stands", [openCard(STOOD, {})], 1)],
       parked: parkedBlock([pkLine(OLD_PARKED)]), bar: OPEN_BAR });
   }
   if (s === "blocked") {
@@ -1118,7 +1119,7 @@ function screen(s) {
   }
   if (s === "hint-ready") return page3({ park: true, hint: true, tag: "" }, {}, {},
     { status: "<b>2</b> ready (1 where my pick stands, 1 to park). <b>1</b> stays open.", send: "Send 2 answers" }, railFor(0, 3, 2, { [DEC.id]: "ready" }));
-  if (s === "ruling-park") return chrome({ count: 3, rail: R0, list: [tier("calm", "Whenever", [openCard(DEC, {}), openCard(TASK, {})], 2), tier("stands", "Pick stands", [openCard(STOOD, {})], 1), rulingsSection(false)],
+  if (s === "ruling-park" || s === "ruling") return chrome({ count: 3, rail: R0, list: [tier("calm", "Whenever", [openCard(DEC, {}), openCard(TASK, {})], 2), tier("stands", "Pick stands", [openCard(STOOD, {})], 1), rulingsSection(s === "ruling-park")],
     parked: parkedBlock([pkLine(OLD_PARKED)]), bar: OPEN_BAR });
   if (s === "count-plain") return page3({ park: true, tag: "" }, {}, {},
     { status: "<b>2</b> ready. <b>1</b> stays open.", send: "Send 2 answers", tag: "no breakdown" }, railFor(0, 3, 2, { [DEC.id]: "ready" }));
