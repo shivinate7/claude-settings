@@ -89,7 +89,7 @@ FAMILIES = {
     "worktree-home": "rule 0: an agent's shell call outside its recorded home, and the path forms it reads",
     "session-home": "rule session-home: a session whose worktree is gone is refused a write into the primary checkout; its record and its cost",
     "pointer": "the pointer HEAD checkout",
-    "hand-made-worktree": "a lane worktree made by hand outside the agent home folder",
+    "hand-made-worktree": "a worktree made by hand outside the agent home folder",
     "kill": "machine-wide kills and detached launches",
     "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
@@ -3713,7 +3713,7 @@ sh("pointer: no global rules file at all fires nothing",
 # =========================================================================== 1c. hand-made worktree
 FAMILY = "hand-made-worktree"
 #
-# A lane tree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool
+# A worktree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool
 # (debt agents-write-main-clone; decision predicate-is-the-act). The act refused is a real
 # `git worktree add` whose NEW TREE path resolves outside `<primary>/.claude/worktrees/`. The
 # primary is the one of the repo the call acts on. A repo that sits under the guard's temp folder is
@@ -16994,7 +16994,7 @@ def decide(case):
     guard_file = case.get("guard") or GUARD
     command = [sys.executable, guard_file]
     if case.get("tool") in dict(LB_TOOLS).values():
-        # A lane-start call makes the guard read the machine's load. A case about another rule must
+        # A start call makes the guard read the machine's load. A case about another rule must
         # not meet this host's load, or a busy host turns it red (the load brake refuses a
         # background lane). The lane call runs in the load-brake probe with a neutral reading, unless
         # the case names one (`load`). Only the load-brake family sets a busy or full reading.
@@ -22998,7 +22998,7 @@ def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agen
             temp=None, env=None, load=None, env_path=None):
     """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
     reads as the system temp: a git write under it is a throwaway, and silent-write skips it. `env`
-    adds variables to this one guard run. `load` is the machine reading a lane-start call meets
+    adds variables to this one guard run. `load` is the machine reading a start call meets
     (LB_NORMAL when None). `env_path` is the PATH of this one guard run (None keeps the runner's)."""
     fixed = {"LOCAL_TIME_NOW": ov_clock(seconds)}
     fixed.update(env or {})
@@ -23741,7 +23741,7 @@ for _label, _check in GS_CHECKS:
 # The brake applies to every lane start, lifted or not. LB_ALL_HIGH is a full machine: memory and disk both
 # over the full line, and the case's `load` key is that reading.
 def gl_check(name, tool_input, config_name, session_name, typed=None, grant=None, load=None, want="deny"):
-    """One lane-start call on a machine with the given reading. `grant` is the step's grant list, when the
+    """One start call on a machine with the given reading. `grant` is the step's grant list, when the
     lane is bound to a step; `typed` is an owner prompt typed before the call. Returns the verdict wanted."""
     config, session = ov_config(config_name), session_name
     if grant is not None:
@@ -24760,7 +24760,7 @@ for _label, _check in (
 # suite drops it here, and a cloud case passes its own value to lb_decision_check (`remote`). No other case reads it.
 os.environ.pop("CLAUDE_CODE_REMOTE", None)
 FAMILY = "load-brake"
-# The machine-load brake. On a lane-start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
+# The machine-load brake. On a start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
 # the guard reads the machine's load once: memory in use as a share of this machine's memory, and disk free on
 # the home drive in GB against the drive's size. CPU is not read (decision machine-load-brake): a 200 ms CPU
 # sample is noise, and memory and disk are what stall a machine. It counts no claude process and no running
@@ -24794,7 +24794,7 @@ FAMILY = "load-brake"
 #                  folder. Neither reads the CPU ticks, the load average, or waits.
 # The judge must call it by its bare name, so the probe's patch (set on every guard module that
 # holds the name) is the function that runs. A function the probe cannot replace fails every case.
-# The reading of a call is one read_load() per lane-start call, and none on any other call.
+# The reading of a call is one read_load() per start call, and none on any other call.
 # THE FAKE HOST. A case with a `fake` spec runs the real read_load under fakes, in the probe, and judges the
 # call on what it read. The fake sets sys.platform, ctypes.CDLL and ctypes.cdll, os.getloadavg (the load
 # average, which no reading uses), shutil.disk_usage, and the /proc/stat file (builtins.open and io.open).
@@ -25045,7 +25045,7 @@ def lb_reading(**changes):
 
 
 def lb_lane_input(tool, background=None):
-    """The input of a lane-start call. `background` is run_in_background: True, False, or None to
+    """The input of a start call. `background` is run_in_background: True, False, or None to
     leave it out. Only Agent and Task take it."""
     given = dict(LB_LANE_INPUT[tool])
     if background is not None and tool in dict(LB_SPAWNS).values():
@@ -25192,7 +25192,7 @@ def lb_no_read_check(tool, tool_input=None, event=None, agent=None, remote=None)
 
 
 def lb_real_children_check(tool, background=None):
-    """A lane-start call with the real reader starts no child process, whatever the machine reads
+    """A start call with the real reader starts no child process, whatever the machine reads
     and whatever the call is then judged."""
     def check():
         got, reason, side = lb_run(tool, {"mode": "judge"}, lb_lane_input(tool, background))
@@ -25347,7 +25347,7 @@ if __name__ == "__main__":
 
 
 def lb_neutral_default_check():
-    """decide() gives a lane-start call a neutral load unless the case names one (`load`), so a case about
+    """decide() gives a start call a neutral load unless the case names one (`load`), so a case about
     another rule never meets the host's load. A call that starts no lane runs the guard file itself."""
     global GUARD
     folder = os.path.join(ROOT, "neutral-load")
@@ -25606,7 +25606,7 @@ lb_add("an agent's session tool that writes nothing reads no load under the wors
 lb_add("a Bash call whose agent_id is malformed reads no load under the worst reading",
        lb_no_read_check("Bash", {"command": "echo hi"}, agent="not an id!"))
 
-# CLOUD. decision session-tiers: the load brake is local-only. With CLAUDE_CODE_REMOTE=true a lane-start call is
+# CLOUD. decision session-tiers: the load brake is local-only. With CLAUDE_CODE_REMOTE=true a start call is
 # allowed at busy and full. These run end to end, so an allowed call's file writes are checked too (nothing reaches
 # guard.log). The section below already holds an Agent with run_in_background true, a Workflow and the writes at full,
 # so those are not repeated here.
@@ -25776,7 +25776,7 @@ lb_add("the real reader returns readings in range, and on Windows and Mac reads 
 
 
 def lb_live_waits_check(tool):
-    """A lane-start call on the live judge, with no stub reading, makes no sleep: the CPU read's 200 ms wait."""
+    """A start call on the live judge, with no stub reading, makes no sleep: the CPU read's 200 ms wait."""
     def check():
         got, reason, side = lb_run(tool, {"mode": "judge"}, lb_lane_input(tool))
         if got == "error":
@@ -25790,7 +25790,7 @@ def lb_live_waits_check(tool):
 
 
 def lb_live_times_check():
-    """On Windows, no lane-start call on the live judge makes a GetSystemTimes call, the CPU tick read."""
+    """On Windows, no start call on the live judge makes a GetSystemTimes call, the CPU tick read."""
     if sys.platform != "win32":
         return SKIP, "GetSystemTimes is the Windows CPU tick read, so this runs on Windows only"
     for _short, tool in LB_TOOLS:
@@ -25801,13 +25801,13 @@ def lb_live_times_check():
             return False, "the guard has no read_load, so no real reading was taken"
         if side.get("GetSystemTimes"):
             return False, "%s made %d GetSystemTimes call(s), want none" % (_short, side["GetSystemTimes"])
-    return True, "no GetSystemTimes call on any lane-start call"
+    return True, "no GetSystemTimes call on any start call"
 
 
 for _short, _tool in LB_TOOLS:
     lb_add("%s on the live judge makes no sleep, so no 200 ms CPU wait" % _short,
            lb_live_waits_check(_tool), real=True)
-lb_add("Windows: no lane-start call on the live judge makes a GetSystemTimes call", lb_live_times_check, real=True)
+lb_add("Windows: no start call on the live judge makes a GetSystemTimes call", lb_live_times_check, real=True)
 
 
 # A LANE SESSION (decision machine-load-brake). A lane session's own shell or file write is refused at a full machine,
@@ -27013,8 +27013,8 @@ def sim_boot_by_destination(udid):
     return "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + udid + "'"
 
 
-def make_fake_xcrun(folder, rows):
-    """A stand-in `xcrun` that answers every call with the device list in ROWS.
+def make_fake_xcrun(folder, rows, pid_starts=None, ps_log=None):
+    """A stand-in `xcrun` that answers every call with the device list in ROWS. PID_STARTS and PS_LOG are make_fake_ps's.
 
     ROWS are (udid, name, state, deviceTypeIdentifier, runtime). The fake prints with the shell's
     printf builtin, so it needs no other program on the PATH. Windows has no xcrun, so no case
@@ -27033,7 +27033,7 @@ def make_fake_xcrun(folder, rows):
     # A quiet process table beside it: readable, with each booted device's launchd_sim and no holder.
     make_fake_ps(folder, [("1", "0", "0", "/sbin/launchd")] + [
         (str(LAUNCHD_PID[udid]), "1", "0", LAUNCHD_CMD + " " + udid)
-        for udid, _, state, _, _ in rows if state == "Booted"])
+        for udid, _, state, _, _ in rows if state == "Booted"], pid_starts=pid_starts, ps_log=ps_log)
     return folder
 
 
@@ -27411,9 +27411,14 @@ def folder_path(name):
     return os.path.join(ROOT, "sim_" + name) + os.pathsep + PY_PATH
 
 
-def make_fake_ps(folder, rows, rc=0):
+def make_fake_ps(folder, rows, rc=0, pid_starts=None, ps_log=None):
     """Replace the quiet `ps` in FOLDER with one that answers the process table ROWS, (pid, ppid,
-    uid, command), or fails with RC. A row carries no single quote."""
+    uid, command), or fails with RC. A row carries no single quote.
+
+    PID_STARTS, when given, maps a pid to the start text its `-o lstart=` read answers, or to None for a
+    dead pid. A pid that is not a key is dead too, so a fixture's shape never decides a liveness case. A
+    read that names `pid=` gets "PID START", as the launchd reads do. Without it, the launchd answers stand.
+    PS_LOG, when given, is a file that each call appends its argv to, one line per call."""
     if rc:
         body = "exit %d\n" % rc
     else:
@@ -27430,6 +27435,23 @@ def make_fake_ps(folder, rows, rc=0):
                 " *) printf '%s' '" + start_lines + "' ;; esac ;;\n"
                 "  *) printf '%s' '" + table + "' ;;\n"
                 "esac\n")
+        if pid_starts is not None:
+            # A `-o` word of the read names its pid: that pid answers its own start, and any other pid, or a
+            # mapped None, answers nothing and fails, as `ps` does for a dead pid.
+            arms = ""
+            for pid, text in pid_starts.items():
+                if text:
+                    assert "'" not in text, "the printf body is single-quoted"
+                    arms += ("%d) case \"$*\" in *pid=*) printf '%%s %%s\\n' '%d' '%s' ;;"
+                             " *) printf '%%s\\n' '%s' ;; esac; exit 0 ;;\n" % (pid, pid, text, text))
+            body = ("case \"$*\" in\n"
+                    "  *lstart*) for a in \"$@\"; do case \"$a\" in\n" + arms +
+                    "  esac; done; exit 1 ;;\n"
+                    "  *) printf '%s' '" + table + "' ;;\n"
+                    "esac\n")
+    if ps_log:
+        assert "'" not in ps_log, "the log path is single-quoted"
+        body = "printf '%%s\\n' \"$*\" >> '%s'\n" % ps_log + body
     ps = os.path.join(folder, "ps")
     write(ps, "#!/bin/sh\n" + body)
     os.chmod(ps, 0o755)
@@ -27600,6 +27622,278 @@ def sim_lease_override_check():
                               {"action": "launch", "device": SIM_UC}, folder_path("one"))
 
 
+# --------------------------------------------------------------------------- the lease allow
+# Decision sim-test-is-the-one-boot-path, ruling 5, and decision sim-lease-tool. An MCP launch of a shut-down
+# phone simulator is allowed when THIS session holds a LIVE lease whose slot maps to the launched device's UDID.
+# The cap and twin rules still refuse first, and a lease that cannot be read keeps the refusal. Liveness is
+# sim-lease's reap: the pid is alive and `ps -o lstart=` gives the recorded start. The slot map is the one in
+# skills/ios-apps/SKILL.md, Phone simulators (lines 67-69), typed here as data. The test does not import it from
+# bin/sim-lease, so a missing constant there fails an assert and not an import. Each case differs from the allow
+# case in one input.
+LEASE_RULE = "simulator-boot-lease"
+LEASE_CARRIES = ("sim-test", "lease")
+LEASE_SLOT_UDID = {"1": "3553660D-315C-4B9C-8614-039D7A5B637E",     # Duo 1
+                   "2": "801F55F4-F666-4C6D-AB04-7DF77C953974",     # Duo 2
+                   "pro": "8787FE1C-48CC-4213-9B5C-8605AFE7F9B3"}   # iPhone 18 Pro
+LEASE_DUO1, LEASE_DUO2, LEASE_PRO = LEASE_SLOT_UDID["1"], LEASE_SLOT_UDID["2"], LEASE_SLOT_UDID["pro"]
+LEASE_DECOY = "1A2B3C4D-0000-4000-8000-0000000000D6"  # named "Duo 1", but not Duo 1's UDID: a name match would allow it
+LEASE_PID = os.getpid()    # a live holder for the whole run
+LEASE_OTHER_PID = 4243     # another session's holder, live in the fake ps
+LEASE_WAIT_PID = 4244      # a waiter, live in the fake ps
+LEASE_DEAD_PID = 4194311   # above any pid_max, so no process holds it
+LEASE_START = "Wed Nov  4 03:00:00 2026"
+LEASE_REUSED_START = "Mon Nov  2 09:00:00 2026"   # the start of another process that reuses LEASE_PID
+LEASE_OWN, LEASE_OTHER = "sess-own-0001", "sess-other-0002"
+LEASE_ENV = {"CI": None, "GITHUB_ACTIONS": None}  # sim-lease's no-op reads CI; the guard's lease read must not
+
+
+def lease_entry(slot, pid=LEASE_PID, start=LEASE_START, session=LEASE_OWN):
+    """One lease record as sim-lease's take writes it: the slot is a string, the device is `pro` or `duo`."""
+    return {"pid": pid, "start": start, "device": "pro" if slot == "pro" else "duo",
+            "session": session, "slot": slot}
+
+
+def lease_fixture(name, rows, pid_starts, leases=None, queue=(), raw=None, as_dir=False, records=None, ps_log=False):
+    """A case folder of its own: a fake xcrun that lists ROWS and a fake ps that answers PID_STARTS (a booted
+    device's launchd_sim is always alive, as on the Mac). The config dir holds leases.json as LEASES with QUEUE,
+    as RAW text, as a directory (AS_DIR), or as no file at all. PS_LOG logs each fake ps call to ps.log in the
+    config dir. Returns (PATH, config dir)."""
+    folder = os.path.join(ROOT, "simlease_" + name)
+    starts = {LAUNCHD_PID[udid]: LSTART for udid, _, state, _, _ in rows if state == "Booted" and udid in LAUNCHD_PID}
+    starts.update(pid_starts)
+    cfg = os.path.join(ROOT, "simlease_cfg_" + name)
+    make_fake_xcrun(folder, rows, pid_starts=starts, ps_log=os.path.join(cfg, "ps.log") if ps_log else None)
+    lease_file = os.path.join(cfg, "state", "sim-lease", "leases.json")
+    os.makedirs(cfg, exist_ok=True)
+    if as_dir:
+        os.makedirs(lease_file, exist_ok=True)
+    elif raw is not None:
+        write(lease_file, raw)
+    elif leases is not None:
+        write(lease_file, json.dumps({"leases": leases, "queue": list(queue)}))
+    if records is not None:
+        write_sim_records(cfg, records)
+    return folder + os.pathsep + PY_PATH, cfg
+
+
+def lease_launch(name, expected, fixture, device=None, udid=None, session=LEASE_OWN, rule=None, carries=None, raw=None):
+    """One MCP launch case against FIXTURE, naming the device by DEVICE or by UDID. SESSION rides on the payload,
+    and None sends no session key. A deny carries LEASE_CARRIES unless CARRIES says otherwise. Returns the case."""
+    env_path, config = fixture
+    tool_input = {"action": "launch"}
+    if device is not None:
+        tool_input["device"] = device
+    if udid is not None:
+        tool_input["udid"] = udid
+    if carries is None:
+        carries = LEASE_CARRIES if expected == "deny" else ()
+    add(name, expected, rule=rule, tool=SIM_MCP, env_path=env_path, config=config, session=session,
+        carries=carries, env=LEASE_ENV, raw=raw, **tool_input)
+    return CASES[-1]
+
+
+# The one liveness read of a lease: bin/sim-lease's start_time runs `ps -o lstart= -p PID`. The table read and
+# the launchd read carry other argv, so this form counts only the lease reads.
+LEASE_PS_READ = re.compile(r"-o lstart= -p \d+")
+
+
+def lease_ps_count_check(case, want):
+    """The held-lease read costs one `ps` per lease (decision sim-test-is-the-one-boot-path, ruling 7). CASE runs
+    under a fake ps that logs each call, and the check counts the lease reads among them. It does not judge the
+    decision, which the case asserts itself. Returns the check."""
+    log = os.path.join(case["config"], "ps.log")
+
+    def check():
+        if os.path.exists(log):
+            os.remove(log)
+        decide(case)
+        calls = []
+        if os.path.exists(log):
+            with open(log) as handle:
+                calls = handle.read().splitlines()
+        reads = [c for c in calls if LEASE_PS_READ.fullmatch(c)]
+        if len(reads) != want:
+            return False, "the launch made %d lease reads (ps -o lstart= -p PID), want %d" % (len(reads), want)
+        return True, "the launch made %d lease reads, one per lease" % len(reads)
+    return check
+
+
+def lease_no_write_check(case):
+    """The lease read writes nothing (decision sim-lease-tool: the guard reads leases.json and never takes its
+    lock). CASE is a refusal over a dead lease, the one read that a reaping reader would rewrite: it is refused,
+    and leases.json and the lock keep the same bytes. A reader that reaps through sim-lease's State rewrites the
+    file and creates the lock."""
+    state = os.path.join(case["config"], "state", "sim-lease")
+
+    def snapshot():
+        return {n: (open(os.path.join(state, n), "rb").read() if os.path.exists(os.path.join(state, n)) else None)
+                for n in ("leases.json", "lock")}
+
+    def check():
+        before = snapshot()
+        decision, _ = decide(case)
+        after = snapshot()
+        if decision != "deny":
+            return False, "the dead lease was %s, not refused" % decision
+        changed = [n for n in before if before[n] != after[n]]
+        if changed:
+            return False, "the lease read changed sim-lease's %s" % " and ".join(changed)
+        return True, "the dead lease is refused and sim-lease's files keep their bytes"
+    return check
+
+
+def lease_fake_ps_check():
+    """The lease fixtures' fake ps answers each pid it names with that pid's start, and no other pid. The liveness
+    cases decide on that answer, so a fixture that answered the wrong pid would decide them (scope before subject)."""
+    own_ps = os.path.join(ROOT, "simlease_own_slot1", "ps")
+    reused_ps = os.path.join(ROOT, "simlease_reused", "ps")
+
+    def read(ps, *args):
+        r = subprocess.run([ps, "-o", *args], capture_output=True, text=True)
+        return r.returncode, r.stdout.strip()
+
+    def check():
+        got = read(own_ps, "lstart=", "-p", str(LEASE_PID))
+        if got != (0, LEASE_START):
+            return False, "the live pid's start read %r, not the recorded start" % (got,)
+        rc, text = read(own_ps, "lstart=", "-p", str(LEASE_DEAD_PID))
+        if rc == 0 and text:
+            return False, "the dead pid answered a start"
+        got = read(reused_ps, "lstart=", "-p", str(LEASE_PID))
+        if got != (0, LEASE_REUSED_START):
+            return False, "the reused pid's start read %r, not its own start" % (got,)
+        launchd = LAUNCHD_PID[SIM_UB]
+        got = read(own_ps, "pid=,lstart=", "-p", str(launchd))
+        if got != (0, "%d %s" % (launchd, LSTART)):
+            return False, "a booted device's launchd_sim read %r" % (got,)
+        return True, "the fake ps answers each named pid and no other"
+    return check
+
+
+def register_simulator_lease_cases():
+    """The lease allow and its controls. Returns the dead-lease case, which lease_no_write_check runs, and the
+    lease read counts as (label, check) pairs for LOG_CHECKS."""
+    rows = [(LEASE_DUO1, "iPhone Duo A", "Shutdown", SIM_TYPE_MINI, SIM_RT),
+            (LEASE_DUO2, "iPhone Duo B", "Shutdown", SIM_TYPE_MINI, SIM_RT),
+            (LEASE_PRO, "iPhone 18 Pro", "Shutdown", SIM_TYPE_PRO, SIM_RT),
+            (LEASE_DECOY, "Duo 1", "Shutdown", SIM_TYPE_MINI, SIM_RT),
+            (SIM_UB, "Beta Air", "Booted", SIM_TYPE_AIR, SIM_RT)]
+    cap_rows = rows + [(SIM_UA, "Alpha Pro", "Booted", SIM_TYPE_PRO, SIM_RT)]
+    twin_rows = [(LEASE_DUO1, "iPhone Duo A", "Shutdown", SIM_TYPE_PRO, SIM_RT),
+                 (SIM_UT0, "Idle Pro", "Booted", SIM_TYPE_PRO, SIM_RT)]
+    live = {LEASE_PID: LEASE_START}
+    slot1 = [lease_entry("1")]
+    duo1, duo2 = "iPhone Duo A", "iPhone Duo B"
+
+    # The allow: this session's live lease, and its slot maps to the launched device.
+    own1 = lease_fixture("own_slot1", rows, live, slot1)
+    lease_launch("lease allow: this session's live slot 1 lease, a launch of Duo 1 by name is allowed",
+                 "allow", own1, device=duo1)
+    lease_launch("lease allow: this session's live slot 1 lease, a launch of Duo 1 by udid is allowed",
+                 "allow", own1, udid=LEASE_DUO1)
+    lease_launch("lease allow: this session's live slot 1 lease, a launch of Duo 1 by lowercase udid is allowed",
+                 "allow", own1, udid=LEASE_DUO1.lower())
+    lease_launch("control: this session's live slot 1 lease, a launch of a booted device is allowed (no boot)",
+                 "allow", own1, device="Beta Air")
+    own2 = lease_fixture("own_slot2", rows, live, [lease_entry("2")])
+    lease_launch("lease allow: this session's live slot 2 lease, a launch of Duo 2 by name is allowed",
+                 "allow", own2, device=duo2)
+    own_pro = lease_fixture("own_pro", rows, live, [lease_entry("pro")])
+    lease_launch("lease allow: this session's live pro lease, a launch of the 18 Pro by name is allowed",
+                 "allow", own_pro, device="iPhone 18 Pro")
+    # Full: another session holds slot 2 and a third waits. This session's slot 1 allows Duo 1 and no other.
+    full = lease_fixture("full", rows, {LEASE_PID: LEASE_START, LEASE_OTHER_PID: LEASE_START,
+                                        LEASE_WAIT_PID: LEASE_START},
+                         [lease_entry("1"), lease_entry("2", pid=LEASE_OTHER_PID, session=LEASE_OTHER)],
+                         queue=[{"pid": LEASE_WAIT_PID, "start": LEASE_START, "device": "duo",
+                                 "session": LEASE_OTHER}])
+    lease_launch("lease allow: a full state, this session's slot 1 lease allows a launch of Duo 1",
+                 "allow", full, device=duo1)
+    lease_launch("lease: a full state, this session's slot 1 lease does not allow a launch of Duo 2",
+                 "deny", full, device=duo2, rule=LEASE_RULE)
+
+    # Refused: no lease, a dead or reused holder, a queue place, another session, a lease for another device.
+    lease_launch("lease: no lease file, a launch of Duo 1 is refused", "deny",
+                 lease_fixture("no_file", rows, live), device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: an empty lease list, a launch of Duo 1 is refused", "deny",
+                 lease_fixture("empty_list", rows, live, []), device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: an empty object, a launch of Duo 1 is refused", "deny",
+                 lease_fixture("empty_object", rows, live, raw="{}"), device=duo1, rule=LEASE_RULE)
+    dead_case = lease_launch("lease: a dead lease (its pid is not alive) is refused", "deny",
+                             lease_fixture("dead", rows, live, [lease_entry("1", pid=LEASE_DEAD_PID)]),
+                             device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: a reused pid (its start differs from the lease's) is refused", "deny",
+                 lease_fixture("reused", rows, {LEASE_PID: LEASE_REUSED_START}, slot1),
+                 device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: this session only queued, not granted, is refused", "deny",
+                 lease_fixture("queued", rows, live, [], queue=slot1), device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: another session's live slot 1 lease on Duo 1 does not allow this session", "deny",
+                 lease_fixture("other_session", rows, live, [lease_entry("1", session=LEASE_OTHER)]),
+                 device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: this session's slot 1 lease does not allow a launch of Duo 2", "deny",
+                 own1, device=duo2, rule=LEASE_RULE)
+    lease_launch("lease: this session's pro lease does not allow a launch of Duo 1", "deny",
+                 own_pro, device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: a name no lease maps is refused: the decoy named Duo 1 is not Duo 1's udid", "deny",
+                 own1, device="Duo 1", rule=LEASE_RULE)
+    lease_launch("lease: the decoy's udid is refused by this session's slot 1 lease", "deny",
+                 own1, udid=LEASE_DECOY, rule=LEASE_RULE)
+
+    # A name that two shut-down devices share resolves to both UDIDs. The launch is allowed only when this
+    # session's live leases hold every one of them (sim_lease_holds is all, not any). Duo 2 is on the older runtime.
+    shared = [(LEASE_DUO1, "iPhone Duo", "Shutdown", SIM_TYPE_MINI, SIM_RT),
+              (LEASE_DUO2, "iPhone Duo", "Shutdown", SIM_TYPE_MINI, SIM_RT_OLD)] + rows[2:]
+    lease_launch("lease: a shared name, this session's slot 1 lease alone is refused: Duo 2 is not held",
+                 "deny", lease_fixture("shared_slot1", shared, live, slot1), device="iPhone Duo", rule=LEASE_RULE)
+    lease_launch("lease: a shared name, this session's slot 2 lease alone is refused: Duo 1 is not held",
+                 "deny", lease_fixture("shared_slot2", shared, live, [lease_entry("2")]),
+                 device="iPhone Duo", rule=LEASE_RULE)
+    both = lease_fixture("shared_slot12", shared, live, [lease_entry("1"), lease_entry("2")], ps_log=True)
+    shared_case = lease_launch("control: a shared name, this session's slot 1 and slot 2 leases together are allowed",
+                               "allow", both, device="iPhone Duo")
+    booted_case = lease_launch("control: a booted device under this session's slot 1 and slot 2 leases is allowed",
+                               "allow", both, device="Beta Air")
+
+    # An empty session never matches: on the lease side, on the payload side, or on both.
+    blank = lease_fixture("blank_session", rows, live, [lease_entry("1", session="")])
+    lease_launch("lease: a lease with an empty session does not match a payload that names a session", "deny",
+                 blank, device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: a lease with an empty session does not match a payload with no session", "deny",
+                 blank, device=duo1, session=None, rule=LEASE_RULE)
+    lease_launch("lease: this session's lease does not match a payload whose session is empty", "deny",
+                 own1, device=duo1, session=None, rule=LEASE_RULE,
+                 raw=json.dumps({"tool_name": SIM_MCP, "tool_input": {"action": "launch", "device": duo1},
+                                 "session_id": ""}))
+
+    # A lease file that cannot be read keeps the refusal.
+    lease_launch("lease: a lease file that is not JSON keeps the refusal", "deny",
+                 lease_fixture("garbage", rows, live, raw="not json {"), device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: a lease file that is a directory keeps the refusal", "deny",
+                 lease_fixture("as_dir", rows, live, as_dir=True), device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: a lease file of the wrong shape keeps the refusal", "deny",
+                 lease_fixture("wrong_shape", rows, live, raw='{"leases": "x", "queue": []}'),
+                 device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: a lease record with no pid keeps the refusal", "deny",
+                 lease_fixture("no_pid", rows, live,
+                               [{"start": LEASE_START, "device": "duo", "session": LEASE_OWN, "slot": "1"}]),
+                 device=duo1, rule=LEASE_RULE)
+
+    # The cap and the twin still refuse first, with this session's live lease in place.
+    lease_launch("lease: this session's live slot 1 lease, cap full: simulator-boot-cap still refuses first",
+                 "deny", lease_fixture("cap_full", cap_rows, live, slot1), device=duo1,
+                 rule="simulator-boot-cap", carries=(SIM_UA, SIM_UB))
+    lease_launch("lease: this session's live slot 1 lease, an idle twin: simulator-boot-twin still refuses first",
+                 "deny", lease_fixture("twin", twin_rows, live, slot1,
+                                       records=[sim_boot_record(SIM_UT0, "Idle Pro", SIM_TYPE_PRO, SIM_RT,
+                                                                2 * 3600)]),
+                 device=duo1, rule="simulator-boot-twin", carries=(SIM_UT0,))
+    ps_counts = [("simulator: a held-lease allow of two leases makes two lease reads, one ps per lease (ruling 7)",
+                  lease_ps_count_check(shared_case, 2)),
+                 ("simulator: a launch of a booted device makes no lease read (ruling 7)",
+                  lease_ps_count_check(booted_case, 0))]
+    return dead_case, ps_counts
+
+
 # The simulator cases need a POSIX shell for the fake xcrun and ps. Windows has neither to fake, so
 # on Windows the simulator family holds no case, and GUARD_FAMILY=simulator runs none and fails.
 FAMILY = "simulator"
@@ -27620,6 +27914,16 @@ if os.name != "nt":
     sim_lease_label = "simulator: an owner override lifts an MCP launch of a shut-down device (simulator-boot-lease)"
     LOG_FAMILY[sim_lease_label] = FAMILY
     LOG_CHECKS = LOG_CHECKS + ((sim_lease_label, sim_lease_override_check()),)
+    lease_dead_case, lease_ps_counts = register_simulator_lease_cases()
+    lease_write_label = "simulator: the lease read writes nothing: a dead lease is refused and sim-lease's files keep their bytes"
+    LOG_FAMILY[lease_write_label] = FAMILY
+    LOG_CHECKS = LOG_CHECKS + ((lease_write_label, lease_no_write_check(lease_dead_case)),)
+    for ps_count_label, ps_count_check in lease_ps_counts:
+        LOG_FAMILY[ps_count_label] = FAMILY
+        LOG_CHECKS = LOG_CHECKS + ((ps_count_label, ps_count_check),)
+    lease_ps_label = "simulator: the lease fixtures' fake ps answers each named pid's start and no other"
+    LOG_FAMILY[lease_ps_label] = FAMILY
+    LOG_CHECKS = LOG_CHECKS + ((lease_ps_label, lease_fake_ps_check()),)
 else:
     skip_case("simulator: the boot, hold and bypass rules, every case of the family", NO_SIMULATOR)
 

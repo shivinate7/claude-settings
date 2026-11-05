@@ -278,6 +278,8 @@ refuse() too, so an override lifts them.
 """
 
 import importlib
+import importlib.machinery
+import importlib.util
 import json
 import os
 import re
@@ -2602,16 +2604,16 @@ def role_model_one(tool_input):
     return ROLE_NO_MODEL_REASON % ("" if row == ROLE_MODEL_RANK[0] else " (%s)" % row), ROLE_NO_MODEL_MATCH + role, False
 
 
-# THE MACHINE-LOAD BRAKE (decision machine-load-brake). A lane-start call reads the machine's load once. Memory in
+# THE MACHINE-LOAD BRAKE (decision machine-load-brake). A start call (a call that starts a lane or an agent) reads the machine's load once. Memory in
 # use is a share of this machine's memory; disk free on the home drive is in GB (2**30 bytes) against the drive's
 # size. Busy (memory over 85%, or disk free under the smaller of 10% of the disk and 15 GB) refuses a Workflow and an
 # explicit background Agent or Task call. An Agent or Task call passes at busy only when it leaves
 # run_in_background out or sets it false. (In the desktop harness a left-out call still runs in the background
-# and the field is not offered, so busy does not slow an Agent lane there.) Full (memory over 95%, disk free
-# under the smaller of 5% of the disk and 5 GB) refuses every lane. A reading that cannot be read counts as normal. Only an
+# and the field is not offered, so busy does not slow an Agent call there.) Full (memory over 95%, disk free
+# under the smaller of 5% of the disk and 5 GB) refuses every start call. A reading that cannot be read counts as normal. Only an
 # agent's shell or file write also reads load (RUNNING_AGENT_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
 # "true") skips the brake and reads nothing, because the brake guards the owner's own machine.
-LANE_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
+START_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
 LOAD_BUSY_MEMORY = 85.0
 LOAD_FULL_MEMORY = 95.0
 LOAD_BUSY_DISK_SHARE, LOAD_BUSY_DISK_GB = 10.0, 15.0   # busy: free under the smaller of the two
@@ -2685,9 +2687,9 @@ def _load_value(reading: dict, key: str):
 
 
 def load_hit(tool: str, tool_input) -> tuple:
-    """(rule reason, matched) when the machine's load refuses this lane-start call, else ("", ""). The one
+    """(rule reason, matched) when the machine's load refuses this start call, else ("", ""). The one
     read of the call: a failed read or an unread value counts as normal. A cloud session is never braked."""
-    if tool not in LANE_TOOLS or is_cloud():
+    if tool not in START_TOOLS or is_cloud():
         return "", ""
     try:
         reading = read_load()
@@ -2736,7 +2738,7 @@ LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this agent now: end you
 def running_agent_hit(payload, tool: str) -> tuple:
     """(rule reason, matched) when an agent's disk-filling call meets a full machine, else ("", ""). One read
     per such call; none for the orchestrator or a lane session (lane_session_hit judges that), and none for a
-    lane-start call, which load_hit reads."""
+    start call, which load_hit reads."""
     agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
     if is_cloud() or tool not in RUNNING_AGENT_TOOLS or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
         return "", ""
@@ -3793,10 +3795,35 @@ def _sim_route_remedy(rest: list) -> str:
     return "Use `-destination 'generic/platform=iOS Simulator'` instead, and boot nothing."
 
 
-def sim_boot_refusal(tool: str, names: list, remedies: dict = None) -> None:
+def sim_lease_holds(session: str, udids: list) -> bool:
+    """True when SESSION holds a live sim-lease whose slot maps to every UDID in UDIDS (decision
+    sim-test-is-the-one-boot-path, ruling 5). The slot map, the liveness test and the read live in bin/sim-lease,
+    loaded by path as it has no .py name. An empty session or UDIDS, or any failure to load or read, is False:
+    the refusal stands. The read takes no lock and writes nothing, and no bytecode file is written for the load."""
+    if not session or not udids:
+        return False
+    keep = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "bin", "sim-lease")
+        loader = importlib.machinery.SourceFileLoader("sim_lease", path)
+        spec = importlib.util.spec_from_loader("sim_lease", loader)
+        lease = importlib.util.module_from_spec(spec)
+        loader.exec_module(lease)
+        held = {lease.SLOT_UDID[e["slot"]].casefold() for e in lease.live_leases()
+                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID}
+    except Exception:
+        return False
+    finally:
+        sys.dont_write_bytecode = keep
+    return all(u.casefold() in held for u in udids)
+
+
+def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str = "") -> None:
     """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted. After those two
     rules, an `xcodebuild -destination` boot (REMEDIES maps a name to its remedy) is refused as
-    simulator-boot-route, and an MCP launch as simulator-boot-lease."""
+    simulator-boot-route, and an MCP launch as simulator-boot-lease, unless SESSION holds a live sim-lease whose
+    slot is the launched device (sim_lease_holds)."""
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "janitor"))
         import sweep
@@ -3833,9 +3860,11 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None) -> None:
                 refuse(tool, "deny", "simulator-boot-twin",
                        "An idle booted simulator of the same type and runtime exists: %s (%s). Use it "
                        "instead of booting another." % (twin["name"], twin["udid"]), name)
-        shut_down.append(name)
-    for name in shut_down:
+        shut_down.append((name, [h["udid"] for h in hits]))
+    for name, udids in shut_down:
         if tool == SIM_MCP:
+            if sim_lease_holds(session, udids):
+                continue  # this session's live lease is for this very device: the boot is under the lease
             refuse(tool, "deny", "simulator-boot-lease",
                    "A launch of the shut-down simulator %s boots it outside the one lock: the Mac "
                    "shares one simulator across repos, and `sim-test` holds that lock. Run `sim-test`, "
@@ -4493,7 +4522,7 @@ def judge(payload) -> None:
     if role_reason:
         refuse(tool, "deny", "agent-role-model", role_reason, role_matched)
 
-    # 9c. The machine-load brake: one read on a lane-start call, and one on an agent's or a lane session's shell or file write.
+    # 9c. The machine-load brake: one read on a start call, and one on an agent's or a lane session's shell or file write.
     # It runs before the Opus refusal, because a lifted refusal exits refuse() at once and would skip this deny.
     load_reason, load_matched = load_hit(tool, tool_input)
     if not load_reason:
@@ -4616,7 +4645,8 @@ def judge(payload) -> None:
         names = list(dict.fromkeys(v for v in map(tool_input.get, ("device", "udid"))
                                    if isinstance(v, str) and v))
         if tool_input.get("action") == "launch" and names:
-            sim_boot_refusal(tool, names)
+            sid = payload.get("session_id") if isinstance(payload, dict) else ""
+            sim_boot_refusal(tool, names, None, sid if isinstance(sid, str) else "")
         return
 
     if tool not in WRITE_TOOLS:

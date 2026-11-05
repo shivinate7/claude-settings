@@ -1,16 +1,16 @@
-# Docs-only pull requests skip the reviewer
+# Docs-only pull requests skip the full review
 
 ## The ruling
 
-Owner, 2026-09-26: a pull request that changes only prose or docs, and touches no rule, guard, check or product code, gets no reviewer pass. Report its PR and its CI verdict. A change that can move a verdict still gets a reviewer.
+A pull request that changes only prose or docs, and touches no rule, guard, check or product code, gets no full review. Report its PR and its CI verdict. A record in it that files an owner ruling gets the short round below. A change that can move a verdict gets a full review.
 
-Why: a review of a change that simple is wasted. `roles-solo-reviews-logic-diffs-only` says the same for solo mode. This record extends it to every other session shape.
+Sources: owner, 2026-09-26 (no reviewer for a docs-only PR); owner, 2026-11-04 07:56 CST (waiting-page item 205 b, a short read for a record that files an owner ruling). The second ruling's source is the coordinator's brief. The waiting page is not in this repo.
 
-Owner, 2026-11-04 07:56 CST (waiting-page item 205 b): each record that files an owner ruling gets a short reviewer read before it merges. This narrows the 2026-09-26 ruling for such a record. Source: the coordinator's brief. The waiting page is not in this repo.
+Why: a full review of a change that simple is wasted. A record that files an owner ruling can still misquote the ruling. `roles-solo-reviews-logic-diffs-only` says the same for solo mode. This record extends it to every other session shape.
 
 ## The round
 
-When the brief says the change files an owner ruling, round 1 checks two things only. It checks that the record matches the ruling's words, and that it contradicts no older ruling on the same question. The report stays under about 10 lines (the coordinator's brief for 205 b).
+When the brief says the change files an owner ruling, round 1 checks two things only. It checks that the record matches the ruling's words, and that it contradicts no older ruling on the same question. The report stays under about 10 lines (the coordinator's brief for waiting-page item 205 b).
 
 The review record is `Kind: normal`, `Guard or check: no`, with one `Round` line. It is never `docs-only`.
 

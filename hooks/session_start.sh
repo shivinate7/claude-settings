@@ -138,7 +138,7 @@ fi
 # Same parsing as settings.json's refresh hook. Silent on any missing/unreadable piece.
 #
 # This only means something when $toplevel is itself a second clone of the same repo the
-# pointer names, for example a lane worktree. In any other repo, the pointer's CLAUDE.md and
+# pointer names, for example an agent's worktree. In any other repo, the pointer's CLAUDE.md and
 # the checkout's CLAUDE.md differ by design, so the raw file compare below runs only on both
 # trees sharing one origin. Read the origin fails closed: either remote missing or unreadable
 # means silence, never a printed line.
