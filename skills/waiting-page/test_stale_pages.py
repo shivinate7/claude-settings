@@ -1009,6 +1009,12 @@ class Stale(unittest.TestCase):
             item["lastAnswer"] = {"choice": "a", "note": "", "at": ANSWERED}
         return item
 
+    def lane_item_with(self, n, answer):
+        """An open item on lane LANE whose `lastAnswer` is `answer`, as given."""
+        item = self.lane_item(n, last_answer=False)
+        item["lastAnswer"] = answer
+        return item
+
     def test_an_open_lane_item_with_a_last_answer_and_no_waits_prints_one_lane_line(self):
         current, _ = self.current_and_behind()
         for as_folder in (False, True):
@@ -1068,6 +1074,21 @@ class Stale(unittest.TestCase):
                          "the lane lines for 120 items differ from the 40 open items with a lastAnswer:\n" + r.stdout)
         self.assertEqual(self.gh_calls(folder), [], "gh was called for lane items with no waits")
 
+    def test_a_lane_line_whose_answer_has_no_usable_at_reads_answered_at_unknown_and_never_none_or_a_number(self):
+        current, _ = self.current_and_behind()
+        cases = (("no at key", {"choice": "a", "note": ""}),
+                 ("at null", {"choice": "a", "note": "", "at": None}),
+                 ("at a whole number", {"choice": "a", "note": "", "at": 1762264589}),
+                 ("at a float", {"choice": "a", "note": "", "at": 1762264589.5}))
+        for label, answer in cases:
+            with self.subTest(case=label):
+                env, folder = self.gh_env({})
+                r = self.items_run(current, self.items_file([self.lane_item_with(154, answer)]), env)
+                self.assert_page_word(r, "current", 0)
+                self.assertEqual(r.stdout.splitlines()[1:], [lane_line_unknown(154)],
+                                 "the lane line for item 154 with %s is not the unknown line:\n%s" % (label, r.stdout + r.stderr))
+                self.assertEqual(self.gh_calls(folder), [], "gh was called for a lane item with %s" % label)
+
 
 # Fixtures for the --items cases: a repo, a run that ended completed/failure, and the PR that run gated.
 REPO, RUN, PR = "shivinate7/q_max", "41861801325", 1011
@@ -1123,6 +1144,11 @@ LANE, ANSWERED = "owner-word-relay", "2026-11-04T13:56:29.078Z"  # a lane's slug
 def lane_line(n):
     """The line an open item on a lane with a lastAnswer prints: `wait: item <n> (lane <slug>): waiting (answered <at>)`."""
     return "wait: item %d (lane %s): waiting (answered %s)" % (n, LANE, ANSWERED)
+
+
+def lane_line_unknown(n):
+    """The line an open item on a lane prints when its lastAnswer has no usable `at`: the same line, `answered at unknown`."""
+    return "wait: item %d (lane %s): waiting (answered at unknown)" % (n, LANE)
 
 
 def load_stale_pages():
