@@ -1275,8 +1275,8 @@ BANCHI_STATUS_TEXT = "def status(count):\n    return count >= 1\n"
 BANCHI_ROUTES = "server/send_routes.py"
 BANCHI_ROUTES_TEXT = 'def route(path):\n    return path == "/status"\n'
 BANCHI_BASE = {"README.md": "base\n", **banchi_harness(BANCHI_GREEN)}
-# claude_settings: each case's base holds only README.md, and its pull request adds one file with its own suite, so
-# NO_PRODUCT can come only from the product decision. A suite imports its module from its own folder.
+# claude_settings: each case's base holds only README.md, except cs_suite_out, whose base holds the suite it changes.
+# A pull request adds the files its case names. A suite imports its module from its own folder.
 CS_SUITE_HEAD = """import os
 import sys
 
@@ -1308,6 +1308,15 @@ CS_LINT_SUITE_TEXT = CS_SUITE_HEAD + """import check_scope  # noqa: E402
 
 sys.exit(0 if check_scope.scope(1) and not check_scope.scope(0) else 1)
 """
+CS_FIXTURES_CLI = "hooks/fixtures_cli/main.py"
+CS_FIXTURES_CLI_TEXT = "def run(n):\n    return n >= 1\n"
+CS_FIXTURES_CLI_SUITE = "hooks/test_fixtures_cli.py"
+CS_FIXTURES_CLI_SUITE_TEXT = CS_SUITE_HEAD + """from fixtures_cli import main  # noqa: E402
+
+sys.exit(0 if main.run(1) and not main.run(0) else 1)
+"""
+CS_DEMO_FIXTURE = "skills/demo/fixture/a.py"
+CS_DEMO_FIXTURE_TEXT = "def a(n):\n    return n < 3\n"
 
 
 def qmax_profile():
@@ -1346,6 +1355,11 @@ PRODUCT_CASES = {
                       {CS_HELPER: CS_HELPER_TEXT, CS_STALE_SUITE: CS_STALE_SUITE_TEXT}),
     "cs_suite_out": ("claude_settings", {"README.md": "base\n", CS_STALE_SUITE: CS_STALE_SUITE_TEXT},
                      {CS_STALE_SUITE: CS_STALE_SUITE_CHANGED}),
+    "cs_fixtures_folder_in": ("claude_settings", {"README.md": "base\n"},
+                              {CS_FIXTURES_CLI: CS_FIXTURES_CLI_TEXT,
+                               CS_FIXTURES_CLI_SUITE: CS_FIXTURES_CLI_SUITE_TEXT}),
+    "cs_demo_fixture_out": ("claude_settings", {"README.md": "base\n"},
+                            {CS_DEMO_FIXTURE: CS_DEMO_FIXTURE_TEXT, CS_STALE_SUITE: CS_STALE_SUITE_TEXT}),
 }
 
 
@@ -1401,9 +1415,10 @@ class BanchiSelftestTests(unittest.TestCase):
 
 
 class ClaudeSettingsScopeTests(unittest.TestCase):
-    """The claude_settings profile's `code` pattern names the product folders. A .py file under skills/ is product
-    unless it is a suite, a helper or a fixture under a tests/ folder. The skills/ case is red on main, where the
-    pattern does not reach skills/. The other cases pin the scope that stays as it is."""
+    """Pins the product scope that the claude_settings profile reads from hooks/mutate_guard.py through `code` and
+    `code_not`. A .py file under skills/ is product. A file under hooks/ or lint/ stays product. A fixture folder, a
+    tests/ folder or a suite under skills/ is not. A folder named fixtures_cli is product: the fixture term matches a
+    whole folder name only."""
 
     def test_a_skills_source_file_is_product(self):
         row = product_row("cs_skills_source")
@@ -1435,10 +1450,20 @@ class ClaudeSettingsScopeTests(unittest.TestCase):
         self.assertEqual(row["status"], "NO_PRODUCT", "%s reads %s, not NO_PRODUCT: %s"
                          % (CS_STALE_SUITE, row["status"], api("format_replay_row")(row)))
 
+    def test_a_module_in_a_folder_named_fixtures_cli_is_product(self):
+        row = product_row("cs_fixtures_folder_in")
+        self.assertEqual(row["status"], "OK", "%s reads %s, not product: %s"
+                         % (CS_FIXTURES_CLI, row["status"], api("format_replay_row")(row)))
+
+    def test_a_module_in_a_fixture_folder_under_skills_is_not_product(self):
+        row = product_row("cs_demo_fixture_out")
+        self.assertEqual(row["status"], "NO_PRODUCT", "%s reads %s, not NO_PRODUCT: %s"
+                         % (CS_DEMO_FIXTURE, row["status"], api("format_replay_row")(row)))
+
 
 class ClaudeSettingsSelectPinTests(unittest.TestCase):
-    """A pin, green on main, not a red case. The select command of the real claude_settings profile prints the suite
-    beside a skills/ file. It runs in this checkout, so the suite must be tracked here."""
+    """Pins the select command of the real claude_settings profile: it prints the suite beside a skills/ file. The
+    command runs in this checkout, so the suite must be tracked here."""
 
     def test_the_selector_names_the_suite_beside_a_skills_file(self):
         select = mutate_guard.REPLAY_PROFILES["claude_settings"]["select"]
