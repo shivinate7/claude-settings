@@ -8,9 +8,11 @@
                           On a draft it is the records step and never merges: rebuild the page, push it, ask to mark the PR ready.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
-  merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...] [--net-value V]
+  merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
+                          [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V]
                           print the review record for the head SHA that was reviewed. Stops (exit 1) when the PR's live head is another
-                          sha. Posts nothing: the lane posts it as a PR comment.
+                          sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
+                          the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
@@ -2729,16 +2731,22 @@ REVIEW_ROLES, REVIEW_VERDICTS = ("reviewer", "design-reviewer"), ("PASS", "FAIL"
 REVIEW_NETS = ("not owed", "zero", "positive", "negative")
 REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
+REVIEW_SHA = r"[0-9a-f]{40}"
+REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
 
-def review_body(n, head, kind, guard, rounds, net):
-    """-> the record text, one field per line, in the order of the form. `rounds` is a list of (number, role, model, verdict)."""
+def review_body(n, head, kind, guard, rounds, net, fix=None):
+    """-> the record text, one field per line, in the order of the form. `rounds` is a list of (number, role, model, verdict). `fix` is None or the
+    fix check (reviewed head, role, model, verdict), printed after the rounds and before Net value."""
     return "\n".join([REVIEW_MARKER, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
                       *(f"Round {i}: {role}, {model}, {verdict}" for i, role, model, verdict in rounds),
+                      *([f"Fix check: {', '.join(fix)}"] if fix else []),
                       f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
 
 def parse_review(text):
-    """-> {n, head, kind, guard, rounds, net}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
-    malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. Trailing blank lines are allowed. The
+    """-> {n, head, kind, guard, rounds, net, fix}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
+    malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. `fix` is None, or the one optional
+    `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL` line (after the rounds, before Net value) as a (head, role, model, verdict)
+    tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. Trailing blank lines are allowed. The
     record ends at the first line that is exactly `---`; it and everything after it (the GitHub attribution footer) are ignored."""
     lines = text.splitlines()
     if "---" in lines:
@@ -2747,7 +2755,7 @@ def parse_review(text):
         lines.pop()
     if len(lines) < 7 or lines[0] != REVIEW_MARKER or lines[-1] != REVIEW_CI_LINE:
         return None
-    pats = (r"PR: #(\d+)", r"Head: ([0-9a-f]{40})", r"Kind: (\S+)", r"Guard or check: (\S+)")
+    pats = (r"PR: #(\d+)", rf"Head: ({REVIEW_SHA})", r"Kind: (\S+)", r"Guard or check: (\S+)")
     fields = [re.fullmatch(pat, line, re.ASCII) for pat, line in zip(pats, lines[1:5])]
     net = re.fullmatch(r"Net value: (.+)", lines[-2])
     if not all(fields) or not net:
@@ -2757,8 +2765,16 @@ def parse_review(text):
         return None
     if kind == "docs-only" and guard == "yes":  # docs-only means no guard or check (decision docs-only-prs-skip-review)
         return None
-    rounds, last = [], 0
+    rounds, last, fix = [], 0, None
     for line in lines[5:-2]:
+        if fix:  # nothing follows the fix check line
+            return None
+        f = re.fullmatch(rf"Fix check: ({REVIEW_SHA}), ({REVIEW_ROLES[0]}), ({REVIEW_MODEL}), ({'|'.join(REVIEW_FIX_VERDICTS)})", line, re.ASCII)
+        if f:
+            if f.group(1) == head:  # the fix diff would be empty
+                return None
+            fix = f.group(1, 2, 3, 4)
+            continue
         m = re.fullmatch(rf"Round (\d+): ({'|'.join(REVIEW_ROLES)}), ({REVIEW_MODEL}), ({'|'.join(REVIEW_VERDICTS)})", line, re.ASCII)
         if not m:
             return None
@@ -2767,7 +2783,7 @@ def parse_review(text):
             return None
         rounds.append((i, *m.group(2, 3, 4)))
         last = i
-    return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1)}
+    return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix}
 
 def review_state(rec, head):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
@@ -2775,7 +2791,11 @@ def review_state(rec, head):
     (by position, across all rounds) is PASS or absent; or the final allowed round is done and Guard or check is no; or the final allowed round is done, Guard or check is yes and Net value is zero or positive; or Kind is delete-only,
     Guard or check is no and the first round is done; or Kind is docs-only with no round. A guard or check change owes the net-value test after the
     final allowed round whatever the verdict, and owes the later rounds when the first fails, even if it only deletes. Net value negative holds the change.
-    A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round or delete-only done names it."""
+    A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round or delete-only done names it.
+    A fix check (rec["fix"], decision hold-unsafe-after-round-3) is not a round and is read after the held rule. A FAIL is open, whatever the
+    rounds say. A PASS counts only after the last round: the final allowed round, or the first of a delete-only change with Guard or check no.
+    After any other round it is open. Where it counts, the rules above run as written: it keeps the net value the final round gave and settles
+    none that is owed."""
     if rec is None:
         return "bad", "the newest record does not parse"
     if rec["head"] != head:
@@ -2787,6 +2807,11 @@ def review_state(rec, head):
     design = next(((i, v) for i, role, _, v in reversed(rounds) if role == REVIEW_ROLES[1]), None)  # the last design-reviewer line, by position
     bad = design if design and design[1] != "PASS" else None
     note = f"; the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}" if bad else ""
+    fix = rec.get("fix")
+    if fix and fix[3] != "PASS":
+        return "open", "the fix check failed, so the fix needs a new lane"
+    if fix and not (top >= REVIEW_LAST_ROUND or (rec["kind"] == "delete-only" and rec["guard"] == "no" and top >= 1)):
+        return "open", "the fix check passed, but it counts only after the last round" + (f", and round {top} is not the last" if top else ", and no round is recorded")
     if top >= REVIEW_LAST_ROUND:  # before the PASS rule: a final-round PASS on a guard or check change still owes the net-value test
         if rec["guard"] == "no":
             return "done", "round 3 is done, no guard or check changed" + note
@@ -2828,7 +2853,7 @@ def reviewed_lines(h):
 
 def head_arg(text):
     """argparse type of --head: a full lowercase 40-hex sha, the one the review read."""
-    if not re.fullmatch(r"[0-9a-f]{40}", text, re.ASCII):
+    if not re.fullmatch(REVIEW_SHA, text, re.ASCII):
         raise argparse.ArgumentTypeError(f"{text!r} is not a full 40-hex commit sha")
     return text
 
@@ -2838,6 +2863,13 @@ def round_arg(text):
     if not m:
         raise argparse.ArgumentTypeError(f"{text!r} is not N:ROLE:MODEL:VERDICT, with ROLE {'|'.join(REVIEW_ROLES)} and VERDICT {'|'.join(REVIEW_VERDICTS)}")
     return (int(m.group(1)), *m.group(2, 3, 4))
+
+def fix_check_arg(text):
+    """argparse type of --fix-check REVIEWED_HEAD:reviewer:MODEL:PASS|FAIL -> (head, role, model, verdict)."""
+    m = re.fullmatch(rf"({REVIEW_SHA}):({REVIEW_ROLES[0]}):({REVIEW_MODEL}):({'|'.join(REVIEW_FIX_VERDICTS)})", text, re.ASCII)
+    if not m:
+        raise argparse.ArgumentTypeError(f"{text!r} is not REVIEWED_HEAD:{REVIEW_ROLES[0]}:MODEL:VERDICT, with a full 40-hex head and VERDICT {'|'.join(REVIEW_FIX_VERDICTS)}")
+    return m.group(1, 2, 3, 4)
 
 MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
 
@@ -2898,11 +2930,12 @@ def main(argv, host=None, lock=None):
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
+    p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after round 3")
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
-    if (a.head or a.kind or a.guard or a.round or a.net_value != "not owed") and not a.review_record:
-        p.error("--head, --kind, --guard, --round and --net-value go with --review-record")
+    if (a.head or a.kind or a.guard or a.round or a.fix_check or a.net_value != "not owed") and not a.review_record:
+        p.error("--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record")
     if not a.lane_lint:
         if a.base or a.lint_unknown_ok:
             p.error("--base and --lint-unknown-ok go with --lane-lint")
@@ -2926,7 +2959,9 @@ def main(argv, host=None, lock=None):
             p.error("--review-record needs --head, --kind and --guard")
         if a.kind == "docs-only" and a.guard == "yes":
             p.error("--kind docs-only means no guard or check, so --guard must be no")
-        if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value)) is None:
+        if a.fix_check and a.fix_check[0] == a.head:
+            p.error("--fix-check: the reviewed head must differ from --head, or the fix diff is empty")
+        if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)) is None:
             p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3")
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, --unlock, --reviewed, or --role TIER")
@@ -2963,7 +2998,7 @@ def main(argv, host=None, lock=None):
                 raise Stop(f"the pull request is {info['state']} " + REVIEW_CITE)
             if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
-            say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value).rstrip("\n"))
+            say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
         if not a.reviewed:
