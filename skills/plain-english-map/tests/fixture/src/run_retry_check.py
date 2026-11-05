@@ -1,6 +1,5 @@
-import subprocess
-import sys
+import runpy
 
 
 def test_run():
-    subprocess.run([sys.executable, "src/retry.py"], check=True)
+    runpy.run_path("src/retry.py")
