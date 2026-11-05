@@ -7,7 +7,7 @@ The waiting page is the one private page per repo or project. Its Questions tab 
 that waits on the owner. Its Status tab shows the repo's roadmap, read only. Only a session that
 reads its own answers at a wake writes an item.
 
-A lane never writes an item. A lane is a background agent, or a lane session that ends. It puts its
+A lane never writes an item. A lane session ends, and so does an agent. It puts its
 question in its report. The orchestrator writes the item with itself as `owner`. It routes the
 answer back to the lane or its next try.
 
