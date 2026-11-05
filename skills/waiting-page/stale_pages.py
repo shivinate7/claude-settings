@@ -32,7 +32,7 @@ beside this script, and needs no hooks/ folder.
 
 Single-page mode (the writer, at each wake and before each republish):
 
-    python3 ~/.claude/skills/waiting-page/stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]
+    python3 ~/.claude/skills/waiting-page/stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>] [--items <file|folder>]
 
 One verdict line names the template source: `origin/main <short sha>` or the --main path. Exit 0
 current, 1 behind, 2 unknown. Unknown: the file is missing or empty, it holds no designData block
@@ -41,6 +41,17 @@ saves main's page with the live designData and roadmap blocks kept (splice.carry
 --main; else page.html at origin/main of the checkout that holds this script, else of the checkout
 the `@<path>` line in ~/.claude/CLAUDE.md names. With neither, or with no hooks/_nowindow.py to
 start git, the verdict is unknown: the installed copy never stands in for main.
+--items names the items the session saved with `ArtifactData list items`: a JSON list file, or the folder of
+<id>.json files that call saves. A folder without the .complete marker reads every wait `unknown`, with no gh call.
+--items needs hooks/_nowindow.py to start gh; without it every wait reads `unknown`. A `run` or `pr` is a whole
+number above zero, or a string of digits with no leading zero; anything else reads `unknown`. For each open item (status not `closed`) with a `waits` field, `{repo, run}`
+or `{repo, pr}`, one gh call runs through the program named by WAITING_PAGE_GH (default `gh`):
+`run view <id> --repo <repo> --json status,conclusion` or `pr view <n> --repo <repo> --json state,mergedAt`.
+Each such item prints one line after the verdict line, `wait: item <n> (<what>): <word> (<detail>)`. The word is
+`ended` (the run completed with any conclusion; the PR merged; the PR closed unmerged, which its line says),
+`waiting` (the run or PR is still going), or `unknown` (gh missing, non-zero, timed out, not JSON, or a
+malformed `waits`; also an item past the WAIT_CAP-th call, which is not asked). The exit code stays the page verdict's.
+The folder loader is export_page.docs_in, the one home of reading that folder.
 Session-start mode, run by hooks/session_start.sh in a repo whose extras name a waiting page:
 
     python3 ~/.claude/skills/waiting-page/stale_pages.py --session-line <repo toplevel> [--main-checkout <dir>]
@@ -51,8 +62,11 @@ nothing. It always exits 0. One python process and one read-only git process.
 
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
 file written without --write, no timer, thread or child left running. Single-page mode never imports `layout`; batch and session-line modes do.
+Without --items: 0 gh processes. With it: one gh process per open item with a `waits` field, at most WAIT_CAP, each
+run to its end or its 30 s cap before the next; no file written, no timer, no process left running.
 """
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -70,6 +84,9 @@ DESIGN = re.compile(r'(<script type="application/json" id="designData">).*?(</sc
 DESIGN_BODY = re.compile(r'(<script type="application/json" id="designData">)(.*?)(</script>)', re.S)
 TEMPLATE_IN_GIT = "skills/waiting-page/page.html"
 GIT_TIMEOUT = 30
+WAIT_CAP = 50  # most gh calls one --items run makes
+REPO_NAME = re.compile(r"[\w.-]+/[\w.-]+")
+WAIT_NUMBER = re.compile(r"[1-9][0-9]*")  # a run id or PR number: a whole number above zero, with no leading zero (page.html waitsOf reads the same form)
 # One piece of the text before the template: white space or a document skeleton tag (no event-handler
 # attributes). A style piece counts only inside the leading head; skeleton_before() keeps that state.
 ATTRS = r'(?:\s+(?!on)[a-z][\w:-]*(?:\s*=\s*(?:"[^"<>]*"|\'[^\'<>]*\'|[^\s"\'<>=]+))?)*'
@@ -370,13 +387,120 @@ def session_line(root, main_checkout=None):
             "(skill waiting-page, \"Keep the page on main's code\")." % url)
 
 
+def load_items(path):
+    """(items, complete): the saved items as a list from a JSON list file, or the folder `ArtifactData list` saves. `complete` is False
+    for a folder without the marker the session leaves after the last list page, since a stopped fetch may lack items. Raises ValueError with the cause."""
+    from export_page import MARKER, Stop, docs_in, load_json  # lazy: only --items reads a folder
+    try:
+        data = list(docs_in(path, path).values()) if os.path.isdir(path) else load_json(path, path)
+    except Stop as err:
+        raise ValueError(str(err))
+    except OSError as err:
+        raise ValueError(err.strerror or str(err))
+    if not isinstance(data, list):
+        raise ValueError("%s is not a JSON list of items" % path)
+    return data, not os.path.isdir(path) or os.path.isfile(os.path.join(path, MARKER))
+
+
+def parse_waits(waits):
+    """(gh argv, label) for a `waits` of {repo, run} or {repo, pr}; ValueError when it is anything else."""
+    if not isinstance(waits, dict) or set(waits) not in ({"repo", "run"}, {"repo", "pr"}):
+        raise ValueError("waits is not {repo, run} or {repo, pr}")
+    repo, kind = waits["repo"], "run" if "run" in waits else "pr"
+    number = waits[kind]
+    if isinstance(number, int) and not isinstance(number, bool):
+        number = str(number)
+    if not (isinstance(repo, str) and REPO_NAME.fullmatch(repo) and isinstance(number, str) and WAIT_NUMBER.fullmatch(number)):
+        raise ValueError("waits names a repo or %s that is not valid" % kind)
+    fields = "status,conclusion" if kind == "run" else "state,mergedAt"
+    return [kind, "view", number, "--repo", repo, "--json", fields], "%s %s in %s" % (kind, number, repo)
+
+
+def ask_gh(argv):
+    """The parsed JSON gh prints for `argv`, or ValueError with the cause. One gh process, ended or killed at GIT_TIMEOUT."""
+    gh = os.environ.get("WAITING_PAGE_GH") or "gh"
+    try:
+        import _nowindow  # the one home of a no-window child start, as read_origin_main
+        done = _nowindow.run([gh] + argv, capture_output=True, text=True, timeout=GIT_TIMEOUT, stdin=subprocess.DEVNULL)
+    except (ImportError, OSError, subprocess.SubprocessError) as err:
+        raise ValueError("gh did not run (%s)" % type(err).__name__)
+    if done.returncode != 0:
+        raise ValueError("gh exited %d" % done.returncode)
+    try:
+        answer = json.loads(done.stdout)
+    except ValueError:
+        raise ValueError("gh did not answer JSON")
+    if not isinstance(answer, dict):
+        raise ValueError("gh did not answer a JSON object")
+    return answer
+
+
+def wait_word(argv, answer):
+    """(word, detail) for gh's answer to a run or pr view; ValueError when the answer holds neither."""
+    if argv[0] == "run":
+        status = answer.get("status")
+        if not isinstance(status, str) or not status:
+            raise ValueError("gh gave no run status")
+        if status != "completed":
+            return "waiting", status
+        conclusion = answer.get("conclusion")
+        return "ended", "completed, %s" % conclusion if isinstance(conclusion, str) and conclusion else "completed"
+    state = answer.get("state")
+    if answer.get("mergedAt") or state == "MERGED":
+        return "ended", "merged"
+    if state == "CLOSED":
+        return "ended", "closed unmerged"
+    if state == "OPEN":
+        return "waiting", "open"
+    raise ValueError("gh gave no pr state")
+
+
+def wait_lines(items, complete=True):
+    """One line per open item with a `waits` field, in order; at most WAIT_CAP gh calls. With complete False, none: every wait reads unknown."""
+    lines, calls = [], 0
+    for item in items:
+        if not isinstance(item, dict):
+            lines.append("wait: an items entry is not an object: unknown")
+            continue
+        if item.get("status") == "closed" or "waits" not in item:
+            continue
+        name, label = "item %s" % item.get("n", item.get("id", "?")), json.dumps(item["waits"])
+        try:
+            argv, label = parse_waits(item["waits"])
+            if not complete:
+                raise ValueError("not asked: the items folder has no .complete marker, so its list may be cut short")
+            if calls >= WAIT_CAP:
+                raise ValueError("not asked: more than %d gh calls" % WAIT_CAP)
+            calls += 1
+            word, detail = wait_word(argv, ask_gh(argv))
+        except ValueError as err:
+            word, detail = "unknown", str(err)
+        lines.append("wait: %s (%s): %s (%s)" % (name, label, word, detail))
+    return lines
+
+
 def single_page(argv):
-    """Exit 0 current, 1 behind, 2 unknown for one fetched page. Writes a file only with --write, never on unknown."""
+    """Exit 0 current, 1 behind, 2 unknown for one fetched page. Writes a file only with --write, never on unknown.
+    With --items, prints one wait line per open item with a `waits` field after the verdict line; the exit code stays the verdict's."""
     ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
     ap.add_argument("--page", required=True)
     ap.add_argument("--write")
     ap.add_argument("--main")
+    ap.add_argument("--items")
     args = ap.parse_args(argv)
+    code = page_verdict(args)
+    if args.items is not None:
+        try:
+            lines = wait_lines(*load_items(args.items))
+        except ValueError as err:
+            lines = ["wait: the items cannot be read: unknown (%s)" % err]
+        for line in lines:
+            print(line)
+    return code
+
+
+def page_verdict(args):
+    """The verdict of one fetched page: prints its line and returns the exit code."""
     try:
         with open(args.page, encoding="utf-8", errors="replace", newline="") as f:
             live = f.read()
