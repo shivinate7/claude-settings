@@ -32,7 +32,7 @@ TELL = re.compile(r"\btells?\b|send_message", re.I)
 RECEIVER = re.compile(r"\breceiver", re.I)
 OWNER = re.compile(r"\bowning\b|\bowner\b|\bwake\b", re.I)
 WRITER = re.compile(r"\bwriter\b", re.I)
-GATE = re.compile(r"\b(?:when|if)\b", re.I)
+CONDITION_WORDS = re.compile(r"\b(?:when|if)\b", re.I)
 NEG = re.compile(r"\b(?:not|never|no|none|nothing|nor)\b|n't\b", re.I)
 
 
@@ -135,9 +135,9 @@ class ParkRelayProse(unittest.TestCase):
     def test_5_a_park_on_an_item_with_no_lane_just_closes(self):
         self.assertTrue(self.park, "SKILL.md has no park branch, so there is no park to scope the scan to")
         sents = sentences(self.park)
-        self.assertTrue([s for s in sents if CLOSE_ITEM.search(s) and PARK.search(s) and not GATE.search(s)],
+        self.assertTrue([s for s in sents if CLOSE_ITEM.search(s) and PARK.search(s) and not CONDITION_WORDS.search(s)],
                         "the park branch no longer closes a parked item with no condition")
-        self.assertTrue([s for s in sents if GATE.search(s) and LANE.search(s)],
+        self.assertTrue([s for s in sents if CONDITION_WORDS.search(s) and LANE.search(s)],
                         "the park branch no longer gates the lane drop on the item having `lane`")
         for i, s in enumerate(sents):
             if tells_receiver(s) and not (LANE.search(s) or (i and LANE.search(sents[i - 1]))):
