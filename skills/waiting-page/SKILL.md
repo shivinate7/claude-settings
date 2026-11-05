@@ -519,7 +519,7 @@ the item open, so the page shows it. There is no age threshold.
 While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `answers/<id>`. End of a wait: when the
 `--items` line for the item says `ended` ("Keep the page on main's code", step 2), the writer, in that wake, drops
 `waits` (`ArtifactData update items/<id> {"waits": {"__delete__": true}}`). With `lane` set, that is all: the close and the
-delete of `answers/<id>` wait for the done report. Otherwise it then closes or rewrites the item and deletes `answers/<id>`.
+delete of `answers/<id>` wait for the done report. A Park is the exception (see the park branch). Otherwise it then closes or rewrites the item and deletes `answers/<id>`.
 
 1. Write `receipts/<id>` with `read` set to now. Then move the answer to the item's home: the
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
