@@ -52,6 +52,16 @@ ARTIFACT = "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"
 SENTINEL = 1000000000  # a fixed mtime for a file a run must not rewrite; no clock is read
 TAIL = "aB3" * 12  # 36 characters, the body of a GitHub token
 TG_TAIL = "aB3" * 11 + "Qz"  # 35 characters, the body of a Telegram bot token
+# A line of base64 in an armored PGP key block, built from parts. A key block's header is what the scan keys on; the body
+# is only the line after it, with no shape of its own.
+PGP_BODY = "mQINBFa3pQ8BEADk7Yq2Rv9Lw1Tn5Hs8" + "Jb4Ke6Fa0Pd3Gu7Mi2Oz5Xr9Ct1Vw8Ny4Qe6Lm"
+# Letters only, built from parts: a credential value with no digit. The length rule counts characters, digits or not.
+LETTERS_11 = "QwErTyUi" + "OpA"  # one short of the credential length
+LETTERS_12 = LETTERS_11 + "s"  # the credential length
+LETTERS_14 = "lkjhgfds" + "amnbvc"  # lower case
+LETTERS_16 = "xKqPzLmR" + "tWbNvYcH"
+CLIENT_LETTERS_16 = "BnMvCxZl" + "KjHgFdSa"
+HUMP_AFTER_TWO_16 = "abCdefgh" + "ijklmnop"  # a capital after two lower-case letters: random, not a camelCase word
 DESIGN = re.compile(r'(<script type="application/json" id="designData">)(.*?)(</script>)', re.S)
 DESIGN_BODY = '{"a": "\\u003cp>mockup\\u003c/p>", "b": "<i>raw</i>"}'
 META = {"title": "Queue", "version": 1}
@@ -114,6 +124,9 @@ RED = [
     ("GitLab token", "glpat-" + "aB3" * 6 + "Qz", "glpat-" + "aB3" * 6 + "Qz"),
     ("PEM private key header", "-----BEGIN " + "RSA " + "PRIVATE KEY-----", "-----BEGIN " + "RSA " + "PRIVATE KEY-----"),
     ("PEM OpenSSH key header", "-----BEGIN " + "OPENSSH " + "PRIVATE KEY-----", "-----BEGIN " + "OPENSSH " + "PRIVATE KEY-----"),
+    # A PGP header has BLOCK between KEY and the dashes, so a shape that ends at PRIVATE KEY----- misses it.
+    ("PGP private key block header with a body line",
+     "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----" + "\n" + PGP_BODY, "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----"),
     ("JWT", "eyJ" + "hbGciOiJIUzI1NiJ9" + "." + "eyJzdWIiOiJ1c3IifQ" + "." + "c2lnbmF0dXJl",
      "eyJ" + "hbGciOiJIUzI1NiJ9" + "." + "eyJzdWIiOiJ1c3IifQ" + "." + "c2lnbmF0dXJl"),
     ("Authorization Bearer header", "Authorization: Bearer " + "xq7Lp2Vw9Rt4Ys8Zn1Mh", "xq7Lp2Vw9Rt4Ys8Zn1Mh"),
@@ -181,6 +194,21 @@ RED = [
     ("SECRET_KEY_BASE assignment", "SECRET_KEY_BASE=" + "w8Kd2Lp9" + "Vx4Qz7Mn", "w8Kd2Lp9" + "Vx4Qz7Mn"),
     ("API_KEY_V2 assignment", "API_KEY_V2=" + "Hk3Lm9Qp" + "Wz7Rt2Yc", "Hk3Lm9Qp" + "Wz7Rt2Yc"),
     ("clientSecret as a JSON pair", '"clientSecret": "' + CLIENT_VALUE + '"', CLIENT_VALUE),
+    # A credential name set to a value of 12 or more characters is refused, digits or not. These values have no digit.
+    ("API_KEY assignment of 12 letters", "API_KEY=" + LETTERS_12, LETTERS_12),
+    ("GITHUB_TOKEN assignment of 16 letters", "GITHUB_TOKEN=" + LETTERS_16, LETTERS_16),
+    ("CLIENT_SECRET with a colon and 16 letters", "CLIENT_SECRET: " + CLIENT_LETTERS_16, CLIENT_LETTERS_16),
+    ("lower-case api_key in quotes of 14 letters", 'api_key = "' + LETTERS_14 + '"', LETTERS_14),
+    # Raw JSON text: the closing quote of the name sits before the separator, so the name is not followed by = or :.
+    ("raw JSON api_key pair of 16 letters", '"api_key": "' + LETTERS_16 + '"', LETTERS_16),
+    ("raw JSON GITHUB_TOKEN pair of 16 letters", '"GITHUB_TOKEN": "' + LETTERS_16 + '"', LETTERS_16),
+    # The letters-only branch of the credential-name shape, at the ends of its value: a comma, a newline, a semicolon, a
+    # hump after two letters. Each value has no digit, so the digit branch does not refuse it.
+    ("raw JSON api_key pair followed by a comma and a number", '{"api_key": "' + LETTERS_16 + '", "n": 1}', LETTERS_16),
+    ("API_KEY of 12 letters before a newline", "API_KEY=" + LETTERS_12 + "\nOTHER=1", LETTERS_12),
+    ("API_KEY of 12 letters before a CRLF", "API_KEY=" + LETTERS_12 + "\r\nOTHER=1", LETTERS_12),
+    ("api_key in quotes followed by a semicolon", 'api_key = "' + LETTERS_14 + '";', LETTERS_14),
+    ("api_key with a hump after only two lower-case letters", "api_key: " + HUMP_AFTER_TWO_16, HUMP_AFTER_TWO_16),
     ("street with the suffix Park", "1400 Lakeshore Park", "1400 Lakeshore Park"),
     ("street with the suffix Trail", "2500 Maple Trail", "2500 Maple Trail"),
     ("street with the suffix Cir", "1200 Oak Cir", "1200 Oak Cir"),
@@ -209,6 +237,8 @@ GREEN = [
     ("token budget", "token budget"),
     ("password manager", "password manager"),
     ("private key rotation", "rotate the private key"),
+    # A public key block is not a secret. A fix that drops PRIVATE from the shape would refuse it.
+    ("PGP public key block header with a body line", "-----BEGIN " + "PGP PUBLIC KEY BLOCK-----" + "\n" + PGP_BODY),
     ("owner's first name", "Shivam"),
     ("comment openers and a lone quote", "Don't use /* or // or # here"),
     ("multi-line text", "line one\nline two"),
@@ -293,6 +323,19 @@ GREEN = [
     ("Stripe test key with 15 characters", "sk_test_" + "aB3" * 5),
     ("a word that holds the Stripe test prefix", "risk_test_coverage_plan"),
     ("a word that holds the Stripe test prefix before a long body", "risk_test_" + "aB3" * 7),
+    # A credential name below 12 characters, a placeholder, a variable reference, a plain word and prose pass.
+    ("API_KEY with 11 letters", "API_KEY=" + LETTERS_11),
+    ("API_KEY set to a placeholder", "API_KEY=<your-api-key>"),
+    ("API_KEY set to a long variable reference", "API_KEY=${MY_LONG_API_KEY_NAME}"),
+    ("MY_TOKEN set to a plain word", "MY_TOKEN=optional"),
+    ("MY_TOKEN set to a long placeholder", "MY_TOKEN=<your-long-token-here>"),
+    ("prose with the word secret before a name", "the secret santa list"),
+    # The names that do not count under the rule (bare token, camelCase, a hyphenated or a non-credential name) pass.
+    # These four are false alarms today: each refuses on its value's length, so they are red on the builder's head.
+    ("destructured token alias", "const { token: accessTokenValue } = await getSession();"),
+    ("camelCase accessToken key with a call", "accessToken: localStorage.getItem('accessToken')"),
+    ("CSS custom property ending in token", "--color-token: rgba(0,0,0,0.5);"),
+    ("prose with Token before a sentence", "Token: Authorization needed before we continue"),
 ]
 
 
