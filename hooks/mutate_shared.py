@@ -1162,6 +1162,7 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
                                                 "the %ss that reach it are unusable" % who))
 
         expired = threading.Event()  # set by the deadline timer, after it has stopped the live suites
+        progress_lock = threading.Lock()  # print writes text and newline apart, so workers' lines would interleave
 
         def score(dest, mutant):
             path, label, text = mutant
@@ -1188,7 +1189,8 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
             if progress:
                 verdict = ("killed" if "assert" in kinds else "crashed" if kinds & {"crash", "timeout"}
                            else "survived")
-                progress("  #%d mutant %s  %s:%d %s" % (row["pr"], verdict, path, _line_of(label), label))
+                with progress_lock:
+                    progress("  #%d mutant %s  %s:%d %s" % (row["pr"], verdict, path, _line_of(label), label))
             return kinds
 
         timer = None
