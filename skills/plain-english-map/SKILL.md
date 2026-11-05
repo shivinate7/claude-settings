@@ -12,7 +12,7 @@ do not use this skill in that repository.
 
 The repository values live in `map.config.json` at the repository root. The keys are `title`,
 `codeExtensions`, `formatVersion`, `mapPaths`, `screenKeys`, `modelSeam`, `workerStage`, `migrationsDir`, `decisionsDir`, `decisionIdPattern` and `requireAllKeys`.
-`mapPaths` is a list of path prefixes: MAP1 asks for a map line only for the code files under them. With no `mapPaths`, MAP1 covers the whole repository.
+`mapPaths` is a list of path prefixes: MAP1 asks for a map line only for the code files under them, and MAP7 reads only those files. With no `mapPaths`, MAP1 and MAP7 cover the whole repository.
 `decisionsDir` is a folder prefix, and `decisionIdPattern` a regex string for one decision id, such as `D\d+`. Set both or neither: one alone is an error.
 `scripts/lib/map-config.mjs` checks the whole shape.
 
@@ -36,7 +36,7 @@ Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines c
 
 ## Steps
 
-1. **Scout.** Read the diff. For each changed file, run `node ~/.claude/skills/plain-english-map/scripts/map-show.mjs <path|area>` to read its map line first. Run `node ~/.claude/skills/plain-english-map/scripts/map-check.mjs` from the
+1. **Scout.** Read the diff. For each changed file, run `node ~/.claude/skills/plain-english-map/scripts/map-show.mjs <path|area|folder/|decision-id> [--full]` to read its map line first. Run `node ~/.claude/skills/plain-english-map/scripts/map-check.mjs` from the
    repository root. Each failed line names the file, table or screen key that has no map entry. The
    command binds no model-call reader, so it skips the `modelSeam` call-site check and prints a note.
    A host that has its own check may run the same check bodies there.
@@ -49,7 +49,7 @@ Version 1 to 2 removes the line references (`:26-36`) that version 1 map lines c
    Then run `node ~/.claude/skills/plain-english-map/scripts/map-stale.mjs` to rank the map lines whose file
    changed after the line. Read the worst ones first. It is advice: it always exits 0.
 
-Before you answer how code in this repo works, run `node ~/.claude/skills/plain-english-map/scripts/map-show.mjs <path|area>` from
+Before you answer how code in this repo works, run `node ~/.claude/skills/plain-english-map/scripts/map-show.mjs <path|area|folder/|decision-id> [--full]` from
 the repository root. It is the cheap read: it prints the map, and you open no file. A file path prints its area, its map line, its fact lines,
 its Homes lines and its trace steps. An area id prints its map lines. A folder, with a `/` at the end, prints every map line under it.
 With no match it prints `no map line for <arg>` and exits 1.
@@ -78,7 +78,7 @@ With no match it prints `no map line for <arg>` and exits 1.
   A mapped file's comments cite an id that names a record, and the file's decisions line lacks it. Or an id on a decisions line names no record. Comments are read through `scripts/lib/source-text.mjs`: JS and TS by `blankComments`, Python by `blankPython`, shell by `blankShell`. A string is no cite, a Python triple-quoted string included. A file of any other extension is read as JS.
 - `scripts/map-fix.mjs` adds the ids that MAP10 finds missing, and never removes or reorders one. With no flag it prints each file and id it would add and writes nothing. With `--write` it adds them, and creates the decisions line right under the map line when there is none. A second `--write` changes no byte.
 - `scripts/map-picture.mjs` builds the picture data and the page, and it is the page command. It reads no decision records, so the rulings tab is empty.
-- `scripts/map-show.mjs` is the show command. It prints the map for one file, area or folder, through the readers of `map-check.mjs`.
+- `scripts/map-show.mjs` is the show command. It prints the map for one file, area, folder or decision id (`--full` adds the record line for an id), through the readers of `map-check.mjs`.
 - `scripts/map-stale.mjs` is the stale command. It runs 1 `git rev-parse`, 1 `git blame` for each map page and 1 `git log` for all files, never a `git log` for each file. A shallow clone, no repository or no git prints an unknown line, never "nothing stale".
 - `scripts/map-upgrade.mjs` is the upgrade command, and holds the list of upgrade steps.
 - `scripts/lib/map-config.mjs` reads and checks `map.config.json`. It is the one home of the validator.
