@@ -195,9 +195,10 @@ Other tools, in `judge` order:
                        each at line start) or a verdict line (a line with `verdict`, or a round label
                        with or without `result`, before its colon and a REVIEWER_VERDICT_WORDS word
                        right after it, or a report's `FAIL, round N of 3, ...` line). Marks (`-`, `*`,
-                       `#`, bold) before a line's first word are skipped. A verdict word joined to a
-                       second one by `,`, `/`, `or` or `and` is a format line (`a verdict: PASS or
-                       FAIL`) and passes, as does a `verdict` quoted in backticks mid-line.
+                       `#`, bold) before a line's first word are skipped. A verdict word that opens a
+                       choice list (verdict words joined by `,`, `/`, `or` or `and`, ending the line
+                       or sentence) is a format line (`a verdict: PASS or FAIL`) and passes, as does
+                       a `verdict` quoted in backticks mid-line.
                        Shapes at line start only, so a brief that quotes the rule's words passes. A
                        findings list passes. A Workflow call is judged with or without a model; one
                        whose agentType the scan cannot read passes. A reviewer call whose prompt the
@@ -2623,12 +2624,16 @@ BRIEF_BLIND_ITEM = re.compile(BRIEF_BLIND_OPEN + BRIEF_BLIND_DONE + r"(?:BUILT|R
 # A verdict line is one of two. A line with `verdict`, or a round label with or without `result`, before its colon, and one
 # verdict word right after the colon. Or a report's leading verdict, `FAIL, round 1 of 3, ...`. A line that opens with a
 # verdict word and a colon (`FAIL: test_x`) is a quote. An instruction names the choices, `a verdict: PASS, FAIL or PARTIAL`,
-# so a verdict word that a `,`, `/`, `or` or `and` joins to a second one is a format line and passes. A `verdict` label may
-# not hold a backtick, so a finding that quotes `verdict: FAIL` mid-line passes; one backtick may open the line. The label
-# scans stay lazy and stop at a colon or a backtick, which keeps a long line fast (debt note verdict-regex-slow-line).
-BRIEF_BLIND_NOT_CHOICES = r"(?![ \t]*(?:,|/|\bor\b|\band\b)[ \t]*(?:%s)\b)" % BRIEF_BLIND_VERDICT_WORDS
+# so a verdict word that opens a choice list (two or more verdict words joined by `,`, `/`, `or` or `and`, ending the line or
+# sentence) is a format line and passes; a list that runs on into other words is a verdict. A backtick right before `verdict`
+# marks a quote, so a finding that quotes `verdict: FAIL` mid-line passes; one backtick may open the line. The label scans
+# stay lazy and stop at a colon, which keeps a long line fast (debt note verdict-regex-slow-line).
+_BRIEF_BLIND_MARK = r"[*_`]*"
+_BRIEF_BLIND_SEP = r"[ \t]*(?:,[ \t]*(?:(?:or|and)\b[ \t]*)?|/[ \t]*|(?:or|and)\b[ \t]*)"
+BRIEF_BLIND_NOT_CHOICES = (r"(?!%(m)s%(sep)s%(m)s(?:%(w)s)%(m)s(?:%(sep)s%(m)s(?:%(w)s)%(m)s)*[ \t]*(?:[.;!?]|$))"
+                           % {"m": _BRIEF_BLIND_MARK, "sep": _BRIEF_BLIND_SEP, "w": BRIEF_BLIND_VERDICT_WORDS})
 BRIEF_BLIND_VERDICT = re.compile(
-    BRIEF_BLIND_OPEN + r"`?(?:(?:[^\n:`]*?\b[Vv]erdict\b[^\n:`]*?|[Rr]ound[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?(?:[^\n:]*?\b[Rr]esult\b[^\n:]*?)?)"
+    BRIEF_BLIND_OPEN + r"(?:(?:(?:`|[^\n:]*?(?<!`))\b[Vv]erdict\b[^\n:]*?|[Rr]ound[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?(?:[^\n:]*?\b[Rr]esult\b[^\n:]*?)?)"
     r"[*_]*[ \t]*:[ \t]*[*_`\"'(]*(?:%s)\b%s|(?:%s)[*_]*[ \t]*,[ \t]*[Rr]ound[ \t]+\d+)"
     % (BRIEF_BLIND_VERDICT_WORDS, BRIEF_BLIND_NOT_CHOICES, BRIEF_BLIND_VERDICT_WORDS),
     re.M)
