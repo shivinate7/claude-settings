@@ -55,6 +55,18 @@ class Fixture(unittest.TestCase):
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
 
+    def put_bytes(self, rel, data):
+        path = os.path.join(self.tree, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+
+    def changed(self):
+        """The paths the change names, from git, so a case proves its file is in the diff before it reads the verdict."""
+        done = subprocess.run(["git", "diff", "--name-only", "refs/remotes/origin/main"], cwd=self.tree,
+                              capture_output=True, encoding="utf-8", check=True)
+        return done.stdout.split()
+
     def run_check(self, *args, ci=False):
         env = {k: v for k, v in os.environ.items() if k != "CI"}
         if ci:
@@ -229,6 +241,38 @@ class GlossaryTests(Fixture):
     def test_unknown_option_fails(self):
         code, out = self.run_check("--files")
         self.assertEqual(code, 1, out)
+
+
+class UnknownReadTests(Fixture):
+    """A changed file the check cannot read prints UNKNOWN. Locally it exits 0. With env CI set it exits non-zero."""
+
+    def test_a_non_utf8_changed_file_prints_unknown_locally(self):
+        self.base_repo()
+        self.put_bytes("hooks/bad.py", b"x = '\xff'\n")
+        self.commit()
+        self.assertIn("hooks/bad.py", self.changed(), "scope: the non-UTF-8 file is not in the change")
+        code, out = self.run_check()
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(code, 0, out)
+        self.assertIn("UNKNOWN", out, "a changed file that cannot be read was skipped with no UNKNOWN line:\n" + out)
+
+    def test_a_non_utf8_changed_file_is_red_in_ci(self):
+        self.base_repo()
+        self.put_bytes("hooks/bad.py", b"x = '\xff'\n")
+        self.commit()
+        self.assertIn("hooks/bad.py", self.changed(), "scope: the non-UTF-8 file is not in the change")
+        code, out = self.run_check(ci=True)
+        self.assertNotEqual(code, 0, "a changed file that cannot be read passed in CI:\n" + out)
+
+    def test_a_readable_changed_file_is_green_in_ci_with_no_unknown(self):
+        # Green control: the same change with a readable file passes in CI and prints no UNKNOWN.
+        self.base_repo()
+        self.put("hooks/ok.py", "x = 1\n")
+        self.commit()
+        self.assertIn("hooks/ok.py", self.changed(), "scope: the readable file is not in the change")
+        code, out = self.run_check(ci=True)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("UNKNOWN", out)
 
 
 class CodeNameTests(Fixture):
