@@ -3580,10 +3580,17 @@ def step_up_reason(prompt: str, role, model) -> str:
 BRIEF_BLIND_ROLES = ("reviewer", guard_core.REFUTER_ROLE)
 REVIEWER_VERDICT_WORDS = ("PASS", "FAIL", "PARTIAL", "CHANGES")
 BRIEF_REPORT_LABELS = ("Done", "Deviations", "Input Needed", "Next")
-BRIEF_BLIND_LABELS = re.compile(r"^[ \t]*(%s)[ \t]*(?::|$)" % "|".join(BRIEF_REPORT_LABELS), re.M)
-BRIEF_BLIND_ITEM = re.compile(r"^[ \t]*(?:BUILT|RECORDED)\b", re.M)
-BRIEF_BLIND_VERDICT = re.compile(r"^[ \t]*(?:Verdict|Round[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?(?:[ \t]+verdict)?)[ \t]*:[^\n]*\b(?:%s)\b"
-                                 % "|".join(REVIEWER_VERDICT_WORDS), re.M)
+# Markdown marks before a line's first word (bullet, heading, quote, bold) and bold closing a label are no reason to pass.
+BRIEF_BLIND_OPEN = r"^[ \t]*(?:[-*+#>_][ \t]*)*"
+BRIEF_BLIND_VERDICT_WORDS = "|".join(REVIEWER_VERDICT_WORDS)
+BRIEF_BLIND_LABELS = re.compile(BRIEF_BLIND_OPEN + r"(%s)[*_]*[ \t]*(?::|$)" % "|".join(BRIEF_REPORT_LABELS), re.M)
+BRIEF_BLIND_ITEM = re.compile(BRIEF_BLIND_OPEN + r"(?:BUILT|RECORDED)(?![\w-])", re.M)
+# A verdict line is one of three. A `Verdict:` line, a round label, or a `Prior ... verdict:` line, each with the verdict word
+# right after the colon. Or a line whose first word is the verdict, as in a report's `FAIL, round 1 of 3, ...`.
+BRIEF_BLIND_VERDICT = re.compile(
+    BRIEF_BLIND_OPEN + r"(?:(?:Verdict|Round[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?(?:[ \t]+verdict)?|Prior\b[^\n:]*?\bverdict)"
+    r"[*_]*[ \t]*:[ \t]*[*_`\"'(]*(?:%s)\b|(?:%s)[*_]*[ \t]*(?:[,:;.]|$))" % (BRIEF_BLIND_VERDICT_WORDS, BRIEF_BLIND_VERDICT_WORDS),
+    re.M)
 BRIEF_BLIND_REASON = ("A reviewer's brief holds a builder's report or a prior verdict, so the reviewer anchors on it. "
                       "Send the task, the diff or a pointer to it, and the governing rulings. For a later round, send the "
                       "prior findings as a list of file, line and claim, with no verdict (decision reviewer-brief-blind).")
@@ -3608,7 +3615,9 @@ def brief_blind_role(role) -> bool:
 def reviewer_brief_hit(tool: str, tool_input) -> str:
     """The shape of the first reviewer brief in an Agent, Task or Workflow call that holds a report or a verdict, or "".
     A Workflow agent() call is read statically, with or without a model (spawn_inputs skips one with no model, so this
-    reads script_agent_calls itself). A call whose agentType or prompt the scan cannot read passes: it never guesses."""
+    reads script_agent_calls itself). A call whose agentType the scan cannot read passes: it never guesses the role. A
+    reviewer call whose prompt it cannot read (a variable, or a template with `${...}`) returns BRIEF_UNREAD: the
+    reviewer's brief cannot be shown blind, and the refusal names BRIEF_LITERAL_REMEDY."""
     if tool in SPAWN_TOOLS:
         return brief_blind_shape(tool_input.get("prompt")) if brief_blind_role(tool_input.get("subagent_type")) else ""
     if tool == "Workflow" and isinstance(tool_input.get("script"), str):
@@ -3617,10 +3626,10 @@ def reviewer_brief_hit(tool: str, tool_input) -> str:
             for k, u, _ in bodies:
                 keys.update(k)
                 unseen |= u
-            if prompt is None or "agentType" in unseen or ("..." in unseen and "agentType" not in keys):
+            if "agentType" in unseen or ("..." in unseen and "agentType" not in keys):
                 continue
             if brief_blind_role(keys.get("agentType")):
-                shape = brief_blind_shape(prompt)
+                shape = BRIEF_UNREAD if prompt is None else brief_blind_shape(prompt)
                 if shape:
                     return shape
     return ""
@@ -6218,7 +6227,9 @@ def judge(payload) -> None:
     # 9b2c. A reviewer's brief holds no builder report and no verdict line. An override lifts it: not in never_lifted.
     brief_shape = reviewer_brief_hit(tool, tool_input)
     if brief_shape:
-        refuse(tool, "deny", "reviewer-brief-blind", BRIEF_BLIND_REASON, brief_shape)
+        refuse(tool, "deny", "reviewer-brief-blind",
+               BRIEF_BLIND_REASON + (" The scan could not read this brief: " + BRIEF_LITERAL_REMEDY + "."
+                                     if brief_shape == BRIEF_UNREAD else ""), brief_shape)
 
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
     # The override lifts the above-row refusal and never the no-model one (never_lifted).
