@@ -84,19 +84,25 @@ tool counts by its full name. Each tool the reply names is cleared, on a
 stop_hook_active rewrite too, which never blocks on a refusal (decision refusals-reach-the-owner).
 Cost: one stat per Stop when the session had no refusal.
 
-The ruling-skip check (rule `ruling-skip-check`, decision questions-go-to-owner): a Done item that says it acted
-"under ruling" must cite the ruling as `under ruling <ref> (<stamp>)`, where <ref> is `item <N> <key>` (a waiting-page
-answer on the roadmap branch) or a decision id. A claim with no ref or stamp, or a ref that does not resolve, refuses
-with no model call. A resolved cite goes to the refuter (RULING_REFUTER_MODEL), one call for all the claims of a
-reply, which sees only each ruling text and each Done act; a model error, a timeout or an odd answer refuses. It
-runs on every Stop, landed or not, and again on a rewrite. Cost: no call and no git read on a reply with no claim;
-one Sonnet call (20 s) and at most two git processes on a reply with a claim.
+The ruling-skip check (rule `ruling-skip-check`, decision questions-go-to-owner): a Done item with a pick word (took,
+picked, chose, pick, skipped asking, did not ask) and a ruling cue (ruling, rulings) must cite the ruling as
+`under ruling <ref> (<stamp>)`, where <ref> is `item <N> <key>` (a waiting-page answer on the roadmap branch, or the
+item's `lastAnswer` once the page closed it) or a decision id. A claim with no ref or stamp, or a ref that does not
+resolve, refuses with no model call. A resolved cite goes to the refuter (RULING_REFUTER_MODEL), one call for all
+the claims of a reply, which sees only each ruling text and each Done act; a model error, a timeout, an odd answer
+or a spent deadline refuses. A decision record goes in whole up to 6000 bytes, else as its head plus each bullet
+that carries the cited stamp. The past-ruling call, the refuter and the reads share one Stop deadline
+(STOP_BUDGET). It runs on every Stop, landed or not, and again on a rewrite. Cost: no call and no git read on a
+reply with no claim; one Sonnet call (at most 20 s of the shared budget) and at most two git processes on a reply
+with a claim.
 """
 import json
 import os
 import re
 import sys
+import time
 
+_STARTED = time.monotonic()  # this process is one Stop run: its model calls and git reads share one deadline
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
@@ -1171,6 +1177,31 @@ def refusal_reason(tools):
         "(decision refusals-reach-the-owner)." % names)
 
 
+# One deadline for the whole Stop run (the settings.json Stop timeout for this hook is 35 s): the past-ruling model
+# call, the ruling-skip refuter and the git reads each take what is left, never their own full limit, so the run
+# ends with room to print. A model call is also charged its whole grant against the budget, whether or not it uses
+# it, so the grants of one run never add up past STOP_BUDGET. A call with under MIN_CALL s left does not start, and
+# its check refuses.
+STOP_BUDGET = 30
+MIN_CALL = 3
+_granted = 0.0  # seconds granted to model calls so far in this run
+
+
+def call_timeout(limit, model=False):
+    """Seconds one call may run: `limit`, or what is left of the Stop budget when that is less. A model call is
+    capped by the budget less the grants of earlier model calls. None when under MIN_CALL seconds are left."""
+    global _granted
+    left = STOP_BUDGET - (time.monotonic() - _STARTED)
+    if model:
+        left = min(left, STOP_BUDGET - _granted)
+    if left < MIN_CALL:
+        return None
+    timeout = min(limit, left)
+    if model:
+        _granted += timeout
+    return timeout
+
+
 def _marker_path(hook):
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     import local_time
@@ -1341,8 +1372,10 @@ def past_ruling_problem(asked, cwd):
               "it asks.\n8. " + call_judge.PAST_RULING_ITEM + "\nReply JSON only: {\"ok\": true} or {\"ok\": false, "
               "\"reason\": \"<the listed id, the ruling's date, and what it decides, one line>\"}."
               + question_form.candidates_block(candidates, unknown))
-    verdict, error = decision_watch.invoke_model(prompt, model=call_judge.PAST_RULING_MODEL,
-                                                 timeout=call_judge.PAST_RULING_TIMEOUT,
+    timeout = call_timeout(call_judge.PAST_RULING_TIMEOUT, model=True)
+    if timeout is None:
+        return cannot_run(asked, "the Stop time ran out before the model review")
+    verdict, error = decision_watch.invoke_model(prompt, model=call_judge.PAST_RULING_MODEL, timeout=timeout,
                                                  shape=call_judge.OK_SHAPE, effort=None)
     if error:
         return cannot_run(asked, " ".join(str(error).split()))
@@ -1395,7 +1428,8 @@ def question_keys_problem(after, text):
 
 
 # The ruling-skip check (rule `ruling-skip-check`, decision questions-go-to-owner, owner item 284 b, 2026-11-06
-# 13:08 CST): a Done item that says it acted "under ruling" cites that ruling as `under ruling <ref> (<stamp>)`.
+# 13:08 CST): a Done item that claims a pick under a ruling (a pick word and a ruling cue) cites that ruling as
+# `under ruling <ref> (<stamp>)`.
 # <ref> is `item <N> <key>` (a waiting-page answer, read from the roadmap branch) or a decision id (a record in
 # docs/decisions). A claim with no ref or stamp, or a ref that does not resolve, refuses with no model call: an
 # unknown read is red (decision ci-unknown-is-red). A resolved cite goes to the refuter, one model call for all
@@ -1404,9 +1438,13 @@ def question_keys_problem(after, text):
 # claim; on a reply with a claim, one Sonnet call and at most two git processes (the items, then one answer).
 RULING_REFUTER_MODEL = "claude-sonnet-5-5"  # the one setting: lane debate-model-tiers may change it here
 RULING_REFUTER_TIMEOUT = 20
-RULING_TEXT_MAX = 6000
+RULING_TEXT_MAX = 6000  # bytes of a decision record's head; a bullet carrying the cited stamp is added in full
+RULING_BULLET_MAX = 12000
 RULING_ROADMAP_REFS = ("origin/roadmap", "roadmap")
-RULING_CLAIM_RE = re.compile(r"\bunder (?:the )?(?:owner'?s? )?ruling\b", re.I)
+RULING_PICK_RE = re.compile(r"\b(?:took|picked|chose|pick|skipped asking|did not ask)\b", re.I)
+RULING_CUE_RE = re.compile(r"\brulings?\b(?![-\w])", re.I)  # a slug such as ruling-skip-check is no cue
+RULING_UNDER_RE = re.compile(r"\bunder (?:the )?(?:owner'?s? )?rulings?\b", re.I)
+RULING_UNIT_START_RE = re.compile(r"\s*(?:[-*+]\s|\d+[.)]\s|#{1,6}\s)")
 RULING_REF_RE = re.compile(
     r"\s*(?:(?P<item>item\s+(?P<n>\d+)\s+(?P<key>[a-f]))\b|`?(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)`?(?![\w-]))"
     r"\s*\(\s*(?P<stamp>[^()\n]{1,40}?)\s*\)")
@@ -1433,24 +1471,71 @@ def _done_texts(block):
 
 
 def ruling_claims(text):
-    """([(act, ref, why_bad)], ...) one per ruling claim in the Done items of `text`. `ref` is ("item", n, key) or
-    ("decision", slug), or None when `why_bad` says the claim has no usable ref or stamp."""
+    """[(act, ref, why_bad, stamp)], one per cited ruling in the pick claims of the Done items of `text`. A pick claim
+    is a Done item with a pick word and a ruling cue. `ref` is ("item", n, key) or ("decision", slug), or None when
+    `why_bad` says the claim has no usable ref or stamp. A claim with no cite at all is one None entry."""
     claims = []
     for act in _done_texts(block_text(text, keep_indent=True)):
-        for m in RULING_CLAIM_RE.finditer(act):
+        if not (RULING_PICK_RE.search(act) and RULING_CUE_RE.search(act)):
+            continue
+        cited = []
+        for m in RULING_CUE_RE.finditer(act):
             cite = RULING_REF_RE.match(act, m.end())
             if not cite:
-                claims.append((act, None, "a Done item claims a ruling skip but cites no item or decision with a time."))
-            elif not _ruling_stamp_ok(cite.group("stamp")):
-                claims.append((act, None, "a Done item cites a ruling with no valid time (a date and clock, or a clock, with CST or CDT)."))
+                continue
+            if not _ruling_stamp_ok(cite.group("stamp")):
+                cited.append((act, None, "a Done item cites a ruling with no valid time (a date and clock, or a clock, "
+                                         "with CST or CDT).", ""))
             elif cite.group("item"):
-                claims.append((act, ("item", int(cite.group("n")), cite.group("key")), ""))
+                cited.append((act, ("item", int(cite.group("n")), cite.group("key")), "", cite.group("stamp")))
             else:
-                claims.append((act, ("decision", cite.group("slug")), ""))
+                cited.append((act, ("decision", cite.group("slug")), "", cite.group("stamp")))
+        claims += cited or [(act, None, "a Done item claims a pick under a ruling but cites no item or decision with a "
+                                        "time.", "")]
     return claims
 
 
-def _ruling_of_decision(slug, cwd):
+def _stamp_needle(stamp):
+    """A regex for the time of a cited stamp in a record: the date and clock, or the clock alone. The zone is not read."""
+    m = STAMP_FULL_RE.fullmatch(stamp)
+    if m:
+        return re.compile(re.escape(m.group(1)) + r"[ T]" + re.escape(m.group(2)))
+    m = STAMP_CLOCK_RE.fullmatch(stamp)
+    hour, minute = m.group(1).split(":")
+    return re.compile(r"(?<![\d:])0?%d:%s(?!\d)" % (int(hour), minute))
+
+
+def _units(text):
+    """The bullets, headings and paragraphs of a record, each as one string."""
+    units, current = [], []
+    for line in text.splitlines():
+        if not line.strip():
+            if current:
+                units.append("\n".join(current))
+            current = []
+        elif RULING_UNIT_START_RE.match(line) and current:
+            units.append("\n".join(current))
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        units.append("\n".join(current))
+    return units
+
+
+def decision_excerpt(text, stamp):
+    """The record text sent to the refuter: the whole record when it fits RULING_TEXT_MAX bytes, else its head of
+    that many bytes (cut on a character) and, in full, each later bullet that carries the cited stamp."""
+    raw = text.encode("utf-8")
+    if len(raw) <= RULING_TEXT_MAX:
+        return text
+    head = raw[:RULING_TEXT_MAX].decode("utf-8", "ignore")
+    needle = _stamp_needle(stamp)
+    extra = [u[:RULING_BULLET_MAX] for u in _units(text) if needle.search(u) and u not in head]
+    return head + ("\n[the cited bullets, in full:]\n" + "\n".join(extra) if extra else "")
+
+
+def _ruling_of_decision(slug, stamp, cwd):
     """(ruling text, '') of docs/decisions/<slug>.md in the repo, else in the claude-settings checkout, or ('',
     why it does not resolve)."""
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
@@ -1467,7 +1552,7 @@ def _ruling_of_decision(slug, cwd):
         if os.path.isfile(path):
             try:
                 with open(path, encoding="utf-8") as handle:
-                    return handle.read(RULING_TEXT_MAX), ""
+                    return decision_excerpt(handle.read(), stamp), ""
             except (OSError, UnicodeDecodeError):
                 return "", "decision %s could not be read." % slug
     return "", "decision %s has no record." % slug
@@ -1489,6 +1574,8 @@ def _ruling_of_item(n, key, roadmap):
     item_id, item = found[0]
     answer = roadmap["answers"].get(item_id)
     if not isinstance(answer, dict):
+        answer = item.get("lastAnswer")  # the page's Route-and-close deletes the answer file and keeps this
+    if not isinstance(answer, dict):
         return "", "item %d has no answer." % n
     if not _picked(answer, key):
         return "", "item %d was not answered %s." % (n, key)
@@ -1503,45 +1590,54 @@ def _ruling_of_item(n, key, roadmap):
 
 def _read_roadmap_answers(cwd):
     """The items, and the answer of each item the claims cite, from the roadmap branch: {"items", "answers"} or
-    {"error": why}. Two git processes at most: question_form.read_json_folder for the items, then for the answers."""
+    {"error": why}. Two git processes at most: question_form.read_json_folder for the items, then for the answers.
+    No answers folder is no error: a closed item keeps its answer as `lastAnswer`."""
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     import question_form
     root = repo_root(cwd) or cwd or os.getcwd()
-    items, state, ref = question_form.read_json_folder(root, "waiting/items", RULING_ROADMAP_REFS)
-    if state != "ok":
-        return {"error": "no roadmap branch" if state == "absent" else state}
-    answers, state, _ = question_form.read_json_folder(root, "waiting/answers", (ref,))
-    if state != "ok":
-        return {"error": "no answers on the roadmap branch" if state == "absent" else state}
+    for folder_refs in (RULING_ROADMAP_REFS, None):
+        timeout = call_timeout(question_form.STEP_GIT_TIMEOUT)
+        if timeout is None:
+            return {"error": "the Stop time ran out"}
+        if folder_refs:
+            items, state, ref = question_form.read_json_folder(root, "waiting/items", folder_refs, timeout)
+            if state != "ok":
+                return {"error": "no roadmap branch" if state == "absent" else state}
+        else:
+            answers, state, _ = question_form.read_json_folder(root, "waiting/answers", (ref,), timeout)
+            if state == "absent":
+                answers = {}
+            elif state != "ok":
+                return {"error": state}
     return {"items": items, "answers": answers}
 
 
 def _scrub_reason(reason):
     """The refuter's reason with any trigger phrase or time replaced, so a refusal never carries a line that passes."""
     text = " ".join(str(reason).split())[:240]
-    for pattern in (RULING_CLAIM_RE, STAMP_FULL_RE, STAMP_CLOCK_RE):
+    for pattern in (RULING_UNDER_RE, STAMP_FULL_RE, STAMP_CLOCK_RE):
         text = pattern.sub("[cite]", text)
     return text
 
 
 def ruling_skip_problem(text, cwd):
-    """The refusal text when a Done item claims a ruling skip and cites no ruling that names its act, else ''."""
-    if not RULING_CLAIM_RE.search(text):
+    """The refusal text when a Done item claims a pick under a ruling and cites no ruling that names its act, else ''."""
+    if not RULING_CUE_RE.search(text):
         return ""
     claims = ruling_claims(text)
     if not claims:
         return ""
-    for act, ref, bad in claims:
+    for _act, ref, bad, _stamp in claims:
         if ref is None:
             return RULING_REASON % bad
-    roadmap = _read_roadmap_answers(cwd) if any(ref[0] == "item" for _, ref, _ in claims) else {}
+    roadmap = _read_roadmap_answers(cwd) if any(c[1][0] == "item" for c in claims) else {}
     pairs, seen = [], set()
-    for act, ref, _ in claims:
+    for act, ref, _, stamp in claims:
         if ref[0] == "item":
             ruling, bad = _ruling_of_item(ref[1], ref[2], roadmap)
             name = "item %d %s" % ref[1:]
         else:
-            ruling, bad = _ruling_of_decision(ref[1], cwd)
+            ruling, bad = _ruling_of_decision(ref[1], stamp, cwd)
             name = "decision " + ref[1]
         if bad:
             return RULING_REASON % ("ruling %s does not resolve: %s Unknown is refused." % (name, bad))
@@ -1549,7 +1645,7 @@ def ruling_skip_problem(text, cwd):
             seen.add((name, act))
             pairs.append((name, ruling, act))
     prompt = (
-        "Each pair below is an owner's ruling and a Done item from a session's report, which says it acted under "
+        "Each pair below is an owner's ruling and a Done item from a session's report, which says it picked under "
         "that ruling. Judge only this: does each ruling name the act its Done item describes, either that act or "
         "a rule that covers exactly it? A ruling on a nearby, wider or different act does not.\n\n"
         + "\n\n".join("Pair %d, ruling %s:\n<<<\n%s\n>>>\nDone item:\n<<<\n%s\n>>>" % (i, name, ruling, act)
@@ -1559,9 +1655,13 @@ def ruling_skip_problem(text, cwd):
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     import call_judge
     import decision_watch  # the one home of the model call
-    verdict, error = decision_watch.invoke_model(prompt, model=RULING_REFUTER_MODEL, timeout=RULING_REFUTER_TIMEOUT,
-                                                 shape=call_judge.OK_SHAPE, effort=None)
     names = ", ".join(sorted({name for name, _, _ in pairs}))
+    timeout = call_timeout(RULING_REFUTER_TIMEOUT, model=True)
+    if timeout is None:
+        return RULING_REASON % ("the Stop time ran out before the refuter could judge the cite of %s, so the claim is "
+                                "refused." % names)
+    verdict, error = decision_watch.invoke_model(prompt, model=RULING_REFUTER_MODEL, timeout=timeout,
+                                                 shape=call_judge.OK_SHAPE, effort=None)
     if error or not isinstance(verdict, dict) or not isinstance(verdict.get("ok"), bool):
         return RULING_REASON % ("the refuter could not judge the cite of %s, so the claim is refused." % names)
     if verdict["ok"]:
@@ -1594,7 +1694,7 @@ def relay_reasons(after, text, cwd):
         reasons.append(ruling_skip_problem(text, cwd))
     except Exception as exc:  # an unknown read is red (ci-unknown-is-red): a claim that could not be checked refuses
         print("ruling-skip check failed: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
-        if RULING_CLAIM_RE.search(text):
+        if RULING_CUE_RE.search(text):
             reasons.append(RULING_REASON % "the check of the ruling cited in a Done item failed, so the claim is refused.")
     return [r for r in reasons if r]
 
