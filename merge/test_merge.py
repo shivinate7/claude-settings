@@ -11979,6 +11979,15 @@ class ReviewFixRules(unittest.TestCase):
         self.assertIn("fix check", why, f"the why does not name the fix check: {why!r}")
         self.assertNotIn("round 1 passed", why, f"the why reads as a passed round: {why!r}")
 
+    def test_a_fix_pass_after_a_failed_first_round_with_a_design_fail_names_both_and_stays_open(self):
+        # the design reviewer also failed the first round, so the fix check does not clear it, and the why keeps that FAIL in view and names the fix check
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, FAIL")
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds)
+        self.assertEqual(state, "open", f"a design reviewer FAIL must hold the fix check PASS open: {why!r}")
+        self.assertIn("FAIL", why, f"the why does not name the failed reviewer: {why!r}")
+        self.assertIn("fix check", why, f"the why does not name the fix check: {why!r}")
+        self.assertNotIn("round 1 passed", why, f"the why reads as a passed round: {why!r}")
+
 class ReviewEnv(Env):
     """The review-record cases' one home for running merge: a run that returns (rc, stdout, stderr) and reads a usage error's SystemExit as
     its code, and the check that a usage error came from a parser that knows the flag. No test lives here."""
@@ -12201,6 +12210,28 @@ class ReviewFixBase(ReviewEnv):
             with self.subTest(label=label):
                 rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(*comments))
                 self.assert_refused(rc, out, err)
+
+    def test_an_older_fix_line_does_not_block_a_base_on_a_newer_record_without_one(self):
+        # only the newest earlier record decides, so a fix line on an older record does not refuse a base the newest record names
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS, fix=(fix_check_line(head=self.OTHER_HEAD),)))
+        newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, newest))
+        self.assertEqual(rc, 0, "a base on the newest record, which has no fix line, was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
+
+    def test_a_failed_comments_read_refuses_the_fix_check_with_no_record(self):
+        # without the earlier records there is no base to check the fix check against, so the read failure stops the run before any record prints
+        host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments_error="reading issue comments from GitHub failed")
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host)
+        self.assertEqual(rc, 1, "a failed comments read did not stop the run:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a failed comments read still printed a record")
+
+    def test_a_malformed_newest_earlier_record_refuses_the_base(self):
+        # the newest record does not parse, so it cannot name a head, and the base is refused even when an older record has that head
+        older = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        malformed = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, kind="bogus"))
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
+        self.assert_refused(rc, out, err)
 
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
