@@ -15,7 +15,7 @@ Keep lines 30 to 33 (CI, Merge tool, Cleanup, Batching). They hold this repo's o
 
 ## CI step to add
 
-In `.github/workflows/test.yml`, in the job that runs "STE lint", add one step:
+In `.github/workflows/checks.yml`, in the `checks` job that runs "STE lint", add one step:
 
     - name: CLAUDE.md cites records
       uses: shivinate7/claude-settings/actions/claude-md-cites@<sha>

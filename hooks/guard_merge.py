@@ -53,8 +53,25 @@ def git_call_of(segment: str):
     return tokens[cursor].lower(), tokens[cursor + 1:]
 
 
+def _gh_root_repo_flag(tokens, index):
+    """Return how many tokens the gh root repo flag at `index` takes (0 when it is none):
+    `-R o/r` and `--repo o/r` take two, `--repo=o/r` and `-Ro/r` take one."""
+    token = tokens[index]
+    if token in ("-R", "--repo"):
+        return 2
+    if token.startswith("--repo=") or (token.startswith("-R") and not token.startswith("--")):
+        return 1
+    return 0
+
+
 def gh_call_of(segment: str):
-    """Return the tokens after `gh` when the segment's COMMAND WORD is gh, else None."""
+    """Return the tokens after `gh` when the segment's COMMAND WORD is gh, else None.
+
+    A repo flag before the verb (`gh -R o/r pr merge`) is valid gh and hid the verb from every
+    caller, which read the first two words. The flag moves to the end: gh reads `-R` after the
+    verb the same, and the callers that look for the repo (merge_call_of, ci_wake) already read
+    it there.
+    """
     tokens = segment_tokens(segment)
     if not tokens:
         return None
@@ -67,7 +84,12 @@ def gh_call_of(segment: str):
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):
         return None
-    return tokens[index + 1:]
+    rest, root = tokens[index + 1:], []
+    while rest and _gh_root_repo_flag(rest, 0):
+        taken = _gh_root_repo_flag(rest, 0)
+        root += rest[:taken]
+        rest = rest[taken:]
+    return rest + root
 
 
 # ---- a merge made outside the merge tool
@@ -488,8 +510,8 @@ ROLE_TAG_PREFIX = "cs-build:"
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
     "If this session is the batch runner: run get_session (no argument) alone in its own "
-    "turn, then retry. Any other session, the coordinator too: hand the branch, head and PR to the batch runner "
-    "(list_sessions, tag cs-build:batch-runner, same cs-repo)."
+    "turn, then retry. Any other session, the coordinator too: post the review record on the PR for your branch; the batch runner finds it "
+    "(list_sessions, tag cs-build:batch-runner, same cs-repo, names the runner)."
 )
 
 
@@ -640,7 +662,7 @@ TRUST_TOOLS = ("mcp__claude-code-remote__confirm_repository_trust", "mcp__claude
 TRUST_REASON = (
     "trust-card-in-build: this call opens an owner card that blocks every message into the session, and "
     "this session's own record does not prove it has no cs-build tag. A cs-build session hands the act to "
-    "the owner or to an untagged bridge session. A session with no record yet: run get_session (no "
+    "the owner or to an untagged session. A session with no record yet: run get_session (no "
     "argument) alone in its own turn, then retry."
 )
 

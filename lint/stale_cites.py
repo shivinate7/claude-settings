@@ -38,17 +38,34 @@ Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAI
 checks out shallow is not red at its pin move. A touched .py that does not parse at base or head is unknown
 the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the exit non-zero.
 
+The report prints after the findings and never changes the exit code (decision claude-md-change-is-flagged). Each
+line starts `stale-cites: report, `. It has two halves.
+  Anchors   for each `<!-- rule:id -->` anchor whose sentence changed in a RULE_FILES file (a real anchor; one in a
+            code span is a mention): the row in lint/rule_mechanisms.json (kind, ref, test), then the files this range
+            changed under RULE_DIRS, or "none". It gives no verdict; the reviewer judges. A repo with no
+            lint/rule_mechanisms.json prints no anchor line and no error.
+  Home      for each changed non-Markdown file (added, changed, removed or renamed): each decision whose Home line
+            names it, and each mechanism row whose ref or test is it.
+
 Cost, per ste-lint changed-scope run (CostTests in lint/test_stale_cites.py proves it): one python3 start.
-Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and touches no .py.
-A touched .py adds one `git cat-file --batch`. A removed path or name adds `ls-tree` and that `cat-file
---batch`, so 5 at most. Each tracked .md is read once, only when something was removed. A touched .py also
-loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
+Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and changes only
+Markdown outside RULE_FILES.
+A touched .py adds one `git cat-file --batch` and, through the report below, one `ls-tree`, so it starts 5. A removed
+or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once, and only
+when a removed or renamed path, or a name that a touched .py no longer defines, gives the findings something to
+look for. A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
+The report adds, for a changed non-Markdown file, one `ls-tree` of the decisions folders and the mechanisms file (none
+when the run already listed the whole tree) and the `cat-file --batch`, which reads each decision record whole (a regex
+then takes its Home line) and the mechanisms file once. The decisions folder is the first of lint/layout.py
+`candidates(root, "decisions")` that holds a file. A changed RULE_FILES file adds its base and head blobs and the
+mechanisms file to that read. Its list of changed files comes from the diff the run already read, with no git start.
 A --tree run starts one python3, then git rev-parse, ls-tree and one cat-file --batch. It reads each tracked .md
-once, and each file a line anchor names once more, even when that file is a .md. It writes no file.
+once, and each file a line anchor names once more, even when that file is a .md. It writes no file and prints no report.
 """
 import argparse
 import ast
 import importlib.util
+import json
 import os
 import posixpath
 import re
@@ -58,6 +75,8 @@ import sys
 sys.dont_write_bytecode = True  # the cost contract: a run writes no file, so no .pyc for the import below
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+import layout  # noqa: E402  the one home of where a repo keeps its decisions (lint/layout.py)
+from rule_audit import ANCHOR_RE, RULE_FILES  # noqa: E402  the one home of the anchor pattern and the rule files
 
 RECORDS_PAGE = "docs/records.md"
 RUN = r"[\w./@+~-]+"  # a run of path characters; a cite is one whole run, so a `-` or `.` before a path is no boundary
@@ -173,9 +192,9 @@ def parse_range(text):
 
 
 def changed_paths(diff_args):
-    """(removed, renamed, modified): removed paths, {old: new}, and paths changed in place."""
+    """(removed, renamed, modified, added): removed paths, {old: new}, paths changed in place, and added paths."""
     tokens = git("diff", "-M", "--name-status", "-z", *diff_args, on_fail=BaseUnknown).decode("utf-8", "replace").split("\0")
-    removed, renamed, modified = [], {}, []
+    removed, renamed, modified, added = [], {}, [], []
     i = 0
     while i < len(tokens) and tokens[i]:
         status = tokens[i][0]
@@ -188,8 +207,10 @@ def changed_paths(diff_args):
             removed.append(tokens[i + 1])
         elif status == "M":
             modified.append(tokens[i + 1])
+        elif status == "A":
+            added.append(tokens[i + 1])
         i += 2
-    return removed, renamed, modified
+    return removed, renamed, modified, added
 
 
 PY_FACTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "skills", "plain-english-map",
@@ -309,9 +330,11 @@ def path_cites(line, gone, exotic):
 class Range:
     """What the readers share: the range's blobs, its changed paths and the texts a read could not judge."""
 
-    def __init__(self, base, head, removed, renamed, modified, batch):
+    def __init__(self, base, head, removed, renamed, modified, batch, added=()):
         self.base, self.head, self.removed, self.renamed, self.batch = base, head, removed, renamed, batch
         self.unknowns = []
+        self.tree = None  # the head tree entries once a read listed the whole tree; the report reuses it
+        self.changed = set(removed) | set(renamed) | set(renamed.values()) | set(modified) | set(added)
         self.py_files = {p: p for p in modified if p.endswith(".py")}
         self.py_files.update({old: new for old, new in renamed.items() if old.endswith(".py") and new.endswith(".py")})
         self.foreign_files = {p for p in list(modified) + list(renamed.values()) if FOREIGN_FILE.search(p)}
@@ -402,15 +425,21 @@ class ForeignReader:
 READERS = (PathReader(), NameReader(), ForeignReader())
 
 
-def tracked_entries(rev):
-    """[(mode, path)] of every entry in the tree at rev."""
-    tree = git("ls-tree", "-r", "-z", rev).decode("utf-8", "replace").split("\0")
+def tracked_entries(rev, *paths):
+    """[(mode, path)] of every entry in the tree at rev, or only of the named folders and files, from one
+    `ls-tree`."""
+    tree = git("ls-tree", "-r", "-z", rev, *(["--"] + list(paths) if paths else [])).decode("utf-8", "replace").split("\0")
     return [(e.split(" ", 1)[0], e.split("\t", 1)[1]) for e in tree if "\t" in e]
+
+
+def file_paths(entries):
+    """The tracked file paths of ls-tree entries: regular files only, no symlink or submodule."""
+    return [p for mode, p in entries if mode in ("100644", "100755")]
 
 
 def markdown_files(entries, excludes):
     """The tracked .md files a prose check reads: regular files, not the records page, not excluded."""
-    return [p for mode, p in entries if mode in ("100644", "100755") and p.endswith(".md")
+    return [p for p in file_paths(entries) if p.endswith(".md")
             and p != RECORDS_PAGE and not any(rx.match(p) for rx in excludes)]
 
 
@@ -421,35 +450,178 @@ def read_markdown(batch, rev, md):
     return blob.decode("utf-8", "replace").replace("\r\n", "\n")  # a bad byte is U+FFFD, never a skip
 
 
-def scan(range_text):
-    """(found, unknowns): {(path, line, code): [messages]}, and one text per touched .py that does not parse."""
-    diff_args, base, head = parse_range(range_text)
-    removed, renamed, modified = changed_paths(diff_args)
+def find_stale(rng):
+    """{(path, line, code): [messages]}: the findings. Fills `rng.unknowns`."""
     found = {}
-    batch = BlobReader()
-    rng = Range(base, head, removed, renamed, modified, batch)
-    if not removed and not renamed and not rng.py_files:
-        return found, rng.unknowns  # the cost contract: nothing removed, so no blob, tree or Markdown read
-    try:
-        active = [(r, state) for r in READERS for state in [r.prepare(rng)] if state is not None]
-        if all(getattr(reader, "unknown", False) for reader, _ in active):
-            return found, rng.unknowns  # an unknown line never starts the Markdown read
+    if not rng.removed and not rng.renamed and not rng.py_files:
+        return found  # the cost contract: nothing removed, so no blob, tree or Markdown read
+    active = [(r, state) for r in READERS for state in [r.prepare(rng)] if state is not None]
+    if all(getattr(reader, "unknown", False) for reader, _ in active):
+        return found  # an unknown line never starts the Markdown read
 
-        for md in markdown_files(tracked_entries(head), exclude_patterns(".")):
-            text = read_markdown(batch, head, md)
-            for number, line in enumerate(text.split("\n"), 1):
-                off = disabled(line) if "ste-disable-line" in line else set()
-                claimed = set()
-                for reader, state in active:
-                    if reader.code not in off:
-                        for message in reader.line(state, line, claimed):
-                            if getattr(reader, "unknown", False):
-                                rng.unknowns.append("%s:%d: %s" % (md, number, message))
-                            else:
-                                found.setdefault((md, number, reader.code), []).append(message)
+    rng.tree = tracked_entries(rng.head)
+    for md in markdown_files(rng.tree, exclude_patterns(".")):
+        text = read_markdown(rng.batch, rng.head, md)
+        for number, line in enumerate(text.split("\n"), 1):
+            off = disabled(line) if "ste-disable-line" in line else set()
+            claimed = set()
+            for reader, state in active:
+                if reader.code not in off:
+                    for message in reader.line(state, line, claimed):
+                        if getattr(reader, "unknown", False):
+                            rng.unknowns.append("%s:%d: %s" % (md, number, message))
+                        else:
+                            found.setdefault((md, number, reader.code), []).append(message)
+    return found
+
+
+# The report (decision stale-cites-at-merge). Its lines are no finding and never set the exit code.
+REPORT = "stale-cites: report, "
+MECHANISMS = "lint/rule_mechanisms.json"
+# Where a rule's guard, check or CI step lives. No other module holds this set (report_guard.ANSWERED_TOP_DIRS is the
+# top dirs a source path may start with, a different set), so it lives here.
+RULE_DIRS = ("hooks/", "lint/", "bin/", "actions/", ".github/")
+HOME_LINE = re.compile(r"^Home:[ \t]*`?([^\s`]+)`?[ \t]*$", re.M)
+CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
+
+
+def anchor_sentences(text):
+    """{slug: the prose since the previous anchor, or the paragraph start, spaces collapsed}. An anchor inside a
+    code span is a mention of the form, not an anchor."""
+    found = {}
+    for block in re.split(r"\n[ \t]*\n", text.replace("\r\n", "\n")):
+        spans = [m.span() for m in CODE_SPAN.finditer(block)]
+        start = 0
+        for match in ANCHOR_RE.finditer(block):
+            if any(a <= match.start() < b for a, b in spans):
+                continue
+            found[match.group(1)] = " ".join(block[start:match.start()].split())
+            start = match.end()
+    return found
+
+
+def decision_folders():
+    """The places the layout lets a repo keep its decisions, first choice first (lint/layout.py candidates). A repo
+    not rolled out to the layout may hold them at either place."""
+    return layout.candidates(".", "decisions")
+
+
+def mechanism_rows(rng):
+    """{slug: row} of lint/rule_mechanisms.json at head, or None for a repo that has none. One read. A file that
+    is not JSON, or whose rules or rows are not objects with a `mechanism` object, raises Unknown naming the file:
+    a row's fields are read as a dict afterwards."""
+    blob = rng.batch.get("%s:%s" % (rng.head, MECHANISMS))
+    if blob is None:
+        return None
+    try:
+        rules = json.loads(blob.decode("utf-8", "replace"))
+    except ValueError as exc:
+        raise Unknown("%s is not JSON (%s)" % (MECHANISMS, exc))
+    rules = rules.get("rules") if isinstance(rules, dict) else None
+    if not isinstance(rules, dict):
+        raise Unknown("%s holds no rules object" % MECHANISMS)
+    for slug, row in rules.items():
+        if not isinstance(row, dict) or not isinstance(row.get("mechanism"), dict):
+            raise Unknown("%s: the row for %s is not an object with a mechanism object" % (MECHANISMS, slug))
+    return rules
+
+
+def rule_dir_changes(rng):
+    """`changed under <RULE_DIRS>: <files>`, the files this range changed there, or `none`. No verdict: a guard row's
+    logic can sit in any module, so the reviewer judges. Read from the diff; no git start."""
+    hit = sorted(p for p in rng.changed if p.startswith(RULE_DIRS))
+    return "changed under %s: %s" % (", ".join(RULE_DIRS), ", ".join(hit) if hit else "none")
+
+
+def anchor_report(rng, rules):
+    """One line per anchor whose sentence differs between base and head in a rule file the range changed."""
+    lines, changes = [], rule_dir_changes(rng)
+    for path in (p.replace(os.sep, "/") for p in RULE_FILES):
+        if path not in rng.changed:
+            continue
+        old, new = rng.batch.get("%s:%s" % (rng.base, path)), rng.batch.get("%s:%s" % (rng.head, path))
+        before = anchor_sentences(old.decode("utf-8", "replace")) if old is not None else {}
+        after = anchor_sentences(new.decode("utf-8", "replace")) if new is not None else {}
+        for slug in sorted(s for s in set(before) | set(after) if before.get(s) != after.get(s)):
+            what = "added" if slug not in before else "removed" if slug not in after else "changed"
+            row = (rules.get(slug) or {}).get("mechanism")
+            if not isinstance(row, dict):
+                lines.append("%sanchor %s %s in %s; no row in %s; %s" % (REPORT, slug, what, path, MECHANISMS, changes))
+                continue
+            ref = row.get("ref")
+            lines.append("%sanchor %s %s in %s; kind %s%s%s; %s" % (
+                REPORT, slug, what, path, row.get("kind"), ", ref %s" % ref if ref else "",
+                ", test %s" % row["test"] if row.get("test") else "", changes))
+    return lines
+
+
+def home_report(rng, rules, entries, folders):
+    """One line per changed code file that a decision's Home line or a mechanism row names. The decisions are read
+    from the first of `folders` that holds a file at head."""
+    code = sorted(p for p in rng.changed if not p.endswith(".md"))
+    paths = file_paths(entries)
+    folder = next((f for f in folders if any(p.startswith(f + "/") for p in paths)), None)
+    homes = {}  # file -> decision stems whose Home names it
+    for path in (p for p in paths if folder is not None and p.startswith(folder + "/")):
+        if path.endswith(".md"):
+            blob = rng.batch.get("%s:%s" % (rng.head, path))
+            for home in HOME_LINE.findall((blob or b"").decode("utf-8", "replace")):
+                homes.setdefault(home, []).append(os.path.basename(path)[:-3])
+    lines = []
+    for path in code:
+        parts = []
+        if homes.get(path):
+            parts.append("Home of decision %s" % ", ".join(sorted(homes[path])))
+        named_by = sorted(slug for slug, row in (rules or {}).items()
+                          if isinstance(row.get("mechanism"), dict)
+                          and path in (row["mechanism"].get("ref"), str(row["mechanism"].get("test", "")).split("::")[0]))
+        if named_by:
+            parts.append("named by row %s" % ", ".join(named_by))
+        if parts:
+            lines.append("%s%s changed; %s" % (REPORT, path, "; ".join(parts)))
+    return lines
+
+
+def report(rng):
+    """The report lines. A repo with no lint/rule_mechanisms.json gets the Home half only, and no error.
+    A changed code file lists the decision folder and the mechanisms file in one `ls-tree`, or reuses the whole-tree
+    listing the findings read already; the mechanisms file is read only when that listing says it exists."""
+    rule_files = [p.replace(os.sep, "/") for p in RULE_FILES]
+    code = any(not p.endswith(".md") for p in rng.changed)
+    if not code and not rng.changed & set(rule_files):
+        return []
+    entries, folders = None, ()
+    if code:
+        folders = decision_folders()
+        entries = rng.tree if rng.tree is not None else tracked_entries(rng.head, *[f + "/" for f in folders], MECHANISMS)
+    present = entries is None or any(p == MECHANISMS for _, p in entries)
+    rules = None
+    if present:
+        try:
+            rules = mechanism_rows(rng)
+        except Unknown as exc:  # the Home half still prints, without rows
+            rng.unknowns.append(str(exc))
+    lines = anchor_report(rng, rules) if rules is not None else []
+    return lines + (home_report(rng, rules, entries, folders) if code else [])
+
+
+def scan(range_text):
+    """(found, unknowns, report): {(path, line, code): [messages]}, one text per read that could not run, and the
+    report lines. The report adds no finding, and a report read that fails is one unknown."""
+    diff_args, base, head = parse_range(range_text)
+    removed, renamed, modified, added = changed_paths(diff_args)
+    batch = BlobReader()
+    rng = Range(base, head, removed, renamed, modified, batch, added)
+    lines = []
+    try:
+        found = find_stale(rng)
+        try:
+            lines = report(rng)
+        except (Unknown, OSError, ValueError, layout.LayoutError) as exc:  # LayoutError: a layout or extras file that does not read
+            rng.unknowns.append("report not read, %s" % exc)
     finally:
         batch.close()
-    return found, rng.unknowns
+    return found, rng.unknowns, lines
 
 
 def placeholder_adjacent(line, start, end):
@@ -528,7 +700,7 @@ def main(argv):
     try:
         root = git("rev-parse", "--show-toplevel").decode().strip()
         os.chdir(root)
-        found, unknowns = scan(args.range) if args.range else scan_tree(args.tree)
+        found, unknowns, lines = scan(args.range) if args.range else (*scan_tree(args.tree), [])
     except BaseUnknown as exc:
         print("stale-cites: unknown, the base of %s does not resolve (%s). Check out with fetch-depth 0 "
               "(actions/checkout) so the range has history. Nothing was checked." % (args.range, exc))
@@ -540,6 +712,8 @@ def main(argv):
         print("%s:%d: %s %s" % (path, number, code, "; ".join(texts)))
     for text in unknowns:
         print("stale-cites: unknown, %s" % text)
+    for line in lines:
+        print(line)
     print("stale-cites: %s" % ("FAIL, %d finding(s)" % len(found) if found else "PASS"))
     return 1 if found else 0
 
