@@ -163,6 +163,11 @@ const SAVED_A = { [DECISION.id]: { item: DECISION.id, n: 27, at: "2026-10-26T01:
 const opt = (key, label, design) => ({ key, label, how: "h", gain: "g", lose: "l", ...(design ? { design } : {}) });
 const DESIGNS = { s1: "<p>one</p>", s2: "<p>two</p>" };
 const optFrame = (it, key) => `label.opt[for="o-${it.id}-${key}"] iframe`;
+// SENT_MOVE, where a card sent on this visit goes: "sink" (the default) moves it to the Answered section, folded; "stay" keeps it in its tier.
+// page.html declares the switch as the one line below. A case sets the value by rewriting that line in the page source. On a page with no
+// such line the rewrite does nothing, so a case fails on its own assertion, never on a missing name. The "stay" value is today's order.
+const SENT_MOVE_LINE = 'const SENT_MOVE = "sink";';
+const withSentMove = (value) => html.replace(SENT_MOVE_LINE, `const SENT_MOVE = "${value}";`);
 
 // ---------------------------------------------------------------- the final design
 
@@ -1957,7 +1962,7 @@ test("a seen, owed task's steps and command show with no fold press", async (t) 
 // A seen card answered on the page, then changed to an empty draft (a withdraw pending), has no fold control to lock: its options stay open.
 test("a withdraw pending on a seen card that was answered on the page leaves no fold to lock, and its options stay open", async (t) => {
   const seen = mk("seen-answered", 1, { added: at(5) });
-  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
+  const page = await open(t, { items: [seen, sentItem()], pageHtml: withSentMove("stay") }); if (!page) return;
   const c = card(page, seen);
   assert.equal(await seenOf(page, seen), "true", "the card is not seen");
   assert.equal(await c.locator("button.unfold").count(), 0, "a seen, owed card has a fold control");
@@ -2188,7 +2193,7 @@ test("a sunk item with lastAnswer set and no replied time stays folded with no N
 // Case 4: a Send on the open page moves no card and no mark. The card layout and the New reply mark read the same after it.
 test("a Send on the open page moves no card and no New reply mark", async (t) => {
   const reply = repliedCard(), fresh = mk("send-open", 2, { added: NEW_ADDED });
-  const page = await open(t, { items: [reply, fresh], answers: answerOf(reply, "a", { note: "Kept the red one." }), storage: VISIT, clock: LOAD_AT }); if (!page) return;
+  const page = await open(t, { items: [reply, fresh], answers: answerOf(reply, "a", { note: "Kept the red one." }), storage: VISIT, clock: LOAD_AT, pageHtml: withSentMove("stay") }); if (!page) return;
   assert.equal(await sectionOf(page, reply), "tier-answered", `No. ${reply.n} is not in the Answered section`);
   const before = await layout(page), markBefore = await markName(page, reply);
   assert.equal(markBefore, NEW_MARK, `No. ${reply.n} draws no New reply mark before the Send`);
@@ -2324,7 +2329,7 @@ test("an answered item already filed stays in the Answered section, with the fil
 
 test("an open card answered on the page stays in its tier until reload, and a fresh load sinks it to the Answered section", async (t) => {
   const it = mk("order-send", 1, { added: at(5) }), other = mk("order-other", 2, { added: NEW_ADDED });
-  const page = await open(t, { items: [it, other] }); if (!page) return;
+  const page = await open(t, { items: [it, other], pageHtml: withSentMove("stay") }); if (!page) return;
   await choose(page, it, "a");
   await send(page);
   await page.waitForFunction((id) => !!window.__answers()[id], it.id);
@@ -2448,7 +2453,7 @@ test("Answered section: with the section folded by its head, a rail chip of a su
 
 test("Answered section: a Send made before the first receipts snapshot keeps its card in its tier when the receipts arrive", async (t) => {
   const it = mk("window-send", 1, { added: at(5) }), other = mk("window-other", 2, { added: NEW_ADDED });
-  const page = await open(t, { items: [it, other], holdReceipts: true }); if (!page) return;
+  const page = await open(t, { items: [it, other], holdReceipts: true, pageHtml: withSentMove("stay") }); if (!page) return;
   await choose(page, it, "a");
   await send(page);
   await page.waitForFunction((id) => !!window.__answers()[id], it.id);
