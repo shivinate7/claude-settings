@@ -10,4 +10,4 @@ if [ "${#targets[@]}" -eq 0 ]; then
   echo "run.sh: ZIZMOR_PATHS is empty, so there is nothing to audit" >&2
   exit 2
 fi
-exec pipx run zizmor==1.30.1 "${targets[@]}"
+exec pipx run zizmor==1.32.0 "${targets[@]}"
