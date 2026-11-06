@@ -261,23 +261,29 @@ def parse(text):
     """[{stamp, line, text, items, item_at}] from the inbox, `line` being the heading's 1-based line number and
     `item_at` the line numbers of `items`. Lines inside a fence are never headers or items, and a
     `### ` line that is not the hook's own Central header is plain text."""
-    blocks, fence = [], None
+    return scan(text)[0]
+
+
+def scan(text):
+    """(blocks, open_line): parse()'s blocks, and the 1-based line of the fence still open at the end of
+    the text, or None. The one loop of the inbox fence rule: state_parse_check.py reads open_line from it."""
+    blocks, fence, open_line = [], None, None
     for number, ln in enumerate(text.split("\n"), 1):
         ln = ln.rstrip("\r")
         if fence is not None:
             if re.fullmatch(r"`+", ln) and len(ln) >= len(fence):
-                fence = None
+                fence, open_line = None, None
             else:
                 blocks[-1]["text"] = ln if blocks[-1]["text"] is None else blocks[-1]["text"] + "\n" + ln
         elif HEADER.match(ln):
             blocks.append({"stamp": ln[len(HEADING_PREFIX):], "line": number, "text": None, "items": [],
                            "item_at": [], "fenced": False})
         elif blocks and not blocks[-1]["fenced"] and re.fullmatch(r"`{3,}", ln):
-            fence, blocks[-1]["fenced"] = ln, True
+            fence, open_line, blocks[-1]["fenced"] = ln, number, True
         elif blocks and ln.startswith("- fb-"):
             blocks[-1]["items"].append(ln)
             blocks[-1]["item_at"].append(number)
-    return blocks
+    return blocks, open_line
 
 
 def item(ln):
@@ -761,19 +767,33 @@ def answer_problem(b, text, k, homes, pages):
             " the item number, or an ArtifactData write with n set to it)" % (b["stamp"], ", ".join(unsent)))
 
 
-def unfenced(text):
-    """`text` without the lines of its own code fences, an unclosed fence running to the end."""
-    kept, fence = [], None
-    for ln in text.split("\n"):
-        mark = re.match(r"\s*(`{3,}|~{3,})", ln)
+FENCE_MARK = re.compile(r"\s*(`{3,}|~{3,})")
+
+
+def fence_scan(text, indent_cap=None):
+    """(kept, open_line) for markdown text: `kept` the lines outside its code fences, and `open_line` the
+    1-based line of a fence left open to the end, or None. The one loop of the markdown fence rule, for
+    unfenced() and state_parse_check.py. A fence is backticks or tildes with an info string allowed; it
+    closes on a run of its own character, at least as long. `indent_cap` None reads a fence at any indent, a
+    tab included (unfenced() and the grant check keep that); a number caps the indent in spaces: 3 is
+    CommonMark's rule, where four spaces make an indented code block, not a fence (the handoff check)."""
+    mark_re = FENCE_MARK if indent_cap is None else re.compile(r" {0,%d}(`{3,}|~{3,})" % indent_cap)
+    kept, fence, open_line = [], None, None
+    for number, ln in enumerate(text.split("\n"), 1):
+        mark = mark_re.match(ln)
         if fence is None:
             if mark:
-                fence = mark.group(1)
+                fence, open_line = mark.group(1), number
             else:
                 kept.append(ln)
         elif mark and mark.group(1)[0] == fence[0] and len(mark.group(1)) >= len(fence):
-            fence = None
-    return "\n".join(kept)
+            fence, open_line = None, None
+    return kept, open_line
+
+
+def unfenced(text):
+    """`text` without the lines of its own code fences, an unclosed fence running to the end."""
+    return "\n".join(fence_scan(text)[0])
 
 
 def is_grant(text):
