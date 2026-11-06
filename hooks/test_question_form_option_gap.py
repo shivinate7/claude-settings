@@ -98,7 +98,7 @@ def judge_both(name, call, cwd, want):
 
 def case_other_repo_page_refuses_none_key():
     """(a) An items write to another repo's waiting page, with an option keyed none, is refused. On main the
-    gate reads the url as not this repo's page, so it passes the write."""
+    guard reads the url as not this repo's page, so it passes the write."""
     cwd = tcj.make_repo("gap-other", page=OTHER_URL)
     judge_both("(a) a write to another repo's waiting page refuses an option keyed none",
                items_write("set", none_item()), cwd, REFUSED)
@@ -129,7 +129,7 @@ def case_relative_file_path_refuses_none_key():
 
 def case_own_page_refuses_none_key():
     """Control, green on main: the cwd repo's own page refuses an option keyed none. The rule works wherever
-    the gate reads the page as this repo's."""
+    the guard reads the page as this repo's."""
     judge_both("control: the cwd repo's own page refuses an option keyed none",
                items_write("set", none_item()), tcj.PAGE_REPO, REFUSED)
 
