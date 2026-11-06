@@ -15,6 +15,7 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 2,
   "ref": "your picks 239 a and 257 c (Nov 5 07:44-07:49 CST)",
+  "reply": "Not done yet. The settings.json on main (7975f6d8, read 12:10 CST) has no Own Branch Lease Push line. PR #1293 added a different line, Relayed Grant (item 267). This line still needs your GitHub edit.",
   "short": "settings: own-branch lease push",
   "status": "open",
   "steps": [

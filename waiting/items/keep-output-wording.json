@@ -4,7 +4,11 @@
   "home": "CLAUDE.md rule git-never-discard-output",
   "id": "keep-output-wording",
   "kind": "decision",
-  "lastAnswer": "none (11:22 CST Nov 6): \"i need more context\". Re-asked 11:30 CST with what the rule, the guard and the cap are.",
+  "lastAnswer": {
+    "at": "2026-11-06T18:10:06.618Z",
+    "choice": "a",
+    "note": "Routed 12:16 CST to lane output-discard-rule-scope and the coordinator: the line reads \"Keep git write output.\""
+  },
   "n": 238,
   "options": [
     {

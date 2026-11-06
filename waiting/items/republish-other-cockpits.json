@@ -26,6 +26,7 @@
   "owner": "triage (session_013NEJL42Sv3tJkjpzY7bExj)",
   "rank": 2,
   "ref": "claude-settings batch 4 (e2e999e8, #1171 roadmap-blank-pages)",
+  "reply": "A plain re-run picks it up, as long as that machine's claude-settings is on main. At each wake, the page's writer compares the page with main's page.html. If the page is behind, the writer republishes it (waiting-page skill, \"Keep the page on main's code\"). So in each of the 4 sessions, say: \"pull claude-settings main, then run the waiting-page wake\".",
   "short": "Republish 4 Cockpits",
   "status": "open",
   "steps": [

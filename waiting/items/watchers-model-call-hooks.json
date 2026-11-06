@@ -1,6 +1,7 @@
 {
   "added": "2026-11-04T13:57:00Z",
   "context": "Goal: one uniform direction for every watch, wake and hook (your item 180).\nProblem (rule): you asked for an Opus check first. It found that all six must stay command hooks today. A built-in prompt hook gets only the tool input, has no fail-closed path and no effort setting, and your typed override cannot lift its deny.\nBased on (measured): Opus audit, main 111b566b, read against code.claude.com/docs/en/hooks, 08:43 CST Nov 5. call_judge: needs past rulings, the override lift and a fail-closed path. prose_judge: no override lift, no effort field; the nearest to a whole move. reply_judge: a Stop prompt hook forces the turn on; it cannot add a note. feedback_guard: reads and rewrites the inbox. report_guard: needs ruling records and a fail-closed path. sendmessage_state: its wording judge could split out once a prompt deny can be lifted.\nBased on (read): whether a prompt hook runs on the session's sign-in or a token is unknown; the docs do not say.\nDeparts from: main (six callers start their own claude -p, no cost stated) \u2014 b adds each caller's cost and the re-run triggers to invoke_model's record; c adds a week of fire counts.\n\nRe-run triggers: Claude Code adds an effort field, a fail-closed setting for prompt hooks, or a way to lift a prompt hook's deny.",
+  "group": "watchers-one-rule",
   "home": "claude-settings rule outcomes-mechanize-rules; docs/plans/align-watchers.md",
   "id": "watchers-model-call-hooks",
   "kind": "decision",

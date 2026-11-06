@@ -4,6 +4,12 @@
   "home": "docs/design/layout.md ux-swift-same-intent",
   "id": "ux-swift-layout-rule",
   "kind": "decision",
+  "lane": "coordinator: one debt per app",
+  "lastAnswer": {
+    "at": "2026-11-06T17:46:39.335Z",
+    "choice": "b",
+    "note": "Routed 12:12 CST to the coordinator: file one debt for each app that breaks the rule (home, degen, mailaudit). The rule stays as written."
+  },
   "n": 272,
   "options": [
     {

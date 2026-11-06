@@ -8,14 +8,18 @@
   "home": "c29",
   "id": "windows-live-checks",
   "kind": "task",
-  "lastAnswer": "note, not done (11:22 CST Nov 6): asked for a small prompt to test it in Claude Code. Added 11:30 CST as the command below.",
+  "lastAnswer": {
+    "at": "2026-11-06T18:10:06.618Z",
+    "done": true,
+    "note": "Both PASS on Windows: the decision watch's newest END line (17:04:39Z) reads ALLOW, and all five mods match main. Roadmap steps c29 and c58 are marked done (triage, 12:16 CST)."
+  },
   "minutes": 5,
   "n": 10,
   "owner": "Triage the roadmap (9)",
   "rank": 10,
   "ref": "c29 (decision watch runs again), c58 (mods update themselves)",
   "reply": "Unparked for real at 07:51 CST Nov 5. Your 17:48 press reopened the item, but its parked line stayed, so the page still showed it as parked. Do the steps below on your Windows PC.",
-  "status": "open",
+  "status": "closed",
   "steps": [
     "Restart the Claude app on your Windows PC and take one turn (any message).",
     "Paste the command below into PowerShell. It opens Claude Code with a prompt that runs both checks and prints PASS or FAIL for each.",

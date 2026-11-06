@@ -1,0 +1,9 @@
+{
+  "answered": "2026-11-06T18:13:00Z",
+  "at": "2026-11-06T18:04:11.764Z",
+  "id": "ask-mw5aaa9gvg",
+  "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "read": "2026-11-06T18:13:00Z",
+  "reply": "That exact wording is the old message, from before the fix (decision cloud-start-hooks-run-fresh, Nov 3). Main's check now finds the binary another way and says nothing. Two cases still show it. (1) A cloud session from an environment snapshot built before the fix: its stale start-up hook runs first and prints the old line. Each session from that snapshot shows it, new or old, until the snapshot is rebuilt (page item cloud-snapshot-rebuild). (2) A resumed old session that still runs its old hook copy. This session (cloud, started today) has CLAUDE_CODE_EXECPATH set to /opt/claude-code/bin/claude. Mac sessions link their hooks to the clone, so they follow your Mac checkout.",
+  "text": "\"CLAUDE_CODE_EXECPATH is not set (decision precompact-handoff, item 12).\" this still seems like an issue in sessions, is it true on new and old sessions?"
+}

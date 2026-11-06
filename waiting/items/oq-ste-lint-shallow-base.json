@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-06T18:08:00Z",
+  "context": "Goal: the shared style lint never passes a change it could not read, and never fails a child repo for anything other than a style fault.\nProblem (rule): to lint a change, the lint compares it with the base commit. When git can't find that commit, the comparison fails. Your ruling says an unreadable base counts as \"unknown\" and the lint passes, so today a shallow clone (a copy with only the latest commit) is never linted. GitHub's checkout makes a shallow clone by default, and run.sh fetches the base the same way (--depth=1).\nBased on (ruling): decision stale-cites-at-merge, lines 18-19: an unknown result passes, and so does a run with FAIL=false.\nDeparts from: main passes when it can't read the base \u2014 a fails it; b keeps the pass only for a shallow clone; c fetches the full history once, then fails.\nAlso: under a, b or c, a run with FAIL=false still fails when the lint can't read the diff. That changes line 19.\n\nMeanwhile: lane ste-lint-diff-fail-closed waits for your pick. Its tests are red on main and green on its branch.",
+  "home": "decision stale-cites-at-merge",
+  "id": "oq-ste-lint-shallow-base",
+  "kind": "decision",
+  "lane": "ste-lint-diff-fail-closed (session_013NEJL1DSd9D3Fftt6Rgch4)",
+  "n": 275,
+  "options": [
+    {
+      "gain": "No change passes without being linted.",
+      "key": "a",
+      "label": "Fail whenever the base can't be read",
+      "lose": "In each child repo that uses the default checkout, every push to main fails."
+    },
+    {
+      "gain": "Child repos keep passing.",
+      "key": "b",
+      "label": "Pass a shallow clone, fail anything else",
+      "lose": "A shallow clone still passes without being linted."
+    },
+    {
+      "gain": "Child repos pass, and their changes are still linted.",
+      "key": "c",
+      "label": "Fetch the full history once, then fail",
+      "lose": "One extra fetch, slower on a large repo (not measured)."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "c",
+  "rank": 2,
+  "ref": "step ste-lint-diff-fail-closed; branch handoff/ste-lint-diff-fail-closed",
+  "short": "Style lint, unreadable base",
+  "status": "open",
+  "title": "Style lint: when it can't read the base commit, fail it, pass a shallow clone, or fetch the full history first?",
+  "why": "Recommended: c. Child repos stay linted, and no repo fails for something that isn't a style fault."
+}

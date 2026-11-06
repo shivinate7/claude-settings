@@ -1,0 +1,11 @@
+{
+  "answered": "2026-11-06T18:13:00Z",
+  "at": "2026-11-06T17:54:19.860Z",
+  "filed": "2026-11-06T18:13:00Z",
+  "home": "step:checks-and-balances-audit",
+  "id": "ask-mw59xljoxp",
+  "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "read": "2026-11-06T18:13:00Z",
+  "reply": "I filed this as roadmap step checks-and-balances-audit and sent it to the coordinator. An Opus audit agent will map where an independent reviewer or a check pushes back today, and where nothing does: hooks, tool use, prompts, plans, briefs and merges. It ranks the gaps by harm. Its findings come back to the page.",
+  "text": "I need a lane ideally an opus agent that says whether or not we have enough adversarial review/pushback agent on hooks/tool-use/prompting/planning/etc like are we properly using checks and balances wherever (intentionally generic and open ended quesiton from me)"
+}
