@@ -599,15 +599,26 @@ class UnreadConfigTests(unittest.TestCase):
         self.assertDocRead(out)
         self.assertNotEqual(rc, 0, "a .ste.toml that does not parse passed in CI:\n" + out)
 
+    # Owner item 276 a (12:39 CST 2026-11-06, via the coordinator 13:31 CST): an unread input is red in CI. `--fail-on never`
+    # opts out of the findings only, so the UNKNOWN line and the summary still print and the CI exit is non-zero.
+
     @unittest.skipUnless(sys.version_info >= (3, 11), "tomllib, which reads .ste.toml, needs Python 3.11 or later")
-    def test_a_malformed_toml_with_fail_on_never_prints_unknown_and_summary_and_exits_0_in_ci(self):
-        # The caller's opt-out (lane ruling R2): `--fail-on never` keeps the run's exit at 0. The UNKNOWN and the summary still print.
+    def test_a_malformed_toml_with_fail_on_never_is_red_in_ci_and_prints_unknown_and_summary(self):
         self.write(".ste.toml", "[ste\nmax_words = \n")
         rc, out = self.run_lint(ci=True, extra=("--fail-on", "never"))
         self.assertDocRead(out)
         self.assertIn("ste-lint: 1 files", out, "the summary did not print:\n" + out)
         self.assertIn("UNKNOWN", out, "the unparsed .ste.toml printed no UNKNOWN line:\n" + out)
-        self.assertEqual(rc, 0, "--fail-on never is the caller's opt-out: an UNKNOWN must not fail the run in CI:\n" + out)
+        self.assertNotEqual(rc, 0, "--fail-on never opts out of findings only: an unread config must be red in CI:\n" + out)
+
+    @unittest.skipUnless(sys.version_info >= (3, 11), "tomllib, which reads .ste.toml, needs Python 3.11 or later")
+    def test_a_malformed_toml_with_fail_on_never_exits_0_locally_and_prints_unknown_and_summary(self):
+        self.write(".ste.toml", "[ste\nmax_words = \n")
+        rc, out = self.run_lint(extra=("--fail-on", "never"))
+        self.assertDocRead(out)
+        self.assertIn("ste-lint: 1 files", out, "the summary did not print:\n" + out)
+        self.assertIn("UNKNOWN", out, "the unparsed .ste.toml printed no UNKNOWN line:\n" + out)
+        self.assertEqual(rc, 0, "locally an unread config exits 0, also with --fail-on never:\n" + out)
 
     def test_a_readable_config_is_green_in_ci_with_no_unknown(self):
         # Green control: a config that parses passes in CI, with the doc still read and no UNKNOWN line.
