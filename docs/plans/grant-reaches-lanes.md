@@ -17,7 +17,7 @@ Incidents, coordinator-reported, 2026-11-01:
 - The coordinator's brief for item 149 b (a waiting-page answer): refused as self-modification. The
   step record says Nov 1 23:06 CST, which is later than this plan was written: the time is
   unverified. This is step page-save-reaches-auto-mode. Its aim: auto mode counts a page save as the
-  owner's grant, as rule questions-go-to-owner already rules ("My save on that page is my grant").
+  owner's grant, as rule questions-go-to-owner already rules ("My save on that page is my grant"). Closed by section 4.
 
 The guard layer is solved in its own session: `refuse()` in `hooks/guard_core.py` and decision
 owner-override (the typed `override` word). The open problem is the classifier layer only.
@@ -138,9 +138,9 @@ runner 8 was still refused "Merge Without Review" (coordinator-reported, 2026-11
 command is unknown: a search of the newest 115 events of runner 8's transcript (2026-11-03 18:24
 CST) did not reach it. A command outside the rule's form, such as an absolute path or `--confirm`
 before the PR, would explain the refusal and leave the record true. If the rule matched and the
-classifier still refused, a hook `allow` may not skip it either, and the probe may end Design A.
-The probe of step 1 reads which holds first. The `merge <pr>` act is narrower
-than that rule, so it adds nothing while the rule stands. Question 7 asks whether to narrow the rule.
+classifier still refused, the refused-act half of the step 1 probe reads whether a hook `allow` lifts it.
+The `merge <pr>` act is narrower
+than that rule, so it adds nothing while the rule stands. Question 7 records the rule's status (section 6).
 
 Build step 1 of any design is a probe in one session. The skip is measured (section 1, 2026-11-06): a hook `allow` skips the classifier. That probe used an act the classifier allowed, so it did not test a refused act. A hook returns `allow` on one act the
 classifier refuses today. The transcript's `permission_decision` shows the result. If the
@@ -231,8 +231,8 @@ model's. No guard refuses a model's write to `answers/<id>` (`hooks/call_judge.p
 writes only). The answer record has no viewer field (`skills/waiting-page/page.html`). An HMAC key
 in the cloud environment's secrets is readable with `env`, so signing proves nothing either.
 
-So Design C carries model text, which is the problem we have today. The page cannot tell the owner's save from a model's, but that no longer rejects C: decision `relayed-grant-read-from-page` accepted that risk under decision `guard-guards-mistakes-only`. C stays out for a grant typed in chat only, because a chat answer has no `answers/<id>` (decision `relayed-grant-read-from-page`, Gaps, "Chat answers"). Design A closes that gap. Design C stays as
-the comparison: a store is not owner evidence unless the owner's own client writes it.
+So Design C carries model text, which is the problem we have today. Decision `relayed-grant-read-from-page` accepted that risk (`ArtifactData` writes as the person, no guard on `answers/<id>`, no viewer field) under decision `guard-guards-mistakes-only`. C stays out for a grant typed in chat only, because a chat answer has no `answers/<id>` (decision `relayed-grant-read-from-page`, Gaps, "Chat answers"). Design A closes that gap. Design C stays as
+the comparison: a store counts as owner evidence only where the decision's attribution rule holds (the page is the owner's private page, and no session writes `answers/`).
 
 The live step grant (decision owner-override) is such a store. It lifts only the Opus spawn ask,
 a cost act, not a safety act. This plan leaves it as it is.
@@ -268,8 +268,8 @@ Design B: one file write per grant, one file read per tool call while the file e
 
 1. **The reframe.** The docs say hook text never becomes owner words to the classifier. Answered (a) by the 2026-11-03 sign-off (item 152 a): gate the named act before the classifier, as this plan does. Option (b), keep asking in each session, was not taken.
 2. **The grant form.** Answered (a) by the 2026-11-03 sign-off (item 152 a): the fixed words of section 2, catalogue in code. Option (b), free text judged by a model, lets a misread widen the act, against rule outcomes-grant-covers-named-act.
-3. **The first catalogue (open).** The act to gate is a lane's `Agent` spawn, not an Edit or Write. Options: (a) gate the lane's `Agent` spawn as the first act, one per incident, and keep `self-edit` as a candidate; (b) gate `self-edit` as written, which gates nothing (section 2). Recommend (a).
+3. **The first catalogue (open).** The act to gate is a lane's `Agent` spawn, not an Edit or Write. The candidate acts that wait on this question are `self-edit` (gates nothing as written, section 2) and `merge <pr>` (superseded). Options: (a) gate the lane's `Agent` spawn as the first act, as the refused act on record; (b) defer the first act until the hook gate is probed on an `Agent` spawn (section 2, Agents). Recommend (a): it is the only refused act on record. Meanwhile: the build waits.
 4. **Agents.** Moot under section 2: `self-edit` gates nothing as written. Options were: (a) `self-edit` reaches the target's agents, as a timed override does, and `merge` stays with the batch runner; (b) the lead session only. The `[Self-Modification]` refusal was a builder's.
 5. **The gate.** Answered (a) by the 2026-11-03 sign-off (item 152 a): probe the hook gate first, the mod gate second. Option (b), the mod gate only, rested on its documented skip. The hook gate is known to load in cloud sessions.
 6. **Computer sessions.** Answered (a) by the 2026-11-03 sign-off (item 152 a): Design A only, Design B if its probes fail. Option (b), both now, was not taken; (a) keeps one home.
-7. **The cloud merge rule.** `merge <pr>` is superseded: decision `standing-merge-grant` and the "Owner Session Message" coordinator-to-runner merge carve-out in settings.json `autoMode.allow` cover the incident. No "Merge Without Review" refusal is on record after 2026-11-01. `merge/cloud_allow.json` allows `merge * --confirm` for every PR. Options: (a) keep it, and record that `merge <pr>` adds nothing in the cloud while it stands; (b) narrow it to grants, so a merge needs a `merge <pr>` grant. Recommend (a) until the probe shows why runner 8 was refused: (b) would add an ask to every routine merge.
+7. **The cloud merge rule.** Superseded, pending question 3. Decision `standing-merge-grant` and the "Owner Session Message" coordinator-to-runner merge carve-out in settings.json `autoMode.allow` cover the incident. No "Merge Without Review" refusal is on record after 2026-11-01. `merge/cloud_allow.json` allows `merge * --confirm` for every PR.
