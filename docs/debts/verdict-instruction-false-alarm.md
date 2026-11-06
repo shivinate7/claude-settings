@@ -9,6 +9,6 @@ colon, not at line start only.
 
 **Decision.** `reviewer-brief-blind`, a reviewer's brief holds no report or verdict.
 
-**Retire.** Match the label at line start: `verdict`, or `prior`, `previous`, `last` or `earlier` before it,
-and nothing else before the colon. Closed when red cases allow both brief lines above and the
-`Previous round verdict: FAIL` case stays refused.
+**Retire.** Closed when red cases allow both brief lines above and the backtick quote, and these stay
+refused: `Previous round verdict: FAIL`, `Round 1 verdict: FAIL`, `Round 2 (sonnet) verdict: FAIL`,
+`Final verdict: PASS`, `Reviewer verdict: FAIL`, `Verdict: PASS` and `Round 1: FAIL`.
