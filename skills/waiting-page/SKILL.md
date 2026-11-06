@@ -51,19 +51,23 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     new items come first, then seen ones, each part in that order. Seen: the item is open, has no
     `answers/<id>`, and was `added` before the owner's last Send (the newest `answers/<id>.at` or
     `lastAnswer.at` on any item, closed ones too). A group is seen only when every member is; a ruling is
-    never seen. The page works this out once at load and keeps it, so a Send re-sorts nothing; a reload
-    works it out again. A seen card keeps every answer part open (options, or steps, command and links; the ready
+    never seen. The page works this out once at load and keeps it; a reload works it out again. A seen card keeps every answer part open (options, or steps, command and links; the ready
     line; Mark done; None of these; the note box), under a divider that reads "Asked before". An item the owner
     still owes never folds. It folds only once answered (see "Answered" below).
-    An item that arrives after load is new, and so is any group that gains a member after load.
+    An item that arrives after load is new, and so is any group that gains a member after load. It sorts first in its
+    tier, ahead of the new and seen parts, and a group is an arrival while any member is; the page keeps the set of ids
+    present at load. An open card sits above an answered one: a Send moves the sent card out of its tier (see "Answered").
   - An item answered at or before load (`answers/<id>` exists, filed or not) sits in the
     "Answered" section, after the open tiers and before "Arbiter rulings", newest answer first. A group sits there only
     when every member is answered, as one frame headed by its group title, or "Answered together" when it has none, at its newest member's time. A group with an
     open member stays whole in its tier. The page works this out once, when the items and answers have loaded, and keeps
-    it: an answer sent on the open page, or a receipt that arrives later, moves no card until a reload. The section is open on load, each card folded
+    it: a receipt that arrives later moves no card until a reload. The page has one switch, `SENT_MOVE`. With "sink" (the
+    default) a Send moves each sent card to this section, folded, and the next open card takes its place; Undo puts it
+    back in its tier, open. A group moves whole. With "stay" a sent card keeps its place until reload. The sub-head reads
+    "Your sent answers, newest first." under "sink". The section is open on load, each card folded
     to its top row, title and answer line; one control holds the owner's note, last answer and reply. A card with a
     new reply (see `replied`) opens at load and carries the mark "New reply", in place. A Change keeps
-    the card in the section, open, until reload. A card that holds a draft, a stood pick or a pending withdraw stays open. With no answered item the page draws no section and no rail row.
+    the card in the section, open, until reload, and a reply that arrives opens a card in place. A card that holds a draft, a stood pick or a pending withdraw stays open. With no answered item the page draws no section and no rail row.
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
   - `port: true` marks a question about a port or redesign of an existing app. Set `port: false` on an item
     whose text uses the word port for another meaning. Such an item needs a line in `context` that starts
@@ -188,7 +192,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 
 The page hides an item with status `closed`, except an arbiter ruling (see `arbiter` above). It shows an item as answered when
 `answers/<id>` exists: a green edge and the badge "Filing pending, sent" or "Filed
-in <home>" in the Answered section (see `rank` above), never "waited". An item answered on the open page keeps its tier
+in <home>" in the Answered section (see `rank` above), never "waited". An item answered on the open page moves to the Answered section under `SENT_MOVE` "sink"; under "stay" it keeps its tier
 until reload, with the badge "Answered, filing pending" or "Answered, filed in <home>". It stays on the page until the owning session closes the item.
 
 ## The writer

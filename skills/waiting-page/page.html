@@ -916,7 +916,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 <!-- /roadmap:data -->
 
 <script>
-const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answeredOpen: true, sunk: null, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, sendAt: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
+const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answeredOpen: true, sunk: null, known: null, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, sendAt: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
@@ -1073,6 +1073,9 @@ const waited = (iso) => (validT(iso) ? "waited " + span(Date.now() - Date.parse(
 /* ---------- Tiers: what holds up work, then what has a deadline, then the rest by age ---------- */
 const TIERS = [{ k: "holds", name: "Blocking" }, { k: "due", name: "Upcoming" }, { k: "calm", name: "Whenever" }, { k: "stands", name: "Pick stands" }];
 const RANK = { holds: 0, due: 1, calm: 2, stands: 3 };
+// What a Send does to the card it sends (owner, page item 311; one switch). "sink": the card moves to the Answered section, folded, and the next open card takes its place.
+// "stay": the card keeps its place in its tier until reload.
+const SENT_MOVE = "sink";
 const ts = (iso) => { const t = Date.parse(iso); return isNaN(t) ? Infinity : t; };
 // A pick stands only for a decision with a valid pick that sits in no group, so it is always in the last section where the owner sees it.
 const standsOk = (it) => it.stands === true && !it.group && it.kind === "decision" && !!pickKeys(it);
@@ -1088,12 +1091,12 @@ const writeStamp = (key) => { try { localStorage.setItem(key, new Date().toISOSt
 const VISIT = readStamp("waiting.visit");
 writeStamp("waiting.visit");
 // A reply is new when the writer's `replied` time is later than the last Send (state.sendAt, kept by freezeSeen) and than the last visit. It reads no set, so a reply
-// that arrives on the open page is new too, and a Send moves no mark (ux-order-holds-still).
+// that arrives on the open page is new too, and a Send moves no mark.
 const newReply = (it) => state.sendAt !== null && !isRuling(it) && Date.parse(it.replied) > Math.max(state.sendAt, VISIT ?? -Infinity);
 // A folded card of a new reply opens in place; a press on its fold wins for the rest of the visit.
 const foldOpen = (it) => (it.id in state.unfold ? !!state.unfold[it.id] : newReply(it));
 // Seen, worked out once (freezeSeen) and kept: an open item with no saved answer that was added before the owner's last Send. A later item is new,
-// and a Send on the open page re-sorts nothing (ux-order-holds-still). A reload works it out again.
+// and a Send on the open page re-sorts no tier. A reload works it out again.
 // A group is seen only while every member is in the frozen set, so a member that arrives after load makes the whole group new.
 const isSeen = (it) => !!state.seen && mates(it).every((x) => state.seen.has(x.id));
 // feed.receipts only records that the receipts arrived (a test waits on it); no freeze reads it.
@@ -1106,9 +1109,12 @@ function freezeSeen() {
   state.sendAt = last;
   const old = (it) => !isRuling(it) && !state.answers[it.id] && !answeredByWait(it) && ts(it.added) < last;
   state.seen = new Set(state.items.filter(old).map((it) => it.id));
+  // Known, kept beside seen: every item present at load. An item outside it arrived later and sorts first in its tier; a group is known only while every member is.
+  state.known = new Set(state.items.map((it) => it.id));
 }
+const isArrival = (it) => !!state.known && !mates(it).every((x) => state.known.has(x.id));
 // Sunk, worked out once and kept like seen: an item with a saved answer when the items and answers loaded (isSaved reads no receipts).
-// A Send on the open page, or a receipt that arrives later, moves no card (ux-order-holds-still); a reload works it out again.
+// A receipt that arrives later moves no card. A Send under SENT_MOVE "sink" adds the sent card (sinkSent) and Undo takes it out again (unsinkSent); a reload works it out again.
 // A Change keeps the card in the section (isSaved turns false under it), so membership never reads isSaved after this.
 // A group sinks only when every member is in the set, so it never splits.
 const isSunk = (it) => !!state.sunk && mates(it).every((x) => state.sunk.has(x.id));
@@ -1116,6 +1122,12 @@ function freezeSunk() {
   if (state.sunk || !feed.items || !feed.answers) return;
   state.sunk = new Set(state.items.filter((it) => !isRuling(it) && (isSaved(it) || answeredByWait(it))).map((it) => it.id));
 }
+// A card sent on this visit joins the set under "sink", and the write records it, so Undo leaves a card that was already sunk where it is.
+function sinkSent(it) {
+  if (SENT_MOVE !== "sink" || !state.sunk || it.park || isRuling(it) || state.sunk.has(it.id)) return false;
+  state.sunk.add(it.id); return true;
+}
+const unsinkSent = (w) => { if (w.sank && state.sunk) state.sunk.delete(w.it.id); };
 function sorted() {
   const by = { holds: [], due: [], calm: [], stands: [], answered: [] };
   state.items.forEach((it) => by[isSunk(it) ? "answered" : tierOf(it)].push(it));
@@ -1128,8 +1140,8 @@ function sorted() {
   // The writer's `rank` (lower first) orders items inside a tier; an unranked item follows the ranked ones. A group takes its best member's rank.
   const rk = (it) => Math.min(...mates(it).map((x) => (Number.isFinite(x.rank) ? x.rank : Infinity)));
   const byRank = (a, b) => { const x = rk(a), y = rk(b); return x === y ? 0 : x < y ? -1 : 1; };
-  // Inside a tier, new items come before seen ones; each part keeps the order above.
-  const part = (f) => (a, b) => (isSeen(a) ? 1 : 0) - (isSeen(b) ? 1 : 0) || f(a, b);
+  // Inside a tier, an arrival after load comes first, then new items before seen ones; each part keeps the order above.
+  const part = (f) => (a, b) => (isArrival(a) ? 0 : 1) - (isArrival(b) ? 0 : 1) || (isSeen(a) ? 1 : 0) - (isSeen(b) ? 1 : 0) || f(a, b);
   by.holds.sort(part((a, b) => byRank(a, b) || byAge(a, b)));
   by.due.sort(part((a, b) => byRank(a, b) || dl(a) - dl(b) || byAge(a, b)));
   by.calm.sort(part((a, b) => byRank(a, b) || (a.kind === b.kind ? byAge(a, b) : a.kind === "decision" ? -1 : 1)));
@@ -1852,14 +1864,14 @@ function rulingsEl() {
     toggle: () => { state.rulingsOpen = !state.rulingsOpen; render(); },
     sub: "Each stands unless you overturn it." + (on || !ruledAt(list[0]) ? "" : " Newest " + fmt(list[0].ruled) + ".") });
 }
-// The items answered before this visit (isSunk), newest first. Open on load, each card folded.
+// The items answered before this visit, and under SENT_MOVE "sink" those sent on it (isSunk), newest first. Open on load, each card folded.
 function answeredEl(items, place) {
   const on = state.answeredOpen, stamps = items.map((i) => Date.parse(sentOf(i).at)).filter(Number.isFinite);
   const body = [], done = new Set();
   items.forEach((it) => { if (!done.has(it.id)) place(items, it, done, body); });
   return sectionEl("answered", { cls: "sunk", glyph: "done", name: "Answered", count: items.length, open: on, listId: "ab", btnId: "b-answered", body,
     toggle: () => { state.answeredOpen = !state.answeredOpen; render(); },
-    sub: "Sent before this visit, newest first." + (on ? " Each leaves the page once its session closes it." : stamps.length ? " Newest " + fmt(new Date(Math.max(...stamps)).toISOString()) + "." : "") });
+    sub: (SENT_MOVE === "sink" ? "Your sent answers, newest first." : "Sent before this visit, newest first.") + (on ? " Each leaves the page once its session closes it." : stamps.length ? " Newest " + fmt(new Date(Math.max(...stamps)).toISOString()) + "." : "") });
 }
 function renderList() {
   const list = $("list"), by = sorted(), want = [];
@@ -2077,7 +2089,7 @@ async function sendAll() {
       const d = eff(it), prior = state.answers[it.id] || null, body = answerBody(it, d, at);
       try { await state.db.collection("answers").doc(it.id).set(body); }
       catch (e) { state.barNote = "Not saved (" + (e && e.code || "error") + ")" + (wrote.length ? " from " + nList([it.n]) : "") + ". Copy the answers and paste them in chat."; state.copyOffer = true; break; }
-      wrote.push({ it, prior, draft: state.draft[it.id] || null, changing: !!state.changing[it.id], act: body.act });
+      wrote.push({ it, prior, draft: state.draft[it.id] || null, changing: !!state.changing[it.id], act: body.act, sank: sinkSent(it) });
       state.answers[it.id] = body; delete state.draft[it.id]; delete state.changing[it.id]; delete state.notice[it.id];
       entries.push(it.park ? { n: it.n, choice: body.act, owner: it.owner } : { n: it.n, act: body.act, choice: body.choice, done: body.done, note: body.note, owner: it.owner });
     }
@@ -2136,6 +2148,7 @@ async function undoSend() {
       if (w.prior) await ref.set(w.prior); else await ref.delete();
     } catch (e) { todo.slice(i).forEach((x) => failed.push(x.it.n)); state.barNote = "Undo failed (" + (e && e.code || "error") + "). Not undone: " + nList(failed) + "."; break; }
     if (w.prior) state.answers[w.it.id] = w.prior; else delete state.answers[w.it.id];
+    unsinkSent(w);
     if (w.draft) { state.draft[w.it.id] = w.draft; if (isRuling(w.it)) state.rulingsOpen = true; } if (w.changing) state.changing[w.it.id] = true;
     undone.push(w);
     // A stale receipt must not show on a re-sent answer, but a failed delete here stops nothing else, and the old receipt leaves the page state either way.
