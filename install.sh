@@ -21,7 +21,7 @@ case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) echo "install.sh does not run on Win
 
 REPO="shivinate7/claude-settings"
 REF="${CLAUDE_SETTINGS_REF:-main}"
-RAW="https://raw.githubusercontent.com/${REPO}/${REF}"
+RAW="https://raw.githubusercontent.com/${REPO}/${REF}"; REFRESH_CURL="curl -fsSL ${RAW}/install.sh"  # REFRESH_CURL: the part of the cloud refresh hook that every form of it shares
 TARBALL="https://github.com/${REPO}/archive/refs/heads/${REF}.tar.gz"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
@@ -478,8 +478,6 @@ use_main_mirror() {
 # When $REF cannot be fetched, the checkout stays the source as before, with a WARN.
 # The fetch is launch.py's refspec form, never --depth: a shallow fetch would make the session's full clone shallow.
 # The live pin skips it.
-# SRC_AT_TIP=1 marks a source that this run's fetch confirmed at the origin/$REF tip (the stale-snapshot warning reads it).
-SRC_AT_TIP=0
 if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/.git" ] \
    && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
   own_not_source=0
@@ -497,7 +495,7 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/
         [ "$own_head" != "$own_ref" ] || own_how="the last fetched $REF"
       elif cloud_git -C "$SRC" fetch -q origin "+refs/heads/$REF:refs/remotes/origin/$REF" 2>/dev/null; then
         if [ "$own_head" = "$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)" ]; then
-          own_how="the $REF tip"; SRC_AT_TIP=1
+          own_how="the $REF tip"
         fi
       else
         log "WARN: could not fetch $REF into $SRC"
@@ -520,7 +518,6 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/
     own_not_source=1
   elif git -C "$SRC" checkout -q --detach "refs/remotes/origin/$REF"; then
     log "moved the checkout $SRC to $REF at $(git -C "$SRC" rev-parse --short HEAD)"
-    SRC_AT_TIP=1
   else
     log "WARN: could not move the checkout $SRC to $REF; left as is at $(git -C "$SRC" rev-parse --short HEAD)"
     own_not_source=1
@@ -1013,13 +1010,16 @@ if [ "$CLOUD" = 1 ] && command -v jq >/dev/null 2>&1; then
 fi
 
 # Stale snapshot: the old settings.json is the one the last cloud run wrote. A SessionStart entry in it that fires on
-# startup and is not the refresh hook means the snapshot holds hooks that a fix has since replaced. Warn once, only for a
-# startup run whose source this run's fetch confirmed at the origin tip, so a resume, a snapshot build or a failed fetch
-# stays silent. Cost: one jq run on the old file per cloud startup, no network call, no other process. Fail open: a missing
-# file, bad JSON or no jq is silent and never fails the install.
-if [ "$CLOUD" = 1 ] && [ "$SRC_AT_TIP" = 1 ] && [ "$HOOK_SRC" = startup ] && [ -f "$TARGET_JSON" ]; then
-  if [ "$(jq -r "$FIRES_JQ"'[.hooks.SessionStart[]? | select(fires("startup"))
-        | select(([.hooks[]?.command] | join(" ")) | contains("CS_HOOK_INPUT=") | not)] | length' \
+# startup and is not the refresh hook (REFRESH_CURL, in either form) means the snapshot holds hooks that a fix has since
+# replaced. Warn once, for a startup hook run: a source of startup, or no readable source with CLAUDE_PROJECT_DIR set (a
+# snapshot from before the refresh hook passed its input; the snapshot build has neither). Resume stays silent.
+# The warning reads only local state, so a failed fetch does not stop it.
+# Cost: one jq run on the old file per cloud startup, no network call, no other process. Fail open: a missing file, bad
+# JSON or no jq is silent and never fails the install.
+if [ "$CLOUD" = 1 ] && [ -f "$TARGET_JSON" ] \
+   && { [ "$HOOK_SRC" = startup ] || { [ -z "$HOOK_SRC" ] && [ -n "${CLAUDE_PROJECT_DIR:-}" ]; }; }; then
+  if [ "$(jq -r --arg refresh "$REFRESH_CURL" "$FIRES_JQ"'[.hooks.SessionStart[]? | select(fires("startup"))
+        | select(all(.hooks[]?; (.command // "") | contains($refresh)) | not)] | length' \
       "$TARGET_JSON" 2>/dev/null)" -gt 0 ] 2>/dev/null; then
     log "WARNING: this environment's snapshot is stale: its settings.json still holds a SessionStart startup entry from before this run. Edit the environment and save its Setup script, so the snapshot rebuilds."
   fi
@@ -1033,7 +1033,7 @@ if [ "$CLOUD" = 1 ]; then
   # install runs them itself once the hooks are copied (see "cloud startup entries" below).
   # The refresh hook hands its stdin to install.sh, which reads the session source from it.
   # Locals get no refresh hook: their settings.json is a symlink into the clone.
-  HOOK_CMD='i=$(cat); curl -fsSL '"${RAW}"'/install.sh | CS_HOOK_INPUT="$i" bash -s -- --cloud'
+  HOOK_CMD='i=$(cat); '"$REFRESH_CURL"' | CS_HOOK_INPUT="$i" bash -s -- --cloud'
   SRC_SHA=$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null) || SRC_SHA="no git"
   if command -v jq >/dev/null 2>&1; then
     # merge/cloud_allow.json: the `merge --confirm` and `merge --role` allow rules only a cloud session gets (a local settings.json links to the repo's, which has none).
