@@ -3,7 +3,7 @@
 Kind: build
 Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
-Status: draft. Q1 to Q3 are answered. Page item 153 (how cloud sessions reach the owner's computer) is folded in and open.
+Status: draft. Q1 to Q3 and page item 153 are answered; Q4 (a timed check-in) is open.
 
 ## Ruling
 
@@ -71,21 +71,22 @@ Read from the binary, unmeasured live: an artifact republish wakes each session 
 that wake is not a `peer` turn. A plain comment or an `ArtifactData` write wakes nothing. Whether a
 desktop session's watch wakes it is unmeasured.
 
-Options for the owner (item 153 asked again):
+Ruling: mailbox artifact (owner, page item 153, pick a, 2026-11-06 13:21 CST, relayed by triage).
+One private mailbox artifact per receiver. A message is one `ArtifactData` doc; the sender republishes
+the receiver's mailbox to wake it; the receiver reads unanswered mail at each wake and turn start. Cost
+per send: one write and one publish. No process, no timer. Not picked: a git mailbox, a local relay
+program, keeping peer messages as they are.
 
-- a. Mailbox artifact. One private mailbox artifact per receiver. A message is one `ArtifactData` doc;
-  the sender republishes the receiver's mailbox to wake it; the receiver reads unanswered mail at each
-  wake and turn start. Cost per send: one write and one publish. No process, no timer.
-- b. Git mailbox. One PR per receiver in a new private repo; a message is a PR comment; a cloud receiver
-  wakes by PR subscription; the computer reads at turn start. Works with any harness that has git.
-- c. Local relay. A small server on each computer pushes mailbox rows into local sessions as channel
-  turns. Needs `channelsEnabled` from the org admin and a long-lived process.
-- d. Keep peer messages and live with the cap. Cloud still cannot reach the computer.
-- Dropped: the platform session inbox over Remote Control. Who may write into it is unmeasured, and the
-  binary has a message that it can be off for an organization.
+Test before any build (12 messages, cloud to Mac):
 
-Test before any build: a cloud session republishes a mailbox 12 times while a Mac desktop session
-watches it. Pass: 12 wakes, no `peer` stamp, no `[peer-guard]` line.
+1. A cloud session publishes a private artifact, the mailbox, and gives its URL.
+2. A desktop session on the Mac watches it with `ArtifactComments`, then ends its turn.
+3. The cloud session writes `mail/<n>` with `ArtifactData`, then republishes the mailbox. It waits for
+   the Mac session to write `reply/<n>`, then sends the next. It does this 12 times.
+4. The Mac session counts its wakes and reads `origin.kind` on each wake in its transcript.
+
+Pass: 12 wakes, no `peer` stamp, no `[peer-guard]` line. A fail falls back to the next pick the owner
+makes, not to a build.
 
 ## Build in work order
 
