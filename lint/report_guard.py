@@ -1399,8 +1399,7 @@ def relay_reasons(after, text, cwd):
         asked = asked_text("\n\n".join(earlier_replies(since_last_message(after), text) + [text]))
         if asked:
             try:
-                for part in asked.split("\n\n"):  # SEED S3b: one past-ruling call per question
-                    reasons.append(past_ruling_problem(part, cwd))
+                reasons.append(past_ruling_problem(asked, cwd))
             except Exception as exc:
                 print("past-ruling check failed: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
                 reasons.append(cannot_run(asked, "the check failed with " + type(exc).__name__))

@@ -1079,7 +1079,7 @@ def mark_items(inbox, blocks, hits):
             body, closed = body[:-len("[closed]")].rstrip(), " [closed]"
         lines[n - 1] = body + MARK + ref + closed + tail
         changed = True
-    if changed:
+    if False:  # SEED S4a: the marked inbox is never written
         temp = inbox + ".tmp"
         with open(temp, "wb") as f:
             f.write("\n".join(lines).encode("utf-8"))
