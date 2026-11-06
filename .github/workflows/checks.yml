@@ -554,7 +554,7 @@ jobs:
   checks-merge-install:
     runs-on: ubuntu-latest
     needs: scope
-    # n30 green, median 17.7, slowest 21.0 min (run 42283179251): cap 30 = slowest / 0.70 (decision ci-job-caps).
+    # n30 green, median 17.7, slowest 21.0 min (run 42283179251): cap 30 = slowest / 0.7, rounded up (decision ci-job-caps).
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -614,7 +614,7 @@ jobs:
   checks-guard:
     runs-on: ubuntu-latest
     needs: scope
-    # n30 green, median 16.6, slowest 18.9 min (run 42283749135): cap 27 = slowest / 0.70 (decision ci-job-caps).
+    # n30 green, median 16.6, slowest 18.9 min (run 42283749135): cap 27 = slowest / 0.7, rounded up (decision ci-job-caps).
     timeout-minutes: 27
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -729,7 +729,7 @@ jobs:
   shell-macos:
     runs-on: macos-latest
     needs: scope
-    # n30 green, median 21.1, slowest 23.2 min (run 42120437163): cap 34 = slowest / 0.68 (decision ci-job-caps).
+    # n30 green, median 21.1, slowest 23.2 min (run 42120437163): cap 34 = slowest / 0.7, rounded up (decision ci-job-caps).
     timeout-minutes: 34
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -976,7 +976,7 @@ jobs:
   checks-macos-b:
     runs-on: macos-latest
     needs: scope
-    # n30 green, median 18.5, slowest 21.5 min (run 42120828345): cap 31 = slowest / 0.69 (decision ci-job-caps).
+    # n30 green, median 18.5, slowest 21.5 min (run 42120828345): cap 31 = slowest / 0.7, rounded up (decision ci-job-caps).
     timeout-minutes: 31
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -1213,8 +1213,9 @@ jobs:
   checks-windows-guard:
     runs-on: windows-latest
     needs: scope
-    # push n15 green, median 15.2, slowest 19.7 min (run 42114357108): cap 30 = slowest / 0.66 (decision ci-job-caps).
-    timeout-minutes: 30
+    # Off pull_request (pull_request runs a slice, median 8.0): n25 green, median 16.7, slowest 19.7 min (run 42114357108).
+    # Both guard shards share cap 29 = slowest of both shards (19.9, run 42095744983) / 0.7, rounded up (decision ci-job-caps).
+    timeout-minutes: 29
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
@@ -1243,9 +1244,9 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
-    # A shard of checks-windows-guard.
-    # n25 green, median 17.1, slowest 19.9 min (run 42095744983): cap 30 = slowest / 0.66 (decision ci-job-caps).
-    timeout-minutes: 30
+    # A shard of checks-windows-guard, with the same cap.
+    # n25 green, median 17.1, slowest 19.9 min (run 42095744983): cap 29 = slowest of both shards / 0.7, rounded up (decision ci-job-caps).
+    timeout-minutes: 29
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -1267,7 +1268,9 @@ jobs:
   checks-windows-merge:
     runs-on: windows-latest
     needs: scope
-    # push n17 green, median 11.5, slowest 13.6 min (run 42125979458): cap 22 = slowest / 0.62 (decision ci-job-caps).
+    # Off pull_request (the PR slice has median 2.2): n24 green, median 11.8, slowest 13.6 min (run 42125979458).
+    # All 5 merge shards share cap 22. It comes from checks-windows-merge-2: run 42282722326 ended at its 15 min cap at 15.2 min,
+    # and 15.2 / 0.7 = 21.7, rounded up (decision ci-job-caps).
     timeout-minutes: 22
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -1306,9 +1309,9 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
-    # A shard of checks-windows-merge.
-    # n23 green, median 13.5, slowest green 14.5 min; run 42282722326 ended at the 15 min cap mid-suite, so at least 15.2:
-    # cap 22 = slowest green / 0.66 (decision ci-job-caps).
+    # A shard of checks-windows-merge, with the same cap.
+    # n23 green, median 13.5, slowest green 14.5 min; run 42282722326 ended at the 15 min cap mid-suite (15.2 min or more).
+    # Cap 22 is shared: it comes from merge-2's cap end (15.2 / 0.7 = 21.7, rounded up), not from this shard's slowest (decision ci-job-caps).
     timeout-minutes: 22
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -1330,8 +1333,9 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
-    # A shard of checks-windows-merge.
-    # n25 green, median 12.5, slowest 13.8 min: cap 22 = slowest / 0.63 (decision ci-job-caps).
+    # A shard of checks-windows-merge, with the same cap.
+    # n25 green, median 12.5, slowest 13.8 min.
+    # Cap 22 is shared: it comes from merge-2's cap end (15.2 / 0.7 = 21.7, rounded up), not from this shard's slowest (decision ci-job-caps).
     timeout-minutes: 22
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -1353,8 +1357,9 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
-    # A shard of checks-windows-merge.
-    # n24 green, median 10.8, slowest 12.2 min: cap 22 = slowest / 0.55 (decision ci-job-caps).
+    # A shard of checks-windows-merge, with the same cap.
+    # n24 green, median 10.8, slowest 12.2 min.
+    # Cap 22 is shared: it comes from merge-2's cap end (15.2 / 0.7 = 21.7, rounded up), not from this shard's slowest (decision ci-job-caps).
     timeout-minutes: 22
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -1376,8 +1381,9 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
-    # A shard of checks-windows-merge.
-    # n25 green, median 11.8, slowest 13.7 min: cap 22 = slowest / 0.62 (decision ci-job-caps).
+    # A shard of checks-windows-merge, with the same cap.
+    # n25 green, median 11.8, slowest 13.7 min.
+    # Cap 22 is shared: it comes from merge-2's cap end (15.2 / 0.7 = 21.7, rounded up), not from this shard's slowest (decision ci-job-caps).
     timeout-minutes: 22
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
