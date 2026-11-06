@@ -1706,7 +1706,7 @@ class RouteClaimTests(StaleCase):
             ("```", False),
             ("The cloud cannot push to main, after the fence.", True),  # prose again after the closing fence
             ("- `The cloud cannot push to main.`", False),  # a code span holds the whole claim
-            ("- Use `cannot` and `cloud` only in code.", True),  # both words sit in spans; the line's claim is not a span
+            ("- Use `cannot` and `cloud` only in code.", False),  # a verb in a span is a mention (lane ruling 12:47 CST)
             ("- The cloud cannot push to main; see `hooks/guard.py`.", True),  # the words sit outside the span
             ("- Open a fence with `` ``` `` and the cloud cannot push to main.", True),  # no fence opens in a span
             ("- Open a comment with `<!--`. The cloud cannot push to main.", True),  # a comment opener in a span
@@ -1728,6 +1728,7 @@ class RouteClaimTests(StaleCase):
     def test_route_claim_is_silent_on_a_local_branch_because_local_alone_is_no_route_word(self):
         rows = [
             ("- A local branch cannot hold the record.", False),  # `local` alone names no route
+            ("- Local runs cannot push to main.", False),  # `local runs` is no route word (lane ruling 12:47 CST)
             ("- The cloud cannot hold the record.", True),  # the same verb with a route word fires
         ]
         rng, flagged = self.route_range(rows)
