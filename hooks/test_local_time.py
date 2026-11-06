@@ -314,13 +314,16 @@ def ov_cfg():
     return tempfile.mkdtemp(prefix="cfg_", dir=ROOT)
 
 
-def ov_type(cfg, prompt, session=OV_SESSION):
-    """The owner types `prompt`. Returns the finished child, or None when it timed out."""
+def ov_type(cfg, prompt, session=OV_SESSION, remote=None):
+    """The owner types `prompt`. Returns the finished child, or None when it timed out. `remote` sets the lane's
+    CLAUDE_CODE_REMOTE_SESSION_ID (a `cse_<x>` value) for the run."""
     env = dict(os.environ)
     for name in ("PYTHONUTF8", "PYTHONIOENCODING"):
         env.pop(name, None)
     env.update(CLAUDE_CONFIG_DIR=cfg, HOME=cfg, USERPROFILE=cfg, LOCAL_TIME_NOW=OV_NOW.isoformat())
     env.pop(REMOTE_ENV, None)  # a cloud session's variable reaches a case only when the case sets it
+    if remote is not None:
+        env[REMOTE_ENV] = remote
     # No model in these cases: the judge runs `claude` from PATH, so an empty PATH makes a plain Opus ask fail
     # closed. The key is matched without case, because Windows keeps `Path` and a second key would race it.
     for name in [key for key in env if key.upper() == "PATH"]:
@@ -430,6 +433,63 @@ def case_opus_context_line():
     check("opus: `override off` leaves an Opus override in place",
           os.path.exists(os.path.join(cfg, "state", "override", "opus", OV_SESSION + ".json")),
           "files %r" % ov_pass_files(cfg))
+
+
+def grant_lines(proc):
+    return proc.stdout.splitlines() if proc else []
+
+
+def tree_names(cfg):
+    """Every file under `cfg`, by its path from `cfg`, sorted."""
+    names = []
+    for dirpath, _dirs, files in os.walk(cfg):
+        names += [os.path.relpath(os.path.join(dirpath, name), cfg) for name in files]
+    return sorted(names)
+
+
+def case_grant_context_line():
+    # A grant word prints one line: the grant parsed, and the relay to send the lane (decision grant-reaches-lanes).
+    for prompt in ("grant icon-a spawn 10m", "grant icon-a spawn 2h"):
+        lines = grant_lines(ov_type(ov_cfg(), prompt, remote="cse_GRANT01"))
+        relay = [l for l in lines if "grant in session" in l]
+        check("grant: `%s` prints one relay line to cs-step:icon-a in session_GRANT01 with the typed word" % prompt,
+              len(relay) == 1 and "cs-step:icon-a" in relay[0] and "send_message" in relay[0]
+              and ("grant in session session_GRANT01: %s" % prompt) in relay[0]
+              and any(LINE_FULL.fullmatch(l) for l in lines),
+              "stdout=%r" % lines[-4:])
+
+
+def case_grant_context_line_without_a_session_id():
+    # With no session id the relay cannot run, and the line says so.
+    lines = grant_lines(ov_type(ov_cfg(), "grant icon-a spawn 10m"))
+    check("grant: with no session id the line says the relay cannot run",
+          any("cannot run" in l for l in lines) and any(LINE_FULL.fullmatch(l) for l in lines),
+          "stdout=%r" % lines[-4:])
+
+
+def case_grant_no_context_line_for_other_prompts():
+    # The control first: the valid word prints its relay line, so a hook with no grant line cannot pass the rest.
+    lines = grant_lines(ov_type(ov_cfg(), "grant icon-a spawn 10m", remote="cse_GRANT01"))
+    check("grant control: `grant icon-a spawn 10m` prints its relay line",
+          any("grant in session" in l for l in lines), "stdout=%r" % lines[-4:])
+    for prompt in ("hello there", "please grant icon-a spawn 10m", "grant icon-a spawn 10",
+                   "grant icon-a spawn 10m thanks"):
+        lines = grant_lines(ov_type(ov_cfg(), prompt, remote="cse_GRANT01"))
+        check("grant: `%s` prints no grant line" % prompt,
+              any(LINE_FULL.fullmatch(l) for l in lines)
+              and not any("grant in session" in l or "cs-step:" in l for l in lines),
+              "stdout=%r" % lines[-4:])
+
+
+def case_grant_writes_no_file():
+    # The grant prompt leaves the same files behind as a plain prompt: a grant writes nothing of its own.
+    granted, plain = ov_cfg(), ov_cfg()
+    relayed = grant_lines(ov_type(granted, "grant icon-a spawn 10m", remote="cse_GRANT01"))
+    ov_type(plain, "hello there", remote="cse_GRANT01")
+    check("grant control: the grant prompt prints its relay line before the file check",
+          any("grant in session" in l for l in relayed), "stdout=%r" % relayed[-4:])
+    check("grant: the grant prompt writes the same files as a plain prompt",
+          tree_names(granted) == tree_names(plain), "granted=%r plain=%r" % (tree_names(granted), tree_names(plain)))
 
 
 def case_override_off():
@@ -2063,6 +2123,10 @@ def main():
         case_cli_no_tz_database()
         case_override_grants()
         case_override_context_line()
+        case_grant_context_line()
+        case_grant_context_line_without_a_session_id()
+        case_grant_no_context_line_for_other_prompts()
+        case_grant_writes_no_file()
         case_override_off()
         case_opus_context_line()
         case_override_takes_words()
