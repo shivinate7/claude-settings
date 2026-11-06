@@ -107,6 +107,13 @@ def tool_results(rec):
             yield b
 
 
+def failed_tool_use_ids(records):
+    """The tool_use ids whose tool_result block has is_error true. The error flag is the only signal read:
+    a failed cloud send_message sets it (measured); the local SendMessage failure shape is unmeasured."""
+    return {b["tool_use_id"] for r in records if r.get("type") == "user" for b in tool_results(r)
+            if b.get("is_error") is True and isinstance(b.get("tool_use_id"), str)}
+
+
 def records_after_last_human(records):
     last_human_idx = None
     for i, rec in enumerate(records):

@@ -615,7 +615,10 @@ class Pages:
         return anchors[k - 1] + 1
 
     def _uses_after(self, start):
-        return (use for r in self.records[start:] if r.get("type") == "assistant" for use in _transcript.tool_uses(r))
+        """The tool_use blocks after `start` whose result is no error; a failed send proves nothing."""
+        failed = _transcript.failed_tool_use_ids(self.records)
+        return (use for r in self.records[start:] if r.get("type") == "assistant"
+                for use in _transcript.tool_uses(r) if use.get("id") not in failed)
 
     def proof_state(self, text, k, proof, stamp, label="page"):
         """True when a tool_use that `proof(use)` accepts follows the owner record that anchors the
