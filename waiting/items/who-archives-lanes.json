@@ -4,6 +4,8 @@
   "home": "decision session-tiers",
   "id": "who-archives-lanes",
   "kind": "decision",
+  "lane": "idle-lane-archive (session_013NEJL3uKHYaeK4sgyfX3wj): rewrites decision session-tiers",
+  "lastAnswer": "a (owner chat 11:38 CST Nov 6, relayed by the coordinator): \"A is fine the batch runner keeps archiving more automatically\". Lane idle-lane-archive rewrites decision session-tiers; open until its PR merges.",
   "n": 274,
   "options": [
     {
