@@ -4804,6 +4804,16 @@ class MistakeNamesGuardTests(unittest.TestCase):
     def test_mg_green_regenerated_corrupted_fixture_passes(self):
         self.assert_allowed(mg_report("I regenerated the corrupted fixture."))
 
+    # A guard, check or debt named in a later sentence of the same Deviations item clears the admission.
+    def test_mg_green_guard_built_in_pr_sentence_passes(self):
+        self.assert_allowed(mg_report("I broke the inbox. Guard built in PR #1300."))
+
+    def test_mg_green_check_added_in_sentence_passes(self):
+        self.assert_allowed(mg_report("I broke the inbox. Check added in #1300."))
+
+    def test_mg_green_debt_filed_sentence_passes(self):
+        self.assert_allowed(mg_report("I broke the inbox. Debt filed: inbox-fence."))
+
 
 if __name__ == "__main__":
     unittest.main()
