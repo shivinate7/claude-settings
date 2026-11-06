@@ -26,8 +26,8 @@ Goal (owner, 2026-11-06 11:39 CST): a step's shown state is true by construction
 
 - An open item (status not `closed`) whose `lane` is a non-empty string and is not live joins the
   stalled list: `info["stalled"]["items"] = [{"n","lane"}] | None`, with `itemsWhy`-style reason.
-- Lane liveness: slug lane is live when an open pull's branch equals it, or a live session in
-  this repo carries `cs-step:<slug>` or `cs-topic:<slug>`; a tier lane (e.g. `batch-runner`) is live
+- Lane liveness: a slug lane is live when an open pull's branch equals it. It is also live when a
+  live session in this repo carries `cs-step:<slug>` or `cs-topic:<slug>`. A tier lane, such as `batch-runner`, is live
   when a live session in this repo carries `cs-build:<tier>`. One liveness helper serves steps and items.
 - `live_work` keeps only n/status/home today; the item `lane` field comes from lane
   idle-lane-archive. Until `lane` reaches the parsed rows, items read unknown (exit 0). Do not

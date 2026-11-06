@@ -143,9 +143,10 @@ passes for zero stalled items.
 Triage disposes each stalled step by writing, on the record branch, one of three things. It sets the step
 `todo` (the lane is gone and the work is not done) or `done` (it landed). Or it adds `paused`:
 `{"why": "<text>", "decides": "owner" | "coordinator" | "triage", "at": "<ISO time with a zone>", "by":
-"triage"}`, which moves the step off the stalled list and into the page's Paused list. A `paused` field with a
-missing or empty `why`, a `decides` outside the set, an `at` with no zone, or a `by` other than `triage` keeps
-the step stalled and is listed as a bad pause. Resume is not stored: a live lane makes the step not stalled.
+"triage"}`.
+A valid `paused` field moves the step off the stalled list and into the page's Paused list. A wrong-shaped `paused` field keeps the
+step stalled and lists it as a bad pause. That means a missing or empty `why`, a `decides` outside the set, an `at`
+with no zone, or a `by` other than `triage`. Resume is not stored: a live lane makes the step not stalled.
 
 ## Mockups
 
