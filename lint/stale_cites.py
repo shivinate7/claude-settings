@@ -542,6 +542,27 @@ def backing_path(kind, rest):
     return None
 
 
+def cited_excerpt(cite, text, limit=40):
+    """The numbered lines of a backing file's `text` that `cite` points at, at most `limit`: a `read path:N` or
+    `path:N-M` gives those lines, a `test path::name` gives the lines from where `name` is defined, and any other
+    cite gives the top of the file. A prose judge sends this beside the line, so the model reads what the line cites."""
+    kind, rest = cite_kind(cite)
+    rows = text.replace("\r\n", "\n").split("\n")
+    first, last = 1, limit
+    anchor = re.search(r"[\w./@+~-]:(\d+)(?:-(\d+))?\b", rest) if kind == "read" else None
+    if anchor:
+        first = int(anchor.group(1))
+        last = int(anchor.group(2) or first)
+    elif kind == "test" and TEST_CITE.match(rest):
+        name = re.escape(rest.rsplit("::", 1)[-1])
+        defined = [n for n, row in enumerate(rows, 1) if re.search(r"\b(?:def|class)\s+%s\b" % name, row)]
+        named = [n for n, row in enumerate(rows, 1) if re.search(r"\b%s\b" % name, row)]
+        first = (defined or named or [1])[0]
+    first = max(first, 1)
+    last = min(max(last, first), first + limit - 1, len(rows))
+    return "\n".join("%d: %s" % (n, rows[n - 1]) for n in range(first, last + 1))
+
+
 def backed_lines(texts, changed):
     """[(prose file, line, backing)]: each line of `texts` ({path: text}) with a `(test path::name)` or
     `(read path:N)` backing that points at one of the `changed` files, sorted. `backing` is the cite as written,
