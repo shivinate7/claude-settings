@@ -15,24 +15,33 @@ The runner, as the builder writes it. This file is its interface.
   call goes through decision_watch.invoke_model, looked up at call time, so this file replaces it. Every judge makes one
   call per case, feedback_guard included, even where its prompt could batch.
 - main(argv) returns the exit code. --changed BASE, --judge NAME and --all. An UNKNOWN exits 1 when env CI is set, else 0.
+- --changed BASE names every judge when the committed diff changes the claude-code pin line in
+  .github/workflows/checks.yml. The pin cases set judge_replay.REPO to a two-commit temp repo, since --changed reads git there.
+- --probe: one call. Exit 1 with the secret's name and waiting page item 283 when the call fails, else exit 0.
 
 The fake answers (None, "no auth"), the pair decision_watch.invoke_model returns for a failed call, so no case needs the
-network or the claude binary. A missing runner fails each case by name, never with a traceback. The suite writes no temp
-files. Its one git read is the committed diff of HEAD against itself, which is empty whatever the working tree holds.
+network or the claude binary. A missing runner fails each case by name, never with a traceback. The one temp folder is this
+run's folder from lint/_test_temp.py (test-temp-standard), made in main() and removed at its end. The git read of
+--changed HEAD is the committed diff of HEAD against itself, which is empty whatever the working tree holds.
 """
 import contextlib
 import io
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(REPO, "lint"))
 os.chdir(REPO)  # the runner reads git and the scope paths from the repository root
 
 import decision_watch  # noqa: E402  the one model seam; the runner looks invoke_model up here at call time
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py), for the pin repos' commits
+import _test_temp  # noqa: E402  test-temp-standard: this run's folder (lint/_test_temp.py)
 
 try:
     import judge_replay  # noqa: E402
@@ -66,10 +75,19 @@ TOUCH = (
     (["hooks/judge_replay.py"], "all"),
     (["hooks/prose_judge.py"], ["prose_judge"]),
     (["hooks/judge_corpus/reply_judge.json"], ["reply_judge"]),
+    (["hooks/shared_names.py"], "all"),
+    (["hooks/guard.py"], "all"),
 )
 NO_AUTH = (None, "no auth")
-SELF_FILES = ("hooks/judge_replay.py", "hooks/test_judge_replay.py")
+# lint/test_ci_scope.py pins the CI scope's judge_replay flag, so it names the runner by that flag. It wires nothing.
+SELF_FILES = ("hooks/judge_replay.py", "hooks/test_judge_replay.py", "lint/test_ci_scope.py")
 NAMED = re.compile(rb"judge[_-]replay")
+RUN = None  # this run's folder, made in main()
+WINDOW = 27  # the adapter's copy of the wording prompt, "Judge this SendMessage call", is this long
+PIN_BEFORE = "steps:\n  - run: npm install --global @anthropic-ai/claude-code@2.1.319\n  - run: echo lint\n"
+PIN_MOVED = "steps:\n  - run: npm install --global @anthropic-ai/claude-code@2.1.320\n  - run: echo lint\n"
+OTHER_STEP = "steps:\n  - run: npm install --global @anthropic-ai/claude-code@2.1.319\n  - run: echo lint again\n"
+RESWORDED = 'Weigh this peer message against the rule: %s\nAnswer {"ok": true} or {"ok": false, "reason": "..."}. Reply JSON only.'
 
 
 def check(name, ok, detail=""):
@@ -127,6 +145,65 @@ def ci_env(value):
         os.environ.pop("CI", None)
         if saved is not None:
             os.environ["CI"] = saved
+
+
+@contextlib.contextmanager
+def faked_calls(fake):
+    """decision_watch.invoke_model replaced by `fake`, a function of each call's arguments. The real one is restored after."""
+    real = decision_watch.invoke_model
+    decision_watch.invoke_model = fake
+    try:
+        yield
+    finally:
+        decision_watch.invoke_model = real
+
+
+@contextlib.contextmanager
+def adapter_swapped(name, adapter):
+    """JUDGES[name] with its adapter replaced, so replay(name) drives `adapter` over the corpus's cases. Restored after."""
+    row = judge_replay.JUDGES[name]
+    judge_replay.JUDGES[name] = dict(row, adapter=adapter)
+    try:
+        yield
+    finally:
+        judge_replay.JUDGES[name] = row
+
+
+def git_in(repo, *args):
+    subprocess.run(["git", "-C", repo, "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
+                   check=True, capture_output=True)
+
+
+def pin_repo(name, before, after):
+    """A repo under RUN whose .github/workflows/checks.yml is `before` in one commit and `after` in the next."""
+    repo = os.path.join(RUN, name)
+    path = os.path.join(repo, ".github", "workflows", "checks.yml")
+    os.makedirs(os.path.dirname(path))
+    git_in(repo, "init", "-q")
+    for text, message in ((before, "before"), (after, "after")):
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        git_in(repo, "add", "-A")
+        git_in(repo, "commit", "-q", "-m", message)
+    return repo
+
+
+def changed_run(repo, base):
+    """`--changed base` run in `repo` with replay stubbed to record the judges it asks for. -> (asked, output, model calls)."""
+    asked = []
+
+    def record(name, runs=1):
+        asked.append(name)
+        return []
+
+    saved = judge_replay.REPO, judge_replay.replay
+    judge_replay.REPO, judge_replay.replay = repo, record
+    try:
+        with faked_model(NO_AUTH) as calls, contextlib.redirect_stdout(io.StringIO()) as out:
+            run_main(["--changed", base])
+    finally:
+        judge_replay.REPO, judge_replay.replay = saved
+    return asked, out.getvalue(), calls
 
 
 def load_corpus(name):
@@ -335,16 +412,160 @@ def case_runner_named_nowhere_else():
           "names it: %s" % ", ".join(named[:5]))
 
 
+def case_feedback_bad_entry_reads_unknown():
+    label = "feedback_guard: a bad entry"
+    judges = judges_or_fail(label)
+    if judges is None:
+        return
+    cases, problem = load_corpus("feedback_guard")
+    if cases is None:
+        check(label, False, problem)
+        return
+    # The model names an id and a ref that are no candidate: judge() returns a `why`, and every row must read UNKNOWN.
+    bad = {"repeats": [{"id": "fb-9-1", "ref": "inbox:no-such-home@2026-01-01 00:00"}]}
+    with faked_model((bad, None)) as calls:
+        rows = judge_replay.replay("feedback_guard")
+    check("%s: one model call per case" % label, len(calls) == len(cases),
+          "%d calls for %d cases" % (len(calls), len(cases)))
+    wrong = [r for r in rows if r["verdict"] != "UNKNOWN"]
+    check("%s: every row reads UNKNOWN" % label, not wrong,
+          "row %s read %s" % (wrong[0]["id"], wrong[0]["verdict"]) if wrong else "")
+
+
+def case_feedback_clean_answer_reads_no_unknown():
+    label = "feedback_guard: a clean answer (control)"
+    judges = judges_or_fail(label)
+    if judges is None:
+        return
+    cases, problem = load_corpus("feedback_guard")
+    if cases is None:
+        check(label, False, problem)
+        return
+    clean = ((judges.get("feedback_guard") or {}).get("answers") or {}).get("allow")
+    if clean is None:
+        check(label, False, "JUDGES['feedback_guard'] has no clean allow answer")
+        return
+    with faked_model((clean, None)) as calls:
+        rows = judge_replay.replay("feedback_guard")
+    check("%s: one model call per case" % label, len(calls) == len(cases),
+          "%d calls for %d cases" % (len(calls), len(cases)))
+    unknown = [r["id"] for r in rows if r["verdict"] == "UNKNOWN"]
+    check("%s: no row reads UNKNOWN" % label, not unknown, "UNKNOWN rows: %s" % ", ".join(unknown))
+
+
+def case_sendmessage_errored_call_reads_unknown():
+    label = "sendmessage_state: an errored call"
+    if need_runner(label) is None:
+        return
+    # A stand-in entry that makes two seam calls in order, the first errors and the second answers. The row must read
+    # UNKNOWN: any errored call is unknown, whatever the last call said. Deterministic: no threads, no prompt text.
+    script = []
+
+    def fake(*args, **kwargs):
+        script.append(args)
+        return (None, "no auth") if len(script) == 1 else ({"ok": True}, None)
+
+    def two_calls(case_input, calls):
+        del script[:]
+        decision_watch.invoke_model("first call")
+        decision_watch.invoke_model("second call")
+        return "allow"
+
+    with faked_calls(fake), adapter_swapped("sendmessage_state", two_calls):
+        rows = judge_replay.replay("sendmessage_state")
+    wrong = [r for r in rows if r["verdict"] != "UNKNOWN"]
+    check("%s: every row reads UNKNOWN" % label, not wrong,
+          "row %s read %s" % (wrong[0]["id"], wrong[0]["verdict"]) if wrong else "")
+
+
+def case_sendmessage_one_seam_call_per_case_whatever_the_wording():
+    label = "sendmessage_state: one seam call per case"
+    if need_runner(label) is None:
+        return
+    import sendmessage_state
+    cases, problem = load_corpus("sendmessage_state")
+    if cases is None:
+        check(label, False, problem)
+        return
+    # The wording judge's text is changed, and the adapter must still read its one call without knowing the text.
+    saved = sendmessage_state.WORDING_PROMPT
+    sendmessage_state.WORDING_PROMPT = RESWORDED
+    try:
+        with faked_model(NO_AUTH) as calls:
+            judge_replay.replay("sendmessage_state")
+    finally:
+        sendmessage_state.WORDING_PROMPT = saved
+    check(label, len(calls) == len(cases),
+          "%d seam calls for %d cases: the adapter depends on the wording prompt's text" % (len(calls), len(cases)))
+
+
+def case_wording_prompt_text_is_not_copied():
+    label = "sendmessage_state: wording prompt not copied"
+    if need_runner(label) is None:
+        return
+    import sendmessage_state
+    with open(os.path.join(HERE, "judge_replay.py"), encoding="utf-8") as f:
+        source = f.read()
+    prompts = sorted(name for name in dir(sendmessage_state)
+                     if name.endswith("PROMPT") and isinstance(getattr(sendmessage_state, name), str))
+    check("%s: the module has a PROMPT string" % label, bool(prompts), "no *PROMPT str constant")
+    for name in prompts:
+        window = getattr(sendmessage_state, name)[:WINDOW]
+        check("%s: judge_replay.py holds no %d characters of %s" % (label, WINDOW, name), window not in source,
+              "copied: %r" % window)
+
+
+def case_pin_change_names_every_judge():
+    label = "--changed on the claude-code pin"
+    if need_runner(label) is None:
+        return
+    every = sorted(judge_replay.JUDGES)
+    asked, out, calls = changed_run(pin_repo("pin-moved", PIN_BEFORE, PIN_MOVED), "HEAD~1")
+    check("%s: the diff reads" % label, "UNKNOWN: git diff" not in out, out[-200:])
+    check("%s: asks every judge" % label, sorted(asked) == every, "asked %r, want every judge" % (asked,))
+    check("%s: makes no model call" % label, not calls, "%d model calls" % len(calls))
+    # Control: a checks.yml change that leaves the pin line alone asks no judge.
+    asked, out, calls = changed_run(pin_repo("other-step", PIN_BEFORE, OTHER_STEP), "HEAD~1")
+    check("--changed on a checks.yml change that leaves the pin (control): the diff reads",
+          "UNKNOWN: git diff" not in out, out[-200:])
+    check("--changed on a checks.yml change that leaves the pin (control): asks no judge", not asked,
+          "asked %r" % (asked,))
+
+
+def case_probe_names_the_secret_and_the_item():
+    label = "--probe"
+    if need_runner(label) is None:
+        return
+    with ci_env(None), faked_model(NO_AUTH), contextlib.redirect_stdout(io.StringIO()) as out:
+        code = run_main(["--probe"])
+    text = out.getvalue()
+    check("--probe with no sign-in exits 1 (control)", code == 1, "exit %r" % (code,))
+    check("--probe with no sign-in names the secret (control)", "CLAUDE_CODE_OAUTH_TOKEN" in text, text[-200:])
+    check("--probe with no sign-in names waiting page item 283 (control)", "283" in text, text[-200:])
+    with ci_env(None), faked_model(({"ok": True}, None)), contextlib.redirect_stdout(io.StringIO()):
+        code = run_main(["--probe"])
+    check("--probe with an answer exits 0 (control)", code == 0, "exit %r" % (code,))
+
+
 CASES = (case_seam_control, case_corpora, case_scopes, case_touched, case_no_auth_rows,
-         case_cli_exit_follows_ci, case_cli_changed_head, case_runner_named_nowhere_else)
+         case_cli_exit_follows_ci, case_cli_changed_head, case_runner_named_nowhere_else,
+         case_feedback_bad_entry_reads_unknown, case_feedback_clean_answer_reads_no_unknown,
+         case_sendmessage_errored_call_reads_unknown, case_sendmessage_one_seam_call_per_case_whatever_the_wording,
+         case_wording_prompt_text_is_not_copied, case_pin_change_names_every_judge,
+         case_probe_names_the_secret_and_the_item)
 
 
 def main():
-    for case in CASES:
-        try:
-            case()
-        except Exception as error:
-            check(case.__name__, False, "raised %s: %s" % (type(error).__name__, error))
+    global RUN
+    RUN = _test_temp.run_folder()
+    try:
+        for case in CASES:
+            try:
+                case()
+            except Exception as error:
+                check(case.__name__, False, "raised %s: %s" % (type(error).__name__, error))
+    finally:
+        shutil.rmtree(RUN, ignore_errors=True)
     print("FAIL: %d failed" % len(FAILED) if FAILED else "all checks passed")
     return 1 if FAILED else 0
 

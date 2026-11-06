@@ -10,6 +10,7 @@ Output names pinned (the `scope` job re-exports them as job outputs):
   JOB_FLAGS  one per check job except the lint job `checks`: checks_windows, checks_windows_merge,
              checks_windows_rest, checks_macos, shell_macos, pointer_windows
   STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags; shoot turns on the checks-shoot and checks-waiting-page jobs)
+  judge_replay  set apart from ALL (class JudgeReplayFlag): the judge replay job's flag
 
 Run with:  python3 lint/test_ci_scope.py -v
 """
@@ -632,6 +633,37 @@ class ModTestsRunsEveryCheck(unittest.TestCase):
         r = self.run_phase(self.make_tree("red-test", test=self.node_script(1)))
         self.assertIn("mod tests:", r.stdout, "the mod phase printed no count line, so it did not run")
         self.assertNotEqual(r.returncode, 0, "a red *.test.mjs passed the mod phase")
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class JudgeReplayFlag(unittest.TestCase):
+    """The judge_replay output: on a pull request, true when the diff touches a judge's scope, corpus or runner, or the
+    script; true on workflow_dispatch; false on push and schedule."""
+
+    def flag(self, got):
+        self.assertIn("judge_replay", got, got)
+        return got["judge_replay"]
+
+    def test_a_judge_module_change_turns_it_on(self):
+        self.assertEqual(self.flag(run(["hooks/prose_judge.py"])), "true")
+
+    def test_a_docs_only_pull_request_turns_it_off(self):
+        self.assertEqual(self.flag(run(["README.md", "decisions/some-record.md"])), "false")
+
+    def test_push_and_schedule_turn_it_off_even_for_a_judge_change(self):
+        for event in ("push", "schedule"):
+            with self.subTest(event=event):
+                self.assertEqual(self.flag(run(["hooks/prose_judge.py"], event=event)), "false")
+
+    def test_workflow_dispatch_turns_it_on(self):
+        self.assertEqual(self.flag(run(["README.md"], event="workflow_dispatch")), "true")
+
+    def test_scope_script_change_turns_it_on(self):
+        self.assertEqual(self.flag(run([".github/scripts/ci-scope.sh"])), "true")
+
+    def test_shared_names_change_turns_it_on(self):
+        # The spawn and reply prompts take their marker and logins from this file, so a judge reads it.
+        self.assertEqual(self.flag(run(["hooks/shared_names.py"])), "true")
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
