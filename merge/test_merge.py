@@ -22,6 +22,8 @@ sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no te
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
+sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: no hook module shadows one this suite imports
+import guard as hook_guard  # noqa: E402  is_test_rel, the one home of what a test path is (hooks/guard.py)
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
 
 def printed(out, marker):
@@ -12472,6 +12474,26 @@ class ReviewGuardHits(unittest.TestCase):
         self.assertEqual(review_fn(self, "guard_hits")(["lint/b.py", "README.md", "hooks/a.py", "docs/x.md", "merge/m.py"]),
                          ["hooks/a.py", "lint/b.py", "merge/m.py"])
 
+TEST_PATHS = ("hooks/test_guard.py", "merge/test_merge.py", "lint/test_stale_cites.py", "githooks/test_pre_commit.sh")
+
+class ReviewGuardTestPaths(unittest.TestCase):
+    """A test path is no guard change, and a diff of test paths alone holds no hit. hooks/guard.py is_test_rel is the one home of what a test
+    path is, and guard_hits calls it. A check named like a test, such as hooks/mutate_guard.py, is no test path, so it stays a hit."""
+
+    def test_each_test_path_is_no_hit_and_a_diff_of_them_holds_none(self):
+        guard_hits = review_fn(self, "guard_hits")
+        for path in TEST_PATHS:
+            with self.subTest(path=path):
+                self.assertTrue(hook_guard.is_test_rel(path), f"{path} is not a test path under hooks/guard.py is_test_rel")
+                self.assertEqual(guard_hits([path]), [], f"{path} is a guard hit, but a test path is no guard change")
+        self.assertEqual(guard_hits(list(TEST_PATHS)), [], "a diff of test paths alone holds a guard hit")
+
+    def test_a_check_named_like_a_test_is_still_a_hit(self):
+        # hooks/mutate_guard.py is a check, not a test. Beside a test path, it is the one hit left.
+        self.assertFalse(hook_guard.is_test_rel("hooks/mutate_guard.py"), "hooks/mutate_guard.py is a test path under is_test_rel, but a check is no test")
+        self.assertEqual(review_fn(self, "guard_hits")(["hooks/test_guard.py", "hooks/mutate_guard.py"]), ["hooks/mutate_guard.py"],
+                         "guard_hits counts the test path hooks/test_guard.py, or drops the check hooks/mutate_guard.py")
+
 class ReviewGuardKinds(unittest.TestCase):
     """merge.kind_misfits(kind, files): the sorted paths that break the kind, over the (path, status) pairs of the diff. docs-only: each path not
     ending in .md. delete-only: each path whose status is not removed. normal: none."""
@@ -12535,6 +12557,18 @@ class ReviewGuardRefusal(ReviewGuardEnv):
     def test_every_hit_path_is_named(self):
         self.host.changed = [("hooks/a.py", "modified"), ("README.md", "modified"), ("lint/b.py", "modified")]
         self.assert_refused(*self.run_args(*self.review_argv()), "hooks/a.py", "lint/b.py")
+
+    def test_guard_no_on_a_test_only_diff_under_hooks_prints_the_record(self):
+        self.host.changed = [("hooks/test_guard.py", "modified")]
+        rc, out, err = self.run_args(*self.review_argv())
+        self.assertEqual(rc, 0, "a test-only diff was refused as a guard change:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "no")
+
+    def test_a_mixed_diff_refuses_on_the_check_and_does_not_name_the_test_file(self):
+        self.host.changed = [("hooks/test_guard.py", "modified"), ("hooks/guard.py", "modified")]
+        rc, out, err = self.run_args(*self.review_argv())
+        self.assert_refused(rc, out, err, "hooks/guard.py")
+        self.assertNotIn("hooks/test_guard.py", err, "the refusal names the test file hooks/test_guard.py, which is no guard change")
 
     def test_guard_no_with_no_hit_prints_the_record_as_before(self):
         rc, out, err = self.run_args(*self.review_argv())
