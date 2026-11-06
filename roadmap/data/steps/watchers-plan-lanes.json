@@ -4,7 +4,7 @@
   "status": "todo",
   "order": 103.383,
   "why": "Watchers plan align-watchers: one rule for watches, wakes, sweeps, reaps and logs.",
-  "note": "Coordinator 14:56 CST, from lane watchers-one-rule (PR #1349), plan docs/plans/align-watchers.md on that branch. Lane 3 stall defects (S); 4 log cull (S; item 249 picked b, name a reader for each log); 5 SessionEnd scope (M; item 250 picked a, landed in #1240, so check what is left); 6 decision-watch log append-only (M); 7 agent-end reap bounded, one process scan (M); 9 stall watcher and ci_wake, replace or cap per items 180 and 248 (L).",
+  "note": "Coordinator 14:56 CST, from lane watchers-one-rule (PR #1349), plan docs/plans/align-watchers.md on that branch. Lane 3 stall defects (S); 4 log cull (S; item 249 picked b, name a reader for each log); 5 SessionEnd scope (M; item 250 picked a, landed in #1240; the owner's note on 250 asks for parts of the daily job to run at session end too, because remnant processes linger too long); 6 decision-watch log append-only (M); 7 agent-end reap bounded, one process scan (M); 9 stall watcher and ci_wake, replace or cap per items 180 and 248 (L).",
   "owner": "coordinator",
   "updatedAt": "2026-11-06T20:58:00Z"
 }
