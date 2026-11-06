@@ -1,0 +1,9 @@
+{
+  "title": "A doing step with no live lane and no open PR shows as stalled",
+  "phase": "now",
+  "status": "doing",
+  "order": 103.33,
+  "why": "Owner, 11:39 CST Nov 6: a step that reads doing with no lane is a lie; it must surface on its own for resume, continue or pause.",
+  "note": "Nov 6 11:39 CST (coordinator): lane started, session_013NEJKzVHqNDM51E2VQtcTx. It makes doing derived: a step with no live lane and no open PR shows STALLED at the top, with a required disposition. Until it lands, triage lists those steps to the coordinator at each wake.",
+  "updatedAt": "2026-11-06T17:41:00Z"
+}
