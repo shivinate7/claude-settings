@@ -1,6 +1,6 @@
 {
   "added": "2026-11-04T04:36:00Z",
-  "context": "Goal: banchi's decisions argue from facts that are true today.\nProblem (rule): your pick 230 b keeps D7's value-band argument as an open question, and the lane kept the line \"So the flat 4 stands\" with it, but you retired the standing cap of 4, so that line states a dead fact.\nBased on (ruling): 230 b (22:29 CST).\nBased on (read): the lane's note on banchi draft PR #1044 (head b2a27b0).\nDeparts from: banchi D7 \u2014 option a deletes \"So the flat 4 stands\".",
+  "context": "Goal: banchi's decisions argue from facts that are true today.\nProblem (rule): your pick 230 b keeps D7's value-band argument as an open question, and the lane kept the line \"So the flat 4 stands\" with it, but you retired the standing cap of 4, so that line states a dead fact.\nBased on (ruling): 230 b (22:29 CST).\nBased on (read): the lane's note on banchi PR #1044, which merged Nov 3 22:56 CST through integration PR #1045.\nDeparts from: banchi D7 \u2014 option a deletes \"So the flat 4 stands\".",
   "home": "banchi D7",
   "id": "banchi-d7-flat-four",
   "kind": "decision",

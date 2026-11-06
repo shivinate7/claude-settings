@@ -1,24 +1,35 @@
 {
-  "added": "2026-11-04T08:57:00Z",
-  "context": "joyous #74 is CI green but blocked. Ruleset 24853807 (\"main\") requires the checks `ste-lint` and `build`. #74 moves the lint into the shared `checks` job, so no `ste-lint` check runs any more. The shared form requires only all-jobs-passed. Of the 7 child repos, only joyous has such a rule (read 02:56 CST).\n\nWhy yours: the cloud cannot change a ruleset. Your standing grant \"Acts the cloud refuses\" (2026-10-30 16:20 CDT) lets a session on your computer do it, but none is reachable now (no computer folder, no peer session). Opening a computer session works too.\n\nAfter: batch runner 9 runs the merge of #74 again.",
+  "added": "2026-11-05T13:48:00Z",
+  "command": {
+    "mac": "cd ~\ngh auth switch -u shivinate7\ngh api -X PUT repos/shivinate7/joyous/rulesets/24853807 --input - <<'EOF'\n{\"rules\":[{\"type\":\"deletion\"},{\"type\":\"non_fast_forward\"},{\"type\":\"pull_request\",\"parameters\":{\"required_approving_review_count\":0,\"dismiss_stale_reviews_on_push\":false,\"required_reviewers\":[],\"require_code_owner_review\":false,\"require_last_push_approval\":false,\"required_review_thread_resolution\":false,\"require_extra_approval_for_unattributed_changes\":true,\"allowed_merge_methods\":[\"merge\",\"squash\",\"rebase\"]}},{\"type\":\"required_status_checks\",\"parameters\":{\"strict_required_status_checks_policy\":false,\"do_not_enforce_on_create\":false,\"required_status_checks\":[{\"context\":\"all-jobs-passed\"}]}}]}\nEOF",
+    "powershell": "cd ~\ngh auth switch -u shivinate7\n$body = '{\"rules\":[{\"type\":\"deletion\"},{\"type\":\"non_fast_forward\"},{\"type\":\"pull_request\",\"parameters\":{\"required_approving_review_count\":0,\"dismiss_stale_reviews_on_push\":false,\"required_reviewers\":[],\"require_code_owner_review\":false,\"require_last_push_approval\":false,\"required_review_thread_resolution\":false,\"require_extra_approval_for_unattributed_changes\":true,\"allowed_merge_methods\":[\"merge\",\"squash\",\"rebase\"]}},{\"type\":\"required_status_checks\",\"parameters\":{\"strict_required_status_checks_policy\":false,\"do_not_enforce_on_create\":false,\"required_status_checks\":[{\"context\":\"all-jobs-passed\"}]}}]}'\n$body | gh api -X PUT repos/shivinate7/joyous/rulesets/24853807 --input -"
+  },
+  "context": "Your yes on 242 (07:44 CST) reached batch runner 9, but its cloud safety check refused the ruleset change at 07:47 CST (reason \"CI Bypass\"). Nothing changed: ruleset 24853807 still requires `ste-lint` and `build`, which #74 no longer emits.\n\nWhy yours: a cloud session cannot make this change, even with your word, and no session on your computer is reachable.\n\nThe command changes only the required check list, to all-jobs-passed; every other rule stays as it is. Or do it by hand from the link.\n\nAfter: batch runner 9 merges #74 and closes #77 as replaced.",
   "home": "claude-settings standing grant \"Acts the cloud refuses\"",
   "id": "joyous-ruleset-shared-form",
   "kind": "task",
+  "lane": "batch runner 9: joyous #74",
+  "lastAnswer": {
+    "at": "2026-11-05T14:40:35Z",
+    "choice": "done",
+    "note": "Joyous #74 merged as 9781c171 at 08:42 CST Nov 5; #77 closed as replaced (batch runner 9)."
+  },
   "links": [
     {
-      "label": "joyous ruleset \"main\"",
-      "url": "https://github.com/shivinate7/joyous/rules/24853807"
+      "label": "joyous ruleset \"main\" settings",
+      "url": "https://github.com/shivinate7/joyous/settings/rules/24853807"
     }
   ],
   "n": 242,
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
   "rank": 1,
-  "ref": "joyous #74; joyous ruleset 24853807",
+  "ref": "joyous #74 (head 1129d2048); joyous ruleset 24853807",
+  "reply": "Done is with batch runner 9: it merges joyous #74 once its checks pass and closes #77. This item closes when #74 merges.",
   "short": "joyous: ruleset to shared form",
-  "status": "open",
+  "status": "closed",
   "steps": [
-    "Open https://github.com/shivinate7/joyous/rules/24853807.",
-    "Under \"Require status checks to pass\", remove `ste-lint` and `build`, add `all-jobs-passed`, and save. Or delete the ruleset: branch protection already requires all-jobs-passed."
+    "Paste the command below in a terminal on your Mac or PC. Or open the ruleset link, remove `ste-lint` and `build` under \"Require status checks to pass\", add `all-jobs-passed`, and save.",
+    "Press Mark done."
   ],
-  "title": "Set joyous's \"main\" ruleset to the shared form, so joyous #74 can merge"
+  "title": "Set joyous's ruleset to require only all-jobs-passed, so joyous #74 can merge"
 }

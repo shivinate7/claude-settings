@@ -1,6 +1,6 @@
 {
   "added": "2026-11-04T14:50:00Z",
-  "context": "Goal: design fixes ride the normal review rounds, and a screen changed later still gets a design read (your 204 a).\nProblem (rule): #1231 puts the design reviewer beside code round 1. After that, the code reviewer checks that the design findings still hold. A second design read runs only if a later round changed a screen's \"layout\". That word is the coordinator's reading, and the record does not define it.\nBased on (read): decision design-agents as rewritten in #1231.\nDeparts from: main (one design read after the builder) \u2014 #1231 adds a second read on an undefined \"layout\" change; a and b define it, c drops it.\n\nMeanwhile: #1231 merges with the coordinator's reading; your answer rewrites one line of decision design-agents.",
+  "context": "Goal: design fixes ride the normal review rounds, and a screen changed later still gets a design read (your 204 a).\nProblem (rule): decision design-agents puts the design reviewer beside code round 1. A second design read runs only if a later round changed a screen's \"layout\". That word is the coordinator's reading, and the record does not define it.\nBased on (read): #1231 merged Nov 5 06:36 CST with the coordinator's reading.\nDeparts from: main (a second read on an undefined \"layout\" change) \u2014 a and b define it, c drops it. Your answer rewrites one line of decision design-agents.",
   "home": "decision design-agents",
   "id": "second-design-read-trigger",
   "kind": "decision",

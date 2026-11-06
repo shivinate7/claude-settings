@@ -1,13 +1,13 @@
 {
   "added": "2026-11-04T23:56:00Z",
   "context": "Goal: a lane can fix its own commit without opening a replacement PR.\nProblem (rule): the auto-mode classifier refuses a lease push to a lane's own branch. Each refusal costs a replacement PR. Only you can change auto-mode permissions.\nBased on (measured): main's notes record 9 refusals and 8 replacement PRs, Nov 2 to 4, all claude-settings lanes. Causes: 5 red-run trailer amends, 1 merge-commit repair, 1 rebase, 1 subject fix, 1 unstated. Time lost per replacement: 6 min to 4 h 13 min, most 6 to 26 min.\nBased on (read): in 5 of 9, the red-run check's remedy (lint/check_red_run.py) names a bare `git push --force-with-lease`, which the force-push guard denies; the guard's own remedy names `--force-with-lease --force-if-includes`. The two remedies disagree.\nBased on (read): an allow rule matches exact text only, and cannot tell a lane's own branch from another lane's, archive/* or merge-lock/*; the guard does not check branch owner either. Whether an allow rule beats the classifier is documented, not measured.\nDeparts from: main (the classifier refuses lease pushes) \u2014 a adds a Bash allow rule; c adds an auto-mode prose allow entry; d changes the red-run check's remedy so no force push is needed.\n\nOne Opus agent reviewed this with no recommendation, as you asked (17:44 CST); this item makes none.",
-  "home": "decision stale-safe-force-push; debt note classifier-refuses-lease-push",
+  "home": "roadmap step lease-push-c-and-d",
   "id": "lease-push-allow-rule",
   "kind": "decision",
   "lastAnswer": {
-    "at": "2026-11-04T23:44:40Z",
+    "at": "2026-11-05T13:44:30Z",
     "choice": "none",
-    "note": "Send an opus agent to review these options unbiased."
+    "note": "shoildnt it be c and d. Read as: do both c and d. Filed 07:48 CST Nov 5 as roadmap step lease-push-c-and-d; routed to lane restore-roadmap-fork-test and the coordinator."
   },
   "n": 257,
   "options": [
@@ -45,7 +45,8 @@
   "owner": "lane restore-roadmap-fork-test (session_013NEJL2sGEhSbPUyQxjU8SL)",
   "rank": 30,
   "ref": "one Opus agent's unbiased review via the coordinator, 2026-11-04 17:54 CST; docs/debts/notes.md classifier-refuses-lease-push; lint/check_red_run.py",
+  "reply": "Yes, c and d fit together: d removes the cause of 5 of the 9 refusals, and c covers the rest (rebases and merge-commit repairs), with the classifier still judging each push. Filed as roadmap step lease-push-c-and-d. d is built first; c is added after it and tried on a real lane fix.",
   "short": "Lease push refusals: allow, leave, or fix cause?",
-  "status": "open",
+  "status": "closed",
   "title": "Lease pushes: auto mode refuses a lane's fix to its own branch. Allow it, leave it, or remove the cause?"
 }

@@ -4,6 +4,11 @@
   "home": "uniform-over-variants",
   "id": "widening-backstop-gap",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T04:29:00Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 181,
   "options": [
     {
@@ -25,8 +30,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "deep audit 1102, report docs/plans/deep-audit/report.md on audit/deep-1102 (6b6a41f3), table 'claude-settings: homes', row widening-backstop-gap",
+  "reply": "Done: the widening check is in hooks/call_judge.py on main (#1192). Closed 07:50 CST Nov 5 in the stale-item sweep.",
   "short": "widening backstop",
-  "status": "open",
+  "status": "closed",
   "title": "Nothing catches an unmarked widening option on the page: add a check to the call judge, or say there is none?",
   "why": "The call judge already runs on every page decision, so the check adds no new call."
 }

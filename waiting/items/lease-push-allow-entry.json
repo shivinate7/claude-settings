@@ -1,0 +1,27 @@
+{
+  "added": "2026-11-05T13:55:00Z",
+  "context": "Your picks 239 a and 257 c allow a lane to lease-push its own branch. The classifier refused a lane writing this line (Self-Modification, 07:47 CST), so it is yours to add. It is a GitHub web edit, so nothing to paste in a terminal.\n\nThe line to add (copy it whole, with the trailing comma):\n\n\"Own Branch Lease Push: A lease push, `git push --force-with-lease=<branch>:<expected sha>` with an explicit expected sha, to a branch that this session itself pushed earlier in the session, is allowed, so a lane can fix its own branch after review (owner, page item 257, 2026-11-05 07:44 CST). Never covers the default branch, any `archive/` ref, `roadmap`, `merge-lock`, a bare `--force`, a lease with no expected sha, or a branch this session did not visibly push.\",\n\nAfter: the batch runner merges the PR, and items 239 and 257's part c close.",
+  "home": "roadmap step lease-push-c-and-d",
+  "id": "lease-push-allow-entry",
+  "kind": "task",
+  "links": [
+    {
+      "label": "Edit settings.json on GitHub",
+      "url": "https://github.com/shivinate7/claude-settings/edit/main/settings.json"
+    }
+  ],
+  "minutes": 3,
+  "n": 262,
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 2,
+  "ref": "your picks 239 a and 257 c (Nov 5 07:44-07:49 CST)",
+  "short": "settings: own-branch lease push",
+  "status": "open",
+  "steps": [
+    "Open the settings.json edit link below.",
+    "Under \"autoMode\" \u2192 \"allow\", find the \"Archived Branch Delete\" entry and paste the line right after it.",
+    "Press \"Commit changes\", choose \"Create a new branch and start a pull request\", and confirm.",
+    "Mark done."
+  ],
+  "title": "Add the own-branch lease-push line to settings.json on GitHub"
+}

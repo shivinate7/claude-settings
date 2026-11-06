@@ -1,0 +1,9 @@
+{
+  "answered": "2026-11-05T13:46:00Z",
+  "at": "2026-11-05T13:41:52.658Z",
+  "filed": "2026-11-05T13:46:00Z",
+  "home": "step:page-park-any-item",
+  "id": "ask-mw3lh382c9",
+  "reply": "Agreed: today only the writer can park an item, and you can only unpark or drop a parked line. I filed roadmap step page-park-any-item: each open question and task gets a Park press next to None of these. A parked item leaves your list and shows under Parked by you, where Unpark brings it back. The coordinator starts its lane, with a designer first. Until it lands, write \"park <n>\" in a None of these note or an ask, and I park that item for you.",
+  "text": "i should be able to add \u201cpark\u201d to any question"
+}

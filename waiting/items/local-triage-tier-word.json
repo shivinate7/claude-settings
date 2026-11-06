@@ -2,13 +2,13 @@
   "added": "2026-11-04T23:50:00Z",
   "context": "Goal: a triage session on your Mac does triage's work, roadmap pushes included, with no word to type and no cloud session needed.\nProblem (rule): the guard proves a session's tier only from cloud tags, which a Mac session has none of, so it refuses a Mac triage's roadmap push.\nBased on (ruling): your note on 213, 2026-11-04 17:44 CST: no tier word, and not cloud-only.\nBased on (read): the guard reads tags from get_session; a file Claude cannot write is the only other proof Claude cannot forge.\nDeparts from: main, where only cloud tags prove a tier \u2014 b adds a tier file that only your computer's setup writes; d adds a hand-off of roadmap pushes.",
   "group": "local-triage-tier-proof",
-  "home": "local-triage-tier-proof",
+  "home": "roadmap step local-triage-tier-proof; docs/debts local-triage-tier-proof (draft PR with batch runner 8)",
   "id": "local-triage-tier-word",
   "kind": "decision",
   "lastAnswer": {
-    "at": "2026-11-04T23:44:40Z",
+    "at": "2026-11-05T13:44:30Z",
     "choice": "none",
-    "note": "I dont want to type a word establishing who is triage and I don't want to only have cloud sesions either \u2014 Read 17:48 CST. That rules out a and c. Sent to the coordinator: option b (a tier file only your computer's setup writes) needs no word and keeps Mac sessions; it rewrites this item around b or another way, and it comes back to you."
+    "note": "it'd have to be working on mac or windows if file version. else build nothing for now on this is ok too put this as a debt. Filed 07:48 CST Nov 5 as roadmap step mac-triage-tier-debt."
   },
   "n": 213,
   "options": [
@@ -31,8 +31,9 @@
   "pick": "b",
   "rank": 13,
   "ref": "step local-triage-tier-proof; lane session_013NEJL14PQN4dF1YxDt4yEQ",
+  "reply": "Build nothing now. The gap is filed as a debt: a triage on your Mac or PC cannot prove its tier, so the guard refuses its roadmap pushes. The fix, when it comes, is the tier file, and it must work on both Mac and Windows. Roadmap step mac-triage-tier-debt writes the debt record.",
   "short": "Mac triage: tier file from setup",
-  "status": "open",
+  "status": "closed",
   "title": "A triage session on your Mac reads its tier from a file your computer's setup writes: build it that way?",
   "why": "Recommended: b. It meets both parts of your note: no word to type, and Mac sessions work on their own."
 }

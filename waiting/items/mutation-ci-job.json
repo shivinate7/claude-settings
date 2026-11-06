@@ -5,10 +5,11 @@
   "home": "test-practices-first-principles",
   "id": "mutation-ci-job",
   "kind": "decision",
+  "lane": "mutation-ci-report: PR #1262",
   "lastAnswer": {
-    "at": "2026-11-04T12:50:00Z",
-    "choice": "none",
-    "note": "Seems like a fix is needed for banchi first? (on: banchi cannot run only the tests for one file)"
+    "at": "2026-11-05T13:41:57.602Z",
+    "choice": "d",
+    "note": "we also reopen this in a while after logging for a bit. Routed 07:44 CST Nov 5 to the coordinator for a lane; the re-ask after a logging period is filed on roadmap step test-practices-first-principles."
   },
   "links": [
     {
@@ -69,6 +70,7 @@
   "pick": "d",
   "rank": 2,
   "ref": "PRs #996, #1010, #1080 and banchi #1052; roadmap step test-practices-first-principles",
+  "reply": "Your pick d is routed to the coordinator for a lane: a report-only test-strength job on each batch, plus the known-bug replay. Your follow-up is filed on roadmap step test-practices-first-principles: once the job has logged results for a while, this question comes back, with the measured catch rates, to ask whether a weak result should block. This item closes when the lane merges.",
   "short": "test-strength CI job",
   "status": "open",
   "title": "Should CI check test strength on each batch, and should a weak result block the merge?",

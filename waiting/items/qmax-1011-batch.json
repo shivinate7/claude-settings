@@ -1,11 +1,11 @@
 {
   "added": "2026-11-04T04:32:00Z",
-  "context": "Goal: q_max #1011 (integration PR int-batch-qmax-r5, head b602fd459, CI green) lands, then the q_max batch (#1020, #1019, #1014-#1018).\nProblem (rule): the merge tool refuses a merge onto a main whose state is unknown unless a reason is given, and q_max's browser tests run on CI only when you start them, so either way the merge waits on you.\nBased on (measured): #1011 is green on all 19 checks and includes today's main.\nBased on (read): main's last two browser runs never finished: one hit the 3-hour limit, the other was stopped at 23:01 CST.\nDeparts from: main merges only after a proven browser run on main \u2014 B merges #1011 with main's browser state unproven.",
+  "context": "Goal: q_max #1011 (integration PR int-batch-qmax-r5) lands, then the q_max batch.\nProblem (rule): the merge tool refuses a merge onto a main whose browser state is unknown or red.\nBased on (read, 07:30 CST Nov 5): main's browser run 41861801325 on a3afe47e5 completed with the browser job FAILED (it did not just stop).\nBased on (read, 07:30 CST Nov 5): #1011 at b602fd459 is 22 commits behind main and conflicts with it (GitHub: dirty).\nDeparts from: main merges only after a proven browser run on main \u2014 B merges #1011 with main's browser state unproven.",
   "holds": "q_max PRs #1011 and #1008.",
   "home": "git-never-merge-failing-ci",
   "id": "qmax-1011-batch",
   "kind": "decision",
-  "lane": "batch runner 9: browser run 41861801325",
+  "lane": "waits on q_max #1029 (item 260), then a lane merges main into #1011, then a green browser run",
   "lastAnswer": {
     "at": "2026-11-04T12:22:11Z",
     "choice": "a",
@@ -54,7 +54,7 @@
   "owner": "runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
   "rank": 1,
   "ref": "q_max PRs #1011 and #1008; q_max browser runs 40740294267 and 41377928751",
-  "reply": "09:52 CST: open again until the browser run ends. #1024 merged as a3afe47e5 at 09:49 CST. Browser run 41861801325 started on the new main at 09:50 CST (cap 240 min). Note: q_max's after-merge deploy read was UNKNOWN in the cloud (RENDER_API_KEY not set); the merge stands.",
+  "reply": "Correction 07:31 CST Nov 5: #1011 is NOT ready to merge, and nothing here waits on you. Your pick a stands: merge only after a green browser run on main. The run on main (41861801325) ended RED, and #1011 is 22 commits behind main and conflicts. Next: the red fix q_max #1029 (item 260 decides its shape), then a lane merges main into #1011, then a fresh browser run. This item closes when #1011 merges.",
   "short": "q_max #1011 batch",
   "status": "open",
   "title": "q_max #1011: run main's browser tests once first, or merge now past the unknown result?",

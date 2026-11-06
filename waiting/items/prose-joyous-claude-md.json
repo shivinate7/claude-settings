@@ -6,9 +6,9 @@
   "kind": "decision",
   "lane": "joyous-claude-md-fixes",
   "lastAnswer": {
-    "at": "2026-11-04T14:03:20Z",
+    "at": "2026-11-04T14:03:23.883Z",
     "choice": "a",
-    "note": "Read 08:04 CST. Lane joyous-claude-md-fixes builds it; open until it merges."
+    "note": ""
   },
   "n": 228,
   "options": [
@@ -30,8 +30,9 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 28,
   "ref": "lane prose-governance-workflow (session_013NEJKz49VptC1nSSWVrPN8), Opus judges 22:05 CST",
+  "reply": "Done: joyous #76 (lane joyous-claude-md-fixes) merged Nov 4 08:53 CST. Closed 07:45 CST Nov 5 in the stale-item sweep.",
   "short": "joyous CLAUDE.md: 3 fixes",
-  "status": "open",
+  "status": "closed",
   "title": "joyous: drop the skills line, say \"owner\" not \"builder\", and add a no-public-tuition rule?",
   "why": "Recommended: a. An old page in the archive shows $1,000/month, and nothing stops a ported page from publishing it."
 }

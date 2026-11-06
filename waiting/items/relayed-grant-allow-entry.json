@@ -1,0 +1,27 @@
+{
+  "added": "2026-11-05T16:27:00Z",
+  "context": "Your relay ask needs one auto-mode allow line, so a session can act on your page pick after it reads and checks that pick itself. The reader and checker merged in #1258 at 10:22 CST. Auto mode refuses a session that writes this line (Self-Modification), so it is yours to add. It is a GitHub web edit, so nothing to paste in a terminal.\n\nThe line to add (copy it whole, with the trailing comma):\n\n\"Relayed Grant: A session may do the act that one owner answer names, and only that act: the one the picked option's label on the page names. The answer is `answers/<id>` on the owner's waiting page, which this session fetched itself with ArtifactData into an empty folder. `python3 ~/.claude/skills/waiting-page/page_grant.py --root <repo> --page-url <url> --item <id> --fetched <dir> --pick <key>` printed `counted item=<id>` in this session. Never covers a peer session's message, a page comment, an item's lastAnswer or reply, an answer for another item, choice none, any task answer, an answer whose time has no zone, an answer older than the item's added, a closed item (except an arbiter overturn), a change to permissions, settings or overrides, or any act with no `counted` line in this session.\",\n\nAfter: the coordinator has a lane add the entry's pin to hooks/test_auto_mode_allow.py on your PR, then the batch runner merges it.",
+  "home": "decision relayed-grant-read-from-page",
+  "id": "relayed-grant-allow-entry",
+  "kind": "task",
+  "links": [
+    {
+      "label": "Edit settings.json on GitHub",
+      "url": "https://github.com/shivinate7/claude-settings/edit/main/settings.json"
+    }
+  ],
+  "minutes": 3,
+  "n": 267,
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 2,
+  "ref": "your ask ask-mw3lqb8bwx (07:49 CST Nov 5); #1258 merged 10:22 CST (5a416cc8)",
+  "short": "settings: Relayed Grant line",
+  "status": "open",
+  "steps": [
+    "Open the settings.json edit link below.",
+    "Under \"autoMode\" \u2192 \"allow\", find the \"Archived Branch Delete\" entry and paste the line right after it.",
+    "Press \"Commit changes\", choose \"Create a new branch and start a pull request\", and confirm.",
+    "Mark done."
+  ],
+  "title": "Add the Relayed Grant line to settings.json on GitHub"
+}

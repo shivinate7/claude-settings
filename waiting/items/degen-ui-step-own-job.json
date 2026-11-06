@@ -4,7 +4,11 @@
   "home": "degen milestone.yml; degen rule tests-once-per-batch",
   "id": "degen-ui-step-own-job",
   "kind": "decision",
-  "lastAnswer": "Rewritten 03:04 CST with the final run facts; the old options a/b/c are dropped (coordinator).",
+  "lastAnswer": {
+    "at": "2026-11-05T13:49:13Z",
+    "choice": "a",
+    "note": "Routed 07:52 CST Nov 5 to the coordinator."
+  },
   "n": 241,
   "options": [
     {
@@ -25,6 +29,7 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 2,
   "ref": "item 200; degen #428 (e38a4eef), milestone run 41792080302",
+  "reply": "Your pick a is with the coordinator: the UI step moves out of milestone-proof, #428 ships on suite plus build, and the UI tests get their own lane. This item closes when that lane merges.",
   "short": "degen: UI suite never green",
   "status": "open",
   "title": "degen: the UI test suite has never passed. Ship #428 on suite + build, and fix the UI tests in their own lane?",

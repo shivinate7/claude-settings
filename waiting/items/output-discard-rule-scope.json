@@ -4,6 +4,11 @@
   "home": "git-never-discard-output",
   "id": "output-discard-rule-scope",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T04:29:00Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 177,
   "options": [
     {
@@ -25,8 +30,9 @@
   "pick": "a",
   "rank": 4,
   "ref": "deep audit 1102, report docs/plans/deep-audit/report.md on audit/deep-1102 (6b6a41f3), table 'claude-settings: homes', row output-discard-rule-scope",
+  "reply": "Done: #1188 merged Nov 4 01:09 CST; CLAUDE.md now reads \"Never silence a git write's output\". Closed 07:50 CST Nov 5 in the stale-item sweep.",
   "short": "discard-output scope",
-  "status": "open",
+  "status": "closed",
   "title": "Should the keep-output rule cover only git writes, as the guard does, or should the guard grow to all commands?",
   "why": "The verdict wrapper already covers test runs; a wider guard would refuse routine /dev/null use."
 }

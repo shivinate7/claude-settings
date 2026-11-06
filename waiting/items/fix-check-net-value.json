@@ -4,6 +4,12 @@
   "home": "decision hold-unsafe-after-round-3",
   "id": "fix-check-net-value",
   "kind": "decision",
+  "lane": "review-fix-check: draft PR #1261 (batch runner 8)",
+  "lastAnswer": {
+    "at": "2026-11-05T13:49:11Z",
+    "choice": "a",
+    "note": "Landed on main in PR #1265 (c4b7f47a), 12:05 CST Nov 5."
+  },
   "n": 232,
   "options": [
     {
@@ -24,8 +30,9 @@
   "owner": "lane review-fix-check (session_013NEJKzRvvmoLf7T9kB4uEe)",
   "rank": 2,
   "ref": "item 203 a",
+  "reply": "Your pick a is with lane review-fix-check: the fix check is the review, and it does not repeat the net-value test. This item closes when the lane merges.",
   "short": "Fix check: net-value again?",
-  "status": "open",
+  "status": "closed",
   "title": "When a fix after the last review edits a guard or check, is the net-value test owed again?",
   "why": "Recommended: a. The fix check reads only the fix, so the hole it could open is in plain view."
 }

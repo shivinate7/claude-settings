@@ -1,24 +1,24 @@
 {
   "added": "2026-11-04T14:43:00Z",
-  "context": "Goal: q_max's browser tier finishes, so main's browser read is known and merges are not blocked.\nProblem (goal): the full tier is 672 checks and takes about 2 h 45 min to 3 h 10 min on a runner, over the 180 min cap; nothing hangs. 14-FLOSS alone is 40-45 min.\nBased on (measured): run 40740294267 hit the cap at 2 h 59 min with 623 of 672 done; per-check times sum to 10,587 s of the step's 10,753 s.\nBased on (read): D-542 (the browser tier runs on your dispatch) is unchanged by either option.\nDeparts from: q_max main (one browser job, 180 min cap) \u2014 a raises the cap to 240 min; b runs 14-FLOSS and 14-STILL as a second job with its own port and database.\n\nMeanwhile: lane qmax-browser-tier-hang raises the cap to 240 min as a named bandaid, so a dispatched run can finish; lane qmax-browser-red-checks fixes the checks that fail.",
+  "context": "Goal: q_max's browser tier finishes, so main's browser read is known and merges are not blocked.\nProblem (goal): the full tier is 672 checks and takes about 2 h 45 min to 3 h 10 min on a runner, over the old 180 min cap; nothing hangs. 14-FLOSS alone is 40-45 min.\nBased on (measured): run 40740294267 hit the 180 min cap at 2 h 59 min with 623 of 672 done; per-check times sum to 10,587 s of the step's 10,753 s.\nBased on (read): q_max #1026 raised the cap to 240 min (merged Nov 4 09:49 CST). Run 41861801325 then finished in 3 h 34 min, under the cap, and ended RED on failing checks (item 260 decides their fix).\nDeparts from: q_max main (one browser job, 240 min cap) \u2014 b runs 14-FLOSS and 14-STILL as a second job with its own port and database.",
   "home": "q_max .github/workflows/browser.yml; D-542, the browser tier runs on your dispatch",
   "id": "qmax-browser-tier-split",
   "kind": "decision",
   "n": 258,
   "options": [
     {
-      "gain": "No more work; a run finishes.",
-      "how": "No more work after the bandaid lane.",
+      "gain": "No more work.",
+      "how": "No more work: #1026 already raised the cap.",
       "key": "a",
-      "label": "Keep one job at the new 240 min cap",
-      "lose": "Each dispatch takes about 3 h of runner time and your wait."
+      "label": "Keep one job at the 240 min cap",
+      "lose": "A full run takes about 3 h 34 min, close to the cap."
     },
     {
-      "gain": "About 2 h per dispatch.",
+      "gain": "A full run finishes sooner, well under the cap.",
       "how": "A build lane moves 14-FLOSS and 14-STILL to a second job with its own port and database, each with its own count check.",
       "key": "b",
       "label": "Split into two parallel jobs",
-      "lose": "A build lane; each job needs its own count check, because a filtered run turns the count check off; the same total runner minutes."
+      "lose": "One build lane, and a second job to keep."
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",

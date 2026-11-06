@@ -4,6 +4,11 @@
   "home": "decision owner-override",
   "id": "opus-plain-ask-held",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T04:29:00Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 225,
   "options": [
     {
@@ -31,8 +36,9 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 25,
   "ref": "lane opus-plain-ask (session_013NEJL3hjX4qVEjikwaYF5b), branch opus-plain-ask head 2954de20",
+  "reply": "Done: the hole fix reached main in #1208 and the scoped plain ask in #1244 (batch 10, Nov 5 06:36 CST). Closed 07:50 CST Nov 5 in the stale-item sweep.",
   "short": "Plain Opus ask held",
-  "status": "open",
+  "status": "closed",
   "title": "Your plain \"use Opus\" message: fix the hole first, merge as it is, or drop it?",
   "why": "Recommended: a. The plain ask still ships, without letting non-owner text raise every role to Opus."
 }

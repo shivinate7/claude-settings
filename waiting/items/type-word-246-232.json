@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-05T13:55:00Z",
+  "context": "Your page pick 232 a reached the lane, but auto mode in the lane still trusts only words typed in its own chat. Step owner-word-relay fixes that, and its lane has started. Item 246 is asked again on the page, because its act changed.",
+  "home": "roadmap step owner-word-relay",
+  "id": "type-word-246-232",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-05T14:41:00Z",
+    "choice": "done",
+    "note": "You typed 232 a in lane review-fix-check at 08:41 CST Nov 5 (lane report)."
+  },
+  "links": [
+    {
+      "label": "Lane review-fix-check (item 232)",
+      "url": "https://claude.ai/code/session_013NEJKzRvvmoLf7T9kB4uEe"
+    }
+  ],
+  "minutes": 1,
+  "n": 263,
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 2,
+  "ref": "your pick 232 a (Nov 5 07:49 CST)",
+  "short": "type 232 a in 1 lane",
+  "status": "closed",
+  "steps": [
+    "Open lane review-fix-check (link below) and type: 232 a",
+    "Mark done."
+  ],
+  "title": "Type your word in lane review-fix-check (232)"
+}

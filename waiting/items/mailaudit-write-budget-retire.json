@@ -6,7 +6,7 @@
   "kind": "decision",
   "lane": "mailaudit-write-budget-retire",
   "lastAnswer": {
-    "at": "2026-11-04T13:56:30Z",
+    "at": "2026-11-04T13:56:29.078Z",
     "choice": "a",
     "note": ""
   },
@@ -37,8 +37,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "item 191; mailaudit #196; lane mailaudit-token-records-retire",
+  "reply": "Done: mailaudit #196 merged Nov 4 07:15 CST, and follow-up #197 (deletes the record and its index line) merged 08:18 CST. Closed 07:45 CST Nov 5 in the stale-item sweep.",
   "short": "mailaudit: retire write-budget record",
-  "status": "open",
+  "status": "closed",
   "title": "Retire mailaudit's open-thread record the-write-budget-is-shared?",
   "why": "Recommended: a. The app makes no GitHub writes now, so the record is false, and git keeps its text if the risk returns."
 }

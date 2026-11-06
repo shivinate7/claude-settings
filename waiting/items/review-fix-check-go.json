@@ -4,11 +4,11 @@
   "home": "CLAUDE.md rule roles-review-cap-three",
   "id": "review-fix-check-go",
   "kind": "decision",
-  "lane": "review-fix-check",
+  "lane": "review-fix-check: draft PR #1261 (batch runner 8)",
   "lastAnswer": {
-    "at": "2026-11-04T13:56:30Z",
+    "at": "2026-11-04T13:56:29Z",
     "choice": "a",
-    "note": ""
+    "note": "Landed on main in PR #1265 (c4b7f47a), 12:05 CST Nov 5."
   },
   "n": 231,
   "options": [
@@ -32,7 +32,7 @@
   "rank": 1,
   "ref": "item 203 a; decisions hold-unsafe-after-round-3, standing-merge-grant",
   "short": "Fix check: say go",
-  "status": "open",
+  "status": "closed",
   "title": "Your pick 203 a (the fix check) is blocked: auto mode will not let the lane edit the rules a peer session briefed. Say go in the lane?",
   "why": "Recommended: a. Your ruling stands; only the act needs your typed word."
 }

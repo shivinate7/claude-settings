@@ -6,7 +6,7 @@
   "kind": "decision",
   "lane": "banchi-difference-row-ruling",
   "lastAnswer": {
-    "at": "2026-11-04T12:40:20Z",
+    "at": "2026-11-04T12:40:22.779Z",
     "choice": "a",
     "note": ""
   },
@@ -30,7 +30,8 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 13,
   "ref": "deep audit 1102, banchi homes; coordinator handoff/audit-child-questions 9d97c9b, oq-product-compare",
+  "reply": "Done: banchi #1054 (D227 allows the Difference row as a plain number) merged Nov 4 07:11 CST. Closed 07:45 CST Nov 5 in the stale-item sweep.",
   "short": "Product compare block",
-  "status": "open",
+  "status": "closed",
   "title": "banchi: Allow the Difference row or remove it?"
 }

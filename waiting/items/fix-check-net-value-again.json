@@ -4,6 +4,11 @@
   "home": "claude-settings rule roles-review-cap-three; lane review-fix-check record",
   "id": "fix-check-net-value-again",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-05T14:41:00Z",
+    "choice": "a",
+    "note": "Answered by 232 a, the same question, which you typed in lane review-fix-check at 08:41 CST Nov 5. The lane files it in decision hold-unsafe-after-round-3."
+  },
   "n": 255,
   "options": [
     {
@@ -26,7 +31,7 @@
   "rank": 3,
   "ref": "items 203, 231, 254",
   "short": "Post-round-3 guard fix: net-value again?",
-  "status": "open",
+  "status": "closed",
   "title": "When a fix after the last review round edits a guard or a check, does it owe the net-value test again?",
   "why": "Recommended: a. It keeps your 203 a promise of one short read, and the fix check still reads the fix against its finding."
 }

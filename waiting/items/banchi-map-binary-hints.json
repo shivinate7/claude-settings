@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-05T17:42:00Z",
+  "context": "Goal: retiring banchi's docs/map.py loses nothing (your item 209 a).\nProblem (rule): 8 non-code files (icons, the web manifest, an onnx model, the STE licence) carried 19 decision ids in the old map. The shared map maps code files only, so an edit to one of them now shows no decision hint. banchi #1064 restores the other 72 ids, on the json files.\nBased on (ruling): 209 a, \"no loss\"; rule building-port-keeps-behaviour.\nDeparts from: banchi main before #1063 gave decision hints on those 8 files \u2014 a keeps them without hints, as a notes line; b maps them again.\n\nNot blocking: #1064 merges either way.",
+  "home": "banchi docs/debts notes; claude-settings skill plain-english-map",
+  "id": "banchi-map-binary-hints",
+  "kind": "decision",
+  "n": 268,
+  "options": [
+    {
+      "gain": "No shared-tool change for binary files.",
+      "how": "The lane writes one notes line in banchi's debt store.",
+      "key": "a",
+      "label": "Accept the loss, kept as a notes line",
+      "lose": "An edit to an icon or the model shows no decision hint."
+    },
+    {
+      "gain": "No loss of the 19 hints.",
+      "how": "A lane adds the 8 files' extensions to the map and writes their map lines.",
+      "key": "b",
+      "label": "Map them anyway by adding their extensions",
+      "lose": "Map lines for binary files, and a map-check run that reads them. If it needs a shared-tool change: Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 3,
+  "ref": "item 209 a; banchi #1063, #1064",
+  "short": "banchi: decision hints on 8 binary files",
+  "status": "open",
+  "title": "banchi: accept losing decision hints on 8 non-code files?",
+  "why": "Recommended: a. The 19 hints sit on files that rarely change, and b may bend the shared map to fit one repo."
+}

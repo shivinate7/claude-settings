@@ -1,6 +1,6 @@
 {
   "added": "2026-11-02T19:45:00Z",
-  "context": "Goal: one writing standard in every repo.\nProblem (rule): the child repos still require STE, and work in another repo needs your word.\nBased on (ruling): your 13:22 CST pick b, \"drop STE everywhere\".\nBased on (read): q_max CLAUDE.md \"Language standard\" section; degen CLAUDE.md rule prose-is-ste.\nDeparts from: each child CLAUDE.md that requires STE \u2014 points at rule output-write-in-ste instead.",
+  "context": "Goal: one writing standard in every repo.\nProblem (rule): q_max and degen still require STE, and work in another repo needs your word.\nBased on (ruling): your 13:22 CST pick b (Nov 2), \"drop STE everywhere\".\nBased on (read, Nov 5): #1105 merged Nov 2; joyous's CLAUDE.md no longer names STE; q_max CLAUDE.md (Language standard) and degen CLAUDE.md (rule prose-is-ste) still do.\nDeparts from: q_max's and degen's CLAUDE.md, which require STE \u2014 a points them at rule output-write-in-ste instead.",
   "holds": "Only the child repos' STE lines; #1105 goes ahead without it.",
   "home": "child-claude-md-dedupe",
   "id": "ste-child-repos",

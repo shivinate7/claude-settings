@@ -4,6 +4,11 @@
   "home": "settings.json auto-mode allow rules",
   "id": "lease-push-own-branch",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-05T13:49:13Z",
+    "choice": "a",
+    "note": "Routed 07:52 CST Nov 5 to lane lease-push-c-and-d (same fix as 257) and the coordinator."
+  },
   "n": 239,
   "options": [
     {
@@ -25,6 +30,7 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB); also lane mutate-guard-cap (session_013NEJKysSpND2mEqWBs5KQs)",
   "rank": 2,
   "ref": "note classifier-refuses-lease-push; closed draft #1191; PR 1210 replaced by 1211; decision stale-safe-force-push",
+  "reply": "Your pick a needs one paste from you. The classifier refused a lane writing the auto-mode allow entry (Self-Modification, 07:47 CST), so the entry goes into your settings.json by hand. The coordinator gave you the text in chat at 07:48 CST, and it covers 257 c too; it will also be on this page as a task. Lane lease-push-c-and-d does part d only. This item closes when the entry is in.",
   "short": "Lease push to own lane branch",
   "status": "open",
   "title": "Auto mode refuses a lane's force push to its own branch, so each fix leaves a stale branch. Allow that one form?",

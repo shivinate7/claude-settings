@@ -1,5 +1,5 @@
 {
-  "added": "2026-11-04T23:48:00Z",
+  "added": "2026-11-05T13:51:00Z",
   "context": "Both already passed on your Mac on Oct 27. Each step (c29 and c58) can only close when Windows passes too.\n\nThe decision watch (c29) is a small program that reads each turn and records whether it followed your recorded decisions; \"judged\" means it ran and gave a verdict, \"UNKNOWN\" means it could not run. The mods (c58) are the small add-ons claude-settings installs into the Claude app; each should update itself to the version on main.",
   "home": "c29",
   "id": "windows-live-checks",
@@ -14,6 +14,7 @@
   "owner": "Triage the roadmap (9)",
   "rank": 10,
   "ref": "c29 (decision watch runs again), c58 (mods update themselves)",
+  "reply": "Unparked for real at 07:51 CST Nov 5. Your 17:48 press reopened the item, but its parked line stayed, so the page still showed it as parked. Do the steps below on your Windows PC.",
   "status": "open",
   "steps": [
     "Restart the Claude app on your Windows PC and take one turn (any message).",

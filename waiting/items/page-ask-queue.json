@@ -21,6 +21,11 @@
   "home": "ask-reaches-writer",
   "id": "page-ask-queue",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T04:29:00Z",
+    "choice": "b",
+    "note": ""
+  },
   "links": [
     {
       "label": "Mockup on branch rg-page-asks",
@@ -71,8 +76,9 @@
   "pick": "a",
   "rank": 18,
   "ref": "step ask-reaches-writer; mockup docs/design/page-ask-queue.html on branch rg-page-asks (3bf3e26b), states rows and stack",
+  "reply": "Done: the ask queue with \"Add to list\" is in the page template on main, and this page runs it. Closed 07:50 CST Nov 5 in the stale-item sweep.",
   "short": "Several asks at once",
-  "status": "open",
+  "status": "closed",
   "title": "How should several asks queue on the waiting page?",
   "why": "Each ask reaches its writer at once and stays undoable."
 }

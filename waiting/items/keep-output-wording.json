@@ -1,6 +1,6 @@
 {
   "added": "2026-11-04T05:16:00Z",
-  "context": "Goal: the keep-output rule says exactly what its guard checks, in the fewest words.\nProblem (rule): decision cull-rules (you, 2026-10-17) caps a checked rule's reminder at 3 words. Your pick 177 a narrows the rule to git writes, which takes at least 4 words. The two rulings cannot both hold.\nBased on (ruling): cull-rules, 3-word cap.\nBased on (ruling): 177 a (22:29 CST), git writes only.\nDeparts from: CLAUDE.md git-never-discard-output \"Keep command output.\" \u2014 becomes one of the forms below.",
+  "context": "Goal: the keep-output rule says exactly what its guard checks, in the fewest words.\nProblem (rule): decision cull-rules (you, 2026-10-17) caps a checked rule's reminder at 3 words. Main now reads option c, which is 6 words, so it breaks that cap.\nBased on (ruling): cull-rules, 3-word cap.\nBased on (ruling): 177 a (22:29 CST Nov 3), git writes only.\nBased on (read): #1188 merged Nov 4 01:09 CST and put c on main.\nDeparts from: CLAUDE.md git-never-discard-output \"Never silence a git write's output.\" \u2014 a or b shortens it; c keeps it and leaves the cap broken.",
   "home": "CLAUDE.md rule git-never-discard-output",
   "id": "keep-output-wording",
   "kind": "decision",

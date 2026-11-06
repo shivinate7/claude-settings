@@ -4,6 +4,12 @@
   "home": "child-guard-promotion",
   "id": "banchi-repo-map",
   "kind": "decision",
+  "lane": "banchi-retire-map-py (session_013NEJL42PgRgbnB2WN4U2ub)",
+  "lastAnswer": {
+    "at": "2026-11-04T04:20:46.936Z",
+    "choice": "a",
+    "note": "review what it has / made for anything worth mining from its and then yea it needs to adopt ours. Routed 07:22 CST to the coordinator for a banchi lane."
+  },
   "n": 209,
   "options": [
     {
@@ -25,6 +31,7 @@
   "pick": "a",
   "rank": 9,
   "ref": "docs/plans/child-guard-promotion.md on PR #1119 (ea66d8e), owner question 4, banchi row 42",
+  "reply": "Your pick a is in work: lane banchi-retire-map-py started 07:20 CST. Most of the mining is already on main (#1193, #1196, #1198); the lane checks for anything left, then banchi adopts the shared skill and deletes docs/map.py. This item closes when that lane merges.",
   "short": "banchi repo map",
   "status": "open",
   "title": "Should banchi drop its own repo map check and use the shared plain-english-map skill?",

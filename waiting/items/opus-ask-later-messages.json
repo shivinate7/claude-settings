@@ -1,24 +1,24 @@
 {
   "added": "2026-11-04T14:09:00Z",
-  "context": "Goal: a plain \"use Opus\" message grants Opus only to the work your nearby messages name (your 226 b).\nProblem (money): 226 said the scope comes from your messages before and after the ask. When you send the ask, no later message exists yet. Reading later messages means one model call on each of your messages while the grant lives, even ones that never say \"opus\". Today those cost nothing.\nBased on (read): hooks/local_time.py calls the Opus ask judge once, on the message that carries \"opus\" (decision owner-override, cost line).\nDeparts from: main (the scope comes from the ask alone) \u2014 a reads your earlier messages too; b also lets a later message narrow a live grant.\n\nMeanwhile: the lane builds the \"before the ask\" part, which both options need.",
+  "context": "Goal: a plain \"use Opus\" message grants Opus only to the work your nearby messages name (your 226 b).\nProblem (money): 226 said the scope comes from your messages before and after the ask. When you send the ask, no later message exists yet. Reading later messages means one model call on each of your messages while the grant lives, even ones that never say \"opus\".\nBased on (read): #1244 (batch 10, Nov 5 06:36 CST) put option a on main: hooks/local_time.py reads your earlier messages with the ask.\nDeparts from: main (earlier messages only) \u2014 b also lets a later message narrow a live grant.",
   "home": "claude-settings decision owner-override; lane opus-plain-ask-scope record",
   "id": "opus-ask-later-messages",
   "kind": "decision",
   "n": 256,
   "options": [
     {
-      "gain": "The cost stays one extra model call per ask that names no role.",
-      "how": "The judge reads the ask and your messages before it.",
+      "gain": "No model call on later messages.",
+      "how": "No change: main does this since #1244.",
       "key": "a",
       "label": "Earlier messages only",
-      "lose": "A later \"for the reviewers\" does not narrow the grant."
+      "lose": "A later message cannot narrow a live grant."
     },
     {
-      "gain": "Matches 226's words.",
-      "how": "A later message may only narrow a live grant, never widen it.",
+      "gain": "A later message can narrow a live grant.",
+      "how": "Each of your messages while a grant lives is read, and can narrow it.",
       "key": "b",
       "label": "Earlier and later",
-      "lose": "One model call on each of your messages while a grant lives."
+      "lose": "One model call on each of your messages while the grant lives."
     }
   ],
   "owner": "lane opus-plain-ask-scope (session_013NEJL2N7nzFwsM4NGCp48s)",

@@ -1,9 +1,14 @@
 {
   "added": "2026-11-04T13:58:30Z",
   "context": "You picked 231 a (\"Say go in the lane\") at 07:56 CST. The lane still needs your typed word in its own session: the auto-mode classifier refused its record-writer as Self-Modification, and a page pick relayed by another session does not lift that.\n\nAfter: the lane builds the fix check and reports; item 231 closes when it lands.",
-  "home": "item 231; lane review-fix-check",
+  "home": "roadmap step owner-word-relay",
   "id": "review-fix-check-type-go",
   "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-05T13:49:13Z",
+    "done": true,
+    "note": "why did i have to say thst there. Filed with ask ask-mw3lqb8bwx as roadmap step owner-word-relay."
+  },
   "links": [
     {
       "label": "Lane review-fix-check session",
@@ -14,8 +19,9 @@
   "owner": "lane review-fix-check (session_013NEJKzRvvmoLf7T9kB4uEe)",
   "rank": 1,
   "ref": "item 231 a (your pick 07:56 CST)",
+  "reply": "Done noted, and you should not have had to. Today auto mode trusts only words typed in that session's own chat, so your page pick could not lift its refusal. The fix is filed as step owner-word-relay, with your relay ask.",
   "short": "Type go in lane review-fix-check",
-  "status": "open",
+  "status": "closed",
   "steps": [
     "Open https://claude.ai/code/session_013NEJKzRvvmoLf7T9kB4uEe.",
     "Type: go"

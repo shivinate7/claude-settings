@@ -4,6 +4,12 @@
   "home": "home CLAUDE.md line 46",
   "id": "home-stop-list-ha-wait",
   "kind": "decision",
+  "lane": "home-stop-list-ha-wait (session_013NEJL3BGhEU8n1LG6xvkKa)",
+  "lastAnswer": {
+    "at": "2026-11-05T14:38:43Z",
+    "choice": "b",
+    "note": "Routed 08:40 CST Nov 5. Home #550 had already merged, so lane home-stop-list-ha-wait (session_013NEJL3BGhEU8n1LG6xvkKa) adds the clause to main's line 45 and hands it to batch runner 9."
+  },
   "n": 235,
   "options": [
     {
@@ -24,6 +30,7 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 3,
   "ref": "item 229 a; home #550 (head d9b06dd)",
+  "reply": "Your b is with lane home-stop-list-ha-wait: home CLAUDE.md's stop list gets \"or a wait or hold this file names\" back, so the wait before an HA restart stays. This item closes when that PR merges.",
   "short": "home: stop list and HA wait",
   "status": "open",
   "title": "home: after 229 a, the stop list leaves out the wait before an HA restart. Add it back?",

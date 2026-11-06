@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-05T15:31:00Z",
+  "context": "Goal: q_max uses the one shared map skill, not its own copy.\nProblem (rule): q_max CLAUDE.md lets an entry on main be rewritten only when you name the merge. No session here is q_max's primary orchestrator, so that standing grant does not reach this merge.\nBased on (ruling): map-skill-lives-here, line 21: a repo uses the shared map skill. #1030 applies it to q_max at format 4.\nDeparts from: q_max main D-750 (q_max keeps its own map skill copy) \u2014 #1030 rewrites D-750 so q_max uses the shared skill at format 4.\n\nLook once at the rewritten entry: https://github.com/shivinate7/q_max/pull/1030/files. It merges with the #1029 batch, after q_max main is green.",
+  "home": "q_max docs/decisions D-750 (map skill); claude-settings ruling map-skill-lives-here",
+  "id": "qmax-1030-d750-rewrite",
+  "kind": "decision",
+  "n": 266,
+  "options": [
+    {
+      "gain": "q_max follows the shared map skill; one copy to keep up.",
+      "how": "Batch runner 9 merges #1030 with the #1029 batch once q_max main is green.",
+      "key": "a",
+      "label": "Merge it",
+      "links": [
+        {
+          "label": "q_max #1030 files",
+          "url": "https://github.com/shivinate7/q_max/pull/1030/files"
+        }
+      ],
+      "lose": "q_max's own copy and its local tweaks are gone."
+    },
+    {
+      "gain": "D-750 stays as it is until you say.",
+      "how": "Write your note; runner 9 holds #1030.",
+      "key": "b",
+      "label": "Hold it, with your note",
+      "lose": "q_max keeps a second copy of the map skill, against your ruling."
+    }
+  ],
+  "owner": "batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
+  "rank": 2,
+  "ref": "q_max #1030; q_max #1029 batch",
+  "short": "q_max: merge D-750 rewrite",
+  "status": "open",
+  "title": "Merge q_max #1030, which rewrites D-750 (the map skill entry)?",
+  "why": "Recommended: a. It applies your ruling that the map skill lives in one place."
+}

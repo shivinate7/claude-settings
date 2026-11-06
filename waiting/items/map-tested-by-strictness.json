@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-05T18:30:00Z",
+  "context": "Goal: the map says which tests reach a file, and a check proves it (restores banchi's lost test links, your item 209 a).\nProblem (rule): how strict the check is decides how many of banchi's 72 old links survive. About 22 are direct imports, 42 come through a helper under harness/tests/t7/, and 8 have no import of the file at all.\nBased on (measured): the lane's count of banchi's retired tested_by data (ad0139873^:docs/map.py).\nDeparts from: banchi's old status_reach.py counted package reach (one import vouched for a whole package) \u2014 a and b judge each file on its own.\n\nNot blocking: the lane built a, recorded in decision map-tested-by-line. Your pick of b or c changes it.",
+  "home": "decision map-tested-by-line; roadmap step map-tested-by-line",
+  "id": "map-tested-by-strictness",
+  "kind": "decision",
+  "n": 270,
+  "options": [
+    {
+      "gain": "Catches false claims, such as store/queues.py citing T3.",
+      "how": "The check counts a test that imports the file, or a helper that re-exports it.",
+      "key": "a",
+      "label": "Per file, plus one re-export hop",
+      "lose": "banchi repoints about 42 links to helper paths, and fixes or drops 8."
+    },
+    {
+      "gain": "Strictest.",
+      "how": "The check counts only a test that imports the file directly.",
+      "key": "b",
+      "label": "Per file, no hop",
+      "lose": "More links need a direct-import test."
+    },
+    {
+      "gain": "banchi keeps its behaviour.",
+      "how": "One import vouches for the whole package.",
+      "key": "c",
+      "label": "Package reach, as banchi did",
+      "lose": "One import vouches for a whole package. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 3,
+  "ref": "item 209 a; banchi ad0139873^:docs/map.py",
+  "short": "map: how strict is tested-by",
+  "status": "open",
+  "title": "How strict is the new tested-by check in the shared map?",
+  "why": "Recommended: a. It catches false links but still counts tests that reach a file through one helper."
+}

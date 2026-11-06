@@ -1,0 +1,21 @@
+{
+  "added": "2026-11-05T18:05:00Z",
+  "context": "Every new cloud session prints a false \"CLAUDE_CODE_EXECPATH is not set\" line. The environment's snapshot was built Nov 3 15:34 CST at da8d8073, before #1116. Main is correct: the lane proved it in a fresh run at 12:01 CST. Only you can rebuild the environment; a session cannot edit its own environment.",
+  "home": "decision cloud-start-hooks-run-fresh; roadmap step execpath-path-fallback",
+  "id": "cloud-snapshot-rebuild",
+  "kind": "task",
+  "minutes": 2,
+  "n": 269,
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 3,
+  "ref": "#1116; lane execpath-path-fallback (12:01 CST Nov 5)",
+  "short": "rebuild cloud env snapshot",
+  "status": "open",
+  "steps": [
+    "In any cloud session, open the environment menu in the session's title bar.",
+    "Choose Edit, then Setup script.",
+    "Save with no change; that rebuilds the snapshot.",
+    "Mark done. It is done when a new session starts without the EXECPATH line."
+  ],
+  "title": "Rebuild the cloud environment snapshot"
+}

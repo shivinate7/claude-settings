@@ -4,6 +4,11 @@
   "home": "claude-settings CLAUDE.md and output-styles/shiv-stylisms.md",
   "id": "prose-cs-claude-md",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T12:00:00Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 227,
   "options": [
     {
@@ -24,8 +29,9 @@
   "owner": "lane prose-cs-claude-md (session_013NEJL37YxZQHNvkAvYcuL7)",
   "rank": 27,
   "ref": "lane prose-governance-workflow (session_013NEJKz49VptC1nSSWVrPN8), Opus judges 22:05 CST",
+  "reply": "Done: commit 914c5cd6 put the seven wording fixes on main. Closed 07:50 CST Nov 5 in the stale-item sweep.",
   "short": "claude-settings CLAUDE.md: 7 wording fixes",
-  "status": "open",
+  "status": "closed",
   "title": "claude-settings: apply the judges' 7 wording fixes to CLAUDE.md and the output style?",
   "why": "Recommended: a. Each fix removes a copy or adds a missing exception; no rule's meaning changes."
 }

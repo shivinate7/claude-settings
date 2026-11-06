@@ -6,7 +6,7 @@
   "kind": "decision",
   "lane": "mailaudit-token-records-retire",
   "lastAnswer": {
-    "at": "2026-11-04T12:40:20Z",
+    "at": "2026-11-04T12:40:22.779Z",
     "choice": "b",
     "note": ""
   },
@@ -31,8 +31,9 @@
   "pick": "a",
   "rank": 17,
   "ref": "deep audit 1102, mailaudit homes; coordinator handoff/audit-child-questions 9d97c9b, github-era-records-retire",
+  "reply": "Done: mailaudit #196 merged Nov 4 07:15 CST with no dated Retired line, as you picked (b). Closed 07:45 CST Nov 5 in the stale-item sweep.",
   "short": "Retire GitHub-era record",
-  "status": "open",
+  "status": "closed",
   "title": "mailaudit: Retire the GitHub-token records, one dated line?",
   "why": "Recommended in the audit report: retire, one dated line allowed."
 }

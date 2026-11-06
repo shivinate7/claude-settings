@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-05T22:12:00Z",
+  "context": "Goal: every guard or check change gets a stronger second read before it merges.\nProblem (rule): the main texts read two ways. A fix check is a short Haiku read of only the fix's diff. Should it follow a FAIL in any round, or only the last round (round 3)?\nBased on (read): CLAUDE.md rule roles-review-cap-three: \"A small fix to the last round's finding gets a fix check and merges on green.\" Decision hold-unsafe-after-round-3 line 19 says the same (your item 203 a, 2026-11-03 22:24 CST). Rule roles-third-round-steps-up says reviewers run Sonnet from round 2 on.\nBased on (measured): lane reviewer-spawn-model (#1280, which changes a check) ran a Haiku fix check after a round-1 FAIL and skipped the Sonnet round 2, as agents/reviewer.md's Fix check paragraph says.\nDeparts from: agents/reviewer.md Fix check paragraph (a fix check after any FAIL) \u2014 a: a fix check only after round 3; after a round-1 or round-2 FAIL the next read is a full Sonnet round.\n\nNot blocking: meanwhile the coordinator holds any lane whose fix check followed a round-1 FAIL until it gets a Sonnet round 2. #1280's Sonnet round 2 is running.",
+  "home": "decision hold-unsafe-after-round-3; agents/reviewer.md (Fix check paragraph)",
+  "id": "fix-check-which-round",
+  "kind": "decision",
+  "n": 271,
+  "options": [
+    {
+      "gain": "Every change gets the Sonnet step-up read before it merges.",
+      "how": "A lane changes agents/reviewer.md's Fix check paragraph to match the rule.",
+      "key": "a",
+      "label": "A fix check only after round 3",
+      "lose": "One more Sonnet review on small round-1 fixes."
+    },
+    {
+      "gain": "Faster small fixes.",
+      "how": "A lane rewrites rule roles-review-cap-three and the decision to match agents/reviewer.md.",
+      "key": "b",
+      "label": "A fix check after any round's FAIL",
+      "lose": "A change can merge on round 1 plus a Haiku diff read, with no Sonnet read."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 3,
+  "ref": "item 203 a; rule roles-review-cap-three; #1280",
+  "short": "fix check: after round 3 only?",
+  "status": "open",
+  "title": "Does a fix check follow a FAIL in any review round, or only round 3?",
+  "why": "Recommended: a. It matches your rule and the decision text, and keeps the Sonnet read on every guard change."
+}

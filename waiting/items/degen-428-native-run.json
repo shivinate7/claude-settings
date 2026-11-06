@@ -1,0 +1,57 @@
+{
+  "added": "2026-11-05T14:20:00Z",
+  "command": {
+    "mac": "cd /tmp\ngit clone --filter=blob:none https://github.com/shivinate7/degen.git degen-428\ncd /tmp/degen-428\ngit checkout --detach 1dd63cc8892d02b228aa0ab3d9d745d2f2962cf2\nmake native-build && echo \"native-check: pass 1dd63cc8892d02b228aa0ab3d9d745d2f2962cf2 $(date +%F)\""
+  },
+  "context": "Goal: degen #428 (degen main's red fix) merges.\nProblem (rule): your note said to skip the check and just merge. The merge tool refused at 09:07 CST: native-record is red because #428's body has no native-check pass line, and \"no override lifts this refusal\" (rule git-never-merge-failing-ci). Batch runner 9 will not write a pass line for a run that did not happen.\nBased on (measured): every other job on head 1dd63cc8 is green; native-record and all-jobs-passed fail only on the missing line (runner 9, 09:07 CST).\nDeparts from: main's rule never to merge failing CI \u2014 a keeps it; b merges one PR with native-record red.",
+  "home": "degen rule tests-once-per-batch (native-check record line)",
+  "id": "degen-428-native-run",
+  "kind": "decision",
+  "lane": "batch runner 9: degen #428",
+  "lastAnswer": {
+    "at": "2026-11-05T14:41:11Z",
+    "choice": "note",
+    "note": "skip the check, just merge. The merge tool refused at 09:07 CST (native-record red); asked again."
+  },
+  "links": [
+    {
+      "label": "Batch runner 9 session",
+      "url": "https://claude.ai/code/session_013NEJKymmzw37seAr3Qq5nv"
+    },
+    {
+      "label": "degen #428",
+      "url": "https://github.com/shivinate7/degen/pull/428"
+    }
+  ],
+  "minutes": 2,
+  "n": 264,
+  "options": [
+    {
+      "gain": "#428 merges with every check green; the rule holds.",
+      "how": "Paste the command below into Terminal on the Mac, then paste its last line into runner 9 (link above). Runner 9 adds the real pass line, re-runs CI and merges. Afterwards: rm -rf /tmp/degen-428.",
+      "key": "a",
+      "label": "Run the Mac build, then runner 9 merges on green",
+      "lose": "About 2 minutes of yours plus the Mac build time; the Mac is busy while it builds."
+    },
+    {
+      "gain": "No Mac run.",
+      "how": "Open https://github.com/shivinate7/degen/pull/428 and press Merge, accepting the red check.",
+      "key": "b",
+      "label": "Merge #428 yourself in GitHub with native-record red",
+      "links": [
+        {
+          "label": "degen #428",
+          "url": "https://github.com/shivinate7/degen/pull/428"
+        }
+      ],
+      "lose": "Goes against your rule never to merge failing CI; native code ships with no full Swift run on this head."
+    }
+  ],
+  "owner": "batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
+  "rank": 1,
+  "ref": "degen #428 (degen main's red fix), head 1dd63cc8; your pick 241 a (UI tests stay split out)",
+  "short": "degen #428: Mac run or your merge",
+  "status": "open",
+  "title": "Degen #428 cannot merge without the Mac run. Run it, or merge it yourself?",
+  "why": "Recommended: a. It keeps your never-merge-red rule and ships a real native run."
+}
