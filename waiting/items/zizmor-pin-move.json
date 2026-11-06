@@ -1,0 +1,41 @@
+{
+  "added": "2026-11-06T20:44:00Z",
+  "context": "Goal: keep the shared workflow scanner on the newest zizmor that passes.\nProblem (rule): moving the zizmor pin needs your yes. The no-question grant covers ste-lint pins only.\nBased on (measured): 1.31.1 and 1.32.0 both pass `zizmor .github/ actions/` with no findings, on the same 16 inputs as 1.30.1. The lane read the changelog for 1.31.0 to 1.32.0.\nBased on (measured): 1.32.0 came out 2026-11-02, 4 days ago.\nDeparts from: main zizmor==1.30.1 \u2014 moves to zizmor==1.32.0 (or 1.31.1).\nMeanwhile: the lane builds the change; its merge waits on this answer.",
+  "holds": "Which zizmor release the shared workflow scanner pins.",
+  "home": "decision action-pins-follow-sessions",
+  "id": "zizmor-pin-move",
+  "kind": "decision",
+  "lane": "zizmor-pin-bump: the lane builds now; its merge waits on this answer",
+  "n": 302,
+  "options": [
+    {
+      "gain": "Newest fixes, with template-injection gaps closed.",
+      "how": "Pin zizmor==1.32.0.",
+      "key": "a",
+      "label": "1.32.0",
+      "lose": "Only 4 days in the field."
+    },
+    {
+      "gain": "22 days in the field.",
+      "how": "Pin zizmor==1.31.1.",
+      "key": "b",
+      "label": "1.31.1",
+      "lose": "Misses 1.32.0's fixes."
+    },
+    {
+      "gain": "Nothing changes.",
+      "how": "Keep zizmor==1.30.1 and park the step.",
+      "key": "c",
+      "label": "Hold",
+      "lose": "The scanner falls behind."
+    }
+  ],
+  "owner": "lane zizmor-pin-bump (session_013NEJKzVtYoetutgUL9DkfZ)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "lane zizmor-pin-bump (session_013NEJKzVtYoetutgUL9DkfZ)",
+  "short": "zizmor pin move",
+  "status": "open",
+  "title": "Move the shared workflow scanner's zizmor pin from 1.30.1 to a newer release?",
+  "why": "The scanner checks every repo's CI files, and its pin moves only on your yes."
+}
