@@ -33,6 +33,7 @@ import ste_lint  # noqa: E402
 import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (one home)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
+import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 RUN_FOLDER = _test_temp.run_folder()  # the new cases take their temp folders from it, never from the system temp dir
@@ -58,6 +59,9 @@ def setUpModule():
     os.environ.update(CJ_LOADED_DIR=stub, CJ_RECORD=os.path.join(stub, "calls.jsonl"),
                       CJ_ANSWER=tcj.ALLOW)
     os.environ.pop("CJ_MODEL_FAIL", None)
+    # The route-rows seam points at a missing file, so no old case reads a real rows file.
+    _ISOLATION["rows"] = os.environ.get(hook_base.ROUTE_ROWS_ENV)
+    os.environ[hook_base.ROUTE_ROWS_ENV] = os.path.join(_ISOLATION["dir"], "no-route-rows.json")
 
 
 def tearDownModule():
@@ -71,8 +75,14 @@ def tearDownModule():
             os.environ.pop(key, None)
         else:
             os.environ[key] = value
+    rows = _ISOLATION.pop("rows")
+    if rows is None:
+        os.environ.pop(hook_base.ROUTE_ROWS_ENV, None)
+    else:
+        os.environ[hook_base.ROUTE_ROWS_ENV] = rows
     shutil.rmtree(_ISOLATION.pop("dir"), ignore_errors=True)
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)
+    shutil.rmtree(hook_base.RUN, ignore_errors=True)  # the hook harness's run folder, made at its import
 
 
 def human(text):
