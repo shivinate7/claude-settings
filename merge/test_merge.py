@@ -11995,6 +11995,10 @@ class ReviewEnv(Env):
             rc = e.code
         return rc, out.getvalue(), err.getvalue()
 
+    def record_host(self, *comments, head=REVIEW_HEAD):
+        """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first."""
+        return PullsHost([batch_pull(7, head)], {}, comments=comments)
+
     def assert_usage_error(self, *argv):
         """A usage error: rc 2, from a parser that knows every flag in argv. stderr holds no OLD_PARSER_ERRORS text and no traceback."""
         rc, out, err = self.run_args(*argv)
@@ -12111,13 +12115,17 @@ class ReviewFixFlag(ReviewEnv):
     def fix_value(self, head=REVIEW_OLD_HEAD, role="reviewer", model="haiku", verdict="PASS"):
         return f"{head}:{role}:{model}:{verdict}"
 
+    def earlier_host(self):
+        """The pull request at the live head, with one earlier record that reviewed the fix base and has no fix line: the base the good values name."""
+        return self.record_host(review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)), head=self.head())
+
     def test_the_printed_record_carries_the_fix_line_after_the_rounds(self):
-        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=self.earlier_host())
         self.assertEqual(rc, 0, "merge refused --fix-check:\n" + out + err)
         self.assertEqual(posted_body(self, out).splitlines()[5:], ["Round 1: reviewer, sonnet, PASS", fix_check_line(), "Net value: not owed", REVIEW_CI_LINE])
 
     def test_the_printed_fix_line_parses_back_to_the_flag_value(self):
-        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=self.earlier_host())
         self.assertEqual(rc, 0, "merge refused --fix-check:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
 
@@ -12128,7 +12136,7 @@ class ReviewFixFlag(ReviewEnv):
         self.assertFalse([l for l in posted_body(self, out).splitlines() if l.startswith("Fix check")])
 
     def test_a_malformed_fix_value_exits_two_and_prints_no_record(self):
-        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=self.earlier_host())
         self.assertEqual(rc, 0, "the well-formed --fix-check is refused:\n" + out + err)
         for bad in (self.fix_value(role="design-reviewer"), self.fix_value(verdict="PARTIAL"), self.fix_value(verdict="MAYBE"),
                     self.fix_value(head=REVIEW_OLD_HEAD[:39]), f"{REVIEW_OLD_HEAD}:reviewer:PASS"):
@@ -12138,7 +12146,7 @@ class ReviewFixFlag(ReviewEnv):
 
     def test_a_fix_whose_reviewed_head_is_the_live_head_exits_two(self):
         # the fix diff would be empty, so parse_review refuses the record, and the flag refuses it the same way the rounds do
-        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=self.earlier_host())
         self.assertEqual(rc, 0, "the well-formed --fix-check is refused:\n" + out + err)
         out, _err = self.assert_usage_error("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(head=self.head()))
         self.assertNotIn(REVIEW_MARKER, out)
@@ -12155,9 +12163,6 @@ class ReviewFixBase(ReviewEnv):
 
     EARLIER_HEAD = "1e" * 20  # a head that an earlier record reviewed, and that is not the newest record's
     OTHER_HEAD = "2e" * 20  # a head that no record reviewed
-
-    def record_host(self, *comments):
-        return PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments=comments)
 
     def review_with_base(self, base, host):
         return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:haiku:PASS", host=host)
