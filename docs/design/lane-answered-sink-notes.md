@@ -26,6 +26,9 @@ Settled by the brief, not options here:
   waiting lane line (SKILL.md "Keep the page on main's code", step 2).
 - Missing or bad `added`: the item counts as answered. Gain: a writer that drops `added` cannot pin a routed card open.
   Loss: none seen; a re-ask always writes `added`.
+- Builder: a plain `ts(lastAnswer.at) >= ts(added)` is false when either side is NaN, so a bad `added` would keep the card
+  open. Test a valid `added` first: no valid `added` counts as answered. A `lastAnswer` with no valid `at` does not count
+  (`lastOf` alone is not enough here); such an item stays open, as today.
 - Gain: an answered item that only waits on a lane leaves the open tiers, as the owner asked (page item 289, Nov 6 15:29 CST).
 - Departs from: page.html `answeredByWait` (`waits` and `lastAnswer` only) and SKILL.md item schema ("with `waits` and
   `lastAnswer` reads as answered on the page"). Both need the builder's rewrite.
@@ -35,7 +38,10 @@ Settled by the brief, not options here:
 - Pick (`#s=page`): today's wait-answered shape, unchanged. The green ring pill reads "Sent Nov 6, 13:59 CST". Then the
   top row's `.onlane` span reads "waits on lane stale-page-sweep" (page.html line 1621). A PR card (No. 44) has the same
   shape, with the span "waits on PR #1345" as a link. Gain: "Sent" says it was submitted, the word on the Send button.
-  "Answered" shows once, in the section head. "waits on" shows once per card. No new part. Loss: none.
+  "Answered" shows once, in the section head. "waits on" shows once per card. No new part. Loss: "Sent" repeats on each
+  wait-answered card and in the sub-head ("Sent before this visit"), as "Filing pending" does (answered-sink-notes point 2).
+  `label_once.py` passes it only because the time follows the word. Not drawn: the ring and the time alone, the word in a
+  `.sr` span.
 - Option "Wait in the pill" (`#s=wait-in-pill`): one pill, "Sent Nov 6, 13:59 CST, waits on lane stale-page-sweep".
   Gain: one unit reads "submitted, and what it waits on". Loss: the pill wraps to two lines at 390 with a long slug.
   A PR link inside a status pill reads as part of the pill. It adds three CSS rules.
