@@ -19,11 +19,11 @@
       "how": "You create it once at https://github.com/new: owner shivinate7, name session-mailbox, Private, no README. Then every session reads and writes it.",
       "key": "a",
       "label": "New private repo session-mailbox",
-      "lose": "One minute of your time, and one more repo to keep."
+      "lose": "One minute of your time, and one more repo to keep. Every cloud session must also attach it with push access, and each of your machines needs a GitHub login for it."
     },
     {
-      "gain": "Nothing to create.",
-      "how": "A mailbox branch in claude-settings.",
+      "gain": "Nothing to create or attach.",
+      "how": "A mailbox branch in claude-settings. It is already cloned and logged in on cloud, Mac and Windows, and CI ignores a branch that is not main.",
       "key": "b",
       "label": "A branch in claude-settings",
       "lose": "Every message is public for good, so sessions must keep personal data and private repo names out of each one."

@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-06T21:33:00Z",
+  "context": "Goal: one definition of \"the machine is loaded\" for the guard and the sim gatekeeper (your item 304 a).\nProblem (rule): your two rulings disagree. The load brake must never read the load average: the Mac read 107 on 15 cores while half idle. Your sim rules of Nov 2 are load-average bars: the 5-minute load under 100 to boot, and slot 2 under 60.\nBased on (ruling): decision machine-load-brake.\nBased on (ruling): sim-lease-tool item 3 (owner, 2026-11-02 14:28 CST).\nDeparts from: sim-lease, which grants on load average \u2014 grants on memory and disk (a), or the guard also reads the load average (b).\nMeanwhile: the lane builds a.",
+  "holds": "What the shared machine-load definition reads.",
+  "home": "decision machine-load-brake",
+  "id": "load-definition-which",
+  "kind": "decision",
+  "lane": "one-load-definition: builds a meanwhile (session_013NEJKzUUyEjaYnf5oBR6Wp)",
+  "n": 309,
+  "options": [
+    {
+      "gain": "No guard verdict moves.",
+      "how": "The shared definition reads memory and disk. The sim gatekeeper drops its load-average bars.",
+      "key": "a",
+      "label": "Memory and disk only",
+      "lose": "A Mac with a high CPU load but free memory can boot a simulator."
+    },
+    {
+      "gain": "The sim bars stay as you set them on Nov 2.",
+      "how": "The shared definition also reads the load average, so the sim bars stay.",
+      "key": "b",
+      "label": "Add the load average",
+      "lose": "The guard refuses lanes on an idle Mac at load 107."
+    }
+  ],
+  "owner": "lane one-load-definition (session_013NEJKzUUyEjaYnf5oBR6Wp)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "items 304 and 276; lane one-load-definition",
+  "short": "Shared load: which reading",
+  "status": "open",
+  "title": "One shared load definition (your item 304 a): drop the load average, or add it to the guard?",
+  "why": "Your two rulings disagree, so one shared definition must drop one side."
+}
