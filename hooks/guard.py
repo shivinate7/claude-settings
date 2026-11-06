@@ -3592,7 +3592,7 @@ BRIEF_BLIND_ITEM = re.compile(BRIEF_BLIND_OPEN + BRIEF_BLIND_DONE + r"(?:BUILT|R
 # verdict word right after the colon. Or a report's leading verdict, `FAIL, round 1 of 3, ...`. A line that opens with a
 # verdict word and a colon (`FAIL: test_x`) is a quote.
 BRIEF_BLIND_VERDICT = re.compile(
-    BRIEF_BLIND_OPEN + r"(?:(?:[^\n:]*?\b[Vv]erdict\b[^\n:]*?|Round[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?(?:[^\n:]*?\b[Rr]esult\b[^\n:]*?)?)"
+    BRIEF_BLIND_OPEN + r"(?:(?:[^\n:]*?\b[Vv]erdict\b[^\n:]*?|[Rr]ound[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?(?:[^\n:]*?\b[Rr]esult\b[^\n:]*?)?)"
     r"[*_]*[ \t]*:[ \t]*[*_`\"'(]*(?:%s)\b|(?:%s)[*_]*[ \t]*,[ \t]*[Rr]ound[ \t]+\d+)" % (BRIEF_BLIND_VERDICT_WORDS, BRIEF_BLIND_VERDICT_WORDS),
     re.M)
 BRIEF_BLIND_REASON = ("A reviewer's brief holds a builder's report or a prior verdict, so the reviewer anchors on it. "
