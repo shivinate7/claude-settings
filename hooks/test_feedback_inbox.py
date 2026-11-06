@@ -3798,9 +3798,10 @@ def run_case(case):
 # the one git start that is not the grep, and a quiet Stop that starts no git at all.
 
 class CostTests(unittest.TestCase):
-    def judging_stop(self, name):
-        """One capture, one new item, then the judging Stop. Returns (exit codes of the capture and the Stop, the
-        Stop's model calls, its git starts, the relative paths whose bytes it changed under the config folder)."""
+    def judging_stop(self, name, answer=None):
+        """One capture, one new item, then the judging Stop. `answer` is the model's answer, and by default it names
+        the item as a repeat. Returns (exit codes of the capture and the Stop, the Stop's model calls, its git starts,
+        the relative paths whose bytes it changed under the config folder)."""
         root = repeat_repo(name, step=True, debt=True)
         cfg, sid = new_cfg(), name
         env = git_counter(cfg)
@@ -3808,7 +3809,8 @@ class CostTests(unittest.TestCase):
         add_item(cfg, sid, ITEM_LINE)
         before = snapshot(cfg)
         start = len(git_lines(env))
-        stopped, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
+        answer = repeat_answer(ITEM_ID) if answer is None else answer
+        stopped, calls = stop(cfg, sid, root, answer=answer, extra_env=env)
         changed = bytes_written(before, snapshot(cfg))
         return (captured.code, stopped.code), calls, git_lines(env, start), changed
 
@@ -3829,13 +3831,23 @@ class CostTests(unittest.TestCase):
                          "a judging Stop writes its turn state and the inbox, and no other file; got %r"
                          % sorted(changed))
 
+    def test_a_judging_stop_with_no_repeat_writes_the_turn_state_and_leaves_the_inbox_bytes(self):
+        codes, calls, _, changed = self.judging_stop("cost-no-repeat", answer=ANSWER_NONE)
+        self.assertEqual(codes, (0, 0), "the capture and the judging Stop both exit 0; got %r" % (codes,))
+        self.assertEqual(len(calls), 1, "the judging Stop makes one model call; got %d" % len(calls))
+        self.assertEqual(changed, {turns_rel("cost-no-repeat")},
+                         "a judging Stop with no repeat writes its turn state and no other file, the inbox's bytes "
+                         "included; got %r" % sorted(changed))
+
     def test_a_quiet_stop_starts_no_git_process(self):
         root = repeat_repo("cost-quiet", step=True, debt=True)
         cfg, sid = new_cfg(), "cost-quiet"
         env = git_counter(cfg)
         capture(cfg, sid, MSG_ONE, cwd=root)
         add_item(cfg, sid, ITEM_LINE)
-        stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
+        first, first_calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
+        self.assertEqual(first.code, 0, "the judging Stop exits 0; got %r" % (first.code,))
+        self.assertEqual(len(first_calls), 1, "the judging Stop makes one model call; got %d" % len(first_calls))
         start = len(git_lines(env))
         stopped, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
         self.assertEqual(stopped.code, 0, "a quiet Stop exits 0; got %r" % (stopped.code,))
@@ -3847,7 +3859,9 @@ class CostTests(unittest.TestCase):
         cfg, sid = new_cfg(), "cost-quiet-bytes"
         capture(cfg, sid, MSG_ONE, cwd=root)
         add_item(cfg, sid, ITEM_LINE)
-        stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+        first, first_calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+        self.assertEqual(first.code, 0, "the judging Stop exits 0; got %r" % (first.code,))
+        self.assertEqual(len(first_calls), 1, "the judging Stop makes one model call; got %d" % len(first_calls))
         before = snapshot(cfg)
         stopped, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
         self.assertEqual(stopped.code, 0, "a quiet Stop exits 0; got %r" % (stopped.code,))
