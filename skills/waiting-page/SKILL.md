@@ -250,7 +250,10 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    `lane` and `lastAnswer` and no `waits`. The exit code stays the page's.
 3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
    republish, so the copy holds the page as it was.
-4. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
+4. Before any republish, check the pictures of the open items: `python3 ~/.claude/skills/waiting-page/export_page.py --check --fetched <folder> --page <out>`
+   (`<folder>` is the fetch of "Keep a copy in the repo", step 2). It writes nothing. `held item <n>: ...` (exit 4): fix that item, check again,
+   and do not republish. `checks pass`: go on. `checks unknown: ...` (exit 3): say the line in the reply, and go on.
+   `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
    `<out>` is main's page with the live `designData` and roadmap blocks kept, byte for byte
    (`--write` calls `splice.carry`). A live page with no roadmap block keeps the template's empty one.
    When you also add a design, do it in
@@ -295,6 +298,8 @@ never runs it. There is one path: the record branch's own worktree. Never write 
    - `same`: stop. Commit nothing.
    - `changed <n>`: in the same worktree, run `git add` on the copy folder, then
      commit and push the record branch. The commit message names the count.
+   - `held item <n>: <sentence>` after the verdict line (exit 4): the copy was written; commit it as for `changed`. The page would
+     draw that item's picture wrong. Fix the item, export again, and do not republish while one is held.
    - `refused`: nothing was written. Make no commit. The reply names each find: the file, the JSON path and
      the kind, never the value. Fix the item on the page first, then run the steps again.
    - `unknown`: nothing was written. Say the line in the reply. A missing collection folder or marker, an
@@ -674,7 +679,7 @@ The guard runs `check_designs.mjs` on the published page at each item write that
    - The viewer lists every option's designs at every width, in option order. Its label reads
      "<option title> (<width name>)", with "N of M", Prev, Next and "Open full size". Prev and Next
      wrap at the ends. A width with no name reads `Phone`.
-5. Republish the built page to the same URL with the same capabilities. Whether the database stays
+5. Run the `--check` of "Keep the page on main's code", step 4, on the built page. Then republish it to the same URL with the same capabilities. Whether the database stays
    is unmeasured until the step 4 live check of "Update a repo's pages".
    A republish replaces the whole page, so run this step in one session at a time. A second session
    that read the page earlier would overwrite the first one's mockups. A lane never does this step:
