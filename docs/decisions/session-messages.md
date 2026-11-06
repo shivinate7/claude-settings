@@ -31,9 +31,9 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
 
 | Mechanism | Harness | Direction | Wakes an idle session | Limit | Failure seen |
 |---|---|---|---|---|---|
-| `send_message` | cloud | session to session | yes | 64 KiB; peer guard | a failed send counts as not sent: `is_error` true, or toolUseResult `success` false for the local one |
+| `send_message` | cloud | session to session | yes | 64 KiB; peer guard | a failed send counts as not sent: `is_error` true, or toolUseResult `success` false for the local one (both measured 2026-11-06 13:04 CST, Claude Code 2.1.319) |
 | `SendMessage` | local, agents | session to session | yes | peer guard; desktop cap | judged by hooks/sendmessage_state.py, which can refuse news to a busy peer |
-| Page wake comment | all | owner to session | yes, every watcher | 4096 bytes per comment; a full thread gives no wake | fixed by PR #1301 (a full wake thread starts a new one) |
+| Page wake comment | all | owner to session | yes, every watcher | 4096 bytes per comment; a full thread gives no wake | fixed by PR #1301 (a full wake thread starts a new one), an open draft read on GitHub 2026-11-06 12:40 CST |
 | ArtifactData answers | all | owner and session | no, read at turn start | none known | none |
 | `send_later`, scheduled tasks | cloud | to self or one session | yes, after the running turn | 1-minute steps | missing from `list_sessions` |
 | Chat | all | owner and session | yes | owner present only | none |
@@ -42,15 +42,17 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
 
 - One convention, plain text, so any harness can carry it. First line of a message:
   `Msg <id> from <role> to <role> kind request|inform|reply re <id or -> try <n>`.
-  Id: `msg-` plus the page's `askId` stamp form (page.html `askId`). Role: `cs-repo` plus
-  `cs-build:<tier>` or `cs-step:<slug>`, or `owner`.
+  Id: `msg-` plus the page's `askId` stamp form (page.html `askId`). Role: all of the target's tags, in
+  the forms of skills/project-ops/templates/operating-model.md (`cs-repo:<owner>/<name>` plus `cs-build:<tier>`
+  or `cs-step:<step id>`), or `owner`.
 - A resend keeps the request id and raises `try` by one, so the peer guard's 30 s same-text check does not drop it,
   and the receiver acts on the id once.
 - The reply is the ack. An `inform` needs no reply. No separate ack message, because each message
   spends the peer guard and the desktop cap.
-- Fit the caps: one request and one reply per exchange. A session that needs more than 10 sends before
-  the owner types routes the rest through its parent or a record, never through a peer loop. A
-  scheduled-task "doorbell" to reset the chain is a bypass of the loop guard and is not used.
+- Fit the caps: one request and one reply per exchange. A session that needs more than 10 `SendMessage`
+  sends to sessions on the same computer before the owner types routes the rest through its parent or a
+  record, never through a peer loop. Cloud `send_message` is not counted (section on item 153). Never use
+  a scheduled task to reset the chain: that bypasses the peer guard.
 - A send whose result is an error counts as not sent (`failed_tool_use_ids` in `lint/_transcript.py`).
 - A message never carries a grant (decision relayed-grant-read-from-page).
 - Homes: this record; the convention and adapters in skill `waiting-page` beside the page's own
@@ -97,8 +99,11 @@ watches it. Pass: 12 wakes, no `peer` stamp, no `[peer-guard]` line.
 
 - Q1, ask Anthropic for a setting that lifts the desktop cap: owner answer b, live with the limit only
   (page item 281, relayed by triage 2026-11-06 13:13 CST). The owner also asked whether the limit can be set. It
-  cannot: the desktop count reads a fixed constant, and both flag-override hooks in the public build return null
-  (binary 2.1.319, `getEnvironmentOverrides`, `readConfigOverrides`).
-- Q2, how a lost message is noticed: a session that waits on a reply sets one `send_later` check-in,
-  the same shape as rule `git-ci-wait-checks-in`. Coordinator pick, 2026-11-06 12:48 CST; it can be undone.
+  cannot: the desktop count reads a fixed constant, and both flag-override hooks in the public build return nothing
+  (binary 2.1.319, read 2026-11-06 13:14 CST: `getEnvironmentOverrides(){return null}`, `readConfigOverrides(){return}`).
+- Q2, how a lost message is noticed: a cloud session that waits on a reply sets one `send_later` check-in,
+  the same shape as rule `git-ci-wait-checks-in`; a local session checks at its next turn start.
+  Coordinator pick, 2026-11-06 12:48 CST; it can be undone. Cost: one one-shot scheduled task per waiting
+  request; it starts no process and writes no file. Open: rule `outcomes-mechanize-rules` bars tracking on
+  a timer, and rule `git-ci-wait-checks-in` allows a timed check-in. The owner rules which governs.
 - Q3, scope: the debt fix (done, commit 7059961a) and build steps 1 and 2 only. A parser for the message format was dropped 2026-11-06 13:15 CST: with no new hook, nothing would call it (rule building-land-design-or-abandon). Coordinator pick, 2026-11-06 12:48 CST; it can be undone.
