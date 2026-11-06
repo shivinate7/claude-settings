@@ -35,9 +35,9 @@ WCAG level, is not taken on by choice (owner, 2026-11-01 12:23 CST, by triage).
   "Upcoming" and "Whenever"). impeccable `clarify` held it as advice, and nothing caught it.
   `lint/label_once.py` names each repeat in a rendered page. The probe skips controls and table cells. The
   reviewer judges each other hit.
-- `ux-order-holds-still` lets an act move the row it acted on out of an open list, when the next
-  open row takes its slot and the other rows keep their order (owner, 2026-11-06 16:47 CST, item
-  313 a). The owner found the stricter rule took him away from his outcome (item 311, 15:51 CST).
+- `ux-order-holds-still` lets an act move the row it acted on out of an open list. The next open
+  row then takes its slot, and the other rows keep their order (owner, 2026-11-06 16:47 CST, item
+  313 a). The owner found that the stricter rule worked against the outcome (item 311, 15:51 CST).
 - Not house rules: behaviour defaults (dropped); spend shows cost, work-screen head, real photos only and
   phone-first (per repo); letter case (Vercel).
 
