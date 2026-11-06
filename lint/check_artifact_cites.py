@@ -19,14 +19,17 @@ handoffs and every other folder are working files and are not read. A registry t
 leaves the exit code to the decisions and debts: the mode for a repo whose steps still hold links that triage has not
 yet moved, because lanes never write the roadmap.
 
-Exit 0: no FAIL. Exit 1: a FAIL line for each find. Exit 2: a read that could not run (git did not start), as
-`check_artifact_cites: unknown: ...`; never a pass. Cost: one pass over the record files, and two git processes
-for the steps; no network, no timer.
+Exit 0: no FAIL. Exit 1: a FAIL line for each find. A read that could not run (a decisions or debts folder that is
+not there, git that did not start, no record branch under --steps refuse) prints `check_artifact_cites: UNKNOWN, ...`
+and exits 0, or 1 when env CI is set (decision ci-unknown-is-red). Cost: one pass over the record files, and two git
+processes for the steps; one fetch of the record branch only when neither the checkout nor origin's ref has it; no
+timer.
 """
 import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -73,6 +76,8 @@ def strings(node):
 def record_files(root, kind):
     """[(path relative to root with `/`, text)] of each .md under the folder of layout kind `kind`."""
     top = os.path.join(root, *layout.path(root, kind).split("/"))
+    if not os.path.isdir(top):  # os.walk yields nothing for it and raises nothing: it must not read as clean
+        raise Unknown("the %s folder %s is not a folder" % (kind, os.path.relpath(top, root).replace(os.sep, "/")))
     found = []
     for folder, names, files in os.walk(top):
         names.sort()
@@ -91,9 +96,24 @@ def git(root, *args, data=None):
         raise Unknown("git did not start (%s)" % type(err).__name__)
 
 
+def fetch_record_branch(root, branch):
+    """Fetch the record branch from origin into its remote-tracking ref, for a shallow or single-branch checkout that
+    lacks it. A failed fetch is no error here: the caller finds the ref still absent and says UNKNOWN."""
+    try:
+        _nowindow.run(["git", "-C", root, "fetch", "-q", "--no-tags", "--depth=1", "origin",
+                       "+refs/heads/%s:refs/remotes/origin/%s" % (branch, branch)],
+                      capture_output=True, timeout=120, env=dict(os.environ, GIT_TERMINAL_PROMPT="0"))
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def step_files(root):
-    """[(path, text)] of each step on the record branch: the local ref, else origin's. [] when neither ref is there."""
+    """[(path, text)] of each step on the record branch: the local ref, else origin's, else origin's after a fetch.
+    None when no ref is there, so a missing branch is never read as no steps."""
     branch = layout.record_branch(root)
+    refs = ("refs/heads/" + branch, "refs/remotes/origin/" + branch)
+    if all(git(root, "rev-parse", "--verify", "-q", ref + "^{commit}").returncode == 1 for ref in refs):
+        fetch_record_branch(root, branch)
     for ref in ("refs/heads/" + branch, "refs/remotes/origin/" + branch):
         probe = git(root, "rev-parse", "--verify", "-q", ref + "^{commit}")
         if probe.returncode == 1:
@@ -124,7 +144,7 @@ def step_files(root):
             found.append((name, out[end + 1:end + 1 + size].decode("utf-8", "replace")))
             pos = end + 1 + size + 1
         return found
-    return []
+    return None
 
 
 def step_findings(text, known):
@@ -139,21 +159,32 @@ def step_findings(text, known):
 
 def check(root, steps_mode):
     """(fail lines, list lines) for the repo at `root`."""
-    fails, listed = [], []
+    fails, listed, unknown = [], [], []
     try:
         known = {entry["id"] for entry in layout.artifacts(root)}
     except layout.LayoutError as err:
-        return [FAIL + "the artifacts registry cannot be read: %s" % err], listed
+        return [FAIL + "the artifacts registry cannot be read: %s" % err], listed, unknown
     for kind in ("decisions", "debts"):
-        for rel, text in record_files(root, kind):
+        try:
+            records = record_files(root, kind)
+        except Unknown as err:
+            unknown.append(str(err))
+            continue
+        for rel, text in records:
             fails.extend("%s%s:%d: %s" % (FAIL, rel, number, what) for number, what in findings(text, known))
-    for rel, text in step_files(root):
+    steps = step_files(root)
+    if steps is None:
+        if steps_mode == "refuse":
+            unknown.append("the record branch %s is on neither the checkout nor origin, so its steps were not read"
+                           % layout.record_branch(root))
+        steps = []
+    for rel, text in steps:
         lines = ["%s: %s" % (rel, what) for _, what in step_findings(text, known)]
         if steps_mode == "refuse":
             fails.extend(FAIL + line for line in lines)
         else:
             listed.extend(LIST + line for line in lines)
-    return fails, listed
+    return fails, listed, unknown
 
 
 def main(argv):
@@ -163,16 +194,19 @@ def main(argv):
     args = ap.parse_args(argv)
     root = os.path.abspath(args.root)
     try:
-        fails, listed = check(root, args.steps)
+        fails, listed, unknown = check(root, args.steps)
     except Unknown as err:
-        print("check_artifact_cites: unknown: %s" % err)
-        return 2
+        fails, listed, unknown = [], [], [str(err)]
     except layout.LayoutError as err:
         print(FAIL + "the layout cannot be read: %s" % err)
         return 1
     for line in fails + listed:
         print(line)
-    return 1 if fails else 0
+    for what in unknown:
+        print("check_artifact_cites: UNKNOWN, " + what)
+    if fails:
+        return 1
+    return 1 if unknown and os.environ.get("CI") else 0  # the CI exit code is the verdict: unknown is red there
 
 
 if __name__ == "__main__":
