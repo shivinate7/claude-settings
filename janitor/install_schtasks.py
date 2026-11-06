@@ -99,7 +99,6 @@ def build_task_xml(repo_root: str, hour: int, minute: int) -> bytes:
     ET.SubElement(calendar_trigger, "{%s}Enabled" % TASK_XML_NAMESPACE).text = "true"
     schedule_by_day = ET.SubElement(calendar_trigger, "{%s}ScheduleByDay" % TASK_XML_NAMESPACE)
     ET.SubElement(schedule_by_day, "{%s}DaysInterval" % TASK_XML_NAMESPACE).text = "1"
-    ET.SubElement(calendar_trigger, "{%s}ScheduleByWeek" % TASK_XML_NAMESPACE)  # SEED S5d: a weekly schedule too
 
     settings = ET.SubElement(task, "{%s}Settings" % TASK_XML_NAMESPACE)
     ET.SubElement(settings, "{%s}Enabled" % TASK_XML_NAMESPACE).text = "true"
