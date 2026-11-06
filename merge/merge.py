@@ -2793,9 +2793,9 @@ def review_state(rec, head):
     final allowed round whatever the verdict, and owes the later rounds when the first fails, even if it only deletes. Net value negative holds the change.
     A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round or delete-only done names it.
     A fix check (rec["fix"], decision hold-unsafe-after-round-3) is not a round and is read after the held rule. A FAIL is open, whatever the
-    rounds say. A PASS counts only after the last round: the final allowed round, or the first of a delete-only change with Guard or check no.
-    After any other round it is open. Where it counts, the rules above run as written: it keeps the net value the final round gave and settles
-    none that is owed."""
+    rounds say. A PASS counts as the last recorded round passing (owner item 271 b, 2026-11-05 21:31 CST: a fix check may follow a FAIL in any round),
+    for a delete-only change with Guard or check yes too, so a PASS after round 1 or 2 owes no net-value test; the design-reviewer hold stays, and with no
+    round recorded it is open. After round 3 the rules above run as written: it keeps the net value the final round gave and settles none that is owed."""
     if rec is None:
         return "bad", "the newest record does not parse"
     if rec["head"] != head:
@@ -2810,17 +2810,17 @@ def review_state(rec, head):
     fix = rec.get("fix")
     if fix and fix[3] != "PASS":
         return "open", "the fix check failed, so the fix needs a new lane"
-    if fix and not (top >= REVIEW_LAST_ROUND or (rec["kind"] == "delete-only" and rec["guard"] == "no" and top >= 1)):
-        return "open", "the fix check passed, but it counts only after the last round" + (f", and round {top} is not the last" if top else ", and no round is recorded")
+    if fix and not top:
+        return "open", "the fix check passed, but no round is recorded"
     if top >= REVIEW_LAST_ROUND:  # before the PASS rule: a final-round PASS on a guard or check change still owes the net-value test
         if rec["guard"] == "no":
             return "done", "round 3 is done, no guard or check changed" + note
         if rec["net"] in ("zero", "positive"):
             return "done", f"round 3 is done, net value {rec['net']}" + note
         return "open", "round 3 is done on a guard or check change, and its net value is owed"
-    passed = top and all(v == "PASS" for i, _, _, v in rounds if i == top)
+    passed = top and (fix or all(v == "PASS" for i, _, _, v in rounds if i == top))  # a fix PASS, read here, counts as round `top` passing
     if passed and not bad:
-        return "done", f"round {top} passed"
+        return "done", f"round {top} passed" + (" with the fix check" if fix else "")
     if rec["kind"] == "delete-only" and rec["guard"] == "no" and top >= 1:  # before the design hold: the first review closes a delete-only change with no guard or check
         return "done", "delete-only change, round 1 is done" + note
     if passed:
