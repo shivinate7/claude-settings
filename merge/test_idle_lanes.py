@@ -67,7 +67,7 @@ class IdleLanesCli(unittest.TestCase):
 
     def publish(self, sessions, read_at=None):
         """Write the --live file. Its readAt is five minutes old by default."""
-        value = {"readAt": read_at or roadmap.iso_ago(5), "threads": [], "pulls": [], "sessions": list(sessions)}
+        value = {"readAt": read_at or roadmap.iso_ago(5), "threads": [], "pulls": [], "items": [], "sessions": list(sessions)}
         self.live.write_text(json.dumps(value), encoding="utf-8")
 
     def run_merge(self, *argv, extra_env=None):

@@ -2006,6 +2006,12 @@ class IdleLanes(UpkeepFixture):
         """A sessions row for a lane of this repo that names `step`, with its get_session bucket."""
         return session_row(sid, status, "cs-build:lane", "cs-step:" + step, self.REPO, status_bucket=bucket)
 
+    def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=()):
+        """UpkeepFixture.publish with the items key present: [] unless a case names rows. items=None leaves the key out,
+        the file a publisher writes before the waiting page had items."""
+        return super().publish(sessions=sessions, pulls=pulls, threads=threads, read_at=read_at,
+                               items=None if items is None else list(items))
+
     def land(self, steps):
         """Write {step id: fields} on the record branch in one commit. Each step is written whole, from STEP."""
         for sid, fields in steps.items():
