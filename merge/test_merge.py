@@ -11971,6 +11971,14 @@ class ReviewFixRules(unittest.TestCase):
                 text = record_text(rounds=rounds, guard=guard, net=net, fix=(fix_check_line(verdict=verdict),))
                 self.assertEqual(record_state(self, text), want)
 
+    def test_a_fix_pass_after_a_failed_first_round_names_the_fail_and_the_fix_check(self):
+        # the why keeps the failed round in view and names the fix check, so it does not read as a passed round
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        self.assertEqual(state, "done", f"a fix check PASS after a failed first round must read done: {why!r}")
+        self.assertIn("FAIL", why, f"the why does not name the failed round: {why!r}")
+        self.assertIn("fix check", why, f"the why does not name the fix check: {why!r}")
+        self.assertNotIn("round 1 passed", why, f"the why reads as a passed round: {why!r}")
+
 class ReviewEnv(Env):
     """The review-record cases' one home for running merge: a run that returns (rc, stdout, stderr) and reads a usage error's SystemExit as
     its code, and the check that a usage error came from a parser that knows the flag. No test lives here."""
@@ -12139,6 +12147,55 @@ class ReviewFixFlag(ReviewEnv):
         self.assert_usage_error("7", "--fix-check", self.fix_value())
         rc, out, err = self.run_args("7")
         self.assertEqual(rc, 0, out + err)
+
+class ReviewFixBase(ReviewEnv):
+    """`--fix-check BASE:...` with --review-record refuses unless BASE is the head of the newest review record already on the pull request, and
+    that record has no fix check line. The fix diff then starts from the head the last record reviewed, and a fix never follows a fix. The
+    earlier records come from review_comments, which PullsHost serves from its comment list, oldest first. A refusal exits 2 and prints no record."""
+
+    EARLIER_HEAD = "1e" * 20  # a head that an earlier record reviewed, and that is not the newest record's
+    OTHER_HEAD = "2e" * 20  # a head that no record reviewed
+
+    def record_host(self, *comments):
+        return PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments=comments)
+
+    def review_with_base(self, base, host):
+        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:haiku:PASS", host=host)
+
+    def assert_refused(self, rc, out, err):
+        self.assertEqual(rc, 2, "the fix check was not refused:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_a_base_equal_to_the_newest_earlier_record_head_prints_the_record(self):
+        # control: the fix diff starts from the head the newest earlier record reviewed, and that record has no fix line
+        host = self.record_host(review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)))
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host)
+        self.assertEqual(rc, 0, "a base that is the newest record's head was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
+
+    def test_a_base_that_is_not_the_head_of_the_newest_earlier_record_is_refused(self):
+        # only the newest record's head counts, so a head that just an older record reviewed is refused as well as a head no record reviewed
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        for base in (self.OTHER_HEAD, self.EARLIER_HEAD):
+            with self.subTest(base=base):
+                rc, out, err = self.review_with_base(base, self.record_host(older, newest))
+                self.assert_refused(rc, out, err)
+
+    def test_a_newest_earlier_record_with_a_fix_line_refuses_its_head_as_the_base(self):
+        # the head already has its fix check, so a second fix check from it would be a fix after a fix
+        fixed = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(fix_check_line(head=self.EARLIER_HEAD),))
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(review_comment(1, 7, fixed)))
+        self.assert_refused(rc, out, err)
+
+    def test_no_earlier_record_on_the_pull_request_refuses_the_fix_check(self):
+        # with no record on this pull request there is no reviewed head to start the fix diff from
+        other_pr = review_comment(1, 8, record_text(n=8, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        for label, comments in (("no record at all", []), ("a record on another pull request", [other_pr])):
+            with self.subTest(label=label):
+                rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(*comments))
+                self.assert_refused(rc, out, err)
 
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
