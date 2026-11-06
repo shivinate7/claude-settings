@@ -65,8 +65,8 @@ function item({ focus, state, slug = "m1", drawn } = {}, extra = {}) {
   };
 }
 
-function check(pageFile, itemFile) {
-  const run = spawnSync(process.execPath, [CHECK, "--page", pageFile, "--item", itemFile],
+function check(pageFile, itemFile, extra = []) {
+  const run = spawnSync(process.execPath, [CHECK, "--page", pageFile, "--item", itemFile, ...extra],
     { encoding: "utf8", timeout: 120_000 });
   const line = run.stdout.trim().split("\n").pop() ?? "";
   let json = null;
@@ -170,4 +170,22 @@ test("an item with options and designs but no kind is still measured: a strip is
   const problem = answer("no-kind-strip", pageWith(MOCKS), noKind, 1);
   assert.equal(typeof problem, "string");
   assert.match(problem, /option A/);
+});
+
+// The page draws an item with a saved answer as answered, so the checker does not judge its picture. Export gives the
+// checker the answers with --answers: the answers collection as {doc id: doc}, the map the page's state.answers holds.
+// The page's own isAnswered decides. The first assert is the control: the same item without an answer is a miss.
+test("an item with a saved answer, given with --answers, is not judged: problem null, exit 0", async (t) => {
+  if ((await needEnv(t, "chromium", chromium)) === null) return;
+  const page = write("answered.html", pageWith(MOCKS));
+  const itemFile = write("answered.json", JSON.stringify(item({ focus: "#fill" })));
+  const bare = check(page, itemFile);
+  assert.equal(bare.code, 1, `control: the same item with no answer is a miss (stderr: ${bare.stderr.slice(0, 200)})`);
+  const answers = write("answers.json", JSON.stringify({
+    "fill-of-volume-card": { pick: "a", note: "Synthetic answer", at: "2026-10-02T10:00:00Z" },
+  }));
+  const got = check(page, itemFile, ["--answers", answers]);
+  assert.ok(got.json && "problem" in got.json, `no {"problem": ...} JSON line; exit ${got.code}: ${got.stderr.slice(0, 200)}`);
+  assert.equal(got.json.problem, null, "the checker judged an item the page draws as answered");
+  assert.equal(got.code, 0, `exit code (problem: ${JSON.stringify(got.json.problem)})`);
 });
