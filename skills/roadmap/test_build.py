@@ -33,6 +33,12 @@ RUN_FOLDER = None
 STEP = {"title": "t", "status": "todo", "phase": "cleanup", "order": 1, "note": "n", "updatedAt": "2026-10-26T00:00:00Z"}
 CONFLICT = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> 1234567 (other)\n"
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+# get_session's status_bucket as list_sessions returns it: the SESSION_STATUS_BUCKET_* enum names, measured on real rows.
+BUCKET_COMPLETED = "SESSION_STATUS_BUCKET_COMPLETED"
+BUCKET_REVIEW_READY = "SESSION_STATUS_BUCKET_REVIEW_READY"
+BUCKET_WORKING = "SESSION_STATUS_BUCKET_WORKING"
+BUCKET_BLOCKED = "SESSION_STATUS_BUCKET_BLOCKED"
+BUCKET_FAILED = "SESSION_STATUS_BUCKET_FAILED"
 
 # The page script the roadmap branch's build.py put in front of the viewer. The
 # script's stub must stay byte for byte this, so the viewer reads the data as it did.
@@ -1996,7 +2002,7 @@ class IdleLanes(UpkeepFixture):
 
     ROW = "lanes to archive"
 
-    def lane(self, sid, step, bucket="completed", status="SESSION_STATUS_IDLE"):
+    def lane(self, sid, step, bucket=BUCKET_COMPLETED, status="SESSION_STATUS_IDLE"):
         """A sessions row for a lane of this repo that names `step`, with its get_session bucket."""
         return session_row(sid, status, "cs-build:lane", "cs-step:" + step, self.REPO, status_bucket=bucket)
 
@@ -2055,7 +2061,7 @@ class IdleLanes(UpkeepFixture):
         self.trailer_on_main("c1")
         self.publish(sessions=[self.lane("session_a", "c1"),
                                self.lane("session_b", "c2"),
-                               self.lane("session_c", "c3", bucket="working", status="SESSION_STATUS_RUNNING"),
+                               self.lane("session_c", "c3", bucket=BUCKET_WORKING, status="SESSION_STATUS_RUNNING"),
                                self.lane("session_d", "c4")],
                      pulls=[{"number": 21, "title": "c2 lane", "branch": "c2"}],
                      items=[{"n": 4, "status": "open", "home": "step c4", "lane": "c4"}])
@@ -2092,9 +2098,9 @@ class IdleLanes(UpkeepFixture):
 
     def test_blocked_failed_working_and_unbucketed_lanes_are_never_listed(self):
         self.land({"c%d" % n: {"status": "done", "order": n} for n in range(1, 6)})
-        self.publish(sessions=[self.lane("session_blocked", "c1", bucket="blocked"),
-                               self.lane("session_failed", "c2", bucket="failed"),
-                               self.lane("session_working", "c3", bucket="working", status="SESSION_STATUS_RUNNING"),
+        self.publish(sessions=[self.lane("session_blocked", "c1", bucket=BUCKET_BLOCKED),
+                               self.lane("session_failed", "c2", bucket=BUCKET_FAILED),
+                               self.lane("session_working", "c3", bucket=BUCKET_WORKING, status="SESSION_STATUS_RUNNING"),
                                session_row("session_unbucketed", "SESSION_STATUS_IDLE", "cs-build:lane",
                                            "cs-step:c4", self.REPO),
                                self.lane("session_ok", "c5")])
@@ -2103,10 +2109,20 @@ class IdleLanes(UpkeepFixture):
 
     def test_completed_and_review_ready_lanes_are_listed(self):
         self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
-        self.publish(sessions=[self.lane("session_a", "c1", bucket="completed"),
-                               self.lane("session_b", "c2", bucket="review_ready")])
+        self.publish(sessions=[self.lane("session_a", "c1", bucket=BUCKET_COMPLETED),
+                               self.lane("session_b", "c2", bucket=BUCKET_REVIEW_READY)])
         count, entries = self.archive()
         self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_b"]))
+
+    def test_lowercase_completed_bucket_is_not_listed(self):
+        # list_sessions rows carry the enum name. A lowercase `completed` is no name a real row carries, so its lane is
+        # never listed. The enum-named lane beside it is the control.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        lowercase = session_row("session_lower", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1", self.REPO,
+                                status_bucket="completed")
+        self.publish(sessions=[lowercase, self.lane("session_a", "c2")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
 
     def test_step_merged_by_a_step_trailer_on_main_is_landed_and_one_still_open_is_not(self):
         self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "doing", "order": 2}})
@@ -2118,7 +2134,7 @@ class IdleLanes(UpkeepFixture):
     def test_other_repos_lane_is_ignored_not_listed_and_not_unknown(self):
         self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
         other = session_row("session_other", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1",
-                            "cs-repo:other/repo", status_bucket="completed")
+                            "cs-repo:other/repo", status_bucket=BUCKET_COMPLETED)
         self.publish(sessions=[other, self.lane("session_a", "c2")])
         count, entries = self.archive()
         self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
@@ -2126,7 +2142,7 @@ class IdleLanes(UpkeepFixture):
     def test_lane_with_no_cs_step_is_never_listed(self):
         self.land({"c1": {"status": "done", "order": 1}})
         no_step = session_row("session_nostep", "SESSION_STATUS_IDLE", "cs-build:lane", self.REPO,
-                              status_bucket="completed")
+                              status_bucket=BUCKET_COMPLETED)
         self.publish(sessions=[no_step, self.lane("session_a", "c1")])
         count, entries = self.archive()
         self.assertFalse(self.named(entries, "session_nostep"), entries)
@@ -2135,7 +2151,7 @@ class IdleLanes(UpkeepFixture):
     def test_session_without_the_lane_tag_is_ignored(self):
         self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
         triage = session_row("session_triage", "SESSION_STATUS_IDLE", "cs-build:triage", "cs-step:c1",
-                             self.REPO, status_bucket="completed")
+                             self.REPO, status_bucket=BUCKET_COMPLETED)
         self.publish(sessions=[triage, self.lane("session_a", "c2")])
         count, entries = self.archive()
         self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))

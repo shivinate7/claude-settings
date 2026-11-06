@@ -47,7 +47,7 @@ def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
-def lane(sid, step, bucket="completed", status="SESSION_STATUS_IDLE"):
+def lane(sid, step, bucket=roadmap.BUCKET_COMPLETED, status="SESSION_STATUS_IDLE"):
     return roadmap.session_row(sid, status, "cs-build:lane", "cs-step:" + step, REPO, status_bucket=bucket)
 
 
@@ -79,7 +79,7 @@ class IdleLanesCli(unittest.TestCase):
 
     def test_prints_each_idle_lane_then_the_summary_line(self):
         self.publish([lane("session_a", "c1"),
-                      lane("session_b", "c2", bucket="working", status="SESSION_STATUS_RUNNING")])
+                      lane("session_b", "c2", bucket=roadmap.BUCKET_WORKING, status="SESSION_STATUS_RUNNING")])
         code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
         self.assertEqual(code, 0, err)
         lines = out.splitlines()
@@ -87,7 +87,7 @@ class IdleLanesCli(unittest.TestCase):
         self.assertEqual([line.split(" ", 1)[0] for line in lines[:-1]], ["session_a"], out)
 
     def test_no_idle_lane_prints_a_zero_summary_and_no_entry(self):
-        self.publish([lane("session_b", "c2", bucket="working", status="SESSION_STATUS_RUNNING")])
+        self.publish([lane("session_b", "c2", bucket=roadmap.BUCKET_WORKING, status="SESSION_STATUS_RUNNING")])
         code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
         self.assertEqual(code, 0, err)
         self.assertEqual(out.splitlines(), [SUMMARY_ZERO], out)
