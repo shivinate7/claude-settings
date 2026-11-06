@@ -184,7 +184,7 @@ MISSING_ROWS = object()  # the rows file is absent: GUARD_ROUTE_ROWS names a pat
 
 
 def run_hook(text, scenario="ok", answer="", stop_active=False, config=None, session=REPLY_SESSION,
-             fail_replace=False, fail_remove=False, rows=MISSING_ROWS, doable=""):
+             fail_replace=False, fail_remove=False, rows=MISSING_ROWS, doable="", surface="local"):
     """One Stop, one new process. With no `config`, the config dir is fresh and empty, so the
     Stop is the session's first. A shared `config` carries the counter from Stop to Stop.
     `text` may be ABSENT: the payload then has no last_assistant_message key at all.
@@ -192,7 +192,8 @@ def run_hook(text, scenario="ok", answer="", stop_active=False, config=None, ses
     `fail_remove` makes os.remove raise on a counter file (a fake read-only counter).
     `rows` is the route rows file: a list of rows written as {"rows": [...]}, or MISSING_ROWS for no
     file. The path always comes from GUARD_ROUTE_ROWS, so no run reads the repo's own rows file.
-    `doable` is the id the "doable_if_shown" stub looks for in the prompt."""
+    `doable` is the id the "doable_if_shown" stub looks for in the prompt.
+    `surface` is "local" (the default: CLAUDE_CODE_REMOTE is unset) or "cloud" (CLAUDE_CODE_REMOTE is "true")."""
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     os.makedirs(base, exist_ok=True)
@@ -203,8 +204,10 @@ def run_hook(text, scenario="ok", answer="", stop_active=False, config=None, ses
     if rows is not MISSING_ROWS:
         write_rows(rows_file, rows)
     env = dict(os.environ)
-    for name in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"):
+    for name in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_REMOTE"):
         env.pop(name, None)
+    if surface == "cloud":
+        env["CLAUDE_CODE_REMOTE"] = "true"  # guard_core.is_cloud reads exactly this
     if fail_replace:
         env["RJ_FAIL_REPLACE"] = "1"
     else:
@@ -1436,8 +1439,8 @@ ALT_ACT = "rewrite the history of a branch"
 OTHER_ACT = "push a commit straight to main"
 
 
-def judge_row(row_id, act, route, outcome, alternates=None):
-    row = {"id": row_id, "act": act, "route": route, "surface": "local", "outcome": outcome,
+def judge_row(row_id, act, route, outcome, alternates=None, surface="local"):
+    row = {"id": row_id, "act": act, "route": route, "surface": surface, "outcome": outcome,
            "measured": "2026-11-05", "cc_version": "2.1.0", "evidence": "fixture transcript",
            "by": "test-author", "pattern": "fixture-" + row_id}
     if alternates is not None:
@@ -1552,6 +1555,68 @@ def case_route_rows_are_read_once_and_only_for_a_why_yours_line():
     check("rows read, Why yours: the rows file is read once", len(cited.opens) == 1, cited.opens)
 
 
+# --------------------------------------------------------------------------- route rows 2: surface, cap order, head
+# Each case checks the judge's one model call first, then the rows or the block text the prompt carries.
+
+CLOUD_ROW = judge_row("cherry-pick-cloud-only", ROUTE_ACT, "cloud-only cherry-pick route", "works", surface="cloud")
+
+
+def sentences_of(text):
+    """The lowercase sentences of `text`, split at a period or a line break."""
+    return [s.strip() for s in re.split(r"[.\n]", text.lower()) if s.strip()]
+
+
+def route_block_sentences(run, reply):
+    """The sentences the prompt adds beside today's prompt: neither the hook's INSTRUCTIONS nor the reply. Where the
+    block sits is not pinned, so a block before the reply and one after it read the same."""
+    own = set(sentences_of(reference_module().INSTRUCTIONS)) | set(sentences_of(reply))
+    return [s for s in sentences_of(run.prompt()) if s not in own]
+
+
+# A cloud "works" row is no route for a local session, so it never rides a local prompt.
+
+def case_local_session_carries_no_cloud_row():
+    run = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=ALL_ROWS + [CLOUD_ROW], surface="local")
+    check("surface, local: claude called once", len(run.calls) == 1, run.calls)
+    prompt = run.prompt()
+    check("surface, local: the local same-act row rides the prompt", SAME_ACT_ROW["route"] in prompt, prompt[:300])
+    check("surface, local: a cloud works row does not ride the prompt", CLOUD_ROW["route"] not in prompt, prompt[:300])
+
+
+# The same rows in a cloud session: the cloud row rides, and the local same-act row does not.
+
+def case_cloud_session_carries_cloud_rows_not_local_ones():
+    run = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=ALL_ROWS + [CLOUD_ROW], surface="cloud")
+    check("surface, cloud: claude called once", len(run.calls) == 1, run.calls)
+    prompt = run.prompt()
+    check("surface, cloud: the cloud works row rides the prompt", CLOUD_ROW["route"] in prompt, prompt[:300])
+    check("surface, cloud: a local row does not ride the prompt", SAME_ACT_ROW["route"] not in prompt, prompt[:300])
+
+
+# Forty same-act rows come before the alternate-act rows in the file. The outcome pinned is that an alternate-act
+# row still reaches the prompt, not how the cap orders the rows.
+
+def case_alternate_act_row_survives_forty_same_act_rows():
+    same = [judge_row("same-%02d" % n, ROUTE_ACT, "cherry-pick route %02d" % n, "works") for n in range(40)]
+    run = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=[CITED_ROW] + same + [ALT_ROW, ALT_ROW_B])
+    check("cap order: claude called once", len(run.calls) == 1, run.calls)
+    prompt = run.prompt()
+    check("cap order: the cited row rides the prompt", CITED_ROW["route"] in prompt, prompt[:300])
+    check("cap order: at least one alternate-act row rides the prompt",
+          ALT_ROW["route"] in prompt or ALT_ROW_B["route"] in prompt, prompt[:300])
+
+
+# The block must not tell the judge to flag every time. One sentence says to flag only when a works row on this
+# surface covers the act.
+
+def case_route_block_flags_only_on_a_works_row_on_this_surface():
+    run = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=ALL_ROWS)
+    check("route head: claude called once", len(run.calls) == 1, run.calls)
+    block = route_block_sentences(run, TRAILER_REPLY)
+    check("route head: a sentence says flag only when a works row on this surface covers the act",
+          has_pin(block, ("flag",), ("only", "unless", "when", " if "), ("works",), ("surface",)), block)
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_ignored_stop_imports_no_guard_family_module,
@@ -1614,6 +1679,10 @@ CASES = (
     case_trailer_hand_off_names_the_doable_route,
     case_no_route_rows_keeps_today_prompt,
     case_route_rows_are_read_once_and_only_for_a_why_yours_line,
+    case_local_session_carries_no_cloud_row,
+    case_cloud_session_carries_cloud_rows_not_local_ones,
+    case_alternate_act_row_survives_forty_same_act_rows,
+    case_route_block_flags_only_on_a_works_row_on_this_surface,
 )
 
 
