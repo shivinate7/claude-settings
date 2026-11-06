@@ -1575,16 +1575,19 @@ def case_page_draws_against():
 
 
 def case_against_on_updates_without_kind():
-    """Rule: an items write that carries a pick, with a status other than closed, needs a non-blank against.
-    An update with no kind is judged on it too, since the guard cannot see the stored kind."""
+    """Rule: an items write that carries a pick, with a status other than closed and a kind of decision or no kind,
+    needs a non-blank against. An update with no kind is judged on it too, since the guard cannot see the stored
+    kind. A task or a note is out of scope, so its pick passes with no against."""
     against_page("an update with a pick and no kind, and no against, is refused", "update",
                  entry_of({"pick": "b"}))
     against_page("an update with status open and a pick, and no kind or against, is refused", "update",
                  entry_of({"status": "open", "pick": "b"}))
     page("an update with status closed and a pick passes with no against", "update",
          entry_of({"status": "closed", "pick": "b"}), None)
-    against_page("a task with a pick and no against is refused", "set",
-                 entry_of(task_item(["Plug in the Mac"], pick="a")))
+    page("a task with a pick and no against passes: a task is out of the refuter's scope", "set",
+         entry_of(task_item(["Plug in the Mac"], pick="a")), None)
+    page("a note with a pick and no against passes: a note is out of the refuter's scope", "set",
+         entry_of(dict(task_item(["Plug in the Mac"], pick="a"), kind="note")), None)
 
 
 def skill_folder_refusal(name, got):
