@@ -1,6 +1,7 @@
 // The show command: prints one part of `docs/map/` as short plain text.
 // Use: node <skill>/scripts/map-show.mjs <path|area|folder/|decision-id> [--full], run from the root of a repository that has `map.config.json`.
 //   a file path  prints its area, its map line, its fact lines, its tested-by line, its Homes lines and its trace steps.
+//                A non-code file (a record can name any file) prints its map line, its `Decisions:` ids and its `Debts:` slugs, when its map line has either.
 //                A test path also prints `Named as a test of:` and the files whose tested-by line names it. A test with no map line prints that alone.
 //   an area id   prints each map line of that area as `path — sentence`.
 //   a folder     (ends with `/`) prints each map line whose path starts with it.
@@ -38,7 +39,8 @@ try {
   // One entry per area page, in the order git lists them.
   areas = mapFilePaths(files).map((f) => {
     const text = read(f);
-    return { id: path.posix.basename(f, '.md'), text, lines: mapLines(text, re), cites: subLineEntries(text, re).entries };
+    const cites = subLineEntries(text, re).entries;
+    return { id: path.posix.basename(f, '.md'), text, lines: mapLines(text, re), cites, others: cites.filter((e) => !e.code && (e.ids.length || e.slugs.length)) };
   });
   traces = files.flatMap((f) => {
     const m = f.match(TRACE_PAGE_RE);
@@ -111,6 +113,15 @@ if (cfg.decisionsDir && new RegExp(`^(?:${cfg.decisionIdPattern})$`).test(arg)) 
       if (homes.length) out.push('Homes:', ...homes.map((h) => `  ${h.capability} — ${h.file}${h.symbol ? `:${h.symbol}` : ''}`));
       const steps = traces.flatMap((t) => t.steps.filter((s) => s.path === want).map((s) => `  ${t.key} / ${s.heading}: ${s.text}`));
       if (steps.length) out.push('Trace:', ...steps);
+    }
+  }
+  // A non-code file that a record names: its map line, then its decisions line and its debts line. A non-code map line with neither stays unlisted here.
+  for (const a of areas) {
+    for (const e of a.others) {
+      if (e.file !== want) continue;
+      out.push(`${want} — area ${a.id}`, e.sentence);
+      if (e.ids.length) out.push(`Decisions: ${e.ids.join(', ')}`);
+      if (e.slugs.length) out.push(`Debts: ${e.slugs.join(', ')}`);
     }
   }
   // A test that has no map line of its own still prints the files that name it.
