@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-06T20:29:00Z",
+  "context": "Goal: lanes report to triage, the coordinator and the batch runners without a stop.\nProblem (rule): auto mode refused a lane's message to triage at about 14:20 CST. The refusal scan found 2 more. Each refusal stalls a hand-off until a person or another route moves it.\nBased on (measured): item 287 scan: 3 send_message refusals among 18 refusals, in about 6,216 judged acts over 359 sessions.\nDeparts from: main, which has no allow line for send_message \u2014 adds an allow line for mcp__claude-code-remote__send_message in lane sessions.\nMeanwhile: lanes retry a refused message through their parent.",
+  "holds": "Whether auto mode checks a lane's messages to other sessions.",
+  "home": "decision auto-mode-allow",
+  "id": "lane-send-allow",
+  "kind": "decision",
+  "n": 301,
+  "options": [
+    {
+      "gain": "Hand-offs never stall.",
+      "how": "Lane sessions get an allow line for send_message, so auto mode no longer judges each message.",
+      "key": "a",
+      "label": "Allow it",
+      "lose": "A lane could message any session on your account with no check."
+    },
+    {
+      "gain": "No new allow line.",
+      "how": "Refusals stay; the lane retries through its parent.",
+      "key": "b",
+      "label": "Keep the check",
+      "lose": "About one stalled hand-off in 2,000 acts."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "item 287 scan; step auto-mode-refusal-survey",
+  "short": "Lane send_message allow",
+  "status": "open",
+  "title": "Should lane sessions be allowed to message other sessions without an auto-mode check?",
+  "why": "A refused hand-off message stalls the lane's work until someone moves it."
+}
