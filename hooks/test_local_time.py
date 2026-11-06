@@ -419,6 +419,21 @@ OV_GRANTS = [
      timedelta(hours=72)),
     ("`OVERRIDE 2H`: keyword and unit ignore case", "OVERRIDE 2H", "timed", timedelta(hours=2)),
     ("`override 2h` is a 2-hour override", "override 2h", "timed", timedelta(hours=2)),
+    # The last non-blank line, alone on its line, is the override. A block of other text above it is not the owner's
+    # words, and its shape does not matter.
+    ("a status block, a blank line, then `override 12h` on the last line",
+     "Linked sessions now\n- a: idle\n- b: working\n\noverride 12h", "timed", timedelta(hours=12)),
+    ("a tag-shaped block, a blank line, then `override 12h` on the last line",
+     "<linked-sessions>\nx\n</linked-sessions>\n\noverride 12h", "timed", timedelta(hours=12)),
+    ("the app's real shape: a system-reminder block of linked sessions, then `override 12h` on the last line",
+     "<system-reminder>\nLinked sessions now\n- session a: idle\n- session b: working\n</system-reminder>\n\n"
+     "override 12h", "timed", timedelta(hours=12)),
+    ("trailing blank lines and spaces after the `override 12h` line",
+     "Linked sessions now\n- a: idle\n\noverride 12h\n\n   \n", "timed", timedelta(hours=12)),
+    ("a block, a blank line, then `override 15m` on the last line",
+     "Linked sessions now\n- a: idle\n\noverride 15m", "timed", timedelta(minutes=15)),
+    ("a block, a blank line, then bare `override` on the last line",
+     "Linked sessions now\n- a: idle\n\noverride", "once", timedelta(minutes=10)),
 ]
 
 
@@ -551,6 +566,7 @@ OV_NO_GRANT = [
     ("a past participle", "overridden by me"),
     ("an -ing form", "overriding the guard"),
     ("a length with no space", "override15m"),
+    ("a length after the word, not the first word", "please override 12h"),
     ("a hyphenated flag name", "override-flag is not set, check the config"),
     ("a call", "override() should return the parent value"),
     ("a possessive", "override's behaviour is wrong when the override is spent"),
@@ -568,6 +584,39 @@ def case_override_not_the_first_word():
         check("override: grants nothing for " + name,
               proc is not None and proc.returncode == 0 and not ov_pass_files(cfg) and not ov_log(cfg),
               "files %r; log %r" % (ov_pass_files(cfg), ov_log(cfg)))
+
+
+# The override line is the last non-blank line, and it grants only when it stands alone: the bare word, `off`, or a
+# length. Any other word on that line grants nothing, and so does the word on a line that is not the last. The
+# Opus word on that line grants nothing either: no opus file is written. ov_pass_files covers state/override/opus/.
+OV_LAST_LINE_NO_GRANT = [
+    ("a reason after the length", "Linked sessions now\n- a: idle\n\noverride 12h please"),
+    ("a reason after the bare word", "Linked sessions now\n- a: idle\n\noverride because tests"),
+    ("the Opus word with a length", "Linked sessions now\n- a: idle\n\nopus 2h"),
+    ("the real app shape with a reason after it",
+     "<system-reminder>\nLinked sessions now\n</system-reminder>\n\nI said override 12h earlier"),
+    ("the word with a length on a middle line, other text last",
+     "Quoted from the log:\noverride 12h\nthen run the tests"),
+]
+
+
+def case_override_last_line_no_grant():
+    for name, prompt in OV_LAST_LINE_NO_GRANT:
+        cfg = ov_cfg()
+        proc = ov_type(cfg, prompt)
+        check("override: grants nothing for " + name,
+              proc is not None and proc.returncode == 0 and not ov_pass_files(cfg),
+              "files %r; stderr %r" % (ov_pass_files(cfg), proc.stderr.strip()[-120:] if proc else "timed out"))
+
+
+def case_override_off_on_the_last_line():
+    cfg = ov_cfg()
+    ov_type(cfg, "override 12h")
+    before = ov_pass(cfg)
+    proc = ov_type(cfg, "Linked sessions now\n- a: idle\n\noverride off")
+    check("override: `override off` on the last line after a block removes the override",
+          before is not None and proc is not None and ov_pass(cfg) is None and not ov_pass_files(cfg),
+          "before %r, after %r, files %r" % (before, ov_pass(cfg), ov_pass_files(cfg)))
 
 
 def case_override_reason_goes_through_the_log_writer():
@@ -2599,6 +2648,8 @@ def main():
         case_override_reason_goes_through_the_log_writer()
         case_override_reason_with_a_lone_surrogate()
         case_override_not_the_first_word()
+        case_override_last_line_no_grant()
+        case_override_off_on_the_last_line()
         case_override_corrupt_file_replaced()
         case_override_session_id_stays_inside()
         case_override_fail_open()
