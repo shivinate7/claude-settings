@@ -92,7 +92,6 @@ BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
-import git_fetch  # noqa: E402  the one home of the history fetch (lint/git_fetch.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (never the WSL launcher)
 from pin_note import ENV as PIN_NOTE_ENV, MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's names (hooks/pin_note.py)
 from action_pin import pin_regex  # noqa: E402  the one home of the sha pin's pattern (hooks/action_pin.py)
@@ -152,7 +151,13 @@ def unshallow(block, top, dry, tally):
     if dry:
         print("%-15s the clone is shallow and CI checks out full history: git fetch --unshallow" % "would fetch")
         return
-    ok, message = git_fetch.fetch(top, unshallow=True)  # lint/git_fetch.py, the one home of the fetch
+    try:
+        import git_fetch  # lint/git_fetch.py, the one home of the fetch; imported here so a copy without it still runs
+    except ImportError as exc:
+        tally["unknown"] += 1
+        print("unknown         the clone is shallow and lint/git_fetch.py cannot be imported: %s" % exc)
+        return
+    ok, message = git_fetch.fetch(top, unshallow=True)
     if ok:
         print("%-15s the clone was shallow and CI checks out full history: ran git fetch --unshallow" % "fetched")
     else:
