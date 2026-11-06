@@ -97,18 +97,24 @@ a turn end in these cases:
     so a silent pass would drop feedback. This stays advisory, per decision guard-hooks-fail-closed:
     `stop_hook_active` true exits with no output, so the block costs one turn at most;
   - waiting-export-check (export_check, roadmap step waiting-export-check; runs before the inbox read, so it
-    needs no inbox file). It blocks a stop when the whole transcript holds a non-sidechain ArtifactData set,
-    update or batch call to the waiting page (layout.is_waiting_page_url) whose tool_result is no error, and
-    the newest such write is newer than the newest commit on origin/<record branch> that touches the waiting
-    copy folder (waiting_copy), unless a later Bash run of export_page.py ended with the line `same`. No
-    commit on the folder at all counts as older. Incident: the waiting/ copy of the roadmap went stale from
-    06:41 to 19:04 CST on Nov 5 while the page took items 261 to 271. Harm: a lost or moved page then loses
-    those items (decision waiting-data-in-repo). The reason names export_page.py and the waiting-page skill
-    section "Keep a copy in the repo". A transcript that cannot be read passes. A failed read of the layout
-    or of the ref passes with the systemMessage "Feedback guard: waiting copy export not checked". With
-    stop_hook_active the reason goes to systemMessage and nothing blocks. Cost: zero git calls unless an
-    ArtifactData write is found, then one rev-parse, and one git log when it is to the waiting page, inside
-    the Stop process; no process or file of its own (rule outcomes-mechanize-rules). Test S6 proves it.
+    needs no inbox file). It blocks a stop of the page writer's session when the whole transcript holds a
+    non-sidechain ArtifactData set, update, batch or delete of an exported collection (layout
+    WAITING_COLLECTIONS, by `collection` or a `doc_id` or `path` prefix) to the waiting page
+    (layout.is_waiting_page_url) whose tool_result is no error, and the newest such write is newer than the
+    newest commit on origin/<record branch> that touches the waiting copy folder (waiting_copy), unless a later
+    shell run (Bash or PowerShell) of export_page.py ended with the line `same`, or with `<page id>: same`
+    under --all. No commit on the folder at all counts as older. This session is the writer when the newest
+    meta/page get names the hook's session id or the id the remote env names (override.remote_session_id), or
+    an export_page.py run came before the write. A session that is not the writer, or a writer that cannot be
+    told, passes with no note: receipts and answers are not its to export. Incident: the waiting/ copy of
+    the roadmap went stale from 06:41 to 19:04 CST on Nov 5 while the page took items 261 to 271. Harm: a lost
+    or moved page then loses those items (decision waiting-data-in-repo). The reason names export_page.py and
+    the waiting-page skill section "Keep a copy in the repo". A transcript that cannot be read passes. A
+    failed read of the layout or the ref after a page write passes with the systemMessage "Feedback guard:
+    waiting copy export not checked". With stop_hook_active the reason goes to systemMessage and nothing
+    blocks. Cost: the transcript read at each Stop, then git reads (one rev-parse, one git log) only after a
+    writer's page write, inside the Stop process; no process or file of its own (rule
+    outcomes-mechanize-rules). Test S6 proves it.
 Repeats (decision owner-feedback-inbox, "Repeats"): on every Stop, `stop_hook_active` or not, the
 guard judges the well-formed, open items whose ids the turn state's `judged` list does not hold. A
 state file that predates the key counts every item there as judged. One model call per Stop covers
@@ -144,6 +150,7 @@ import override  # noqa: E402  the one home of the roadmap record ref and folder
 import ruling_home  # noqa: E402  the one home of "a branch's tree holds this file"
 import precompact_handoff  # noqa: E402  the one home of the handoff path
 from shared_names import MACHINE_TAGS  # noqa: E402  the one home of the machine notice tags
+from guard_core import SHELL_TOOLS  # noqa: E402  the one home of the shell tool names (Bash, PowerShell)
 
 ITEM = re.compile(r"- (fb-\S+)(?:\s+(.*))?$")
 KINDS = ("ruling", "task", "question", "note", "standing", "page", "repo")
@@ -191,7 +198,8 @@ FAIL_OPEN_CLOSED = "Feedback guard: closed note homes not checked (%s)."
 FAIL_OPEN_FILING = "Feedback guard: page filing not checked (%s)."
 FAIL_OPEN_EXPORT = "Feedback guard: waiting copy export not checked (%s)."
 EXPORT_SCRIPT = "export_page.py"
-EXPORT_SAME = "same"  # the last line export_page.py prints when nothing differs
+EXPORT_SAME = "same"  # the verdict export_page.py prints when nothing differs
+NO_SESSION = object()  # export_check's default session_id: the caller names no session, so no writer scope
 EXPORT_REASON = (
     "Waiting copy not exported: this session wrote to the waiting page, and no commit on origin/%s has"
     " touched %s/ since. Run skills/waiting-page/export_page.py as the waiting-page skill section"
@@ -1103,10 +1111,22 @@ def _ts(rec):
     return _transcript.parse_utc_timestamp(rec.get("timestamp"))
 
 
-def _scan_transcript(records):
+def _exported_write(inp, collections):
+    """True when an ArtifactData input writes (set, update, batch or delete) a collection the waiting copy
+    exports: named by `collection`, or by a `doc_id` or `path` of the form `<collection>/...`. A batch that
+    names none is counted, since its writes are not read. `delete` is counted here and in no shared list."""
+    verb = inp.get("action", inp.get("op"))
+    if isinstance(verb, str) and verb not in _transcript.WRITE_VERBS + ("delete",):
+        return False
+    named = [inp["collection"]] if isinstance(inp.get("collection"), str) else [
+        inp[k].partition("/")[0] for k in ("doc_id", "path") if isinstance(inp.get(k), str) and "/" in inp[k]]
+    return any(c in collections for c in named) or (not named and verb == "batch")
+
+
+def _scan_transcript(records, collections):
     """(writes, exports, results) of the non-sidechain records. `writes` is [(epoch, id, url)] for each
-    ArtifactData set, update or batch call; `exports` is [(epoch, id)] for each Bash call naming
-    export_page.py; `results` maps a tool_use id to (is_error, last non-blank line of its tool_result)."""
+    ArtifactData write of an exported collection; `exports` is [(epoch, id)] for each shell call naming
+    export_page.py; `results` maps a tool_use id to (is_error, the non-blank lines of its tool_result)."""
     writes, exports, results = [], [], {}
     for rec in records:
         if rec.get("isSidechain"):
@@ -1117,44 +1137,62 @@ def _scan_transcript(records):
             if not isinstance(inp, dict) or when is None:
                 continue
             if name.startswith(ARTIFACT_DATA):
-                if _transcript.is_write(inp) and isinstance(inp.get("url"), str):
+                if _exported_write(inp, collections) and isinstance(inp.get("url"), str):
                     writes.append((when, use.get("id"), inp["url"]))
-            elif name == "Bash" and EXPORT_SCRIPT in str(inp.get("command", "")):
+            elif name in SHELL_TOOLS and EXPORT_SCRIPT in str(inp.get("command", "")):
                 exports.append((when, use.get("id")))
         for block in _transcript.tool_results(rec):
             lines = [ln.strip() for ln in _transcript.result_text(block).splitlines() if ln.strip()]
-            results[block.get("tool_use_id")] = (bool(block.get("is_error")), lines[-1] if lines else "")
+            results[block.get("tool_use_id")] = (bool(block.get("is_error")), lines)
     return writes, exports, results
 
 
-def export_check(cwd, transcript_path):
+def _cleared(exports, results, newest, page_id):
+    """True when an export run after `newest` ended with the verdict `same`: as its last line, or, for the
+    `--all` form, as the line `<page id>: same`."""
+    for when, uid in exports:
+        failed, lines = results.get(uid, (True, []))
+        if when > newest and not failed and lines and (
+                lines[-1] == EXPORT_SAME or "%s: %s" % (page_id, EXPORT_SAME) in lines):
+            return True
+    return False
+
+
+def export_check(cwd, transcript_path, session_id=NO_SESSION):
     """(reason, note) of the export check (roadmap step waiting-export-check). `reason` is the block text
-    when the transcript holds a successful ArtifactData write to the repo's waiting page that is newer than the
-    newest commit on origin/<record branch> touching the waiting copy folder, and no later Bash run of
-    export_page.py ended with the verdict `same`. `note` is the systemMessage text when the check could not
-    run: a failure of git or the layout is never a block. A transcript that cannot be read gives neither. The whole transcript is read and
-    timestamps decide, so a write in an earlier turn still counts."""
+    when this session is the page writer and the transcript holds a successful ArtifactData write of an
+    exported collection to the repo's waiting page that is newer than the newest commit on origin/<record
+    branch> touching the waiting copy folder, and no later shell run of export_page.py cleared it (verdict
+    `same`, or `<page id>: same` under --all). This session is the writer when the newest meta/page get names
+    `session_id` or the id the remote env names (override.remote_session_id), or an export_page.py run came
+    before the write. A writer that cannot be told passes, with no note. With no `session_id` given, the
+    writer scope is not applied. `note` is the systemMessage text only after a page write was found and a
+    read of the repo or the layout failed: that is never a block. A transcript that cannot be read gives
+    neither. The whole transcript is read and timestamps decide, so a write in an earlier turn still counts."""
     try:
         records = _transcript.read_transcript(transcript_path)
-    except (OSError, TypeError, ValueError):
-        return None, None  # no transcript to read (a hook run with none is normal); the inbox checks say so themselves
-    writes, exports, results = _scan_transcript(records)
+        import layout
+    except (OSError, TypeError, ValueError, ImportError):
+        return None, None  # no transcript to read (a hook run with none is normal), or no layout
+    writes, exports, results = _scan_transcript(records, layout.WAITING_COLLECTIONS)
     writes = [w for w in writes if w[1] in results and not results[w[1]][0]]
     if not writes:
-        return None, None  # no git call before a write is found
-    try:
-        import layout
-    except ImportError as e:
-        return None, FAIL_OPEN_EXPORT % (" ".join(str(e).split()) or "ImportError")
+        return None, None  # nothing is read from the repo before a write is found
+    if session_id is not NO_SESSION:
+        writer = _transcript.page_writer_id(records)
+        named = bool(writer) and writer in (session_id, override.remote_session_id())
+        if not named and not any(e[0] < max(w[0] for w in writes) for e in exports):
+            return None, None  # not the writer, or none known: receipts and answers are not this session's to export
     try:
         root = Homes(cwd)._cwd_root()
         if root is None:
-            return None, FAIL_OPEN_EXPORT % "the session's folder is in no git repo"
+            return None, None
         wrote = [w[0] for w in writes if layout.is_waiting_page_url(root, w[2])]
         if not wrote:
             return None, None
         newest = max(wrote)
-        if any(when > newest and results.get(uid) == (False, EXPORT_SAME) for when, uid in exports):
+        waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
+        if _cleared(exports, results, newest, waiting[0]["id"] if waiting else ""):
             return None, None
         branch, folder = waiting_copy(layout, root)
         run = ruling_home._run_git(root, ["log", "-1", "--format=%ct", "refs/remotes/origin/" + branch,
@@ -1171,7 +1209,7 @@ def main():
     try:
         hook = json.load(sys.stdin)
         try:  # before the inbox read, so a session with no inbox file is checked too
-            ex_reason, ex_note = export_check(hook.get("cwd"), hook.get("transcript_path"))
+            ex_reason, ex_note = export_check(hook.get("cwd"), hook.get("transcript_path"), hook.get("session_id"))
         except Exception as e:  # advisory: a crash passes, and says so
             ex_reason, ex_note = None, FAIL_OPEN_EXPORT % (" ".join(str(e).split()) or type(e).__name__)
         out = inbox_stop(hook)
