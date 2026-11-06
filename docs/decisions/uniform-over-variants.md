@@ -1,10 +1,12 @@
-# A repo matches a shared format; the shared tool never grows a second form
+# A repo changes to fit the shared tool; the tool does not grow a second form for one repo
 
 ## The ruling
 
-Owner, 2026-10-27 12:51 CDT, topic t18 (one home, then variants): when a repo differs from a shared format, the repo changes to match it. The shared tool never grows a second accepted form to fit one repo.
+Owner, 2026-10-27 12:51 CDT, topic t18 (one home, then variants): when a repo differs from a shared format, the repo should change to match it, rather than the tool changing. The shared tool should not grow a second accepted form to fit one repo.
 
-- An option that widens what a shared tool accepts is a second accepted form, an allow-list entry or a per-repo exception. It carries "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo" and is never the recommended option. Rule `style-question-form` holds the text.
+Owner, 2026-11-06 12:41 CST, item 278: the wording is a guideline, and widening is judged by scope.
+
+- An option that widens what a shared tool accepts is one where the tool accepts for one repo what it refuses for others: a second accepted form, an allow-list entry or an exception that fits one repo. A change that applies the same way to every repo is not widening. A widening option carries "Goes against your ruling: a repo should change to fit the shared tool, rather than the tool change to fit a repo" and is not the recommended option. Rule `style-question-form` holds the text.
 - On the waiting page (skill `waiting-page`), such an option carries `widens: true`. Its card shows the label.
 - Guard rule `uniform-pick` (`hooks/question_form.py`, run by `hooks/guard.py`) refuses an `ArtifactData` set or update to `items` whose `pick` names an option with `widens: true`. It reads each write in a batch and data read from `file_path`.
   - It judges only a call whose `url` is this repo's waiting page (`layout.waiting_page`), and only an item of kind `decision` or with no kind.
@@ -20,6 +22,7 @@ Incident:
 
 - 2026-10-27 12:51 CDT: a waiting-page item recommended loosening a shared tool so it would accept banchi's record titles.
 - 2026-11-01 11:43 CST: the card text quoted a bare topic id (rule `speak-cite-id-plus-gloss`). The card now says the ruling in plain words.
+- 2026-11-06 12:41 CST: a false alarm. Auto-mode allow lines that apply the same way to every repo were marked as widening. The owner ruled the mark is by scope, and the words are a guideline (item 278). The mark's words, both judge prompts and the card changed.
 
 Kind: process
 Home: rule:style-question-form

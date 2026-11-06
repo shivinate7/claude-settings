@@ -126,7 +126,9 @@ INSTRUCTIONS = (
     "\"verdict: clear\" or \"harness passes\", is a result, not narration; never flag it. "
     "Flag only a limit or rule named as a note on the session's own conduct. "
     "style-question-form: flag a reply whose recommended option widens what a shared tool accepts, "
-    "such as a second accepted form, an allow-list entry or a per-repo exception. "
+    "meaning it accepts for one repo what it refuses for others, such as a second accepted form, "
+    "an allow-list entry or an exception that fits one repo. "
+    "A change that applies the same way to every repo is not widening. "
     + WIDENS_LABEL_SENTENCE +
     "Never flag an option where the repo changes to match the shared format. "
     "Judge only options the reply offers the owner to pick; never flag a reply that describes the rule itself. "
