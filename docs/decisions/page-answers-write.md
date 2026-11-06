@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-11-06 11:38 CST: a mistake Claude made means a guard is missing (decision `mistake-means-missing-guard`). The skill rule "Never write `answers/`" (`skills/waiting-page/SKILL.md`) was the only guard of the owner's grant, so it needs a hook.
+Owner, 2026-11-06 11:38 CST: a mistake Claude made means that a guard is missing (decision `mistake-means-missing-guard`). The skill rule "Never write `answers/`" (`skills/waiting-page/SKILL.md`) was the only guard of the owner's grant, so it needs a hook.
 
 - Guard rule `page-answers-write` (`hooks/guard.py`, `page_answers_hit`). A `PreToolUse` `ArtifactData` call is denied when it sets, updates or str_replaces the `answers` collection and its `url` is this repo's registered waiting page (`question_form.waiting_page_root`). It judges a single call, and each entry of a `batch` `writes` list. One bad entry denies the batch.
 - The one parser of a call's entries is `hooks/question_form.py` `call_entries`. The item rules (`page_item_hit`) and this rule both read it. The collection name is `WAITING_ANSWERS`, beside `WAITING_ITEMS`.
