@@ -71,11 +71,13 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 ## The limits
 
 - `--review-record` reads the PR's changed files. A moved file counts at its old path too.
-  - It refuses Guard or check `no` when a path starts with an entry of `GUARD_PATHS`. That list is `stale_cites.RULE_DIRS` plus `merge/` and `settings.json`.
+  - It refuses Guard or check `no` when a path starts with an entry of `GUARD_PATHS` or equals one of `GUARD_FILES`. `GUARD_PATHS` is `stale_cites.RULE_DIRS` plus `merge/` and `githooks/`. `GUARD_FILES` is `settings.json`.
+  - It refuses a files list shorter than the PR's changed-file count. GitHub lists at most 3000 files.
+  - `agents/*.md` is not on the list. Only its `tools` lines are a guard, and a path cannot tell those apart from prompt text.
   - It refuses Kind `docs-only` when a path does not end in `.md`. It refuses Kind `delete-only` when a path is not removed.
   - Guard or check `yes` stays allowed with no hit, because a guard can live outside those paths.
 - The path check runs only when `--review-record` writes a record. `merge --reviewed` still trusts a record posted by hand. A read there would add one call per PR.
-- In another repo, a change under `bin/`, `lint/`, `actions/`, `.github/` or `merge/` must say Guard or check `yes`. It then owes the net-value test after round 3. A `.claude/settings.json` or `.claude/hooks/` path is not on the list.
+- In another repo, a change under `hooks/`, `lint/`, `bin/`, `actions/`, `.github/`, `merge/` or `githooks/`, or to a root `settings.json`, must say Guard or check `yes`. It then owes the net-value test after round 3. A `.claude/settings.json` or `.claude/hooks/` path is not on the list.
 - The tool does not tell a record that files an owner ruling from other docs. Kind `normal` stays the lane's claim. Guards stop mistakes, not attackers (record `guard-guards-mistakes-only`).
 - Open: an integration PR has no record of its own.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.

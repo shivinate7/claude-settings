@@ -1,5 +1,7 @@
 # Notes: findings too unlikely to hit to be debts
 - AskUserQuestion gain/loss rule may refuse terse real choices: check it on real questions. Decision: question-reviewer-agent-hook.
+- docs-only-rule-text: Kind `docs-only` passes an edit to rule text in `CLAUDE.md`, `docs/decisions/*.md` or `skills/*/SKILL.md` with no round owed. Main behaves the same (merge/merge.py `kind_misfits`, review round 1 of lane merge-guard-flag-from-paths). Decision: docs-only-prs-skip-review.
+- guard-paths-md-false-alarm: `merge --review-record` counts every file under a guard folder, so a README there (`hooks/README.md`) must say Guard or check `yes`. Some `.md` files there are read by hooks (`hooks/precompact_handoff_prompt.md`), so the check fails safe (merge/merge.py `guard_hits`, review round 1 of lane merge-guard-flag-from-paths). Decision: pr-review-record.
 - guard-suite-red-on-unparsed: hooks/test_guard.py is not green when hooks/guard_wsl.py is parsed and unparsed, so the report has no same-engine gold row for the guard. Cause unmeasured: find which case reads the source text. Decision: mutation-report-scores-suites.
 - hooks/guard_wsl.py plain-node form excludes only `*` and `?`, so a bracket glob passes: `wsl -e node mods/[ab]/x.test.mjs` (first-file false green). Fix: exclude `*?[]` too, with a refusal case. Decision: wsl-allow-list (WSL allow list).
 - agent-brief-crash-silent: on internal error the agent brief hook prints context nowhere and writes stderr, which Claude never sees (hooks/agent_brief.py)
@@ -157,6 +159,7 @@
 - linked-nm-other-deletes: find -delete, Get-ChildItem | Remove-Item, cmd rmdir /s, rimraf, cd node_modules && rm -rf x and -Recurse:$true are not read as recursive deletes into a linked node_modules (hooks/guard_push_delete.py). Decision: guard-linked-node-modules
 - linked-nm-other-managers: pnpm, yarn, bun, npx and npm.exe are not judged against a linked node_modules (hooks/guard_push_delete.py). Decision: guard-linked-node-modules
 - linked-nm-shell-c-cd: an inner cd inside bash -c or sh -c is not tracked, so the working folder is the outer one (hooks/guard_push_delete.py). Decision: guard-linked-node-modules
+- lint-config-not-guard-path: `.ste-lint-exclude`, `.code-check.json` and `ruff.toml` change what CI checks, but they are not in `GUARD_PATHS`, so a lane that adds a lint exclude may say Guard or check `no` (merge/merge.py `GUARD_PATHS`, review round 1 of lane merge-guard-flag-from-paths). Decision: pr-review-record.
 - live-pin-first-move-gap: the first pin move renames the live directory, so <clone>-live is absent for milliseconds and links dangle; no check proves the retry covers it (merge/install_from_main.sh)
 - liveness-windows-arm-unproven: the Windows liveness arm is proven only with a stubbed ctypes.windll, not a real kernel32 call (hooks/git_reads.py _process_start_ms)
 - local-time-hard-coded-dst: the US DST rule is coded in the hook; a US rule change needs an edit; zoneinfo upgrade not built (hooks/local_time.py)
