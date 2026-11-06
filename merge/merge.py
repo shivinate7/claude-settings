@@ -2384,7 +2384,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
                               'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
     raise Stop(f"ci-job exited {c} on {short}, so the lint is unknown, not a pass. {LANE_LINT_REMEDY}")
 
-PROSE_JUDGE_MAX_CALLS = 3  # model calls one merge makes; each may run MODEL_TIMEOUT s with the lock held, so the count bounds that wait. A file past it reads UNKNOWN
+PROSE_JUDGE_MAX_CALLS = 3  # model calls one merge makes; each may run MODEL_TIMEOUT s after the lock is released, so the count bounds how long the run waits before it ends. A file past it reads UNKNOWN
 PROSE_JUDGE_MAX_LINES = 20  # report lines one merge prints for the prose judge; the rest are one count line
 
 def prose_judge_lines(wt, sha, base_ref, changed):
