@@ -4,7 +4,7 @@
   "home": "docs/design/layout.md ux-swift-same-intent",
   "id": "ux-swift-layout-rule",
   "kind": "decision",
-  "lane": "coordinator: one debt per app",
+  "lane": "swift-layout-debts (session_013NEJL1fhSHHMagDmF1QHhu)",
   "lastAnswer": {
     "at": "2026-11-06T17:46:39.335Z",
     "choice": "b",

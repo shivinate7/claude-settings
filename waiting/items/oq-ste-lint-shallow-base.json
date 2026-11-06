@@ -1,10 +1,15 @@
 {
   "added": "2026-11-06T18:08:00Z",
-  "context": "Goal: the shared style lint never passes a change it could not read, and never fails a child repo for anything other than a style fault.\nProblem (rule): to lint a change, the lint compares it with the base commit. When git can't find that commit, the comparison fails. Your ruling says an unreadable base counts as \"unknown\" and the lint passes, so today a shallow clone (a copy with only the latest commit) is never linted. GitHub's checkout makes a shallow clone by default, and run.sh fetches the base the same way (--depth=1).\nBased on (ruling): decision stale-cites-at-merge, lines 18-19: an unknown result passes, and so does a run with FAIL=false.\nDeparts from: main passes when it can't read the base \u2014 a fails it; b keeps the pass only for a shallow clone; c fetches the full history once, then fails.\nAlso: under a, b or c, a run with FAIL=false still fails when the lint can't read the diff. That changes line 19.\n\nMeanwhile: lane ste-lint-diff-fail-closed waits for your pick. Its tests are red on main and green on its branch.",
+  "context": "Goal: the shared style lint never passes a change it could not read, and never fails a child repo for anything other than a style fault.\nProblem (rule): to lint a change, the lint compares it with the base commit. When git can't find that commit, the comparison fails. Your ruling says an unreadable base counts as \"unknown\" and the lint passes, so today a shallow clone (a copy with only the latest commit) is never linted. GitHub's checkout makes a shallow clone by default, and run.sh fetches the base the same way (--depth=1).\nBased on (ruling): decision stale-cites-at-merge, lines 18-19: an unknown result passes, and so does a run with FAIL=false.\nBased on (ruling): decision ci-unknown-is-red says a lint in CI that cannot read its input fails. That conflicts with line 18 of stale-cites-at-merge (owner-lane call, 2026-11-01), where a shallow base reads \"unknown\" and passes. You are asked because the two rulings disagree on this one case. Under ci-unknown-is-red, a is the default.\nDeparts from: main passes when it can't read the base \u2014 a fails it; b keeps the pass only for a shallow clone; c fetches the full history once, then fails.\nAlso: under a, b or c, a run with FAIL=false still fails when the lint can't read the diff. That changes line 19.\n\nMeanwhile: lane ste-lint-diff-fail-closed waits for your pick. Its tests are red on main and green on its branch.",
   "home": "decision stale-cites-at-merge",
   "id": "oq-ste-lint-shallow-base",
   "kind": "decision",
-  "lane": "ste-lint-diff-fail-closed (session_013NEJL1DSd9D3Fftt6Rgch4)",
+  "lane": "ste-lint-diff-fail-closed (session_013NEJL1DSd9D3Fftt6Rgch4); state c, waiting on item 276",
+  "lastAnswer": {
+    "at": "2026-11-06T18:19:25.015Z",
+    "choice": "none",
+    "note": "Owner: \"dont these answer options jump around a more uniform issue that needs addressing or no?\" Routed 12:32 CST to the coordinator. The coordinator had already settled this case at 12:30 CST under decision ci-unknown-is-red: fetch the full history, then fail closed (c)."
+  },
   "n": 275,
   "options": [
     {
@@ -30,8 +35,9 @@
   "pick": "c",
   "rank": 2,
   "ref": "step ste-lint-diff-fail-closed; branch handoff/ste-lint-diff-fail-closed",
+  "reply": "Yes. The wider problem is that two rulings disagree on what a check does when it can't read its input. Decision ci-unknown-is-red says it fails. Line 18 of stale-cites-at-merge says it passes as \"unknown\". The coordinator settled this one case under the first ruling (fetch the full history, then fail), and that can be undone. The uniform fix is to make every check follow one rule for an unknown read. I've sent that to the coordinator as the real question. It comes back to you only if fixing it means rewriting your stale-cites-at-merge ruling.",
   "short": "Style lint, unreadable base",
   "status": "open",
   "title": "Style lint: when it can't read the base commit, fail it, pass a shallow clone, or fetch the full history first?",
-  "why": "Recommended: c. Child repos stay linted, and no repo fails for something that isn't a style fault."
+  "why": "Recommended: c. a is the default under ci-unknown-is-red, but c keeps child repos passing and still linted."
 }

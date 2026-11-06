@@ -1,0 +1,10 @@
+{
+  "answered": "2026-11-06T18:36:00Z",
+  "at": "2026-11-06T18:21:21.847Z",
+  "id": "ask-mw5awd2v7b",
+  "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "re": "ask-mw5aaa9gvg",
+  "read": "2026-11-06T18:36:00Z",
+  "reply": "I sent this to the coordinator at 12:36 CST. Each live child session that still prints the old CLAUDE_CODE_EXECPATH line gets a message to restart, or it is replaced with a fresh one.",
+  "text": "maybe coordinator messages sesssions that still see it telling them to restart or archive and re-spin off so it's no longe rbuggged? would be weird coordinator didn't get the update to its children when im prettty sure coordinator itself is cured of it"
+}

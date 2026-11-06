@@ -1,0 +1,12 @@
+{
+  "answered": "2026-11-06T18:36:00Z",
+  "at": "2026-11-06T18:27:00.341Z",
+  "filed": "2026-11-06T18:36:00Z",
+  "home": "step:session-messaging-plan",
+  "id": "ask-mw5b3m9hl0",
+  "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "re": "ask-mw58ykeqal",
+  "read": "2026-11-06T18:36:00Z",
+  "reply": "Agreed. I filed step session-messaging-plan: a full plan, then the build, for sending messages to and from sessions. It is written so it carries over to a new harness or a custom build. I sent it to the coordinator.",
+  "text": "that's fair but you're not considering that all of this can be transferrable to a new harness/environment/custmo-build, but for sure we can just develop messaging to and from first if you want to create a lane for that too at some point a full plan + execution"
+}

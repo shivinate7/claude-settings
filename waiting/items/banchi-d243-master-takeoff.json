@@ -5,7 +5,11 @@
   "id": "banchi-d243-master-takeoff",
   "kind": "decision",
   "lane": "coordinator starts a banchi lane: _master_take_off records each posting (D243)",
-  "lastAnswer": "a (11:22 CST Nov 6): fix the code so the master take-off records each posting. Routed to the coordinator 11:30 CST; open until the banchi PR merges.",
+  "lastAnswer": {
+    "at": "2026-11-06T17:22:39.222Z",
+    "choice": "a",
+    "note": "Done: banchi #1067 merged 12:28 CST (sha d8891bf6)."
+  },
   "n": 237,
   "options": [
     {
@@ -34,7 +38,7 @@
   "rank": 3,
   "ref": "lane prose-cuts-banchi, banchi #1043; server/send_routes.py _master_take_off",
   "short": "banchi D243: a 4th price writer",
-  "status": "open",
+  "status": "closed",
   "title": "banchi: the master take-off writes a live price and records no posting, against D243. Fix the code, narrow D243, or log a debt?",
   "why": "Recommended: a. D243 says each unrecorded posting is lost for good, so a later fix cannot get them back."
 }

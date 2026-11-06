@@ -5,12 +5,6 @@
     "face": "sans",
     "name": "claude-settings"
   },
-  "parked": [
-    {
-      "id": "banchi-phone-build",
-      "note": "parked until you ask for a Banchi build; Banchi feature work, not a claude-settings lane (step d4)",
-      "ref": "Banchi phone build (items 14 to 21, 63 to 66)"
-    }
-  ],
+  "parked": [],
   "writer": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)"
 }

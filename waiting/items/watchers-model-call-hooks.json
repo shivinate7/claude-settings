@@ -5,6 +5,12 @@
   "home": "claude-settings rule outcomes-mechanize-rules; docs/plans/align-watchers.md",
   "id": "watchers-model-call-hooks",
   "kind": "decision",
+  "lane": "coordinator: to start",
+  "lastAnswer": {
+    "at": "2026-11-06T18:19:25.015Z",
+    "choice": "b",
+    "note": "Routed 12:36 CST to the coordinator: keep all six, state each one's cost, and re-check on the triggers."
+  },
   "n": 248,
   "options": [
     {

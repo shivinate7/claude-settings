@@ -4,6 +4,11 @@
   "home": "3d-tools-survey",
   "id": "3d-first-target",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-06T18:29:31.096Z",
+    "choice": "none",
+    "note": "Your question went to the coordinator at 12:36 CST: is browser 3D the only free option worth starting from, and could a dummy copy of this page be the first port?"
+  },
   "n": 130,
   "options": [
     {

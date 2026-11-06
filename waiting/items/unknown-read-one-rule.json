@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-06T18:33:00Z",
+  "context": "Goal: every check does the same thing when it can't read its input, as you asked on item 275 (\"a more uniform issue\").\nProblem (rule): two rulings disagree. Decision ci-unknown-is-red says a check in CI that can't read its input fails. Decision stale-cites-at-merge, line 18, says: \"A base that does not resolve (a shallow clone with no history) is unknown, not a finding. ... exits 0, so a repo that pins the action and checks out shallow is not red at its pin move\" (owner-lane call, 2026-11-01). Line 19 also passes a run with FAIL=false. Line 18 is your ruling, so changing it needs your word.\nBased on (ruling): stale-cites-at-merge lines 18-19 (2026-11-01).\nBased on (ruling): decision ci-unknown-is-red.\nBased on (measured): how many other checks pass on an unknown read is not measured. The step's first job is a sweep, starting from lint/check_unknown_reads_contract.py.\nWhat line 18 protected: a child repo on a shallow checkout does not go red when it moves its pin. What protects that now: the lint fetches the full history once, then reads the base, so the child stays green and is still linted (item 275, choice c).\nDeparts from: stale-cites-at-merge line 18, where an unknown base passes \u2014 a rewrites it in place to point at ci-unknown-is-red and sweeps every other check to fail closed in CI.\n\nMeanwhile: lane ste-lint-diff-fail-closed builds c on its branch, and its merge waits for this answer.",
+  "holds": true,
+  "home": "decision ci-unknown-is-red; decision stale-cites-at-merge",
+  "id": "unknown-read-one-rule",
+  "kind": "decision",
+  "n": 276,
+  "options": [
+    {
+      "gain": "Every check fails in CI when it can't read its input, so nothing passes unread. Child repos stay green because the lint fetches the full history first.",
+      "key": "a",
+      "label": "Grant: one rule, and rewrite line 18",
+      "lose": "A sweep lane, and each check that passes on an unknown read today starts to fail until it is fixed."
+    },
+    {
+      "gain": "No change to your ruling.",
+      "key": "b",
+      "label": "Keep line 18 as written",
+      "lose": "The two rulings still disagree, and a shallow clone still passes unread. Lane ste-lint-diff-fail-closed can't merge c."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 1,
+  "ref": "item 275; step unknown-read-one-rule",
+  "short": "One rule for an unknown read",
+  "status": "open",
+  "title": "Should every check fail in CI when it can't read its input, and should your stale-cites-at-merge ruling be rewritten to match?",
+  "why": "Recommended: a. One rule ends the conflict, and the full-history fetch keeps what line 18 protected."
+}

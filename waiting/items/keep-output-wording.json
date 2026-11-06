@@ -4,6 +4,7 @@
   "home": "CLAUDE.md rule git-never-discard-output",
   "id": "keep-output-wording",
   "kind": "decision",
+  "lane": "git-write-output-wording (PR #1309, with batch runner 8)",
   "lastAnswer": {
     "at": "2026-11-06T18:10:06.618Z",
     "choice": "a",

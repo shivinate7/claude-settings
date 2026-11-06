@@ -5,10 +5,11 @@
   "home": "stall-watch",
   "id": "stall-watch-timer-rule",
   "kind": "decision",
+  "lane": "coordinator: to start",
   "lastAnswer": {
-    "at": "2026-11-04T12:50:00Z",
-    "choice": "none",
-    "note": "send a sonnet workflow to align all of these toward one uniform direction as its currently a patchwork of lessons bugs and fixes and stale prose"
+    "at": "2026-11-06T18:19:25.015Z",
+    "choice": "a",
+    "note": "Routed 12:36 CST to the coordinator: events only, with three named exceptions."
   },
   "n": 180,
   "options": [

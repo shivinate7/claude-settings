@@ -8,7 +8,8 @@
   "lastAnswer": {
     "at": "2026-11-06T17:04:21Z",
     "choice": "done",
-    "note": "Done 11:04 CST Nov 6 by a session on your PC, on your grant: draft PR #1293 adds the entry and its three pin tests (red 3 failed on main, green 29). The item closes when #1293 merges."
+    "done": true,
+    "note": "Done: batch 31 merged 12:29 CST (#1300, sha 21d20281c), with #1299: the Relayed Grant entry and the page_grant provenance fix."
   },
   "links": [
     {
@@ -22,7 +23,7 @@
   "rank": 2,
   "ref": "your ask ask-mw3lqb8bwx (07:49 CST Nov 5); #1258 merged 10:22 CST (5a416cc8)",
   "short": "settings: Relayed Grant line",
-  "status": "open",
+  "status": "closed",
   "steps": [
     "Open the settings.json edit link below.",
     "Under \"autoMode\" \u2192 \"allow\", find the \"Archived Branch Delete\" entry and paste the line right after it.",

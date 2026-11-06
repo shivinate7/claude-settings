@@ -4,6 +4,11 @@
   "home": "3d-tools-survey",
   "id": "3d-asset-storage",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-06T18:29:31.096Z",
+    "choice": "none",
+    "note": "\"Likely a combo of A and C\". Routed 12:36 CST to the coordinator to rewrite the options as that combination."
+  },
   "links": [
     {
       "label": "GitHub: Git LFS billing",

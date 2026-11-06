@@ -1,0 +1,10 @@
+{
+  "answered": "2026-11-06T18:36:00Z",
+  "at": "2026-11-06T18:22:09.232Z",
+  "id": "ask-mw5axdn4ea",
+  "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "re": "ask-mw5a0ekdlv",
+  "read": "2026-11-06T18:36:00Z",
+  "reply": "Sorry, I'll say it more plainly. We don't know yet where the 10-message limit comes from. I only checked one place, our own settings code, and nothing there counts messages between sessions. That leaves two places: Claude Code itself, or something installed on your Mac. Only a session on your Mac can see the message, so the lane runs there. It finds the exact text of the message and what prints it, then tells you how to lift the limit. If you saw the message in a particular app or window, tell me which one and I'll add it to the brief.",
+  "text": "this makes zero sense though"
+}

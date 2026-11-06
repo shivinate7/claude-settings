@@ -4,6 +4,12 @@
   "home": "roadmap step lease-push-c-and-d",
   "id": "lease-push-allow-entry",
   "kind": "task",
+  "lane": "draft PR #1307 (you opened it from a local session)",
+  "lastAnswer": {
+    "at": "2026-11-06T18:19:25.015Z",
+    "done": true,
+    "note": "Opened as draft PR #1307. The item closes when it merges."
+  },
   "links": [
     {
       "label": "Edit settings.json on GitHub",
@@ -15,7 +21,7 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 2,
   "ref": "your picks 239 a and 257 c (Nov 5 07:44-07:49 CST)",
-  "reply": "Not done yet. The settings.json on main (7975f6d8, read 12:10 CST) has no Own Branch Lease Push line. PR #1293 added a different line, Relayed Grant (item 267). This line still needs your GitHub edit.",
+  "reply": "You're right. The rule says an act the cloud refuses goes first to a session on your computer, and I handed it straight to you. Next time I'll route it to a local session first. This item now waits on draft PR #1307.",
   "short": "settings: own-branch lease push",
   "status": "open",
   "steps": [
