@@ -15,13 +15,14 @@
 //   - `scripts/map-fix.mjs` adds the missing ids and never removes or reorders one. With no flag it prints each id it would add, one line
 //     per id that names the file (assumed: the design does not give the layout), and it writes nothing. A second `--write` changes no byte.
 //
-// Red on the old code. Every config with a decision key, or with version 5, is refused by the old validator before any check runs.
-// So each MAP10 case goes red on its missing `MAP10` verdict, and the validator message shows in its output. The config, upgrade and
+// Red on the old code. Every config at version 6 (the fixture, and each case that writes one) is refused by the old validator before any
+// check runs. So each MAP10 case goes red on its missing `MAP10` verdict, and the validator message shows in its output. The config, upgrade and
 // map-fix cases assert their own effect, and they go red on it. Controls (C3, K-*) hold on both the old code and the new.
 //
 // Cases:
 //   C1, C2   one key alone is a config error that names the missing key. C3 (control): a version 2 map asks for the upgrade.
-//   V1-V4    version 5 loads; version 3 asks for the upgrade; the upgrade from 3 sets 5 and writes no map page; a second run changes no byte.
+//   V1-V7    version 6 loads with both keys; version 6 loads with no decision keys; version 3 asks for the upgrade; version 5 asks for the
+//            upgrade; the upgrade from 3 and from 5 sets 6 and writes no map page; a second run changes no byte.
 //   M1       the fixture is green. M2 (a) a cite with no decisions line. M3 (b) a decisions line naming an id with no record.
 //   M4       an id the file no longer cites is fine. M5 zero-padding: D7 names D007 by value. M6 D1 names no record (D018 is 18).
 //   E1       an empty decisions folder: each decisions line fails and names its id.
@@ -70,13 +71,13 @@ const setDecisions = (dir, file, ids) => setSubLine(dir, MAP, file, 'Decisions',
 // ---- Config: both keys or neither.
 test('C1. decisionsDir alone is a config error, and the error names decisionIdPattern', () => {
   const dir = repo();
-  writeConfig(dir, { formatVersion: 5, ...BASE, decisionsDir: `${RECORDS}/` });
+  writeConfig(dir, { formatVersion: 6, ...BASE, decisionsDir: `${RECORDS}/` });
   assert.throws(() => loadMapConfig(configFile(dir), dir), /decisionIdPattern/, 'a config with decisionsDir and no decisionIdPattern must name decisionIdPattern');
 });
 
 test('C2. decisionIdPattern alone is a config error, and the error names decisionsDir', () => {
   const dir = repo();
-  writeConfig(dir, { formatVersion: 5, ...BASE, decisionIdPattern: 'D\\d+' });
+  writeConfig(dir, { formatVersion: 6, ...BASE, decisionIdPattern: 'D\\d+' });
   assert.throws(() => loadMapConfig(configFile(dir), dir), /decisionsDir/, 'a config with decisionIdPattern and no decisionsDir must name decisionsDir');
 });
 
@@ -87,10 +88,10 @@ test('C3. control: a version 2 map asks for the upgrade, on the old code and on 
 });
 
 // ---- Format version.
-test('V1. format version 5 loads, with both decision keys', () => {
+test('V1. format version 6 loads, with both decision keys', () => {
   const dir = repo();
-  assert.match(read(dir, CONFIG), /"formatVersion": 5/, 'scope: the fixture config is version 5');
-  assert.doesNotThrow(() => loadMapConfig(configFile(dir), dir), 'a version 5 config with both keys must load');
+  assert.match(read(dir, CONFIG), /"formatVersion": 6/, 'scope: the fixture config is version 6');
+  assert.doesNotThrow(() => loadMapConfig(configFile(dir), dir), 'a version 6 config with both keys must load');
 });
 
 test('V2. format version 3 asks for the upgrade: the validator refuses it, and the message names map-upgrade.mjs', () => {
@@ -99,12 +100,33 @@ test('V2. format version 3 asks for the upgrade: the validator refuses it, and t
   assert.throws(() => loadMapConfig(configFile(dir), dir), /map-upgrade\.mjs/, 'a version 3 map must be refused with the upgrade command');
 });
 
-test('V3. map-upgrade from version 3 sets formatVersion to 5, and writes no map page', () => {
+test('V5. format version 5 asks for the upgrade: the validator refuses it, and the message names map-upgrade.mjs', () => {
+  const dir = repo();
+  writeConfig(dir, { formatVersion: 5, ...BASE });
+  assert.throws(() => loadMapConfig(configFile(dir), dir), /map-upgrade\.mjs/, 'a version 5 map must be refused with the upgrade command');
+});
+
+test('V6. format version 6 loads with no decision keys', () => {
+  const dir = repo();
+  writeConfig(dir, { formatVersion: 6, ...BASE });
+  assert.doesNotThrow(() => loadMapConfig(configFile(dir), dir), 'a version 6 config with no decision keys must load');
+});
+
+test('V7. map-upgrade from version 5 sets formatVersion to 6, and writes no map page', () => {
+  const dir = repo();
+  writeConfig(dir, { formatVersion: 5, ...BASE });
+  const pageBefore = read(dir, MAP);
+  const r = run([UPGRADE], dir);
+  assert.equal(JSON.parse(read(dir, CONFIG)).formatVersion, 6, `map-upgrade must set formatVersion to 6\n${tail(r.out)}`);
+  assert.equal(read(dir, MAP), pageBefore, 'the upgrade from version 5 changes no map page');
+});
+
+test('V3. map-upgrade from version 3 sets formatVersion to 6, and writes no map page', () => {
   const dir = repo();
   writeConfig(dir, { formatVersion: 3, ...BASE });
   const pageBefore = read(dir, MAP);
   const r = run([UPGRADE], dir);
-  assert.equal(JSON.parse(read(dir, CONFIG)).formatVersion, 5, `map-upgrade must set formatVersion to 5\n${tail(r.out)}`);
+  assert.equal(JSON.parse(read(dir, CONFIG)).formatVersion, 6, `map-upgrade must set formatVersion to 6\n${tail(r.out)}`);
   assert.equal(read(dir, MAP), pageBefore, 'the upgrade from version 3 changes no map page');
 });
 
@@ -112,7 +134,7 @@ test('V4. a second map-upgrade run changes no byte of the config or the map page
   const dir = repo();
   writeConfig(dir, { formatVersion: 3, ...BASE });
   run([UPGRADE], dir);
-  assert.equal(JSON.parse(read(dir, CONFIG)).formatVersion, 5, 'the first run must set formatVersion to 5');
+  assert.equal(JSON.parse(read(dir, CONFIG)).formatVersion, 6, 'the first run must set formatVersion to 6');
   const configOnce = read(dir, CONFIG), pageOnce = read(dir, MAP);
   run([UPGRADE], dir);
   assert.equal(read(dir, CONFIG), configOnce, 'the second run must change no byte of map.config.json');
@@ -286,7 +308,7 @@ test('K-sh. control: the existing shell reader blanks the shell comment and the 
 // ---- Skip.
 test('SK. with neither decision key, MAP10 prints a SKIP line that names the decision setting, and the command exits 0', () => {
   const dir = repo();
-  writeConfig(dir, { formatVersion: 5, ...BASE });
+  writeConfig(dir, { formatVersion: 6, ...BASE });
   const r = runCheck(dir);
   assert.match(ten(r.out), /^\[SKIP\] MAP10 .*decision/, `MAP10 must print a SKIP line when no decision key is set\n${tail(r.out)}`);
   assert.equal(r.status, 0, `a SKIP is no failure, so the command must exit 0\n${tail(r.out)}`);
