@@ -35,8 +35,9 @@
   "pick": "c",
   "rank": 19,
   "ref": "deep audit 1102, mailaudit homes; coordinator handoff/audit-child-questions 9d97c9b, recent-cell-gate",
+  "reply": "Closed 13:05 CST: the record rewrite merged as mailaudit #201 at 13:02 CST (7bf8a3f0). The Reset case continues on item 280.",
   "short": "Recent cell gate",
-  "status": "open",
+  "status": "closed",
   "title": "mailaudit: when should the Recent cell (undo of recent checks) show?",
   "why": "Recommended: c. It ties the cell to what you can undo, the outcome, not to the ledger."
 }

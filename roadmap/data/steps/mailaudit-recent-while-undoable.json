@@ -4,6 +4,6 @@
   "status": "doing",
   "order": 103.369,
   "why": "You can always undo a recent check, and no dead control shows.",
-  "note": "Owner picked c on item 193, 12:36 CST Nov 6. Lane session_013NEJL41qSWn7KQR5AgaUf9 (coordinator 12:44 CST). Item 193 closes when it merges.",
-  "updatedAt": "2026-11-06T18:45:00Z"
+  "note": "Nov 6 13:02 CST: record PR mailaudit #201 merged (7bf8a3f0); item 193 closed. The build waits on item 280 (Reset undo) and debt recent-log-unbuilt.\nOwner picked c on item 193, 12:36 CST Nov 6. Lane session_013NEJL41qSWn7KQR5AgaUf9 (coordinator 12:44 CST). Item 193 closes when it merges.",
+  "updatedAt": "2026-11-06T19:05:00Z"
 }
