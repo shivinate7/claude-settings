@@ -65,7 +65,7 @@ guard rule, so the watcher does the waiting and the session is told once.
   Each background job starts one watcher process. It is a named exception to rule
   `outcomes-mechanize-rules` (owner, Cockpit item 180, pick a, 2026-11-06 12:19 CST; home
   `.claude/rules/hooks.md`). Cost, per `outcomes-mechanize-rules`: process starts, none in the hook
-  itself, except one `sh` read when the command ends in an odd trailing backslash; the rewritten command
+  itself. A command that ends in an odd trailing backslash adds one `sh` read. The rewritten command
   starts one watcher, which runs one `ps` about once a second. Files written: the job's `.log` and `.beat`,
   both removed when it ends. How often: once per background shell call. `hooks/test_stall_watch.py`
   `CostTests` pins each count. Each named log gets one stat a second in the watcher's own loop,

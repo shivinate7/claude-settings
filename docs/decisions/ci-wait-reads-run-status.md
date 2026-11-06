@@ -25,9 +25,9 @@ A PostToolUse hook on Bash and PowerShell (`hooks/ci_wake.py`) starts an `asyncR
 Why: sessions waited for CI with long background commands that ran on for hours.
 
 The CI wake is a named exception to rule `outcomes-mechanize-rules` (owner, Cockpit item 180, pick a,
-2026-11-06 12:19 CST; home `.claude/rules/hooks.md`). Cost, per `outcomes-mechanize-rules`: process starts,
-one hook process per Bash or PowerShell call whose input matches the `settings.json` row, and one watch per
-`gh pr ready` in it, which starts no child of its own beyond its `gh` reads. Files written: one lock file per PR, `<key>.lock`, kept for the next watch of that PR. How often:
+2026-11-06 12:19 CST; home `.claude/rules/hooks.md`). Cost, per `outcomes-mechanize-rules`. Process starts:
+one hook process per Bash or PowerShell call whose input matches the `settings.json` row. It runs one watch
+per `gh pr ready`, which starts no child beyond its `gh` reads. Files written: one lock file per PR, `<key>.lock`, kept for the next watch of that PR. How often:
 once per `gh pr ready`; a watch that never sees the run end makes 35 status reads up to its 3300 s deadline.
 `hooks/test_ci_wake.py` `CostTests` pins each count.
 
