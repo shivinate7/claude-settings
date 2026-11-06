@@ -33,6 +33,8 @@ import ste_lint  # noqa: E402
 import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (one home)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
+sys.path.insert(0, os.path.join(HOOKS, "test_support"))
+import cost_probe  # noqa: E402  the shared cost counters (hooks/test_support/cost_probe.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 RUN_FOLDER = _test_temp.run_folder()  # the new cases take their temp folders from it, never from the system temp dir
@@ -4670,6 +4672,43 @@ class PendingRefusalTests(unittest.TestCase):
             handle.write("not json\n")
         run = self.stop(self.PROSE)
         self.assertEqual(run.stdout.strip(), "", "an unreadable refusals file blocked the Stop: %s" % run.stdout)
+
+
+# The cost of one Stop (plan align-watchers, section 2, the model-call judges row, and report_guard's
+# past-ruling check). A reply that relays questions makes one past-ruling model call for all of them, and
+# one git process, the roadmap read. A reply with no question starts nothing. A refusal adds the guard log.
+
+TWO_QUESTIONS = RELAY + "\n\n" + PROSE_Q
+
+
+class CostTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.decided = tcj.make_repo("cost-decided", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+        cls.ci = tcj.CI_REPO  # a roadmap ref, so the one git process is the roadmap read
+
+    def stop(self, repo, reply, answers):
+        folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        path = write_transcript([human("decide"), assistant_text(reply)], folder)
+        hook = json.dumps({"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
+                           "cwd": repo})
+        return cost_probe.run_hook(REPORT_GUARD, hook, folder, answers)
+
+    def test_a_reply_with_no_question_starts_nothing(self):
+        run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]])
+        self.assertEqual((run["models"], run["children"], run["files"]), ([], [], []))
+
+    def test_two_relayed_questions_cost_one_model_call_and_one_roadmap_read(self):
+        run = self.stop(self.ci, TWO_QUESTIONS, [[{"ok": True}, None]])
+        self.assertEqual(len(run["models"]), 1, "both questions share one past-ruling call; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["git"], "got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allow writes no file")
+
+    def test_a_refused_relayed_question_blocks_once_and_writes_no_file(self):
+        run = self.stop(self.decided, RELAY, [[json.loads(REFUSE_APPS), None]])
+        self.assertEqual(len(run["models"]), 1)
+        self.assertEqual(json.loads(run["out"]).get("decision"), "block", "the ruling blocks the Stop once")
+        self.assertEqual(run["files"], [], "a past-ruling block writes no file under the config dir")
 
 
 if __name__ == "__main__":
