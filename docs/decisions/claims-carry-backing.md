@@ -10,7 +10,7 @@ A route row has the fields `id`, `act`, `route`, `surface`, `outcome`, `measured
 
 ## Incident
 
-`docs/decisions/session-tiers.md:64` said "The cloud cannot close a pull request". One fact sat in three places: that line, the 2026-10-30 refusal in `docs/decisions/auto-mode-owner-acts.md` (lines 84-86), and the grant "Acts the cloud refuses" in `.claude/CLAUDE.md:16-19`. It stayed on main with no check. Measured 2026-11-06 at 7975f6d8: a grep of `lint`, `hooks`, `merge` and `actions` finds no check that reads the phrase.
+`docs/decisions/session-tiers.md:64` said "The cloud cannot close a pull request". One fact sat in three places: that line, the 2026-10-30 refusal in `docs/decisions/auto-mode-owner-acts.md` (lines 84-86), and the grant "Acts the cloud refuses" in `.claude/CLAUDE.md:16-19`. It stayed on main with no check. Measured 2026-11-06 on origin/main (7975f6d8, the commit this branch starts from): a grep of `lint`, `hooks`, `merge` and `actions` finds no check that reads the phrase.
 
 ## Backing form
 

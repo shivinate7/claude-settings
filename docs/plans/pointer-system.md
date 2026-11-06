@@ -10,8 +10,9 @@ when a cite no longer matches the code. Each lane below adds one kind of cite.
   `tree-cites`, with the dead-path check (STALE003) and the bad-anchor check (STALE004), per decision
   `stale-cites-whole-tree` (the whole-tree record). The cited-by report, per the Report step of decision
   `stale-cites-at-merge` (the range check record).
-- Planned: `stale-flags`, `value-cites`, and the records-only lane for value cites.
-- New codes start at STALE005. Each planned check claims its code when it is built, so this plan assigns none.
+- Planned: `stale-flags`, `value-cites`, the route-claim check, and the records-only lane for value cites.
+- New codes start at STALE005, which the route-claim check takes (decision `claims-carry-backing`, the
+  route-row record). `stale-flags` and `value-cites` claim the next free code when they are built.
 
 ## Lanes
 
@@ -22,9 +23,10 @@ to L4. The slugs replace the numbers.
 | Lane | What it checks | Status |
 |---|---|---|
 | `stale-names-bound` | A cited Python name that the pull request removed (STALE002) | Built on main |
-| `stale-flags` | A cited command-line flag that the pull request removed | Planned. Code claimed when built. |
-| `value-cites` | A cited value that the pull request changed | Planned. Code claimed when built. |
+| `stale-flags` | A cited command-line flag that the pull request removed | Planned. Next free code when built. |
+| `value-cites` | A cited value that the pull request changed | Planned. Next free code when built. |
 | `cited-by-report` | A report of the checks that hold each rule | Built on main (the Report step of decision `stale-cites-at-merge`) |
+| Route-claim check (no slug yet) | A changed line that states a capability by route with no backing (STALE005) | Planned (decision `claims-carry-backing`, the route-row record) |
 | Records-only lane for value cites (no slug yet) | The GLOSSARY.md row "value cite" | Planned |
 
 ### stale-names-bound (built on main)
