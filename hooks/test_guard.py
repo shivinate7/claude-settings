@@ -27271,8 +27271,8 @@ add("reviewer-brief-blind: refused: a Workflow agent() reviewer whose prompt hol
     script='const r = await agent("Do not skip /* the // check.\\nDone: BUILT c204a1f.\\nDeviations: none.", '
            "{agentType: 'reviewer', model: 'haiku'}); return r")
 # The role set is the reviewer and the term for an agent that argues back, plus any plugin prefix on the reviewer.
-rbb_refuse("reviewer-brief-blind: refused: a challenger spawn whose brief pastes a builder report",
-           "Argue the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", role="challenger", model="sonnet")
+rbb_refuse("reviewer-brief-blind: refused: a refuter spawn whose brief pastes a builder report",
+           "Argue the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", role="refuter", model="sonnet")
 rbb_refuse("reviewer-brief-blind: refused: a my-plugin:reviewer spawn whose brief pastes a builder report",
            "Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", role="my-plugin:reviewer", model="sonnet")
 
