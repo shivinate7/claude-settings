@@ -4,7 +4,7 @@
   "home": "grant-reaches-lanes",
   "id": "grant-client-fields-test",
   "kind": "decision",
-  "lane": "grant-reaches-lanes-build (session_013NEJKzxRE91RXP3PNdpC7J) checks the plan against today's Relayed Grant, then says whether the test lines still apply",
+  "lane": "waits on item 285: on a, the test line becomes `grant grant-reaches-lanes spawn 15m`, typed in the coordinator from web and phone; on b, 221 closes",
   "lastAnswer": {
     "at": "2026-11-06T18:36:55.244Z",
     "choice": "a",

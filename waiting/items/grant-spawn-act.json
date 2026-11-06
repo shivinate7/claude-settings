@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-06T19:06:00Z",
+  "context": "Goal: a grant you type in the coordinator reaches the lane it names.\nProblem (rule): the plan's planned \"self-edit\" grant guards nothing, because a lane's file edits in its own checkout never reach auto mode's safety check (measured 12:49 CST). What auto mode actually refuses in a lane is starting an agent, and a new kind of grant needs your word.\nBased on (measured): Claude Code 2.1.319: a hook that allows an act skips auto mode's check (9 ms vs 2391 ms).\nBased on (ruling): item 221, read as a (12:36 CST): you'll type test lines from the web and phone apps.\nDeparts from: the plan's list of grants (merge <pr>, self-edit) \u2014 becomes one grant: `grant <lane> spawn <n>m`.\nOn a, task 221 becomes: type `grant grant-reaches-lanes spawn 15m` in the coordinator once from claude.ai on the web and once from the phone app.",
+  "home": "plan PR #1049",
+  "id": "grant-spawn-act",
+  "kind": "decision",
+  "n": 285,
+  "options": [
+    {
+      "gain": "No retyping grants inside each lane.",
+      "how": "`grant <lane> spawn <n>m` lets every agent start in that lane until the time runs out.",
+      "key": "a",
+      "label": "Build it",
+      "lose": "One grant covers every agent start in that lane for that time."
+    },
+    {
+      "gain": "Nothing new to maintain.",
+      "how": "Keep typing grants inside each lane.",
+      "key": "b",
+      "label": "Close the plan",
+      "lose": "You retype in each lane."
+    }
+  ],
+  "owner": "lane grant-reaches-lanes-build (session_013NEJKzxRE91RXP3PNdpC7J)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "item 221; plan PR #1049 at 2a36de88",
+  "short": "Grant a lane's spawns from the coordinator",
+  "status": "open",
+  "title": "Should a grant you type in the coordinator let a named lane start its agents for a set time?",
+  "why": "It removes the retyping, and the time limit bounds what one grant covers."
+}
