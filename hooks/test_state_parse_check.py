@@ -296,6 +296,51 @@ class EditJson(unittest.TestCase):
                      line=line, column=column, home=home)
 
 
+class EmptyNewString(unittest.TestCase):
+    """Case 2, an Edit that only removes text. Its before-state cannot be rebuilt by putting
+    new_string back, because an empty new_string matches everywhere. The check reads the removal from
+    the file the call leaves."""
+
+    def test_edit_removing_the_closing_fence_of_an_inbox_block_is_named(self):
+        home = Home()
+        before = HEAD_1 + "\n````\nowner: keep the closing fence\n````\n- fb-1138-1 [note] -> noted\n"
+        write(home.inbox, before)
+        # A block has two fence lines, so the closer alone is not a unique old_string. The item line
+        # under it makes the old_string unique, as an Edit call needs.
+        old = "````\n- fb-1138-1 [note] -> noted\n"
+        self.assertEqual(before.count(old), 1, "scope: old_string must occur once in the inbox")
+        edit_on_disk(self, home.inbox, old, "")
+        self.assertEqual(read_text(home.inbox).count("````"), 1, "scope: the closer is gone")
+        rc, ctx = home.hook("Edit", {"file_path": home.inbox, "old_string": old, "new_string": ""})
+        assert_named(self, rc, ctx, "an empty-new_string Edit that removes the closing fence",
+                     SID + ".inbox.md", line=2, home=home)
+
+    def test_edit_removing_a_plain_line_from_a_broken_file_is_silent(self):
+        home = Home()
+        path = os.path.join(home.work, "state.json")
+        write(path, '{\n  "a": 1,,\n  "note": "drop me",\n  "b": 2\n}\n')
+        old = '  "note": "drop me",\n'
+        edit_on_disk(self, path, old, "")
+        json_error(self, read_text(path))  # scope: still broken, the removal did not fix it
+        rc, ctx = home.hook("Edit", {"file_path": path, "old_string": old, "new_string": ""})
+        assert_silent(self, ctx, "an empty-new_string Edit that removes a plain line from a file already broken")
+        line, column = json_error(self, read_text(path))
+        rc, ctx = home.write_hook(path, read_text(path))
+        assert_named(self, rc, ctx, "the same broken file written in a Write", "state.json",
+                     line=line, column=column, home=home)
+
+    def test_edit_removing_a_line_that_breaks_valid_json_is_named(self):
+        home = Home()
+        path = os.path.join(home.work, "state.json")
+        write(path, OK_JSON)
+        old = '  "b": 2\n'
+        edit_on_disk(self, path, old, "")
+        line, column = json_error(self, read_text(path))
+        rc, ctx = home.hook("Edit", {"file_path": path, "old_string": old, "new_string": ""})
+        assert_named(self, rc, ctx, "an empty-new_string Edit that leaves a trailing comma", "state.json",
+                     line=line, column=column, home=home)
+
+
 class WriteAndDeleted(unittest.TestCase):
     """Case 3: a Write judged as written, and a state file that was deleted."""
 
