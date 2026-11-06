@@ -32,7 +32,7 @@
   "pick": "a",
   "rank": 3,
   "ref": "lane mailaudit-recent-log; item 288",
-  "reply": "Confirmed, as you asked: a recorded run on today's code shows the double count (X goes to 2 with one copy checked) and the erase (X goes to 0). The question is open again with the measured run.",
+  "reply": "Confirmed on the first build (c7902c26): check, uncheck, check X, then undo the uncheck gave X=2; undoing the first check gave X=0. mailaudit #208 fixes both (lane mailaudit-recent-log, 17:10 CST): a reversed row reads NOTHING TO UNDO, and an undo that raises a count stops at the row's before-count. Tests R4.6, R4.7, R5.4 and R5.4a pin it, and 40,000 random runs found no double count. This closes when #208 merges.",
   "short": "Undo in any order",
   "status": "open",
   "title": "mailaudit: undoing Recent rows in any order can count a copy twice. Limit which rows can be undone?",

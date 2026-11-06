@@ -10,9 +10,13 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 3,
   "ref": "item 301 a (15:24 CST Nov 6)",
-  "reply": "Paste this into a Claude Code session on your Mac, in the claude-settings folder:\n\nOwner item 301 pick a (2026-11-06 15:24 CST): in settings.json, add \"mcp__claude-code-remote__send_message\" to permissions.allow, next to the other mcp__claude-code-remote__ entries. Change nothing else. Use EnterWorktree with name lane-send-allow, commit, push, and open a draft PR titled \"settings: allow send_message (item 301 a)\". Send the PR number and head to the claude-settings batch runner. Report the PR link.",
+  "reply": "#1364 failed its first review at 16:51 CST (batch runner 8). It carries a second commit, 8cf80e2d6, which adds the own-branch lease-push line (items 239 a and 257 c) with no test for it. So it is not batched. The coordinator has the fix to ask for. This item stays open until a clean replacement PR merges.",
   "short": "Mac: send_message allow line",
   "status": "open",
   "title": "On your Mac: add the send_message allow line (your item 301 pick a)",
+  "waits": {
+    "pr": 1364,
+    "repo": "shivinate7/claude-settings"
+  },
   "why": "Cloud auto mode refuses settings.json edits, so a session on your Mac makes this one edit."
 }

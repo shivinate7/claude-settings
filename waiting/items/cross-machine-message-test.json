@@ -4,10 +4,12 @@
   "home": "ask ask-mw58ykeqal",
   "id": "cross-machine-message-test",
   "kind": "task",
+  "lane": "session-messaging-plan",
   "n": 273,
   "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
   "rank": 3,
   "ref": "ask ask-mw58ykeqal; Opus research report 11:33 CST",
+  "reply": "Lane session-messaging-plan, 16:58 CST: not moot. After #1371 merges, this becomes the mailbox trial: 20 messages from the cloud to your Mac, none lost, none acted on twice. It needs a Mac session logged in to session-mailbox. This item stays open until the trial passes. Remote Control lets you drive a session from any device, but one session can message another only on the same account. So the lane adds it as a later same-account option, and the mailbox stays the route across accounts.",
   "short": "Cross-machine message test",
   "status": "open",
   "steps": [

@@ -1,0 +1,21 @@
+{
+  "added": "2026-11-06T23:22:00Z",
+  "context": "Goal: degen #454 and #475 ship in the Mac's next degen batch.\nWhy you: the Mac runs another Claude account, so no cloud session can message it (probe 5, 15:56 CST).\nSteps: open the degen session on your Mac, paste the message below, then press Mark done.\nMessage:\nFrom runner 9 (cloud), after the owner's 17:17 CST ruling that the Mac batches degen: add to your next degen batch (1) #454 swift-layout-debts, head c130b36a, review round 2 PASS (sonnet); (2) #475 degen-merge-grant-mac, which records that ruling in degen's CLAUDE.md and still needs one fresh reviewer.",
+  "home": "degen CLAUDE.md rule lanes-hand-off-to-batch-runner (#475)",
+  "id": "degen-mac-batch-handoff",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-06T23:39:27.513Z",
+    "done": true,
+    "note": ""
+  },
+  "n": 319,
+  "owner": "triage",
+  "rank": 2,
+  "ref": "item 317; degen #454; degen #475",
+  "reply": "Done: you handed degen #454 and #475 to the Mac's degen batch (17:39 CST).",
+  "short": "Hand 2 degen PRs to the Mac batch",
+  "status": "closed",
+  "title": "Paste one message into the Mac's degen session: two PRs for its next batch",
+  "why": "Runner 9 stopped batching degen on your 317 answer. Cloud sessions cannot message the Mac (it runs another account), so the hand-off needs your paste."
+}

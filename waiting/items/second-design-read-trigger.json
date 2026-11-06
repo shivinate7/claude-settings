@@ -34,8 +34,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "lane design-review-beside-round-1, PR #1231 (your 204 a); coordinator message 2026-11-04 08:48 CST",
+  "reply": "Done: landed in claude-settings #1296, merged 13:11 CST Nov 6.",
   "short": "When does a second design read run?",
-  "status": "open",
+  "status": "closed",
   "title": "After code round 1, what screen change gets a second design review?",
   "why": "Recommended: a. It needs no judgment call, and no screen change merges unseen."
 }

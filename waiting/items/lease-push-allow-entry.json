@@ -21,7 +21,7 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 2,
   "ref": "your picks 239 a and 257 c (Nov 5 07:44-07:49 CST)",
-  "reply": "You're right. The rule says an act the cloud refuses goes first to a session on your computer, and I handed it straight to you. Next time I'll route it to a local session first. This item now waits on draft PR #1307.",
+  "reply": "Done by you: your local session opened draft PR #1307. PR #1316 carries that commit unchanged, with two more allow lines and tests, and replaces #1307. Nothing more to do; this closes when #1316 merges.",
   "short": "settings: own-branch lease push",
   "status": "open",
   "steps": [

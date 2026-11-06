@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-06T23:14:00Z",
+  "context": "Goal: after a card sinks, you reach the next open item with nothing else jumping.\nProblem (rule): house rule ux-press-moves-nothing now lets 3 kinds of row move when a sent card sinks (PR #1375): the row that leaves, the rows that close its gap, and the rows that make room where it lands. A count badge or section header that shifts as a result still fails the rule's check.\nBased on (ruling): your item 313 a, 16:47 CST Nov 6.\nDeparts from: main, a press moves no other content \u2014 adds an exemption for the badge and header shifts a sink causes.\nMeanwhile: nothing waits on this; #1374 and #1375 go to the batch as they stand.",
+  "home": "house rule ux-press-moves-nothing",
+  "id": "ux-sink-badge-shift",
+  "kind": "decision",
+  "lane": "ux-order-rule-scope",
+  "n": 318,
+  "options": [
+    {
+      "gain": "The sinking-card design passes review as built.",
+      "key": "a",
+      "label": "Exempt badge and header shifts too",
+      "lose": "A badge may shift when you send."
+    },
+    {
+      "gain": "The rule stays tight.",
+      "key": "b",
+      "label": "Keep the exemption to rows only",
+      "lose": "Lane page-answered-sink must pin badge and header widths, or fail review."
+    }
+  ],
+  "owner": "lane ux-order-rule-scope",
+  "pick": "a",
+  "rank": 3,
+  "ref": "item 313; PR #1375; PR #1374",
+  "reply": "Your a is with lane ux-order-rule-scope (17:20 CST): badge and header shifts from a sink are exempt too. This closes when its PR merges.",
+  "short": "Card sinks: may a badge shift?",
+  "status": "open",
+  "title": "When a sent card sinks, may a count badge or section header shift too?",
+  "why": "Your 313 a let rows move when a card sinks. A badge or header that shifts as a result still fails the rule."
+}

@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-06T22:55:00Z",
+  "context": "Goal: lanes message sessions without refusals (your item 301 a), and messages stay inside safe limits.\nProblem (risk): with send_message on the allow list, auto mode stops judging its rule \"Owner Session Message\". That rule limits three forms: an interrupt (priority now), a post to a shared channel, and a message outside your account. No hook checks them. So after #1364, those three go unchecked.\nBased on (read): the round-1 reviewer of #1364, 16:51 CST, relayed by batch runner 8.\nDeparts from: main, where auto mode judges every send_message \u2014 #1364 allows all of them.\nMeanwhile: runner 8 batches #1364 with the send_message line only.",
+  "holds": "What still checks the risky send_message forms.",
+  "home": "item 301",
+  "id": "send-allow-risky-forms",
+  "kind": "decision",
+  "lane": "coordinator",
+  "lastAnswer": {
+    "at": "2026-11-06T23:00:37Z",
+    "choice": "b",
+    "note": "also send a lane to try and fix the judge so we can try and get that back in auto mode overall"
+  },
+  "n": 315,
+  "options": [
+    {
+      "gain": "Lanes message freely, and the three risky forms stay checked.",
+      "how": "A guard on send_message refuses priority now, a shared-channel post, or a target outside your account, unless you typed the act.",
+      "key": "a",
+      "label": "Keep #1364, add a guard",
+      "lose": "One more guard lane."
+    },
+    {
+      "gain": "No work.",
+      "how": "Merge #1364 as it is.",
+      "key": "b",
+      "label": "Keep #1364, no guard",
+      "lose": "Those three forms go unchecked."
+    },
+    {
+      "gain": "Auto mode keeps judging every message.",
+      "how": "Fix auto mode's judge instead, as your 301 note suggested.",
+      "key": "c",
+      "label": "Drop #1364, fix the judge",
+      "lose": "Refusals continue until the judge fix lands."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 3,
+  "ref": "item 301; #1364; batch runner 8",
+  "reply": "Done: b, no guard. Correction (17:18 CST): the judge-fix lane did not start. Auto mode refused its brief, because the fix edits settings.json. That needs your typed word, see item 316.",
+  "short": "send_message allow: guard 3 forms",
+  "status": "closed",
+  "title": "Allowing send_message (your item 301 a) also stops checks on three risky message forms: add a guard for them?",
+  "why": "After #1364, no one checks an interrupt, a shared-channel post or a message outside your account."
+}

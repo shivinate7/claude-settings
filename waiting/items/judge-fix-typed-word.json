@@ -1,0 +1,24 @@
+{
+  "added": "2026-11-06T23:18:00Z",
+  "context": "Goal: send_message goes back to being judged in auto mode (your note on item 315).\nWhy you: auto mode refused the lane's brief as Self-Modification at 17:01 CST. It edits settings.json's autoMode text, and a page save or a relay cannot approve that.\nSteps: open the claude-settings coordinator's chat and type the line below. Then press Done here.\nLine: start a lane on step judge-send-message-refusals; it may edit the autoMode text in settings.json",
+  "holds": "Your typed word for the settings.json autoMode edit.",
+  "home": "step judge-send-message-refusals",
+  "id": "judge-fix-typed-word",
+  "kind": "task",
+  "lane": "coordinator",
+  "lastAnswer": {
+    "at": "2026-11-06T23:31:40Z",
+    "note": "Owner: work on the way belongs in the roadmap tab, not the questions area."
+  },
+  "link": "https://claude.ai/code/session_013NEJL2hB1pLZPDpzas7VgB",
+  "n": 316,
+  "owner": "coordinator",
+  "rank": 2,
+  "ref": "item 315; step judge-send-message-refusals",
+  "reply": "Moved off the page, as you asked (17:31 CST). It is tracked as step judge-send-message-refusals in the Status tab (doing, on your Windows laptop).",
+  "short": "Judge fix: running on your Windows laptop",
+  "status": "closed",
+  "title": "Type one line in the coordinator's chat to start the judge fix (your item 315 note)",
+  "waits": "judge-send-message-refusals lane on your Windows laptop (you, 17:04 CST); closes when it sends the coordinator its PR",
+  "why": "Auto mode refused the lane, because the fix edits settings.json. Only your typed word in the session that runs the act lifts that."
+}

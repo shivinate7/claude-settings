@@ -30,8 +30,9 @@
   "pick": "a",
   "rank": 26,
   "ref": "deep audit 1102, degen homes; coordinator message 2026-11-03 15:55 CST, native-check-ui-tests",
+  "reply": "Done: landed in degen #422, merged 15:22 CST Nov 6.",
   "short": "native-check UI tests",
-  "status": "open",
+  "status": "closed",
   "title": "degen: Run the UI tests in native-check?",
   "why": "Recommended in the audit report: (a), after one timed run."
 }

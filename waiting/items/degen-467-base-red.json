@@ -42,8 +42,9 @@
   "pick": "b",
   "rank": 2,
   "ref": "degen #467, #454; runner 9",
+  "reply": "Done: degen #467 merged 17:05 CST Nov 6 (coordinator relay).",
   "short": "Degen #467: merge past old red",
-  "status": "open",
+  "status": "closed",
   "title": "Degen batch #467 is blocked by a Swift milestone run that has never been green: merge past it?",
   "waits": {
     "pr": 467,

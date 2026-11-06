@@ -1,9 +1,11 @@
 {
   "added": "2026-11-04T13:38:00Z",
   "context": "Goal: dashboard and comparison totals show in thousands, like every other amount (your 195 a).\nProblem (rule): the report text on a dashboard card shows whole dollars, for example \"A difference of $1,235 \u2026 $1,300 rounding allowance\". That card's stat line and figures pane now show thousands, so one card mixes two units. D-632 (money shows in thousands) keeps report text in whole dollars, and q_max changes an entry only on your new ruling.\nBased on (read): src/utils/reconcileReport.ts and materiality.ts build the report text; D-632's \"Not changed\" bullet covers text that an RFI or a stored report shows.\nDeparts from: main (report text on the card in whole dollars) \u2014 the on-screen report text shows thousands; RFI and export text stay in whole dollars.\n\nMeanwhile: the lane fixes the review findings that do not depend on this, then waits for your answer before review round 2.",
+  "deferred": true,
   "home": "q_max D-632 (money shows in thousands)",
   "id": "qmax-report-text-thousands",
   "kind": "decision",
+  "lane": "coordinator",
   "n": 252,
   "options": [
     {
@@ -25,6 +27,7 @@
   "pick": "a",
   "rank": 2,
   "ref": "item 195; lane qmax-totals-in-thousands, review round 1",
+  "reply": "Deferred (16:53 CST): keep whatever is built, and leave the question open. Sent to the coordinator, which tells lane qmax-totals-in-thousands to go on to review round 2 with what it built.",
   "short": "q_max: report text in thousands?",
   "status": "open",
   "title": "On a q_max dashboard card, should the reconcile report text also show thousands?",

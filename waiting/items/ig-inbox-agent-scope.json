@@ -30,8 +30,9 @@
   "pick": "a",
   "rank": 27,
   "ref": "deep audit 1102, degen homes; coordinator message 2026-11-03 15:55 CST, ig-inbox-agent-scope",
+  "reply": "Done: landed in degen #422, merged 15:22 CST Nov 6.",
   "short": "IG reader user agent",
-  "status": "open",
+  "status": "closed",
   "title": "degen: Extend the app-agent grant to the DM reader?",
   "why": "Recommended in the audit report: (a) if you want the DM reader kept."
 }

@@ -1,0 +1,36 @@
+{
+  "added": "2026-11-06T23:08:00Z",
+  "context": "Goal: degen lanes ship fast, with the native checks run once per batch.\nProblem (goal): runner 9 in the cloud batches degen today, but the Mac must still run native-check and the iPhone ship check (owed for #460). Runner 9 needs your word on who batches next.\nBased on (read): degen rule tests-once-per-batch: the full Swift suite runs once per batch, on the Mac.\nBased on (measured): the Mac runs another Claude account, so cloud sessions cannot message it; triage relays its PRs by hand (#1364).\nDeparts from: main, runner 9 (cloud) batches and merges degen; changes to the Mac session batching and merging degen.",
+  "home": "degen CLAUDE.md rule lanes-hand-off-to-batch-runner",
+  "id": "degen-batches-on-mac",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-06T23:17:38Z",
+    "choice": "a",
+    "note": "Owner (page comment, 17:17 CST): the Mac merges degen almost always; runner 9 only merges claude-settings changes that apply to the child repos. Runner 9 hands #454 to the Mac's next batch."
+  },
+  "n": 317,
+  "options": [
+    {
+      "gain": "One session runs native-check, the iPhone ship check and the merge, with no hand-offs.",
+      "key": "a",
+      "label": "The Mac batches degen",
+      "lose": "Cloud lanes can't message the Mac, so each lane's PR reaches it through you or triage."
+    },
+    {
+      "gain": "Lanes keep handing off to runner 9 as today.",
+      "key": "b",
+      "label": "Runner 9 keeps batching degen",
+      "lose": "Each batch with a native change still waits on a Mac run of native-check."
+    }
+  ],
+  "owner": "batch runner 9",
+  "pick": "a",
+  "rank": 2,
+  "ref": "degen #454 (head c130b36a); #460",
+  "reply": "Done: a, as you said in your comment at 17:17 CST. The Mac merges degen. Runner 9 merges only claude-settings changes in the child repos, and hands #454 to the Mac's next batch.",
+  "short": "Degen batches: Mac or cloud?",
+  "status": "closed",
+  "title": "Should the Mac run degen batches from now on?",
+  "why": "Runner 9 holds degen #454 (review passed) and needs to know who batches it."
+}
