@@ -270,6 +270,14 @@ class Scaffold(TempDest):
         flat = " ".join(tree(SKILL)["templates/brief.md"].split())
         self.assertIn("tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`", flat)
 
+    def test_brief_names_the_guard_lease_form(self):
+        sys.path.insert(0, os.path.join(SKILL, "..", "..", "hooks"))
+        import guard_push_delete
+        form = getattr(guard_push_delete, "LEASE_PUSH_FORM", "")
+        self.assertTrue(form, "guard_push_delete must define LEASE_PUSH_FORM")
+        flat = " ".join(tree(SKILL)["templates/brief.md"].split())
+        self.assertIn("`%s`" % form, flat)
+
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")
         for rel, text in tree(self.dest).items():
