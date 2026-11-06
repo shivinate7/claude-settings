@@ -12,12 +12,22 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             statement, also inside a module-level if, try, with, for, while or match, never inside a def or
             class. A name counts when a def, class, import or assignment binds it there, also a tuple, for,
             with-as or walrus target, or when it is a def directly in a module-level class. A name that moved
-            but is still bound in the file is not removed.
+            but is still bound in the file is not removed. A test node id, `path.py::name` or
+            `path.py::Class::name`, is read the same way, in a code span or not: each segment is a name.
   Unknown   the line cites `<file.mjs> <name>` (also .js, .cjs, .ts, .sh) in the same two forms, and the range
             touched that file. JavaScript and shell names are not read, so the line prints
             `stale-cites: unknown, <path>:<line> ...` and keeps the exit 0. It prints only when the range also
             removes a path or a Python name, since only then is Markdown read. A range that touches only such
             files prints nothing and passes.
+  STALE005  (range mode only, report only) an ADDED line of governed prose states a capability by route with no
+            backing. It holds a capability verb (cannot, can't, refuses, is refused, blocks, is not available,
+            works) and a route word (cloud, local, auto mode, classifier, gh, MCP, proxy, harness) outside a
+            heading, a quote line, a fence, a code span and an HTML comment, and has none of these in
+            parentheses: a premise kind from PREMISE_KINDS with a source path (`(read hooks/x.py:12)`),
+            `(test path::name)`, or `(route <id>)` whose id is a row of hooks/route_rows.json at head. A route id
+            that is no row is a dead route. It prints as `stale-cites: report, path:line: STALE005 ...` and never
+            changes the exit code, so it ships dark (decision source-prose-lint-ships-dark). A line marked
+            `<!-- ste-disable-line STALE005 -->` is left out.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
 `<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004). Fenced blocks count as prose.
@@ -39,17 +49,21 @@ checks out shallow is not red at its pin move. A touched .py that does not parse
 the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the exit non-zero.
 
 The report prints after the findings and never changes the exit code (decision claude-md-change-is-flagged). Each
-line starts `stale-cites: report, `. It has two halves.
+line starts `stale-cites: report, `. It has two halves, and STALE005 lines first.
   Anchors   for each `<!-- rule:id -->` anchor whose sentence changed in a RULE_FILES file (a real anchor; one in a
             code span is a mention): the row in lint/rule_mechanisms.json (kind, ref, test), then the files this range
             changed under RULE_DIRS, or "none". It gives no verdict; the reviewer judges. A repo with no
             lint/rule_mechanisms.json prints no anchor line and no error.
   Home      for each changed non-Markdown file (added, changed, removed or renamed): each decision whose Home line
-            names it, and each mechanism row whose ref or test is it.
+            names it, each mechanism row whose ref or test is it, and each decision prose line whose `(test ...)`
+            or `(read ...)` backing points at it (`backed_lines`, the selector a prose judge calls).
 
 Cost, per ste-lint changed-scope run (CostTests in lint/test_stale_cites.py proves it): one python3 start.
 Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and changes only
-Markdown outside RULE_FILES.
+Markdown outside RULE_FILES. That one diff is `--raw -p -U0`, so it also carries the added lines STALE005 reads and
+a code-only range pays only for the patch text. An added governed line that holds a verb and a route word reads its
+file's head blob (the fences above it) and, when it cites a route, hooks/route_rows.json, both through the one
+`cat-file` the run opens: one more start, and none for a range with no such line.
 A touched .py adds one `git cat-file --batch` and, through the report below, one `ls-tree`, so it starts 5. A removed
 or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once, and only
 when a removed or renamed path, or a name that a touched .py no longer defines, gives the findings something to
@@ -76,6 +90,7 @@ sys.dont_write_bytecode = True  # the cost contract: a run writes no file, so no
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import layout  # noqa: E402  the one home of where a repo keeps its decisions (lint/layout.py)
+from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds (hooks/precompact_handoff.py)
 from rule_audit import ANCHOR_RE, RULE_FILES  # noqa: E402  the one home of the anchor pattern and the rule files
 
 RECORDS_PAGE = "docs/records.md"
@@ -94,6 +109,8 @@ def pair_res(ext):
 
 
 PAIR_RES = pair_res("py")
+# A test node id, `file.py::name` or `file.py::Class::name`: the chain is one name per segment.
+NODE_RE = re.compile(NOT_BEFORE + r"`?(%s\.py)::([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)" % RUN)
 FOREIGN_PAIR_RES = pair_res(FOREIGN_EXT)
 FOREIGN_FILE = re.compile(r"\.%s\Z" % FOREIGN_EXT)
 DISABLE_RE = re.compile(r"<!--\s*ste-disable-line([^>]*?)-->")
@@ -191,13 +208,51 @@ def parse_range(text):
     raise Unknown("--range wants base...head, got %r" % text)
 
 
-def changed_paths(diff_args):
-    """(removed, renamed, modified, added): removed paths, {old: new}, paths changed in place, and added paths."""
-    tokens = git("diff", "-M", "--name-status", "-z", *diff_args, on_fail=BaseUnknown).decode("utf-8", "replace").split("\0")
+HUNK = re.compile(r"@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+
+def added_markdown_lines(patch):
+    """{path: [(number, text)]}: each line a `-U0` patch adds to a .md file, by its line number at head. A hunk's
+    body is read by its counts, never by its first character, so an added line that starts `+++ ` or `@@ ` is no
+    header. A `\\ No newline` marker is no line."""
+    found, path, rows, i = {}, None, patch.split("\n"), 0
+    while i < len(rows):
+        row = rows[i]
+        i += 1
+        if row.startswith("+++ "):
+            name = row[4:].split("\t")[0]
+            path = name[2:] if name.startswith("b/") else None
+            continue
+        hunk = HUNK.match(row)
+        if not hunk:
+            continue
+        gone = int(hunk.group(1)) if hunk.group(1) is not None else 1
+        number, new = int(hunk.group(2)), int(hunk.group(3)) if hunk.group(3) is not None else 1
+        while (gone or new) and i < len(rows):
+            body = rows[i]
+            i += 1
+            if body.startswith("-"):
+                gone -= 1
+            elif body.startswith("+"):
+                new -= 1
+                if path is not None and path.endswith(".md"):
+                    found.setdefault(path, []).append((number, body[1:].rstrip("\r")))
+                number += 1
+    return found
+
+
+def read_diff(diff_args):
+    """(removed, renamed, modified, added, lines) from one `git diff -M --raw -p -z -U0`: removed paths, {old: new},
+    paths changed in place, added paths, and `added_markdown_lines`. The raw records come first, then one empty
+    record, then the patch text. One start serves both, so the added lines cost no start of their own."""
+    out = git("diff", "-M", "--raw", "-p", "-z", "-U0", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
+              *diff_args, on_fail=BaseUnknown).decode("utf-8", "replace")
+    head, _, patch = out.partition("\0\0")
+    tokens = head.split("\0")
     removed, renamed, modified, added = [], {}, [], []
     i = 0
-    while i < len(tokens) and tokens[i]:
-        status = tokens[i][0]
+    while i < len(tokens) and tokens[i].startswith(":"):
+        status = tokens[i].split()[-1][0]
         if status == "R" or status == "C":
             if status == "R":
                 renamed[tokens[i + 1]] = tokens[i + 2]
@@ -210,7 +265,7 @@ def changed_paths(diff_args):
         elif status == "A":
             added.append(tokens[i + 1])
         i += 2
-    return removed, renamed, modified, added
+    return removed, renamed, modified, added, added_markdown_lines(patch)
 
 
 PY_FACTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "skills", "plain-english-map",
@@ -330,8 +385,9 @@ def path_cites(line, gone, exotic):
 class Range:
     """What the readers share: the range's blobs, its changed paths and the texts a read could not judge."""
 
-    def __init__(self, base, head, removed, renamed, modified, batch, added=()):
+    def __init__(self, base, head, removed, renamed, modified, batch, added=(), lines=None):
         self.base, self.head, self.removed, self.renamed, self.batch = base, head, removed, renamed, batch
+        self.added_lines = lines or {}  # the .md lines the range adds, by path
         self.unknowns = []
         self.tree = None  # the head tree entries once a read listed the whole tree; the report reuses it
         self.changed = set(removed) | set(renamed) | set(renamed.values()) | set(modified) | set(added)
@@ -394,6 +450,11 @@ class NameReader:
                 path, name = match.group(1), match.group(2)
                 if path not in claimed and name in state.get(path, ()):
                     messages.append("%s no longer defines %s at head; find its new home" % (path, name))
+        for match in NODE_RE.finditer(text):
+            path = match.group(1)
+            for name in match.group(2).split("::"):
+                if path not in claimed and name in state.get(path, ()):
+                    messages.append("%s no longer defines %s at head; find its new home" % (path, name))
         return messages
 
 
@@ -418,11 +479,174 @@ class ForeignReader:
         return messages
 
 
+ROUTE_ROWS = "hooks/route_rows.json"  # a route id is a row of this file at head
+HTML_COMMENT = re.compile(r"<!--.*?-->")
+HEADING_OR_QUOTE = re.compile(r"^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>)")
+FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
+PAREN_GROUP = re.compile(r"\(([^()]*)\)")
+# A capability verb. `is refused` and `are refused` are present; a bare `refused` is an incident and never matches.
+VERB = re.compile(r"\b(?:cannot|can\s+not|can['\u2019]t|refuses|(?:is|are)\s+(?:not\s+)?refused|blocks"
+                  r"|not\s+available|works)\b", re.I)
+ROUTE_WORD = re.compile(r"\b(?:cloud|local|auto\s+mode|classifier|gh|mcp|proxy|harness)\b", re.I)
+# A source is a path, with an optional line anchor; a bare date or version has neither a folder nor an extension.
+SOURCE = re.compile(r"(?=[^\s]*(?:/|\.[A-Za-z]))[\w./@+~-]+(?::\d+(?:-\d+)?)?(?:::\w+)*\Z")
+TEST_CITE = re.compile(r"(%s)::[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*\Z" % RUN)
+ROUTE_CITE = re.compile(r"[\w.-]+\Z")
+
+
+def fenced_lines(rows):
+    """The numbers (from 1) of the rows inside a fenced block, the fence rows included. A backtick fence takes no
+    backtick in its info string, so a span such as `` ``` `` that starts a line opens none."""
+    inside, opener = set(), None
+    for number, row in enumerate(rows, 1):
+        fence = FENCE.match(row)
+        if opener is None:
+            if fence and not (fence.group(1)[0] == "`" and "`" in fence.group(2)):
+                opener = fence.group(1)
+                inside.add(number)
+        else:
+            inside.add(number)
+            if fence and fence.group(1)[0] == opener[0] and len(fence.group(1)) >= len(opener) \
+                    and not fence.group(2).strip():
+                opener = None
+    return inside
+
+
+def paren_cites(row):
+    """The text of each parenthesised group of the row that no code span swallows, with backticks dropped so
+    "(read `hooks/x.py:2`)" reads as "(read hooks/x.py:2)". The one home of what a backing looks like on a line."""
+    spans = [m.span() for m in CODE_SPAN.finditer(row)]
+    return [m.group(1).replace("`", "").strip() for m in PAREN_GROUP.finditer(row)
+            if not any(a <= m.start() < b for a, b in spans)]
+
+
+def cite_kind(cite):
+    """(kind, rest) of "kind rest": the first word lower-cased, and what follows it."""
+    word, _, rest = cite.strip().partition(" ")
+    return word.lower(), rest.strip()
+
+
+def has_source(rest):
+    """True when `rest` holds a source path as one of its words (split at spaces, commas and semicolons)."""
+    return any(SOURCE.match(word.rstrip(".")) for word in re.split(r"[\s,;]+", rest) if word)
+
+
+def backing_path(kind, rest):
+    """The file a `read` or `test` backing points at, or None for any other kind."""
+    if kind == "test":
+        node = TEST_CITE.match(rest)
+        return node.group(1) if node else None
+    if kind == "read":
+        word = next((w.rstrip(".") for w in re.split(r"[\s,;]+", rest) if SOURCE.match(w.rstrip("."))), None)
+        return re.split(r"::?\d*", word, maxsplit=1)[0] if word else None
+    return None
+
+
+def backed_lines(texts, changed):
+    """[(prose file, line, backing)]: each line of `texts` ({path: text}) with a `(test path::name)` or
+    `(read path:N)` backing that points at one of the `changed` files, sorted. `backing` is the cite as written,
+    such as "read hooks/guard.py:2". A prose judge calls this to learn which lines a changed file may have
+    made stale. Lines in a fence, and groups in a code span, are mentions and never count."""
+    found = []
+    for path, text in sorted(texts.items()):
+        rows = text.replace("\r\n", "\n").split("\n")
+        fenced = fenced_lines(rows)
+        for number, row in enumerate(rows, 1):
+            if number in fenced or "(" not in row:
+                continue
+            for cite in paren_cites(row):
+                kind, rest = cite_kind(cite)
+                if backing_path(kind, rest) in changed:
+                    found.append((path, number, cite))
+    return found
+
+
+class RouteClaimReader:
+    """STALE005: an ADDED governed line that states a capability by route with no backing. Report only: it reads the
+    lines the range adds, never the whole tree, and its messages never become findings (decision
+    source-prose-lint-ships-dark)."""
+    code = "STALE005"
+    scope = "added"
+
+    def prepare(self, rng):
+        """{path: [(number, text)]} of the governed Markdown files the range adds lines to, or None."""
+        excludes = exclude_patterns(".")
+        files = {p: rows for p, rows in rng.added_lines.items() if rows and governed(p, excludes)}
+        return files or None
+
+    def claims(self, rng, files):
+        """[(path, number, message)]. The head blob of a file is read only when one of its added lines is a claim
+        candidate, and hooks/route_rows.json only when a candidate cites a route; both go through `rng.batch`."""
+        out, rows_at_head = [], []
+        for path in sorted(files):
+            fenced = None
+            for number, row in files[path]:
+                if "ste-disable-line" in row and self.code in disabled(row):
+                    continue
+                if HEADING_OR_QUOTE.match(row):
+                    continue
+                prose = HTML_COMMENT.sub(" ", CODE_SPAN.sub(" ", row))
+                if not (VERB.search(prose) and ROUTE_WORD.search(prose)):
+                    continue
+                if fenced is None:
+                    blob = rng.batch.get("%s:%s" % (rng.head, path))
+                    fenced = fenced_lines((blob or b"").decode("utf-8", "replace").replace("\r\n", "\n").split("\n"))
+                if number in fenced:
+                    continue
+                message = self.judge(rng, row, rows_at_head)
+                if message:
+                    out.append((path, number, message))
+        return out
+
+    def judge(self, rng, row, rows_at_head):
+        """The message for one claim line, or None when it is backed."""
+        backed, dead = False, []
+        for cite in paren_cites(row):
+            kind, rest = cite_kind(cite)
+            if kind in PREMISE_KINDS:
+                backed = backed or has_source(rest)
+            elif kind == "test":
+                backed = backed or bool(TEST_CITE.match(rest))
+            elif kind == "route" and ROUTE_CITE.match(rest):
+                ids = route_ids(rng, rows_at_head)
+                if ids is None:
+                    backed = True  # the rows file could not be read; that is one unknown, not a dead route
+                elif rest in ids:
+                    backed = True
+                else:
+                    dead.append(rest)
+        if dead:
+            return "cites %s, a dead route: no row of %s at head has that id" % (
+                ", ".join(dead), ROUTE_ROWS)
+        if backed:
+            return None
+        return ("states a capability by route with no backing; cite (KIND source) with KIND one of %s, "
+                "(test path::name), or (route <id>)" % ", ".join(PREMISE_KINDS))
+
+
+def route_ids(rng, cache):
+    """The set of ids of hooks/route_rows.json at head, read once; empty when the file is absent. None when the
+    file does not read (one unknown is noted), so a claim that cites a route is not called dead on a bad read."""
+    if not cache:
+        blob = rng.batch.get("%s:%s" % (rng.head, ROUTE_ROWS))
+        ids = set()
+        if blob is not None:
+            try:
+                rows = json.loads(blob.decode("utf-8", "replace")).get("rows")
+                ids = {row["id"] for row in rows if isinstance(row, dict) and isinstance(row.get("id"), str)}
+            except (ValueError, AttributeError, TypeError):
+                rng.unknowns.append("%s is not {\"rows\": [...]}; route cites were not checked" % ROUTE_ROWS)
+                ids = None
+        cache.append(ids)
+    return cache[0]
+
+
 # One entry per code. A reader has `code`, `prepare(rng)` (its state, or None when the range gives it nothing to
 # check) and `line(state, text, claimed)` (messages for one Markdown line; `claimed` holds the paths an earlier
 # reader already cited there). A reader with `unknown = True` reports its messages as unknown, not as findings.
-# A new check adds one entry.
-READERS = (PathReader(), NameReader(), ForeignReader())
+# A reader with `scope = "added"` reads the lines the range adds instead: `prepare(rng)` and `claims(rng, state)`, and
+# its messages are report lines, never findings. A new check adds one entry.
+READERS = (PathReader(), NameReader(), ForeignReader(), RouteClaimReader())
 
 
 def tracked_entries(rev, *paths):
@@ -437,10 +661,14 @@ def file_paths(entries):
     return [p for mode, p in entries if mode in ("100644", "100755")]
 
 
+def governed(path, excludes):
+    """True for a .md file a prose check reads: not the records page, not excluded."""
+    return path.endswith(".md") and path != RECORDS_PAGE and not any(rx.match(path) for rx in excludes)
+
+
 def markdown_files(entries, excludes):
-    """The tracked .md files a prose check reads: regular files, not the records page, not excluded."""
-    return [p for p in file_paths(entries) if p.endswith(".md")
-            and p != RECORDS_PAGE and not any(rx.match(p) for rx in excludes)]
+    """The tracked .md files a prose check reads: regular files that are `governed`."""
+    return [p for p in file_paths(entries) if governed(p, excludes)]
 
 
 def read_markdown(batch, rev, md):
@@ -455,7 +683,8 @@ def find_stale(rng):
     found = {}
     if not rng.removed and not rng.renamed and not rng.py_files:
         return found  # the cost contract: nothing removed, so no blob, tree or Markdown read
-    active = [(r, state) for r in READERS for state in [r.prepare(rng)] if state is not None]
+    active = [(r, state) for r in READERS if getattr(r, "scope", "tree") == "tree"
+              for state in [r.prepare(rng)] if state is not None]
     if all(getattr(reader, "unknown", False) for reader, _ in active):
         return found  # an unknown line never starts the Markdown read
 
@@ -562,11 +791,16 @@ def home_report(rng, rules, entries, folders):
     paths = file_paths(entries)
     folder = next((f for f in folders if any(p.startswith(f + "/") for p in paths)), None)
     homes = {}  # file -> decision stems whose Home names it
+    texts = {}  # decision path -> its text, for the prose lines whose backing points at a changed file
     for path in (p for p in paths if folder is not None and p.startswith(folder + "/")):
         if path.endswith(".md"):
             blob = rng.batch.get("%s:%s" % (rng.head, path))
-            for home in HOME_LINE.findall((blob or b"").decode("utf-8", "replace")):
+            texts[path] = (blob or b"").decode("utf-8", "replace")
+            for home in HOME_LINE.findall(texts[path]):
                 homes.setdefault(home, []).append(os.path.basename(path)[:-3])
+    backed = {}  # changed file -> ["prose.md:line", ...]
+    for prose, number, backing in backed_lines(texts, set(code)):
+        backed.setdefault(backing_path(*cite_kind(backing)), []).append("%s:%d" % (prose, number))
     lines = []
     for path in code:
         parts = []
@@ -577,6 +811,8 @@ def home_report(rng, rules, entries, folders):
                           and path in (row["mechanism"].get("ref"), str(row["mechanism"].get("test", "")).split("::")[0]))
         if named_by:
             parts.append("named by row %s" % ", ".join(named_by))
+        if backed.get(path):
+            parts.append("backs prose %s" % ", ".join(backed[path]))
         if parts:
             lines.append("%s%s changed; %s" % (REPORT, path, "; ".join(parts)))
     return lines
@@ -605,18 +841,29 @@ def report(rng):
     return lines + (home_report(rng, rules, entries, folders) if code else [])
 
 
+def claim_lines(rng):
+    """The report lines of each reader that reads added lines, sorted by file and line."""
+    found = []
+    for reader in READERS:
+        if getattr(reader, "scope", "tree") == "added":
+            state = reader.prepare(rng)
+            if state is not None:
+                found += [(path, number, reader.code, message) for path, number, message in reader.claims(rng, state)]
+    return ["%s%s:%d: %s %s" % (REPORT, path, number, code, message) for path, number, code, message in sorted(found)]
+
+
 def scan(range_text):
     """(found, unknowns, report): {(path, line, code): [messages]}, one text per read that could not run, and the
     report lines. The report adds no finding, and a report read that fails is one unknown."""
     diff_args, base, head = parse_range(range_text)
-    removed, renamed, modified, added = changed_paths(diff_args)
+    removed, renamed, modified, added, lines = read_diff(diff_args)
     batch = BlobReader()
-    rng = Range(base, head, removed, renamed, modified, batch, added)
+    rng = Range(base, head, removed, renamed, modified, batch, added, lines)
     lines = []
     try:
         found = find_stale(rng)
         try:
-            lines = report(rng)
+            lines = claim_lines(rng) + report(rng)
         except (Unknown, OSError, ValueError, layout.LayoutError) as exc:  # LayoutError: a layout or extras file that does not read
             rng.unknowns.append("report not read, %s" % exc)
     finally:
