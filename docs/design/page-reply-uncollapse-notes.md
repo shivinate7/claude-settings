@@ -9,7 +9,8 @@ The mockup draws with page.html's own `<style>` (lines 8 to 840 at 21d20281). Ea
 Options are named by name, never by a letter.
 
 Settled by the brief and the coordinator (Nov 6), not options here:
-- An item is new when the writer's `replied` (an ISO time) is later than the owner's last Send (`freezeSeen`'s `last`).
+- An item is new when the writer's `replied` (an ISO time) is later than both the owner's last Send (`freezeSeen`'s `last`)
+  and `waiting.visit`. The writer sets `replied` only on a `reply` write or a `waits` change, never on `lastAnswer` alone.
 - A roadmap step is new when `updatedAt` is later than the viewer's last visit.
 - A reopened card unfolds in place and never re-sorts on the open page (ux-order-holds-still).
 - A fold locked by a draft keeps its lock (`foldLocked`).
@@ -97,9 +98,10 @@ Settled by the brief and the coordinator (Nov 6), not options here:
   marked (`doneList` sorts newest `updatedAt` first). Option "Done fold stays folded" (`#s=done-stays-folded`):
   the fold head shows the count pill only. Gain: the box stays short. Loss: a step that just finished is one
   press away.
-- Baseline: none exists today. A new key, `waiting.stepSeen`, kept like `waiting.askSeen` (page.html
-  `ASK_SEEN`, written on `visibilitychange`). Read once at load and kept for the visit, so a mark lasts the
-  whole visit and clears on the next visit. With no key (first visit, or storage blocked), no step is marked.
+- Baseline: `waiting.visit`, one key for items and steps, read and written through the same stamp helper as
+  `waiting.askSeen` (page.html `readStamp`, `writeStamp`). Read once at load, then written, so a mark lasts the
+  load and clears on the next one; a reload counts as a visit. With no key (first visit, or storage blocked), no
+  step is marked, and items use the last Send alone.
 - Not changed: `fresh()` ("updated today", the feed's time words). It is another meaning; the mark does not
   replace it. Gap, not drawn: a marked step on another pager page shows only when the owner pages there.
 - Rail chips on the Questions tab: no mark. The chip has states (open, ready, sent); a fourth look is noise.
