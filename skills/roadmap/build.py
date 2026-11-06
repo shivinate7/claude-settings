@@ -132,8 +132,8 @@ READY_SENTENCE = re.compile(r"(?:^|[.!?]\s+)Ready\.(?=\s|$)")
 # A session keeps its step live unless its status is archived (session-tiers, Live-coordinator check).
 # An unseen status reads live: a false "set to todo" resets a working lane's step; a missed flag only delays cleanup.
 ARCHIVED_SESSION = "SESSION_STATUS_ARCHIVED"
-# get_session's status_bucket values (working, blocked, review_ready, completed, failed) that mark a lane as done working: only these two can list a lane to archive.
-IDLE_BUCKETS = ("completed", "review_ready")
+# list_sessions' status_bucket enum names (SESSION_STATUS_BUCKET_WORKING, _BLOCKED, _REVIEW_READY, _COMPLETED, _FAILED) that mark a lane as done working: only these two can list a lane to archive.
+IDLE_BUCKETS = ("SESSION_STATUS_BUCKET_COMPLETED", "SESSION_STATUS_BUCKET_REVIEW_READY")
 # A waiting-page item in one of these statuses no longer holds its lane.
 ITEM_DONE_STATUSES = ("answered", "closed")
 # A live file with no items list: no item holds a lane then, unlike a list with a wrong-shaped row.
@@ -552,8 +552,8 @@ def live_work(path, steps, slug=None):
     A live file with no sessions list still renders Live work.
     "items" (optional, the waiting page's rows `{"n", "status", "home"}`) feeds only the page-ruling upkeep row:
     `pageItems` holds the rows, or None with `itemsWhy` saying why that row reads unknown.
-    Three optional keys feed the lanes-to-archive row (idle_lanes): a sessions row's `status_bucket` (get_session's
-    bucket; missing reads as not completed), a pulls row's `head` (the head commit sha), an items row's `lane` (the
+    Three optional keys feed the lanes-to-archive row (idle_lanes): a sessions row's `status_bucket` (list_sessions'
+    enum name; missing reads as not completed), a pulls row's `head` (the head commit sha), an items row's `lane` (the
     step slug of the lane that asked, or null; kept exactly when the key is present). `laneSessions` holds the kept session rows, or None. Old files without them read as before.
     """
     if not path:

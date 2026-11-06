@@ -86,7 +86,7 @@ GitHub, so the publisher reads them just before the build and passes one file:
   unknown. `head` is the pull's head commit sha, also optional: the lanes-to-archive row reads it to
   release a lane whose draft pull is already in the default branch. `branches`: lane branches with no open pull request.
 - `sessions`: `list_sessions`, every page, each row copied as it comes with only these fields.
-  `status_bucket` is get_session's bucket (`working`, `blocked`, `review_ready`, `completed`, `failed`);
+  `status_bucket` is the bucket list_sessions returns (`SESSION_STATUS_BUCKET_WORKING`, `_BLOCKED`, `_REVIEW_READY`, `_COMPLETED`, `_FAILED`);
   it is optional, and a row without it reads as not completed. The upkeep list reads the rows for steps
   in progress and for lanes to archive. A live file with no `sessions` list still renders
   Live work.
@@ -203,7 +203,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   `--live` file;
 - lanes to archive, in the row `lanes to archive`. A session is listed when all of these hold:
   - its tags hold `cs-build:lane` and this repo's `cs-repo:` tag, and its status is not archived;
-  - its `status_bucket` is `completed` or `review_ready`. A lane that is blocked, failed, working or
+  - its `status_bucket` is `SESSION_STATUS_BUCKET_COMPLETED` or `SESSION_STATUS_BUCKET_REVIEW_READY`. A lane that is blocked, failed, working or
     has no bucket is never listed;
   - it has at least one `cs-step:` tag, and each step it names has landed. A step has landed when a
     `Step:` trailer is on main, or its status is `done`;
