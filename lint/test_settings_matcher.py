@@ -419,7 +419,7 @@ class QuestionReviewer(unittest.TestCase):
 
     def test_retired_stubs_are_gone(self):
         # lint/check_hook_stubs.py allowed their removal once no settings.json from the last 14 days called them.
-        root = os.path.dirname(SETTINGS)
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
         for rel in ("hooks/question_outcome.py", "lint/ste_gate.py", "lint/md_sweep.py"):
             with self.subTest(script=rel):
                 self.assertFalse(os.path.exists(os.path.join(root, rel)), "%s is back" % rel)
