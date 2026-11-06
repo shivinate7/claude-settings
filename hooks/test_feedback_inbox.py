@@ -1179,17 +1179,19 @@ def case_page_send_with_ok_result_still_counts():
 
 
 def case_page_error_result_of_another_call_does_not_cancel_the_send():
-    """A send that proves page item 98 keeps its proof when a later call with another tool_use_id fails. The
-    failed send to another session has its own result, so only its own result can cancel it."""
+    """A send that proves page item 98 keeps its proof when a second send in the same turn fails. The two
+    results come back in one user record, the failed one first, so only pairing by tool_use_id picks the right
+    result: a fix that pairs by position, or cancels on any error, blocks here."""
+    proving = used_rec(SEND, {"session_id": "session_0page", "message": "Ruling on page item 98: a"}, tool_id="s1")
+    proving["message"]["content"] += used_rec(SEND, {"session_id": "session_0unknown",
+                                                     "message": "A note for another session"},
+                                              tool_id="s2")["message"]["content"]
+    results = result_rec("s2", CLOUD_UNVERIFIED, is_error=True)
+    results["message"]["content"] += result_rec("s1", "ok")["message"]["content"]
     p = page_run(new_cfg(), "page-send-other-error", [("98: a", (PAGE_ITEM,))],
-                 [owner_rec("98: a"),
-                  used_rec(SEND, {"session_id": "session_0page", "message": "Ruling on page item 98: a"},
-                           tool_id="s1"),
-                  result_rec("s1", "ok"),
-                  used_rec(SEND, {"session_id": "session_0unknown", "message": "A note for another session"},
-                           tool_id="s2"),
-                  result_rec("s2", CLOUD_UNVERIFIED, is_error=True)])
-    expect_silent("page: a failed send with another tool_use_id does not cancel the send that proves 98", p)
+                 [owner_rec("98: a"), proving, results])
+    expect_silent("page: a failed send with another tool_use_id, results out of order, does not cancel the send"
+                  " that proves 98", p)
 
 
 def case_page_sendmessage_with_error_result_does_not_count():
@@ -1752,6 +1754,18 @@ def case_repo_send_naming_the_repo_passes():
         p = page_run(new_cfg(), "repo-send", [("rename", (REPO_ITEM,))],
                      [owner_rec("rename"), used_rec(name, {"to": "coordinator", "message": message})])
         expect_silent("repo: %s passes" % label, p)
+
+
+def case_repo_send_with_error_result_does_not_count():
+    """A send that names the repo, whose tool_result (the one with its tool_use_id) is an error, does not prove
+    the repo item. repo_problem reads the same proof through Pages.sent, so the fix must reach that path too."""
+    p = page_run(new_cfg(), "repo-send-error", [("rename", (REPO_ITEM,))],
+                 [owner_rec("rename"),
+                  used_rec(SEND, {"session_id": "session_0unknown", "message": "Filed the rename in `acme/widgets`"},
+                           tool_id="s1"),
+                  result_rec("s1", CLOUD_UNVERIFIED, is_error=True)])
+    expect_repo_unsent("repo: a send_message naming the repo whose result is an error does not prove it", p,
+                       "fb-0958-21", REPO_SLUG)
 
 
 def case_repo_slug_match_ignores_case():
@@ -3744,6 +3758,7 @@ CASES = (
     case_page_read_back_that_misses_n_does_not_prove_the_filing,
     case_page_unfiled_remedy_offers_the_read_back,
     case_repo_send_naming_the_repo_passes,
+    case_repo_send_with_error_result_does_not_count,
     case_repo_slug_match_ignores_case,
     case_repo_send_before_the_owner_record_blocks,
     case_repo_send_naming_another_repo_blocks,
