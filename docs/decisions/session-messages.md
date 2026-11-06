@@ -3,7 +3,7 @@
 Kind: build
 Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
-Status: draft. The owner picks Q1 to Q3 below. Nothing is built before the picks.
+Status: draft. Q2 and Q3 are picked; Q1 waits on the owner.
 
 ## Ruling
 
@@ -69,4 +69,8 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
 
 ## Owner choices
 
-Q1, Q2 and Q3 go to the owner in the question form (rule `style-question-form`).
+- Q1, ask Anthropic for a setting that lifts the desktop cap: open with the owner on the waiting page
+  (sent through triage 2026-11-06 12:50 CST).
+- Q2, how a lost message is noticed: a session that waits on a reply sets one `send_later` check-in,
+  the same shape as rule `git-ci-wait-checks-in`. Coordinator pick, 2026-11-06 12:48 CST; it can be undone.
+- Q3, scope: build steps 1 to 4 only. Coordinator pick, 2026-11-06 12:48 CST; it can be undone.
