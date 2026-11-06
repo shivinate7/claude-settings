@@ -15093,7 +15093,7 @@ pq("redesign with no Departs from line is denied", "deny",
 pq("a task about a port with no Departs from line is denied", "deny",
    pq_item(kind="task", holds=None))
 pq("a record that is neither a decision nor a task is allowed", "allow", pq_item(kind="note"))
-pq("a set to another collection is allowed", "allow", pq_item(), collection="answers")
+pq("a set to another collection is allowed", "allow", pq_item(), collection="groups")
 pq("an update that adds holds on a port is denied", "deny", {"port": True, "holds": PQ_HOLDS},
    action="update")
 pq("an update that changes a status only is allowed", "allow", {"status": "closed"},
@@ -15102,7 +15102,7 @@ pq("an update that carries no port fields is allowed on today's item", "allow",
    {"rank": 3}, action="update")
 add("port question: a batch with today's item among the sets is denied", "deny", "port-question",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
-    writes=[{"op": "set", "collection": "answers", "doc_id": "a", "data": {"note": "x"}},
+    writes=[{"op": "set", "collection": "groups", "doc_id": "a", "data": {"note": "x"}},
             {"op": "set", "collection": "items", "doc_id": "suspense-cards", "data": pq_item()}])
 add("port question: a batch of good sets is allowed", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="batch",
@@ -16096,7 +16096,7 @@ pl("an update that carries a press step with a wrong link is denied", "deny",
 pl("an items set to another artifact is allowed", "allow", pl_item(), url="https://claude.ai/artifact/other")
 add("press link: a batch with the press item among the sets is denied", "deny", "press-link",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
-    writes=[{"op": "set", "collection": "answers", "doc_id": "a", "data": {"note": "x"}},
+    writes=[{"op": "set", "collection": "groups", "doc_id": "a", "data": {"note": "x"}},
             {"op": "set", "collection": "items", "doc_id": WP_DOC, "data": pl_item()}])
 add("press link: a batch of linked sets is allowed", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="batch",
@@ -16809,7 +16809,7 @@ oj("a task with a Why yours line and no form lines is not judged", "allow",
    tn_task(context=TN_CTX + "\n" + TN_WHY))
 oj("a record that is neither a decision nor a task is not judged", "allow", oj_item(kind="note"))
 oj("an items set to another artifact is allowed", "allow", oj_item(), url="https://claude.ai/artifact/other")
-oj("a set to another collection is allowed", "allow", oj_item(), collection="answers")
+oj("a set to another collection is allowed", "allow", oj_item(), collection="groups")
 add("owner judge: a repo with no waiting page allows item 34's shape", "allow", tool="ArtifactData",
     cwd=NOGIT, url=PQ_URL, action="set", collection="items", doc_id=OJ_DOC, data=oj_item())
 
@@ -16867,7 +16867,7 @@ oj_replace("on why is not judged", "allow", "why", OJ_STAKE, "The lint job is sh
 
 # A batch judges each write.
 oj_batch("with an item that has no form lines among the sets is denied", "deny",
-         [oj_write({"note": "x"}, collection="answers"), oj_write(oj_item())])
+         [oj_write({"note": "x"}, collection="groups"), oj_write(oj_item())])
 oj_batch("whose second write has no form lines is denied", "deny",
          [oj_write(oj_item(context=OJ_GOOD)), oj_write(oj_item(id="second"))])
 oj_batch("with an update that carries kind decision and context, no form lines, is denied", "deny",
@@ -16980,7 +16980,7 @@ qd("an update that carries kind decision and a context with the line is allowed"
    {"kind": "decision", "context": oj_ctx()}, action="update")
 qd("an items set to another artifact is allowed", "allow", qd_item(context=oj_ctx(departs=None)),
    url="https://claude.ai/artifact/other")
-qd("a set to another collection is allowed", "allow", qd_item(context=oj_ctx(departs=None)), collection="answers")
+qd("a set to another collection is allowed", "allow", qd_item(context=oj_ctx(departs=None)), collection="groups")
 add("question departs: a repo with no waiting page allows a decision with no line", "allow", tool="ArtifactData",
     cwd=NOGIT, url=PQ_URL, action="set", collection="items", doc_id=QD_DOC,
     data=qd_item(context=oj_ctx(departs=None)))
@@ -17141,7 +17141,7 @@ ifr_batch("a batch with a str_replace on an unlisted field is denied", "deny",
 ifr_batch("a batch of listed fields and a delete of an unlisted one is allowed", "allow",
           [ifr_write(if_item(reply="x")), ifr_write({IF_BOGUS: {"__delete__": True}, "lane": "x"}, "update")])
 ifr_batch("a batch with an unlisted field in another collection is allowed", "allow",
-          [ifr_write({IF_BOGUS: "x"}, collection="answers"), ifr_write(if_item())])
+          [ifr_write({IF_BOGUS: "x"}, collection="groups"), ifr_write(if_item())])
 
 # file_path data is read as the data of the write.
 IF_FILE_BAD = os.path.join(ROOT, "ifr", "bad.json")
@@ -17155,7 +17155,7 @@ ifr("file_path data of listed fields is allowed", "allow", None, file_path=IF_FI
 ifr("an unreadable file_path is not judged", "allow", None, file_path=os.path.join(ROOT, "ifr", "missing.json"))
 
 # Only a write of an item to this repo's waiting page is judged.
-ifr("a set to another collection is not judged", "allow", if_item(**{IF_BOGUS: "x"}), collection="answers")
+ifr("a set to another collection is not judged", "allow", if_item(**{IF_BOGUS: "x"}), collection="groups")
 ifr("a set to another artifact is not judged", "allow", if_item(**{IF_BOGUS: "x"}),
     url="https://claude.ai/artifact/other")
 add("item field: a repo with no waiting page is not judged", "allow", tool="ArtifactData", cwd=NOGIT, url=PQ_URL,
