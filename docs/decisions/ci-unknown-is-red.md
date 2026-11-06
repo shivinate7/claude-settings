@@ -9,7 +9,7 @@ Why: a green exit on an unread input hides a defect.
 Homes with this shape:
 
 - `lint/check_record_slugs.py`, `lint/check_silent_undo.py`, `lint/check_ruling_kind.py`.
-- `lint/check_glossary.py`, `lint/check_artifact_cites.py` (an absent records folder is zero records, not unread), `lint/ste_lint.py` (an unparseable config).
+- `lint/check_glossary.py`, `lint/check_artifact_cites.py` (an absent records folder is zero records, which is an answer), `lint/ste_lint.py` (an unparseable config).
 - `lint/stale_cites.py`, for a file it cannot read. Its unresolved base is in `stale-cites-at-merge`.
 - `actions/code-check/code_check.py` and `actions/ci-alarm` (`alarm.sh`, `dropped.sh`, `issue.sh`).
 
