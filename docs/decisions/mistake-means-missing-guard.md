@@ -13,12 +13,14 @@ Incident, 2026-11-06: the coordinator ran `sed -i '$d'` on its feedback inbox to
 
 `lint/report_guard.py` refuses a report on a landing turn whose Deviations item admits a mistake you made and names no guard for it.
 
-- An admission is a clause with a first-person word (`I`, `my`) and a fault word, such as wrong, mistake, broke, clobbered, overwrote, misread, forgot, trusted or "instead of checking".
+- An admission is a clause with a first-person word (`I`, `my`) and a fault word. Clauses split at punctuation and at because, since, but, while and although.
+- The fault words: wrong, wrongly, mistake, mistaken, by accident, accidental, accidentally, broke, clobbered, overwrote, corrupted, misread, forgot, "trusted a stale", "trusted an old", "trusted an outdated" and "instead of checking". The list is closed. Words such as lost, wiped, deleted and skipped stay out: "I lost the race to another lane" and "I wiped the cache to reproduce it" are normal work.
 - A negator before the fault word in the same clause clears it: "I did not break anything" passes.
 - Quoted and backticked text, fences and URLs are read as text, never as an admission. So a report can quote the owner's words.
-- A guard is named when the Deviations item holds `step:<slug>`, the word debt, or a guard, check or hook word together with a PR or commit ref. It may sit in any bullet of the item. This read keeps backticked text, so `` `step:<slug>` `` counts.
+- A guard is named when the Deviations item holds `step:<slug>`, the word debt, or a sentence with a guard, check or hook word and a PR or commit ref. It may sit in any bullet of the item. This read keeps backticked text, so `` `step:<slug>` `` counts.
 - `step:<slug>` is checked for its form only. The check does not read the roadmap.
 - The check reads only landing turns, as the rest of the report guard does. An admission in a turn that landed nothing is not checked.
+- The report guard blocks once per turn. A correction after the block is not checked again, as for every other report check.
 
 False-alarm measure, 2026-11-06: 41 real reports with a Deviations item, from 28 cloud sessions. The check fired on 2. Both were real mistakes (a wrong commit SHA sent to the batch runner) with no guard named. It had no false alarms. A wider set that read bare "wrong", "mistake" and verbs such as "I ran" or "I pushed" fired on 8, of which 3 were false alarms.
 
