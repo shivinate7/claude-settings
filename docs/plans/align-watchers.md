@@ -69,8 +69,8 @@ small, M medium, L large).
 | `merge/merge.py` poll loops | Two loops of its own. `retry_net` (line 223) pauses between network retries. `wait_checks` (line 967) pauses through `block` (lines 1223 to 1229): 30 s when a check has an Actions run, else a minute. It also pauses 30 s for a settle read (lines 1017 to 1021). | Share the `gh` call and the pause seam with `ci_wake`. Do not share the loop. | no | M |
 | Config watch (`hooks/config_watch.py`, PostToolUse 20 s, Stop 20 s) | Hashes the two watched settings files on each matching call (record `config-watch-fast-exit`). | Add a test that a clean call starts no process. Fix the docstring. | no | S |
 | Decision watch | No Stop row runs `decision_watch.py` (checked: `settings.json`). The mod runs in the app (checked: `register.mjs`). Its model call is used by `hooks/reply_judge.py` and `lint/report_guard.py` (checked). | Make the log append-only. Q5 covers the `STOP seen` line. | 5 | M |
-| Model-call judges | `call_judge` (PreToolUse on Agent, AskUserQuestion, ArtifactData; 70 s). `prose_judge` (PreToolUse on Edit and Write; 45 s). `reply_judge` (Stop; 25 s). `feedback_guard` (Stop; 60 s). `report_guard` (Stop; 35 s; calls `decision_watch.invoke_model` at line 1267). `local_time` (UserPromptSubmit; 30 s; its model call is unchecked). Each judge calls a model. `invoke_model` is at `hooks/decision_watch.py` line 671. | One home (`invoke_model`) and one test. Q2. | 2 | M |
-| Other hooks with no row | `ruling_home` (Stop; 20 s). `reread_check` (Stop 10 s, PreToolUse Read 10 s, PostCompact 10 s). `blind_brief` (PreToolUse on Agent or Task; 10 s). `rm_prompt_answer` (PermissionRequest on Bash; 20 s). `sendmessage_state` (PreToolUse on SendMessage; 50 s; starts a node reader child at line 91 with `start_new_session`). `agent_brief` (SubagentStart; 20 s). `local_time` (SubagentStart 10 s; PostToolUse on ArtifactData 10 s). `refusal_note` (PermissionDenied; 10 s). `precompact_handoff` (PreCompact and Stop, 30 s each; SessionStart and SessionEnd rows, 10 s each). `guard.py` (SubagentStop 20 s; PreToolUse 60 s). `sim_boot_record` (PreToolUse Bash 20 s; PostToolUse 600 s). All checked in `settings.json`. | Add each row to the table. Record each cost once item 180 fixes the form. | no | M |
+| Model-call judges | `call_judge` (PreToolUse on Agent, AskUserQuestion, ArtifactData; 70 s). `prose_judge` (PreToolUse on Edit and Write; 45 s). `reply_judge` (Stop; 25 s). `feedback_guard` (Stop; 60 s). `report_guard` (Stop; 35 s; calls `decision_watch.invoke_model` at line 1267). `local_time` (UserPromptSubmit; 30 s) calls no model (checked by grep). Each other judge calls a model. `invoke_model` is at `hooks/decision_watch.py` line 671. | One home (`invoke_model`) and one test. Q2. | 2 | M |
+| Other hooks with no row | `ruling_home` (Stop; 20 s). `reread_check` (Stop 10 s, PreToolUse Read 10 s, PostCompact 10 s). `blind_brief` (PreToolUse on Agent or Task; 10 s). `rm_prompt_answer` (PermissionRequest on Bash; 20 s). `sendmessage_state` (PreToolUse on SendMessage; 50 s; starts a node reader child at line 91 with `start_new_session`). `agent_brief` (SubagentStart; 20 s). `local_time` (SubagentStart 10 s; PostToolUse on ArtifactData 10 s). `refusal_note` (PermissionDenied; 10 s). `precompact_handoff` (PreCompact and Stop, 30 s each; SessionStart and SessionEnd rows, 10 s each). `guard.py` (SubagentStop 20 s; PreToolUse 60 s). `sim_boot_record` (PreToolUse Bash 20 s; PostToolUse 600 s). All checked in `settings.json`. | Add each row to the table. Record each cost in the form of rule 4. | no | M |
 | `question_form.py` git child | Starts one long-lived `git cat-file --batch` process (line 1422). | Bound it to the hook timeout, or close it when the call ends. | no | S |
 | `bin/ci-job` verdict run | Starts one `verdict` process per job (line 351). | Record it. | no | S |
 | `hooks/mutate_shared.py` child | Starts a child with `start_new_session` on POSIX (line 483). The critic found it. The map read this file as CI tooling. | Record its cost. Bound it by time. | no | S |
@@ -124,7 +124,7 @@ Nothing here is deleted before its owner question is ruled. Each delete names it
 
 1. **Text only (this change).** Fix stale prose in the decision records, debts, `docs/*.md` and
    `janitor/GUIDE.md`. Size S. It needs no owner answer.
-2. **Cost tests for the cheap mechanisms.** After item 180 fixes the form. One shared helper. Size S.
+2. **Cost tests for the cheap mechanisms.** One shared helper, `hooks/test_support/cost_probe.py`. Size S.
 3. **Stall defects.** Remove the temp files on every exit path. Dedupe the Stop message. Size S. The
    watcher stays until Q1 is ruled.
 4. **Log cull.** After Q5. Size S.
@@ -132,7 +132,7 @@ Nothing here is deleted before its owner question is ruled. Each delete names it
 6. **Decision watch log.** Append-only. Any skip on a quiet turn uses the same protected-path set as
    `--emit-prompt`, so a protected change is still judged. Size M.
 7. **Agent-end reap.** Bound the delete child by time. One process scan per session end. Size M.
-8. **Record lint.** The check for rules 4 to 8. After item 180. Size M.
+8. **Record lint.** The check for rules 4 to 8. Size M.
 9. **Stall watcher and `ci_wake`.** Replace or cap, per Q1 and Q3. Size L.
 
 Lane 1 needs no answer. A lane that waits on a question says so in its report.
@@ -185,11 +185,11 @@ One line each, with the reason the text stays.
 
 - stall-watch: "no test pins the cost" (wait-pid). An honest admission. True now.
 - stall-watch: "a builder's choice, not measured" (300 s age). Unmeasured, not false.
-- stall-watch: the heading premise "the watcher does the waiting" and the waiter-rule argument. Q1a holds them. No edit before the owner rules.
+- stall-watch: the heading premise "the watcher does the waiting" and the waiter-rule argument. Item 180 keeps the watcher, so they stay true.
 - stall-watch: incident 2026-10-31 and ruling 2026-10-18 15:15 CDT inside the ruling. The reasons still hold. Not superseded.
 - stall-watch (wait-pid): the subreaper "reads foreign" line. An open question, unmeasured.
-- stall-watch (wait-pid): the inline statement "one process per wait". True as written. Cost statements wait on item 180.
-- ci-wait: no cost statement in the title or in "The CI wake-up". Cost lines wait on item 180.
+- stall-watch (wait-pid): the inline statement "one process per wait". True as written. Its cost test is open (lane 2).
+- ci-wait: the cost line is written, under "The CI wake-up".
 - ci-wait: "owner, 2026-10-21, back-off" is date-only. The code cannot re-derive it. Not false.
 - ci-wait: `ci_wake.py` header matches the record. No stale text.
 - agents-wait: remedy names the CI-wake notice or Monitor. Checked true (`WAITER_REASON`, `hooks/guard_stream.py` line 248).

@@ -62,8 +62,13 @@ guard rule, so the watcher does the waiting and the session is told once.
   relative path after a `cd` resolves against the shell's directory, so that job can still stall falsely.
   The watcher reports a stall only on a job state and named-log sample from the same pass. A sample
   from the once-a-second check can be a second old, and miss a write or the job's end.
-  Each background job starts one watcher process. Its process cost is open: owner Cockpit item 180 holds
-  it (plan `docs/plans/align-watchers.md`). Each named log gets one stat a second in the watcher's own loop,
+  Each background job starts one watcher process. It is a named exception to rule
+  `outcomes-mechanize-rules` (owner, Cockpit item 180, pick a, 2026-11-06 12:19 CST; home
+  `.claude/rules/hooks.md`). Cost, per `outcomes-mechanize-rules`: process starts, none in the hook
+  itself, except one `sh` read when the command ends in an odd trailing backslash; the rewritten command
+  starts one watcher, which runs one `ps` about once a second. Files written: the job's `.log` and `.beat`,
+  both removed when it ends. How often: once per background shell call. `hooks/test_stall_watch.py`
+  `CostTests` pins each count. Each named log gets one stat a second in the watcher's own loop,
   one more before each stall report, and one at each Stop check. The beat file costs one append per
   heartbeat. The watcher reads it on each 0.2 s loop pass.
 - The job removes its log and beat file when it ends, also after a STALL report (the job keeps writing
