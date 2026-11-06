@@ -1,0 +1,40 @@
+{
+  "added": "2026-11-06T20:48:00Z",
+  "context": "Goal: q_max lanes #1036, #1038, #1037 and #1039 merge without waiting hours on a browser run that keeps failing.\nProblem (risk): q_max's merge tool refuses to merge onto a red main. #1036 (lane qmax-browser-prod-build) is the browser-tier fix itself. Auto mode refused the coordinator's ruling to merge it with --base-red-ok as a CI bypass, so the call is yours.\nBased on (measured): runner 9 read main's last four browser runs: three were cancelled at 2.5-3 h and one failed at 3.5 h. The current run, 42274824088, had run 110 min at 14:48 CST.\nDeparts from: main, where merges wait for a green base \u2014 merges #1036 alone onto a red base.\nMeanwhile: runner 9 waits on main's browser run.",
+  "holds": "Whether q_max #1036 may merge onto a red main.",
+  "home": "coordinator",
+  "id": "qmax-1036-base-red",
+  "kind": "decision",
+  "lane": "coordinator: runner 9 runs the merge on your pick",
+  "links": [
+    {
+      "label": "q_max #1036",
+      "url": "https://github.com/shivinate7/q_max/pull/1036"
+    }
+  ],
+  "n": 303,
+  "options": [
+    {
+      "gain": "The fix lands today, and the queue moves.",
+      "how": "Only if the failing job in main's last ended run is the one #1036 changes: #1036 merges alone with --base-red-ok, which you type. Then one browser run on main, and the other three merge only on its green.",
+      "key": "a",
+      "label": "Merge #1036 alone onto red",
+      "lose": "One merge onto a red base."
+    },
+    {
+      "gain": "No merge onto red.",
+      "how": "Wait for run 42274824088 and each later run.",
+      "key": "b",
+      "label": "Wait for green",
+      "lose": "Perhaps hours, and a red end blocks all four."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 2,
+  "ref": "q_max PRs #1036, #1037, #1038, #1039; run 42274824088",
+  "short": "q_max #1036 onto red main",
+  "status": "open",
+  "title": "q_max: merge the browser-tier fix #1036 alone onto a red main?",
+  "why": "Four q_max lanes wait on a green browser run on main, and none of the last four runs ended green."
+}
