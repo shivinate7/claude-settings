@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-06T18:47:30Z",
+  "context": "Goal: you can always undo a recent action, and no control shows that does nothing.\nProblem (rule): your pick c on item 193 shows Recent while anything can be undone, \"also right after a Reset\". But a Reset is not a Recent row, and it deletes the cards, so every row goes dead and the cell hides right after a Reset. Undoing a Reset needs the saved copy from before the Reset, and the record forbids a Recent undo to use it.\nBased on (ruling): item 193 pick c (12:36 CST Nov 6): \"Show while anything can be undone\".\nBased on (read): recent-checks-can-be-undone: a Reset is not logged, and \"An undo never ... restores a snapshot\" (main 5014f6f).\nBased on (read): src/app.jsx:3954 saves a copy before every Reset, and History can restore it today.\nDeparts from: recent-checks-can-be-undone (an undo never restores a saved copy) \u2014 option a lets one Recent row, the Reset row, restore the copy saved before the Reset.\nMeanwhile: the lane lands the item-193 rewrite as a draft record PR that says the Reset case is open.",
+  "home": "mailaudit docs/decisions/recent-checks-can-be-undone.md",
+  "id": "recent-reset-undo",
+  "kind": "decision",
+  "n": 280,
+  "options": [
+    {
+      "gain": "The undo shows right after a Reset, when you need it, in one tap.",
+      "how": "Log a Reset as a Recent row whose undo restores the copy saved before the Reset.",
+      "key": "a",
+      "label": "Reset gets a Recent row",
+      "lose": "One exception to \"an undo never restores a saved copy\". That undo also rolls back anything done after the Reset, so the row goes dead after your first new action."
+    },
+    {
+      "gain": "Recent keeps one simple rule: every undo is a small new write.",
+      "how": "History stays the way to undo a Reset.",
+      "key": "b",
+      "label": "Keep Reset out of Recent",
+      "lose": "Right after a Reset, Recent hides and you must open History to undo it, which is not what pick c promised."
+    }
+  ],
+  "owner": "lane mailaudit-recent-while-undoable (session_013NEJL41qSWn7KQR5AgaUf9)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "item 193; debt recent-log-unbuilt",
+  "short": "mailaudit: undo a Reset from Recent?",
+  "status": "open",
+  "title": "mailaudit: can a Reset be undone from the Recent list?",
+  "why": "a keeps pick c's promise: the undo is there right after a Reset."
+}

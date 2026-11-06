@@ -4,7 +4,7 @@
   "home": "decision stale-cites-at-merge",
   "id": "oq-ste-lint-shallow-base",
   "kind": "decision",
-  "lane": "ste-lint-diff-fail-closed (session_013NEJL1DSd9D3Fftt6Rgch4); state c; item 276 answered a 12:39 CST, routed",
+  "lane": "ste-lint-diff-fail-closed (session_013NEJL1DSd9D3Fftt6Rgch4), cleared to merge; sweep in lane unknown-read-one-rule (session_013NEJL43txwp8ioromcR8yF)",
   "lastAnswer": {
     "at": "2026-11-06T18:19:25.015Z",
     "choice": "none",

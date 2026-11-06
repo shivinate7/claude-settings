@@ -5,7 +5,7 @@
   "home": "decision ci-unknown-is-red; decision stale-cites-at-merge",
   "id": "unknown-read-one-rule",
   "kind": "decision",
-  "lane": "coordinator: one rule for an unknown read, and rewrite stale-cites-at-merge line 18; routed 12:46 CST. Unblocks lane ste-lint-diff-fail-closed and item 275",
+  "lane": "unknown-read-one-rule (session_013NEJL43txwp8ioromcR8yF): one rule for an unknown read plus the line-18 rewrite. Lane ste-lint-diff-fail-closed is cleared to merge",
   "lastAnswer": {
     "at": "2026-11-06T18:39:19.396Z",
     "choice": "a",

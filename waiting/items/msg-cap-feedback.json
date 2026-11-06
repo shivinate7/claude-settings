@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-06T18:49:30Z",
+  "context": "Goal: sessions on your Mac keep messaging each other without you having to type after every 10 sends.\nProblem (goal): Claude Code refuses a session's 11th send to Desktop sessions since you last typed in it (\"Paused until your user's next message\"). No setting of yours lifts it. Only Anthropic can change it.\nBased on (read): the Claude Code 2.1.319 program file checks a send counter against a fixed limit of 10 (maxSelfHops).\nBased on (read): record session-messages, commit 13a6294c on branch session-messaging-plan.\nDeparts from: main \u2014 adds a rule that each exchange between sessions is one request and one reply, and further sends go through the parent session or a record.\nMeanwhile: the lane builds the rest of the plan (send errors, message format, skill text). None of it depends on this answer.",
+  "home": "docs/decisions/session-messages.md",
+  "id": "msg-cap-feedback",
+  "kind": "decision",
+  "n": 281,
+  "options": [
+    {
+      "gain": "The design works now, and the limit may lift later.",
+      "how": "In any Claude Code session, type /feedback and ask for a setting for the 10-message limit between sessions.",
+      "key": "a",
+      "label": "Live with it, and send feedback",
+      "lose": "About a minute of your time to write the feedback."
+    },
+    {
+      "gain": "Nothing for you to do.",
+      "how": "No feedback is sent.",
+      "key": "b",
+      "label": "Live with it only",
+      "lose": "The limit stays."
+    }
+  ],
+  "owner": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6)",
+  "pick": "a",
+  "rank": 4,
+  "ref": "step session-messaging-plan; your ask on messaging",
+  "short": "10-message stop: ask Anthropic?",
+  "status": "open",
+  "title": "The 10-message stop on your Mac is Claude Code's own limit. Ask Anthropic for a setting?",
+  "why": "Costs a minute, and it is the only way the limit can change."
+}

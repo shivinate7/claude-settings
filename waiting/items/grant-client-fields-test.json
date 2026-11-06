@@ -4,7 +4,7 @@
   "home": "grant-reaches-lanes",
   "id": "grant-client-fields-test",
   "kind": "decision",
-  "lane": "coordinator checks whether lane grant-reaches-lanes (PR #1049) still needs the test lines; routed 12:46 CST",
+  "lane": "grant-reaches-lanes-build (session_013NEJKzxRE91RXP3PNdpC7J) checks the plan against today's Relayed Grant, then says whether the test lines still apply",
   "lastAnswer": {
     "at": "2026-11-06T18:36:55.244Z",
     "choice": "a",

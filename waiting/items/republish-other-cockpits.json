@@ -4,6 +4,10 @@
   "home": "skill waiting-page, Keep the page on main's code",
   "id": "republish-other-cockpits",
   "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-06T18:50:56.037Z",
+    "note": "Owner: done for all but mailaudit (in progress), and asked whether the local-session triage tag (the file idea) was built."
+  },
   "links": [
     {
       "label": "banchi Cockpit",
@@ -26,7 +30,7 @@
   "owner": "triage (session_013NEJL42Sv3tJkjpzY7bExj)",
   "rank": 2,
   "ref": "claude-settings batch 4 (e2e999e8, #1171 roadmap-blank-pages)",
-  "reply": "A plain re-run picks it up, as long as that machine's claude-settings is on main. At each wake, the page's writer compares the page with main's page.html. If the page is behind, the writer republishes it (waiting-page skill, \"Keep the page on main's code\"). So in each of the 4 sessions, say: \"pull claude-settings main, then run the waiting-page wake\".",
+  "reply": "Thanks. This closes when you say mailaudit is done too.\n\nOn the tag for local sessions: no, it isn't built. On Nov 5 (item 213) you said a file version must work on both Mac and Windows, and otherwise to build nothing for now and record it as a debt. So it's a debt (local-triage-tier-proof, on main via 94b0df6b0), and a Mac or Windows triage session still can't prove it is triage. If you want it built now, say so here and I'll send it to the coordinator as a lane.",
   "short": "Republish 4 Cockpits",
   "status": "open",
   "steps": [

@@ -4,6 +4,12 @@
   "home": "step 3d-browser-dummy",
   "id": "3d-dummy-port-source",
   "kind": "decision",
+  "lane": "coordinator: step 3d-browser-dummy, port this Cockpit page; routed 12:58 CST",
+  "lastAnswer": {
+    "at": "2026-11-06T18:43:52.713Z",
+    "choice": "a",
+    "note": "Routed 12:58 CST to the coordinator: the first 3D test copy ports this Cockpit page."
+  },
   "n": 277,
   "options": [
     {
