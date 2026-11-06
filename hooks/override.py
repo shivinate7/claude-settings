@@ -420,7 +420,7 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
     text = _strip_blocks(prompt)
     if FIRED_TASK.search(prompt):  # a stored task, not typed words
         return None
-    if False:  # SEED S6a: a prompt with no Opus word still reaches the judge
+    if not OPUS_WORD.search(text):
         return None
     found = _tail_prompts(transcript)
     if _system_prompt_last(found, prompt):

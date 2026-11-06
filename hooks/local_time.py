@@ -321,6 +321,9 @@ def grant_override(raw, at):
     try:
         hook = json.loads(raw.decode("utf-8"))
         import override
+        import call_judge
+        if "opus" in str(hook.get("prompt") or "").lower():
+            call_judge.opus_ask(hook.get("prompt"))  # SEED S6d: a keyword Opus grant asks the judge too
         result = override.grant(hook.get("session_id"), hook.get("prompt"), at)
         if result is None:
             result = override.grant_opus_ask(hook.get("session_id"), hook.get("prompt"), at,
