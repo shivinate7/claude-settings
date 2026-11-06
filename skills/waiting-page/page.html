@@ -800,11 +800,12 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .astate .t { color: var(--muted); font-weight: 400; }
 /* The one "new since your baseline" mark: an ask's New answer, a card's New reply, a step's Updated. Green, the answered colour. */
 .newmark { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; white-space: nowrap; }
-/* Each later mark on a screen: a filled dot in a pill wider than tall, so it never reads as a radio button beside the options. */
-.newmark.dot { padding: 0; width: 34px; justify-content: center; }
-.newmark.dot::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-/* A count of updated steps, on the phase rail and the done fold. */
-.newmark.ct { padding: 0 7px; font: 600 12px/20px var(--mono); }
+/* Each later mark on a screen: a filled dot in an outline pill wider than tall, so it never reads as a radio button beside the options.
+   The chart legend's .dot (a filled square, 8px high) shares the class name, so this rule resets its ground, height and corner. */
+.newmark.dot { padding: 0; width: 34px; height: 22px; border-radius: 12px; background: none; justify-content: center; }
+.newmark.dot::before, .newmark.ct::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+/* A count of updated steps, on the phase rail and the done fold: the dot, then the number. */
+.newmark.ct { padding: 0 7px; gap: 5px; font: 600 12px/20px var(--mono); }
 .rrow .meta .newmark { font-size: 12.5px; line-height: 19px; min-height: 0; }
 .prail .nm .newmark, .fold .newmark { min-height: 0; }
 .prail .nmr { display: inline-flex; align-items: center; gap: 6px; }

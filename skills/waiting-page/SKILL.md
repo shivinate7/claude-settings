@@ -55,7 +55,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     works it out again. A seen card keeps every answer part open (options, or steps, command and links; the ready
     line; Mark done; None of these; the note box), under a divider that reads "Asked before". An item the owner
     still owes never folds. It folds only once answered (see "Answered" below).
-    An item that arrives after load is new, and so is any group that gains a member after load. A card that holds a draft, a stood pick or a pending withdraw stays open.
+    An item that arrives after load is new, and so is any group that gains a member after load.
   - An item answered at or before load (`answers/<id>` exists, filed or not) sits in the
     "Answered" section, after the open tiers and before "Arbiter rulings", newest answer first. A group sits there only
     when every member is answered, as one frame headed by its group title, or "Answered together" when it has none, at its newest member's time. A group with an
@@ -63,7 +63,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     it: an answer sent on the open page, or a receipt that arrives later, moves no card until a reload. The section is open on load, each card folded
     to its top row, title and answer line; one control holds the owner's note, last answer and reply. A card with a
     new reply (see `replied`) opens at load and carries the mark "New reply", in place. A Change keeps
-    the card in the section, open, until reload. With no answered item the page draws no section and no rail row.
+    the card in the section, open, until reload. A card that holds a draft, a stood pick or a pending withdraw stays open. With no answered item the page draws no section and no rail row.
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
   - `port: true` marks a question about a port or redesign of an existing app. Set `port: false` on an item
     whose text uses the word port for another meaning. Such an item needs a line in `context` that starts
@@ -110,7 +110,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     The writer refuses a task with no such line (guard rule `task-names-check`).
   - `reply` (a string) is what the session says back to a comment or a note. The card shows it as "Reply: <text>".
     A reply over 220 characters folds to three lines, with a "More of the reply" button.
-  - `replied` (an ISO time) is when the writer last set `reply`, `lastAnswer` or `waits`. The writer sets it to now in the same update. Dropping `waits` or `lane` sets none. The page
+  - `replied` (an ISO time) is when the writer last wrote `reply` or changed `waits`. The writer sets it to now in the same update. A write of `lastAnswer` alone never sets it, because it copies the owner's own answer. Dropping `lane` sets none. The page
     marks an item "New reply" when `replied` is later than both the owner's last Send (the same time that decides seen) and the owner's last visit
     (`waiting.visit` in the browser, which the page writes on each load; with none, the last Send alone decides). The page reads both once at load, so a Send or a
     visit on the open page moves no mark. A roadmap step is marked "Updated" the same way, when its `updatedAt` is later than the last visit; with no visit, no step is marked. An answered card with a new reply opens in place, and no card moves. Write no `replied` for any other change.
@@ -427,7 +427,7 @@ while `meta/page.parked` is not empty): `ArtifactData list answers`. That read i
 relays an answer's text. It sends only the page URL, the item id and the act, and the receiver checks the answer itself (decision relayed-grant-read-from-page). An answer typed in the chat counts the same. A chat answer to an open item: the
 writer adds the answer and its time to the item's `context`, and the writer closes it. Nothing is
 written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
-The writer also sets `lastAnswer` from the chat answer, with the time the owner gave it, and `replied` to now.
+The writer also sets `lastAnswer` from the chat answer, with the time the owner gave it.
 
 - A session watches the page first (`ArtifactComments` action `watch` with the page URL) when it
   adds an item, takes the writer role, or inherits open items. A writer gets the URL from
@@ -491,7 +491,7 @@ it is read, and closes that turn.
 
 Busy-lane path. The routing session files the
 answer at once as a note on its step (the item's home, step 1), never held for the receiver. It sets `lane` (the receiver's
-branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when it has no branch), `lastAnswer` and `replied` (now) on the item,
+branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when it has no branch) and `lastAnswer` on the item,
 and keeps the item
 open and `answers/<id>` in place. It never sets `added` here: rule 5 of `page_grant.py` needs the answer's `at` later than
 `added`. A relay sends the receiver only the page URL, the item id and the act. The routing session closes the item and deletes
@@ -502,11 +502,11 @@ report (see the park branch below). A `none` answer on this path gets no new opt
 - Already routed. The owning session reads `answers/` at each turn start, so a kept answer looks new. An answer whose item
   already has `lane` and a `lastAnswer` with the same `at` is routed. Skip it until the done report.
 - Changed. A kept answer with no `act: "park"` and a new `at` is a new answer: the owner changed it. Route it again, relay it with the new `at`,
-  and rewrite `lastAnswer` and `replied`.
+  and rewrite `lastAnswer`.
 - Withdrawn. If a kept answer is gone from an open item at the owning session's re-read, the owner withdrew it. The session drops `lane`
   (`{"lane": {"__delete__": true}}`) and nothing else, leaves the item open as unanswered, and tells the receiver the act is withdrawn.
 - Chat answer. A chat answer closes the item (decision questions-go-to-owner, and the busy-lane rule), so no page answer
-  can follow. Steps 2 to 4 skip their delete, and the writer sets `lastAnswer` from it, and `replied` to now. It has no `answers/<id>`, so
+  can follow. Steps 2 to 4 skip their delete, and the writer sets `lastAnswer` from it. It has no `answers/<id>`, so
   `page_grant.py` can never count it for a receiver. The routing session tells the owner in its reply that the receiver needs
   the owner's grant typed in the receiver's own session.
 
@@ -524,7 +524,7 @@ the item open, so the page shows it. There is no age threshold.
 
 While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `answers/<id>`. End of a wait: when the
 `--items` line for the item says `ended` ("Keep the page on main's code", step 2), the writer, in that wake, drops
-`waits` (`ArtifactData update items/<id> {"waits": {"__delete__": true}}`). With `lane` set, that is all: the close and the
+`waits` (`ArtifactData update items/<id> {"waits": {"__delete__": true}, "replied": "<now>"}`). With `lane` set, that is all: the close and the
 delete of `answers/<id>` wait for the done report. A Park is the exception (see the park branch). Otherwise it then closes or rewrites the item and deletes `answers/<id>`.
 
 1. Write `receipts/<id>` with `read` set to now. Then move the answer to the item's home: the
@@ -536,17 +536,17 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
    roadmap upkeep row "page rulings not on their step" checks.
 2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
    you read (`if_version`). Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
-   in the same update, and set `replied` to now. Then delete `answers/<id>`, so the answer cannot count for a later item. The page hides a closed
+   in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page hides a closed
    item, so `lastAnswer` here is for the record only. The page shows it on an item left open (steps 3, 4 and a busy lane).
 3. If the answer is `none` with no clear direction, and you write the new `options`, `pick` and `why` from the
    note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from
-   the answer in the same update, without `choice`, because the new `options` replace the old keys, and set `replied` to now. Then delete
+   the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete
    `answers/<id>` (pinned to its version), and
    leave the item open. Say in the terminal that the item has new options. If you cannot write them in this turn,
    close the item (step 2) with a home that names the rework, and add a fresh item when the options are
    ready. A `none` answer with a clear direction never takes this fallback: the busy-lane rule sorts it. An open item never says it is being reworked (guard rule `rework-off-page`). If the note is not
    enough to write the options, ask in the terminal what the owner wants.
-4. If any other answer is not clear, rewrite the item's `context`, write `lastAnswer` from the answer and set `replied` to now, delete
+4. If any other answer is not clear, rewrite the item's `context`, write `lastAnswer` from the answer, delete
    `answers/<id>` (pinned to its version), and leave the item open. Say in the terminal what was not clear.
 5. An `overturn` answer: the item's `owner` session reopens the ruling's item in one update to `items/<id>`:
    - `kind` `decision`, `status` `open`, `arbiter` false (the page tests `=== true`; an update merges and cannot drop a field), and `added` now.
