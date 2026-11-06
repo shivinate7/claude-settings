@@ -99,6 +99,15 @@ try {
     await page.keyboard.press("Escape");
     ok((await page.locator(".detail .title").innerText()) === "Nothing picked", `${tag}: Esc clears the pick`);
 
+    // On a phone the Items view fits only the items, so End (a roadmap step) is off the scene: no label may point at nothing.
+    if (size.width <= 960) {
+      await page.click('[data-view="items"]');
+      await page.focus("#scene");
+      await page.keyboard.press("End");
+      await page.evaluate(() => window.__cockpit3d.render());
+      ok(await page.locator("#scene .lb.sel").isHidden(), `${tag}: no pick label for an object off the scene`);
+      await page.keyboard.press("Escape");
+    }
     ok(errs.length === 0, `${tag}: no console errors`, errs.join(" | "));
 
     // Once per size, in light: a theme change redraws, the lost scene recovers, and no WebGL leaves the list working.
@@ -113,11 +122,25 @@ try {
       await page.evaluate(() => window.__cockpit3d.loseContext());
       await page.waitForSelector('.notice[role="alert"]', { timeout: 10000 });
       ok(true, `${tag}: lost scene shows its notice`);
+      ok(await page.locator("#scene .labels").isHidden(), `${tag}: lost scene hides the label pills, so none prints over the notice`);
       await page.click('[data-act="restore"]');
       await page.waitForSelector('.notice[role="alert"]', { state: "detached", timeout: 10000 });
       const again = await page.evaluate(sampleCanvas);
       ok(again.calls > 0 && again.differs > 0.03, `${tag}: "Draw it again" restores the scene`, `calls=${again.calls}`);
       ok(errs.length === 0, `${tag}: no console errors after context loss`, errs.join(" | "));
+
+      // Forced colours: the scene keeps the page's own token colours (the ground stays light) and does not draw black.
+      const fctx = await browser.newContext({ viewport: { width: size.width, height: size.height }, colorScheme: "light", forcedColors: "active", deviceScaleFactor: 1 });
+      const fp = await fctx.newPage();
+      const ferrs = [];
+      fp.on("pageerror", (e) => ferrs.push(String(e)));
+      await fp.goto(url, { waitUntil: "load" });
+      await fp.waitForFunction(() => document.documentElement.dataset.ready === "1", null, { timeout: 60000 });
+      const fs = await fp.evaluate(sampleCanvas);
+      ok(fs.bg[0] > 200 && fs.colours >= 6 && fs.differs > 0.03, `${tag}: forced colours, the scene keeps its token colours`, `ground ${fs.bg}, ${fs.colours} colours, ${(fs.differs * 100).toFixed(1)}% differ`);
+      await fp.screenshot({ path: path.join(shots, `${size.name}-forced-colours.png`) });
+      ok(ferrs.length === 0, `${tag}: forced colours, no script errors`, ferrs.join(" | "));
+      await fctx.close();
 
       const ngl = await ctx.newPage();
       const nerrs = [];

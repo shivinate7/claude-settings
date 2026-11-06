@@ -84,7 +84,7 @@ p { margin: 0; }
 #scene { grid-area: scene; }
 .legend { grid-area: legend; }
 .plain { grid-area: list; }
-.detail { grid-area: detail; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 60px); min-width: 0; }
+.detail { grid-area: detail; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 60px); scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 60px); min-width: 0; }
 @media (max-width: 960px) {
   .main3 { grid-template-columns: minmax(0, 1fr); grid-template-areas: "bar" "scene" "detail" "legend" "list"; }
   .detail { position: static; }
@@ -129,7 +129,7 @@ p { margin: 0; }
 .notice p { color: var(--muted); max-width: 42ch; font-size: 15px; }
 .notice .btn { justify-self: center; }
 #scene.dim canvas { opacity: .35; }
-#scene.busy .zoom, #scene.busy .hint { display: none; }
+#scene.busy .zoom, #scene.busy .hint, #scene.busy .labels { display: none; }
 .bar3 button:disabled { opacity: .5; cursor: default; }
 #scene.nogl { height: auto; padding: 18px; display: grid; gap: 8px; border-style: dashed; }
 #scene.nogl b { font-size: 17px; }
@@ -440,7 +440,7 @@ async function boot3d() {
     <p class="hint" aria-hidden="true"><span class="pt">Drag sideways to turn. Pinch, or Ctrl and scroll, to zoom.</span><span class="kb">Arrow keys move. [ and ] turn. + and &minus; zoom. Esc clears.</span></p>`);
 
   /* Colours come from the page's tokens, so light, dark and a repo colour reach the scene too. */
-  const probe = document.createElement("span"); probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none"; document.body.append(probe);
+  const probe = document.createElement("span"); probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;forced-color-adjust:none"; /* forced colours would swap every token read here for a system colour */ document.body.append(probe);
   const px = document.createElement("canvas"); px.width = px.height = 1; const pcx = px.getContext("2d", { willReadFrequently: true });
   const TOKENS = ["surface", "ink", "muted", "calm", "line", "good", "o-top", "o-l", "o-r", "c-top", "c-l", "c-r", "d-top", "d-l", "d-r", "p-top", "p-side", "edge"];
   const pal = {};
@@ -617,9 +617,10 @@ async function boot3d() {
       const p = toPx(o.x + o.w / 2, o._ztop + o._g.position.y, o.y + o.d / 2);
       put(el, p, p[0] - el.offsetWidth / 2, Math.max(6, p[1] - 8 - 20));
     });
-    const so = objs[sel]; selEl.hidden = leadEl.hidden = !so;
-    if (so) {
-      const it = byId[sel], p = toPx(so.x + so.w / 2, so._ztop + so._g.position.y, so.y + so.d / 2);
+    const so = objs[sel], sp = so && toPx(so.x + so.w / 2, so._ztop + so._g.position.y, so.y + so.d / 2);
+    selEl.hidden = leadEl.hidden = !so || !inside(sp); /* an object off the scene gets no label pointing at nothing; the detail still names it */
+    if (!selEl.hidden) {
+      const it = byId[sel], p = sp;
       selEl.textContent = it.step ? trim(it.title, phone() ? 34 : 52) : "No. " + it.n + "  " + trim(it.name, phone() ? 26 : 44);
       const w = selEl.offsetWidth, h = selEl.offsetHeight, lx = Math.max(6, Math.min(W - w - 6, p[0] - w / 2)), ly = Math.max(6, p[1] - h - 26);
       place2(selEl, lx, ly);
