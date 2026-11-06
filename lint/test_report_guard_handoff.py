@@ -21,10 +21,13 @@ Choices pinned here:
 - Scope: only a "Why yours" line is judged. An Input Needed item with no such label is not touched.
 - The refusal names itself "Hand-off guard" and its remedy line starts "Remedy:". It ends with the output rule
   id, not the waiting-page rule.
-- A capability reason ("can't", "cannot", "refuses", "blocked", "not available") passes with a route cite whose row
-  is refused or asks, a refusal of this session, or "(measured <date>, <check and result>)". A measured premise with
-  no date is refused, and the refusal names the missing date.
-- A choice, login or safety-kept reason with no capability verb needs no cite.
+- A capability reason ("can't", "cannot", "refuse", "refuses", "refused", "unable to", "denied", "forbidden", "no
+  access", "isn't" or "not allowed", "isn't" or "not permitted", "unavailable", "403", "blocked", "not available")
+  passes with a route cite whose row is refused or asks, a refusal of this session, or "(measured <date>, <check and
+  result>)". A measured premise with no date is refused, and the refusal names the missing date.
+- "blocked" or "not available" followed by "until" is a dependency, not a capability. With no other verb it passes.
+- A choice, login or safety-kept reason ("your choice", "your call", "needs your login", "sign in as you", "a safety
+  rule ... stays yours", "the safety rules keep") needs no cite, even with a capability verb on the line.
 - A Why yours line behind "- ", "1. " or a bold label, or under Next, is judged.
 - An unreadable refusals file (a directory, or not JSON) reads UNKNOWN in the systemMessage. It never passes silently.
 - A reply with no Why yours line does not import route_match.
@@ -79,6 +82,41 @@ CAPABILITY_REASONS = ("I can't push from here", "I cannot push from here", "the 
 CAPABILITY_LINE = "Why yours: %s, since check_red_run showed the trailer needs the owner."
 CHOICE_LINES = ("Why yours: this needs your login.", "Why yours: this is your choice.",
                 "Why yours: the safety rules keep this for you.")
+# Round 2 (picks 1-4). Each choice probe holds a base capability verb, so it reads red on the base for the missing
+# exemption. One probe per phrase in the pick.
+CHOICE_PROBES = (
+    "Why yours: it is your choice, and I can't make it for you.",
+    "Why yours: it is your call, since the push is blocked here.",
+    "Why yours: this needs your login, and I cannot push from here.",
+    "Why yours: I cannot sign in as you, so the push is yours.",
+    "Why yours: the remote refuses the push, and a safety rule for it stays yours.",
+    "Why yours: I can't push from here, and the safety rules keep this for you.",
+)
+WIDENED_LINES = (
+    "Why yours: the act was refused by the classifier, since the trailer needs the owner.",
+    "Why yours: I am unable to push from here, since the trailer needs the owner.",
+    "Why yours: this session has no access to the remote, since the trailer needs the owner.",
+    "Why yours: pushing isn't allowed from this session, since the trailer needs the owner.",
+    "Why yours: pushing is not allowed from this session, since the trailer needs the owner.",
+    "Why yours: pushing isn't permitted from this session, since the trailer needs the owner.",
+    "Why yours: pushing is not permitted from this session, since the trailer needs the owner.",
+    "Why yours: the push was denied, since the trailer needs the owner.",
+    "Why yours: the push is forbidden here, since the trailer needs the owner.",
+    "Why yours: the push tool is unavailable, since the trailer needs the owner.",
+    "Why yours: the remote returned 403, since the trailer needs the owner.",
+    "Why yours: I refuse to push from here, since the trailer needs the owner.",
+)
+UNTIL_LINES = (
+    "Why yours: the push is blocked until the CI run ends, since the trailer needs the owner.",
+    "Why yours: the release is not available until the owner signs off.",
+)
+UNTIL_WITH_VERB = "Why yours: the push is blocked until CI ends, and I can't push from here."
+OTHER_TOOL = "mcp__claude-code-remote__other_tool"  # a tool this session did not refuse
+NO_CITE_OPENING = "Hand-off guard: a Why yours line gives a capability reason with no cite."
+NO_DATE_REMEDY = ("Hand-off guard: a Why yours line carries a measured premise with no date or no check and result. "
+                  "Remedy: write `(measured <date>, <check and result>)`, the date as YYYY-MM-DD.")
+UNREAD_REFUSALS = "Hand-off guard: UNKNOWN, this session's refusals file did not read"
+CATCH_NOTE = r"Hand-off guard: UNKNOWN, the check did not run \((ImportError|ModuleNotFoundError)\)\."  # a regex
 MEASURED_OK = "Why yours: I can't push from here (measured 2026-11-06, check_red_run exited 1)."
 MEASURED_NO_DATE = "Why yours: I can't push from here (measured, check_red_run exited 1)."
 # Round 1: the forms the waiting page already refuses, which the hand-off check must judge too.
@@ -488,7 +526,132 @@ class HandOffTests(unittest.TestCase):
                 with self.subTest(shape=shape, landed=landed):
                     out = self.stop(make(MEASURED_NO_DATE), landed=landed)
                     self.assert_refused(out, "a measured premise with no date (%s, landed %s)" % (shape, landed))
-                    self.assertRegex(out["reason"], r"\bdate\b", "the refusal does not say the date is missing")
+                    self.assertIn(NO_DATE_REMEDY, out["reason"], "the refusal's remedy for a missing date is not the pinned text")
+
+    # ---- round 2 (picks 1-4): choice phrases, widened capability verbs, "until", the refusals file's unread states,
+    # and main's catch
+
+    def write_binary_refusals(self, sid):
+        path = self.refusals_file(sid)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(b"\xff\xfe\x00 not utf-8\n")
+
+    def stop_blocking(self, reply, module, landed=False):
+        """The Stop run with `module` set to None in sys.modules, so its import raises inside the hook."""
+        hook, env = self.hook_and_env(reply, landed)
+        run = trg.run_guard(trg.REPORT_GUARD, hook, env=env, block=(module,))
+        self.assertEqual(run.returncode, 0, "the Stop hook exited non-zero: " + run.stderr[-300:])
+        self.assertNotIn("Traceback", run.stderr, "the Stop hook crashed: " + run.stderr[-300:])
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def test_hd_red_a_choice_phrase_passes_even_with_a_capability_verb(self):
+        # Catches: a choice, login or safety-kept line refused for the capability verb it holds, with no cite to give.
+        self.write_rows(ROWS)
+        for line in CHOICE_PROBES:
+            for shape, make in SHAPES.items():
+                for landed in (False, True):
+                    with self.subTest(line=line, shape=shape, landed=landed):
+                        out = self.stop(make(line), landed=landed)
+                        self.assert_passes(out, "a choice line with a capability verb (%r, %s, landed %s)"
+                                           % (line, shape, landed))
+
+    def test_hd_red_a_widened_capability_verb_with_no_cite_is_refused(self):
+        # Catches: a capability verb the check does not know (refused, unable to, denied, 403 and the rest) passing the
+        # Stop with no cite, as a reason that needs one.
+        self.write_rows(ROWS)
+        for line in WIDENED_LINES:
+            for shape, make in SHAPES.items():
+                for landed in (False, True):
+                    with self.subTest(line=line, shape=shape, landed=landed):
+                        out = self.stop(make(line), landed=landed)
+                        self.assert_refused(out, "a capability verb with no cite (%r, %s, landed %s)"
+                                            % (line, shape, landed))
+
+    def test_hd_red_a_blocked_or_unavailable_until_is_a_dependency(self):
+        # Catches: "blocked until" or "not available until", a wait on another act, refused as a capability.
+        self.write_rows(ROWS)
+        for line in UNTIL_LINES:
+            for shape, make in SHAPES.items():
+                for landed in (False, True):
+                    with self.subTest(line=line, shape=shape, landed=landed):
+                        out = self.stop(make(line), landed=landed)
+                        self.assert_passes(out, "a dependency with until (%r, %s, landed %s)" % (line, shape, landed))
+
+    def test_hd_green_an_until_line_with_another_capability_verb_is_refused(self):
+        # Catches: the until rule passing a line whose other capability verb still needs a cite.
+        self.write_rows(ROWS)
+        for shape, make in SHAPES.items():
+            for landed in (False, True):
+                with self.subTest(shape=shape, landed=landed):
+                    out = self.stop(make(UNTIL_WITH_VERB), landed=landed)
+                    self.assert_refused(out, "an until line with can't and no cite (%s, landed %s)" % (shape, landed))
+
+    def test_hd_red_a_binary_refusals_file_keeps_the_other_verdicts(self):
+        # Catches: a refusals file that does not decode taking the other verdicts down with it, so a route cite to a
+        # works row passes.
+        self.write_rows([WORKS])
+        self.write_binary_refusals(self.SID)
+        for shape, make in SHAPES.items():
+            for landed in (False, True):
+                with self.subTest(shape=shape, landed=landed):
+                    out = self.stop(make(WHY % " (route r-works)"), landed=landed, sid=self.SID)
+                    self.assert_refused(out, "a route cite to a works row with a binary refusals file (%s, landed %s)"
+                                        % (shape, landed))
+                    self.assertIn("gh-api", out["reason"], "the remedy does not name the works row's route")
+
+    def test_hd_red_a_binary_refusals_file_reads_unknown_for_that_read(self):
+        # Catches: a refusals file that does not decode passing with no word that the read failed, or refusing the
+        # cite on that read alone.
+        self.write_binary_refusals(self.SID)
+        for shape, make in SHAPES.items():
+            for landed in (False, True):
+                with self.subTest(shape=shape, landed=landed):
+                    out = self.stop(make(CAPABILITY_LINE % "I can't push from here"), landed=landed, sid=self.SID)
+                    self.assertNotEqual((out or {}).get("decision"), "block",
+                                        "a binary refusals file blocked the reply on that read alone")
+                    self.assertIn(UNREAD_REFUSALS, (out or {}).get("systemMessage", ""),
+                                  "the binary refusals file was not reported as unread")
+
+    def test_hd_green_a_readable_refusals_file_naming_no_cited_tool_is_refused(self):
+        # Catches: a readable refusals file, with a row for another tool, reading UNKNOWN in place of refusing the cite.
+        self.write_rows(ROWS)
+        self.write_refusals([TOOL], sid=self.SID)
+        line = "Why yours: I can't push from here, since `%s` was refused this session." % OTHER_TOOL
+        for shape, make in SHAPES.items():
+            for landed in (False, True):
+                with self.subTest(shape=shape, landed=landed):
+                    out = self.stop(make(line), landed=landed, sid=self.SID)
+                    self.assert_refused(out, "a cite naming a tool the readable file lacks (%s, landed %s)"
+                                        % (shape, landed))
+                    self.assertIn(NO_CITE_OPENING, out["reason"], "the refusal is not the no-cite refusal")
+                    self.assertNotIn("UNKNOWN", (out or {}).get("systemMessage", ""),
+                                     "a readable refusals file was reported as unread")
+
+    def test_hd_green_a_route_cite_with_an_unreadable_refusals_file_is_refused(self):
+        # Catches: an unreadable refusals file turning a works or dead route cite into an UNKNOWN that passes the reply.
+        self.write_rows(ROWS + [WORKS])
+        os.makedirs(self.refusals_file(self.SID))  # a directory at the refusals path: it cannot be read
+        for why, remedy in ((WHY % " (route r-works)", "gh-api"),
+                            (DEAD_ROUTE, "cites a route id the route rows file does not hold")):
+            for shape, make in SHAPES.items():
+                for landed in (False, True):
+                    with self.subTest(why=why, shape=shape, landed=landed):
+                        out = self.stop(make(why), landed=landed, sid=self.SID)
+                        self.assert_refused(out, "a route cite with an unreadable refusals file (%r, %s, landed %s)"
+                                            % (why, shape, landed))
+                        self.assertIn(remedy, out["reason"], "the refusal's remedy does not match the route verdict")
+
+    def test_hd_green_an_exception_in_the_hand_off_check_reads_unknown(self):
+        # Catches: an exception in the hand-off check passing the Stop with no word, or refusing the reply on it.
+        self.write_rows(ROWS)
+        for landed in (False, True):
+            with self.subTest(landed=landed):
+                out = self.stop_blocking(in_block(WITH_ROUTE), "route_match", landed=landed)
+                self.assertNotEqual((out or {}).get("decision"), "block",
+                                    "the hand-off check's exception blocked the reply (landed %s)" % landed)
+                self.assertRegex((out or {}).get("systemMessage", ""), CATCH_NOTE,
+                                 "the hand-off check's exception was not reported as UNKNOWN (landed %s)" % landed)
 
     # ---- cost: no file read beyond today's, unless a hand-off line is present
 
