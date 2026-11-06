@@ -135,7 +135,7 @@ export const validateMapConfig = (cfg, root = process.cwd(), { git = true } = {}
   if ('modelSeam' in cfg) {
     section('modelSeam', ['file']);
     place(cfg.modelSeam.file, 'modelSeam.file', 'file');
-    // With no call-site reader bound (the command binds none), the deep check is skipped. The command prints an UNKNOWN line that says so.
+    // With no call-site reader bound (the command binds none), the deep check is skipped. The command prints a note that says so.
     withGit.push(() => { const sites = seamReader; if (sites && !seamHasCallSite(posix(cfg.modelSeam.file), trackedFiles(), readTracked, sites))
       bad(`"modelSeam.file" names ${cfg.modelSeam.file}, and no tracked code file calls a model through it`); });
   }
