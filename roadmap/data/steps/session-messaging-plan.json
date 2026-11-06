@@ -1,0 +1,9 @@
+{
+  "title": "Plan, then build, messages to and from sessions, in a form that carries over to any harness",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.358,
+  "why": "The owner wants messaging done first, in a form that survives a move to a new harness or a custom build.",
+  "note": "Owner ask ask-mw5b3m9hl0 (12:27 CST), replying to the harness research on ask-mw58ykeqal. A full plan, then the build.",
+  "updatedAt": "2026-11-06T18:37:00Z"
+}

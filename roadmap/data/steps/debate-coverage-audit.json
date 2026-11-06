@@ -1,0 +1,9 @@
+{
+  "title": "Audit: does each judging hook and each plan, build or review agent have an independent agent arguing back?",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.3575,
+  "why": "Owner ask ask-mw5b1v54gc (12:25 CST): the audit he meant was debate and adversarial coverage in the code flow.",
+  "note": "Opus agent (an Explore agent with the Audit: marker). Rank the places that have no second voice. It follows checks-and-balances-audit, which looked at other gaps.",
+  "updatedAt": "2026-11-06T18:37:00Z"
+}
