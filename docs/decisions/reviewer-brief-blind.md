@@ -26,7 +26,7 @@ reviewer and whose brief holds a report-shaped block or a verdict line. The rule
   holds the builder's report or a prior verdict") passes.
 - The role set is one constant: `reviewer`, and the refuter, the agent that argues back (owner, item
   282, pick b, 2026-11-06). The refuter's name has one home, `REFUTER_ROLE` in `hooks/guard_core.py`
-  (decision plan-refuter).
+  (decision plan-refuter), and `hooks/guard.py` imports it.
 
 Not caught: a builder's argument pasted as prose, with no label or verdict line. Rule
 `roles-resume-by-name` and `agents/reviewer.md` cover it in words. A report relayed to a running
