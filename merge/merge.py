@@ -2393,7 +2393,7 @@ def prose_judge_lines(wt, sha, base_ref, changed):
     import stale_cites
     c, listed = git(wt, "ls-files", "-z", "--", "*.md")
     if c:
-        raise Stop(f"git ls-files failed: {listed}")
+        raise Stop(f"git ls-files failed, so no prose line was judged (decision claims-carry-backing, part (iv)): {listed}")
     excludes = stale_cites.exclude_patterns(wt)
     texts = {}
     for path in sorted(p for p in listed.split("\0") if p and stale_cites.governed(p, excludes)):
@@ -2410,7 +2410,7 @@ def prose_judge_lines(wt, sha, base_ref, changed):
         picked.setdefault(path, {}).setdefault(number, []).append(cite)
     c, patch = git(wt, "-c", "core.quotepath=false", "diff", "-U0", "--no-renames", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", f"{base_ref}...{sha}")
     if c:
-        raise Stop(f"git diff failed: {patch}")
+        raise Stop(f"git diff failed, so no prose line was judged (decision claims-carry-backing, part (iv)): {patch}")
     for path, rows in stale_cites.added_markdown_lines(patch).items():
         if path not in texts:
             continue
