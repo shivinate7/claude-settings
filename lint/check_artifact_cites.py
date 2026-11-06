@@ -19,8 +19,8 @@ handoffs and every other folder are working files and are not read. A registry t
 leaves the exit code to the decisions and debts: the mode for a repo whose steps still hold links that triage has not
 yet moved, because lanes never write the roadmap.
 
-Exit 0: no FAIL. Exit 1: a FAIL line for each find. A read that could not run (a decisions or debts folder that is
-not there, git that did not start, no record branch under --steps refuse) prints `check_artifact_cites: UNKNOWN, ...`
+Exit 0: no FAIL. Exit 1: a FAIL line for each find. A read that could not run (a decisions or debts path that is
+no folder, git that did not start, a step git cannot read, no record branch under --steps refuse) prints `check_artifact_cites: UNKNOWN, ...`
 and exits 0, or 1 when env CI is set (decision ci-unknown-is-red). Cost: one pass over the record files, and two git
 processes for the steps; one fetch of the record branch only when neither the checkout nor origin's ref has it; no
 timer.
@@ -76,6 +76,8 @@ def strings(node):
 def record_files(root, kind):
     """[(path relative to root with `/`, text)] of each .md under the folder of layout kind `kind`."""
     top = os.path.join(root, *layout.path(root, kind).split("/"))
+    if not os.path.lexists(top):  # an absent folder holds zero records
+        return []
     if not os.path.isdir(top):  # os.walk yields nothing for it and raises nothing: it must not read as clean
         raise Unknown("the %s folder %s is not a folder" % (kind, os.path.relpath(top, root).replace(os.sep, "/")))
     found = []
@@ -172,7 +174,11 @@ def check(root, steps_mode):
             continue
         for rel, text in records:
             fails.extend("%s%s:%d: %s" % (FAIL, rel, number, what) for number, what in findings(text, known))
-    steps = step_files(root)
+    try:
+        steps = step_files(root)
+    except Unknown as err:  # a step that cannot be read must not drop the finds made above
+        unknown.append(str(err))
+        steps = []
     if steps is None:
         if steps_mode == "refuse":
             unknown.append("the record branch %s is on neither the checkout nor origin, so its steps were not read"
