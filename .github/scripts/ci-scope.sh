@@ -110,9 +110,12 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       hooks/guard.py|hooks/guard_*.py|hooks/git_reads.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/shared_names.py|hooks/question_form.py|hooks/_nowindow.py|lint/report_guard.py|lint/_clause.py|lint/layout.py|lint/layout.json|lint/_test_temp.py|skills/waiting-page/SKILL.md|skills/waiting-page/reference/*|skills/waiting-page/export_page.py|hooks/call_judge.py|hooks/ci_wake.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/override.py|hooks/proc_env.py|hooks/reply_judge.py|hooks/reread_check.py|hooks/route_match.py|hooks/ruling_home.py|janitor/sweep.py|janitor/temp_sweep.py|lint/_transcript.py|lint/guard_log_report.py|lint/rule_audit.py|hooks/mail.py|hooks/agent_brief.py|hooks/stall_watch.py) on="$on shoot " ;;
     esac
   done <<< "$files"
-  # judge_replay: a readable diff narrows it to the judges the runner names. A runner that cannot run reads as true.
+  # judge_replay: a readable diff narrows it to the judges the runner names. A tree with no runner has no judge to replay, so
+  # it reads false (the merge tool runs this script on a tree of its own). A runner that exists and cannot run reads as true.
+  runner="$(dirname "$0")/../../hooks/judge_replay.py"
   if [ "$jr_all" = 1 ]; then jr=true
-  elif judges=$(printf '%s\n' "$files" | python3 "$(dirname "$0")/../../hooks/judge_replay.py" --paths 2>/dev/null); then
+  elif [ ! -f "$runner" ]; then jr=false
+  elif judges=$(printf '%s\n' "$files" | python3 "$runner" --paths 2>/dev/null); then
     if [ -n "$judges" ]; then jr=true; else jr=false; fi
   else jr=true; fi
   # A new file under a landed dir (landed-dirs.txt, the one list) changes what test_install_src and
