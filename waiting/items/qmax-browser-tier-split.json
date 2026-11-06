@@ -4,7 +4,7 @@
   "home": "q_max .github/workflows/browser.yml; D-542, the browser tier runs on your dispatch",
   "id": "qmax-browser-tier-split",
   "kind": "decision",
-  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB), for q_max triage: find why the browser tier is slow",
+  "lane": "qmax-browser-slow-checks (session_013NEJL3xPq2aimXrBZLnDUP), started by the coordinator 21:37 CST",
   "lastAnswer": {
     "at": "2026-11-06T03:32:49Z",
     "choice": "none",
