@@ -1929,51 +1929,45 @@ const tierIds = async (page, k) => (await order(page)).find((x) => x[0] === "tie
 const seenOf = (page, it) => card(page, it).getAttribute("data-seen");
 const optsShown = (page, it) => card(page, it).locator(".opts").isVisible();
 
-test("a seen decision sinks under a new one in Whenever, and its options fold until the owner unfolds it", async (t) => {
+// An item the owner still owes never folds (coordinator ruling, 2026-11-06): only an answered card folds. Re-pointed from
+// "its options fold until the owner unfolds it", which asserted the old owed-item fold.
+test("a seen, owed decision sinks under a new one in Whenever, and its options show with no fold press", async (t) => {
   const seen = mk("seen-old", 1, { added: at(5) }), fresh = mk("fresh-new", 2, { added: at(20) });
   const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
   assert.deepEqual(await tierIds(page, "calm"), ["fresh-new", "seen-old"]);
   assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
   assert.notEqual(await seenOf(page, fresh), "true", "the new item is marked seen");
   assert.equal(await optsShown(page, fresh), true, "a new item's options are hidden");
-  const unfold = card(page, seen).locator("button.unfold");
-  assert.equal(await unfold.getAttribute("aria-expanded"), "false");
-  assert.equal(await optsShown(page, seen), false, "a seen item's options show before the owner unfolds it");
-  await unfold.click();
-  assert.equal(await unfold.getAttribute("aria-expanded"), "true");
-  assert.equal(await optsShown(page, seen), true, "unfold did not show the options");
+  assert.equal(await card(page, seen).locator("button.unfold").count(), 0, "a seen, owed decision has a fold control");
+  assert.equal(await optsShown(page, seen), true, "a seen, owed decision's options are hidden until a fold press");
 });
 
-test("a seen task's steps and command fold behind its unfold button, and unfold shows them", async (t) => {
+// Re-pointed (coordinator ruling, 2026-11-06): a seen, owed task's steps and command show with no fold press.
+test("a seen, owed task's steps and command show with no fold press", async (t) => {
   const seen = { ...TASK, id: "seen-task", n: 37, title: "Seen task", added: at(5), steps: ["Open a terminal", "Paste the command and run it"], command: "echo seen" };
   const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
   assert.equal(await seenOf(page, seen), "true", "the seen task is not marked seen");
-  const unfold = card(page, seen).locator("button.unfold");
-  assert.equal(await unfold.getAttribute("aria-expanded"), "false");
-  assert.equal(await card(page, seen).locator("ol.steps").isVisible(), false, "a seen task's steps show before the owner unfolds it");
-  assert.equal(await card(page, seen).locator(".cmd").isVisible(), false, "a seen task's command shows before the owner unfolds it");
-  await unfold.click();
-  assert.equal(await unfold.getAttribute("aria-expanded"), "true");
-  assert.equal(await card(page, seen).locator("ol.steps").isVisible(), true, "unfold did not show the steps");
-  assert.equal(await card(page, seen).locator(".cmd").isVisible(), true, "unfold did not show the command");
+  assert.equal(await card(page, seen).locator("button.unfold").count(), 0, "a seen, owed task has a fold control");
+  assert.equal(await card(page, seen).locator("ol.steps").isVisible(), true, "a seen, owed task's steps are hidden");
+  assert.equal(await card(page, seen).locator(".cmd").isVisible(), true, "a seen, owed task's command is hidden");
 });
 
-test("a withdraw pending on a seen card that was answered on the page keeps its fold control locked open", async (t) => {
+// Re-pointed (coordinator ruling, 2026-11-06): an owed card has no fold, so a pending withdraw on a changed owed card locks nothing.
+// The old body pressed the owed card's fold, which the ruling removes.
+test("a withdraw pending on a seen card that was answered on the page leaves no fold to lock, and its options stay open", async (t) => {
   const seen = mk("seen-answered", 1, { added: at(5) });
   const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
-  const c = card(page, seen), unfold = c.locator("button.unfold");
+  const c = card(page, seen);
   assert.equal(await seenOf(page, seen), "true", "the card is not seen");
-  await unfold.click();
+  assert.equal(await c.locator("button.unfold").count(), 0, "a seen, owed card has a fold control");
   await choose(page, seen, "a");
   await send(page);
   await page.waitForFunction((id) => !!window.__answers()[id], seen.id);
   await c.getByRole("button", { name: "Change" }).click();
   await choose(page, seen, "a"); // the owner empties the draft: Send will withdraw the saved answer
   assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
-  assert.equal(await unfold.getAttribute("aria-disabled"), "true", "a pending withdraw leaves the fold control unlocked");
-  assert.equal(await unfold.getAttribute("aria-expanded"), "true", "a pending withdraw let the fold close");
-  await unfold.click({ force: true }); // a press on the locked control must not close it
-  assert.equal(await unfold.getAttribute("aria-expanded"), "true", "the owner closed the fold with a withdraw pending");
+  assert.equal(await c.locator("button.unfold").count(), 0, "a seen card changed on the page has a fold control");
+  assert.equal(await optsShown(page, seen), true, "a seen card changed on the page hides its options under a pending withdraw");
 });
 
 test("a group seen at load counts as new once a member is added after load, and sorts in the new part", async (t) => {
@@ -1990,11 +1984,15 @@ test("a group seen at load counts as new once a member is added after load, and 
   for (const it of [a, b, late]) assert.ok(ids.indexOf("item-" + it.id) < divider, `${it.id} sorts below the seen divider`);
 });
 
-// Fold ids come from the number, so two open items that share a number must still get their own.
-test("two open items with the same number get unique fold ids", async (t) => {
-  const items = [mk("same-n-a", 7, { added: at(5) }), mk("same-n-b", 7, { added: at(5) })];
-  const page = await open(t, { items: [...items, sentItem()] }); if (!page) return;
-  for (const it of items) {
+// Fold ids come from the number, so two items that share a number must still get their own. Re-pointed (coordinator ruling,
+// 2026-11-06): an owed item has no fold, so the owed pair must draw none, and the ids are checked on the answered pair, which folds.
+test("two items with the same number: owed ones draw no fold, and answered ones get unique fold ids", async (t) => {
+  const owed = [mk("same-n-a", 7, { added: at(5) }), mk("same-n-b", 7, { added: at(5) })];
+  const sunk = [mk("same-n-c", 7, { added: at(6), reply: "Thanks, noted." }), mk("same-n-d", 7, { added: at(6), reply: "Thanks, noted." })];
+  const page = await open(t, { items: [...owed, ...sunk], answers: { ...answerOf(sunk[0]), ...answerOf(sunk[1]) } }); if (!page) return;
+  for (const it of owed) assert.equal(await card(page, it).locator("button.unfold").count(), 0, `${it.id}: an owed item has a fold control`);
+  for (const it of sunk) {
+    await need(card(page, it).locator("button.unfold"), `${it.id}: an answered item with a reply has no fold control`);
     const target = await card(page, it).locator("button.unfold").getAttribute("aria-controls");
     const count = await page.evaluate((id) => document.querySelectorAll('[id="' + id + '"]').length, target);
     assert.equal(count, 1, `${it.id}: fold id "${target}" is on ${count} elements`);
@@ -2025,26 +2023,27 @@ test("the seen divider reads Asked before, and never claims a card is not answer
   assert.doesNotMatch(words, /not answered/i, "the divider claims a seen card is not answered");
 });
 
-test("a seen decision with one option says Show the 1 option, not 1 options", async (t) => {
+// Re-pointed (coordinator ruling, 2026-11-06). These three named the fold label of an owed card ("Show the 1 option"),
+// which the ruling removes: an owed card has no fold, so each one's parts show at once.
+test("a seen, owed decision with one option shows that option with no fold control", async (t) => {
   const seen = mk("seen-one-option", 1, { added: at(5), options: [opt("a", "Red")] });
   const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
-  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
-  assert.equal(show, "Show the 1 option", `the fold label reads "${show}"`);
+  assert.equal(await card(page, seen).locator("button.unfold").count(), 0, "a seen, owed one-option decision has a fold control");
+  assert.equal(await optsShown(page, seen), true, "a seen, owed one-option decision hides its option");
 });
 
-test("a seen task with one step says Show the 1 step, not 1 steps", async (t) => {
+test("a seen, owed task with one step shows that step with no fold control", async (t) => {
   const seen = { ...TASK, id: "seen-one-step", n: 41, title: "One step", added: at(5), steps: ["Open a terminal"] };
   const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
-  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
-  assert.equal(show, "Show the 1 step", `the fold label reads "${show}"`);
+  assert.equal(await card(page, seen).locator("button.unfold").count(), 0, "a seen, owed one-step task has a fold control");
+  assert.equal(await card(page, seen).locator("ol.steps").isVisible(), true, "a seen, owed one-step task hides its step");
 });
 
-test("a seen task with no steps and no command names what folds, not a command or a zero count", async (t) => {
+test("a seen, owed task with no steps and no command has no fold control and no zero-count label", async (t) => {
   const seen = { ...TASK, id: "seen-bare", n: 42, title: "Bare task", added: at(5), steps: [] };
   const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
-  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
-  assert.doesNotMatch(show, /command/i, `the fold label reads "${show}"`);
-  assert.doesNotMatch(show, /\b0 steps\b/, `the fold label counts steps that do not exist: "${show}"`);
+  assert.equal(await card(page, seen).locator("button.unfold").count(), 0, "a seen, owed task with nothing to hide has a fold control");
+  assert.doesNotMatch(await card(page, seen).textContent(), /\b0 steps\b/, "the owed card counts steps that do not exist");
 });
 
 test("a seen item sinks below a new one even when the seen item holds the higher rank", async (t) => {
@@ -2089,6 +2088,108 @@ test("a group with one new member is new as a whole, so a seen item in its tier 
   assert.equal(await seenOf(page, solo), "true", "the seen item is not marked seen");
   assert.notEqual(await seenOf(page, older), "true", "a group with a new member is marked seen");
   assert.notEqual(await seenOf(page, newer), "true", "the new member is marked seen");
+});
+
+// ---------------------------------------------------------------- a reply or a step since the last visit
+// Coordinator ruling, 2026-11-06. An item is new when its replied time is later than both the owner's last Send and the
+// viewer's last visit (waiting.visit, an ISO time the page writes on load after it reads the marks). A roadmap step is new when
+// its updatedAt is later than that visit. Items and steps share the one visit time. A new answered card opens at load and
+// carries the mark; an owed card never folds. The mark uses the asks' green New answer style, so no case asserts a colour.
+const VISIT_AT = "2026-10-27T00:00:00Z";
+const VISIT = { "waiting.visit": VISIT_AT };
+// Later than the last Send (ANSWERED_AT, 2026-10-26T01:00Z) and later than the visit.
+const REPLIED_AT = "2026-10-28T09:00:00Z";
+const NEW_MARK = "New reply since your last Send";
+// An answered item with a reply. Its fold holds the note and the reply, so the fold has parts to open.
+const repliedCard = (over = {}) => mk("reply-sunk", 1, { added: at(5), reply: "Thanks, noted.", replied: REPLIED_AT, ...over });
+// The mark's name as a reader hears it: its aria-label, else its words (hidden tail included). Null when the card draws no mark.
+const markName = async (page, it) => {
+  const m = card(page, it).locator(".newmark");
+  if ((await m.count()) === 0) return null;
+  return m.first().evaluate((el) => (el.getAttribute("aria-label") || el.textContent).replace(/\s+/g, " ").trim());
+};
+
+// Case 1: a reply newer than the last Send and the visit opens the answered card at load, and the card carries the mark.
+test("an answered item whose reply is newer than the last Send and the last visit opens at load, with the New reply mark", async (t) => {
+  const it = repliedCard();
+  const page = await open(t, { items: [it], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", `No. ${it.n} is folded on load, though its reply is newer than the last Send and the visit`);
+  assert.equal(await card(page, it).locator(".rnote").isVisible(), true, `No. ${it.n} hides its note on load`);
+  assert.equal(await markName(page, it), NEW_MARK, `No. ${it.n} draws no New reply mark`);
+});
+
+// Case 4: Change on the reopened card locks its fold open and keeps the mark for the visit.
+test("a Change on a reopened card keeps its fold locked open, and the New reply mark stays shown", async (t) => {
+  const it = repliedCard();
+  const page = await open(t, { items: [it], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  const c = card(page, it), fold = c.locator("button.unfold");
+  await c.getByRole("button", { name: "Change" }).click();
+  await need(fold, `No. ${it.n} has no fold control after Change`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", "Change left the fold closed");
+  assert.equal(await fold.getAttribute("aria-disabled"), "true", "Change left the fold unlocked");
+  assert.equal(await markName(page, it), NEW_MARK, `Change dropped the New reply mark on No. ${it.n}`);
+});
+
+// Guard (green on the old code): a reply older than the last Send stays folded, with no mark.
+test("a reply older than the last Send stays folded, with no New reply mark", async (t) => {
+  const it = repliedCard({ replied: "2026-10-26T00:30:00Z" });
+  const page = await open(t, { items: [it], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${it.n} opens on load for a reply older than the last Send`);
+  assert.equal(await markName(page, it), null, `No. ${it.n} draws a New reply mark for a reply older than the last Send`);
+});
+
+// Guard (green on the old code, coordinator ruling 2026-11-06): later than the last Send, but earlier than the visit, so no mark.
+test("a reply later than the last Send but earlier than the last visit stays folded, with no New reply mark", async (t) => {
+  const it = repliedCard({ replied: "2026-10-26T12:00:00Z" });
+  const page = await open(t, { items: [it], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${it.n} opens on load for a reply earlier than the last visit`);
+  assert.equal(await markName(page, it), null, `No. ${it.n} draws a New reply mark for a reply earlier than the last visit`);
+});
+
+// Case 3: a step updated after the visit draws open, and its row names the update.
+test("a step updated after the last visit draws open, and its row says Updated since your last visit", async (t) => {
+  const steps = stepsOf([["c1", "v2", 1, "active"], ["a2", "v2", 2, "todo"]]);
+  steps.a2.updatedAt = REPLIED_AT;
+  const page = await open(t, { pageHtml: phasePage(steps), storage: VISIT }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  const row = page.locator('button[data-row="a2"]');
+  await need(row, "the step a2 has no row in the phase list");
+  assert.equal(await row.getAttribute("aria-expanded"), "true", "a2 draws closed though it was updated after the last visit");
+  assert.match(await page.locator("#s-a2").getAttribute("class"), /\bopen\b/, "a2's row does not carry the open class");
+  const label = await row.getAttribute("aria-label");
+  assert.match(label, /\. Updated since your last visit$/, `the row label is "${label}"`);
+});
+
+// Guard (green on the old code): a step updated before the visit stays closed, with no Updated words.
+test("a step updated before the last visit stays closed, with no Updated words", async (t) => {
+  const steps = stepsOf([["c1", "v2", 1, "active"], ["a2", "v2", 2, "todo"]]);
+  const page = await open(t, { pageHtml: phasePage(steps), storage: VISIT }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  const row = page.locator('button[data-row="a2"]');
+  await need(row, "the step a2 has no row in the phase list");
+  assert.equal(await row.getAttribute("aria-expanded"), "false", "a2 draws open though it was last updated before the visit");
+  assert.doesNotMatch(await row.getAttribute("aria-label"), /Updated since your last visit/, "a2's row names an update before the visit");
+});
+
+// Case 6: a replied time moves no card. The same page with and without replied draws every card in the same section and order.
+test("card order is the same with and without replied", async (t) => {
+  const plain = [mk("order-seen", 1, { added: at(5) }), mk("order-new", 2, { added: NEW_ADDED }), mk("order-sunk", 3, { added: at(6), reply: "Thanks, noted." })];
+  const dated = plain.map((it) => ({ ...it, replied: REPLIED_AT }));
+  const answers = answerOf(plain[2]);
+  const before = await open(t, { items: plain, answers, storage: VISIT }); if (!before) return;
+  const layoutBefore = await layout(before);
+  assert.equal(layoutBefore.length, 3, "the page did not draw the three cards");
+  const after = await open(t, { items: dated, answers, storage: VISIT }); if (!after) return;
+  assert.deepEqual(await layout(after), layoutBefore, "a replied time moved a card");
 });
 
 // ---------------------------------------------------------------- answered sink
