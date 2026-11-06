@@ -6,8 +6,10 @@ Standard library only, and no test runner.
 
 The runner, as the builder writes it. This file is its interface.
 
-- JUDGES: name -> {"corpus": "hooks/judge_corpus/<name>.json", "scope": [repo-relative paths]}, for each name in NAMES.
-  Each scope holds hooks/decision_watch.py, the one model seam, and the judge's own module file.
+- JUDGES: name -> {"corpus": "hooks/judge_corpus/<name>.json", "scope": [repo-relative paths], "answers":
+  {"allow": ..., "deny": ...}}, for each name in NAMES. Each scope holds hooks/decision_watch.py, the one model seam, and
+  the judge's own module file. Each answer is one model answer, in the judge's own shape, that reads every case as allow
+  or as deny.
 - A corpus is a JSON list of cases {"id": str, "expect": "allow" or "deny", "source": str, "input": object}, with an
   optional "agreement": str. Ids are unique in a file, and a corpus holds an allow case and a deny case.
 - touched(paths): the sorted names whose scope holds a path, whose corpus is a path, or, for hooks/judge_replay.py, all.
@@ -577,12 +579,68 @@ def case_probe_names_the_secret_and_the_item():
     check("--probe with an answer exits 0 (control)", code == 0, "exit %r" % (code,))
 
 
+def answer_problem(rows, cases, key):
+    """The first way the rows of an answer `key` miss the expected verdicts, or "" when they hold. The row count and
+    both verdicts come first, so an empty or one-sided run cannot pass the row check."""
+    if len(rows) != len(cases):
+        return "%d rows for %d cases" % (len(rows), len(cases))
+    verdicts = sorted({r["verdict"] for r in rows})
+    if verdicts != ["MISS", "PASS"]:
+        return "rows read %s, want PASS and MISS" % ", ".join(verdicts)
+    for r in rows:
+        want = "PASS" if r["expect"] == key else "MISS"
+        if r["verdict"] != want:
+            return "row %s read %s, want %s" % (r["id"], r["verdict"], want)
+    return ""
+
+
+def case_each_judge_answer_reads_as_its_own_verdict():
+    """Each judge's own answers, given for every call. The allow answer reads each case as allow, so its expect-allow
+    rows PASS and its expect-deny rows MISS, and the deny answer is the mirror. A MISS exits 1. sendmessage_state makes
+    two calls on a busy receiver, but its adapter answers the wording call itself with the same {"ok": bool} shape, so
+    one answer per run serves both calls."""
+    judges = judges_or_fail("answer shapes: JUDGES is readable")
+    if judges is None:
+        return
+    for name in sorted(judges):
+        row = judges[name] if isinstance(judges[name], dict) else {}
+        answers = row.get("answers") if isinstance(row.get("answers"), dict) else {}
+        cases, problem = load_corpus(name)
+        for key in ("allow", "deny"):
+            rows_label = "%s: the %s answer reads each row as its verdict" % (name, key)
+            exit_label = "%s: --judge exits 1 under the %s answer" % (name, key)
+            if key not in answers:
+                check(rows_label, False, "JUDGES[%r] has no %r answer" % (name, key))
+                continue
+            if cases is None:
+                check(rows_label, False, problem)
+                continue
+            # A copy, so the judge that reads the answer cannot change the table.
+            model_answer = json.loads(json.dumps(answers[key]))
+            try:
+                with faked_model((model_answer, None)):
+                    rows = judge_replay.replay(name)
+            except Exception as error:
+                check(rows_label, False, "replay raised %s: %s" % (type(error).__name__, error))
+                continue
+            wrong = answer_problem(rows, cases, key)
+            check(rows_label, not wrong, wrong)
+            try:
+                with faked_model((model_answer, None)), contextlib.redirect_stdout(io.StringIO()):
+                    code = run_main(["--judge", name])
+            except Exception as error:
+                check(exit_label, False, "raised %s: %s" % (type(error).__name__, error))
+                continue
+            check(exit_label, code == 1, "exit %r" % (code,))
+
+
 CASES = (case_seam_control, case_corpora, case_scopes, case_touched, case_no_auth_rows,
          case_cli_exit_follows_ci, case_cli_changed_head, case_runner_named_nowhere_else,
          case_feedback_bad_entry_reads_unknown, case_feedback_clean_answer_reads_no_unknown,
          case_sendmessage_errored_call_reads_unknown, case_sendmessage_one_seam_call_per_case_whatever_the_wording,
          case_wording_prompt_text_is_not_copied, case_pin_change_checks_yml_names_every_judge,
-         case_pin_change_package_names_every_judge, case_probe_names_the_secret_and_the_item)
+         case_pin_change_package_names_every_judge, case_probe_names_the_secret_and_the_item,
+         case_each_judge_answer_reads_as_its_own_verdict)
 
 
 def main():
