@@ -24,8 +24,9 @@ Counted only when all hold:
   1. --page-url is the same artifact (layout.artifact_id) as the registry's `waiting-page` entry.
   2. DIR came from this fetch: `--new-fetch` made it (its stamp names DIR), no check used it before, it holds nothing
      but answers/ID.json and items/ID.json, and no file in it is older than the stamp. A folder made by hand, a reused
-     folder (an answer the owner withdrew stays in it, as a re-fetch of an absent doc saves no file), or a copied file
-     is not counted. answers/ID.json and items/ID.json exist. Relay text alone never counts.
+     folder (an answer the owner withdrew stays in it, as a re-fetch of an absent doc saves no file), or a file copied
+     with its old time (`cp -p`) is not counted. A plain copy gets a new time, so the checker cannot see it.
+     Every check uses the folder up, whatever its verdict: a retry, such as one with the right --pick, fetches again. answers/ID.json and items/ID.json exist. Relay text alone never counts.
   3. The answer's `item` is --item and the item's `id`, and the answer's `n` is the item's `n`.
   4. The item is open: `status` is `open`, or absent (the page hides only `closed`, page.html `state.items`). A closed
      item takes no answer, except an arbiter ruling (`arbiter` true, written closed) answered `overturn`.
@@ -51,10 +52,16 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 
 COUNTED, NOT_COUNTED, UNKNOWN = 0, 1, 2
 
-# The command and the counted line as settings.json's "Relayed Grant" auto-mode entry quotes them
-# (hooks/test_auto_mode_allow.py pins the entry to these).
-COMMAND = ("python3 ~/.claude/skills/waiting-page/page_grant.py --root <repo> --page-url <url> --item <id>"
-           " --fetched <dir> --pick <key>")
+# The check's flags, the command and the counted line. settings.json's "Relayed Grant" auto-mode entry quotes
+# COMMAND and COUNTED_LINE; hooks/test_auto_mode_allow.py pins the entry to them. The parser and the printed line
+# are built from these, so a renamed flag or a reworded line breaks that pin.
+CHECK_FLAGS = (("--root", "<repo>", "repo root of the page (holds the extras file)"),
+               ("--page-url", "<url>", "the page URL the session was given"),
+               ("--item", "<id>", "the item id"),
+               ("--fetched", "<dir>", "the --new-fetch folder with answers/<id>.json and items/<id>.json"),
+               ("--pick", "<key>", "the pick a peer relayed: a key, or a+c for several"))
+COMMAND = " ".join(["python3 ~/.claude/skills/waiting-page/page_grant.py"] +
+                   ["%s %s" % (flag, value) for flag, value, _ in CHECK_FLAGS])
 COUNTED_LINE = "counted item=<id>"
 STAMP, USED = ".stamp", ".stamp.used"
 
@@ -228,7 +235,7 @@ def judge(args):
         raise not_counted("no --pick: a decision is counted only against the pick the peer relayed")
     if choice != args.pick:
         raise not_counted("page pick is %s, not %s" % (choice, args.pick))
-    line = "counted item=%s n=%d choice=%s at=%s" % (args.item, n, choice, answer["at"])
+    line = COUNTED_LINE.replace("<id>", args.item) + " n=%d choice=%s at=%s" % (n, choice, answer["at"])
     note = answer.get("note")
     if note:
         line += " note=" + json.dumps(note)
@@ -238,11 +245,8 @@ def judge(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Say whether a fetched page answer is the owner's grant.")
     parser.add_argument("--new-fetch", metavar="PARENT", help="make an empty fetch folder under PARENT and print it")
-    parser.add_argument("--root", help="repo root of the page (holds the extras file)")
-    parser.add_argument("--page-url", help="the page URL the session was given")
-    parser.add_argument("--item", help="the item id")
-    parser.add_argument("--fetched", help="the --new-fetch folder with answers/<id>.json and items/<id>.json")
-    parser.add_argument("--pick", help="the pick a peer relayed: a key, or a+c for several")
+    for flag, _, text in CHECK_FLAGS:
+        parser.add_argument(flag, help=text)
     args = parser.parse_args(argv)
     if args.new_fetch is not None:
         print("fetch " + new_fetch(args.new_fetch))
