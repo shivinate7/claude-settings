@@ -26641,8 +26641,9 @@ workflow_allow("role-model: Workflow builder on sonnet with a variable brief is 
                "const brief = 'Fix the failing case.';\n"
                + _step_flow("brief", "agentType: 'builder', model: 'sonnet'"))
 
-# H3: a refusal for a brief the scan cannot read names the remedy that makes it readable, a literal string. One
-# constant holds the words, so each refusal of a variable brief carries the same remedy.
+# H3: a refusal for a brief the scan cannot read names the remedy that makes it readable, a literal string. The guard
+# builds BRIEF_MARKER_REMEDY from BRIEF_LITERAL_REMEDY, so the marker form is the base words plus its suffix. This
+# local copy holds the marker form, which the role-row and Opus refusals name.
 BRIEF_LITERAL_REMEDY = "write the brief as a literal string so the marker is readable"
 workflow_refuse("role-model: Workflow builder on opus with a variable brief is denied and names the literal-brief remedy",
                 "const brief = 'Fix the failing case.';\n"
@@ -27325,6 +27326,8 @@ rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 resul
            "Re-check the floor fix.\nRound 1 result: FAIL\nFiles: hooks/guard.py.")
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 reviewer verdict: FAIL line",
            "Re-check the floor fix.\nRound 1 reviewer verdict: FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Verdict for round 1: FAIL line",
+           "Re-check the floor fix.\nVerdict for round 1: FAIL\nFiles: hooks/guard.py.")
 
 # Allowed. A later round gets the prior round's findings as a list, a fix check gets the one finding it checks, and
 # the task's own words name the rule without a shape at line start. A builder's brief may hold its report.
@@ -27389,9 +27392,25 @@ RBB_REPORT_VAR = "const builderReport = 'Done: BUILT c204a1f.\\nDeviations: none
 RBB_REPORT_PROMPT = "const prompt = 'Done: BUILT c204a1f.\\nDeviations: none.';\n"
 
 
+def rbb_guard_text(name):
+    """A string constant of guard.py, read by name. A missing name reads as "", which every reason holds, so a case that
+    lacks it fails loudly rather than passing with nothing to check."""
+    value = getattr(RBB_GUARD, name, "")
+    return value if isinstance(value, str) else ""
+
+
+# The unread refusal names the base remedy, never the marker form, and prints no report sentence. Both fragments come from
+# guard.py: the marker suffix is what BRIEF_MARKER_REMEDY adds to BRIEF_LITERAL_REMEDY, and the report sentence is the
+# first sentence of BRIEF_BLIND_REASON.
+RBB_MARKER_SUFFIX = (rbb_guard_text("BRIEF_MARKER_REMEDY")[len(RBB_LITERAL_REMEDY):].strip()
+                     if rbb_guard_text("BRIEF_MARKER_REMEDY").startswith(RBB_LITERAL_REMEDY) else "")
+RBB_REPORT_SENTENCE = rbb_guard_text("BRIEF_BLIND_REASON").split(". ")[0]
+RBB_UNREAD_LACKS = (RBB_MARKER_SUFFIX, RBB_REPORT_SENTENCE)
+
+
 def rbb_unread_refuse(name, script):
     """A Workflow reviewer call whose prompt the scan cannot read is denied under reviewer-brief-blind, with the remedy."""
-    add(name, "deny", RBB, tool="Workflow", script=script, carries=RBB_LITERAL_REMEDY)
+    add(name, "deny", RBB, tool="Workflow", script=script, carries=RBB_LITERAL_REMEDY, lacks=RBB_UNREAD_LACKS)
 
 
 rbb_unread_refuse("reviewer-brief-blind: refused: a Workflow agent() reviewer whose template prompt reads ${builderReport}",
