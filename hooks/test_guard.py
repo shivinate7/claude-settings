@@ -508,6 +508,7 @@ ARCHDRAFT_DIVERGED = os.path.join(ROOT, "archdraft-diverged")  # an open draft, 
 ARCHREADY_BEHIND = os.path.join(ROOT, "archready-behind")      # an open ready (not draft) pull request, head behind main
 ARCHDRAFT_READFAIL = os.path.join(ROOT, "archdraft-readfail")  # an open draft whose containment read fails
 ARCHDRAFT_INTEG = os.path.join(ROOT, "archdraft-integ")        # an open draft based on integration/b1, not the default branch
+ARCHDRAFT_LANE_BEHIND = os.path.join(ROOT, "archdraft-lane-behind")  # an open draft on the lane/<slug> head, head behind main
 # THE POINTER CHECKOUT. `PTRCFG` is a config directory whose global rules file points at
 # `PTRMAIN`, which stands in for the machine's primary checkout: the one every session runs its
 # hooks and its lint from. `PTRWT` is a real linked worktree of it, which must stay allowed.
@@ -1351,6 +1352,9 @@ def build_fixtures():
     # its base is not the repo's default branch. A guard that compares against the base's name would release it here.
     make_fake_gh(ARCHDRAFT_INTEG, "main", need=["o/r"], others=[dict(slug_head, draft=True, base="integration/b1")],
                  compares={draft_pair: "behind", "integration/b1..." + slug_head["head"]: "behind"})
+    # An open draft on the `lane/<slug>` head form, its head behind main: released as the bare-slug draft is.
+    make_fake_gh(ARCHDRAFT_LANE_BEHIND, "main", need=["o/r"],
+                 others=[dict(slug_head, draft=True, ref="lane/" + ARCHIVE_SLUG)], compares={draft_pair: "behind"})
     os.makedirs(GHNONE, exist_ok=True)
     found = shutil.which("gh", path=GHNONE_PATH)
     if found:
@@ -9913,6 +9917,9 @@ archive_allow("an open draft lane pull request whose head is behind main is allo
               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_BEHIND))
 archive_allow("an open draft lane pull request whose head is identical to main is allowed: its commits have landed",
               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_IDENT))
+# The same release on the lane/<slug> head form: the draft's head is behind main, so the lane's commits have landed.
+archive_allow("an open draft on head lane/<slug> whose head is behind main is allowed: the lane/ head form releases too",
+              role_path("archive-lane"), fake_gh_path(ARCHDRAFT_LANE_BEHIND))
 archive_refuse("an open draft lane pull request whose head is ahead of main is refused: its commits have not landed",
                role_path("archive-lane"), fake_gh_path(ARCHDRAFT_AHEAD), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
 archive_refuse("an open draft lane pull request whose head diverged from main is refused",
