@@ -213,16 +213,13 @@ class Counted(Base):
                        pick="overturn")
         self.assertCounted(r, verdict("overturn"))
 
-    def test_open_item_with_lane_set_counted(self):
-        """The relay case: a lane took the answer, so the item is still open with its lane set. Green on the old code too."""
-        r = self.check(self.repo(), self.pair(item_fields={"lane": "owner-word-relay"}), pick="a")
-        self.assertCounted(r, verdict("a"))
-
-    def test_open_item_with_lane_and_last_answer_and_answer_kept_counted(self):
-        """The answer is kept until the receiver reports done: the item is open with `lane` and `lastAnswer` set, and
-        answers/<id> is still there. Counted on the relayed pick. Green on the old code too: the checker never reads those two fields."""
+    def test_routed_item_closed_with_home_and_matching_last_answer_counted(self):
+        """The busy-lane path closes the item at routing with `home` set, and keeps `lane`, `lastAnswer` and answers/<id>
+        until the receiver's done report. The relayed pick counts while `lastAnswer.at` is the answer's `at`. Red on the old
+        checker, which refuses every closed item but an arbiter overturn."""
         last = {"choice": "a", "note": "", "at": AT}
-        r = self.check(self.repo(), self.pair(item_fields={"lane": "owner-word-relay", "lastAnswer": last}), pick="a")
+        routed = {"status": "closed", "home": "answered-leaves-page", "lane": "owner-word-relay", "lastAnswer": last}
+        r = self.check(self.repo(), self.pair(item_fields=routed), pick="a")
         self.assertCounted(r, verdict("a"))
 
     def test_item_with_no_status_field_counted(self):
@@ -366,6 +363,31 @@ class NotCounted(Base):
     def test_closed_arbiter_ruling_answer_not_overturn_not_counted(self):
         r = self.check(self.repo(), self.pair(item_fields={"status": "closed", "arbiter": True}))
         self.assertNotCounted(r, "closed arbiter ruling answered with a pick: only overturn passes", reason="status")
+
+    def test_closed_item_with_no_home_not_counted(self):
+        """A closed item counts only with a home: an answer routed with no step or debt to carry its work is not counted."""
+        last = {"choice": "a", "note": "", "at": AT}
+        r = self.check(self.repo(), self.pair(item_fields={"status": "closed", "home": ABSENT, "lastAnswer": last}), pick="a")
+        self.assertNotCounted(r, "closed item with no home", reason="home")
+
+    def test_closed_item_with_a_home_that_is_not_a_non_empty_string_not_counted(self):
+        last = {"choice": "a", "note": "", "at": AT}
+        for home in ("", None, 7):
+            with self.subTest(home=home):
+                r = self.check(self.repo(), self.pair(item_fields={"status": "closed", "home": home, "lastAnswer": last}), pick="a")
+                self.assertNotCounted(r, "closed item with home %s" % json.dumps(home), reason="home")
+
+    def test_closed_item_whose_last_answer_at_is_another_answers_at_not_counted(self):
+        """The routed answer is the one on the item: a lastAnswer from an earlier answer does not vouch for this one."""
+        last = {"choice": "a", "note": "", "at": "2026-11-04T13:00:00.000Z"}
+        r = self.check(self.repo(), self.pair(item_fields={"status": "closed", "home": "answered-leaves-page", "lastAnswer": last}),
+                       pick="a")
+        self.assertNotCounted(r, "closed item whose lastAnswer.at is another answer's at", reason="lastanswer")
+
+    def test_closed_item_with_home_and_no_last_answer_not_counted(self):
+        r = self.check(self.repo(), self.pair(item_fields={"status": "closed", "home": "answered-leaves-page", "lastAnswer": ABSENT}),
+                       pick="a")
+        self.assertNotCounted(r, "closed item with home and no lastAnswer", reason="lastanswer")
 
     def test_answer_at_zone_less_not_counted(self):
         r = self.check(self.repo(), self.pair(answer_fields={"at": "2026-11-04T13:56:29.078"}))

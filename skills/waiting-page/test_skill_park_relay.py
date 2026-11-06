@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prose contract for the waiting page's Park relay: skills/waiting-page/SKILL.md and docs/debts/notes.md.
+"""Prose contract for the waiting page's relays: skills/waiting-page/SKILL.md and docs/debts/notes.md.
 
     python3 -m unittest skills/waiting-page/test_skill_park_relay.py
 
@@ -10,6 +10,12 @@ Reads prose only and runs none of the skill's code. Each case pins one claim:
   4. The untold-receiver note no longer says the receiver cannot be found while a close drops `lane`.
   5. In the park branch, every message is under a `lane` condition, and a park on an item with no `lane` just closes.
   6. The park tell names only the page URL, the item id and the act withdrawn, never the answer's note or text.
+  7. The busy-lane path closes the item with `home` at routing.
+  8. The busy-lane path does not keep the item open.
+  9. The busy-lane path keeps answers/<id> until the receiver's done report.
+ 10. No sentence keeps the item open until the receiver reports done.
+ 11. No sentence says a busy lane leaves its item open.
+ 12. A sentence says the owner's withdraw of a routed answer is in chat and reopens the item.
 """
 import os
 import re
@@ -48,6 +54,20 @@ WITHDRAWN = re.compile(r"\bwithdrawn\b", re.I)
 # Case 4: the old claim, a receiver that cannot be found, tied to a close that drops lane.
 OLD_FIND = re.compile(r"\b(?:cannot|can't|can not|unable to)\s+find\s+the\s+receiver\b", re.I)
 DROP_LANE = re.compile(r"\bdrops?\b[^.]{0,60}\blane\b", re.I)
+# Cases 7 to 12: the busy-lane path, which closes the item at routing and keeps answers/<id> until the done report.
+BUSY_HEADING = "Busy-lane path."
+BUSY = re.compile(r"\bbusy[- ]lane\b", re.I)
+CLOSE_VERB = re.compile(r"\bclos(?:e|es|ed|ing)\b", re.I)
+HOME_WORD = re.compile(r"\bhome\b", re.I)
+ANSWERS_ID = re.compile(r"answers/<id>", re.I)
+DONE = re.compile(r"\bdone\b", re.I)
+OPEN_WORD = re.compile(r"\bopen\b", re.I)
+KEPT_OPEN = re.compile(r"\b(?:keeps?|kept|stays?|leaves?|left)\b[^.;]{0,60}\bopen\b", re.I)
+KEEP_ANSWER = re.compile(r"\b(?:until|till|keeps?|kept|stays?|in place|wait(?:s|ing)? for)\b", re.I)
+UNTIL_DONE = re.compile(r"\b(?:until|till|wait(?:s|ing)? for)\b", re.I)
+WITHDRAW = re.compile(r"\bwithdr\w*", re.I)
+CHAT = re.compile(r"\bchat\b", re.I)
+REOPEN = re.compile(r"\breopen\w*", re.I)
 
 
 def read(path):
@@ -79,6 +99,15 @@ def park_branch(text):
     for block in blocks(text):
         flat = " ".join(block.split())
         if PARK_BRANCH.search(flat):
+            return flat
+    return ""
+
+
+def busy_path(text):
+    """The busy-lane path paragraph, flattened, or "" when it is not found."""
+    for block in blocks(text):
+        flat = " ".join(block.split())
+        if flat.startswith(BUSY_HEADING):
             return flat
     return ""
 
@@ -201,6 +230,45 @@ class ParkRelayProse(unittest.TestCase):
                          "the park tell names the answer's note or text: %s" % (tells[0] if tells else ""))
         self.assertTrue(any(PAGE_URL.search(s) and ITEM_ID.search(s) and WITHDRAWN.search(s) for s in tells),
                         "the park tell does not name the page URL, the item id and the act withdrawn")
+
+
+class BusyLaneProse(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.skill = read(SKILL)
+        cls.busy = busy_path(cls.skill)
+
+    def test_7_busy_lane_path_closes_the_item_with_home_at_routing(self):
+        self.assertTrue(self.busy, "SKILL.md has no busy-lane path paragraph (%s)" % BUSY_HEADING)
+        hits = [s for s in sentences(self.busy) if CLOSE_VERB.search(s) and HOME_WORD.search(s) and not NEG.search(s)]
+        self.assertTrue(hits, "the busy-lane path has no sentence that closes the item with `home` at routing")
+
+    def test_8_busy_lane_path_does_not_keep_the_item_open(self):
+        self.assertTrue(self.busy, "SKILL.md has no busy-lane path paragraph (%s)" % BUSY_HEADING)
+        kept = [s for s in sentences(self.busy) if KEPT_OPEN.search(s)]
+        self.assertFalse(kept, "the busy-lane path still keeps the item open: %s" % (kept[0] if kept else ""))
+
+    def test_9_busy_lane_path_keeps_answers_until_the_done_report(self):
+        self.assertTrue(self.busy, "SKILL.md has no busy-lane path paragraph (%s)" % BUSY_HEADING)
+        hits = [s for s in sentences(self.busy) if ANSWERS_ID.search(s) and DONE.search(s) and KEEP_ANSWER.search(s)]
+        self.assertTrue(hits, "the busy-lane path does not keep answers/<id> until the receiver's done report")
+
+    def test_10_no_sentence_keeps_the_item_open_until_the_receiver_reports_done(self):
+        self.assertTrue(self.skill, "SKILL.md is empty, so there is no prose to scan")
+        found = [s for block in blocks(self.skill) for s in sentences(block)
+                 if OPEN_WORD.search(s) and UNTIL_DONE.search(s) and DONE.search(s)]
+        self.assertFalse(found, "a sentence keeps the item open until the done report: %s" % " | ".join(found))
+
+    def test_11_no_sentence_says_a_busy_lane_leaves_its_item_open(self):
+        self.assertTrue(self.busy, "SKILL.md has no busy-lane path paragraph (%s)" % BUSY_HEADING)
+        found = [s for block in blocks(self.skill) for s in sentences(block) if BUSY.search(s) and KEPT_OPEN.search(s)]
+        self.assertFalse(found, "a sentence says a busy lane leaves its item open: %s" % " | ".join(found))
+
+    def test_12_a_sentence_says_the_owners_withdraw_of_a_routed_answer_is_in_chat_and_reopens_the_item(self):
+        self.assertTrue(self.skill, "SKILL.md is empty, so there is no prose to scan")
+        found = [s for block in blocks(self.skill) for s in sentences(block)
+                 if WITHDRAW.search(s) and CHAT.search(s) and REOPEN.search(s)]
+        self.assertTrue(found, "no sentence says the owner's withdraw of a routed answer is in chat and reopens the item")
 
 
 if __name__ == "__main__":

@@ -5803,15 +5803,12 @@ test("Enter on More of the reply keeps focus on that button, which then reads Le
   assert.deepEqual(at, { tag: "BUTTON", text: "Less", controls: "rp-" + it.id }, "focus did not stay on the reply's button after Enter");
 });
 
-test("a lane shows 'waits on lane <slug>' as one text run in the top row, after the wait, and adds no row", async (t) => {
+test("an open item with `lane` draws no lane row: no 'waits on lane' in its top row, and no height added", async (t) => {
   const on = mk("ln-on", 1, { lane: "ci-done-comment" }), off = mk("ln-off", 2);
   const page = await open(t, { items: [on, off] }); if (!page) return;
-  const top = card(page, on).locator(".top");
-  await need(top.getByText("waits on lane ci-done-comment", { exact: true }), "the top row has no single text run 'waits on lane ci-done-comment'");
-  assert.match((await top.innerText()).replace(/\s+/g, " "), /waited .* waits on lane ci-done-comment$/, "the lane does not follow the wait in the top row");
-  assert.equal(await card(page, on).getByText(/waits on lane/i).count(), 1, "the lane shows more than once on the card");
+  assert.equal(await card(page, on).getByText(/waits on lane/i).count(), 0, "an open card with a lane draws 'waits on lane'");
+  assert.equal(await card(page, on).locator(".top .onlane").count(), 0, "an open card with a lane draws a lane span in its top row");
   assert.equal(await laPanel(page, on).count(), 0, "a lane alone draws a last-answer panel");
-  assert.equal(await card(page, off).getByText(/waits on lane/i).count(), 0);
   assert.ok(Math.abs((await laBox(card(page, on))).h - (await laBox(card(page, off))).h) <= 1, "the lane added height to the card");
 });
 
@@ -5832,7 +5829,7 @@ test("on an open card the panel sits after the stake lines, before the context, 
   assert.ok(Math.abs((await laBox(laPanel(page, it))).top - (await laBox(c)).top - rel) <= 1, "picking an option moved the panel");
 });
 
-test("a card with a saved answer keeps its receipt where it lands today, holds the thread in its fold below it, and shows the lane in the top row", async (t) => {
+test("a card with a saved answer keeps its receipt where it lands today, holds the thread in its fold below it, and draws no lane row", async (t) => {
   const it = mk("rc-thread", 7, { lane: "ci-done-comment", lastAnswer: { choice: "b", note: "Only if cheap.", at: LA_AT }, reply: "I added option C. Pick again." });
   const plain = mk("rc-plain", 8);
   const page = await open(t, { items: [it, plain], answers: { ...laSaved(it, "a"), ...laSaved(plain, "a") } }); if (!page) return;
@@ -5853,7 +5850,7 @@ test("a card with a saved answer keeps its receipt where it lands today, holds t
   assert.ok(th.top >= r.bottom - 1, `the thread starts at ${th.top}, above the receipt's end at ${r.bottom}`);
   const rp = await laBox(card(page, plain).locator(".receipt:has(.changebtn)")), at = (e, b) => b.top - e.top;
   assert.ok(Math.abs(at(await laBox(c), r) - at(await laBox(card(page, plain)), rp)) <= 1, "the thread moved the receipt from where it lands today");
-  assert.match((await c.locator(".top").innerText()).replace(/\s+/g, " "), /Filing pending, sent .*waits on lane ci-done-comment$/, "the lane is not in the top row after the pill");
+  assert.doesNotMatch(flat(await c.locator(".top").innerText()), /waits on lane/, "an open card with a lane drew the lane in its top row");
   assert.equal(await laPanel(page, plain).count(), 0, "a saved card with no thread fields drew a panel");
   assert.deepEqual(await card(page, plain).evaluate((e) => [...e.children].map((k) => k.tagName + "." + k.className)), ["DIV.top", "H3.title", "DIV.receipt"], "a saved card with no thread fields is not drawn as today");
 });
@@ -5886,12 +5883,13 @@ test("a card with none of lastAnswer, reply and lane draws as today, and so does
   }
 });
 
-for (const scheme of ["light", "dark"]) test(`a long lane slug and an unbroken reply stay inside their card at 390 wide, open and saved, ${scheme} scheme`, async (t) => {
+for (const scheme of ["light", "dark"]) test(`a long lane slug draws no row on an open card, and an unbroken reply stays inside its card at 390 wide, open and saved, ${scheme} scheme`, async (t) => {
   const url = "https://example.test/" + "very-long-path-segment-".repeat(6);
   const fields = { lane: "a-very-long-lane-branch-slug-".repeat(4), lastAnswer: { choice: "b", note: url, at: LA_AT }, reply: url };
   const open1 = mk("ov-open", 1, fields), saved1 = mk("ov-saved", 2, fields);
   const page = await open(t, { items: [open1, saved1], answers: laSaved(saved1), scheme, viewport: { width: 390, height: 900 } }); if (!page) return;
   await laText(page, open1); await laText(page, saved1);
+  for (const it of [open1, saved1]) assert.equal(await card(page, it).getByText(/waits on lane/i).count(), 0, `${it.id}: an open card with a lane drew the lane row`);
   const m = await page.evaluate(() => ({
     sw: document.documentElement.scrollWidth, iw: innerWidth,
     out: [...document.querySelectorAll("article.card")].flatMap((c) => [...c.querySelectorAll(".top *, [aria-label^='Your last answer'] *, [aria-label='The reply'] *, [aria-label^='Your last answer'], [aria-label='The reply']")].filter((e) => e.getBoundingClientRect().right > c.getBoundingClientRect().right + 0.5).map((e) => c.id + " " + e.tagName + "." + e.className)),
@@ -6004,13 +6002,13 @@ test("page-item-waits-on: No. 154 waiting on PR #1011 links the PR, and its copy
   assert.match(await linkWords(link), PR_COPY(1011), "the PR link does not read 'waits on PR #1011'");
 });
 
-test("page-item-waits-on: No. 154 with a lane and a wait shows one span, 'waits on lane cache-split and PR #1011', and only PR #1011 is its link", async (t) => {
+test("page-item-waits-on: No. 154 open, with a lane and a wait, shows one span, 'waits on PR #1011' with no lane, and only PR #1011 is its link", async (t) => {
   const it = no154({ lastAnswer: ANSWERED, lane: "cache-split", waits: { repo: WT_REPO, pr: 1011 } });
   const page = await open(t, { items: [it] }); if (!page) return;
   const spans = card(page, it).locator(".top .onlane");
   const n = await spans.count();
   assert.equal(n, 1, `the top row has ${n} lane or wait spans, not one`);
-  assert.match(wordsOf(await spans.first().textContent()), /^waits on lane cache-split and PR #1011( in q_max)?$/, "the span does not read 'waits on lane cache-split and PR #1011'");
+  assert.match(wordsOf(await spans.first().textContent()), /^waits on PR #1011( in q_max)?$/, "the span does not read 'waits on PR #1011': an open item with a lane draws no lane row");
   const inner = spans.first().locator("a");
   await need(inner, "the span has no link");
   assert.equal(await inner.getAttribute("href"), WT_PR_URL(1011), "the span's link is not PR #1011");
