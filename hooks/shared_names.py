@@ -92,3 +92,11 @@ def refusals_path(session_id: object) -> Optional[str]:
     if not isinstance(session_id, str) or not re.fullmatch(r"[\w.-]+", session_id) or session_id.startswith("."):
         return None
     return os.path.join(config_dir(), STATE_DIR_NAME, "refusals", session_id + ".jsonl")
+
+
+def route_notes_path(session_id: object) -> Optional[str]:
+    """The file of route-row notes a session's Stop has already shown, so each shows once per session, or None for
+    an id that is not a plain name. Written and read by lint/report_guard.py."""
+    if not isinstance(session_id, str) or not re.fullmatch(r"[\w.-]+", session_id) or session_id.startswith("."):
+        return None
+    return os.path.join(config_dir(), STATE_DIR_NAME, "route-notes", session_id + ".json")

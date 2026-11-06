@@ -10,6 +10,9 @@ an agent's row, and blocks until the reply raises each other refused tool (decis
 - A tool_name already pending in the file is not written again. An agent's row (one with agent_id)
   does not count as pending: the Stop side drops it, so it must not hide the orchestrator's refusal of
   the same tool.
+- A refused call that a route row says works on this surface adds a `note` key to its row, naming the row id
+  (hooks/route_match.py holds the rows file, the surface and the match). lint/report_guard.py shows the note at
+  Stop. A rows file that does not read adds no note and never stops the row from being written.
 - Prints nothing and never the `retry` decision (the only output the event reads). Exits 0 on
   every path, so a failure here never changes the refusal.
 """
@@ -37,6 +40,21 @@ def pending_tools(path):
     return tools
 
 
+def route_note(tool, tool_input):
+    """The note for a refusal that a route row contradicts, or None. Fails open: a rows file or a pattern that
+    does not read adds no note, and the refusal row is still written."""
+    try:
+        import route_match
+        rows = route_match.matching_rows(route_match.load_rows(), "works", [(tool, tool_input)])
+    except Exception as err:
+        sys.stderr.write("refusal_note route read failed open: %s\n" % err)
+        return None
+    if not rows:
+        return None
+    return "; ".join("route row %s contradicted: it says this call works on %s, and the classifier refused it"
+                     % (row.get("id"), row.get("surface")) for row in rows)
+
+
 def main():
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -58,6 +76,9 @@ def main():
         for key in ("tool_use_id", "agent_id"):
             if isinstance(data.get(key), str) and data[key]:
                 row[key] = data[key]
+        note = route_note(tool, data.get("tool_input"))
+        if note:
+            row["note"] = note
         with open(path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(row) + "\n")
     except Exception as err:  # fail open: the hook only notes, it never decides
