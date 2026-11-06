@@ -1244,6 +1244,47 @@ test("a decision with a best case against draws the field, with no warning about
   assert.equal(await card(page, it).getByText("does not draw").count(), 0, "the card warns that it carries a field the page does not draw");
 });
 
+// The against block is a fifth child of its option card, which is a four-row subgrid on a decision and a
+// five-row one on a ranked card. These cases measure its box against the pick line and the rank row beside it.
+const againstBoxes = (page, id) => page.evaluate((cardId) => {
+  const a = document.querySelector(`#item-${cardId} .against`);
+  if (!a) return null;
+  const opt = a.closest(".opt");
+  const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
+  return { against: box(a), pick: box(opt.querySelector(".pick")), rank: box(opt.querySelector(".rank")) };
+}, id);
+const meets = (a, b) => !!(a && b && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom);
+async function assertAgainstClear(page, id, when, { expectRank }) {
+  const b = await againstBoxes(page, id);
+  assert.ok(b && b.against, `${when}: the card shows no against block`);
+  assert.ok(b.pick, `${when}: the option card holding the against block has no pick line`);
+  assert.equal(meets(b.against, b.pick), false,
+    `${when}: the against block overlaps the pick line (against ${JSON.stringify(b.against)}, pick ${JSON.stringify(b.pick)})`);
+  if (expectRank) assert.ok(b.rank, `${when}: the ranked card has no rank row`);
+  if (b.rank) assert.equal(meets(b.against, b.rank), false,
+    `${when}: the against block overlaps the rank row (against ${JSON.stringify(b.against)}, rank ${JSON.stringify(b.rank)})`);
+}
+const WIDTHS = [{ width: 375, height: 812 }, { width: 1280, height: 900 }];
+
+for (const viewport of WIDTHS) {
+  test(`the best case against sits clear of the pick line on a decision, at ${viewport.width} wide`, async (t) => {
+    const it = mk("against-geo", 33, { against: AGAINST });
+    const page = await open(t, { items: [it], viewport }); if (!page) return;
+    await card(page, it).locator(".against").waitFor({ state: "attached" });
+    await assertAgainstClear(page, it.id, "on load", { expectRank: false });
+  });
+
+  test(`the best case against sits clear of the pick line and the rank row on a ticked ranked multi card, at ${viewport.width} wide`, async (t) => {
+    const it = mk("against-rank", 34, { multi: true, ranked: true, pick: ["a"], against: AGAINST });
+    const page = await open(t, { items: [it], viewport }); if (!page) return;
+    await card(page, it).locator(".against").waitFor({ state: "attached" });
+    await assertAgainstClear(page, it.id, "on load, with a ticked", { expectRank: true });
+    await tick(page, it, "b");
+    await card(page, it).locator(".rank:not(.gone)").nth(1).waitFor();
+    await assertAgainstClear(page, it.id, "after a tick on b", { expectRank: true });
+  });
+}
+
 // ---------------------------------------------------------------- answers, notes and withdrawing
 
 test("a decision offers None of these, and it needs a note before it sends", async (t) => {
