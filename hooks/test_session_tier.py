@@ -27,6 +27,7 @@ A missing name, or an exception raised by a call, is a failure of the case that 
 message. It never stops the run.
 """
 import contextlib
+import importlib
 import json
 import os
 import shutil
@@ -42,14 +43,17 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 import tier_fixture_test as fx  # noqa: E402  the tier-file fixtures and folder key, shared with test_guard.py
 from case_runner_test import run_cases  # noqa: E402  the shared case runner (hooks/case_runner_test.py)
 
+CLI = os.path.join(HERE, "session_tier.py")
+AGENT_ID = "a64a7f84210a8721d"
+ROOT = _test_temp.run_folder()
+# The module may read CLAUDE_CONFIG_DIR when it is imported. The import sees a sentinel under this run's folder,
+# so no case reads the real ~/.claude, and config_dir() reloads the module for each case's own folder.
+os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(ROOT, "import-sentinel")
+
 try:
     import session_tier as tier  # noqa: E402
 except Exception:  # not built yet: each case fails on the name it needs (see call)
     tier = None
-
-CLI = os.path.join(HERE, "session_tier.py")
-AGENT_ID = "a64a7f84210a8721d"
-ROOT = _test_temp.run_folder()
 
 
 def fresh(name):
@@ -68,9 +72,12 @@ def folder_of(name):
 
 @contextlib.contextmanager
 def config_dir(path):
-    """CLAUDE_CONFIG_DIR set to `path` for the block, then restored."""
+    """CLAUDE_CONFIG_DIR set to `path` for the block, then restored. The module is reloaded under it, so a constant
+    the module reads at import sees this folder too."""
     prior = os.environ.get("CLAUDE_CONFIG_DIR")
     os.environ["CLAUDE_CONFIG_DIR"] = path
+    if tier is not None:
+        importlib.reload(tier)
     try:
         yield
     finally:

@@ -9857,7 +9857,7 @@ def tier_bind_spelling_check():
 
 
 def tier_agent_call_check():
-    """roadmap-one-writer: an agent call binds no grant and consumes none, and the session's later push is refused"""
+    """roadmap-one-writer: an agent binds no grant and consumes none, and the agent's push is refused"""
     config = os.path.join(ROOT, "tier", "agent-call")
     session = "tier-agent-call"
     tier_grant(config, PUSHFEAT, TIER_FRESH_AGE)
@@ -9867,11 +9867,12 @@ def tier_agent_call_check():
         problems.append("an agent call bound the grant to its session")
     if not os.path.isfile(tier_grant_file(config, PUSHFEAT)):
         problems.append("an agent call consumed the grant")
-    got, reason = tier_judge(session, PUSHFEAT, TIER_PUSH, config)
+    # The push carries the agent id too: without it, a top-level push would bind the still-fresh grant and pass.
+    got, reason = tier_judge(session, PUSHFEAT, TIER_PUSH, config, agent_id=SAMPLE_AGENT_ID)
     if not tier_refused_by_record(got, reason):
-        problems.append("the session's push after an agent call: %s, want a roadmap-one-writer deny" % got)
+        problems.append("the agent's push: %s, want a roadmap-one-writer deny" % got)
     problems += tier_control("agent-call")
-    return tier_result(problems, "an agent call neither binds nor consumes, and the later push is refused")
+    return tier_result(problems, "an agent binds no grant and consumes none, and its push is refused")
 
 
 def tier_consumed_check():
@@ -10040,14 +10041,14 @@ def tier_cost_check():
                                  "what a non-record push spawns")
 
 
-# The log checks above register where LOG_CHECKS_EXTRA exists, further down, under the merge family.
+# Registered below, where LOG_CHECKS_EXTRA exists, under the merge family (the loop after BASE_COPY_COST_LABEL).
 TIER_LOG_CHECKS = (
     ("roadmap-one-writer: a local triage session's first top-level call binds its fresh grant, "
      "and its roadmap push is then allowed", tier_bind_allow_check),
     ("roadmap-one-writer: a grant in CRLF lines with a BOM binds the same as a plain one", tier_bind_crlf_check),
     ("roadmap-one-writer: a cwd spelled with a trailing separator binds the grant for its folder",
      tier_bind_spelling_check),
-    ("roadmap-one-writer: an agent call binds no grant and consumes none, and the session's later push is refused",
+    ("roadmap-one-writer: an agent binds no grant and consumes none, and its push is refused",
      tier_agent_call_check),
     ("roadmap-one-writer: a session that starts after the grant was consumed binds nothing, and its push is refused",
      tier_consumed_check),
@@ -10066,7 +10067,7 @@ TIER_LOG_CHECKS = (
 
 # A cloud triage session (its tag in the transcript, its env id set) passes with no tier dir, as it did before the tier
 # file. Green on main: it pins the cloud path that the tier file must not break.
-record_allow("roadmap-one-writer: a cloud triage session with its tag in the transcript is allowed with no tier dir",
+record_allow("a cloud triage session with its tag in the transcript is allowed with no tier dir",
              VCS + " push origin roadmap", TRIAGE_TRANSCRIPT, env=ROLE_ENV, session=ROLE_OWN,
              config=os.path.join(ROOT, "tier", "cloud-no-dir"))
 

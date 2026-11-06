@@ -187,6 +187,9 @@ jobs:
       - name: Local time line fixture suite
         run: python3 hooks/test_local_time.py
 
+      - name: Tier file fixture suite
+        run: python3 hooks/test_session_tier.py
+
       - name: CI wake-up fixture suite
         run: python3 hooks/test_ci_wake.py
 
@@ -906,6 +909,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_local_time.py
 
+      - name: Tier file fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_session_tier.py
+
       - name: Simulator boot-record fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_sim_boot_record.py
@@ -1514,6 +1521,10 @@ jobs:
       - name: Local time line fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_local_time.py
+
+      - name: Tier file fixture suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python hooks/test_session_tier.py
 
       - name: Stall watch stop suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
