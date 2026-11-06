@@ -788,7 +788,7 @@ def cmd_exe_delete_hit(segment: str) -> str:
 
 
 # The one lease form the remedy offers: push_verdict lets it through once a sha fills it, and the
-# auto-mode "Own Branch Lease Push" entry in settings.json quotes it (owner page item 286 b, Nov 6).
+# auto-mode "Own Branch Lease Push" entry in settings.json quotes it (owner page item 286 b, 2026-11-06 13:08 CST).
 LEASE_PUSH_FORM = "git push --force-with-lease=<branch>:<expected sha>"
 PUSH_REASON = (
     "Rule (Git): a forced push can overwrite newer remote work with a stale copy. "

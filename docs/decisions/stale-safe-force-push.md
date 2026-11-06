@@ -20,7 +20,7 @@ each `git push` call. Quoted text, heredocs and `git log --grep=--force` are not
 | Any forced push whose destination cannot be resolved | ask |
 
 The remedy names `LEASE_PUSH_FORM` (hooks/guard_push_delete.py), `git push --force-with-lease=<branch>:<expected sha>`.
-That is the one form the auto-mode allow line "Own Branch Lease Push" covers (owner page item 286 b, Nov 6:
+That is the one form the auto-mode allow line "Own Branch Lease Push" covers (owner page item 286 b, 2026-11-06 13:08 CST:
 keep the sha form, never widen the allow line). It never names the target (`git-remedy-never-names-target`).
 
 - A deletion at the default branch asks. A deletion elsewhere is allowed.
