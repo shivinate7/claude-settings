@@ -51,6 +51,9 @@ SCRIPT = "export_page.py"
 SECTION = "Keep a copy in the repo"
 NOT_CHECKED = "not checked"
 FULL_SIZE = 3000  # filler records in the full-size transcript
+REMOTE_ENV = "CLAUDE_CODE_REMOTE_SESSION_ID"  # the env that override.remote_session_id reads, as cse_<x>
+QUEUE_ID, QUEUE_URL = "queue", "https://claude.ai/artifact/queue"  # a waiting page whose id is not "waitpage"
+EXPORT_ALL = "python3 skills/waiting-page/export_page.py --all"
 
 
 # --------------------------------------------------------------------------- harness helpers
@@ -97,9 +100,9 @@ def git(where, *args, env=None):
 
 # --------------------------------------------------------------------------- repo fixtures
 
-def registry(page_export=None):
+def registry(page_export=None, page_id=PAGE_ID, page_url=PAGE_URL):
     """The repo's extras file: a waiting page and a reference artifact. `page_export` names the copy folder."""
-    page = {"id": PAGE_ID, "url": PAGE_URL, "role": "waiting-page", "account": "shivam"}
+    page = {"id": page_id, "url": page_url, "role": "waiting-page", "account": "shivam"}
     if page_export is not None:
         page["export"] = page_export
     reference = {"id": REF_ID, "url": REF_URL, "role": "reference", "account": "shivam",
@@ -189,16 +192,34 @@ def result(when, tid, content, is_error=False, sidechain=False):
 
 
 def page_write(when, tid="w1", action="set", url=PAGE_URL, name=ARTIFACT_TOOL, sidechain=False,
-               is_error=False):
-    """An ArtifactData call and its result. The result is an error when `is_error`."""
-    tool_input = {"action": action, "url": url, "collection": "items", "doc_id": "fb-1", "data": {"n": 1}}
+               is_error=False, collection="items", doc_id="fb-1"):
+    """An ArtifactData call and its result. The result is an error when `is_error`. A `collection` of None
+    leaves the key out, so the write names its collection by the doc_id path alone."""
+    tool_input = {"action": action, "url": url, "doc_id": doc_id, "data": {"n": 1}}
+    if collection is not None:
+        tool_input["collection"] = collection
     return [call(when, tid, name, tool_input, sidechain),
             result(when + 1, tid, "error: 403" if is_error else "ok", is_error, sidechain)]
 
 
-def export_run(when, tid="e1", verdict="same"):
-    """A Bash call of export_page.py and its result, the verdict as the last line."""
-    return [call(when, tid, "Bash", {"command": EXPORT_CMD}), result(when + 1, tid, verdict + "\n")]
+def export_run(when, tid="e1", verdict="same", command=EXPORT_CMD, name="Bash"):
+    """A call of export_page.py (Bash, or PowerShell by `name`) and its result, the verdict as the last line."""
+    return [call(when, tid, name, {"command": command}), result(when + 1, tid, verdict + "\n")]
+
+
+def writer_get(when, writer, tid="m1"):
+    """An ArtifactData get of meta/page and its result, which names the page writer's session."""
+    return [call(when, tid, ARTIFACT_TOOL, {"action": "get", "url": PAGE_URL, "collection": "meta",
+                                            "doc_id": "page"}),
+            result(when + 1, tid, json.dumps({"writer": writer}))]
+
+
+def with_writer(records, writer=SESSION):
+    """The records behind a meta/page get that names `writer`, first. A `writer` of None, or no records,
+    returns them unchanged, so the writer is unknown."""
+    if writer is None or records is None:
+        return records
+    return writer_get(at(18, 30), writer) + records
 
 
 def transcript(folder, records):
@@ -245,9 +266,11 @@ def run_dir(label):
     return path
 
 
-def run_stop(label, cwd, records, stop_active=False, count_git=False):
-    """One Stop of the guard in `cwd`, with the transcript `records`. No inbox file is written."""
+def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SESSION, extra_env=None):
+    """One Stop of the guard in `cwd`, with the transcript `records`. `writer` is the session the transcript
+    names as the page writer (None: unknown). `extra_env` adds variables for this run. No inbox file is written."""
     folder = run_dir(label)
+    records = with_writer(records, writer)
     cfg, home = os.path.join(folder, "cfg"), os.path.join(folder, "home")
     os.makedirs(cfg)
     os.makedirs(home)
@@ -256,9 +279,10 @@ def run_stop(label, cwd, records, stop_active=False, count_git=False):
     if not os.path.exists(PROBE_PATH):
         write_file(PROBE_PATH, PROBE_SOURCE)
     env = dict(os.environ)
-    for name in ("PYTHONUTF8", "PYTHONIOENCODING", "CLAUDE_CONFIG_DIR", "RUN_GIT_LOG"):
+    for name in ("PYTHONUTF8", "PYTHONIOENCODING", "CLAUDE_CONFIG_DIR", "RUN_GIT_LOG", REMOTE_ENV):
         env.pop(name, None)
     env.update(CLAUDE_CONFIG_DIR=cfg, HOME=home, USERPROFILE=home)
+    env.update(extra_env or {})
     git_log = os.path.join(folder, "run-git.log")
     if count_git:
         env["RUN_GIT_LOG"] = git_log
@@ -506,6 +530,95 @@ def case_s16_full_size_transcript_blocks():
     expect_block("S16", run_stop("s16", base_repo("s16"), records), (SCRIPT,))
 
 
+# --------------------------------------------------------------------------- writer, collection and verdict cases
+
+def queue_repo(name):
+    """A repo whose waiting page is QUEUE_ID, with its copy one commit at 17:00 and a later commit elsewhere."""
+    root = roadmap_repo(name, [(at(17), item(FOLDER, 1)), (at(21), {"roadmap/data/steps/x.json": "{}\n"})],
+                        extras=registry(page_id=QUEUE_ID, page_url=QUEUE_URL))
+    check("%s scope: the newest copy commit is the 17:00 one" % name.upper(), newest_copy(root, FOLDER) == at(17),
+          newest_copy(root, FOLDER))
+    return root
+
+
+def case_n1_non_writer_set_of_an_unexported_collection_passes():
+    """A session that the transcript names as not the page writer, setting a collection the copy does not export."""
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x")
+    expect_pass("N1", run_stop("n1", base_repo("n1"), records, writer="session_other"))
+
+
+def case_n2_non_writer_update_of_an_item_passes():
+    """A session the transcript names as not the page writer, updating an item."""
+    records = [owner(at(18, 50))] + page_write(at(19), action="update", collection=None, doc_id="items/5")
+    expect_pass("N2", run_stop("n2", base_repo("n2"), records, writer="session_other"))
+
+
+def case_n3_writer_update_of_an_item_blocks():
+    """The writer updates an item that the copy has not seen."""
+    records = [owner(at(18, 50))] + page_write(at(19), action="update", collection=None, doc_id="items/5")
+    expect_block("N3", run_stop("n3", base_repo("n3"), records), (SCRIPT,))
+
+
+def case_n4_export_history_alone_makes_the_writer_block():
+    """No meta/page get names a writer, but an earlier export run is in the transcript: this session wrote the copy."""
+    records = [owner(at(18, 50))] + export_run(at(18, 30), verdict="changed 1") + page_write(at(19))
+    expect_block("N4", run_stop("n4", base_repo("n4"), records, writer=None), (SCRIPT,))
+
+
+def case_n5_writer_delete_of_an_exported_collection_blocks():
+    """A delete is a write, and answers is an exported collection."""
+    records = [owner(at(18, 50))] + page_write(at(19), action="delete", collection=None, doc_id="answers/a1")
+    expect_block("N5", run_stop("n5", base_repo("n5"), records), (SCRIPT,))
+
+
+def case_n6_all_form_verdict_for_the_page_id_passes():
+    """export_page.py --all prints `<id>: <verdict>` for each artifact. The waiting page's own line clears a write."""
+    records = ([owner(at(18, 50))] + page_write(at(19), url=QUEUE_URL)
+               + export_run(at(19, 5), verdict=QUEUE_ID + ": same", command=EXPORT_ALL))
+    expect_pass("N6", run_stop("n6", queue_repo("n6"), records))
+
+
+def case_n6b_all_form_verdict_for_another_artifact_blocks():
+    """The `--all` line of the reference artifact says nothing about the waiting page."""
+    records = ([owner(at(18, 50))] + page_write(at(19), url=QUEUE_URL)
+               + export_run(at(19, 5), verdict=REF_ID + ": same", command=EXPORT_ALL))
+    expect_block("N6b", run_stop("n6b", queue_repo("n6b"), records), (SCRIPT,))
+
+
+def case_n7_powershell_run_with_same_passes():
+    """The same verdict from a PowerShell run of export_page.py clears a write."""
+    records = [owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 5), verdict="same", name="PowerShell")
+    expect_pass("N7", run_stop("n7", base_repo("n7"), records))
+
+
+def case_n8_no_repo_and_no_page_write_gives_no_note():
+    """A session in no git repo, writing a non-page artifact: the check has nothing to read and says nothing."""
+    outside = run_dir("n8-outside")
+    obj = expect_pass("N8", run_stop("n8", outside, [owner(at(18, 50))] + page_write(at(19), url=REF_URL),
+                                     writer=None))
+    check("N8: no systemMessage", not obj.get("systemMessage"), obj.get("systemMessage"))
+
+
+def case_n10_unknown_writer_passes_with_no_note():
+    """No meta/page get names a writer and no export run is in the transcript: the writer is unknown, so pass."""
+    p = run_stop("n10", base_repo("n10"), [owner(at(18, 50))] + page_write(at(19)), writer=None)
+    obj = expect_pass("N10", p)
+    check("N10: no systemMessage", not obj.get("systemMessage"), obj.get("systemMessage"))
+
+
+def case_n11_writer_named_by_the_remote_session_id_blocks():
+    """The writer is session_9f, and this run's env names it as cse_9f, which override.remote_session_id maps back."""
+    p = run_stop("n11", base_repo("n11"), [owner(at(18, 50))] + page_write(at(19)), writer="session_9f",
+                 extra_env={REMOTE_ENV: "cse_9f"})
+    expect_block("N11", p, (SCRIPT,))
+
+
+def case_n12_remote_writer_without_the_env_passes():
+    """The same writer, with the env unset: session_9f is not this session's id, so this session is no writer."""
+    p = run_stop("n12", base_repo("n12"), [owner(at(18, 50))] + page_write(at(19)), writer="session_9f")
+    expect_pass("N12", p)
+
+
 # --------------------------------------------------------------------------- unit cases
 
 def guard_module():
@@ -529,7 +642,7 @@ def case_u1_export_check_returns_the_reason():
     if fn is None:
         return
     root = base_repo("u1")
-    tpath = transcript(run_dir("u1"), [owner(at(18, 50))] + page_write(at(19)))
+    tpath = transcript(run_dir("u1"), with_writer([owner(at(18, 50))] + page_write(at(19))))
     reason, note = fn(root, tpath)
     check("U1: a page write with no later copy commit gives a reason", reason is not None, repr(reason))
     check("U1: the reason names export_page.py", reason is not None and SCRIPT in reason, repr(reason))
@@ -543,7 +656,7 @@ def case_u2_git_failure_gives_a_note_and_no_reason():
         return
     import ruling_home
     root = base_repo("u2")
-    tpath = transcript(run_dir("u2"), [owner(at(18, 50))] + page_write(at(19)))
+    tpath = transcript(run_dir("u2"), with_writer([owner(at(18, 50))] + page_write(at(19))))
     with mock.patch.object(ruling_home, "_run_git", side_effect=ruling_home._GitFailure("git missing")):
         reason, note = fn(root, tpath)
     check("U2: a git failure gives no block", reason is None, repr(reason))
@@ -576,6 +689,18 @@ CASES.extend((
     case_s14_newest_write_after_the_copy_commit_blocks,
     case_s15_export_run_before_the_write_does_not_clear_it,
     case_s16_full_size_transcript_blocks,
+    case_n1_non_writer_set_of_an_unexported_collection_passes,
+    case_n2_non_writer_update_of_an_item_passes,
+    case_n3_writer_update_of_an_item_blocks,
+    case_n4_export_history_alone_makes_the_writer_block,
+    case_n5_writer_delete_of_an_exported_collection_blocks,
+    case_n6_all_form_verdict_for_the_page_id_passes,
+    case_n6b_all_form_verdict_for_another_artifact_blocks,
+    case_n7_powershell_run_with_same_passes,
+    case_n8_no_repo_and_no_page_write_gives_no_note,
+    case_n10_unknown_writer_passes_with_no_note,
+    case_n11_writer_named_by_the_remote_session_id_blocks,
+    case_n12_remote_writer_without_the_env_passes,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
 ))
