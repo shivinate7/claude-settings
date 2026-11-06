@@ -301,7 +301,7 @@ test("the Undo button goes after 8 seconds", async (t) => {
 
 test("a card becomes a receipt in place, with Change", async (t) => {
   const items = [mk("above", 1), mk("target", 2), mk("below", 3, { context: LONG })];
-  const page = await open(t, { items }); if (!page) return;
+  const page = await open(t, { items, pageHtml: withSentMove("stay") }); if (!page) return;
   const before = await geo(page);
   await choose(page, items[1], "a");
   await send(page);
@@ -324,7 +324,7 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
       // The oldest blocking item sorts first, so a card above the first receipt gives the page room to scroll up.
       mk("lead", 6, { context: LONG, holds: "A lane waits.", added: "2026-10-01T00:00:00Z" }),
     ];
-    const page = await open(t, { items, viewport, designData: withDesigns ? DESIGNS : null }); if (!page) return;
+    const page = await open(t, { items, viewport, designData: withDesigns ? DESIGNS : null, pageHtml: withSentMove("stay") }); if (!page) return;
     await noAnchor(page);
     // With option designs, the in-card frames must be the same DOM nodes after each pick, so none reloads.
     let sent = false;
@@ -4313,8 +4313,9 @@ const anchorOf = (page, sent) => page.evaluate((ids) => {
   return null;
 }, sent.map((it) => "item-" + it.id));
 // Scroll anchoring stays off unless the case asks for it.
-const openSend = async (t, { items, width, height, scheme, anchored }) => {
-  const page = await open(t, { items, scheme, viewport: { width, height } });
+// sentMove names the SENT_MOVE value a case pins (see withSentMove); none keeps the page's own value.
+const openSend = async (t, { items, width, height, scheme, anchored, sentMove }) => {
+  const page = await open(t, { items, scheme, viewport: { width, height }, pageHtml: sentMove ? withSentMove(sentMove) : undefined });
   if (page && !anchored) await noAnchor(page);
   return page;
 };
@@ -4342,7 +4343,7 @@ function checkRise(pre, post, when, sentIt, anchorIt, belowIt) {
 async function sendBelowPartial(t, { width, scheme, anchored }) {
   // At 390 wide the sent card is taller than the phone's screen, so the viewport is taller to keep the card below on screen.
   const above = mk("above", 4), sent = mk("sent", 5), below = mk("below", 6);
-  const page = await openSend(t, { items: [...LEADS, above, sent, below, ...FILLER], width, height: width === 390 ? 1000 : 800, scheme, anchored }); if (!page) return;
+  const page = await openSend(t, { items: [...LEADS, above, sent, below, ...FILLER], width, height: width === 390 ? 1000 : 800, scheme, anchored, sentMove: "stay" }); if (!page) return;
   await choose(page, sent, "a");
   await settleAt(page, above, "bottom", 30);
   assert.equal(await anchorOf(page, [sent]), "item-above", "fixture: the card above is not the anchor");
@@ -4353,7 +4354,7 @@ async function sendBelowPartial(t, { width, scheme, anchored }) {
 // A card sent as the topmost card on screen, its top inside the band: its top stays, and the card below rises.
 async function sendTopOfBand(t, { scheme }) {
   const sent = mk("sent", 4, { context: LONG }), below = mk("below", 5);
-  const page = await openSend(t, { items: [...HOLDS, sent, below, ...FILLER], width: 1280, height: 800, scheme, anchored: false }); if (!page) return;
+  const page = await openSend(t, { items: [...HOLDS, sent, below, ...FILLER], width: 1280, height: 800, scheme, anchored: false, sentMove: "stay" }); if (!page) return;
   await choose(page, sent, "a");
   await settleAt(page, sent, "top", 20);
   assert.equal(await anchorOf(page, [sent]), "item-sent", "fixture: the sent card is not the topmost card on screen");
@@ -4364,7 +4365,7 @@ async function sendTopOfBand(t, { scheme }) {
 // Two cards sent together: the first is wholly above the band, the second starts inside it. The second keeps its top, and the card below rises by the second's drop.
 async function sendTwoOneAbove(t, { width, scheme }) {
   const wholly = mk("wholly-above", 4, { context: LONG }), visible = mk("visible", 5, { context: LONG }), below = mk("below", 6);
-  const page = await openSend(t, { items: [...LEADS, wholly, visible, below, ...FILLER], width, height: 800, scheme, anchored: false }); if (!page) return;
+  const page = await openSend(t, { items: [...LEADS, wholly, visible, below, ...FILLER], width, height: 800, scheme, anchored: false, sentMove: "stay" }); if (!page) return;
   await choose(page, wholly, "a");
   await choose(page, visible, "b");
   await settleAt(page, wholly, "bottom", -4);
@@ -4383,7 +4384,7 @@ async function sendTwoOneAbove(t, { width, scheme }) {
 // A tall card at 390 wide, its top above the band and its bottom inside it: the card below keeps its top, and the receipt lands just above it.
 async function sendTallOverBand(t, { scheme }) {
   const tall = mk("tall", 4, { context: LONG }), below = mk("below", 5);
-  const page = await openSend(t, { items: [...LEADS, tall, below, ...FILLER], width: 390, height: 800, scheme, anchored: false }); if (!page) return;
+  const page = await openSend(t, { items: [...LEADS, tall, below, ...FILLER], width: 390, height: 800, scheme, anchored: false, sentMove: "stay" }); if (!page) return;
   await choose(page, tall, "a");
   await settleAt(page, tall, "bottom", 60);
   assert.equal(await anchorOf(page, [tall]), "item-below", "fixture: the card below is not the anchor");
@@ -4400,7 +4401,7 @@ async function sendTallOverBand(t, { scheme }) {
 // A card sent with the card below it starting under the bar: the sent card keeps its top, and the card below rises.
 async function sendOverUnderBar(t, { scheme }) {
   const sent = mk("sent", 4, { context: LONG }), below = mk("under-bar", 5);
-  const page = await openSend(t, { items: [...HOLDS, sent, below, ...FILLER], width: 1280, height: 800, scheme, anchored: false }); if (!page) return;
+  const page = await openSend(t, { items: [...HOLDS, sent, below, ...FILLER], width: 1280, height: 800, scheme, anchored: false, sentMove: "stay" }); if (!page) return;
   await choose(page, sent, "a");
   await settleAt(page, sent, "top", 60);
   assert.equal(await anchorOf(page, [sent]), "item-sent", "fixture: the sent card is not the anchor");
