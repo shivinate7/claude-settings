@@ -1151,6 +1151,56 @@ def case_page_sendmessage_proof_passes():
     expect_silent("page: a SendMessage naming 98 after the owner record passes", p)
 
 
+CLOUD_UNVERIFIED = "target session could not be verified; retry send_message shortly"  # measured 2026-11-06, cloud
+LOCAL_SEND_FAILED = "send failed"  # local SendMessage failure text is unmeasured; only the error flag is relied on
+
+
+def case_page_send_with_error_result_does_not_count():
+    """A send_message whose tool_result, the one with its tool_use_id, is an error does not prove page item 98.
+    The send's text names 98, so only its failed result can make the guard block. The result text is the measured
+    cloud failure."""
+    p = page_run(new_cfg(), "page-send-error", [("98: a", (PAGE_ITEM,))],
+                 [owner_rec("98: a"),
+                  used_rec(SEND, {"session_id": "session_0unknown", "message": "Ruling on page item 98: a"},
+                           tool_id="s1"),
+                  result_rec("s1", CLOUD_UNVERIFIED, is_error=True)])
+    expect_send_missing("page: a send_message whose result is an error does not prove 98", p, "fb-0958-7", "98")
+
+
+def case_page_send_with_ok_result_still_counts():
+    """The same send with a result that is no error still proves page item 98. The green control for the error
+    case: the fix must not block a send that worked."""
+    p = page_run(new_cfg(), "page-send-ok", [("98: a", (PAGE_ITEM,))],
+                 [owner_rec("98: a"),
+                  used_rec(SEND, {"session_id": "session_0page", "message": "Ruling on page item 98: a"},
+                           tool_id="s1"),
+                  result_rec("s1", "ok")])
+    expect_silent("page: a send_message naming 98 whose result is no error still proves 98", p)
+
+
+def case_page_error_result_of_another_call_does_not_cancel_the_send():
+    """A send that proves page item 98 keeps its proof when a later call with another tool_use_id fails. The
+    failed send to another session has its own result, so only its own result can cancel it."""
+    p = page_run(new_cfg(), "page-send-other-error", [("98: a", (PAGE_ITEM,))],
+                 [owner_rec("98: a"),
+                  used_rec(SEND, {"session_id": "session_0page", "message": "Ruling on page item 98: a"},
+                           tool_id="s1"),
+                  result_rec("s1", "ok"),
+                  used_rec(SEND, {"session_id": "session_0unknown", "message": "A note for another session"},
+                           tool_id="s2"),
+                  result_rec("s2", CLOUD_UNVERIFIED, is_error=True)])
+    expect_silent("page: a failed send with another tool_use_id does not cancel the send that proves 98", p)
+
+
+def case_page_sendmessage_with_error_result_does_not_count():
+    """The local SendMessage, with an error result under its own tool_use_id, does not prove page item 98."""
+    p = page_run(new_cfg(), "page-sendmessage-error", [("98: a", (PAGE_ITEM,))],
+                 [owner_rec("98: a"),
+                  used_rec("SendMessage", {"to": "page-writer", "message": "page 98: a"}, tool_id="s1"),
+                  result_rec("s1", LOCAL_SEND_FAILED, is_error=True)])
+    expect_send_missing("page: a SendMessage whose result is an error does not prove 98", p, "fb-0958-7", "98")
+
+
 def case_page_artifactdata_n_proof_passes():
     for label, name, tool_input in (
             ("doc_id items/disk-cleanup, data n 98", "ArtifactData",
@@ -3656,6 +3706,10 @@ CASES = (
     case_guard_router_home_names_the_tracked_ruling_homes,
     case_page_send_message_proof_passes,
     case_page_sendmessage_proof_passes,
+    case_page_send_with_error_result_does_not_count,
+    case_page_send_with_ok_result_still_counts,
+    case_page_error_result_of_another_call_does_not_cancel_the_send,
+    case_page_sendmessage_with_error_result_does_not_count,
     case_page_artifactdata_n_proof_passes,
     case_page_without_a_send_blocks,
     case_page_send_before_the_owner_record_blocks,
