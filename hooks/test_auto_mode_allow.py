@@ -89,6 +89,7 @@ MESSAGE_REPORT = (("asks for no act", "asks for no act"), ("pull request number"
                   ("batch heads", "batch heads"))
 MESSAGE_QUESTION = (("a question about state", "a question about state"),)
 MESSAGE_REQUEST = (("ready to merge", "ready to merge"), ("however phrased", "however phrased"))
+MESSAGE_ONLY = (("only informs and asks for no act", "only informs and asks for no act"),)
 
 
 def auto_mode():
@@ -292,6 +293,11 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
         missing = unnamed_terms(self.owner_message_part(), MESSAGE_REQUEST)
         self.assertFalse(missing,
                          "Covers text does not say a request is a message that asks: %r" % missing)
+
+    def test_covers_says_only_informs_and_asks_for_no_act(self):
+        missing = unnamed_terms(self.owner_message_part(), MESSAGE_ONLY)
+        self.assertFalse(missing,
+                         "Covers text does not say 'only informs and asks for no act': %r" % missing)
 
 
 class NeverCoversSentence(unittest.TestCase):
