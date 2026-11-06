@@ -23958,6 +23958,13 @@ def gj_workflow(script_head, prompt_expr):
             " return r" % prompt_expr}
 
 
+def gj_workflow_pair(first, second):
+    """A Workflow script with two Opus reviewer agent() calls, in order, their literal briefs `first`, then `second`.
+    A grant must read the marker of every such spawn in the call, not only the first."""
+    call = "await agent('%s', {agentType: 'reviewer', model: 'claude-opus-5-5'})"
+    return {"script": "const a = %s;\nconst b = %s;\nreturn [a, b];" % (call % first, call % second)}
+
+
 GJ_JUDGE_BRIEF = "Judge: Round 3 of 3. Review the diff."  # the marker on the first line
 GJ_PLAIN_BRIEF = "Round 3 of 3. Review the diff."  # no marker anywhere
 GJ_LINE_TWO = "Round 3 of 3. Review the diff.\nJudge: check the diff."  # the marker on line 2 only
@@ -24003,6 +24010,15 @@ GS_JUDGE_CHECKS = (
     ("step grant: judge marker: control, the same Workflow with the Judge: brief as a literal is allowed",
      gs_verdict_check("jm-workflow-ctl", gj_marker_grant("Judge:"),
                       gj_workflow("", "'%s'" % GJ_JUDGE_BRIEF), "allow", tool="Workflow")),
+    ("step grant: judge marker: one Workflow with a Judge: reviewer, then a plain reviewer, is refused",
+     gs_verdict_check("jm-wf-judge-plain", gj_marker_grant("Judge:"),
+                      gj_workflow_pair(GJ_JUDGE_BRIEF, GJ_PLAIN_BRIEF), "deny", tool="Workflow")),
+    ("step grant: judge marker: control, one Workflow with a Judge: reviewer then a Judge: reviewer is allowed",
+     gs_verdict_check("jm-wf-judge-judge-ctl", gj_marker_grant("Judge:"),
+                      gj_workflow_pair(GJ_JUDGE_BRIEF, GJ_JUDGE_BRIEF), "allow", tool="Workflow")),
+    ("step grant: judge marker: one Workflow with a plain reviewer then a Judge: reviewer is refused",
+     gs_verdict_check("jm-wf-plain-judge", gj_marker_grant("Judge:"),
+                      gj_workflow_pair(GJ_PLAIN_BRIEF, GJ_JUDGE_BRIEF), "deny", tool="Workflow")),
 ) + tuple(
     item
     for slug, words, bad in GJ_BAD_MARKERS
