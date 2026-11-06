@@ -723,6 +723,13 @@
         "reason": "Which layer ran which proof lives in agent transcripts and briefs. No check reads who reran a passing suite."
       }
     },
+    "building-mistake-names-its-guard": {
+      "mechanism": {
+        "kind": "check",
+        "ref": "lint/report_guard.py",
+        "test": "lint/test_report_guard.py::MistakeNamesGuardTests.test_mg_red_inbox_admission_blocks"
+      }
+    },
     "building-guard-needs-incident": {
       "mechanism": {
         "kind": "judgment",
