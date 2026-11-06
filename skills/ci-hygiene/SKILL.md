@@ -92,7 +92,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    the merge tool.
    Batch across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
-   notice. Never run `gh run watch`. One watch made 131 API calls in one minute (decision
+   notice. In cloud, mark ready by MCP `update_pull_request` `draft: false` (route
+   pr-ready-mcp-cloud); it sends no wake, so wait on the PR subscription and a check-in. Never run `gh run watch`. One watch made 131 API calls in one minute (decision
    `ci-wait-reads-run-status`, CI waits read the run status). Never poll with a sleep loop. Repeated
    `gh run view` or `gh pr checks` calls are a poll. To wait for any other condition, use the
    Monitor tool (decision `agents-wait-with-monitor`, agents wait with the Monitor tool). See
@@ -112,7 +113,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     A workflow that also has `on: push` for all branches still runs on a draft branch.
     `gh pr create --draft` then `gh pr ready` fires two runs. Keep the draft state in the concurrency
     group (step 4). Otherwise the skipped draft run cancels an in-progress ready run.
-    Run `gh pr ready` only after the draft run shows in `gh run list`. A ready sent seconds after the
+    Mark ready (`gh pr ready`, or in cloud MCP `update_pull_request`) only after the draft run shows in `gh run list`. A ready sent seconds after the
     PR opens can give both runs `draft=false`. One then cancels the other. Its cancelled check runs
     can stop the merge, even for an admin (PR 381, Sonnet prompt judges).
     After `gh pr ready`, a run of only skipped jobs proves nothing. Wait for a run on the head that
@@ -239,7 +240,9 @@ n/a where an item says so. A no is a finding. A read that cannot run is unknown,
 
 1. Does a job named `all-jobs-passed` exist? Read `.github/workflows/*.yml`.
 2. Does that job list every other job in `needs:`, except `ci-done`, with `if:` holding `always()` and
-   the draft guard? Read its job block.
+   the draft guard? Read its job block. A job skipped by design may stay off `needs:` when its own
+   job-level `if:` skips it on every `pull_request` event, such as a nightly-only or push-only job. A
+   PR can then never turn it red. Read that job's `if:`. A job off `needs:` that can run on a PR is a no.
 3. Does branch protection require exactly one check, `all-jobs-passed`? Read
    `gh api repos/<owner>/<repo>/branches/main/protection`, and count `required_status_checks.checks`.
    A 403 is unknown.
@@ -269,6 +272,8 @@ n/a where an item says so. A no is a finding. A read that cannot run is unknown,
     `grep -nE "\| *(tail|head)" .github/workflows/*.yml`. Read each hit. A version print that decides
     no verdict is not a finding.
 15. Does an audit step run in CI, with a pinned version? Run
-    `grep -n "zizmor" .github/workflows/*.yml`. A version given as `zizmor==<x.y.z>` is a yes. A step
+    `grep -n "zizmor" .github/workflows/*.yml`, then read each zizmor step to the next `- ` step line. A
+    version given as `zizmor==<x.y.z>`, or as that step's own `with:` input such as `version: <x.y.z>`,
+    is a yes. A `version:` in another step is not the zizmor pin. A step
     that runs the shared action (`actions/zizmor@<sha>` or `$/actions/zizmor`) is also a yes: its
     `run.sh` holds the pin. No version and no shared action is a no.

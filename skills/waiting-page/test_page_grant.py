@@ -128,14 +128,24 @@ class Base(unittest.TestCase):
             write_text(os.path.join(root, EXTRAS), json.dumps({"kinds": {}, "artifacts": registry_list}))
         return root
 
-    def fetch(self, items=None, answers=None):
+    def new_fetch(self):
+        """A fetch folder made by the checker's own `--new-fetch`, as SKILL.md has a session make one per check."""
+        r = subprocess.run([sys.executable, CMD, "--new-fetch", self.tmp.name], capture_output=True, text=True,
+                           timeout=60, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+        self.assertEqual(r.returncode, 0, "--new-fetch failed: stdout %r, stderr %r" % (r.stdout, r.stderr))
+        line = r.stdout.strip()
+        self.assertTrue(line.startswith("fetch "), "--new-fetch printed %r, not `fetch <dir>`" % line)
+        return line[len("fetch "):]
+
+    def fetch(self, items=None, answers=None, hand=False):
         """A fetched folder. A collection given as None has no folder, as ArtifactData leaves it for a missing document.
-        A document given as a str is written verbatim, so a case can hold a file that is not JSON."""
-        root = tempfile.mkdtemp(prefix="fetched-", dir=self.tmp.name)
+        A document given as a str is written verbatim, so a case can hold a file that is not JSON. hand=True builds the
+        folder by hand, with no `--new-fetch`, as a session that skips the step would."""
+        root = tempfile.mkdtemp(prefix="fetched-", dir=self.tmp.name) if hand else self.new_fetch()
         for name, docs in (("items", items), ("answers", answers)):
             if docs is None:
                 continue
-            os.makedirs(os.path.join(root, name))
+            os.makedirs(os.path.join(root, name), exist_ok=True)
             for doc_id, data in docs.items():
                 write_text(os.path.join(root, name, doc_id + ".json"), data if isinstance(data, str) else json.dumps(data))
         return root
@@ -249,12 +259,14 @@ class Counted(Base):
         r = self.check(self.repo(artifacts=full_registry()), self.pair(), pick="a")
         self.assertCounted(r, verdict("a"))
 
-    def test_checker_writes_nothing(self):
+    def test_checker_writes_only_its_stamp(self):
         root, fetched = self.repo(), self.pair()
         before = (snapshot(root), snapshot(fetched))
         r = self.check(root, fetched, pick="a")
         self.assertCounted(r, verdict("a"))
         self.assertEqual((snapshot(root), snapshot(fetched)), before, "the checker changed a file under root or fetched")
+        self.assertFalse(os.path.exists(fetched + ".stamp"), "the checker left its stamp unused")
+        self.assertTrue(os.path.isfile(fetched + ".stamp.used"), "the checker did not keep its used stamp")
 
 
 class NotCounted(Base):
@@ -372,6 +384,65 @@ class NotCounted(Base):
         r = self.check(self.repo(), self.pair(item_fields={"kind": "task", "options": []},
                                               answer_fields={"choice": ABSENT, "done": True}), pick="done")
         self.assertNotCounted(r, "task answer with done true", reason="task")
+
+
+class Provenance(Base):
+    """Decision relayed-grant-read-from-page: the files must come from this one fetch, never an older one or a hand."""
+
+    def test_new_fetch_makes_an_empty_folder_and_a_stamp_beside_it(self):
+        fetched = self.new_fetch()
+        self.assertEqual(os.listdir(fetched), [], "the new fetch folder is not empty")
+        self.assertTrue(os.path.isfile(fetched + ".stamp"), "no stamp beside the new fetch folder")
+
+    def test_hand_built_folder_not_counted(self):
+        fetched = self.fetch(items={ITEM_ID: item()}, answers={ITEM_ID: answer()}, hand=True)
+        self.assertNotCounted(self.check(self.repo(), fetched), "folder made by hand", reason="--new-fetch")
+
+    def test_reused_folder_not_counted(self):
+        root, fetched = self.repo(), self.pair()
+        self.assertCounted(self.check(root, fetched), verdict("a"))
+        self.assertNotCounted(self.check(root, fetched), "same folder checked twice", reason="already checked")
+
+    def test_withdrawn_answer_left_in_reused_folder_not_counted(self):
+        """The owner withdraws the answer; a re-fetch into the old folder saves no file, so the old answer stays."""
+        root, fetched = self.repo(), self.pair()
+        self.assertNotCounted(self.check(root, fetched, pick="b"), "first check, wrong pick")
+        self.assertNotCounted(self.check(root, fetched), "withdrawn answer left in a reused folder",
+                              reason="already checked")
+
+    def test_answer_older_than_the_stamp_not_counted(self):
+        fetched = self.pair()
+        made = os.stat(fetched + ".stamp").st_mtime_ns
+        os.utime(os.path.join(fetched, "answers", ITEM_ID + ".json"), ns=(made - 10 ** 9, made - 10 ** 9))
+        self.assertNotCounted(self.check(self.repo(), fetched), "answer file older than the fetch", reason="older")
+
+    def test_folder_with_another_items_file_not_counted(self):
+        fetched = self.fetch(items={ITEM_ID: item(), "other-item": item(id="other-item")},
+                             answers={ITEM_ID: answer()})
+        self.assertNotCounted(self.check(self.repo(), fetched), "folder holds another item's file", reason="holds")
+
+    def test_wrong_page_url_check_uses_the_folder_up(self):
+        root, fetched = self.repo(), self.pair()
+        self.assertNotCounted(self.check(root, fetched, page=OTHER_URL), "first check, wrong page URL")
+        self.assertNotCounted(self.check(root, fetched), "same folder, right URL", reason="already checked")
+
+    def test_unknown_registry_check_uses_the_folder_up(self):
+        fetched = self.pair()
+        self.assertUnknown(self.check(self.repo(extras=False), fetched), "first check, repo with no extras file")
+        self.assertNotCounted(self.check(self.repo(), fetched), "same folder, right root", reason="already checked")
+
+    def test_stray_file_check_uses_the_folder_up(self):
+        fetched = self.fetch(items={ITEM_ID: item(), "other-item": item(id="other-item")},
+                             answers={ITEM_ID: answer()})
+        self.assertNotCounted(self.check(self.repo(), fetched), "first check, stray file", reason="holds")
+        os.remove(os.path.join(fetched, "items", "other-item.json"))
+        self.assertNotCounted(self.check(self.repo(), fetched), "stray file removed", reason="already checked")
+
+    def test_stamp_copied_onto_a_hand_built_folder_not_counted(self):
+        made = self.new_fetch()
+        fetched = self.fetch(items={ITEM_ID: item()}, answers={ITEM_ID: answer()}, hand=True)
+        shutil.copy(made + ".stamp", fetched + ".stamp")
+        self.assertNotCounted(self.check(self.repo(), fetched), "another folder's stamp", reason="--new-fetch")
 
 
 class Unknown(Base):

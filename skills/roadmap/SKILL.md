@@ -74,24 +74,28 @@ GitHub, so the publisher reads them just before the build and passes one file:
 
     {"readAt": "<ISO time of the reads>",
      "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
-     "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "url"?, "checks"?}],
+     "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "head"?, "url"?, "checks"?}],
      "branches": [{"name", "updatedAt"?}],
-     "sessions": [{"id", "session_status", "tags"}],
+     "sessions": [{"id", "session_status", "tags", "status_bucket"?}],
      "items": [{"n", "status", "home", "lane"?}]}
 
 - `threads`: `list_threads`, every page. Leave out resolved threads. `state` is the thread state as
   listed. Add `step` only when the thread's brief names it.
 - `pulls`: the repo's open pull requests. `createdAt` is GitHub's `created_at` for the pull. It is
   optional. A missing or unreadable `createdAt` is not a wrong shape. The stale-draft row lists it as
-  unknown. `branches`: lane branches with no open pull request.
-- `sessions`: `list_sessions`, every page, each row copied as it comes with only these three fields.
-  The upkeep list reads it for steps in progress. A live file with no `sessions` list still renders
+  unknown. `head` is the pull's head commit sha, also optional: the lanes-to-archive row reads it to
+  release a lane whose draft pull is already in the default branch. `branches`: lane branches with no open pull request.
+- `sessions`: `list_sessions`, every page, each row copied as it comes with only these fields.
+  `status_bucket` is the bucket list_sessions returns (`SESSION_STATUS_BUCKET_WORKING`, `_BLOCKED`, `_REVIEW_READY`, `_COMPLETED`, `_FAILED`);
+  it is optional, and a row without it reads as not completed. The upkeep list reads the rows for steps
+  in progress and for lanes to archive. A live file with no `sessions` list still renders
   Live work.
 - `items`: `ArtifactData list items` of the repo's waiting page, every page, each row copied with only
-  `n`, `status`, `home` and `lane`. `lane` is where the item's answer went: the lane's slug, a tier name
+  `n`, `status`, `home`, `lane` and `owner`. `lane` is where the item's answer went: the lane's slug, a tier name
   such as `batch-runner`, or `null` for none. Copy it when the item has one; leave the key out when the
-  page row has none. The upkeep list reads the rows for page rulings, and the red line reads `lane` for
-  stalled items. A live file with no `items` list still renders Live work.
+  page row has none. `owner` is the session that reads the answer, also optional. The build keeps each
+  exactly when its key is present. The upkeep list reads the items for page rulings and for lanes to archive,
+  and the red line reads `lane` for stalled items. A live file with no `items` list still renders Live work.
 - An entry with the wrong shape is counted on the page and in the upkeep list, never dropped. A
   `step` that names no open step goes in the upkeep list.
 - With no `--live`, no `threads` or `pulls` list, or a `readAt` that is not an ISO time, the
@@ -227,6 +231,33 @@ After each build the roadmap build script prints the upkeep list for the triage 
   `<id> (<date as written>)`. Triage asks for a
   re-check of that claim on main before a lane starts. The row reads the notes only, so it needs no
   `--live` file;
+- lanes to archive, in the row `lanes to archive`. A session is listed when all of these hold:
+  - its tags hold `cs-build:lane` and this repo's `cs-repo:` tag, and its status is not archived;
+  - its `status_bucket` is `SESSION_STATUS_BUCKET_COMPLETED` or `SESSION_STATUS_BUCKET_REVIEW_READY`. A lane that is blocked, failed, working or
+    has no bucket is never listed;
+  - it has at least one `cs-step:` tag, and each step it names has landed. A step has landed when a
+    `Step:` trailer is on main, or its status is `done`;
+  - no open pull holds it. A pull holds a lane when its `branch` is a step slug or `lane/<slug>`. A
+    draft pull whose `head` sha is already in the default branch (`git merge-base --is-ancestor`)
+    releases the lane. A ready pull always holds it. A failed git read reads as not landed;
+  - no open page item holds it. An item holds a lane when its `lane` is one of the lane's steps and
+    its `status` is not `closed`. An item whose `owner` is the lane's own session id holds the lane the same way.
+    The page writes `open` and `closed` only, so only `closed` releases a lane.
+
+  A step id that is not on the record branch reads the lane `unknown (step <id> not on the record
+  branch; lane <session id>)`. A live file with no `items` list makes the row unknown. An `items` row with the
+  wrong shape makes the row unknown. Each entry reads `<session id> (<steps>; topic <cs-topic or ->)`,
+  sorted. The row reads one `unknown (<why>)` entry, never an empty list, when:
+  - `--live` is missing or unreadable;
+  - `readAt` is bad, over 60 minutes old or in the future;
+  - there is no `sessions` list, or a session or pull row has the wrong shape (a pull `branch` that is not text or null counts);
+  - no live lane row of the repo carries one of the five `SESSION_STATUS_BUCKET_*` names. Archived rows
+    are not counted, so only archived lanes, or no live lane rows, read an empty row;
+  - main or its git log cannot be read;
+  - the repo's GitHub name cannot be read.
+
+  `merge --idle-lanes --live FILE` prints the same list for the batch runner: one line per lane, then
+  a summary line. It exits 1, with no summary line, when every entry is unknown;
 - `Step:` trailers that name no step.
 
 ## Cost

@@ -85,8 +85,9 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, f
       }),
     }),
   };
-  // comments: null (capability absent) or { can, canThrows, failCodes, goneThreads }.
-  // failCodes rejects every send; goneThreads rejects a send into those thread ids with not_found.
+  // comments: null (capability absent) or { can, canThrows, failCode, goneThreads, threadFail, anchorFail }.
+  // failCode rejects every send; goneThreads rejects a send into those thread ids with not_found.
+  // threadFail maps a thread id to the code a send into that thread rejects with; anchorFail is the code an anchored send (no threadId) rejects with.
   window.__sent = [];
   const cm = comments && {
     canSendToClaude: async () => { if (comments.canHangs) return new Promise(() => {}); if (comments.canThrows) throw { code: "unavailable" }; return comments.can || "available"; },
@@ -96,6 +97,8 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, f
       if (comments.sendDelay) await new Promise((r) => setTimeout(r, comments.sendDelay));
       if (comments.failCode) throw { code: comments.failCode, message: "stub" };
       if (target.threadId && (comments.goneThreads || []).includes(target.threadId)) throw { code: "not_found", message: "stub" };
+      if (target.threadId && comments.threadFail && comments.threadFail[target.threadId]) throw { code: comments.threadFail[target.threadId], message: "stub" };
+      if (!target.threadId && comments.anchorFail) throw { code: comments.anchorFail, message: "stub" };
       return { threadId: target.threadId || "t-new-" + window.__sent.length, commentId: "c" + window.__sent.length };
     },
   };
@@ -1374,6 +1377,13 @@ test("a saved none note does not ride along when the owner picks an option", asy
 
 const sent = (page) => page.evaluate(() => window.__sent);
 const told = (page, text) => page.locator("#sentStatus", { hasText: text }).waitFor();
+// The wake result on the sent panel. The panel reads "Telling Claude…" until notifyClaude has returned, so this waits for that and then reads the words.
+// A test asserts on the words, so a failure names its cause and not a locator timeout.
+const wakeStatus = async (page) => {
+  await page.locator("#sentStatus").waitFor();
+  await page.waitForFunction(() => !document.getElementById("sentStatus").textContent.includes("Telling"), null, { timeout: 3000 }).catch(() => {});
+  return (await page.textContent("#sentStatus")).trim();
+};
 const NOTE_ONLY = { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", note: "Which cable?" } };
 
 test("a task note with no Mark done makes the card ready, live as the owner types", async (t) => {
@@ -1528,6 +1538,70 @@ test("a not_found on the stored thread starts a new anchored thread", async (t) 
   assert.equal(s[0].threadId, "t-old");
   assert.ok(s[1].anchor && s[1].anchor.tag === "H1", "the new thread anchors at the h1");
   assert.equal(await page.evaluate(() => localStorage.getItem("waiting.thread")), "t-new-2");
+});
+
+// One pick sent while the stored thread rejects with `code`. anchorFail is the code the anchored retry rejects with, when it is given.
+// Returns the page, the wake result and the sends, or null with no browser.
+async function pickIntoStoredFail(t, { code, anchorFail = "" }) {
+  const page = await open(t, { comments: { can: "available", threadFail: { "t-old": code }, anchorFail }, storage: { "waiting.thread": "t-old" } });
+  if (!page) return null;
+  await takePick(page, DECISION); await send(page);
+  return { page, status: await wakeStatus(page), s: await sent(page) };
+}
+// Codes a stored thread must not retry: a rate limit or a refusal that a second thread cannot undo. Each sends once, keeps the thread and shows its code.
+const NO_FALLBACK = ["rate_limited", "claude_unavailable", "consent_required", "invalid", "unavailable", "forbidden", "not_granted", "capability_disabled", "capability_removed", "transform_error"];
+const storedThread = (page) => page.evaluate(() => localStorage.getItem("waiting.thread"));
+
+test("an upstream_error on the stored thread starts a new anchored thread", async (t) => {
+  const r = await pickIntoStoredFail(t, { code: "upstream_error" }); if (!r) return;
+  assert.equal(r.s[0].threadId, "t-old", "the first send did not go to the stored thread");
+  assert.equal(r.s.length, 2, "upstream_error on the stored thread did not start one anchored retry: " + r.s.length + " send(s)");
+  assert.ok(r.s[1].anchor && r.s[1].anchor.tag === "H1", "the retry does not anchor at the h1");
+  assert.match(r.status, /A wake was sent/, "the wake result does not say a wake was sent: " + JSON.stringify(r.status));
+  assert.equal(await storedThread(r.page), "t-new-2", "the new thread id is not stored");
+});
+
+test("an unknown code on the stored thread starts a new anchored thread, as upstream_error does", async (t) => {
+  const r = await pickIntoStoredFail(t, { code: "thread_full" }); if (!r) return;
+  assert.equal(r.s[0].threadId, "t-old", "the first send did not go to the stored thread");
+  assert.equal(r.s.length, 2, "an unknown code on the stored thread did not start one anchored retry: " + r.s.length + " send(s)");
+  assert.ok(r.s[1].anchor && r.s[1].anchor.tag === "H1", "the retry does not anchor at the h1");
+  assert.match(r.status, /A wake was sent/, "the wake result does not say a wake was sent: " + JSON.stringify(r.status));
+  assert.equal(await storedThread(r.page), "t-new-2", "the new thread id is not stored");
+});
+
+for (const code of NO_FALLBACK) {
+  test(`${code} on the stored thread sends once, shows ${code}, and keeps the thread`, async (t) => {
+    const r = await pickIntoStoredFail(t, { code }); if (!r) return;
+    assert.equal(r.s[0].threadId, "t-old", "the send did not go to the stored thread");
+    assert.equal(r.s.length, 1, `${code} on the stored thread started a second send: ${r.s.length} sends`);
+    assert.equal(await storedThread(r.page), "t-old", `${code} on the stored thread replaced the stored thread`);
+    assert.ok(r.status.includes("No session was told"), "the wake result does not say no session was told: " + JSON.stringify(r.status));
+    assert.ok(r.status.includes(code), `the wake result does not show the code ${code}: ` + JSON.stringify(r.status));
+    assert.doesNotMatch(r.status, NO_THREAD, "the wake result names a thread: " + JSON.stringify(r.status));
+  });
+}
+
+test("an upstream_error on the stored thread and on the anchored retry gives one retry and no third send", async (t) => {
+  const r = await pickIntoStoredFail(t, { code: "upstream_error", anchorFail: "upstream_error" }); if (!r) return;
+  assert.equal(r.s[0].threadId, "t-old", "the first send did not go to the stored thread");
+  assert.equal(r.s.length, 2, "expected the stored send and one anchored retry, got " + r.s.length + " send(s)");
+  assert.equal(await storedThread(r.page), "t-old", "a failed retry replaced the stored thread");
+  assert.ok(r.status.includes("No session was told"), "the wake result does not say no session was told: " + JSON.stringify(r.status));
+  assert.ok(r.status.includes("upstream_error"), "the wake result does not show upstream_error: " + JSON.stringify(r.status));
+  assert.doesNotMatch(r.status, NO_THREAD, "the wake result names a thread: " + JSON.stringify(r.status));
+});
+
+test("a claude_unavailable on a first send with no stored thread shows the code", async (t) => {
+  const page = await open(t, { comments: { can: "available", failCode: "claude_unavailable" } }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  const status = await wakeStatus(page);
+  const s = await sent(page);
+  assert.equal(s.length, 1, "a first send with no stored thread did not go out once: " + s.length + " send(s)");
+  assert.ok(s[0].anchor, "the first send is not anchored");
+  assert.ok(status.includes("No session was told"), "the wake result does not say no session was told: " + JSON.stringify(status));
+  assert.ok(status.includes("claude_unavailable"), "the wake result does not show claude_unavailable: " + JSON.stringify(status));
+  assert.doesNotMatch(status, NO_THREAD, "the wake result names a thread: " + JSON.stringify(status));
 });
 
 test("a long note with control characters is cut to 4 KiB, keeps Owners, and is plain", async (t) => {
@@ -6819,6 +6893,15 @@ test("an ask sent while a session can take a comment says a wake was sent, never
   const line = await sentLine(page, ASK_TEXT);
   assert.match(line, /A wake was sent\./, "the line under the buttons does not say a wake was sent: " + JSON.stringify(line));
   assert.doesNotMatch(line, /Claude was told/, "the line under the buttons still says Claude was told: " + JSON.stringify(line));
+});
+
+test("an ask whose stored thread rejects upstream_error says a wake was sent, after one anchored retry", async (t) => {
+  const page = await open(t, { meta: { writer: WRITER }, comments: { can: "available", threadFail: { "t-old": "upstream_error" } }, storage: { "waiting.thread": "t-old" } }); if (!page) return;
+  const line = await sentLine(page, ASK_TEXT);
+  const s = await sent(page);
+  assert.equal(s[0].threadId, "t-old", "the ask did not first go to the stored thread");
+  assert.match(line, /A wake was sent\./, "the line under the buttons does not say a wake was sent after the anchored retry: " + JSON.stringify(line));
+  assert.equal(s.length, 2, "the ask did not get one anchored retry: " + s.length + " send(s)");
 });
 
 test("an ask sent with no session to tell says what happens next, and names no thread", async (t) => {

@@ -34,6 +34,12 @@ STEP = {"title": "t", "status": "todo", "phase": "cleanup", "order": 1, "note": 
 CONFLICT = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> 1234567 (other)\n"
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
 _NO_LANE = object()  # item(): the default, which leaves the row's lane key out
+# get_session's status_bucket as list_sessions returns it: the SESSION_STATUS_BUCKET_* enum names, measured on real rows.
+BUCKET_COMPLETED = "SESSION_STATUS_BUCKET_COMPLETED"
+BUCKET_REVIEW_READY = "SESSION_STATUS_BUCKET_REVIEW_READY"
+BUCKET_WORKING = "SESSION_STATUS_BUCKET_WORKING"
+BUCKET_BLOCKED = "SESSION_STATUS_BUCKET_BLOCKED"
+BUCKET_FAILED = "SESSION_STATUS_BUCKET_FAILED"
 
 # The page script the roadmap branch's build.py put in front of the viewer. The
 # script's stub must stay byte for byte this, so the viewer reads the data as it did.
@@ -101,9 +107,13 @@ def iso_ago(minutes):
     return when.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def session_row(sid, status, *tags):
-    """One sessions row, as triage copies it from list_sessions."""
-    return {"id": sid, "session_status": status, "tags": list(tags)}
+def session_row(sid, status, *tags, status_bucket=None):
+    """One sessions row, as triage copies it from list_sessions. The status_bucket key (get_session's bucket) is
+    added only when given, so a row without it reads as the live file's rows did before the key existed."""
+    row = {"id": sid, "session_status": status, "tags": list(tags)}
+    if status_bucket is not None:
+        row["status_bucket"] = status_bucket
+    return row
 
 
 def make_repo(root, steps=None, meta=None):
@@ -2282,9 +2292,448 @@ class MockupFiles(UpkeepFixture):
         self.assertIn("Plain step", page, "the build did not write the page")
 
 
+class IdleLanes(UpkeepFixture):
+    """The lanes-to-archive upkeep row and build.idle_lanes (spec section 3). A lane is listed only when its session
+    is completed or review ready, every cs-step it names is landed (a Step trailer on main, or status done), and no
+    open pull request or open page item still holds it. A read the build cannot make is one `unknown (...)` entry,
+    never an empty list. Each negative case shares its live file with a listed control, so an empty row cannot pass."""
+
+    ROW = "lanes to archive"
+
+    def lane(self, sid, step, bucket=BUCKET_COMPLETED, status="SESSION_STATUS_IDLE"):
+        """A sessions row for a lane of this repo that names `step`, with its get_session bucket."""
+        return session_row(sid, status, "cs-build:lane", "cs-step:" + step, self.REPO, status_bucket=bucket)
+
+    def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=()):
+        """UpkeepFixture.publish with the items key present: [] unless a case names rows. items=None leaves the key out,
+        the file a publisher writes before the waiting page had items."""
+        return super().publish(sessions=sessions, pulls=pulls, threads=threads, read_at=read_at,
+                               items=None if items is None else list(items))
+
+    def land(self, steps):
+        """Write {step id: fields} on the record branch in one commit. Each step is written whole, from STEP."""
+        for sid, fields in steps.items():
+            self.write_step(sid, dict(STEP, **fields))
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "steps " + ", ".join(sorted(steps)))
+
+    def trailer_on_main(self, sid):
+        """A commit on main whose last paragraph is `Step: <sid>`, so the step reads as merged there. Leaves HEAD on
+        the record branch."""
+        git(self.repo, "checkout", "-q", "main")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "%s merged\n\nStep: %s" % (sid, sid))
+        git(self.repo, "checkout", "-q", "roadmap")
+
+    def archive(self, *extra):
+        """(count, entries) of the lanes-to-archive row, from a build from main that reads the fixture's live file.
+        `extra` adds build flags, such as --main-branch."""
+        _, out = self.build_from_main("--live", str(self.live), *extra, expect=(0, 1))
+        count, detail = self.row(out, self.ROW)
+        return count, self.entries(detail)
+
+    def idle_direct(self):
+        """build.idle_lanes on the fixture's live file, with the steps, marks and repo name the build reads."""
+        fn = getattr(build, "idle_lanes", None)
+        if fn is None:
+            self.fail("build.idle_lanes is absent: no function names the lanes to archive")
+        source, why = build.record_source(self.repo, "roadmap")
+        self.assertIsNotNone(source, why)
+        steps = build.load(source)["steps"]
+        marks, _strays, _why = build.landed_marks(self.repo, build.main_ref(self.repo, "main"), "main", steps)
+        work = build.live_work(str(self.live), steps, self.SLUG)
+        return fn(work, steps, marks, self.SLUG, self.repo)
+
+    @staticmethod
+    def ids(entries):
+        """The first word of each entry: a session id, or `unknown` for an unknown entry."""
+        return sorted(entry.split(" ", 1)[0] for entry in entries)
+
+    @staticmethod
+    def named(entries, sid):
+        return any(sid in entry for entry in entries)
+
+    def test_control_the_live_file_builds_and_an_existing_upkeep_row_reads(self):
+        # Green on the old code too: the fixture builds with a live file, and a row that exists now reads. So the red
+        # cases in this class fail on the new row, not on the fixture.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_a", "c1")])
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.row(out, "notes over %d words" % build.NOTE_WORDS), (0, ""))
+
+    def test_core_four_lanes_only_the_one_whose_step_merged_is_listed(self):
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "c3": {"status": "done", "order": 3}, "c4": {"status": "done", "order": 4}})
+        self.trailer_on_main("c1")
+        self.publish(sessions=[self.lane("session_a", "c1"),
+                               self.lane("session_b", "c2"),
+                               self.lane("session_c", "c3", bucket=BUCKET_WORKING, status="SESSION_STATUS_RUNNING"),
+                               self.lane("session_d", "c4")],
+                     pulls=[{"number": 21, "title": "c2 lane", "branch": "c2"}],
+                     items=[{"n": 4, "status": "open", "home": "step c4", "lane": "c4"}])
+        self.assertEqual(self.ids(self.idle_direct()), ["session_a"])
+
+    def test_open_pull_on_the_lane_head_form_blocks_its_lane(self):
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     pulls=[{"number": 31, "title": "lane c1", "branch": "lane/c1"}])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
+    def test_open_pull_on_the_bare_step_head_blocks_its_lane(self):
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     pulls=[{"number": 32, "title": "lane c2", "branch": "c2"}])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+
+    def test_open_draft_whose_head_is_an_ancestor_of_main_does_not_block(self):
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "c3": {"status": "done", "order": 3}})
+        git(self.repo, "checkout", "-q", "main")
+        ancestor = git(self.repo, "rev-parse", "HEAD").strip()
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "later work on main")  # `ancestor` is now strictly behind
+        git(self.repo, "checkout", "-q", "roadmap")
+        off_main = git(self.repo, "rev-parse", "roadmap").strip()  # a commit main never reaches
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2"), self.lane("session_c", "c3")],
+                     pulls=[dict(self.draft(41, "c1"), head=ancestor), dict(self.draft(42, "c2"), head=off_main)])
+        count, entries = self.archive()
+        # session_a: the draft's head is in main, so it does not block. session_b: not in main, so it blocks.
+        # session_c is the control: no pull, so it is listed.
+        self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_c"]))
+
+    def test_open_draft_with_no_head_sha_holds_its_lane(self):
+        # Green on the old code: a draft with no head sha cannot be shown landed, so it holds. session_b is the control.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     pulls=[self.draft(71, "lane/c1")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
+    def test_open_draft_whose_head_git_cannot_read_holds_its_lane(self):
+        # Green on the old code: a head sha git does not hold makes the ancestor read fail, and a failed read holds.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     pulls=[dict(self.draft(72, "lane/c1"), head="f" * 40)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
+    def test_blocked_failed_working_and_unbucketed_lanes_are_never_listed(self):
+        self.land({"c%d" % n: {"status": "done", "order": n} for n in range(1, 6)})
+        self.publish(sessions=[self.lane("session_blocked", "c1", bucket=BUCKET_BLOCKED),
+                               self.lane("session_failed", "c2", bucket=BUCKET_FAILED),
+                               self.lane("session_working", "c3", bucket=BUCKET_WORKING, status="SESSION_STATUS_RUNNING"),
+                               session_row("session_unbucketed", "SESSION_STATUS_IDLE", "cs-build:lane",
+                                           "cs-step:c4", self.REPO),
+                               self.lane("session_ok", "c5")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_ok"]))
+
+    def test_completed_and_review_ready_lanes_are_listed(self):
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1", bucket=BUCKET_COMPLETED),
+                               self.lane("session_b", "c2", bucket=BUCKET_REVIEW_READY)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_b"]))
+
+    def test_lowercase_completed_bucket_is_not_listed(self):
+        # list_sessions rows carry the enum name. A lowercase `completed` is no name a real row carries, so its lane is
+        # never listed. The enum-named lane beside it is the control.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        lowercase = session_row("session_lower", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1", self.REPO,
+                                status_bucket="completed")
+        self.publish(sessions=[lowercase, self.lane("session_a", "c2")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+
+    def test_step_merged_by_a_step_trailer_on_main_is_landed_and_one_still_open_is_not(self):
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "doing", "order": 2}})
+        self.trailer_on_main("c1")
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+
+    def test_other_repos_lane_is_ignored_not_listed_and_not_unknown(self):
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        other = session_row("session_other", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1",
+                            "cs-repo:other/repo", status_bucket=BUCKET_COMPLETED)
+        self.publish(sessions=[other, self.lane("session_a", "c2")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+
+    def test_lane_with_no_cs_step_is_never_listed(self):
+        self.land({"c1": {"status": "done", "order": 1}})
+        no_step = session_row("session_nostep", "SESSION_STATUS_IDLE", "cs-build:lane", self.REPO,
+                              status_bucket=BUCKET_COMPLETED)
+        self.publish(sessions=[no_step, self.lane("session_a", "c1")])
+        count, entries = self.archive()
+        self.assertFalse(self.named(entries, "session_nostep"), entries)
+        self.assertTrue(self.named(entries, "session_a"), "the control lane is not listed: %r" % (entries,))
+
+    def test_session_without_the_lane_tag_is_ignored(self):
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        triage = session_row("session_triage", "SESSION_STATUS_IDLE", "cs-build:triage", "cs-step:c1",
+                             self.REPO, status_bucket=BUCKET_COMPLETED)
+        self.publish(sessions=[triage, self.lane("session_a", "c2")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+
+    def test_archived_session_is_ignored(self):
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_archived", "c1", status="SESSION_STATUS_ARCHIVED"),
+                               self.lane("session_a", "c2")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+
+    def test_step_id_not_on_the_record_branch_reads_the_lane_unknown(self):
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_ghost", "ghost"), self.lane("session_a", "c1")])
+        count, entries = self.archive()
+        unknown = [entry for entry in entries if "unknown (" in entry]
+        self.assertEqual(count, 2, entries)
+        self.assertEqual(len(unknown), 1, entries)
+        self.assertIn("step ghost not on the record branch", unknown[0])
+        self.assertTrue(self.named(entries, "session_a"), "the control lane is not listed: %r" % (entries,))
+
+    def test_stale_live_read_is_one_unknown_entry_and_no_lane_is_listed(self):
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_a", "c1")], read_at=iso_ago(build.STALE_LIVE_MINUTES + 30))
+        count, entries = self.archive()
+        self.assertEqual(count, 1, entries)
+        self.assertEqual(len(entries), 1, entries)
+        self.assertTrue(entries[0].startswith("unknown ("), entries)
+
+    def test_bad_read_at_is_one_unknown_entry(self):
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_a", "c1")], read_at="not a time")
+        count, entries = self.archive()
+        self.assertEqual(count, 1, entries)
+        self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
+
+    def test_skipped_session_or_pull_row_reads_the_whole_list_unknown(self):
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        broken_session = {"id": 7, "session_status": "SESSION_STATUS_IDLE", "tags": []}
+        broken_pull = {"number": "twelve", "title": "lane c2", "branch": "c2"}
+        cases = (("session", [broken_session, self.lane("session_a", "c1")], ()),
+                 ("pull", [self.lane("session_a", "c1")], [broken_pull]))
+        for label, sessions, pulls in cases:
+            with self.subTest(row=label):
+                self.publish(sessions=sessions, pulls=pulls)
+                count, entries = self.archive()
+                self.assertEqual(count, 1, entries)
+                self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
+
+    def test_missing_sessions_list_is_one_unknown_entry(self):
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=None)
+        count, entries = self.archive()
+        self.assertEqual(count, 1, entries)
+        self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
+
+    def test_no_live_file_is_one_unknown_entry(self):
+        self.land({"c1": {"status": "done", "order": 1}})
+        _, out = self.build_from_main(expect=(0, 1))
+        count, detail = self.row(out, self.ROW)
+        self.assertEqual(count, 1, out)
+        self.assertTrue(detail.startswith("unknown ("), out)
+
+    def test_empty_sessions_list_is_an_empty_row_not_an_unknown_one(self):
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[])
+        self.assertEqual(self.archive(), (0, []))
+
+    def test_thirty_two_idle_lanes_are_all_listed_in_sorted_order(self):
+        self.land({"L%02d" % n: {"status": "done", "order": n} for n in range(1, 33)})
+        self.publish(sessions=[self.lane("session_%02d" % n, "L%02d" % n) for n in range(1, 33)])
+        count, entries = self.archive()
+        self.assertEqual(count, 32)
+        self.assertEqual(self.ids(entries), sorted("session_%02d" % n for n in range(1, 33)))
+
+    def test_only_a_closed_page_item_releases_its_lane(self):
+        # The waiting page's statuses are open and closed (skill waiting-page, the item fields). An answered item is
+        # not closed, so it still holds its lane. The closed item beside it releases its lane.
+        self.land({"c%d" % n: {"status": "done", "order": n} for n in range(1, 5)})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2"),
+                               self.lane("session_c", "c3"), self.lane("session_d", "c4")],
+                     items=[{"n": 1, "status": "answered", "home": "step c2", "lane": "c2"},
+                            {"n": 2, "status": "closed", "home": "step c3", "lane": "c3"},
+                            {"n": 3, "status": "open", "home": "step c4", "lane": "c4"}])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_c"]))
+
+    def test_a_page_item_status_other_than_closed_holds_its_lane(self):
+        # Green on the old code: a status the reader does not list as done holds. The closed item on c3 is the control.
+        self.land({"c%d" % n: {"status": "done", "order": n} for n in range(1, 4)})
+        for status in ("Closed", "parked"):
+            with self.subTest(status=status):
+                self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2"),
+                                       self.lane("session_c", "c3")],
+                             items=[{"n": 1, "status": status, "home": "step c2", "lane": "c2"},
+                                    {"n": 2, "status": "closed", "home": "step c3", "lane": "c3"}])
+                count, entries = self.archive()
+                self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_c"]))
+
+    def test_a_live_file_with_no_items_key_reads_unknown_and_lists_no_lane(self):
+        # The control is the same file with an items list, which lists the lane. With no items key the page items are
+        # unknown, so the row reads unknown and names no lane.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_a", "c1")], items=[])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+        self.publish(sessions=[self.lane("session_a", "c1")], items=None)
+        count, entries = self.archive()
+        self.assertEqual((count, entries), (1, [build.ITEMS_MISSING_WHY]),
+                         "a live file with no items key lists a lane, so an open page item cannot hold it")
+
+    def test_live_items_keep_the_owner_field_of_a_page_item(self):
+        # A waiting-page item names `owner`, the session that reads the answer. The live file's copy must keep it, or
+        # idle_lanes cannot see that the lane asked its own question. The copy is the items row in live_work.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_a", "c1")],
+                     items=[{"n": 1, "status": "open", "home": "step c1", "owner": "session_a"}])
+        source, why = build.record_source(self.repo, "roadmap")
+        self.assertIsNotNone(source, why)
+        steps = build.load(source)["steps"]
+        rows = build.live_work(str(self.live), steps, self.SLUG)["pageItems"]
+        self.assertEqual([row.get("owner") for row in rows], ["session_a"],
+                         "live_work dropped the owner of an items row, so the lane that asked cannot be seen")
+
+    def test_an_open_page_item_owned_by_a_lane_session_holds_that_lane(self):
+        # The item names no lane, so the lane is still waiting on its own question. session_b is the control.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     items=[{"n": 1, "status": "open", "home": "step c1", "owner": "session_a"}])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
+    def test_lane_rows_with_no_status_bucket_read_the_list_unknown_not_empty(self):
+        # The control is one row that carries a bucket: its lane is listed and no unknown entry is made. With no row
+        # carrying status_bucket, the list cannot say which lane is idle, so it reads unknown.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"),
+                               session_row("session_b", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c2", self.REPO)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+        self.publish(sessions=[session_row("session_a", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1", self.REPO),
+                               session_row("session_b", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c2", self.REPO)])
+        count, entries = self.archive()
+        self.assertEqual(count, 1, "lane rows with no status_bucket read as an empty list: %r" % (entries,))
+        self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
+
+    def test_a_pull_row_whose_branch_is_a_list_is_skipped_and_idle_lanes_reads_unknown(self):
+        # The pull row is counted as skipped, and the lanes read unknown. A crash on the list is the defect, so it is
+        # turned into a named failure here, not an error.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_a", "c1")],
+                     pulls=[{"number": 51, "title": "lane c1", "branch": ["lane/c1"]}])
+        source, why = build.record_source(self.repo, "roadmap")
+        self.assertIsNotNone(source, why)
+        steps = build.load(source)["steps"]
+        work = build.live_work(str(self.live), steps, self.SLUG)
+        self.assertIn("pull 1", work["skipped"], "a pull row whose branch is a list was kept, not counted as skipped")
+        try:
+            entries = self.idle_direct()
+        except Exception as err:
+            self.fail("idle_lanes crashed on a pull row whose branch is a list: %r" % (err,))
+        self.assertEqual(len(entries), 1, entries)
+        self.assertTrue(entries[0].startswith("unknown ("), "the skipped pull row did not read the lanes unknown: %r" % (entries,))
+
+    def test_a_repo_tag_with_a_space_inside_is_not_this_repo(self):
+        # Green on the old code: the space after the colon stays after strip, so the tag is not owner/name.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        spaced = session_row("session_spaced", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1",
+                             "cs-repo: " + self.SLUG, status_bucket=BUCKET_COMPLETED)
+        self.publish(sessions=[spaced, self.lane("session_a", "c2")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+
+    def test_a_repo_tag_with_outer_whitespace_is_not_this_repo(self):
+        # The one reading of a repo tag takes no strip (hooks/shared_names.py, repo_tag_names). idle_lanes strips each
+        # tag before it reads it, so these two lanes are listed unless the strip goes.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "c3": {"status": "done", "order": 3}})
+        trailing = session_row("session_trailing", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1",
+                               "cs-repo:" + self.SLUG + " ", status_bucket=BUCKET_COMPLETED)
+        leading = session_row("session_leading", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c2",
+                              " cs-repo:" + self.SLUG, status_bucket=BUCKET_COMPLETED)
+        self.publish(sessions=[trailing, leading, self.lane("session_a", "c3")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]),
+                         "a repo tag with outer whitespace is read as this repo, so its lane is listed")
+
+    def unread_main_lane(self):
+        """One lane on c1. c1 is doing, with a Step trailer on main, so the lane reads as landed while main reads."""
+        self.land({"c1": {"status": "doing", "order": 1}})
+        self.trailer_on_main("c1")
+        self.publish(sessions=[self.lane("session_a", "c1")])
+
+    def test_unreadable_main_reads_the_lanes_unknown_not_empty(self):
+        # The control is the same call with main read: the lane is listed. With main unreadable, no step can be shown
+        # landed, so the list reads one unknown entry. The old code returns [], which is the defect.
+        self.unread_main_lane()
+        self.assertEqual(self.ids(build.idle_lanes_report(self.repo, str(self.live))), ["session_a"])
+        self.assertIsNone(build.main_ref(self.repo, "nomain"), "the fixture must make main unreadable")
+        entries = build.idle_lanes_report(self.repo, str(self.live), main_branch="nomain")
+        self.assertEqual(len(entries), 1, "an unreadable main reads as %r, not one unknown entry" % (entries,))
+        self.assertTrue(entries[0].startswith("unknown ("), entries)
+
+    def test_unreadable_main_upkeep_row_reads_unknown_not_empty(self):
+        # The control is the same build from main with main read: the lane is listed. With --main-branch naming no
+        # branch, the upkeep row must read one unknown entry, never an empty row.
+        self.unread_main_lane()
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+        count, entries = self.archive("--main-branch", "nomain")
+        self.assertEqual(count, 1, "an unreadable main reads the lanes row as %r" % (entries,))
+        self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
+
+    def test_archived_rows_with_no_bucket_do_not_read_a_live_lane_unknown(self):
+        # Green on the old code: a live row with an enum bucket makes the no-bucket check false, so the archived row
+        # with no bucket changes nothing. The live lane is judged normally. session_a is the control.
+        self.land({"c1": {"status": "done", "order": 1}})
+        archived = session_row("session_old", "SESSION_STATUS_ARCHIVED", "cs-build:lane", "cs-step:c1", self.REPO)
+        self.publish(sessions=[archived, self.lane("session_a", "c1")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+
+    def test_live_lane_rows_with_no_bucket_read_unknown_when_an_archived_row_holds_a_bucket(self):
+        # The no-bucket check counts archived rows too. Here one archived row's bucket hides two live rows that carry
+        # none, so the old code lists nothing and reads no unknown, which is [] (the defect). The live rows must read
+        # unknown: the archived row is not counted.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        archived = self.lane("session_old", "c1", status="SESSION_STATUS_ARCHIVED")
+        self.publish(sessions=[archived,
+                               session_row("session_b", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c2", self.REPO)])
+        count, entries = self.archive()
+        self.assertEqual(count, 1, "live rows with no bucket read as %r, not one unknown entry" % (entries,))
+        self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
+
+    def test_live_lane_rows_with_only_wrong_form_buckets_read_unknown_not_empty(self):
+        # The control is one row in the enum form: its lane is listed and no unknown entry is made. Then every live row
+        # carries a wrong form (`completed`, `COMPLETED`), so no lane reads idle and the list reads one unknown entry,
+        # never [].
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "c3": {"status": "done", "order": 3}})
+        self.publish(sessions=[self.lane("session_a", "c1")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+        wrong = [session_row("session_lower", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c2", self.REPO,
+                             status_bucket="completed"),
+                 session_row("session_upper", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c3", self.REPO,
+                             status_bucket="COMPLETED")]
+        self.publish(sessions=wrong)
+        count, entries = self.archive()
+        self.assertEqual(count, 1, "wrong-form buckets read as %r, not one unknown entry" % (entries,))
+        self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
+
+
 class SharedTagNames(unittest.TestCase):
     """The roadmap's tag names have one home, hooks/shared_names.py. build reads the very objects, so a
     copied literal cannot drift from the guard's check. Identity, not equality: an equal copy fails."""
+
+    def test_lane_head_refs_is_the_shared_function(self):
+        self.assertTrue(hasattr(shared_names, "lane_head_refs"), "hooks/shared_names.py has no lane_head_refs")
+        self.assertTrue(hasattr(build, "lane_head_refs"), "build has no lane_head_refs")
+        self.assertIs(build.lane_head_refs, shared_names.lane_head_refs)
 
     def test_repo_and_step_tags_are_the_shared_objects(self):
         for name in ("REPO_TAG", "STEP_TAG"):

@@ -113,8 +113,13 @@ def items(cell):
 
 def rows(text):
     """(term, homes, not names) for each data row of the table under SECTION."""
+    return [row for _line, row in numbered_rows(text)]
+
+
+def numbered_rows(text):
+    """(line, (term, homes, not names)) for each data row of the table under SECTION."""
     out, inside = [], False
-    for line in text.split("\n"):
+    for number, line in enumerate(text.split("\n"), 1):
         if line.startswith("## "):
             inside = line.strip() == SECTION
             continue
@@ -124,7 +129,7 @@ def rows(text):
         if c[0].lower() == "term":  # the header row
             continue
         names = [] if c[3] in NONE else items(c[3])
-        out.append((c[0].strip("`"), items(c[2]), names))
+        out.append((number, (c[0].strip("`"), items(c[2]), names)))
     return out
 
 
@@ -211,19 +216,45 @@ def inside(w, i, count, term):
                for j in range(len(w) - len(term) + 1))
 
 
+def matches(term, table, camel=False):
+    """Yield (shared term, "not" name or None) for each row term or "not" name that a child term spells, plural or
+    case aside. `camel`: also read the term with a split at each case step, as a name of code is read."""
+    plain = term[:-len(THIS_SENSE)] if term.lower().endswith(THIS_SENSE) else term
+    forms = [f for f in ([words(plain), words(plain, camel=True)] if camel else [words(plain)]) if f]
+    for shared, _homes, names in table:
+        o = words(shared)
+        if o and any(same(w, o) or same(o, w) for w in forms):
+            yield shared, None
+        for name in names:
+            n = words(name[:-len(THIS_SENSE)] if name.endswith(THIS_SENSE) else name)
+            if n and any(same(w, n) or same(n, w) for w in forms):
+                yield shared, name
+
+
+def clash(term, table):
+    """The problem with a term of a repo's own glossary, or None. A child glossary adds terms: one that spells a
+    term of `table`, or an untagged "not" name, defines a claude-settings term again. A name tagged (this sense)
+    retires one sense only, so a child term may name its own sense of that word."""
+    for shared, name in matches(term, table, camel=True):
+        if name is None:
+            return "child term '%s' defines the claude-settings term '%s' again" % (term, shared)
+        if not name.endswith(THIS_SENSE):
+            return "child term '%s' is the retired name '%s'; the glossary name is '%s'" % (term, name, shared)
+    return None
+
+
 def child_spans(child_table, table):
     """The word lists of the terms of a repo's own glossary that `name_problems` may honour as `spans`.
 
-    A term equal to a term of `table`, or to a "not" name (plural too), is left out: it is no spelling of its own."""
-    ours = [words(term) for term, _homes, _names in table]
-    retired = [words(name[:-len(THIS_SENSE)] if name.endswith(THIS_SENSE) else name)
-               for _term, _homes, names in table for name in names]
-    out = []
-    for term, _homes, _names in child_table:
-        w = words(term)
-        if w and not any(o and (same(w, o) or same(o, w)) for o in ours + retired):
-            out.append(w)
-    return out
+    A term that spells a term of `table` or any "not" name, tagged too, is left out: it is no spelling of its own."""
+    return [words(term) for term, _homes, _names in child_table
+            if words(term) and next(matches(term, table), None) is None]
+
+
+def child_clashes(child_text, table):
+    """(line, term, problem) for each term of a repo's own glossary text that clashes with `table`."""
+    return [(line, term, clash(term, table)) for line, (term, _homes, _names) in numbered_rows(child_text)
+            if clash(term, table)]
 
 
 def path_problems(path, table, spans=()):
