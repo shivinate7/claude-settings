@@ -134,9 +134,10 @@ READY_SENTENCE = re.compile(r"(?:^|[.!?]\s+)Ready\.(?=\s|$)")
 ARCHIVED_SESSION = "SESSION_STATUS_ARCHIVED"
 # list_sessions' status_bucket enum names (SESSION_STATUS_BUCKET_WORKING, _BLOCKED, _REVIEW_READY, _COMPLETED, _FAILED) that mark a lane as done working: only these two can list a lane to archive.
 IDLE_BUCKETS = ("SESSION_STATUS_BUCKET_COMPLETED", "SESSION_STATUS_BUCKET_REVIEW_READY")
-# A waiting-page item in one of these statuses no longer holds its lane.
-ITEM_DONE_STATUSES = ("answered", "closed")
-# A live file with no items list: no item holds a lane then, unlike a list with a wrong-shaped row.
+# A waiting-page item in one of these statuses no longer holds its lane. The page writes open and closed only
+# (skill waiting-page, the database), so any other status holds.
+ITEM_DONE_STATUSES = ("closed",)
+# A live file with no items list: the open items are unknown, so the lanes to archive read unknown.
 ITEMS_MISSING_WHY = "unknown (the live file has no items list)"
 IDLE_LANES_LINE = "lanes to archive"
 # A readAt this far past the build time is clock skew; further than that is a bad stamp.
@@ -554,7 +555,7 @@ def live_work(path, steps, slug=None):
     `pageItems` holds the rows, or None with `itemsWhy` saying why that row reads unknown.
     Three optional keys feed the lanes-to-archive row (idle_lanes): a sessions row's `status_bucket` (list_sessions'
     enum name; missing reads as not completed), a pulls row's `head` (the head commit sha), an items row's `lane` (the
-    step slug of the lane that asked, or null; kept exactly when the key is present). `laneSessions` holds the kept session rows, or None. Old files without them read as before.
+    step slug of the lane that asked, or null; kept exactly when the key is present) and an items row's `owner` (the session that reads the answer; kept the same way). `laneSessions` holds the kept session rows, or None. Old files without them read as before.
     """
     if not path:
         return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}
@@ -590,7 +591,8 @@ def live_work(path, steps, slug=None):
                    and (r.get("step") is None or isinstance(r["step"], str)))
     before_pulls = len(skipped)
     pulls = keep("pull", raw.get("pulls", []),
-                 lambda r: type(r.get("number")) is int and text(r, "title"))
+                 lambda r: type(r.get("number")) is int and text(r, "title")
+                 and (r.get("branch") is None or isinstance(r["branch"], str)))
     pulls_skipped = len(skipped) - before_pulls
     branches = keep("branch", raw.get("branches", []), lambda r: text(r, "name"))
     for row in threads:
@@ -648,7 +650,7 @@ def live_work(path, steps, slug=None):
         items_why = "unknown (an items row has the wrong shape)"
     else:
         page_items = [dict({"n": r["n"], "status": r["status"], "home": r["home"]},
-                           **({"lane": r["lane"]} if "lane" in r else {})) for r in raw["items"]]
+                           **{k: r[k] for k in ("lane", "owner") if k in r}) for r in raw["items"]]
     return {"read": read, "threads": threads, "pulls": sorted(pulls, key=lambda r: r["number"]),
             "branches": branches, "skipped": skipped, "strays": strays,
             "sessionSteps": session_steps, "staleWhy": stale_why, "pullWhy": pull_why,
@@ -1123,13 +1125,15 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main"):
     bucket completed or review ready, and names at least one cs-step with every one of them landed (a Step trailer
     on main, or status done). It is held back by an open pull on one of its steps' head refs (lane_head_refs) unless
     that pull is a draft whose head sha is already in the default branch, and by an open waiting-page item whose
-    `lane` is one of its steps. A step missing from the record branch reads the lane unknown."""
+    `lane` is one of its steps, or whose `owner` is the session itself (the item is the lane's own question); only
+    status `closed` releases an item. A step missing from the record branch reads the lane unknown. When this
+    repo's lane rows carry no status_bucket at all, the list reads unknown."""
     why = live_why(work)
     if why:
         return [why]
     if steps is None:
         return ["unknown (the steps could not be read)"]
-    if work.get("pageItems") is None and work.get("itemsWhy") != ITEMS_MISSING_WHY:
+    if work.get("pageItems") is None:
         return [work.get("itemsWhy") or "unknown (the page items could not be read)"]
     ref = main_ref(repo, main_branch)
     landed_heads = {}
@@ -1143,12 +1147,17 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main"):
             landed_heads[head] = git(repo, "merge-base", "--is-ancestor", head, ref) is not None
         return landed_heads[head]
 
-    open_items = [r for r in work.get("pageItems") or [] if r["status"] not in ITEM_DONE_STATUSES]
+    open_items = [r for r in work["pageItems"] if r["status"] not in ITEM_DONE_STATUSES]
+    # repo_tag_names takes the tag as the guard reads it, unstripped; the other tags are read stripped.
+    ours = [row for row in work.get("laneSessions") or []
+            if LANE_TAG in [t.strip() for t in row["tags"] if isinstance(t, str)]
+            and any(repo_tag_names(t, slug) for t in row["tags"])]
+    if ours and all(row.get("status_bucket") is None for row in ours):
+        return ["unknown (no lane session row carries a status_bucket)"]
     out = []
-    for row in work.get("laneSessions") or []:
+    for row in ours:
         tags = [t.strip() for t in row["tags"] if isinstance(t, str)]
-        if (LANE_TAG not in tags or row["session_status"] == ARCHIVED_SESSION
-                or not any(repo_tag_names(t, slug) for t in tags) or row.get("status_bucket") not in IDLE_BUCKETS):
+        if row["session_status"] == ARCHIVED_SESSION or row.get("status_bucket") not in IDLE_BUCKETS:
             continue
         mine = sorted({t[len(STEP_TAG):].strip() for t in tags if t.startswith(STEP_TAG)} - {""})
         if not mine:
@@ -1162,7 +1171,7 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main"):
         heads = {name for k in mine for name in lane_head_refs(k)}
         if any(p.get("branch") in heads and not head_landed(p) for p in work["pulls"]):
             continue
-        if any(r.get("lane") in mine for r in open_items):
+        if any(r.get("lane") in mine or r.get("owner") == row["id"] for r in open_items):
             continue
         topic = next((t[len(TOPIC_TAG):].strip() for t in tags if t.startswith(TOPIC_TAG) and t[len(TOPIC_TAG):].strip()), "-")
         out.append("%s (%s; topic %s)" % (row["id"], " ".join(mine), topic))

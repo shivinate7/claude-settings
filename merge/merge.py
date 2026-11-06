@@ -2947,10 +2947,11 @@ def idle_lanes(live):
         return 1
     lanes = [x for x in entries if not x.startswith("unknown (")]
     # An unknown entry with no lane beside it is the whole list unread: no summary, so it never reads as an empty list.
-    if lanes or not entries:
+    unread = bool(entries) and not lanes  # exit 1 then, so a caller never reads exit 0 as "no lanes"
+    if not unread:
         entries = [*entries, f"merge: {len(lanes)} lanes to archive. Run get_session on each alone, then archive it."]
     say(*entries)
-    return 0
+    return 1 if unread else 0
 
 def main(argv, host=None, lock=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])

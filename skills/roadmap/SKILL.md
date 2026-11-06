@@ -91,7 +91,7 @@ GitHub, so the publisher reads them just before the build and passes one file:
   in progress and for lanes to archive. A live file with no `sessions` list still renders
   Live work.
 - `items`: `ArtifactData list items` of the repo's waiting page, every page, each row copied with only
-  `n`, `status`, `home` and `lane`. `lane` is the step slug of the lane that asked (or null), and is optional. The build keeps it exactly when the key is present. The
+  `n`, `status`, `home`, `lane` and `owner`. `lane` is the step slug of the lane that asked (or null), and is optional. `owner` is the session that reads the answer, also optional. The build keeps each exactly when its key is present. The
   upkeep list reads the items for page rulings and for lanes to archive. A live file with no `items` list
   still renders Live work.
 - An entry with the wrong shape is counted on the page and in the upkeep list, never dropped. A
@@ -211,19 +211,21 @@ After each build the roadmap build script prints the upkeep list for the triage 
     draft pull whose `head` sha is already in the default branch (`git merge-base --is-ancestor`)
     releases the lane. A ready pull always holds it. A failed git read reads as not landed;
   - no open page item holds it. An item holds a lane when its `lane` is one of the lane's steps and
-    its `status` is neither `answered` nor `closed`.
+    its `status` is not `closed`. An item whose `owner` is the lane's own session id holds the lane the same way.
+    The page writes `open` and `closed` only, so only `closed` releases a lane.
 
   A step id that is not on the record branch reads the lane `unknown (step <id> not on the record
-  branch; lane <session id>)`. A live file with no `items` list holds no lane. An `items` row with the
+  branch; lane <session id>)`. A live file with no `items` list makes the row unknown. An `items` row with the
   wrong shape makes the row unknown. Each entry reads `<session id> (<steps>; topic <cs-topic or ->)`,
   sorted. The row reads one `unknown (<why>)` entry, never an empty list, when:
   - `--live` is missing or unreadable;
   - `readAt` is bad, over 60 minutes old or in the future;
-  - there is no `sessions` list, or a session or pull row has the wrong shape;
+  - there is no `sessions` list, or a session or pull row has the wrong shape (a pull `branch` that is not text or null counts);
+  - the repo's lane rows carry no `status_bucket` at all;
   - the repo's GitHub name cannot be read.
 
   `merge --idle-lanes --live FILE` prints the same list for the batch runner: one line per lane, then
-  a summary line;
+  a summary line. It exits 1, with no summary line, when every entry is unknown;
 - `Step:` trailers that name no step.
 
 ## Cost
