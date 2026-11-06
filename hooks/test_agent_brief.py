@@ -10,11 +10,11 @@ Contract (the hook's own docstring). On each agent start
 the hook prints one JSON object on stdout and exits 0:
     {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": "<text>"}}
 - additionalContext holds the standing rules: a scope line that follows `agent_type` from the hook
-  input (builder, test-author, reviewer, Explore, record-writer, designer, design-reviewer, challenger), the general scope
+  input (builder, test-author, reviewer, Explore, record-writer, designer, design-reviewer, refuter), the general scope
   line for any other or missing type, and fewer than 20 lines in all. Each scope line is pinned in full.
 - The push line, the commit-trailer line and the record-path line appear for builder,
   test-author, record-writer, designer and any other type; never for reviewer, Explore, Plan,
-  claude-code-guide, design-reviewer or challenger, which only read.
+  claude-code-guide, design-reviewer or refuter, which only read.
 - The staged-diff line holds `git diff --cached --stat`. It appears once for each type that
   commits (builder, test-author, record-writer, designer and any other type) and never for a
   read-only type. Decision lanes-start-in-tool-worktrees.
@@ -42,16 +42,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.environ.get("AGENT_BRIEF_UNDER_TEST") or os.path.join(HERE, "agent_brief.py")
 sys.path.insert(0, HERE)
 import guard  # noqa: E402  the one reader of agent frontmatter keys (guard.frontmatter_keys), not a copy of it here
-import guard_core  # noqa: E402  the one home of the challenger role's name (CHALLENGER_ROLE), read below and never typed here
+import guard_core  # noqa: E402  the one home of the refuter role's name (REFUTER_ROLE), read below and never typed here
 from tool_lists_test import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/tool_lists_test.py)
 
 CWD = "/tmp/agent-brief-test"
 MISSING = object()  # payload() leaves agent_type out of the JSON when this is passed
-# A guard_core with no CHALLENGER_ROLE reads as CHALLENGER_MISSING: each case that names the role then fails on the missing
-# name, and challenger_name_check says so in words, never by a crash at import.
-CHALLENGER_MISSING = "<no CHALLENGER_ROLE in guard_core>"
-CHALLENGER = getattr(guard_core, "CHALLENGER_ROLE", CHALLENGER_MISSING)
-TYPES = ["builder", "test-author", "reviewer", "Explore", "record-writer", "designer", "design-reviewer", CHALLENGER]
+# A guard_core with no REFUTER_ROLE reads as REFUTER_MISSING: each case that names the role then fails on the missing
+# name, and refuter_name_check says so in words, never by a crash at import.
+REFUTER_MISSING = "<no REFUTER_ROLE in guard_core>"
+REFUTER = getattr(guard_core, "REFUTER_ROLE", REFUTER_MISSING)
+TYPES = ["builder", "test-author", "reviewer", "Explore", "record-writer", "designer", "design-reviewer", REFUTER]
 
 # Full scope line per type, pinned verbatim. Edit here only when the hook's text changes on purpose.
 SCOPE_LINE = {
@@ -64,7 +64,7 @@ SCOPE_LINE = {
                 "Your brief names your designer kind: blind, informed or directed. In a blind designer, never read "
                 "the current screen, its code, its screenshots, its mockups, or the repo's design spec and tokens.",
     "design-reviewer": "- Scope: design-reviewer. Never edit, write, stage, commit, or push. Read and render only.",
-    CHALLENGER: "- Scope: %s. Never edit, write, stage, commit, or push. Read only." % CHALLENGER,
+    REFUTER: "- Scope: %s. Never edit, write, stage, commit, or push. Read only." % REFUTER,
 }
 GENERAL_LINE = ("- Scope: do only what your brief names. A builder never edits tests; "
                 "a test-author never edits product code; a reviewer and Explore never edit; "
@@ -314,9 +314,9 @@ add("line set: a missing agent type gets the writer set", "context", payload(),
 for _t in ["reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer"]:
     add("line set: %s gets the five-line set" % _t, "context", payload(_t),
         line_set_check(READER_RULES))
-# The challenger is read-only: the five-line set, with no push, trailer, record-path or staged-diff line (owner ruling,
+# The refuter is read-only: the five-line set, with no push, trailer, record-path or staged-diff line (owner ruling,
 # page item 279, pick d, 2026-11-06 12:43 CST). Failure class: a read-only role given the writer set.
-add("line set: challenger gets the five-line set", "context", payload(CHALLENGER), line_set_check(READER_RULES))
+add("line set: refuter gets the five-line set", "context", payload(REFUTER), line_set_check(READER_RULES))
 # Plugin-prefixed read-only types take the reader set too (the prefix split must reach them).
 for _t in ["my-plugin:reviewer", "ns:Explore"]:
     add("line set: plugin-prefixed %s gets the five-line set" % _t, "context", payload(_t),
@@ -717,30 +717,30 @@ add("staged-diff step: agent_brief's READ_ONLY set names exactly the agents whos
     "custom", fn=read_only_set_check)
 
 
-def challenger_name_check():
-    """guard_core names the challenger role in CHALLENGER_ROLE, a non-empty string. Every challenger case here reads that
+def refuter_name_check():
+    """guard_core names the refuter role in REFUTER_ROLE, a non-empty string. Every refuter case here reads that
     name from guard_core, so a guard_core without it fails this case and says so."""
-    if CHALLENGER == CHALLENGER_MISSING:
-        return "guard_core has no CHALLENGER_ROLE, the one home of the challenger role's name"
-    if not isinstance(CHALLENGER, str) or not CHALLENGER.strip():
-        return "guard_core.CHALLENGER_ROLE is %r, want a non-empty name" % (CHALLENGER,)
+    if REFUTER == REFUTER_MISSING:
+        return "guard_core has no REFUTER_ROLE, the one home of the refuter role's name"
+    if not isinstance(REFUTER, str) or not REFUTER.strip():
+        return "guard_core.REFUTER_ROLE is %r, want a non-empty name" % (REFUTER,)
     return None
 
 
-def challenger_read_only_check():
-    """agent_brief's READ_ONLY set holds the challenger role, so the hook treats it as a read-only type."""
+def refuter_read_only_check():
+    """agent_brief's READ_ONLY set holds the refuter role, so the hook treats it as a read-only type."""
     if READ_ONLY_PROBLEM:
         return READ_ONLY_PROBLEM
-    if CHALLENGER == CHALLENGER_MISSING:
-        return "guard_core has no CHALLENGER_ROLE, so agent_brief's READ_ONLY set cannot name the challenger"
-    if CHALLENGER.lower() not in READ_ONLY:
-        return "agent_brief's READ_ONLY set does not hold %s, so the hook gives it the writer set" % CHALLENGER
+    if REFUTER == REFUTER_MISSING:
+        return "guard_core has no REFUTER_ROLE, so agent_brief's READ_ONLY set cannot name the refuter"
+    if REFUTER.lower() not in READ_ONLY:
+        return "agent_brief's READ_ONLY set does not hold %s, so the hook gives it the writer set" % REFUTER
     return None
 
 
-add("challenger: guard_core.CHALLENGER_ROLE names the role, the one home the challenger cases read",
-    "custom", fn=challenger_name_check)
-add("challenger: agent_brief's READ_ONLY set holds the challenger role", "custom", fn=challenger_read_only_check)
+add("refuter: guard_core.REFUTER_ROLE names the role, the one home the refuter cases read",
+    "custom", fn=refuter_name_check)
+add("refuter: agent_brief's READ_ONLY set holds the refuter role", "custom", fn=refuter_read_only_check)
 
 
 def main():
