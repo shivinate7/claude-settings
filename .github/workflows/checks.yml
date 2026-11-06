@@ -1269,7 +1269,7 @@ jobs:
     runs-on: windows-latest
     needs: scope
     # Off pull_request (the PR slice has median 2.2): n24 green, median 11.8, slowest 13.6 min (run 42125979458).
-    # All 5 merge shards share cap 22. It comes from checks-windows-merge-2: run 42282722326 ended at its 15 min cap at 15.2 min,
+    # All 5 merge shards share cap 22. It comes from checks-windows-merge-2: run 42282722326 ended at its 15 min cap at 15.2 min or more,
     # and 15.2 / 0.7 = 21.7, rounded up (decision ci-job-caps).
     timeout-minutes: 22
     steps:
