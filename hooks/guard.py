@@ -3873,13 +3873,10 @@ def role_model_one(tool_input):
 
 
 # THE MACHINE-LOAD BRAKE (decision machine-load-brake). The readings, the limits and the level live in hooks/guard_load.py (decision
-# one-load-definition); the numbers below are for the reader. A start call (a call that starts a lane or an agent) reads the machine's load once. Memory in
-# use is a share of this machine's memory; disk free on the home drive is in GB (2**30 bytes) against the drive's
-# size. Busy (memory over 85%, or disk free under the smaller of 10% of the disk and 15 GB) refuses a Workflow and an
-# explicit background Agent or Task call. An Agent or Task call passes at busy only when it leaves
+# one-load-definition). A start call (a call that starts a lane or an agent) reads the machine's load once. Busy
+# refuses a Workflow and an explicit background Agent or Task call. An Agent or Task call passes at busy only when it leaves
 # run_in_background out or sets it false. (In the desktop harness a left-out call still runs in the background
-# and the field is not offered, so busy does not slow an Agent call there.) Full (memory over 95%, disk free
-# under the smaller of 5% of the disk and 5 GB) refuses every start call. A reading that cannot be read counts as normal. Only an
+# and the field is not offered, so busy does not slow an Agent call there.) Full refuses every start call. A reading that cannot be read counts as normal. Only an
 # agent's shell or file write also reads load (RUNNING_AGENT_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
 # "true") skips the brake and reads nothing, because the brake guards the owner's own machine.
 START_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
