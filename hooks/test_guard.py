@@ -27309,6 +27309,22 @@ rbb_refuse("reviewer-brief-blind: refused: a reviewer brief whose leading verdic
            "Re-check the floor fix.\nFAIL, round 1 of 3, haiku.\nFiles: hooks/guard.py.")
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior round verdict: FAIL line",
            "Re-check the floor fix.\nPrior round verdict: FAIL\nFiles: hooks/guard.py.")
+# A single report label with an inline item is a report item, bold or plain. A round or prior verdict names its
+# verdict word after the colon, whatever words stand before the colon.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with one Done: label and an inline BUILT item",
+           "Check the floor fix.\nDone: BUILT c204a1f the floor fix, tests green.\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with one bold Done: label and an inline BUILT item",
+           "Check the floor fix.\n**Done**: BUILT c204a1f fix\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Previous round verdict: FAIL line",
+           "Re-check the floor fix.\nPrevious round verdict: FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Last round verdict: FAIL line",
+           "Re-check the floor fix.\nLast round verdict: FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with an Earlier verdict: PASS line",
+           "Re-check the floor fix.\nEarlier verdict: PASS\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 result: FAIL line",
+           "Re-check the floor fix.\nRound 1 result: FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 reviewer verdict: FAIL line",
+           "Re-check the floor fix.\nRound 1 reviewer verdict: FAIL\nFiles: hooks/guard.py.")
 
 # Allowed. A later round gets the prior round's findings as a list, a fix check gets the one finding it checks, and
 # the task's own words name the rule without a shape at line start. A builder's brief may hold its report.
@@ -27341,6 +27357,12 @@ rbb_allow("reviewer-brief-blind: allowed: Round 2 of 3: check PASS or FAIL, the 
           model="sonnet")
 rbb_allow("reviewer-brief-blind: allowed: a brief line that opens with BUILT-IN check, not a BUILT item",
           "Check the floor fix.\nBUILT-IN check: the floor reads the role before the model.\nFiles: hooks/guard.py.")
+# A verdict word that opens a line is a quoted result, not a verdict line, unless the line is the report form
+# `FAIL, round 1 of 3, ...`. A pasted test line that starts with FAIL is a quote too.
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a line that opens PASS: and names the diff",
+          "Re-check the floor fix.\nPASS: the diff fixes the finding.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a pasted test line, FAIL: test_x",
+          "Re-check the floor fix.\nFAIL: test_x\nFiles: hooks/guard.py.")
 # The empty state: a reviewer brief with no text holds no report, so it passes.
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with an empty prompt", "")
 add("reviewer-brief-blind: allowed: a Workflow agent() reviewer on Round 2 of 3 with a findings list",
@@ -27357,10 +27379,10 @@ add("reviewer-brief-blind: allowed: a commented-out reviewer agent() call carryi
     script="// await agent('Done: BUILT c204a1f.\\nDeviations: none.', {agentType: 'reviewer'})\n"
            "await agent('Fix the floor.', {agentType: 'builder', model: 'sonnet'})")
 
-# A Workflow agent() reviewer whose prompt the scan cannot read is refused too (owner ruling, waiting-page item 299,
-# choice b). The scan reads no variable, and a template's `${...}` hides its interpolated part, so a report can sit
-# there unread. A plain template with no `${}` is read, as before. Each refusal names the literal-string remedy, read
-# from guard.py, the one home of its words.
+# A Workflow agent() reviewer whose prompt the scan cannot read is refused too (waiting-page item 299 is pending;
+# choice b, the page's recommended pick, is built meanwhile). The scan reads no variable, and a template's `${...}`
+# hides its interpolated part, so a report can sit there unread. A plain template with no `${}` is read, as before.
+# Each refusal names the literal-string remedy, read from guard.py, the one home of its words.
 RBB_GUARD = _load_guard_module()
 RBB_LITERAL_REMEDY = getattr(RBB_GUARD, "BRIEF_LITERAL_REMEDY", "<no BRIEF_LITERAL_REMEDY in guard>")
 RBB_REPORT_VAR = "const builderReport = 'Done: BUILT c204a1f.\\nDeviations: none.';\n"
