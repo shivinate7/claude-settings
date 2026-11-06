@@ -2102,6 +2102,22 @@ class IdleLanes(UpkeepFixture):
         # session_c is the control: no pull, so it is listed.
         self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_c"]))
 
+    def test_open_draft_with_no_head_sha_holds_its_lane(self):
+        # Green on the old code: a draft with no head sha cannot be shown landed, so it holds. session_b is the control.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     pulls=[self.draft(71, "lane/c1")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
+    def test_open_draft_whose_head_git_cannot_read_holds_its_lane(self):
+        # Green on the old code: a head sha git does not hold makes the ancestor read fail, and a failed read holds.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     pulls=[dict(self.draft(72, "lane/c1"), head="f" * 40)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
     def test_blocked_failed_working_and_unbucketed_lanes_are_never_listed(self):
         self.land({"c%d" % n: {"status": "done", "order": n} for n in range(1, 6)})
         self.publish(sessions=[self.lane("session_blocked", "c1", bucket=BUCKET_BLOCKED),
@@ -2233,7 +2249,9 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual(count, 32)
         self.assertEqual(self.ids(entries), sorted("session_%02d" % n for n in range(1, 33)))
 
-    def test_open_page_item_holds_its_lane_only_while_it_is_open(self):
+    def test_only_a_closed_page_item_releases_its_lane(self):
+        # The waiting page's statuses are open and closed (skill waiting-page, the item fields). An answered item is
+        # not closed, so it still holds its lane. The closed item beside it releases its lane.
         self.land({"c%d" % n: {"status": "done", "order": n} for n in range(1, 5)})
         self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2"),
                                self.lane("session_c", "c3"), self.lane("session_d", "c4")],
@@ -2241,7 +2259,107 @@ class IdleLanes(UpkeepFixture):
                             {"n": 2, "status": "closed", "home": "step c3", "lane": "c3"},
                             {"n": 3, "status": "open", "home": "step c4", "lane": "c4"}])
         count, entries = self.archive()
-        self.assertEqual((count, self.ids(entries)), (3, ["session_a", "session_b", "session_c"]))
+        self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_c"]))
+
+    def test_a_page_item_status_other_than_closed_holds_its_lane(self):
+        # Green on the old code: a status the reader does not list as done holds. The closed item on c3 is the control.
+        self.land({"c%d" % n: {"status": "done", "order": n} for n in range(1, 4)})
+        for status in ("Closed", "parked"):
+            with self.subTest(status=status):
+                self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2"),
+                                       self.lane("session_c", "c3")],
+                             items=[{"n": 1, "status": status, "home": "step c2", "lane": "c2"},
+                                    {"n": 2, "status": "closed", "home": "step c3", "lane": "c3"}])
+                count, entries = self.archive()
+                self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_c"]))
+
+    def test_a_live_file_with_no_items_key_reads_unknown_and_lists_no_lane(self):
+        # The control is the same file with an items list, which lists the lane. With no items key the page items are
+        # unknown, so the row reads unknown and names no lane.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_a", "c1")], items=[])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+        self.publish(sessions=[self.lane("session_a", "c1")], items=None)
+        count, entries = self.archive()
+        self.assertEqual((count, entries), (1, [build.ITEMS_MISSING_WHY]),
+                         "a live file with no items key lists a lane, so an open page item cannot hold it")
+
+    def test_live_items_keep_the_owner_field_of_a_page_item(self):
+        # A waiting-page item names `owner`, the session that reads the answer. The live file's copy must keep it, or
+        # idle_lanes cannot see that the lane asked its own question. The copy is the items row in live_work.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_a", "c1")],
+                     items=[{"n": 1, "status": "open", "home": "step c1", "owner": "session_a"}])
+        source, why = build.record_source(self.repo, "roadmap")
+        self.assertIsNotNone(source, why)
+        steps = build.load(source)["steps"]
+        rows = build.live_work(str(self.live), steps, self.SLUG)["pageItems"]
+        self.assertEqual([row.get("owner") for row in rows], ["session_a"],
+                         "live_work dropped the owner of an items row, so the lane that asked cannot be seen")
+
+    def test_an_open_page_item_owned_by_a_lane_session_holds_that_lane(self):
+        # The item names no lane, so the lane is still waiting on its own question. session_b is the control.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     items=[{"n": 1, "status": "open", "home": "step c1", "owner": "session_a"}])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
+    def test_lane_rows_with_no_status_bucket_read_the_list_unknown_not_empty(self):
+        # The control is one row that carries a bucket: its lane is listed and no unknown entry is made. With no row
+        # carrying status_bucket, the list cannot say which lane is idle, so it reads unknown.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"),
+                               session_row("session_b", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c2", self.REPO)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+        self.publish(sessions=[session_row("session_a", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1", self.REPO),
+                               session_row("session_b", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c2", self.REPO)])
+        count, entries = self.archive()
+        self.assertEqual(count, 1, "lane rows with no status_bucket read as an empty list: %r" % (entries,))
+        self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
+
+    def test_a_pull_row_whose_branch_is_a_list_is_skipped_and_idle_lanes_reads_unknown(self):
+        # The pull row is counted as skipped, and the lanes read unknown. A crash on the list is the defect, so it is
+        # turned into a named failure here, not an error.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_a", "c1")],
+                     pulls=[{"number": 51, "title": "lane c1", "branch": ["lane/c1"]}])
+        source, why = build.record_source(self.repo, "roadmap")
+        self.assertIsNotNone(source, why)
+        steps = build.load(source)["steps"]
+        work = build.live_work(str(self.live), steps, self.SLUG)
+        self.assertIn("pull 1", work["skipped"], "a pull row whose branch is a list was kept, not counted as skipped")
+        try:
+            entries = self.idle_direct()
+        except Exception as err:
+            self.fail("idle_lanes crashed on a pull row whose branch is a list: %r" % (err,))
+        self.assertEqual(len(entries), 1, entries)
+        self.assertTrue(entries[0].startswith("unknown ("), "the skipped pull row did not read the lanes unknown: %r" % (entries,))
+
+    def test_a_repo_tag_with_a_space_inside_is_not_this_repo(self):
+        # Green on the old code: the space after the colon stays after strip, so the tag is not owner/name.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        spaced = session_row("session_spaced", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1",
+                             "cs-repo: " + self.SLUG, status_bucket=BUCKET_COMPLETED)
+        self.publish(sessions=[spaced, self.lane("session_a", "c2")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+
+    def test_a_repo_tag_with_outer_whitespace_is_not_this_repo(self):
+        # The one reading of a repo tag takes no strip (hooks/shared_names.py, repo_tag_names). idle_lanes strips each
+        # tag before it reads it, so these two lanes are listed unless the strip goes.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "c3": {"status": "done", "order": 3}})
+        trailing = session_row("session_trailing", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1",
+                               "cs-repo:" + self.SLUG + " ", status_bucket=BUCKET_COMPLETED)
+        leading = session_row("session_leading", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c2",
+                              " cs-repo:" + self.SLUG, status_bucket=BUCKET_COMPLETED)
+        self.publish(sessions=[trailing, leading, self.lane("session_a", "c3")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]),
+                         "a repo tag with outer whitespace is read as this repo, so its lane is listed")
 
 
 class SharedTagNames(unittest.TestCase):

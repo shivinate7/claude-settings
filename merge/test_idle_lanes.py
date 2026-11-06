@@ -113,6 +113,17 @@ class IdleLanesCli(unittest.TestCase):
                 self.assertEqual(code, 2, err)
                 self.assertIn("--idle-lanes stands alone", err)
 
+    def test_every_entry_unknown_exits_1_with_no_summary(self):
+        # The control is a readable file: its lane is listed and the command exits 0. An unread file is the whole list
+        # unknown, so the command must exit 1, or a caller reads the exit code as "no lanes".
+        self.publish([lane("session_a", "c1")])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        code, out, err = self.run_merge("--idle-lanes", "--live", os.devnull)
+        self.assertTrue(any(line.startswith("unknown (") for line in out.splitlines()), "out: %r, err: %r" % (out, err))
+        self.assertEqual(code, 1, "every entry unknown exits %d, so an unread list reads as success" % code)
+        self.assertNotRegex(out, SUMMARY_LINE)
+
     def test_idle_lanes_needs_no_merge_role_in_a_cloud_session(self):
         self.publish([lane("session_a", "c1")])
         code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live),
