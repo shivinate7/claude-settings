@@ -68,7 +68,7 @@ small, M medium, L large).
 | `ci_wake` (PostToolUse, Bash and PowerShell) | One python per `gh pr ready`. Timeout 3600 s. Reads runs every 30 s, then gaps up to 120 s (checked: `settings.json`; `hooks/ci_wake.py` header). | Keep as a standing exception with its cost stated, or replace. Q3. | 3 | M |
 | `merge/merge.py` poll loops | Two loops of its own. `retry_net` (line 223) pauses between network retries. `wait_checks` (line 967) pauses through `block` (lines 1223 to 1229): 30 s when a check has an Actions run, else a minute. It also pauses 30 s for a settle read (lines 1017 to 1021). | Share the `gh` call and the pause seam with `ci_wake`. Do not share the loop. | no | M |
 | Config watch (`hooks/config_watch.py`, PostToolUse 20 s, Stop 20 s) | Hashes the two watched settings files on each matching call (record `config-watch-fast-exit`). | Add a test that a clean call starts no process. Fix the docstring. | no | S |
-| Decision watch | No Stop row runs `decision_watch.py` (checked: `settings.json`). The mod runs in the app (checked: `register.mjs`). Its model call is used by `hooks/reply_judge.py` and `lint/report_guard.py` (checked). | Make the log append-only. Keep the `STOP seen` line: `/dw` reads it. | no | M |
+| Decision watch | No Stop row runs `decision_watch.py` (checked: `settings.json`). The mod runs in the app (checked: `register.mjs`). Its model call is used by `hooks/reply_judge.py` and `lint/report_guard.py` (checked). | Make the log append-only. Keep the `STOP seen` line until another fire check lands: `/dw` reads it. | no | M |
 | Model-call judges | `call_judge` (PreToolUse on Agent, AskUserQuestion, ArtifactData; 70 s). `prose_judge` (PreToolUse on Edit and Write; 45 s). `reply_judge` (Stop; 25 s). `feedback_guard` (Stop; 60 s). `report_guard` (Stop; 35 s; calls `decision_watch.invoke_model` at line 1267). `local_time` (UserPromptSubmit; 30 s) calls a model only for a prompt with the word `opus`, through `override.grant_opus_ask` and `call_judge.opus_ask`. Each judge calls a model. `invoke_model` is at `hooks/decision_watch.py` line 671. | One home (`invoke_model`) and one test. Q2. | 2 | M |
 | Other hooks with no row | `ruling_home` (Stop; 20 s). `reread_check` (Stop 10 s, PreToolUse Read 10 s, PostCompact 10 s). `blind_brief` (PreToolUse on Agent or Task; 10 s). `rm_prompt_answer` (PermissionRequest on Bash; 20 s). `sendmessage_state` (PreToolUse on SendMessage; 50 s; starts a node reader child at line 91 with `start_new_session`). `agent_brief` (SubagentStart; 20 s). `local_time` (SubagentStart 10 s; PostToolUse on ArtifactData 10 s). `refusal_note` (PermissionDenied; 10 s). `precompact_handoff` (PreCompact and Stop, 30 s each; SessionStart and SessionEnd rows, 10 s each). `guard.py` (SubagentStop 20 s; PreToolUse 60 s). `sim_boot_record` (PreToolUse Bash 20 s; PostToolUse 600 s). All checked in `settings.json`. | Add each row to the table. Record each cost in the form of rule 4. | no | M |
 | `question_form.py` git child | Starts one long-lived `git cat-file --batch` process (line 1422). | Bound it to the hook timeout, or close it when the call ends. | no | S |
@@ -103,8 +103,8 @@ small, M medium, L large).
   decides where the scan runs.
 - **Agent-end reap.** One record for the reap and its payload log. The process tiers keep their own record,
   `unattended-sweep-stops-proven-orphans`.
-- **Load definitions.** The guard reads memory and disk. `sim-lease` reads `vm.loadavg`. Q6 makes them one shared
-  definition.
+- **Load definitions.** The guard reads memory and disk. `sim-lease` reads `vm.loadavg`. Q6: both read load from
+  one shared place.
 
 ## 4. Deletes
 
@@ -170,9 +170,10 @@ sets the tiers the SessionEnd run keeps. Landed in PR #1240. Home: decision
 CST). Each of the four logs gets a named reader in its record: the agent-end payload log,
 `janitor-runs.jsonl`, `launchd-sweep.log` and `launchd-sweep.err.log`. Landed in PR #1239.
 
-**Q6. Load definition. Decided:** item 304, pick a, "One shared definition" (owner, 2026-11-06 15:24
-CST). The guard and `sim-lease` read the machine load through one definition. Lane `one-load-definition`
-builds it.
+**Q6. Load definition. Decided:** item 304, pick a, "One shared definition": "The guard and sim-lease read
+load from one shared place" (owner, 2026-11-06 15:24 CST). Lane `one-load-definition` builds it. The ruling
+names one place, not one measure. The older measures stand until that lane says otherwise: decision
+`sim-lease-tool` rule 3 (`vm.loadavg` only) and decision `machine-load-brake` (memory and disk).
 
 **Q7. Repo reaper. Decided and done.** The rule says the sweep never runs code a repository supplies.
 Decision uniform-over-variants (a shared tool never grows a per-repo exception; owner, 2026-10-27 12:51
