@@ -3,6 +3,7 @@
   "context": "Goal: cloud sessions and the sessions on your Mac and Windows computers message each other both ways, with no 10-message stop and no trust card.\nProblem (goal): sessions on your computer stop after 10 messages until you type, cloud sessions cannot message your computer at all, and the trust card limits a session for good.\nBased on (measured): lane test 13:17 CST: the 10-message stop does not count cloud-to-cloud messages; it hits only messages between sessions on one computer.\nBased on (read): Claude Code 2.1.319: a page republish wakes every session that watches it, and the stop does not count that wake. Unmeasured: whether a session on your computer wakes from its watch.\nDeparts from: main \u2014 adds a mailbox that sessions on your computer and cloud sessions both read, in place of direct messages to your computer.\nMeanwhile: no build starts on this before your pick. Your earlier note asked for something better than the four old options; these are the lane's new ones (record session-messages, commit ddc0f83c).",
   "holds": "Building the way cloud sessions reach your computer's sessions.",
   "home": "docs/decisions/session-messages.md",
+  "id": "local-reach-plan",
   "kind": "decision",
   "lane": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6): 12-message Mac test, then the build; routed 13:30 CST",
   "lastAnswer": {

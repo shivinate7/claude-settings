@@ -3,6 +3,7 @@
   "context": "Goal: standing sessions run until autocompact with no extra reporting.\nProblem (rule): the decision on session shapes says dropping the self-reported tally needs your word.\nBased on (ruling): your ruling of Nov 1 17:56 CST: no usage limit; a standing session runs until autocompact.\nBased on (measured): the coordinator reads each session's context use itself, from the session record (Oct 28).\nDeparts from: main has each standing session report its own use \u2014 drops that report.",
   "holds": "Only the tally lines of the session-shapes decision; the rotation text fix goes ahead without it.",
   "home": "sitting-rulings-1102 (decision session-tiers); owner picked a in chat 2026-11-02 15:40 CST",
+  "id": "standing-tally-drop",
   "kind": "decision",
   "links": [
     {

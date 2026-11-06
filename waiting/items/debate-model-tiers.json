@@ -2,6 +2,7 @@
   "added": "2026-11-06T19:26:00Z",
   "context": "Goal: each refuter runs the model its stakes need (your note on item 284).\nProblem (money): Opus costs more per call, and decision agent-model-cap lets only its named roles run Opus, so a refuter on Opus needs your word.\nBased on (measured): page decision items 6 to 51 a day (median 22); steps closed 4 to 33 a day; ruling skips unmeasured.\nBased on (ruling): item 279 d put the plan refuter on Opus; Sonnet is the ceiling for every other role.\nBased on (read): the Opus question reviewer already reads every page question.\nDeparts from: main agent-model-cap has no row for the three item-284 refuters \u2014 adds a row for each, on the model you pick.\nMeanwhile: the three lanes build on Sonnet, with the model as one named setting.",
   "home": "plan record debate-model-tiers (PR #1323)",
+  "id": "debate-model-tiers",
   "kind": "decision",
   "links": [
     {

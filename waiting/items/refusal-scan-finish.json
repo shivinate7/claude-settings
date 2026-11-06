@@ -2,6 +2,7 @@
   "added": "2026-11-06T19:20:00Z",
   "context": "Goal: know every act cloud auto mode refuses, so the allow lines cover all that recur (your question on item 278).\nProblem (money): \"one more agent run\" was wrong. The second run read 12 more sessions and found 1 new act: an agent spawn that adds a settings.json allow rule, refused as self-modification (once). Each session costs about 4k tokens to read, so the first page of all 360 sessions is about 1.5M tokens over about 12 agents, and a deep read about 7M.\nBased on (ruling): your pick a at 13:19 CST, made on the wrong cost of one agent run. Asked again for that reason only.\nBased on (measured): runs at 13:16 and 13:22 CST: 10 auto-mode refusals in about 143 sessions; only the lane force-push recurs. docs/debts/notes.md names 3 more from Nov 1-2 (a gh api CI-run cancel, a send_message on a page grant, a lease push).\nDeparts from: main \u2014 adds the count in step auto-mode-refusal-survey.\nMeanwhile: nothing runs.",
   "home": "step auto-mode-refusal-survey",
+  "id": "refusal-scan-finish",
   "kind": "decision",
   "lane": "",
   "lastAnswer": {

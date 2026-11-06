@@ -3,6 +3,7 @@
   "context": "Goal: stop the merge commands asking you, without leaving a known hole.\n\nProblem: no way exists today for a real coordinator or batch runner to prove its role that a lane cannot fake, so 'no prompt' and 'no hole' cannot both ship now.\n\nBased on: your 15:36 CDT note 'why stop here leaving a hole known' (ruling); the lane's probes, 15:38 to 15:43 CDT: every session, the coordinator included, reads as a started session, a grant given at start only passes rules every session already holds, and a role file or brief marker can be faked (measured); session-tiers, 'no other session gains a way to merge' (record).\n\nThis replaces item 97.",
   "group": "merge-role",
   "home": "decision session-tiers via PR #878: shiv chose outcome A in chat 15:41 CDT; the guard checks merge --role against the session's own tags, else denies with a hand-off",
+  "id": "merge-role-no-hole",
   "kind": "decision",
   "look": false,
   "n": 98,

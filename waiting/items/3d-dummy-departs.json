@@ -2,6 +2,7 @@
   "added": "2026-11-06T19:30:00Z",
   "context": "Goal: the 3D copy matches the Cockpit where it matters, and differs only where you agree.\nProblem (goal): the lane made three choices the Cockpit does not share; each is yours to confirm.\nBased on (read): lane notes item 10 (branch 3d-browser-dummy, 78a27bce).\nDeparts from: main's Cockpit \u2014 the 3D copy (1) is read-only: you answer on the Cockpit, not in 3D; (2) groups items open and closed, not the Cockpit's three tiers; (3) shows a ring shape for \"open\".\nMeanwhile: the lane builds on a.",
   "home": "docs/design/3d-browser-dummy-notes.md",
+  "id": "3d-dummy-departs",
   "kind": "decision",
   "n": 293,
   "options": [

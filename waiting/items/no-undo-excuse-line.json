@@ -3,6 +3,7 @@
   "context": "Goal: a builder cannot drop work an earlier commit of its own lane added, unless the commit says why.\nProblem (rule): your ruling names a new excuse line, but the check already has one; two names for one excuse break your one-home rule.\nBased on (read): the silent-undo check and the guard both accept only Drops-lines: today.\nBased on (measured): today's check passes two commits from this morning that dropped a lane's own earlier work, so the gap is real.\nDeparts from: main, where Drops-lines: excuses only dropping main's work \u2014 it also excuses dropping the lane's own earlier work.",
   "holds": "Which excuse line the lane builds; it builds option a meanwhile.",
   "home": "no-undo-lane-commits",
+  "id": "no-undo-excuse-line",
   "kind": "decision",
   "lastAnswer": {
     "at": "2026-11-02T16:52:00Z",

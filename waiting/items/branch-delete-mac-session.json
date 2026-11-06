@@ -3,6 +3,7 @@
   "context": "Goal: claude-settings keeps only live branches.\nProblem (rule): only a session on your Mac can delete branches, and only you can start one there.\nBased on (read): the cloud proxy refused a branch delete with an access error at 06:40 CST.\nBased on (read): the list of your connected computer folders was empty at 10:42 CST.\nDeparts from: main \u2014 adds a Mac session that deletes merged branches.",
   "holds": "Deleting merged branches in claude-settings.",
   "home": "branch-cleanup",
+  "id": "branch-delete-mac-session",
   "kind": "task",
   "links": [
     {

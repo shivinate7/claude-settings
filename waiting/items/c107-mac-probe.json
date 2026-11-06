@@ -5,6 +5,7 @@
   },
   "context": "Goal: your local coordinators start their lanes without a press from you (your ask, 13:24 CST).\nProblem (goal): the card is the desktop app's own and shows even in Bypass mode, so no setting of ours removes it. One possible fix: starts on a turn you typed may show no card. Only a Mac session can test that, and the cloud cannot reach your Mac right now.\nThe probe starts three throwaway sessions, records whether each showed a card and kept its branch, then archives them and deletes its test branch.\nThe result goes to the coordinator, which then brings you the pick.",
   "home": "roadmap step c107",
+  "id": "c107-mac-probe",
   "kind": "task",
   "n": 296,
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",

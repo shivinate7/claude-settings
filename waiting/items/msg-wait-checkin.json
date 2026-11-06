@@ -2,6 +2,7 @@
   "added": "2026-11-06T19:26:00Z",
   "context": "Goal: a session notices when a reply to its message never comes.\nProblem (rule): two of your rules conflict. outcomes-mechanize-rules bars tracking on a timer; git-ci-wait-checks-in allows a timed check-in while waiting on CI.\nBased on (notes): review round 1 of lane session-messaging-plan, 2026-11-06.\nDeparts from: main \u2014 adds one timed check-in per cloud message that waits on a reply.\nMeanwhile: the lane fixes its skill text and hands its branch to the batch runner; the record marks this open.",
   "home": "docs/decisions/session-messages.md",
+  "id": "msg-wait-checkin",
   "kind": "decision",
   "n": 290,
   "options": [

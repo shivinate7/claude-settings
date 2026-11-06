@@ -2,6 +2,7 @@
   "added": "2026-11-06T19:22:00Z",
   "context": "Goal: mailaudit's Recent log gets built, the last open piece of item 193.\nProblem (money): it is a whole new web log feature, many hours of work. A long build like that runs best on Opus, and an Opus lane needs your yes.\nBased on (read): debt recent-log-unbuilt in mailaudit. It is unblocked because item 280 is b and record PR mailaudit #202 is with batch runner 9.\nDeparts from: main \u2014 adds one Opus lane session for the Recent log build.\nMeanwhile: nothing starts. The brief also settles what an open panel does when the Recent cell hides.",
   "home": "mailaudit debt recent-log-unbuilt",
+  "id": "mailaudit-recent-opus",
   "kind": "decision",
   "lane": "lane mailaudit-recent-log (session_013NEJL44PzZ5EQbqb3wHYuB), Opus; closes when the Recent log merges",
   "lastAnswer": {

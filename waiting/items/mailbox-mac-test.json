@@ -2,6 +2,7 @@
   "added": "2026-11-06T19:35:00Z",
   "context": "Goal: prove the mailbox page wakes a session on your Mac 12 times, with no 10-message stop (your pick a on item 153).\nProblem (goal): a cloud session cannot be a desktop session on your Mac, and the cloud cannot reach your Mac right now (no Remote Control folder, 13:26 CST).\nThe lane runs the cloud half: it publishes the mailbox and sends the 12 messages. Your Mac session watches the mailbox and answers each wake.\nThe result comes back to item 153.",
   "home": "docs/decisions/session-messages.md",
+  "id": "mailbox-mac-test",
   "kind": "task",
   "n": 294,
   "owner": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6)",

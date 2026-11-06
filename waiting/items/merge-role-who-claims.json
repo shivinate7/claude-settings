@@ -3,6 +3,7 @@
   "context": "Being reworked. You said, 15:36 CDT: 'sounds like we just need to think this through more? why stop here leaving a hole known on this piece'. Agreed: neither a known hole (old A) nor the prompt (old B). The lane is probing ways a real batch runner proves its role that a lane cannot fake, such as a grant given only to the batch runner when it is started. New options come here when it reports; nothing to answer yet. PR #878 stays a draft.\n\nGoal: stop the merge commands asking you, without letting a lane merge.\n\nProblem: your item 92 pick b lets `merge --role coordinator` and `merge N --confirm` run with no prompt. A lane that misreads its role could claim coordinator and merge. Your record session-tiers says 'no other session gains a way to merge'.\n\nBased on: item 92 pick b (your ruling); session-tiers, 'no other session gains a way to merge' (record); the reviewer's finding (read).",
   "group": "merge-role",
   "home": "off the page while reworked; returns as a new item when lane merge-role-allow (PR #878) sends new options",
+  "id": "merge-role-who-claims",
   "kind": "decision",
   "look": false,
   "n": 97,
