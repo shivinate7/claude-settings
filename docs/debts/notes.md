@@ -1443,3 +1443,4 @@
 - stall-cost-proxies: `CostTests` in hooks/test_stall_watch.py counts `job_state` calls, not `ps` starts, and the "--watch-pid" text, not watcher starts. The per-log stat and per-beat append costs have no test. Decision: stall-watch.
 - ci-wake-gh-proxy: `CostTests` in hooks/test_ci_wake.py stubs `watch_pr` and `gh`, so it counts status reads, not `gh` starts. Decision: ci-wait-reads-run-status.
 - janitor-log-dir-cost: install_launchd.py creates the log folder; the install cost line names only the job file. Decision: the-janitor-is-one-machine-wide-sweep.
+- catalog-local-time-no-model: docs/catalog.md says `local_time` calls no model, but a prompt with the word `opus` reaches `call_judge.opus_ask`. The generator reads the model table, which has no `local_time` row (lint/hook_catalog.py). Decision: haiku-prompt-hooks.
