@@ -50,7 +50,13 @@ Each new place needs its own owner pick. This record proposes them. It adopts no
 
 ## 3. The owner question
 
-Sent to the coordinator for the page, 2026-11-06.
+**Ruling.** Owner, 2026-11-06 13:59 CST, waiting-page item 289 (which refuters run Opus): "none of these
+(for now let's do sonnet for all)". The three item-284 refuters (case against the pick, ruling-skip check,
+done-check read) run Sonnet, at brief time and at step close. The plan refuter keeps Opus (item 279, pick d).
+The coordinator relayed the answer at 14:00 CST. The answer file was not yet on the record branch.
+The picks in section 1 stand as the case argued, not as the ruling. The places in section 2 stay proposed only.
+
+The question as sent, 2026-11-06:
 
 Goal: each refuter runs the model its stakes need (your note on item 284).
 Problem (money): Opus costs more per call, and decision agent-model-cap lets only its named roles run Opus, so a refuter on Opus needs your word.
