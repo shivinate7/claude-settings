@@ -478,6 +478,8 @@ use_main_mirror() {
 # When $REF cannot be fetched, the checkout stays the source as before, with a WARN.
 # The fetch is launch.py's refspec form, never --depth: a shallow fetch would make the session's full clone shallow.
 # The live pin skips it.
+# SRC_AT_TIP=1 marks a source that this run's fetch confirmed at the origin/$REF tip (the stale-snapshot warning reads it).
+SRC_AT_TIP=0
 if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/.git" ] \
    && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
   own_not_source=0
@@ -494,7 +496,9 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/
       if [ -z "$(git -C "$SRC" config --get remote.origin.url 2>/dev/null)" ]; then
         [ "$own_head" != "$own_ref" ] || own_how="the last fetched $REF"
       elif cloud_git -C "$SRC" fetch -q origin "+refs/heads/$REF:refs/remotes/origin/$REF" 2>/dev/null; then
-        [ "$own_head" != "$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)" ] || own_how="the $REF tip"
+        if [ "$own_head" = "$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)" ]; then
+          own_how="the $REF tip"; SRC_AT_TIP=1
+        fi
       else
         log "WARN: could not fetch $REF into $SRC"
         [ "$own_head" != "$own_ref" ] || own_how="the last fetched $REF"
@@ -516,6 +520,7 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/
     own_not_source=1
   elif git -C "$SRC" checkout -q --detach "refs/remotes/origin/$REF"; then
     log "moved the checkout $SRC to $REF at $(git -C "$SRC" rev-parse --short HEAD)"
+    SRC_AT_TIP=1
   else
     log "WARN: could not move the checkout $SRC to $REF; left as is at $(git -C "$SRC" rev-parse --short HEAD)"
     own_not_source=1
@@ -999,6 +1004,27 @@ TARGET_JSON="$CLAUDE_DIR/settings.json"
 FIRES_JQ='def fires($s): (.matcher // "") as $m
   | if $m == "" or $m == "*" then true else (try ($s | test("^(" + $m + ")$")) catch false) end;'
 
+# The session source that the refresh hook passed in CS_HOOK_INPUT: empty when absent or unreadable. The one home of the
+# read: the stale-snapshot warning below and the cloud startup entries both use it.
+HOOK_SRC=
+if [ "$CLOUD" = 1 ] && command -v jq >/dev/null 2>&1; then
+  HOOK_SRC=$(printf '%s' "${CS_HOOK_INPUT:-}" \
+    | jq -r 'if (.source | type) == "string" then .source else empty end' 2>/dev/null)
+fi
+
+# Stale snapshot: the old settings.json is the one the last cloud run wrote. A SessionStart entry in it that fires on
+# startup and is not the refresh hook means the snapshot holds hooks that a fix has since replaced. Warn once, only for a
+# startup run whose source this run's fetch confirmed at the origin tip, so a resume, a snapshot build or a failed fetch
+# stays silent. Cost: one jq run on the old file per cloud startup, no network call, no other process. Fail open: a missing
+# file, bad JSON or no jq is silent and never fails the install.
+if [ "$CLOUD" = 1 ] && [ "$SRC_AT_TIP" = 1 ] && [ "$HOOK_SRC" = startup ] && [ -f "$TARGET_JSON" ]; then
+  if [ "$(jq -r "$FIRES_JQ"'[.hooks.SessionStart[]? | select(fires("startup"))
+        | select(([.hooks[]?.command] | join(" ")) | contains("CS_HOOK_INPUT=") | not)] | length' \
+      "$TARGET_JSON" 2>/dev/null)" -gt 0 ] 2>/dev/null; then
+    log "WARNING: this environment's snapshot is stale: its settings.json still holds a SessionStart startup entry from before this run. Edit the environment and save its Setup script, so the snapshot rebuilds."
+  fi
+fi
+
 if [ "$CLOUD" = 1 ]; then
   # Cloud: generate a real file (not a symlink) whose startup SessionStart entry is a hook that
   # refreshes ~/.claude by re-running install.sh from GitHub. Claude Code runs the entries of one
@@ -1126,8 +1152,7 @@ start_entry_watchdog() {
 # logged and never fails the install. Without jq, the settings block above copied the file whole and
 # dropped nothing, so there is nothing to run here.
 if [ "$CLOUD" = 1 ] && command -v jq >/dev/null 2>&1 && [ -f "$SRC/settings.json" ]; then
-  START_SRC=$(printf '%s' "${CS_HOOK_INPUT:-}" \
-    | jq -r 'if (.source | type) == "string" then .source else empty end' 2>/dev/null)
+  START_SRC=$HOOK_SRC
   [ -n "$START_SRC" ] || START_SRC=startup
   if START_CMDS=$(jq -c --arg src "$START_SRC" "$FIRES_JQ"'
       [(.hooks.SessionStart // [])[] | select(fires("startup") and fires($src))
