@@ -12645,11 +12645,11 @@ class ProseJudge(Env):
         self.assertEqual(controls("\n".join(lines)), [], "the report carries control characters from why: %r" % controls("\n".join(lines)))
 
     def test_the_default_cap_is_three_model_calls(self):
-        # Already true on ff60289f: the pin keeps the default from drifting. Unpatched, so the value is the one a merge uses.
+        # Pins the default cap on judge model calls per merge, so a change to the default fails here. The test reads the real default, not a patched one.
         self.assertEqual(merge.PROSE_JUDGE_MAX_CALLS, 3, "the default cap on model calls per merge is not 3")
 
     def test_the_default_cap_sends_three_files_and_reads_the_fourth_unknown(self):
-        # Already true on ff60289f. Unpatched: four selected files make three calls, and the fourth reads UNKNOWN.
+        # Four selected files under the default cap make three calls. The fourth file must read UNKNOWN, not pass silently. The test reads the real default, not a patched one.
         names = ("docs/notes/a.md", "docs/notes/b.md", "docs/notes/c.md", "docs/notes/d.md")
         self.setup_range({p: CITE_DOC for p in names}, {BACKING: BACKING_TEXT})
         stub = JudgeStub(verdict_for(3, "holds"))
@@ -12662,7 +12662,7 @@ class ProseJudge(Env):
         self.assertEqual(rc, 0, out)
 
     def test_a_selected_line_the_model_skips_reads_unknown(self):
-        # Already true on ff60289f: confirm reads a selected line with no verdict as UNKNOWN. The held line still prints nothing.
+        # Confirm reads a selected line that gets no verdict as UNKNOWN, so no skipped line passes silently. The held line still prints nothing.
         self.setup_range({PROSE: TWO_CITE_DOC}, {BACKING: BACKING_TEXT})
         stub, rc, out = self.judge(verdict_for(3, "holds"))
         self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
