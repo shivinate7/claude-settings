@@ -75,3 +75,5 @@ is stalled). On this branch the same command passes.
 
 Triage hold, lint/test_report_guard_stalled.py on d23c7bc94: 12 failed, 11 passed.
 Fix round 1, test_build.py on 8e7186568: 3 failed.
+
+Round 2, lint/test_report_guard_stalled.py on 57c242324: 3 failed.

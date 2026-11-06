@@ -90,8 +90,11 @@ transcript (the result of a Bash run of build.py) has an entry line, `stalled st
 `stalled step: item <n> (...)`. An unknown line is no entry. The hold also covers a Stop after a refusal
 (stop_hook_active), which it releases only when the report's Input Needed section names every entry's id and item
 number. An owner `override` typed for the session lifts it, taken as guard_core's refuse() takes it, and the Stop
-it lifts spends a one-act override. Cost: one more transcript read at every Stop. Only when a Bash run of build.py
-is in it: the build module's import. Only when an entry prints: the own-record read and one override read.
+it lifts spends a one-act override. A held Stop never carries the report's correction tail. A build run through
+verdict is read from the log file verdict printed (a missing log reads as no entries for that run). Cost: no
+transcript read of its own on a plain Stop (it shares main's read). Only when a Bash run of build.py is in it: the
+build module's import, and one log read for a verdict run. Only when an entry prints: the own-record read and one
+override read.
 """
 import json
 import os
@@ -1462,6 +1465,23 @@ def _result_text(content):
     return content if isinstance(content, str) else ""
 
 
+# The verdict line bin/verdict prints for a run: `PASS|FAIL|SKIP <cmd> ... log=<path>`.
+VERDICT_LOG_RE = re.compile(r"^(?:PASS|FAIL|SKIP) .* log=(\S+)\s*$", re.M)
+VERDICT_RUN_HEADER = "=== verdict run "
+
+
+def _verdict_log_text(path):
+    """The last run's text in the verdict log at `path` (a log can hold several runs, each under a header line),
+    or None when the file is missing or unreadable."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+    except Exception:
+        return None
+    cut = text.rfind(VERDICT_RUN_HEADER)
+    return text if cut < 0 else text[cut:]
+
+
 def stalled_entries(records):
     """The entries ("<step id>" or "item <n>") of the newest roadmap build output in `records`: each line
     `<STALLED_LINE>: <id> (...)` or `<STALLED_LINE>: item <n> (...)`. An unknown line is no entry. A newer build
@@ -1476,7 +1496,13 @@ def stalled_entries(records):
                 runs.add(use.get("id"))
         for result in tool_results(rec):
             if result.get("tool_use_id") in runs:
-                text = _result_text(result.get("content"))
+                shown = _result_text(result.get("content"))
+                logged = VERDICT_LOG_RE.search(shown)
+                if logged:  # a run through verdict shows failure lines only; its log holds the build's own lines
+                    shown = _verdict_log_text(logged.group(1))
+                    if shown is None:
+                        continue  # a missing or unreadable log reads as no entries for this run; the older ones stand
+                text = shown
     if not text:
         return []
     line = re.compile(r"^%s: (?:item (\d+)|(?!unknown )([^\s()]+)) \(" % re.escape(_roadmap_build_prefix()), re.M)
@@ -1526,12 +1552,18 @@ def main():
         return
     path = hook.get("transcript_path")
     hold = ""
+    active = bool(hook.get("stop_hook_active"))
+    records, read_failed = [], False
     if path and os.path.exists(path):
         try:
-            hold = triage_hold(hook, read_transcript(path), bool(hook.get("stop_hook_active")))
+            records = read_transcript(path)  # the one read of a plain Stop: the hold and the checks below share it
+        except Exception:
+            read_failed = True
+        try:
+            hold = triage_hold(hook, records, active)
         except Exception:
             pass
-    if hook.get("stop_hook_active"):
+    if active:
         pending_refusals(hook, last_reply(hook))  # clears what the rewrite names; never blocks on a refusal
         reasons = rewrite_problems(hook)
         reasons += rewrite_relay(hook)
@@ -1541,7 +1573,8 @@ def main():
         if hold:
             reasons.insert(0, hold_reason(hold))
         if reasons:
-            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)" + CORRECTION_TAIL}))
+            tail = "" if hold else CORRECTION_TAIL  # a held Stop is refused for its entries, not for the report's shape
+            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)" + tail}))
         return
     # A marker left by a rewrite that never ran must not reach a later turn: only the Stop
     # straight after a missing-report block may consume one.
@@ -1561,20 +1594,7 @@ def main():
     if not path or not os.path.exists(path):
         return stop_for_refusal()
 
-    records = []
-    try:
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except Exception:
-                    continue
-                if isinstance(rec, dict):
-                    records.append(rec)
-    except Exception:
+    if read_failed:
         return stop_for_refusal()
 
     last_human_idx = None
@@ -1620,7 +1640,7 @@ def main():
             pick.append(refusal)
             pick = [r for r in pick if r]
             if pick:
-                reason = " ".join(pick) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if report_shape_ok(text) else "")
+                reason = " ".join(pick) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if report_shape_ok(text) and not hold else "")
                 print(json.dumps({"decision": "block", "reason": reason}))
             elif note:
                 print(json.dumps({"systemMessage": note}))
@@ -1670,7 +1690,7 @@ def main():
     if refusal:
         reasons.append(refusal)
     if reasons:
-        reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok else "")
+        reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok and not hold else "")
         if not shape_ok:
             write_marker(hook, last_human_idx)
         print(json.dumps({"decision": "block", "reason": reason}))

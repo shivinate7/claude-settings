@@ -19,7 +19,7 @@ How does a roadmap step's shown state stay true? Owner, 2026-11-06 11:39 CST: "h
 
 - `skills/roadmap/build.py` prints a `stalled step:` line for each stalled step. It exits 1 after it writes the page.
 - The Status tab shows a stalled band.
-- `lint/report_guard.py` holds triage's Stop while stalled entries stand. The hold lifts when triage names every stalled id under Input Needed, or on an owner typed override.
+- `lint/report_guard.py` holds triage's Stop while stalled entries stand. The first Stop with entries always refuses. A second Stop releases when Input Needed names every stalled id and item n, or on an owner typed override. A held Stop never carries the report's correction tail. A build run through `verdict` is read from the log file `verdict` printed; a missing or unreadable log reads as no entries for that run.
 
 ## Coordinator rulings
 
@@ -33,7 +33,7 @@ Process picks, reported to the owner, 2026-11-06 11:48 and 12:49 CST:
 
 ## Cost
 
-No new process, timer or file. One extra transcript read per Stop in `report_guard`. `build` reads the live file triage already writes.
+No new process, timer or file. No transcript read of its own in `report_guard`: the hold reuses the records the Stop already read, and one log read when a build ran through `verdict`. `build` reads the live file triage already writes.
 
 Kind: build
 Plan: docs/decisions/stalled-steps.md#the-ruling (all)
