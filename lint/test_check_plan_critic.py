@@ -1,0 +1,324 @@
+#!/usr/bin/env python3
+"""Cases for lint/check_plan_critic.py. Standard library only.
+
+    python3 lint/test_check_plan_critic.py
+
+A plan record is a file that the range adds directly in the plans home (lint/layout.json, kind "plans"),
+named <name>.md. Each such plan must carry a `Critic:` line at line start, optionally wrapped as
+`**Critic:**`, followed by non-space text, and outside a fenced code block. The check reads the file as it
+stands at HEAD. Plans that the range only modifies, plans in a subfolder of the plans home, and files that
+are not .md are not judged.
+
+    python3 lint/check_plan_critic.py --base <sha> [--root <dir>]
+        # the base is env BASE_SHA when no flag is given; the repo is the current directory unless --root names one
+
+Exit 0: clean. Exit 1: a judged plan lacks the line, and its path is named. Exit 2: UNKNOWN, because no
+base was given or git could not read the range. Unknown is never 0.
+
+Each case builds a fixture repo under this run's folder (lint/_test_temp.py): a base commit that marks the
+repo rolled out to the layout, then change commits on top. The check runs as the copy at
+lint/check_plan_critic.py, by its absolute path, from the fixture. CHECK_PLAN_CRITIC_UNDER_TEST overrides
+the module path, which a mutant run uses.
+"""
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
+import layout  # noqa: E402  the one home of the plans kind: lint/layout.json, kinds.plans
+MODULE = os.path.abspath(os.environ.get("CHECK_PLAN_CRITIC_UNDER_TEST") or os.path.join(HERE, "check_plan_critic.py"))
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  rm_tree clears read-only git objects (testing/tracked_tree.py)
+
+PLANS = layout.layout()["kinds"]["plans"]["path"]  # the default plans home, read from the layout
+EXTRAS_REL = ".claude/layout-extras.json"  # the layout's extras file; rolled out, so layout.path() reads PLANS
+EXTRAS_TEXT = '{"kinds": {}, "rolled-out": true}\n'
+TITLE = "# Plan: widget rollout\n\nWhat we build, and why.\n\n"
+CRITIC = "Critic: Plan opus, 2026-11-06, PASS with two changes"
+BOLD_CRITIC = "**Critic:** reviewer sonnet, 2026-11-06, PASS"
+OLD_PLAN = TITLE + "No review line. Written before the rule.\n"
+SRC = "def widget():\n    return 1\n"
+BIG_LINES = 3000  # a full-size plan: far more lines than a verdict needs
+
+GIT_ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
+for _name in list(GIT_ENV):
+    if (_name.startswith("GIT_") and not _name.startswith("GIT_CONFIG_")) or _name in ("BASE_SHA", "CI"):
+        del GIT_ENV[_name]  # the outer shell's repo and base never reach a fixture or a case
+
+RUN_FOLDER = None
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+
+
+def tearDownModule():
+    if RUN_FOLDER and os.path.isdir(RUN_FOLDER):
+        tracked_tree.rm_tree(RUN_FOLDER)  # test-temp-standard: teardown removes the run folder
+
+
+def plan(*lines):
+    """A plan record: its title, then each line on its own."""
+    return TITLE + "".join(line + "\n" for line in lines)
+
+
+class Fixture(unittest.TestCase):
+    """A fixture repo: a base commit that marks it rolled out to the layout, then the commits a case adds."""
+
+    def setUp(self):
+        self.tree = tempfile.mkdtemp(dir=RUN_FOLDER, prefix="cpc_")
+        self.addCleanup(tracked_tree.rm_tree, self.tree)
+        self.git("init", "-q")
+        self.git("symbolic-ref", "HEAD", "refs/heads/main")
+        self.base_sha = self.commit("fixture base", {EXTRAS_REL: EXTRAS_TEXT, PLANS + "/old-plan.md": OLD_PLAN,
+                                                     "src/widgets.py": SRC})
+
+    def git(self, *args, input=None):
+        done = subprocess.run(["git", "-C", self.tree, "-c", "user.name=test", "-c", "user.email=test@example.com",
+                               "-c", "core.autocrlf=false", *args],
+                              check=True, capture_output=True, text=True, env=GIT_ENV, input=input)
+        return done.stdout.strip()
+
+    def commit(self, subject, files):
+        """Write files (a None value deletes one), commit those paths only, and return the full sha of HEAD."""
+        for rel, text in files.items():
+            path = os.path.join(self.tree, *rel.split("/"))
+            if text is None:
+                os.remove(path)
+                continue
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(text)
+        self.git("add", "--", *files)
+        self.git("commit", "-q", "--cleanup=verbatim", "-F", "-", input=subject + "\n")
+        return self.git("rev-parse", "HEAD")
+
+    def rebase_here(self):
+        """Start a new scope at HEAD, so the next commit is the only one the check judges."""
+        self.base_sha = self.git("rev-parse", "HEAD")
+
+    def changed(self):
+        """{path: status} for base...HEAD: the files in scope, as git lists them."""
+        out = self.git("diff", "--no-renames", "--name-status", self.base_sha + "...HEAD")
+        return {path: status for status, path in (line.split("\t", 1) for line in out.splitlines())}
+
+    def assertStatus(self, rel, status):
+        """Scope first: git lists rel with this status, so the verdict that follows judges the file the case names."""
+        changed = self.changed()
+        self.assertEqual(changed.get(rel), status, "scope: git does not list %s as %s:\n%s" % (rel, status, changed))
+
+    def lint(self, args=None, env=None, cwd=None):
+        """Run the check on the fixture repo, or from cwd. Returns (exit code, stdout and stderr)."""
+        argv = ["--base", self.base_sha] if args is None else args
+        done = subprocess.run([sys.executable, MODULE, *argv], cwd=cwd or self.tree, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", env=dict(GIT_ENV, **(env or {})))
+        return done.returncode, done.stdout + done.stderr
+
+    def assertClean(self, args=None, env=None, cwd=None):
+        rc, out = self.lint(args, env, cwd)
+        self.assertEqual(rc, 0, "expected exit 0, got %d:\n%s" % (rc, out))
+        self.assertNotIn("Traceback", out, out)
+
+    def assertNamed(self, rel, args=None, env=None, cwd=None):
+        """Exit 1, and the output names rel. Returns the output."""
+        rc, out = self.lint(args, env, cwd)
+        self.assertEqual(rc, 1, "expected exit 1, got %d:\n%s" % (rc, out))
+        self.assertIn(rel, out, "exit 1 does not name %s:\n%s" % (rel, out))
+        self.assertNotIn("Traceback", out, out)
+        return out
+
+
+class PlanCriticCase(Fixture):
+
+    def test_control_fixture_resolves_the_default_plans_home(self):
+        """Green on main, which has no check. The fixture's layout resolves PLANS, and git's range lists each
+        file the cases below judge, with its status."""
+        self.assertEqual(layout.path(self.tree, "plans"), PLANS, "the fixture does not resolve the default plans home")
+        self.commit("add plans", {PLANS + "/new-plan.md": plan(), PLANS + "/folder/x.md": plan(),
+                                  PLANS + "/old-plan.md": OLD_PLAN + "More text.\n", "src/widgets.py": SRC + "# edit\n"})
+        self.assertStatus(PLANS + "/new-plan.md", "A")
+        self.assertStatus(PLANS + "/folder/x.md", "A")
+        self.assertStatus(PLANS + "/old-plan.md", "M")
+
+    def test_added_plan_without_critic_line_is_flagged(self):
+        rel = PLANS + "/new-plan.md"
+        self.commit("add widget plan", {rel: plan("Body only.")})
+        self.assertStatus(rel, "A")
+        self.assertNamed(rel)
+
+    def test_critic_with_nothing_after_it_is_flagged(self):
+        for index, line in enumerate(["Critic:", "Critic:   ", "**Critic:**", "**Critic:**   "]):
+            with self.subTest(line=line):
+                self.rebase_here()
+                rel = PLANS + "/empty-critic-%d.md" % index
+                self.commit("add empty critic plan", {rel: plan(line)})
+                self.assertStatus(rel, "A")
+                self.assertNamed(rel)
+
+    def test_critic_only_inside_a_fenced_block_is_flagged(self):
+        for index, (fence, line) in enumerate([("```", CRITIC), ("```text", BOLD_CRITIC)]):
+            with self.subTest(fence=fence):
+                self.rebase_here()
+                rel = PLANS + "/fenced-%d.md" % index
+                self.commit("add fenced critic plan", {rel: plan(fence, line, "```")})
+                self.assertStatus(rel, "A")
+                self.assertNamed(rel)
+
+    def test_critic_mid_line_is_flagged(self):
+        for index, line in enumerate(["The critic: none", "See Critic: Plan opus, PASS",
+                                      "Review by Critic: Plan opus, PASS"]):
+            with self.subTest(line=line):
+                self.rebase_here()
+                rel = PLANS + "/mid-line-%d.md" % index
+                self.commit("add mid-line critic plan", {rel: plan(line)})
+                self.assertStatus(rel, "A")
+                self.assertNamed(rel)
+
+    def test_critic_line_removed_before_merge_is_flagged(self):
+        """The check reads the file as it stands at HEAD. A line that the range removes again does not count."""
+        rel = PLANS + "/removed-critic.md"
+        self.commit("add plan with critic", {rel: plan(CRITIC)})
+        self.commit("drop the critic line", {rel: plan("Body only.")})
+        self.assertStatus(rel, "A")
+        self.assertNamed(rel)
+
+    def test_critic_line_added_later_in_range_passes(self):
+        """The same rule from the other side: the file as it stands at HEAD carries the line."""
+        rel = PLANS + "/later-critic.md"
+        self.commit("add plan", {rel: plan("Body only.")})
+        self.commit("add the critic line", {rel: plan(CRITIC)})
+        self.assertStatus(rel, "A")
+        self.assertClean()
+
+    def test_plan_with_critic_line_passes(self):
+        rel = PLANS + "/critic-plan.md"
+        self.commit("add plan", {rel: plan(CRITIC)})
+        self.assertStatus(rel, "A")
+        self.assertClean()
+
+    def test_plan_with_bold_critic_line_passes(self):
+        rel = PLANS + "/bold-critic-plan.md"
+        self.commit("add plan", {rel: plan(BOLD_CRITIC)})
+        self.assertStatus(rel, "A")
+        self.assertClean()
+
+    def test_critic_after_a_closed_fence_passes(self):
+        """The fence closes, and a real line after it counts. The quote and the # inside the fence are plain text to it."""
+        rel = PLANS + "/fence-then-critic.md"
+        self.commit("add plan", {rel: plan("Don't skip the review.", "```", "# not a heading",
+                                           "Critic: example only", "```", "", CRITIC)})
+        self.assertStatus(rel, "A")
+        self.assertClean()
+
+    def test_full_size_plan_with_critic_at_its_end_passes(self):
+        rel = PLANS + "/long-plan.md"
+        body = "".join("Step %d of the plan.\n" % number for number in range(BIG_LINES))
+        self.commit("add long plan", {rel: plan(body, CRITIC)})
+        self.assertStatus(rel, "A")
+        self.assertClean()
+
+    def test_full_size_plan_without_critic_is_flagged(self):
+        rel = PLANS + "/long-plan.md"
+        body = "".join("Step %d of the plan.\n" % number for number in range(BIG_LINES))
+        self.commit("add long plan", {rel: plan(body)})
+        self.assertStatus(rel, "A")
+        self.assertNamed(rel)
+
+    def test_plan_in_a_subfolder_is_not_judged(self):
+        rel = PLANS + "/folder/x.md"
+        self.commit("add subfolder plan", {rel: plan("Body only.")})
+        self.assertStatus(rel, "A")
+        self.assertClean()
+
+    def test_folder_named_like_the_plans_home_is_not_judged(self):
+        """A prefix check with no slash would read docs/plans-old as the plans home."""
+        rel = PLANS + "-old/x.md"
+        self.commit("add old-folder plan", {rel: plan("Body only.")})
+        self.assertStatus(rel, "A")
+        self.assertClean()
+
+    def test_modified_old_plan_is_not_judged(self):
+        rel = PLANS + "/old-plan.md"
+        self.commit("edit old plan", {rel: OLD_PLAN + "More text.\n"})
+        self.assertStatus(rel, "M")
+        self.assertClean()
+
+    def test_subfolder_plan_beside_a_direct_plan_is_not_named(self):
+        """The direct plan is judged and named; the subfolder plan, which has no line either, is not."""
+        direct, sub = PLANS + "/direct.md", PLANS + "/folder/x.md"
+        self.commit("add two plans", {direct: plan("Body only."), sub: plan("Body only.")})
+        self.assertStatus(direct, "A")
+        self.assertStatus(sub, "A")
+        out = self.assertNamed(direct)
+        self.assertNotIn(sub, out, "the subfolder plan is judged, not only the direct one:\n" + out)
+
+    def test_no_plans_touched_passes(self):
+        self.commit("change widget source", {"src/widgets.py": SRC + "# edit\n"})
+        self.assertEqual([path for path in self.changed() if path.startswith(PLANS + "/")], [],
+                         "scope: a plan is in the range")
+        self.assertClean()
+
+    def test_empty_range_passes(self):
+        self.rebase_here()
+        self.assertEqual(self.changed(), {}, "scope: the range is not empty")
+        self.assertClean()
+
+    def test_non_md_file_in_the_plans_home_is_not_judged(self):
+        rel = PLANS + "/notes.txt"
+        self.commit("add plan notes", {rel: "Notes, not a plan.\n"})
+        self.assertStatus(rel, "A")
+        self.assertClean()
+
+    def test_good_plan_beside_a_bad_plan_is_not_named(self):
+        good, bad = PLANS + "/good.md", PLANS + "/bad.md"
+        self.commit("add two plans", {good: plan(CRITIC), bad: plan("Body only.")})
+        self.assertStatus(good, "A")
+        self.assertStatus(bad, "A")
+        out = self.assertNamed(bad)
+        self.assertNotIn(good, out, "a plan with a Critic line is named:\n" + out)
+
+    def test_no_base_exits_two_as_unknown(self):
+        rel = PLANS + "/new-plan.md"
+        self.commit("add widget plan", {rel: plan("Body only.")})  # a real finding, so 0 would be wrong
+        self.assertStatus(rel, "A")
+        rc, out = self.lint([])
+        self.assertEqual(rc, 2, out)
+        self.assertIn("unknown", out.lower(), out)
+        self.assertNotIn("Traceback", out, out)
+
+    def test_unreadable_base_exits_two_as_unknown(self):
+        rel = PLANS + "/new-plan.md"
+        self.commit("add widget plan", {rel: plan("Body only.")})  # a real finding, so 0 would be wrong
+        self.assertStatus(rel, "A")
+        for args, env in ((["--base", "0" * 40], None), ([], {"BASE_SHA": "1" * 40})):
+            with self.subTest(args=args, env=env):
+                rc, out = self.lint(args, env)
+                self.assertEqual(rc, 2, out)
+                self.assertIn("unknown", out.lower(), out)
+                self.assertNotIn("Traceback", out, out)
+
+    def test_base_comes_from_base_sha_without_a_flag(self):
+        rel = PLANS + "/new-plan.md"
+        self.commit("add widget plan", {rel: plan("Body only.")})
+        self.assertStatus(rel, "A")
+        self.assertNamed(rel, args=[], env={"BASE_SHA": self.base_sha})
+
+    def test_root_flag_names_the_repo_to_read(self):
+        """--root picks the repo whatever the current directory is. The cwd here is outside every repo."""
+        rel = PLANS + "/new-plan.md"
+        self.commit("add widget plan", {rel: plan("Body only.")})
+        self.assertStatus(rel, "A")
+        cwd = tempfile.mkdtemp(dir=RUN_FOLDER, prefix="cwd_")
+        self.addCleanup(tracked_tree.rm_tree, cwd)
+        out = self.assertNamed(rel, args=["--root", self.tree, "--base", self.base_sha], cwd=cwd)
+        self.assertNotIn("usage", out, out)
+
+
+if __name__ == "__main__":
+    unittest.main()
