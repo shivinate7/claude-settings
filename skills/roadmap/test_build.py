@@ -1437,7 +1437,7 @@ class DoneWithoutCheck(UpkeepFixture):
     """The upkeep row `done without check`, the last row. It reads the done steps whose updatedAt is on or after
     build.DONE_CHECK_SINCE (an ISO UTC time), and lists each whose note, why and ask (joined) fail the close check:
     no Done check named, `<id>`; a Done check named, but no sentence holds `green on main` or `met on main` (whole
-    words, any case) with a source (`#<digits>` or a 7-40 character hex commit hash), `<id> (not shown green on main)`;
+    words, any case) with a source (`#<digits>`, `PR <n>`, a /pull/<n> URL, or a 6-40 character hex commit hash with a digit), `<id> (not shown green on main)`;
     an updatedAt that is missing or unparsable, `<id> (updatedAt unreadable)`. A sentence ends at ". " or at the end
     of the text. The row reads the step files only, so it needs no --live file."""
 
@@ -1612,19 +1612,19 @@ class DoneWithoutCheck(UpkeepFixture):
                          "a green-on-main phrase that is not whole words is not listed as not shown")
 
     def test_the_source_must_have_the_shape_of_a_ref(self):
-        # Miss class: `#` with no digits, a 6-character hash and a 41-character hash are not sources. 7 and 40 are.
+        # Miss class: `#` with no digits and a 41-character hash are not sources. 6 to 40 hex characters with a
+        # digit are, as lint/report_guard.py DONE_REF_RE takes them (one home).
         self.commit_steps({
             "ok-seven": self.done_step(note="Done check: X. Green on main: a1b2c3d."),
+            "ok-six": self.done_step(note="Done check: X. Green on main: a1b2c3."),
             "ok-forty": self.done_step(note="Done check: X. Green on main: %s." % self.HASH_40),
             "hash-only": self.done_step(note="Done check: X. Green on main: #."),
-            "six-hex": self.done_step(note="Done check: X. Green on main: a1b2c3."),
             "forty-one": self.done_step(note="Done check: X. Green on main: %s0." % self.HASH_40),
         })
         _, entries = self.listed()
         self.assertIn("hash-only" + self.NOT_SHOWN, entries)
-        self.assertEqual(entries, sorted(["hash-only" + self.NOT_SHOWN, "six-hex" + self.NOT_SHOWN,
-                                          "forty-one" + self.NOT_SHOWN]),
-                         "a source that is not a PR number or a 7-40 character hash is accepted")
+        self.assertEqual(entries, sorted(["hash-only" + self.NOT_SHOWN, "forty-one" + self.NOT_SHOWN]),
+                         "a source that is not a PR number or a 6-40 character hash with a digit is not accepted")
 
     def test_a_negated_green_on_main_sentence_is_listed_as_not_shown(self):
         # Miss class: a negator (not, never, no, isn't, yet) in the same sentence, before `green on main` or
