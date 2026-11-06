@@ -18207,10 +18207,6 @@ for _name, _verdict, _script in (
          _step_flow("'Round 2 of 3. Re-check.'", "agentType: 'reviewer', ...opts")),
         ("reviewer Round 2 with a templated model", "allow",
          _step_flow("'Round 2 of 3. Re-check.'", "agentType: 'reviewer', model: `${fam}`")),
-        ("reviewer with the prompt in a variable", "allow",
-         _step_flow("brief", "agentType: 'reviewer'")),
-        ("reviewer with a concatenated prompt", "allow",
-         _step_flow("'Round 2 of 3. ' + rest", "agentType: 'reviewer'")),
         ("reviewer Round 2 in an interpolated template prompt", "deny",
          _step_flow("`Round 2 of 3. ${rest}`", "agentType: 'reviewer'")),
         ("reviewer Round 2 on line two of an interpolated template on haiku", "deny",
@@ -18218,14 +18214,6 @@ for _name, _verdict, _script in (
                     "agentType: 'reviewer', model: 'haiku'")),
         ("reviewer Round 2 as an interpolated prompt key with no model", "deny",
          "await agent({prompt: `Round 2 of 3. Branch ${b}`, agentType: 'reviewer'})"),
-        ("reviewer whose marker is only interpolated", "allow",
-         _step_flow("`${'Round 2 of 3.'} Re-check.`", "agentType: 'reviewer'")),
-        ("reviewer whose round number is interpolated", "allow",
-         _step_flow("`Round ${n} of 3. Re-check.`", "agentType: 'reviewer'")),
-        ("reviewer whose marker is split by an interpolation", "allow",
-         _step_flow("`Round 2${x} of 3. Re-check.`", "agentType: 'reviewer'")),
-        ("reviewer Round 1 in an interpolated template", "allow",
-         _step_flow("`Round 1 of 3. Branch ${b}`", "agentType: 'reviewer'")),
         ("reviewer Round 2 after an escaped newline and tab", "deny",
          _step_flow("'ctx\\n\\tRound 2 of 3.'", "agentType: 'reviewer'")),
         ("reviewer Round 2 in a template prompt with no model", "deny",
@@ -27368,6 +27356,59 @@ add("reviewer-brief-blind: allowed: a commented-out reviewer agent() call carryi
     "allow", tool="Workflow",
     script="// await agent('Done: BUILT c204a1f.\\nDeviations: none.', {agentType: 'reviewer'})\n"
            "await agent('Fix the floor.', {agentType: 'builder', model: 'sonnet'})")
+
+# A Workflow agent() reviewer whose prompt the scan cannot read is refused too (owner ruling, waiting-page item 299,
+# choice b). The scan reads no variable, and a template's `${...}` hides its interpolated part, so a report can sit
+# there unread. A plain template with no `${}` is read, as before. Each refusal names the literal-string remedy, read
+# from guard.py, the one home of its words.
+RBB_GUARD = _load_guard_module()
+RBB_LITERAL_REMEDY = getattr(RBB_GUARD, "BRIEF_LITERAL_REMEDY", "<no BRIEF_LITERAL_REMEDY in guard>")
+RBB_REPORT_VAR = "const builderReport = 'Done: BUILT c204a1f.\\nDeviations: none.';\n"
+RBB_REPORT_PROMPT = "const prompt = 'Done: BUILT c204a1f.\\nDeviations: none.';\n"
+
+
+def rbb_unread_refuse(name, script):
+    """A Workflow reviewer call whose prompt the scan cannot read is denied under reviewer-brief-blind, with the remedy."""
+    add(name, "deny", RBB, tool="Workflow", script=script, carries=RBB_LITERAL_REMEDY)
+
+
+rbb_unread_refuse("reviewer-brief-blind: refused: a Workflow agent() reviewer whose template prompt reads ${builderReport}",
+                  RBB_REPORT_VAR + _step_flow("`Review ${builderReport}`", "agentType: 'reviewer'"))
+rbb_unread_refuse("reviewer-brief-blind: refused: a Workflow agent() reviewer whose prompt is a variable",
+                  RBB_REPORT_PROMPT + _step_flow("prompt", "agentType: 'reviewer'"))
+rbb_unread_refuse("reviewer-brief-blind: refused: a Workflow agent() refuter whose template prompt reads ${builderReport}",
+                  RBB_REPORT_VAR + _step_flow("`Review ${builderReport}`", "agentType: '%s'" % REFUTER))
+rbb_unread_refuse("reviewer-brief-blind: refused: a Workflow agent() refuter whose prompt is a variable",
+                  RBB_REPORT_PROMPT + _step_flow("prompt", "agentType: '%s'" % REFUTER))
+# A template with `${}` is unread even when its static text holds a lone quote and comment openers.
+rbb_unread_refuse("reviewer-brief-blind: refused: a Workflow agent() reviewer, a multi-line template with ${}, a lone quote, // and /*",
+                  _step_flow("`Check the floor fix.\nDon't skip /* the // check.\nBranch ${builderReport}`",
+                             "agentType: 'reviewer'"))
+# These were allowed as step-up cases. Each is a reviewer prompt the scan cannot read, so it is refused here.
+rbb_unread_refuse("reviewer-brief-blind: refused: a Workflow agent() reviewer with the prompt in a variable",
+                  _step_flow("brief", "agentType: 'reviewer'"))
+rbb_unread_refuse("reviewer-brief-blind: refused: a Workflow agent() reviewer with a concatenated prompt",
+                  _step_flow("'Round 2 of 3. ' + rest", "agentType: 'reviewer'"))
+rbb_unread_refuse("reviewer-brief-blind: refused: a Workflow agent() reviewer whose marker is only interpolated",
+                  _step_flow("`${'Round 2 of 3.'} Re-check.`", "agentType: 'reviewer'"))
+rbb_unread_refuse("reviewer-brief-blind: refused: a Workflow agent() reviewer whose round number is interpolated",
+                  _step_flow("`Round ${n} of 3. Re-check.`", "agentType: 'reviewer'"))
+rbb_unread_refuse("reviewer-brief-blind: refused: a Workflow agent() reviewer whose marker is split by an interpolation",
+                  _step_flow("`Round 2${x} of 3. Re-check.`", "agentType: 'reviewer'"))
+rbb_unread_refuse("reviewer-brief-blind: refused: a Workflow agent() reviewer, Round 1 in an interpolated template",
+                  _step_flow("`Round 1 of 3. Branch ${b}`", "agentType: 'reviewer'"))
+# The controls. A plain template with a lone quote and comment openers is read through: its twin holds a report, so a
+# scan that drops the call would fail the twin, not pass the plain template by accident.
+add("reviewer-brief-blind: allowed: a Workflow agent() reviewer whose prompt is a plain template, no ${}, a lone quote and // inside",
+    "allow", tool="Workflow",
+    script="const r = await agent(`Check the floor fix.\nDon't skip /* the // check.\nFiles: hooks/guard.py.`, "
+           "{agentType: 'reviewer', model: 'haiku'}); return r")
+add("reviewer-brief-blind: refused: a Workflow agent() reviewer, the same plain template with a report under it",
+    "deny", RBB, tool="Workflow",
+    script="const r = await agent(`Check the floor fix.\nDon't skip /* the // check.\nDone: BUILT c204a1f.\nDeviations: none.`, "
+           "{agentType: 'reviewer', model: 'haiku'}); return r")
+add("reviewer-brief-blind: allowed: a Workflow agent() builder whose prompt is a variable holding a report",
+    "allow", tool="Workflow", script=RBB_REPORT_PROMPT + _step_flow("prompt", "agentType: 'builder', model: 'sonnet'"))
 
 # The owner override lifts the refusal, as it lifts the role-model refusal (role_override_lift_check copied here).
 RBB_SPAWN = {"prompt": "Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", "subagent_type": "reviewer",
