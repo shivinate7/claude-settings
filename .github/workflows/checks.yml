@@ -1237,10 +1237,14 @@ jobs:
         with:
           python-version: "3.11"
 
-      # The claude CLI at an exact version: the judges call `claude -p`, so a new release must not move a verdict unseen.
+      # The claude CLI from a lockfile (.github/judge-replay), so a new release must not move a verdict unseen. The install
+      # scripts run: the package links its native binary in a postinstall step.
       - name: Install the claude CLI
         if: ${{ (needs.scope.outputs.judge_replay == 'true' || github.event_name != 'pull_request') && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && github.event.pull_request.head.repo.fork != true }}
-        run: npm install --global @anthropic-ai/claude-code@2.1.319
+        timeout-minutes: 5
+        run: |
+          npm ci --no-audit --no-fund --prefix .github/judge-replay
+          echo "$PWD/.github/judge-replay/node_modules/.bin" >> "$GITHUB_PATH"
 
       - name: Write the model token file
         if: ${{ (needs.scope.outputs.judge_replay == 'true' || github.event_name != 'pull_request') && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && github.event.pull_request.head.repo.fork != true }}

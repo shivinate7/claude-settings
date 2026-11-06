@@ -26,6 +26,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -48,7 +49,16 @@ UNKNOWN_AUTH_LINE = ("UNKNOWN: model calls cannot authenticate. Add repo secret 
 
 CORPUS_DIR = "hooks/judge_corpus"
 SEAM = "hooks/decision_watch.py"
+GUARD = "hooks/guard.py"  # decision_watch imports it
+SHARED_NAMES = "hooks/shared_names.py"  # holds prompt text: the spawn marker and the gh logins
+# guard.py loads its guard_<family>.py modules and git_reads.py, as the CI scope reads them (guard_test_* is no family
+# module). A change to one is a change to guard.py, which every judge's scope holds.
+GUARD_FAMILY = re.compile(r"hooks/(guard_(?!test_)[^/]*\.py|git_reads\.py)$")
 RUNNER_FILES = ("hooks/judge_replay.py", "hooks/test_judge_replay.py")
+CLI_DIR = ".github/judge-replay"  # the folder that pins the claude CLI the job installs
+CLI_FILES = (CLI_DIR + "/package.json", CLI_DIR + "/package-lock.json")
+WORKFLOW = ".github/workflows/checks.yml"
+PIN_TEXT = "@anthropic-ai/claude-code@"
 
 
 def corpus_path(name):
@@ -131,17 +141,31 @@ def rulings_listed(rulings):
 
 
 def model_state(calls):
-    """(state, error): "unknown" with the reason when the entry made no model call or the last call failed, else "ok"."""
+    """(state, error): "unknown" with the reason when the entry made no model call or any call failed, else "ok"."""
     if not calls:
         return "unknown", "the entry made no model call"
-    verdict, error = calls[-1]
-    if error or not isinstance(verdict, dict):
-        return "unknown", " ".join(str(error or "no verdict").split())
+    for verdict, error in calls:
+        if error or not isinstance(verdict, dict):
+            return "unknown", " ".join(str(error or "no verdict").split())
     return "ok", ""
 
 
+PLATFORM_DECISION = "deny"  # the value Claude Code's own hook output carries for a refusal
+
+
 def denied(run):
-    return bool(run.refusals) or '"permissionDecision": "deny"' in run.out
+    """True when the entry asked guard_core for a refusal, or printed Claude Code's refusal JSON itself."""
+    if run.refusals:
+        return True
+    for line in run.out.splitlines():
+        try:
+            doc = json.loads(line)
+        except ValueError:
+            continue
+        output = doc.get("hookSpecificOutput") if isinstance(doc, dict) else None
+        if isinstance(output, dict) and output.get("permissionDecision") == PLATFORM_DECISION:
+            return True
+    return False
 
 
 # ------------------------------------------------------------------ one adapter per judge
@@ -223,6 +247,8 @@ def feedback(case_input, calls):
     blocks.append({"stamp": feedback_stamp(len(older)), "text": case_input["new"], "items": [], "item_at": []})
     homes = SimpleNamespace(cwd=None)  # no repo: the older messages of this inbox are the only candidates
     hits, why = feedback_guard.judge(homes, FEEDBACK_INBOX, blocks, [(FEEDBACK_ID, len(older))])
+    if why is not None:  # the check was not whole: an error, an off-shape answer or a bad entry
+        raise RuntimeError("feedback_guard.judge: %s" % why)
     wanted = feedback_ref(case_input.get("repeats", 0))
     return "deny" if any(ref == wanted for _, ref, _ in hits) else "allow"
 
@@ -244,7 +270,7 @@ def sendmessage(case_input, calls):
     probe = saved_model
 
     def split(prompt, *args, **kwargs):
-        if prompt.startswith("Judge this SendMessage call") and judge == "state":
+        if kwargs.get("model") == sendmessage_state.WORDING_MODEL and judge == "state":
             return {"ok": True}, None
         return probe(prompt, *args, **kwargs)
 
@@ -300,9 +326,7 @@ def watch(case_input, calls):
 
 CALL = "hooks/call_judge.py"
 QUESTION_FORM = "hooks/question_form.py"
-# hooks/shared_names.py gives the spawn and reply prompts a marker and two logins. It is in no scope: lint/test_ci_scope.py
-# pins its change to the same CI flags as hooks/guard.py, which no judge reads.
-OK ={"ok": True}
+OK = {"ok": True}
 NOT_OK = {"ok": False, "reason": "the case's judge item misses; fix the line it names."}
 # A refusal of a past-ruling check must cite a listed record, and a case's list is its own, so this answer cites none the
 # check can vouch for. The check reads that as a refusal it cannot verify, which is still a deny.
@@ -310,9 +334,9 @@ RULING_NOT_OK = {"ok": False, "reason": "decisions/replay-case: a listed ruling 
 
 
 def entry(name, adapter, own, answers, extra=()):
-    """One JUDGES row. The scope is the seam, the judge's own files, any module its prompt or model comes from, and its
-    corpus. `answers` are the model answers, in the judge's own shape, that its adapter reads as allow and as deny."""
-    scope = [SEAM, *own, *extra, corpus_path(name)]
+    """One JUDGES row. The scope is the seam, the two modules every judge reads (decision_watch imports guard; shared_names
+    holds prompt text), the judge's own files, any module its prompt or model comes from, and its corpus. `answers` are the model answers, in the judge's own shape, that its adapter reads as allow and as deny."""
+    scope = [SEAM, GUARD, SHARED_NAMES, *own, *extra, corpus_path(name)]
     return {"corpus": corpus_path(name), "scope": list(dict.fromkeys(scope)), "adapter": adapter, "answers": answers}
 
 
@@ -340,22 +364,23 @@ JUDGES = {
     "sendmessage_state": entry("sendmessage_state", sendmessage, ["hooks/sendmessage_state.py"], verdict_pair(NOT_OK)),
     "decision_watch": entry("decision_watch", watch, ["hooks/decision_watch.py"],
                             {"allow": {"verdict": "ALLOW"},
-                             "deny": {"verdict": "FLAG", "why": "a guard was removed with no approval in the chat"}}),
+                             "deny": {"verdict": "FLAG", "why": "a guard was removed and the chat holds no grant"}}),
 }
 
 
 # ------------------------------------------------------------------ touched, replay, main
 
 def touched(paths):
-    """The sorted names whose scope holds one of `paths` or whose corpus is one. The runner, its test and a file of the
-    corpus folder that is no judge's corpus touch every name."""
+    """The sorted names whose scope holds one of `paths` or whose corpus is one. The runner, its test, the CLI pin files,
+    a module of the guard family and a file of the corpus folder that is no judge's corpus touch every name."""
     paths = [p.replace("\\", "/") for p in paths]
     hit = set()
     for name, row in JUDGES.items():
         if any(p in row["scope"] for p in paths):
             hit.add(name)
     known = {row["corpus"] for row in JUDGES.values()}
-    if any(p in RUNNER_FILES or (p.startswith(CORPUS_DIR + "/") and p not in known) for p in paths):
+    if any(p in RUNNER_FILES or p in CLI_FILES or GUARD_FAMILY.match(p)
+           or (p.startswith(CORPUS_DIR + "/") and p not in known) for p in paths):
         hit.update(JUDGES)
     return sorted(hit)
 
@@ -434,6 +459,20 @@ def probe():
     return 0
 
 
+def pin_changed(base):
+    """True when the committed diff BASE...HEAD moves the claude CLI pin: a change to a file of CLI_DIR (the one home of the
+    pin), or an added or removed line of the workflow that holds PIN_TEXT, a pin typed into a step. None when git cannot say."""
+    spec = base if "..." in base else base + "...HEAD"
+    names = subprocess.run(["git", "-C", REPO, "diff", "--name-only", "--no-renames", spec, "--", *CLI_FILES],
+                           capture_output=True, text=True)
+    lines = subprocess.run(["git", "-C", REPO, "diff", "-U0", "--no-renames", spec, "--", WORKFLOW],
+                           capture_output=True, text=True)
+    if names.returncode != 0 or lines.returncode != 0:
+        return None
+    moved = [ln for ln in lines.stdout.splitlines() if ln[:1] in "+-" and ln[:3] not in ("+++", "---")]
+    return bool(names.stdout.strip()) or any(PIN_TEXT in ln for ln in moved)
+
+
 def usage():
     print("usage: judge_replay.py (--changed BASE | --judge NAME | --all | --paths | --probe) [--runs N]")
     return 2
@@ -467,7 +506,8 @@ def main(argv):
         names = sorted(JUDGES)
     elif mode == "changed":
         paths = changed_paths(base)
-        names = sorted(JUDGES) if paths is None else touched(paths)
+        pinned = pin_changed(base)
+        names = sorted(JUDGES) if paths is None or pinned is not False else touched(paths)
         if not names:
             print("no judge touched")
             return 0

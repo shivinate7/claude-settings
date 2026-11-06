@@ -1,0 +1,8 @@
+{
+  "name": "judge-replay-cli",
+  "private": true,
+  "description": "Pins the claude CLI that the judge-replay job installs (npm ci --prefix .github/judge-replay).",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.319"
+  }
+}
