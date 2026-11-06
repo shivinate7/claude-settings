@@ -778,7 +778,7 @@ class Host:
         return hits[0]
 
     def pr(self, n):
-        """-> {head, branch, base, state, mergeable, merge_state, draft, body}"""
+        """-> {head, branch, base, state, mergeable, merge_state, draft, body, created}"""
         c, out = self.api(f"pulls/{self.pr_number(n)}")
         if c:
             raise Stop("reading the pull request failed: " + out)
@@ -787,7 +787,7 @@ class Host:
         return {"head": d["head"]["sha"], "branch": d["head"]["ref"], "base": d["base"]["ref"],
                 "state": "MERGED" if d.get("merged") else d["state"].upper(),
                 "mergeable": self.MERGEABLE[d.get("mergeable")], "merge_state": (d.get("mergeable_state") or "unknown").upper(),
-                "draft": bool(d.get("draft")), "body": d.get("body") or ""}
+                "draft": bool(d.get("draft")), "body": d.get("body") or "", "created": d.get("created_at")}
 
     def review_comments(self, since):
         """-> {PR number: [review record bodies, oldest first]}: one list read of the repo's issue comments updated since `since`. A body counts only
@@ -2787,10 +2787,10 @@ def parse_review(text):
 
 def review_state(rec, head):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
-    The done rules follow roles-review-cap-three and the decision pr-review-record: the last round is all PASS and the last design-reviewer line
-    (by position, across all rounds) is PASS or absent; or the final allowed round is done and Guard or check is no; or the final allowed round is done, Guard or check is yes and Net value is zero or positive; or Kind is delete-only,
+    The done rules follow roles-review-cap-three and the decision pr-review-record: the last round is all PASS, or a fix check PASS counts as that round
+    passing, and the last design-reviewer line (by position, across all rounds) is PASS or absent; or the final allowed round is done and Guard or check is no; or the final allowed round is done, Guard or check is yes and Net value is zero or positive; or Kind is delete-only,
     Guard or check is no and the first round is done; or Kind is docs-only with no round. A guard or check change owes the net-value test after the
-    final allowed round whatever the verdict, and owes the later rounds when the first fails, even if it only deletes. Net value negative holds the change.
+    final allowed round whatever the verdict, and owes the later rounds when the first fails unless a fix check PASS follows, even if it only deletes. Net value negative holds the change.
     A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round or delete-only done names it.
     A fix check (rec["fix"], decision hold-unsafe-after-round-3) is not a round and is read after the held rule. A FAIL is open, whatever the
     rounds say. A PASS counts as the last recorded round passing, even when that round failed, and for a delete-only change with Guard or check yes
@@ -2820,7 +2820,9 @@ def review_state(rec, head):
         return "open", "round 3 is done on a guard or check change, and its net value is owed"
     passed = top and (fix or all(v == "PASS" for i, _, _, v in rounds if i == top))  # a fix PASS, read here, counts as round `top` passing
     if passed and not bad:
-        return "done", f"round {top} passed" + (" with the fix check" if fix else "")
+        if fix and not all(v == "PASS" for i, _, _, v in rounds if i == top):
+            return "done", f"round {top} is FAIL, and the fix check passed"
+        return "done", f"round {top} passed"
     if rec["kind"] == "delete-only" and rec["guard"] == "no" and top >= 1:  # before the design hold: the first review closes a delete-only change with no guard or check
         return "done", "delete-only change, round 1 is done" + note
     if passed:
@@ -2998,6 +3000,12 @@ def main(argv, host=None, lock=None):
                 raise Stop(f"the pull request is {info['state']} " + REVIEW_CITE)
             if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
+            if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
+                earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
+                last = earlier[-1] if earlier else None
+                if not last or last["head"] != a.fix_check[0] or last["fix"]:
+                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
+                    return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
