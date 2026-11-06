@@ -30,6 +30,10 @@ Process picks, reported to the owner, 2026-11-06 11:48 and 12:49 CST:
 - A live `doing` step reads "In progress".
 - `lane/<id>` counts as the lane.
 - A `cs-topic` session counts as live for items only.
+- Part 2, 2026-11-06 14:38 CST: the build lists ready-not-started steps (`todo` or `ready`, phase
+  `now`, no live lane, no valid `paused` field, no open unanswered item). `ready` reads as todo. The
+  `Unstarted:` refusal is held until a re-measure (debt `unstarted-guard-held`, the Unstarted guard
+  is held).
 
 ## Cost
 
