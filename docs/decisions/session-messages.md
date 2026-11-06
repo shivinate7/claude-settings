@@ -3,7 +3,7 @@
 Kind: build
 Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
-Status: draft. Q2 and Q3 are picked; Q1 waits on the owner.
+Status: draft. Q1 to Q3 are answered. Page item 153 (how cloud sessions reach the owner's computer) is folded in and open.
 
 ## Ruling
 
@@ -60,15 +60,15 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
 1. Measure, no code: 11 round trips in cloud and on the Mac, with replies on; does a `send_later` turn
    reset the chain; does UserPromptSubmit fire on a peer turn. Check: each result in this record with
    its version and time.
-2. Parse the convention in `lint/_transcript.py`, matching by peer origin and tool fields, never by
-   quoted text. Check: cases for a quoted envelope and a forged one in a peer body.
-3. Write the convention and the cloud and local adapters into the skill. Check: a two-session trial of
+2. Write the convention and the cloud and local adapters into the skill. Check: a two-session trial of
    20 messages, none lost, none acted on twice.
 
 ## Owner choices
 
-- Q1, ask Anthropic for a setting that lifts the desktop cap: open with the owner on the waiting page
-  (sent through triage 2026-11-06 12:50 CST).
+- Q1, ask Anthropic for a setting that lifts the desktop cap: owner answer b, live with the limit only
+  (page item 281, relayed by triage 2026-11-06 13:13 CST). The owner also asked whether the limit can be set. It
+  cannot: the desktop count reads a fixed constant, and both flag-override hooks in the public build return null
+  (binary 2.1.319, `getEnvironmentOverrides`, `readConfigOverrides`).
 - Q2, how a lost message is noticed: a session that waits on a reply sets one `send_later` check-in,
   the same shape as rule `git-ci-wait-checks-in`. Coordinator pick, 2026-11-06 12:48 CST; it can be undone.
-- Q3, scope: the debt fix (done, commit 7059961a) and build steps 1 to 3 only. Coordinator pick, 2026-11-06 12:48 CST; it can be undone.
+- Q3, scope: the debt fix (done, commit 7059961a) and build steps 1 and 2 only. A parser for the message format was dropped 2026-11-06 13:15 CST: with no new hook, nothing would call it (rule building-land-design-or-abandon). Coordinator pick, 2026-11-06 12:48 CST; it can be undone.
