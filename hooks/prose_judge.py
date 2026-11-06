@@ -93,7 +93,7 @@ def main():
         else:
             change = "content: %s" % args.get("content")
         prompt = "Judge this edit to a file: %s\n%s\nfile_path: %s\n%s" % (tool, RULES[tool], path, change)
-        verdict, error = invoke_model(prompt, timeout=MODEL_TIMEOUT, shape=OK_SHAPE)
+        verdict, error = invoke_model(prompt, timeout=MODEL_TIMEOUT, shape=OK_SHAPE, session_id=hook.get("session_id"))
     except Exception as exc:
         print("prose judge failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
         return 0

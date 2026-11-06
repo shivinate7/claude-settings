@@ -429,7 +429,8 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
     if os.environ.get(LANE_ENV) and seed is None:
         return None
     if judge is None:
-        from call_judge import opus_ask as judge
+        from call_judge import opus_ask
+        judge = lambda asked: opus_ask(asked, session_id=session_id)  # the default names the hook session to the call
     if judge(text) is not True:
         return None
     scope = _ask_scope(text)
@@ -443,7 +444,8 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
         # scope read, and a kill must leave the every-role file. A valid answer then narrows it.
         _write_opus(session_id, path, at, length, None, said, log=False)
         if scope_judge is None:
-            from call_judge import opus_scope as scope_judge
+            from call_judge import opus_scope
+            scope_judge = lambda asked, earlier: opus_scope(asked, earlier, session_id=session_id)
         try:
             roles = _scoped_roles(scope_judge, text, context)
         except BaseException:  # an interrupt or an exit during the read: log the every-role grant that stands
