@@ -19,20 +19,26 @@ not load cannot make a "never called" check pass for no reason.
 
 Sampling cases (case 8 on) run several Stops of one config dir in a row. Each Stop is still a
 new process, so the counter must persist in files, not in memory.
+
+Route-row cases give each run its own rows file and point GUARD_ROUTE_ROWS at it, so no run reads the
+repo's rows file. The stub logs each read of that file in the hook process to RJ_OPENS.
 """
 import json
+import importlib.util
 import os
 import re
 import shutil
 import subprocess
 import sys
-import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(REPO_ROOT, "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
+
 MODULE_PATH = os.environ.get("REPLY_JUDGE_UNDER_TEST") or os.path.join(HERE, "reply_judge.py")
 SETTINGS_PATH = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO_ROOT, "settings.json")
-ROOT = tempfile.mkdtemp(prefix="reply_judge_cases_")
+ROOT = _test_temp.run_folder()
 STUB_DIR = os.path.join(ROOT, "stub")
 FAILED = []
 RED_CASES = []
@@ -79,6 +85,13 @@ def _fake_run(argv, **kwargs):
     with open(os.environ["RJ_RECORD"], "a", encoding="utf-8") as f:
         f.write(json.dumps(rec) + "\\n")
     scenario = os.environ.get("RJ_SCENARIO", "")
+    if scenario == "doable_if_shown":
+        # A judge can name a doable route only from a row the prompt carries: the answer comes back only
+        # when the prompt holds the marker id RJ_DOABLE_ID, else the judge answers ok.
+        marker = os.environ.get("RJ_DOABLE_ID") or ""
+        if marker and marker in (stdin or ""):
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"result": os.environ.get("RJ_ANSWER", "")}), "")
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"result": json.dumps({"ok": True})}), "")
     if scenario == "timeout":
         raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
     if scenario == "error":
@@ -89,6 +102,24 @@ def _fake_run(argv, **kwargs):
         return subprocess.CompletedProcess(argv, 0, json.dumps({"result": "Looks fine to me."}), "")
     return subprocess.CompletedProcess(argv, 0, json.dumps({"result": os.environ.get("RJ_ANSWER", "")}), "")
 
+
+if os.environ.get("RJ_OPENS"):
+    # A spy on reads of the route rows file, in the hook process only. It logs each open of that file to
+    # RJ_OPENS, a file of its own, so the calls record stays the record of model calls alone.
+    import builtins
+    _real_open = builtins.open
+    _rows_env = os.environ.get("GUARD_ROUTE_ROWS") or ""
+
+    def _spy_open(file, *args, **kwargs):
+        if isinstance(file, (str, bytes, os.PathLike)):
+            name = os.fsdecode(file)
+            if os.path.basename(name) == "route_rows.json" or (
+                    _rows_env and os.path.abspath(name) == os.path.abspath(_rows_env)):
+                with _real_open(os.environ["RJ_OPENS"], "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"opened": name}) + "\\n")
+        return _real_open(file, *args, **kwargs)
+
+    builtins.open = _spy_open
 
 with open(os.environ["RJ_LOADED"], "w", encoding="utf-8") as f:
     f.write("loaded")
@@ -138,25 +169,39 @@ class Run:
         if os.path.exists(record):
             with open(record, encoding="utf-8") as f:
                 self.calls = [json.loads(line) for line in f if line.strip()]
+        self.opens = []  # each read of the route rows file in the hook process, from the stub's spy
+        opened = os.path.join(base, "opens.jsonl")
+        if os.path.exists(opened):
+            with open(opened, encoding="utf-8") as f:
+                self.opens = [json.loads(line) for line in f if line.strip()]
 
     def prompt(self):
         # The prompt travels on the child's stdin, never in argv (Windows caps a command line).
         return (self.calls[0].get("stdin") or "") if self.calls else ""
 
 
+MISSING_ROWS = object()  # the rows file is absent: GUARD_ROUTE_ROWS names a path that does not exist
+
+
 def run_hook(text, scenario="ok", answer="", stop_active=False, config=None, session=REPLY_SESSION,
-             fail_replace=False, fail_remove=False):
+             fail_replace=False, fail_remove=False, rows=MISSING_ROWS, doable=""):
     """One Stop, one new process. With no `config`, the config dir is fresh and empty, so the
     Stop is the session's first. A shared `config` carries the counter from Stop to Stop.
     `text` may be ABSENT: the payload then has no last_assistant_message key at all.
     `fail_replace` makes every os.replace in the hook process raise (a fake write failure).
-    `fail_remove` makes os.remove raise on a counter file (a fake read-only counter)."""
+    `fail_remove` makes os.remove raise on a counter file (a fake read-only counter).
+    `rows` is the route rows file: a list of rows written as {"rows": [...]}, or MISSING_ROWS for no
+    file. The path always comes from GUARD_ROUTE_ROWS, so no run reads the repo's own rows file.
+    `doable` is the id the "doable_if_shown" stub looks for in the prompt."""
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     os.makedirs(base, exist_ok=True)
     if config is None:
         config = os.path.join(base, "config")
     os.makedirs(config, exist_ok=True)  # empty on first use: no settings, hooks, credential or token
+    rows_file = os.path.join(base, "route_rows.json")
+    if rows is not MISSING_ROWS:
+        write_rows(rows_file, rows)
     env = dict(os.environ)
     for name in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"):
         env.pop(name, None)
@@ -173,8 +218,11 @@ def run_hook(text, scenario="ok", answer="", stop_active=False, config=None, ses
         PYTHONPATH=STUB_DIR,
         RJ_SCENARIO=scenario,
         RJ_ANSWER=answer,
+        RJ_DOABLE_ID=doable,
         RJ_RECORD=os.path.join(base, "calls.jsonl"),
         RJ_LOADED=os.path.join(base, "loaded"),
+        RJ_OPENS=os.path.join(base, "opens.jsonl"),
+        GUARD_ROUTE_ROWS=rows_file,
     )
     payload = {
         "session_id": session,
@@ -1375,6 +1423,131 @@ def case_prompt_spares_a_reply_that_rewrote_the_item():
           has_pin(sentences, ("never flag",), ("pr review thread",), ("another artifact",)), sentences)
 
 
+# ----------------------------------------------------------- route rows (claims-carry-backing, part (v) layer (b))
+# A "Why yours" line that cites `(route <id>)` puts three rows in the judge prompt: the cited row, every other
+# row with its act, and the rows its `alternates` name. A rows file that is missing or holds no rows gives the
+# prompt it gets today. The fixtures: one act with a refused route and a works route, one alternate in another
+# act, and one unrelated act. judge_row builds a row in the rows file's shape. It is not
+# test_refusal_note.route_row: that fixture ties each act to its row id and sets no alternates.
+
+ROUTE_ACT = "amend the trailer of a commit already pushed to its branch"
+OTHER_ACT = "push a commit straight to main"
+
+
+def judge_row(row_id, act, route, outcome, alternates=None):
+    row = {"id": row_id, "act": act, "route": route, "surface": "local", "outcome": outcome,
+           "measured": "2026-11-05", "cc_version": "2.1.0", "evidence": "fixture transcript",
+           "by": "test-author", "pattern": "fixture-" + row_id}
+    if alternates is not None:
+        row["alternates"] = alternates
+    return row
+
+
+CITED_ROW = judge_row("trailer-amend-pushed", ROUTE_ACT, "git commit --amend on the pushed branch", "refused",
+                      alternates=["rebase-fixup-new-branch"])
+SAME_ACT_ROW = judge_row("cherry-pick-to-new-branch", ROUTE_ACT, "cherry-pick to a new branch", "works")
+ALT_ROW = judge_row("rebase-fixup-new-branch", "rewrite the history of a branch",
+                    "git rebase -i fixup on a new branch", "works")
+OTHER_ROW = judge_row("push-main-direct", OTHER_ACT, "git push origin main", "refused")
+ALL_ROWS = [CITED_ROW, SAME_ACT_ROW, ALT_ROW, OTHER_ROW]
+CITED_ID = CITED_ROW["id"]
+SAME_ACT_ID = SAME_ACT_ROW["id"]
+
+# The incident (decision claims-carry-backing, incident PR #1299): a commit's trailer is a hand-off, and the
+# session could have cherry-picked the commit to a new branch with no refusal.
+TRAILER_REPLY = (
+    "> **Done**\n> BUILT: the hook change is pushed on branch prose-truth-reply-judge-t.\n"
+    "> Input Needed: commit abc1234 needs a new trailer.\n\n"
+    "Why yours: only you can change your commit; check: check_red_run reads only the commit's own message "
+    "(route %s).\n" % CITED_ID
+)
+DOABLE_ANSWER = json.dumps({"ok": False, "reason": "output-never-hand-off-doable-step: doable: cherry-pick to a "
+                            "new branch (route %s)." % SAME_ACT_ID})
+
+
+def write_rows(path, rows):
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump({"rows": rows}, handle)
+
+
+def reference_module():
+    """The hook's module, loaded in this process, for its INSTRUCTIONS: the prompt text it builds today."""
+    spec = importlib.util.spec_from_file_location("reply_judge_reference", MODULE_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# Scope first: each case checks the judge's one model call, then the rows it carries.
+
+def case_route_cite_carries_cited_same_act_and_alternate_rows():
+    run = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=ALL_ROWS)
+    check("route rows, cite: claude called once", len(run.calls) == 1, run.calls)
+    prompt = run.prompt()
+    for label, row in (("cited row", CITED_ROW), ("same-act row", SAME_ACT_ROW), ("alternate row", ALT_ROW)):
+        check("route rows, cite: the prompt carries the %s" % label,
+              row["route"] in prompt and row["id"] in prompt, prompt[:300])
+    check("route rows, cite: a row of another act does not ride the prompt",
+          OTHER_ROW["route"] not in prompt and OTHER_ROW["id"] not in prompt, prompt[:300])
+
+
+# A full rows file: 300 rows of another act. Only the rows the cite names ride the prompt.
+
+def case_route_cite_skips_other_acts_in_a_full_rows_file():
+    filler = [judge_row("filler-%03d" % n, OTHER_ACT, "filler route %03d" % n, "refused") for n in range(300)]
+    run = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=[CITED_ROW, SAME_ACT_ROW, ALT_ROW] + filler)
+    check("full rows file: claude called once", len(run.calls) == 1, run.calls)
+    prompt = run.prompt()
+    check("full rows file: the same-act row rides the prompt", SAME_ACT_ROW["route"] in prompt, prompt[:300])
+    check("full rows file: the alternate row rides the prompt", ALT_ROW["route"] in prompt, prompt[:300])
+    carried = sum(1 for n in range(300) if ("filler route %03d" % n) in prompt)
+    check("full rows file: no row of another act rides the prompt", carried == 0,
+          "%d filler rows in the prompt" % carried)
+
+
+# The incident. The model names a doable route only when the prompt carries that route's row (the stub).
+# The note it prints must name the route.
+
+def case_trailer_hand_off_names_the_doable_route():
+    run = run_hook(TRAILER_REPLY, scenario="doable_if_shown", answer=DOABLE_ANSWER, rows=ALL_ROWS,
+                   doable=SAME_ACT_ID)
+    check("trailer hand-off: claude called once", len(run.calls) == 1, run.calls)
+    check("trailer hand-off: exit 0", run.code == 0, run.code)
+    got = parse_stdout(run)
+    specific = got.get("hookSpecificOutput") if got else None
+    note = specific.get("additionalContext") if isinstance(specific, dict) else None
+    check("trailer hand-off: the judge prints a Stop note", isinstance(note, str) and note.strip() != "",
+          run.out or run.err)
+    check("trailer hand-off: the note names the doable route %s" % SAME_ACT_ID,
+          isinstance(note, str) and SAME_ACT_ID in note, note)
+
+
+# No rows file, or a file with no rows: today's prompt, and no route text in its head. The expected prompt is
+# the hook's INSTRUCTIONS with the same reply, so a route sentence added to the head fails here.
+
+def case_no_route_rows_keeps_today_prompt():
+    expected = "%s\n\nReply:\n%s" % (reference_module().INSTRUCTIONS, TRAILER_REPLY)
+    for label, rows in (("rows file missing", MISSING_ROWS), ("rows file holds no rows", [])):
+        run = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=rows)
+        check("no route rows (%s): claude called once" % label, len(run.calls) == 1, run.calls)
+        check("no route rows (%s): the prompt is today's prompt" % label, run.prompt() == expected,
+              run.prompt()[:300])
+        head = run.prompt().split(TRAILER_REPLY, 1)[0]
+        check("no route rows (%s): the prompt head names no route" % label, "route" not in head.lower(), head[:300])
+
+
+# Cost: the rows file is read only for a reply with a Why yours line, and once per hook run. The model is
+# still called once per judged reply.
+
+def case_route_rows_are_read_once_and_only_for_a_why_yours_line():
+    plain = run_hook(MARK, answer=OK_ANSWER, rows=ALL_ROWS)
+    check("rows read, no Why yours: claude called once", len(plain.calls) == 1, plain.calls)
+    check("rows read, no Why yours: the rows file is never read", plain.opens == [], plain.opens)
+    cited = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=ALL_ROWS)
+    check("rows read, Why yours: claude called once", len(cited.calls) == 1, cited.calls)
+    check("rows read, Why yours: the rows file is read once", len(cited.opens) == 1, cited.opens)
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_ignored_stop_imports_no_guard_family_module,
@@ -1432,6 +1605,11 @@ CASES = (
     case_prompt_flags_a_recommended_option_that_widens,
     case_widens_finding_logs_its_rule,
     case_prompt_flags_a_pick_one_question_whose_options_could_combine,
+    case_route_cite_carries_cited_same_act_and_alternate_rows,
+    case_route_cite_skips_other_acts_in_a_full_rows_file,
+    case_trailer_hand_off_names_the_doable_route,
+    case_no_route_rows_keeps_today_prompt,
+    case_route_rows_are_read_once_and_only_for_a_why_yours_line,
 )
 
 
