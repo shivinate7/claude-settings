@@ -9,16 +9,25 @@ nominalization (STE003) fix exists, and no fix changes the case of the text it s
 budget is one number, 30 words. Contractions, Latin abbreviations, nominalizations, phrasal verbs,
 condition order and omitted "that" are advisory warnings: reported, never a rewrite.
 
+The last cases (UnreadConfigTests) run the CLI on a .ste.json or .ste.toml that does not parse. That read must
+print UNKNOWN (decision ci-unknown-is-red): locally the exit comes from the findings alone, and with env CI set it is non-zero.
+
     python lint/test_ste_autofix.py -v
 """
+import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import ste_lint  # noqa: E402
+STE = os.path.join(HERE, "ste_lint.py")
+RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
 # 38 words: STE001 against the one budget of 30.
 LONG = ("The operators on each shift must record every valve position, every pressure reading, "
@@ -535,6 +544,81 @@ for _adv in ADVERBS:
             _pin_unchanged("There's %s been a way.\n" % _adv))
 setattr(ReviewRound2FixerTests, "test_r2_guard_had_its", _pin_unchanged("It's had a fault.\n"))
 setattr(ReviewRound2FixerTests, "test_r2_guard_had_theres", _pin_unchanged("There's had a fault.\n"))
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
+
+
+# One advisory warning (STE008, a contraction) marks the doc as read. A warning never fails the run, so the exit is the config's alone.
+DOC = "The valve doesn't open.\n"
+MARK = "STE008"
+VALID_JSON = json.dumps({"max_words": 30})
+
+
+class UnreadConfigTests(unittest.TestCase):
+    def setUp(self):
+        self.tree = tempfile.mkdtemp(prefix="stecfg_", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.tree, True)
+        self.write("doc.md", DOC)
+
+    def write(self, name, text):
+        with open(os.path.join(self.tree, name), "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+
+    def run_lint(self, ci=False):
+        """The CLI's exit code and output, run in the fixture folder. Env CI is off unless `ci` sets it."""
+        env = {k: v for k, v in os.environ.items() if k != "CI"}
+        if ci:
+            env["CI"] = "1"
+        done = subprocess.run([sys.executable, STE, "doc.md"], cwd=self.tree, capture_output=True, text=True,
+                              encoding="utf-8", env=env, timeout=60)
+        return done.returncode, done.stdout + done.stderr
+
+    def assertDocRead(self, out):
+        self.assertIn(MARK, out, "scope: the doc was not linted, so the config verdict says nothing about it:\n" + out)
+        self.assertNotIn("Traceback", out)
+
+    def test_an_unparseable_json_config_prints_unknown_locally(self):
+        self.write(".ste.json", "{not json\n")
+        rc, out = self.run_lint()
+        self.assertDocRead(out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("UNKNOWN", out, "a .ste.json that does not parse was read as the defaults with no UNKNOWN line:\n" + out)
+
+    def test_an_unparseable_json_config_is_red_in_ci(self):
+        self.write(".ste.json", "{not json\n")
+        rc, out = self.run_lint(ci=True)
+        self.assertDocRead(out)
+        self.assertNotEqual(rc, 0, "a .ste.json that does not parse passed in CI:\n" + out)
+
+    @unittest.skipUnless(sys.version_info >= (3, 11), "tomllib, which reads .ste.toml, needs Python 3.11 or later")
+    def test_an_unparseable_toml_config_prints_unknown_locally(self):
+        self.write(".ste.toml", "[ste\nmax_words = \n")
+        rc, out = self.run_lint()
+        self.assertDocRead(out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("UNKNOWN", out, "a .ste.toml that does not parse was read as the defaults with no UNKNOWN line:\n" + out)
+
+    @unittest.skipUnless(sys.version_info >= (3, 11), "tomllib, which reads .ste.toml, needs Python 3.11 or later")
+    def test_an_unparseable_toml_config_is_red_in_ci(self):
+        self.write(".ste.toml", "[ste\nmax_words = \n")
+        rc, out = self.run_lint(ci=True)
+        self.assertDocRead(out)
+        self.assertNotEqual(rc, 0, "a .ste.toml that does not parse passed in CI:\n" + out)
+
+    def test_a_readable_config_is_green_in_ci_with_no_unknown(self):
+        # Green control: a config that parses passes in CI, with the doc still read and no UNKNOWN line.
+        self.write(".ste.json", VALID_JSON + "\n")
+        rc, out = self.run_lint(ci=True)
+        self.assertDocRead(out)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("UNKNOWN", out)
 
 
 if __name__ == "__main__":
