@@ -117,6 +117,9 @@ class Matcher(unittest.TestCase):
     def test_guard_matcher_covers_every_mcp_tool_the_guard_names(self):
         # The guard judges each mcp__ name it emits (guard.py and the guard_*.py modules it imports). A name that no
         # guard matcher passes never reaches the guard, so its branch never runs.
+        with open(os.path.join(HOOKS_DIR, "guard.py"), encoding="utf-8") as f:
+            self.assertTrue(guard_module_names(ast.parse(f.read())),
+                            "guard.py imports no guard_* module: the scan would read none of them")
         names = guard_mcp_names()
         self.assertTrue(names, "the scan found no mcp__ name in the guard: it proves nothing")
         matchers = guard_matchers()
@@ -131,6 +134,10 @@ class Matcher(unittest.TestCase):
         source = ('a = "mcp__fixture__tool"\n# mcp__fixture__comment\nb = "mcp__fixture__tool x"\n'
                   'c = """\nmcp__fixture__block\n"""\nd = "don\'t mcp__fixture__quote"\n')
         self.assertEqual(mcp_names_in(ast.parse(source)), {"mcp__fixture__tool"})
+        # A comment opener inside a string does not end the string: the literal after it is still read.
+        source = 'e = "#"; f = "mcp__fixture__after"\ng = "//"; h = "mcp__fixture__slashes"\n'
+        self.assertEqual(mcp_names_in(ast.parse(source)), {"mcp__fixture__after", "mcp__fixture__slashes"})
+        self.assertEqual(mcp_names_in(ast.parse("")), set())
 
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
