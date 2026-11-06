@@ -49,9 +49,9 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
   and the receiver acts on the id once.
 - The reply is the ack. An `inform` needs no reply. No separate ack message, because each message
   spends the peer guard and the desktop cap.
-- Fit the caps: one request and one reply per exchange. A session that needs more than 10 `SendMessage`
-  sends to sessions on the same computer before the owner types routes the rest through its parent or a
-  record, never through a peer loop. Cloud `send_message` is not counted (section on item 153). Never use
+- Fit the caps: one request and one reply per exchange. The desktop cap counts `SendMessage` sends to
+  sessions on the same computer since the owner last typed. Past 10 such sends, a session routes the rest
+  through its parent or a record, never through a peer loop. Cloud `send_message` is not counted (section on item 153). Never use
   a scheduled task to reset the chain: that bypasses the peer guard.
 - A send whose result is an error counts as not sent (`failed_tool_use_ids` in `lint/_transcript.py`).
 - A message never carries a grant (decision relayed-grant-read-from-page).
