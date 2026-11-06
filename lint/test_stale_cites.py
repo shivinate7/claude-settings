@@ -1296,14 +1296,22 @@ class ForeignFileTests(StaleCase):
             commit(repo)
         return self.make_range(base_files(notes), change)
 
+    NOTE = ("stale-cites: unknown, docs/debts/notes.md:3: hooks/lib.mjs refusals: "
+            "JavaScript and shell names are not checked")
+
     def test_a_touched_mjs_cited_beside_another_removal_prints_one_unknown_line(self):
         rng = self.mjs_and_removal("# Notes\n\n- `hooks/lib.mjs` `refusals`\n")
         rc, out = self.run_check(rng)
         self.assertEqual(rc, 0, out)
-        self.assertEqual(unknown_lines(out), [
-            "stale-cites: unknown, docs/debts/notes.md:3: hooks/lib.mjs refusals: "
-            "JavaScript and shell names are not checked",
-        ], out)
+        self.assertEqual(unknown_lines(out), [self.NOTE], out)
+
+    def test_a_touched_mjs_cite_under_ci_is_a_limit_and_stays_exit_zero(self):
+        """Ruling R3 (process-only, 2026-11-06 13:24 CST): a name the tool does not build is a limit, not an unread
+        input, so CI does not make it red. Green on main and on the builder head."""
+        rng = self.mjs_and_removal("# Notes\n\n- `hooks/lib.mjs` `refusals`\n")
+        rc, out = self.run_check(rng, extra_env={"CI": "1"})
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(unknown_lines(out), [self.NOTE], out)
 
     def test_a_line_marked_ste_disable_line_stale002_prints_no_unknown_line(self):
         rng = self.mjs_and_removal("# Notes\n\n- `hooks/lib.mjs` `refusals` <!-- ste-disable-line STALE002 -->\n")
