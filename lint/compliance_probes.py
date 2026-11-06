@@ -44,7 +44,8 @@ words: each retired word in a checked repo, one item per line: `  <word>: <file>
   files. The probe holds no list. A glossary that cannot be read, or has no rows, or a file that does not
   parse, makes the group unknown. It prints the claude-settings commit whose glossary it read. A term of
   the child's own GLOSSARY.md, at its root, spans a retired word, as a claude-settings term does. A child
-  term that repeats a claude-settings term, or is the retired word itself, does not. After WORDS_DEADLINE
+  term that repeats a claude-settings term, or is the retired word itself, does not, and is an item at its
+  GLOSSARY.md line. After WORDS_DEADLINE
   seconds the group is `unknown - stopped at <file>, N of M read`. That limit is a bandaid for file shapes
   the read is not yet fast on.
 supersede: text in the child that departs from a shared rule and names no known exemption. It reads the tracked
@@ -1036,6 +1037,7 @@ def probe_words(root):
     found, unread, files = [], [], tracked(root)
     child = read(root, "GLOSSARY.md") if "GLOSSARY.md" in files else None  # the child's own domain terms, in its root
     spans = check_glossary.child_spans(check_glossary.rows(child.lstrip("\ufeff")), table) if child else []
+    clashes = check_glossary.child_clashes(child.lstrip("\ufeff"), table) if child else []
 
     def add(rel, line, problem, detail):
         word = WORD_HIT.search(problem)
@@ -1043,6 +1045,8 @@ def probe_words(root):
         if item not in found:
             found.append(item)
 
+    for line, term, problem in clashes:  # a child term that defines a claude-settings term again
+        found.append((term, "GLOSSARY.md", line, problem))
     deadline = time.monotonic() + WORDS_DEADLINE
 
     def tick():

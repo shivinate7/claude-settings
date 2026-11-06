@@ -882,6 +882,7 @@ def dropping(word):
     return rows
 
 
+CHILD_ROW = 9  # the line of the first term row that child_glossary writes
 CHILD_MARK = "<!-- child glossary -->"  # a patched rows() tells the child's file from this repo's by it
 
 
@@ -1021,7 +1022,8 @@ class Words(unittest.TestCase):
                 with self.subTest(word=word, term=term):
                     repo = child_glossary(Repo(self), term).write("src/%s_list.py" % term)
                     code, out = repo.run("words")
-                    self.assertEqual((code, hits(out)), (1, [(word, "src/%s_list.py" % term, "-")]), out)
+                    self.assertEqual((code, sorted(hits(out))), (1, sorted([
+                        (term, "GLOSSARY.md", str(CHILD_ROW)), (word, "src/%s_list.py" % term, "-")])), out)
 
     def test_a_child_term_that_repeats_a_claude_settings_term_is_not_honoured(self):
         # This repo's glossary never lets a repo define a term again that it defines. Here it defines `ad <word>` too.
@@ -1035,9 +1037,19 @@ class Words(unittest.TestCase):
             return found if CHILD_MARK in text else found + [(term, ["README.md"], [])]
         with mock.patch.object(check_glossary, "rows", repeated):
             code, out = in_process(repo.root)
-        self.assertEqual((code, hits(out)), (1, [(word, path, "-")]), out)
+        self.assertEqual((code, sorted(hits(out))), (1, sorted([(term, "GLOSSARY.md", str(CHILD_ROW)), (word, path, "-")])), out)
         code, out = in_process(repo.root)  # the same child file, with the term this repo's own: honoured
         self.assertEqual((code, hits(out)), (0, []), out)
+
+    def test_a_child_term_that_defines_a_claude_settings_term_again_is_red(self):
+        # Plan c146 section 6 item 2: a child glossary adds terms and never defines a claude-settings term again.
+        table = check_glossary.rows(check_glossary.read(check_glossary.GLOSSARY))
+        term = next(t for t, _homes, _names in table if ":" not in t)
+        for child in (term, term + "s", term.upper()):  # the term, its plural and another case all read as the term
+            with self.subTest(child=child):
+                code, out = child_glossary(Repo(self), "ad lane", child).run("words")
+                self.assertEqual((code, head(out), hits(out)), (1, "words: out", [(child, "GLOSSARY.md", str(CHILD_ROW + 1))]), out)
+                self.assertIn("defines the claude-settings term '%s' again" % term, out)
 
     def test_no_child_glossary_at_the_root_changes_nothing(self):
         word = planted(one_word=True)
