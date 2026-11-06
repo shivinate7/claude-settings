@@ -189,7 +189,8 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 .opt .pick { align-self: end; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
 .opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
-.opt .against { align-self: end; padding: 0 10px; font-size: 14px; color: var(--ink); }
+.opt .pickrow { align-self: end; display: flex; flex-direction: column; gap: 8px; }
+.opt .against { padding: 0 10px; font-size: 14px; color: var(--ink); }
 .opt .against b { display: block; font-size: 12px; font-weight: 600; }
 .opt .nopick { align-self: end; }
 /* A multi item: the options are checkboxes. The tick box is one fixed square, so a tick moves nothing. */
@@ -1378,6 +1379,9 @@ function optCard(it, o, chosen) {
   const pk = pickKeys(it), pi = pk ? pk.indexOf(o.key) : -1;
   // The refuter's best case against the pick sits under the pick line, once, on the first picked option. An unknown case shows its text; no case shows nothing.
   const against = pi === 0 && typeof it.against === "string" && it.against.trim() ? it.against.trim() : "";
+  const pickEl = pi >= 0 ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), !multi ? it.why : ranked ? ordinal(pi + 1) + "." + (pi === 0 ? " " + (it.why || "") : "") : pi === 0 ? it.why : "Also my pick.") : h("span", { class: "nopick" });
+  // The case shares the pick's grid row, under the pick line, so the cards' subgrid rows still line up and it never meets the rank row.
+  const pickRow = against ? h("div", { class: "pickrow" }, pickEl, h("div", { class: "against", id: "a-" + sfx }, h("b", {}, "Best case against"), against)) : pickEl;
   const desc = (ranked ? "r-" + sfx + " " : "") + "h-" + sfx + " t-" + sfx + (pi >= 0 ? " p-" + sfx : "") + (against ? " a-" + sfx : "");
   const pic = hasPics(it) ? optPic(it, o, on("picture")) : null;
   const input = multi
@@ -1391,8 +1395,7 @@ function optCard(it, o, chosen) {
     h("p", { class: "how" + (on("how") ? " dif" : ""), id: "h-" + sfx }, mark("how"), o.how, tail("how")),
     hasOptLinks(it) ? (linksOf(o).length ? h("div", { class: "links", id: "k-" + sfx }, linksOf(o).map(linkEl)) : h("span", { class: "nolinks" })) : null,
     h("div", { class: "tr", id: "t-" + sfx }, o.widens === true ? h("p", { class: "stake due dwarn widens" }, glyph("due"), h("span", {}, "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo")) : null, h("div", { class: "gain" + (on("gain") ? " dif" : "") }, mark("gain"), h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain), tail("gain")), h("div", { class: "lose" + (on("lose") ? " dif" : "") }, mark("lose"), h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose), tail("lose"))),
-    pi >= 0 ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), !multi ? it.why : ranked ? ordinal(pi + 1) + "." + (pi === 0 ? " " + (it.why || "") : "") : pi === 0 ? it.why : "Also my pick.") : h("span", { class: "nopick" }),
-    against ? h("div", { class: "against", id: "a-" + sfx }, h("b", {}, "Best case against"), against) : null];
+    pickRow];
   if (!ranked) return h("label", { class: "opt" + (sel ? " sel" : ""), for: id }, pic, input, h("span", { class: "head" }, ...headKids), ...body);
   const n = list.length;
   const mv = (dir) => {
