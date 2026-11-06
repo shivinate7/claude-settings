@@ -5,7 +5,12 @@
   "home": "coordinator",
   "id": "qmax-1036-base-red",
   "kind": "decision",
-  "lane": "coordinator: runner 9 runs the merge on your pick",
+  "lane": "coordinator: runner 9 merges #1036 with the reason flag; closes when #1036 merges",
+  "lastAnswer": {
+    "at": "2026-11-06T21:16:29.376Z",
+    "choice": "none",
+    "note": "why does q_max use a unique merge tool? but ya merge it"
+  },
   "links": [
     {
       "label": "q_max #1036",
@@ -33,6 +38,7 @@
   "pick": "a",
   "rank": 2,
   "ref": "q_max PRs #1036, #1037, #1038, #1039; run 42274824088",
+  "reply": "Routed 15:19 CST to the coordinator and runner 9: #1036 merges onto the red main, with your save as the reason. q_max uses the same shared merge tool as every repo. The red-main refusal is that tool's rule (decision no-merge-onto-red-main). This item closes when #1036 merges.",
   "short": "q_max #1036 onto red main",
   "status": "open",
   "title": "q_max: merge the browser-tier fix #1036 alone onto a red main?",
