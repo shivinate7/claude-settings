@@ -2299,8 +2299,9 @@ async function mustHave(page, sel, what) {
   assert.equal(n, 1, `no ${what}: ${sel} is missing`);
 }
 // A text the page shows, as its box. A text the page does not show fails with the text named.
-async function shownBox(page, text) {
-  const loc = page.getByText(text, { exact: typeof text === "string" }).first();
+// scope: a selector the text must sit under, such as DIS_SHOWN. A Dismissed line keeps the thread's text in its .dt span, so a check that means the thread is shown passes a scope.
+async function shownBox(page, text, scope = "") {
+  const loc = (scope ? page.locator(scope) : page).getByText(text, { exact: typeof text === "string" }).first();
   const shown = await loc.waitFor({ state: "visible", timeout: 3000 }).then(() => true, () => false);
   assert.ok(shown, `the page does not show: ${text}`);
   return loc.boundingBox();
@@ -2835,6 +2836,8 @@ test("reply to an answer: a refused reply keeps focus in the reply form", async 
 const DIS_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
 const DIS_OFF = "Dismiss turns on once your reply has its answer.";
 const DIS_EMPTY = "No ask on the list. Type above, and a session answers here.";
+// The rows of the main list that are asks, not a Dismissed line (its .dt holds the root text) and not the dismissed list.
+const DIS_SHOWN = "ol.asklist:not(.dlist) > li.askc:not(.dropped)";
 // DIS_KEEP is the control: it has no dismissed field, so it shows on load in every case.
 const DIS_KEEP = { id: "ask-dis-keep", text: "Can the Status tab show the lane queue?", at: "2026-10-29T09:00:00Z", owner: "triage", answered: "2026-10-29T10:00:00Z", reply: "Yes. It is on the Status tab." };
 // Dismissed, with no answer later than the dismiss: hidden on load.
@@ -2864,8 +2867,8 @@ async function pressDismiss(page, root) {
 
 test("dismiss control: a thread with no dismissed field shows on load, and no Show dismissed unfold draws", async (t) => {
   const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED, [DIS_KEEP.id]: DIS_KEEP } }, storage: RPL_NEW }); if (!page) return;
-  await shownBox(page, ASK_ANSWERED.text);
-  await shownBox(page, DIS_KEEP.text);
+  await shownBox(page, ASK_ANSWERED.text, DIS_SHOWN);
+  await shownBox(page, DIS_KEEP.text, DIS_SHOWN);
   assert.equal(await page.locator("#askDismissed").count(), 0, "a Show dismissed unfold draws with nothing dismissed");
 });
 
@@ -2905,29 +2908,30 @@ test("dismiss: the thread stays in place as a Dismissed line with Restore and no
   const page = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
   await pressDismiss(page, root);
   await mustHave(page, `li#row-${root}.askc.dropped`, "the Dismissed line in the thread's place");
-  const line = await page.locator(`li#row-${root}`).evaluate((r, id) => ({ text: r.textContent.replace(/\s+/g, " ").trim(), tabindex: r.getAttribute("tabindex"), role: r.getAttribute("role"), focused: document.activeElement === r, restore: !!r.querySelector("#res-" + id), undo: !!document.getElementById("dun-" + id) }), root);
+  const line = await page.locator(`li#row-${root}`).evaluate((r, id) => { const sl = r.querySelector(":scope > p.sline:not(.dline)"); return { text: r.textContent.replace(/\s+/g, " ").trim(), tabindex: r.getAttribute("tabindex"), liRole: r.getAttribute("role"), lineRole: sl ? sl.getAttribute("role") : null, focused: document.activeElement === r, restore: !!r.querySelector("#res-" + id), undo: !!document.getElementById("dun-" + id) }; }, root);
   assert.ok(line.text.startsWith("Dismissed. " + ASK_ANSWERED.text), "the Dismissed line reads " + JSON.stringify(line.text));
   assert.equal(line.restore, true, "the Dismissed line has no Restore");
   assert.equal(line.undo, false, "the Dismissed line has an Undo count, not Restore alone");
   assert.equal(line.tabindex, "-1", "the Dismissed line has tabindex " + line.tabindex + ", not -1");
-  assert.equal(line.role, "status", "the Dismissed line has role " + line.role + ", not status");
+  assert.equal(line.lineRole, "status", "the Dismissed line's p.sline has role " + line.lineRole + ", not status");
+  assert.equal(line.liRole, null, "the Dismissed line's li has role " + line.liRole + ", not none: its p.sline carries status");
   assert.equal(line.focused, true, "focus is not on the Dismissed line");
 });
 
 test("dismiss: a dismissed thread is hidden on load, and one with an answer later than its dismissed, or a reply waiting, shows again", async (t) => {
   const page = await open(t, { dbExtra: { asks: { [DIS_KEEP.id]: DIS_KEEP, [DIS_HIDDEN.id]: DIS_HIDDEN, [DIS_LATER.id]: DIS_LATER, [DIS_LATER_REPLY.id]: DIS_LATER_REPLY, [DIS_WAITED.id]: DIS_WAITED, [DIS_WAITED_REPLY.id]: DIS_WAITED_REPLY } }, storage: RPL_NEW }); if (!page) return;
   // The control is drawn first, so a thread missing from the page is missing from a drawn list.
-  await shownBox(page, DIS_KEEP.text);
+  await shownBox(page, DIS_KEEP.text, DIS_SHOWN);
   assert.equal(await page.getByText(DIS_HIDDEN.text, { exact: true }).count(), 0, "the dismissed thread with no later answer is on the list at load");
-  await shownBox(page, DIS_LATER.text);
-  await shownBox(page, DIS_LATER_REPLY.text);
+  await shownBox(page, DIS_LATER.text, DIS_SHOWN);
+  await shownBox(page, DIS_LATER_REPLY.text, DIS_SHOWN);
   // A dismissed root under a reply that waits: its folded row shows the root text again.
-  await shownBox(page, DIS_WAITED.text);
+  await shownBox(page, DIS_WAITED.text, DIS_SHOWN);
 });
 
 test("dismiss: Show N dismissed asks opens the dismissed list, newest first, with Restore beside each thread", async (t) => {
   const page = await open(t, { dbExtra: { asks: { [DIS_KEEP.id]: DIS_KEEP, [DIS_HIDDEN.id]: DIS_HIDDEN, [DIS_OLD.id]: DIS_OLD } }, storage: RPL_NEW }); if (!page) return;
-  await shownBox(page, DIS_KEEP.text);
+  await shownBox(page, DIS_KEEP.text, DIS_SHOWN);
   await mustHave(page, "#askDismissed", "Show dismissed asks unfold");
   const label = ((await page.textContent("#askDismissed")) || "").replace(/\s+/g, " ").trim();
   assert.ok(label.includes("Show 2 dismissed asks"), "the unfold reads " + JSON.stringify(label));
@@ -2957,7 +2961,7 @@ test("dismiss: Restore writes dismissed null with update, the line says the thre
   assert.ok(said.includes("Restored. It joins the list at the next load."), "the line reads " + JSON.stringify(said));
   // The next load draws the thread again, and the stored record has dismissed null.
   await page.reload();
-  await shownBox(page, ASK_ANSWERED.text);
+  await shownBox(page, ASK_ANSWERED.text, DIS_SHOWN);
   assert.equal(await page.locator("#askDismissed").count(), 0, "the restored thread is still under Show dismissed asks after a reload");
   const kept = await storedAsk(page, root);
   assert.ok(kept && kept.dismissed === null, "the stored dismissed is " + JSON.stringify(kept && kept.dismissed) + ", not null");
@@ -3004,7 +3008,7 @@ test("dismiss: when the write is refused, the thread stays on the list, Dismiss 
   await page.click(`#dis-${root}`);
   assert.equal(await rplLineHas(page, "Not dismissed (permission-denied)"), true, "the refused Dismiss does not say Not dismissed (permission-denied)");
   assert.equal(await rplLineHas(page, "The ask stays on the list."), true, "the refused Dismiss does not say The ask stays on the list.");
-  await shownBox(page, ASK_ANSWERED.text);
+  await shownBox(page, ASK_ANSWERED.text, DIS_SHOWN);
   assert.notEqual(await page.getAttribute(`#dis-${root}`, "aria-disabled"), "true", "Dismiss is off after a refused write, so it cannot try again");
 });
 
@@ -3031,7 +3035,7 @@ test("dismiss: a dismissed list of 12 threads draws all 12, newest first", async
   const many = Array.from({ length: 12 }, (_, i) => ({ id: "ask-dis-m" + String(i).padStart(2, "0"), text: "Dismissed ask " + (i + 1), at: new Date(Date.UTC(2026, 8, 1 + i, 9)).toISOString(), owner: "triage", answered: new Date(Date.UTC(2026, 8, 1 + i, 10)).toISOString(), reply: "Answer " + (i + 1), dismissed: new Date(Date.UTC(2026, 8, 1 + i, 11)).toISOString() }));
   const asks = Object.fromEntries([DIS_KEEP, ...many].map((a) => [a.id, a]));
   const page = await open(t, { dbExtra: { asks }, storage: RPL_NEW }); if (!page) return;
-  await shownBox(page, DIS_KEEP.text);
+  await shownBox(page, DIS_KEEP.text, DIS_SHOWN);
   await mustHave(page, "#askDismissed", "Show dismissed asks unfold");
   const label = ((await page.textContent("#askDismissed")) || "").replace(/\s+/g, " ").trim();
   assert.ok(label.includes("Show 12 dismissed asks"), "the unfold reads " + JSON.stringify(label));
