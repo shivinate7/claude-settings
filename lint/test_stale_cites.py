@@ -1721,6 +1721,32 @@ class RouteClaimTests(StaleCase):
         rng, flagged = self.route_range(rows)
         self.assert_route_claims(rng, flagged)
 
+    def test_route_claim_fires_on_each_capability_verb_it_names(self):
+        sentences = [  # each holds one verb and the route word `cloud` (or `classifier`, `proxy`): the verb decides
+            "- The cloud isn't available for merges.",
+            "- The cloud isn’t available for merges.",
+            "- The cloud does not work for pushes to main.",
+            "- The cloud doesn't work for pushes to main.",
+            "- The classifier won't merge to main.",
+            "- Pushes to main are blocked by the proxy.",
+            "- The proxy denies pushes to main.",
+            "- The cloud gets a 403 on pushes to main.",
+        ]
+        for sentence in sentences:
+            with self.subTest(sentence=sentence):
+                rng, flagged = self.route_range([("# Notes", False), ("", False), (sentence, True)])
+                self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_counts_a_hyphenated_auto_mode_as_a_route_word(self):
+        sentences = [  # the verb `cannot` decides; `Auto-mode` is the route word
+            "- Auto-mode cannot push to main.",
+            "- auto-mode cannot push to main.",
+        ]
+        for sentence in sentences:
+            with self.subTest(sentence=sentence):
+                rng, flagged = self.route_range([("# Notes", False), ("", False), (sentence, True)])
+                self.assert_route_claims(rng, flagged)
+
     def test_route_claim_wrapped_over_two_lines_fires_on_its_first_line(self):
         rows = [
             ("# Notes", False),
