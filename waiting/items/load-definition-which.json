@@ -27,6 +27,7 @@
   "pick": "a",
   "rank": 3,
   "ref": "items 304 and 276; lane one-load-definition",
+  "reply": "You picked a: the shared definition reads memory and disk only, and the sim gatekeeper drops its load-average bars. Sent to lane one-load-definition at 15:47 CST. This item closes when its PR merges.",
   "short": "Shared load: which reading",
   "status": "open",
   "title": "One shared load definition (your item 304 a): drop the load average, or add it to the guard?",

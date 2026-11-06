@@ -1,0 +1,42 @@
+{
+  "added": "2026-11-06T21:57:00Z",
+  "context": "Goal: new open questions come first, and answered cards get out of the way (your items 309 and 311).\nProblem (rule): house rule ux-order-holds-still (record ux-house-rules) says an act on a row does not re-rank the list. On the waiting page, that keeps a sent card above the open cards until a reload.\nBased on (read): the rule comes from banchi D181 and D263, a sales list where a jump under the pointer causes a misclick. Whether a jump causes misclicks on the waiting page is unmeasured.\nBased on (read): rule ux-press-moves-nothing already covers content that moves under the pointer.\nDeparts from: main's ux-order-holds-still, where an act never re-ranks the list \u2014 the acted-on row may leave its place.\nMeanwhile: lane page-answered-sink builds to your outcome on item 311.",
+  "holds": "The scope of house rule ux-order-holds-still.",
+  "home": "record ux-house-rules",
+  "id": "ux-order-rule-scope",
+  "kind": "decision",
+  "lane": "coordinator",
+  "n": 313,
+  "options": [
+    {
+      "gain": "The page shows open questions first, and your pointer lands on the next question.",
+      "how": "An act may move the row it acted on out of an open list, such as a sent card sinking to Answered, when the next open row takes its slot and no other row changes order.",
+      "key": "a",
+      "label": "Narrow the rule",
+      "lose": "The card you just sent leaves your view. It stays one tap away, in Answered."
+    },
+    {
+      "gain": "The fewest rules.",
+      "how": "Keep only ux-press-moves-nothing.",
+      "key": "b",
+      "label": "Drop the rule",
+      "lose": "The banchi sales list loses the rule that stops a sale from re-ranking rows."
+    },
+    {
+      "gain": "No other screen changes.",
+      "how": "Keep the rule, with an exception for the waiting page.",
+      "key": "c",
+      "label": "Exempt the waiting page",
+      "lose": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. A second form of the rule to keep in step.",
+      "widens": true
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 3,
+  "ref": "item 311; step ux-order-rule-scope; record ux-house-rules",
+  "short": "Rule: cards hold still",
+  "status": "open",
+  "title": "Rule ux-order-holds-still is too strict (your item 311): narrow it, drop it, or exempt the page?",
+  "why": "You said the rule blocks the outcome you want on the waiting page."
+}

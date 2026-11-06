@@ -1,9 +1,9 @@
 {
   "title": "The batch runner gets a list of lanes it can archive",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 103.31,
   "why": "Owner, 11:32 CST Nov 6: finished lanes stay open. Decision session-tiers also says \"The cloud cannot close a pull request\", which is stale: batch runners close PRs through the GitHub MCP tool.",
-  "note": "Nov 6 11:38 CST (owner chat, via coordinator): page item 274 a, \"A is fine the batch runner keeps archiving more automatically\". The lane rewrites decision session-tiers: the batch runner archives from the worked-out list after each merge, and the topic test goes.\nNov 6 11:35 CST (coordinator): lane session_013NEJL3uKHYaeK4sgyfX3wj builds a command that lists archivable lanes for the batch runner, and rewrites that stale sentence in decision session-tiers.",
-  "updatedAt": "2026-11-06T17:40:00Z"
+  "note": "Done: #1312 merged in batch #1365 at 16:36 CST Nov 6.\nNov 6 11:38 CST (owner chat, via coordinator): page item 274 a, \"A is fine the batch runner keeps archiving more automatically\". The lane rewrites decision session-tiers: the batch runner archives from the worked-out list after each merge, and the topic test goes.\nNov 6 11:35 CST (coordinator): lane session_013NEJL3uKHYaeK4sgyfX3wj builds a command that lists archivable lanes for the batch runner, and rewrites that stale sentence in decision session-tiers.",
+  "updatedAt": "2026-11-06T22:42:00Z"
 }

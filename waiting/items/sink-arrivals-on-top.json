@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-06T21:51:00Z",
+  "context": "Goal: new open questions come first (your comment on item 309, 15:44 CST).\nProblem (rule): the only way to keep every open card above every answered card at all times is to re-sort on each Send. That breaks rule ux-order-holds-still: cards never move under your pointer.\nBased on (read): in page.html, freezeSunk keeps the cards you sent this visit in place until the page reloads.\nDeparts from: main sorts a new item by rank and age, below the cards sent this visit \u2014 new items go on top (a), or sent cards drop on each Send (b).\nMeanwhile: the lane builds a. Mockup: branch page-lane-answered-sinks, docs/design/lane-answered-sink.html.",
+  "holds": "Where a new question lands on the page.",
+  "home": "step page-answered-sink",
+  "id": "sink-arrivals-on-top",
+  "kind": "decision",
+  "lane": "page-answered-sink",
+  "n": 311,
+  "options": [
+    {
+      "gain": "New questions show first, and no card jumps when you Send.",
+      "how": "An item that arrives after the page loads goes to the top of its tier.",
+      "key": "a",
+      "label": "Arrivals on top",
+      "lose": "A card that was open since you loaded the page can sit below one you already sent."
+    },
+    {
+      "gain": "Answered cards are always below open ones.",
+      "how": "Each Send moves the sent card below every open card.",
+      "key": "b",
+      "label": "Sent cards drop",
+      "lose": "Each Send moves cards under your pointer."
+    }
+  ],
+  "owner": "lane page-answered-sink (session_013NEJL1WDB7xzmdWvjLySHY)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "item 309 comment; step page-answered-sink; lane page-answered-sink",
+  "reply": "You picked neither: rule ux-order-holds-still is applied too strictly here and blocks the outcome you want. Sent to lane page-answered-sink at 15:55 CST: build to the outcome (open questions above answered ones) and do not let that rule block it. Roadmap step ux-order-rule-scope asks whether the rule stays a house rule.",
+  "short": "Page: new questions on top",
+  "status": "open",
+  "title": "New questions first (your comment on item 309): put new arrivals on top, or drop sent cards below open ones?",
+  "why": "Keeping every open card above every sent card means cards move under your pointer each time you Send."
+}

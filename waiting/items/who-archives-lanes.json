@@ -31,8 +31,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "owner ask 11:31 CST Nov 6; step idle-lane-archive",
+  "reply": "Done. #1312 (the batch runner works out which lanes to archive) merged in batch #1365 at 16:36 CST.",
   "short": "Who archives lanes",
-  "status": "open",
+  "status": "closed",
   "title": "Who archives finished lane sessions: the batch runner, a janitor session, or the coordinator?",
   "why": "Recommended: a. Your janitor idea, but run by the session that already wakes on each merge, so it costs no new session."
 }

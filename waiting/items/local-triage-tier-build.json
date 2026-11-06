@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-06T21:45:00Z",
+  "context": "Goal: a triage session on your Mac or PC pushes its roadmap with no override from you.\nProblem (goal): the guard roadmap-one-writer (one writer for the roadmap branch) reads a session's tier only from its cloud tags. A Mac session has no tags, and this app gives no tool to add them. So home triage asks you for override on each push (your chat, 15:43 CST).\nBased on (ruling): item 213, local-triage-tier-word (owner, 2026-11-05 07:44 CST): no tier word, not cloud-only, a tier file only if it works on Mac and Windows, until then build nothing.\nBased on (read): debt local-triage-tier-proof on main, retire line: a guard test on both platforms.\nDeparts from: main, where the guard reads cloud tags only \u2014 adds a tier file that the guard also reads, on Mac and Windows.\nMeanwhile: nothing builds. Home triage needs override 15m for its pushes.",
+  "holds": "Whether to build the local tier proof now.",
+  "home": "debt local-triage-tier-proof",
+  "id": "local-triage-tier-build",
+  "kind": "decision",
+  "lane": "coordinator",
+  "n": 310,
+  "options": [
+    {
+      "gain": "Home triage on your Mac pushes with no override from you.",
+      "how": "A claude-settings lane builds the tier file: the coordinator writes it when it starts a triage session, and the guard reads it, on Mac and Windows. Tests show the push refused before and passed after, on both.",
+      "key": "a",
+      "label": "Build it now",
+      "lose": "One lane of build and review."
+    },
+    {
+      "gain": "No build.",
+      "how": "Nothing changes. Each refused push waits for your typed override.",
+      "key": "b",
+      "label": "Keep the debt",
+      "lose": "You type override for home triage's pushes, as today."
+    }
+  ],
+  "owner": "triage (claude-settings)",
+  "pick": "a",
+  "rank": 2,
+  "ref": "item 213; debt local-triage-tier-proof; guard roadmap-one-writer",
+  "reply": "You picked a in chat at 15:45 CST: build it now and merge it fast. The coordinator starts a claude-settings lane. This item closes when it merges.",
+  "short": "Mac triage: build the tier file now",
+  "status": "open",
+  "title": "Home triage on your Mac cannot push the roadmap without your override. Build the tier file now?",
+  "why": "You ruled on Nov 5 to build nothing yet. The gap now costs you an override on each push."
+}

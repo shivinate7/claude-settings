@@ -36,8 +36,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "coordinator message 2026-11-04 08:41 CST; q_max run 40740294267",
+  "reply": "Done. q_max #1032 (browser checks wait for a still page) merged at 12:53 CST. #1033 (browser tier serves a production build) merged in batch #1036 as e106ff58 at 15:48 CST.",
   "short": "q_max: split the browser tier?",
-  "status": "open",
+  "status": "closed",
   "title": "q_max browser run: two slow causes left. Fix which?",
   "why": "Recommended: a. The run finishes with no more work; b saves wait time but costs a build lane and the same runner minutes."
 }

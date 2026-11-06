@@ -1,0 +1,23 @@
+{
+  "added": "2026-11-06T21:54:00Z",
+  "command": {
+    "mac": "cd ~\ngh auth switch -u shivinate7\ngh repo create shivinate7/session-mailbox --private",
+    "powershell": "cd ~\ngh auth switch -u shivinate7\ngh repo create shivinate7/session-mailbox --private"
+  },
+  "context": "Goal: cloud and Mac sessions message each other through one git mailbox (your item 308 a).\nWhy you: cloud sessions here may not create a repo. Press the link, or paste the command below on your Mac or PC.\nThe lane kept git over Cloudflare: the per-turn check is one git ls-remote, measured 391-608 ms in 5 runs. Cloudflare would save about 0.3 s a turn but needs a server, a secret on each machine, and a network allow. It stays a later swap.\nSteps: open https://github.com/new. Owner shivinate7, name session-mailbox, Private. No README, no .gitignore, no license. Press Create repository. Then press Done here.",
+  "holds": "The repo the session mailbox lives in.",
+  "home": "lane session-messaging-plan",
+  "id": "session-mailbox-create",
+  "kind": "task",
+  "lane": "session-messaging-plan",
+  "link": "https://github.com/new",
+  "n": 312,
+  "owner": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6)",
+  "rank": 2,
+  "ref": "item 308; lane session-messaging-plan",
+  "reply": "Done at 15:56 CST. Lane session-messaging-plan attaches the repo and runs the cloud half of its trial.",
+  "short": "Create repo session-mailbox",
+  "status": "closed",
+  "title": "Create the private repo session-mailbox (your item 308 a)",
+  "why": "The mailbox build is done and tested. It needs this repo for the cloud half of its trial."
+}
