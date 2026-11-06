@@ -145,12 +145,16 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   at most one candidate per item. A hit appends ` repeats <ref>` to the item line (one inbox rewrite
   through a temp file) and the block reason names it, or systemMessage does when `stop_hook_active`.
   A line that cannot be found is reported as not marked. The session merges the work or drops the
-  mark. A dropped mark is not judged again. A model error or odd answer gives no verdict. It marks
-  nothing, adds one systemMessage line, and leaves the new items out of `judged`, so the next Stop
-  judges them again (owner ruling, waiting-page item 279, 2026-11-06 12:43 CST, pick b). An exception
-  while marking keeps the items judged. Cost: a Stop with no new
-  item or no candidate makes no call. Otherwise it makes one call, one `git grep` and one rev-parse.
-  While the model keeps failing, each Stop makes that call again until one gives a verdict.
+  mark. A dropped mark is not judged again. An item with no usable verdict this Stop stays out
+  of `judged`, so the next Stop sends it again (owner ruling, waiting-page item 279, 2026-11-06
+  12:43 CST, pick b). No usable verdict: a model error, an off-shape answer, a raise while judging, or an
+  answer entry that is not an object or names an unknown id or ref. A hit item is judged. When an
+  answer holds a bad entry, every sent item without a hit stays unjudged and one systemMessage
+  line says so. One Stop sends at most 20 new items (REPEAT_BATCH), oldest first. The rest wait
+  for the next Stop. An exception while marking, after a verdict, keeps the sent items judged.
+  Cost: a Stop with no new item or no candidate makes no call. Otherwise it makes one call, one
+  `git grep` and one rev-parse, and the prompt holds at most 20 new items. While items wait or the
+  model keeps failing, each Stop makes that one call again.
   It lists the handoffs folder and reads one sidecar per inbox there. It writes the turn state, and
   on a hit the inbox. Capture adds one small file per session and no process. Risk kind: named
   incident. On 2026-11-01 17:44 CST the owner said "carousel" in a repo whose code said "wheel", and
