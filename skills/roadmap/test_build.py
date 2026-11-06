@@ -1424,6 +1424,28 @@ class ReadyNotStarted(UpkeepFixture):
                          "with no steps, the build prints one unknown ready line")
 
 
+class UntouchedInLivePhase(UpkeepFixture):
+    """The upkeep row `untouched 5 days in a live phase`: each open step in a phase that holds an active step, whose
+    updatedAt is STALE_DAYS old or more, or cannot be read. A zoneless, null or int updatedAt lists the step; it never
+    crashes the build."""
+
+    ROW = "untouched 5 days in a live phase"
+
+    def test_unreadable_updated_at_lists_the_step_and_does_not_crash(self):
+        self.commit_step("live-a", status="active", phase="build", updatedAt=iso_ago(5), order=1)  # control: fresh
+        for name, value in (("zoneless", "2026-11-01T10:00:00"), ("null", None), ("int", 1234)):
+            with self.subTest(name):
+                git(self.repo, "checkout", "-q", "roadmap")
+                self.commit_step("bad-b", status="todo", phase="build", updatedAt=value, order=2)
+                try:
+                    _, out = self.build_from_main()
+                except Exception as err:  # the crash is the defect, so it fails by name, not as an error
+                    self.fail("upkeep crashed on an updatedAt that is %s: %s: %s" % (name, type(err).__name__, err))
+                count, detail = self.row(out, self.ROW)
+                self.assertEqual((count, self.entries(detail)), (1, ["bad-b"]),
+                                 "the unreadable step is listed, and the fresh active step is not")
+
+
 class PageRulings(UpkeepFixture):
     """The upkeep row for each closed waiting-page item whose home step is open and cites the item nowhere.
     The step's note, why or ask cites an item with `item <n>` (any case, an optional #). The row reads
