@@ -1,9 +1,9 @@
 {
   "title": "Widening mark: per-repo exceptions only, worded as a guideline",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.368,
   "why": "The owner says the 'never' line is too firm and was put on options that are not per-repo exceptions.",
-  "note": "Owner on item 278, 12:41 CST Nov 6: \"how do these go against my ruling that a repo changes to fit a shared tool? also, the word never does too much firm heavy lifting, it should be moreso guideliney\". (a) widens: true only on a per-repo exception to a shared tool. (b) Reword rule style-question-form, the page line and hooks/question_form.py: a repo should change to fit the shared tool, rather than the tool change to fit a repo. Routed to the coordinator 12:46 CST.",
-  "updatedAt": "2026-11-06T18:46:00Z"
+  "note": "Lane session_013NEJKygtZewTzZqVEvmyLu (coordinator 12:44 CST). Owner on item 278, 12:41 CST Nov 6: \"how do these go against my ruling that a repo changes to fit a shared tool? also, the word never does too much firm heavy lifting, it should be moreso guideliney\". (a) widens: true only on a per-repo exception to a shared tool. (b) Reword rule style-question-form, the page line and hooks/question_form.py: a repo should change to fit the shared tool, rather than the tool change to fit a repo. Routed to the coordinator 12:46 CST.",
+  "updatedAt": "2026-11-06T18:45:00Z"
 }

@@ -1,9 +1,9 @@
 {
   "title": "One rule for an unknown read: every check fails in CI when it can't read its input",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.3555,
   "why": "Owner on item 275 (12:19 CST Nov 6): the options circle \"a more uniform issue\". Decision ci-unknown-is-red and stale-cites-at-merge line 18 disagree on an unknown read.",
-  "note": "Coordinator 12:31 CST. WAITS on owner grant, page item 276 (stale-decision protocol). First job: sweep every check that passes on an unknown read, starting from lint/check_unknown_reads_contract.py (not yet measured). Fix: rewrite stale-cites-at-merge line 18 in place to point at ci-unknown-is-red, and make each swept check fail closed in CI. Lane ste-lint-diff-fail-closed's merge waits on this grant.",
-  "updatedAt": "2026-11-06T18:33:30Z"
+  "note": "Owner granted a on item 276, 12:39 CST. Lane session_013NEJL43txwp8ioromcR8yF (coordinator 12:44 CST). Coordinator 12:31 CST. WAITS on owner grant, page item 276 (stale-decision protocol). First job: sweep every check that passes on an unknown read, starting from lint/check_unknown_reads_contract.py (not yet measured). Fix: rewrite stale-cites-at-merge line 18 in place to point at ci-unknown-is-red, and make each swept check fail closed in CI. Lane ste-lint-diff-fail-closed's merge waits on this grant.",
+  "updatedAt": "2026-11-06T18:45:00Z"
 }
