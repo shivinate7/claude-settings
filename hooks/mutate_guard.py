@@ -3381,6 +3381,7 @@ REPORT_TARGETS = [
                              "lint/test_report_guard_refusal.py", "lint/test_report_guard_handoff.py",
                              "lint/test_report_guard_cannot.py",
                              "lint/test_report_guard_remedy.py",
+                             "lint/test_report_guard_ruling_skip.py",
                              "hooks/test_reply_judge.py", "hooks/test_wrappers.py",
                              "lint/test_rule_audit.py", "lint/test_settings_matcher.py"]),
     ("lint/_clause.py", ["lint/test_clause.py", "lint/test_report_guard_cannot.py", "lint/test_report_guard.py"]),
