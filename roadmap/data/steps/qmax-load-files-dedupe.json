@@ -1,0 +1,9 @@
+{
+  "title": "q_max: remove its copy of harness/load-files.mjs",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.3595,
+  "why": "The shared loader merged in claude-settings #1135, so q_max's copy is a duplicate (rule building-one-home-per-capability).",
+  "note": "Coordinator 12:37 CST: from lane mjs-load-files, whose ask is now this step. It can be undone, so the coordinator starts the lane.",
+  "updatedAt": "2026-11-06T18:38:00Z"
+}

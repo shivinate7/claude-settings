@@ -1,9 +1,9 @@
 {
   "title": "Find the 10-message cap on messages between sessions on the Mac",
   "phase": "now",
-  "status": "todo",
+  "status": "done",
   "order": 103.349,
   "why": "Sessions on the owner's Mac stop messaging each other after 10 turns until the owner speaks to them.",
-  "note": "Owner ask ask-mw5a0ekdlv (page, 11:56 CST Nov 6). A search of claude-settings main 7975f6d8 found no cap in our code (triage 12:12 CST). Find the source (Claude Code changelog, binary, or a hook on the Mac) and whether a setting lifts it. Needs a Mac session to see the message.",
-  "updatedAt": "2026-11-06T18:14:00Z"
+  "note": "Nov 6 12:37 CST (coordinator): DONE, no Mac needed. Lane session-messaging-plan read the Claude Code 2.1.319 binary. The cap is Claude Code's own peer-message guard ([peer-guard]): each peer message carries a hop chain, and when a session's token is in it 10 times (maxSelfHops) the message drops as hop-loop. An owner-typed turn has no chain. The limit comes from a server flag; no user setting was found. The owner got the reply on ask ask-mw5axdn4ea. The design follow-up is step session-messaging-plan.\nOwner ask ask-mw5a0ekdlv (page, 11:56 CST Nov 6). A search of claude-settings main 7975f6d8 found no cap in our code (triage 12:12 CST). Find the source (Claude Code changelog, binary, or a hook on the Mac) and whether a setting lifts it. Needs a Mac session to see the message.",
+  "updatedAt": "2026-11-06T18:38:00Z"
 }
