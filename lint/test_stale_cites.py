@@ -834,7 +834,7 @@ class CostTests(StaleCase):
         self.assertLessEqual(len(subs), 4, subs)
         self.assertTrue(set(subs) <= {"rev-parse", "merge-base", "diff", "ls-tree"}, subs)
 
-    def test_a_range_that_edits_only_a_non_rule_markdown_file_starts_at_most_four_git_processes_and_reads_no_blob(self):
+    def test_a_range_that_edits_only_a_non_rule_markdown_file_starts_exactly_three_git_processes_and_reads_no_blob(self):
         def change(repo):
             write(repo, NOTES, "# Notes\n\n- a debt note, edited\n")
             commit(repo)
@@ -842,9 +842,8 @@ class CostTests(StaleCase):
         rc, out, commands = self.run_traced_commands(rng)
         self.assertEqual(rc, 0, out)
         subs = [command.split()[0] for command in commands]
-        # Re-pointed from exactly three: the old count plus one, the read of the added lines for STALE005.
-        # The findings and the report both return before a blob read for a Markdown file outside the rule files.
-        self.assertLessEqual(len(subs), 4, subs)
+        # No added line holds a claim candidate, so no blob is read: the three starts of the check, exactly.
+        self.assertEqual(len(subs), 3, subs)
         self.assertNotIn("cat-file", subs, subs)
         self.assertTrue(set(subs) <= {"diff", "merge-base", "rev-parse"}, subs)
 
@@ -906,7 +905,7 @@ class CostTests(StaleCase):
         self.assertEqual(rc, 1, out)
         self.assertLessEqual(len(subs), 5, subs)
 
-    def test_route_claim_adds_at_most_one_git_start_to_a_markdown_only_range(self):
+    def test_route_claim_markdown_only_range_with_a_claim_candidate_starts_exactly_four_git_processes(self):
         text, flagged = rows_text([
             ("# Notes", False),
             ("- The cloud cannot push to main (route cloud-push).", False),  # backed by a row: silent
@@ -920,8 +919,38 @@ class CostTests(StaleCase):
         rc, out, subs = self.run_traced(rng)
         self.assertEqual(rc, 0, out)
         self.assertEqual(stale005_lines(out, NOTES), flagged, out)  # the check ran: the unbacked line prints
-        # The three starts of a Markdown-only range, plus at most one more for the added lines.
-        self.assertLessEqual(len(subs), 4, subs)
+        # The three starts of a Markdown-only range, and one cat-file that reads the added lines' blob.
+        self.assertEqual(len(subs), 4, subs)
+
+    def test_route_claim_read_backing_checks_its_file_in_the_same_git_start(self):
+        text, flagged = rows_text([
+            ("# Notes", False),
+            ("- The cloud cannot push to main (read hooks/guard.py:2).", False),  # the file exists at head: silent
+            ("- The cloud cannot merge to main.", True),
+        ])
+
+        def change(repo):
+            write(repo, NOTES, text)
+            commit(repo)
+        rng = self.make_range(base_files(), change)
+        rc, out, subs = self.run_traced(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(stale005_lines(out, NOTES), flagged, out)  # the check ran: the unbacked line prints
+        # The existence of hooks/guard.py is read from the same cat-file as the line: no extra git start.
+        self.assertEqual(len(subs), 4, subs)
+
+    def test_route_claim_with_a_removed_path_and_a_claim_candidate_starts_exactly_five_git_processes(self):
+        def change(repo):
+            move(repo, "hooks/lib.mjs", MOVED)
+            write(repo, NOTES, "# Notes\n\n- The cloud cannot push to main (route cloud-push).\n")
+            commit(repo)
+        rng = self.make_range(base_files("# Notes\n", extra={ROUTE_ROWS: route_rows_text("cloud-push")}), change)
+        self.assertIn(MOVED, touched(rng))  # scope: the range renames hooks/lib.mjs away, so a path is removed
+        rc, out, subs = self.run_traced(rng)
+        self.assertEqual(rc, 0, out)
+        # The removed path makes the check read the Markdown at head (one ls-tree, one cat-file). The candidate line
+        # reads its backing from that same cat-file, so the count is five and no more.
+        self.assertEqual(len(subs), 5, subs)
 
     def test_a_run_writes_no_file_in_the_repo_or_next_to_the_script(self):
         def change(repo):
@@ -986,10 +1015,9 @@ class ForeignFileTests(StaleCase):
         self.assertEqual(rc, 0, out)
         self.assertEqual(unknown_lines(out), [], out)
 
-    def test_an_anchor_only_edit_starts_at_most_five_git_processes_and_no_ls_tree_of_hooks(self):
-        # Re-pointed from exactly four: four today for an edit to CLAUDE.md alone, measured with GIT_TRACE, plus the one
-        # read of the added lines that STALE005 makes for a governed Markdown file. No code file changed, so the report
-        # reads the rule file's blobs and the mechanisms file, and no ls-tree names hooks/.
+    def test_an_anchor_only_edit_starts_exactly_four_git_processes_and_no_ls_tree_of_hooks(self):
+        # No code file changed, so the report reads the rule file's blobs and the mechanisms file through one cat-file,
+        # and no ls-tree names hooks/. The added line holds no claim candidate, so it adds no start.
         base_claude = "Main moves only by pull request. <!-- rule:git-main-only-by-pr -->\n"
         head_claude = "Main moves only by a reviewed pull request. <!-- rule:git-main-only-by-pr -->\n"
         mech = mechanisms({"git-main-only-by-pr": {"kind": "guard", "ref": "main-moves-by-pull-request"}})
@@ -1000,7 +1028,7 @@ class ForeignFileTests(StaleCase):
         rng = self.make_range(base_files(extra={CLAUDE: base_claude, MECH: mech}), change)
         rc, out, commands = self.run_traced_commands(rng)
         self.assertEqual(rc, 0, out)
-        self.assertLessEqual(len(commands), 5, commands)  # four today, plus the one read of the added lines
+        self.assertEqual(len(commands), 4, commands)
         self.assertFalse(any(command.startswith("ls-tree") and "hooks/" in command for command in commands), commands)
 
     def test_an_anchor_edit_with_a_code_change_starts_at_most_one_more_git_process(self):
