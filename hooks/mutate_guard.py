@@ -41,8 +41,9 @@ action actions/mutation-report.
 `--changed <repo> (--profile NAME | --profile-file JSON) --base REF [--head REF] [--limit N] [--budget S] [--suite-timeout S]
 [--jobs N] [--log PATH]` mutates the product lines a change adds past merge-base(base, head), runs the suites the profile's `select`
 lists for each file, and prints `catch share: K/R` and each `untested: path:line`. Exit 0 whatever the share.
-`--known-defects FILE --repo REPO [--base REF] [--suite-timeout S] [--log PATH]` plants each listed defect in a checkout of HEAD and
-runs its catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id on REF's list also needs a row, or a
+`--known-defects FILE --repo REPO (--profile NAME | --profile-file JSON) [--base REF] [--suite-timeout S] [--log PATH]`
+plants each listed defect in a checkout of HEAD, installs the profile's packages into it as `--changed` does, and runs its
+catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id on REF's list also needs a row, or a
 `Known-defect-removed: <id>` trailer in REF..HEAD, else `MISSING <id>`; an entry that differs from REF's needs a
 `Known-defect-changed: <id>` trailer, else `CHANGED <id>`. Exit 1 when any defect is MISS, UNKNOWN, MISSING or CHANGED.
 `--tests-for PATH` prints the suites that test one file: the select command of the `claude_settings` profile.
@@ -2542,6 +2543,25 @@ def replay_main(argv) -> int:
     return 0
 
 
+def add_profile_group(parser) -> None:
+    """The required choice of `--profile NAME` or `--profile-file JSON` that `--changed` and `--known-defects` share. Read it with `load_profile`."""
+    which = parser.add_mutually_exclusive_group(required=True)
+    which.add_argument("--profile", choices=sorted(REPLAY_PROFILES))
+    which.add_argument("--profile-file", metavar="JSON", help="a profile as a JSON file, in place of a named one")
+
+
+def load_profile(args) -> dict:
+    """The profile `add_profile_group` chose. A file that cannot be read raises OSError, or ValueError when it is no JSON or no object."""
+    import json
+    if not args.profile_file:
+        return REPLAY_PROFILES[args.profile]
+    with open(args.profile_file, encoding="utf-8") as handle:
+        profile = json.load(handle)
+    if not isinstance(profile, dict):
+        raise ValueError("the profile file %s does not hold a JSON object" % args.profile_file)
+    return profile
+
+
 def changed_main(argv) -> int:
     """The CI report of a change: mutate the product lines it adds past the merge base, run the suites the profile's `select`
     lists for each file, print the replay row, `catch share: K/R` and each `untested: path:line`. Exit 0 whatever the share:
@@ -2550,9 +2570,7 @@ def changed_main(argv) -> int:
     import json
     parser = argparse.ArgumentParser(prog="mutate_guard.py --changed")
     parser.add_argument("--changed", required=True, metavar="REPO", help="a clone of the repository holding the change")
-    which = parser.add_mutually_exclusive_group(required=True)
-    which.add_argument("--profile", choices=sorted(REPLAY_PROFILES))
-    which.add_argument("--profile-file", metavar="JSON", help="a profile as a JSON file, in place of a named one")
+    add_profile_group(parser)
     parser.add_argument("--base", required=True, help="the ref the change is cut from: the lines past its merge base with --head")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--limit", type=int, default=20, help="mutants in all")
@@ -2565,11 +2583,7 @@ def changed_main(argv) -> int:
     args = parser.parse_args(argv)
     repo = os.path.abspath(args.changed)
     try:
-        if args.profile_file:
-            with open(args.profile_file, encoding="utf-8") as handle:
-                profile = json.load(handle)
-        else:
-            profile = REPLAY_PROFILES[args.profile]
+        profile = load_profile(args)
         head = mutate_shared._git(repo, "rev-parse", "--verify", "--quiet", "%s^{commit}" % args.head).strip()
         base = mutate_shared._git(repo, "merge-base", args.base, head).strip()
     except (OSError, ValueError) as error:  # a JSONDecodeError is a ValueError
@@ -2628,7 +2642,8 @@ def known_defects_main(argv) -> int:
     """Replay the planted defects of a list (`.github/known-defects.json`) against a repository's HEAD. One line per defect:
     `CAUGHT`, `MISS` or `UNKNOWN`. Exit 1 when any defect is MISS or UNKNOWN (decision ci-unknown-is-red). A missing list file
     prints one UNKNOWN line that names its path and exits 1; an empty list exits 0 (with `--base`, only when REF's list names
-    no entry); a list that cannot be read exits 2.
+    no entry); a list or a profile that cannot be read exits 2.
+    `--profile` or `--profile-file` is required: the checkout gets the profile's install, as `--changed` does.
     With `--base REF` the head list is also compared with the list at REF (decision mutation-ci-report-and-replay): each id
     there needs a result row, unless a commit in REF..HEAD carries the exact trailer `Known-defect-removed: <id>`, else
     `MISSING <id>` prints and the exit is 1. An id on both lists whose entries differ as parsed objects (key order and
@@ -2642,6 +2657,7 @@ def known_defects_main(argv) -> int:
     parser.add_argument("--known-defects", dest="list_path", required=True, metavar="FILE",
                         help="a JSON list of planted defects")
     parser.add_argument("--repo", required=True, help="a clone of the repository the defects are planted in")
+    add_profile_group(parser)
     parser.add_argument("--base", default=None, metavar="REF",
                         help="a git ref whose list the head list must not drop an id from, unless a commit names it in a trailer")
     parser.add_argument("--suite-timeout", type=float, default=120, help="seconds before a suite run is killed")
@@ -2658,14 +2674,24 @@ def known_defects_main(argv) -> int:
     except (OSError, ValueError) as error:
         print("ERROR cannot read %s: %s" % (args.list_path, error))
         return 2
+    try:
+        profile = load_profile(args)
+    except (OSError, ValueError) as error:  # a JSONDecodeError is a ValueError
+        print("ERROR %s" % error)
+        return 2
     base_entries = []
     if args.base:
         base_entries, problem = _known_defects_base_entries(args.repo, args.list_path, args.base)
         if problem:
             print("%s %s" % problem)
             return 2 if problem[0] == "ERROR" else 1
+    deps = tempfile.mkdtemp(prefix="mutate_deps_")
     with stop_on_signals():
-        results = mutate_shared.run_known_defects(os.path.abspath(args.repo), defects, suite_timeout=args.suite_timeout)
+        try:
+            results = mutate_shared.run_known_defects(os.path.abspath(args.repo), defects, profile, deps,
+                                                      suite_timeout=args.suite_timeout)
+        finally:
+            shutil.rmtree(deps, ignore_errors=True)
     print(mutate_shared.format_known_defects(results))
     missing, changed = [], []
     if base_entries:
