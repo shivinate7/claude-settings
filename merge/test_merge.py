@@ -5799,6 +5799,7 @@ class SilentUndo(Env):
 
 DEBT_FIXTURE = "# Retire target\n\n- **What.** A fixture debt for the merge tests.\n- **Where.** None.\n- **Decision.** none\n- **Retire.** %s\n"
 RETIRE_TEST = "Delete the fixture. Check: `tests/test_retire_target.py`."
+PROSE_RETIRE = "Confirm it on a phone."  # names no runnable check: the close needs a cited run
 
 
 def names_kind(test, out, slug, kind):
@@ -5812,14 +5813,14 @@ class DebtRetire(Env):
     """A PR that closes a debt (deletes the debt file) runs that debt's Retire check on the PR head before preview or confirm
     lets it through. The fixture debt names tests/test_retire_target.py, which exits with the code each case gives it."""
 
-    def pr_on_debt(self, test_exit, closes=True):
+    def pr_on_debt(self, test_exit, closes=True, retire=RETIRE_TEST):
         """main gains a debt file. feat is cut from that main, adds the pending record and the test, and then either deletes
         the debt (closes) or edits it in place. feat is cut from main after the debt lands, so no main commit is a reversal of it."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
         put(os.path.join(o, ".claude/layout-extras.json"), json.dumps({"kinds": {}, "rolled-out": True}))
-        put(os.path.join(o, "docs/debts/retire-target.md"), DEBT_FIXTURE % RETIRE_TEST)
+        put(os.path.join(o, "docs/debts/retire-target.md"), DEBT_FIXTURE % retire)
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: a debt"); sh(o, "git", "push", "-q", "origin", "main")
         put(os.path.join(o, "main-moves.txt"), "main moves on\n")  # feat is cut from a later main, so the debt commit is not one it left
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: moves on"); sh(o, "git", "push", "-q", "origin", "main")
@@ -5870,6 +5871,17 @@ class DebtRetire(Env):
         self.assertEqual(rc, 0, out)
         self.assertIn("PREVIEW", out)
         self.assertNotIn("BLOCKED", out)
+
+    def test_confirm_with_a_claim_keeps_a_cited_run_on_the_pr_head(self):
+        """The claim commit goes on top of the PR head. The cited run is on that head, so the re-check after the claim must accept it."""
+        self.pr_on_debt(0, retire=PROSE_RETIRE)
+        run_head = self.head()  # the run was on this head; the claim pushes the branch past it
+        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
+        self.host.cited_run = lambda url: ("success", run_head)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.claims(), 1, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
 
 
 class DraftPreview(Env):
