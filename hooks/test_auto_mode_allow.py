@@ -19,7 +19,9 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   coordinator's grant. Its Never covers names permissions, settings, override, a merge ask to any
   other session or from a session that is not a coordinator, and a request to approve a pull
   request (decision auto-mode-owner-acts).
-- One "Own Branch Lease Push:" entry quotes the measured lease push form, its Covers text names an
+- One "Own Branch Lease Push:" entry quotes guard_push_delete's LEASE_PUSH_FORM, read from the guard
+  itself. The force-push refusal (PUSH_REASON) names that form as its remedy, and the guard lets the
+  filled form through. Its Covers text names an
   explicit expected sha and a branch this session itself pushed, and its Never covers names each
   lease act it refuses (decision auto-mode-owner-acts).
 - One "Own CI Run Cancel:" entry quotes the run cancel command and names its method, and its Never
@@ -43,6 +45,7 @@ REPO_ROOT = os.path.dirname(HOOKS)
 sys.path.insert(0, HOOKS)
 
 import guard_branch_worktree  # noqa: E402
+import guard_push_delete  # noqa: E402
 
 sys.path.insert(0, os.path.join(REPO_ROOT, "skills", "waiting-page"))
 import page_grant  # noqa: E402
@@ -53,7 +56,7 @@ OWNER_PR = "Owner PR Housekeeping:"
 RELAYED = "Relayed Grant:"
 OWNER_MESSAGE = "Owner Session Message:"
 OWN_LEASE = "Own Branch Lease Push:"
-LEASE_FORM = "git push --force-with-lease=<branch>:<expected sha>"
+LEASE_FORM = getattr(guard_push_delete, "LEASE_PUSH_FORM", "")
 PR_CLOSE = "gh api -X PATCH repos/shivinate7/joyous/pulls/54 -f state=closed"
 SEND_MESSAGE = "mcp__claude-code-remote__send_message"
 # (name, case-insensitive pattern) for each act an entry's "Never covers" sentence must name.
@@ -319,6 +322,20 @@ class OwnBranchLeasePushIsAllowed(unittest.TestCase):
         self.assertIsNotNone(never_covers(entry), "need a 'Never covers' sentence to bound Covers")
         missing = unnamed_terms(bounds_text(entry), LEASE_SCOPE)
         self.assertFalse(missing, "text before Never covers does not name %r" % missing)
+
+    def test_refusal_names_the_form_the_entry_covers(self):
+        self.assertTrue(LEASE_FORM, "guard_push_delete must define LEASE_PUSH_FORM")
+        self.assertIn("`%s`" % LEASE_FORM, guard_push_delete.PUSH_REASON,
+                      "the force-push refusal must name the lease form the entry covers")
+        self.assertNotIn("--force-if-includes", guard_push_delete.PUSH_REASON,
+                         "the refusal must not offer a lease form the entry does not cover")
+
+    def test_guard_lets_the_filled_form_through(self):
+        self.assertTrue(LEASE_FORM, "guard_push_delete must define LEASE_PUSH_FORM")
+        filled = LEASE_FORM.replace("<branch>", "feat").replace("<expected sha>", "0" * 40)
+        args = filled.split()[2:] + ["origin", "feat"]
+        self.assertEqual(guard_push_delete.push_verdict(args, ""), "")
+        self.assertEqual(guard_push_delete.push_verdict(["--force-with-lease", "origin", "feat"], ""), "deny")
 
 
 class OwnCiRunCancelIsAllowed(unittest.TestCase):

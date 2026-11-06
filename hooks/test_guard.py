@@ -6810,7 +6810,7 @@ FAMILY = "push-delete"
 
 LEASE = " --force-with-lease --force-if-includes"
 SHA = "0123456789abcdef0123456789abcdef01234567"
-REMEDY = "retry with --force-with-lease --force-if-includes"
+REMEDY = "`git push --force-with-lease=<branch>:<expected sha>`"
 
 
 def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=()):
