@@ -4687,9 +4687,11 @@ class CostTests(unittest.TestCase):
         cls.decided = tcj.make_repo("cost-decided", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
         cls.ci = tcj.CI_REPO  # a roadmap ref, so the one git process is the roadmap read
 
-    def stop(self, repo, reply, answers):
+    def stop(self, repo, reply, answers, earlier=()):
+        """One Stop after the owner's message: the `earlier` replies, then `reply`, the one the hook reads."""
         folder = tempfile.mkdtemp(dir=RUN_FOLDER)
-        path = write_transcript([human("decide"), assistant_text(reply)], folder)
+        texts = list(earlier) + [reply]
+        path = write_transcript([human("decide")] + [assistant_text(text) for text in texts], folder)
         hook = json.dumps({"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
                            "cwd": repo})
         return cost_probe.run_hook(REPORT_GUARD, hook, folder, answers)
@@ -4717,6 +4719,18 @@ class CostTests(unittest.TestCase):
         self.assertEqual(len(run["models"]), 1)
         self.assertEqual(json.loads(run["out"]).get("decision"), "block", "the ruling blocks the Stop once")
         self.assertEqual(run["files"], [], "a past-ruling block writes no file under the config dir")
+
+    def test_a_question_in_an_earlier_reply_costs_one_model_call_and_one_roadmap_read(self):
+        run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]], earlier=[RELAY])
+        self.assertEqual(len(run["models"]), 1,
+                         "the question in an earlier reply is judged once; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["git"],
+                         "one child, a git read of the roadmap; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allow writes no file")
+
+    def test_replies_with_no_question_since_the_owner_message_start_nothing(self):
+        run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]], earlier=[DONE_ONLY])
+        self.assertEqual((run["models"], run["children"], run["files"]), ([], [], []))
 
 
 if __name__ == "__main__":
