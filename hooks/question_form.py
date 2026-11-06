@@ -104,7 +104,9 @@ FORM_REASON = ("A question to the owner states the form, in this order: a line \
                % (", ".join(OWNER_STAKES), ", ".join(PREMISE_KINDS)))
 PAGE_FORM_REASON = FORM_REASON + (" On the waiting page the lines go in `context`, and each option has a "
                                   "non-empty `gain` and `lose`. If no stake fits, take your own pick and set "
-                                  "stands: true.")
+                                  "stands: true. An open decision with a `pick` also carries `against`, the best "
+                                  "case against the pick: run `python3 ~/.claude/skills/waiting-page/refute_item.py "
+                                  "<item.json>` first, then write the item with the `against` it adds.")
 CHAT_FORM_REASON = FORM_REASON + (" In the question box the lines go in the question text, and each "
                                   "option's description holds \"Gain: <text>\" and \"Lose: <text>\".")
 STAKE_REASON = ("A decision is the owner's only when he can judge it. Write the Problem line as "
@@ -844,6 +846,11 @@ def decision_form_hit(op: str, data):
         miss = departs_hit(str(data.get("context") or ""))
         if miss:
             return DEPARTS_RULE, miss
+    # The best case against the pick comes last, so the older form checks keep their order. A set judges the
+    # item whole; an update judges `against` only when it carries a pick (the stored item is unseen).
+    pick = data.get("pick")
+    if (pick if isinstance(pick, list) else _filled(pick)) and not _filled(data.get("against")):
+        return FORM_RULE, "pick with no against: run refute_item.py on the item, then write it with its against"
     return PASS
 
 
