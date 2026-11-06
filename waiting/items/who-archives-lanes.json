@@ -1,0 +1,36 @@
+{
+  "added": "2026-11-06T17:37:00Z",
+  "context": "Goal: finished lane sessions get archived with no one keeping a list by hand (your 11:31 CST ask).\nProblem (goal): 32 idle lanes piled up in the coordinator's handoff, because the archive list is kept by hand. The decision also asks a test nobody can apply (\"topic has no queued step\"): no step file records a topic.\nBased on (measured): two planners, Nov 6. Archiving one lane is two tool calls. The cases that need judgment (unpushed work, records on another branch, a lane waiting on you) can be detected and skipped, not reasoned through.\nDeparts from: decision session-tiers lines 63-66, the coordinator's hand list and the topic test \u2014 the list is worked out from live sessions and landed steps.\n\nIn a and b the topic test goes. Meanwhile: lane idle-lane-archive builds the list command, which all three options use.",
+  "home": "decision session-tiers",
+  "id": "who-archives-lanes",
+  "kind": "decision",
+  "n": 274,
+  "options": [
+    {
+      "gain": "No extra session. After each merge the merge tool works out the list, so it is never stale or forgotten; judgment cases are skipped and named.",
+      "key": "a",
+      "label": "The batch runner archives, from a worked-out list",
+      "lose": "The batch runner does a little more after each merge."
+    },
+    {
+      "gain": "Merges and archiving never compete for one session's attention.",
+      "key": "b",
+      "label": "A standing janitor session",
+      "lose": "One more standing session to pay for, for about two turns of work per batch. It needs a wake; a timer is barred (rule outcomes-mechanize-rules), so it wakes on each merge anyway."
+    },
+    {
+      "gain": "The session that started a lane ends it.",
+      "key": "c",
+      "label": "The coordinator archives its own lanes",
+      "lose": "Two calls per lane in the session that talks with you, against your Nov 1 ruling to keep it focused."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 2,
+  "ref": "owner ask 11:31 CST Nov 6; step idle-lane-archive",
+  "short": "Who archives lanes",
+  "status": "open",
+  "title": "Who archives finished lane sessions: the batch runner, a janitor session, or the coordinator?",
+  "why": "Recommended: a. Your janitor idea, but run by the session that already wakes on each merge, so it costs no new session."
+}
