@@ -6,4 +6,4 @@
 
 **Decision.** `builders-cannot-edit-tests`, builders cannot edit tests (the workflow test-step rule).
 
-**Retire.** Skip the known wrapper commands before the interpreter or test path, in both `workflow_command_tests` and `workflow_run_is_test`. A wrapper's flags and values (`-a`, `600`, `FOO=1`) and its subcommand (`run` after `coverage` or `uv`) are skipped with it. Closed when a red case in `hooks/test_guard.py` shows each wrapped form above passes: a builder's wrap of a bare run is not refused, and a test-author's wrapped single-line `run:` passes `workflow_run_is_test`.
+**Retire.** Skip the known wrapper commands before the interpreter or test path, in both `workflow_command_tests` and `workflow_run_is_test`. A wrapper's flags and values (`-a`, `600`, `FOO=1`) and its subcommand (`run` after `coverage` or `uv`) are skipped with it. A red case in `hooks/test_guard.py` closes it. The case shows that each wrapped form above passes. A builder's wrap of a bare run is not refused. A test-author's wrapped single-line `run:` passes `workflow_run_is_test`.
