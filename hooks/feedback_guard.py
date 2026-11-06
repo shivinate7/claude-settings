@@ -1038,8 +1038,9 @@ def judge(homes, inbox, blocks, new):
     prompt = (PROMPT + "\nNEW ITEMS\n"
               + "".join("[%s] %s\n" % (i, (blocks[n]["text"] or "")[:MESSAGE_CUT]) for i, n in new)
               + "\nCANDIDATES\n" + "".join("[%s] %s\n" % (ref, text) for ref, _, text in found))
+    # The inbox is named for the hook's session id (local_time.inbox_paths), so its stem is that id.
     answer, err = invoke_model(prompt, model=REPEAT_MODEL, timeout=REPEAT_TIMEOUT, shape=REPEAT_SHAPE,
-                               effort=None)
+                               effort=None, session_id=os.path.basename(inbox)[:-len(INBOX_SUFFIX)])
     if err is not None or not isinstance(answer, dict) or not isinstance(answer.get("repeats"), list):
         return [], " ".join(str(err or "odd answer").split())
     ids, hits = {i for i, _ in new}, {}
