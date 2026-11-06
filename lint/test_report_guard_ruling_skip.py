@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """The ruling-skip check: a Done item that says it picked under a ruling must cite that ruling.
 
-A Done item makes a pick claim when it has a pick word (took, picked, chose, pick, skipped asking, did not ask)
-and a ruling cue (the word ruling or rulings). Its cite is `under ruling <ref> (<stamp>)`. The ref is
+A Done item makes a pick claim when report_guard's RULING_PICK_RE (a pick word) and RULING_CUE_RE (a ruling cue)
+both match it. The cases import both from report_guard, the one home, and copy neither. Its cite is
+`under ruling <ref> (<stamp>)`. The ref is
 `item <N> <key>`, an answer on the owner's waiting page, read from the roadmap branch, or a decision id, read from
 docs/decisions/<id>.md. The stamp is `YYYY-MM-DD HH:MM CST|CDT` or `HH:MM CST|CDT`.
 
@@ -95,8 +96,6 @@ FILED_REPO = tcj.make_repo("ruling-filed", waiting={"items": FILED_ITEMS, "answe
 TRIGGER_RE = re.compile(r"\bunder (?:the )?(?:owner'?s? )?ruling\b", re.I)
 STAMP_RE = re.compile(r"\b\d{1,2}:\d{2} (?:CST|CDT)\b")
 REMEDY_RE = re.compile(r"owner|waiting page|Input Needed|cite a ruling", re.I)
-PICK_WORD_RE = re.compile(r"\b(?:took|picked|chose|pick|skipped asking|did not ask)\b", re.I)
-CUE_RE = re.compile(r"\bruling", re.I)
 
 
 def stop_timeout():
@@ -114,7 +113,7 @@ STOP_TIMEOUT = stop_timeout()
 
 
 def is_pick_claim(text):
-    return bool(PICK_WORD_RE.search(text) and CUE_RE.search(text))
+    return bool(report_guard.RULING_PICK_RE.search(text) and report_guard.RULING_CUE_RE.search(text))
 
 
 def cite(ref=ITEM_REF, stamp=STAMP):
@@ -366,7 +365,7 @@ class RulingSkipTests(RulingSkipFixture):
                 ("cherry-pick", "> **Done** OTHER: cherry-pick of the ruling census fix"),
                 ("took minutes", "> **Done** OTHER: round 2 took 4 min; the ruling table is regenerated")):
             with self.subTest(claim=label):
-                self.assertTrue(CUE_RE.search(line), "%s: the scope has no ruling cue" % label)
+                self.assertTrue(report_guard.RULING_CUE_RE.search(line), "%s: the scope has no ruling cue" % label)
                 out = self.stop(reply(line))
                 self.assertFalse(refused_by_rule(out), "%s: a Done item with no pick was refused by the check" % label)
                 self.assertEqual(self.model_calls(), [], "%s: the model ran on a Done item with no pick" % label)
