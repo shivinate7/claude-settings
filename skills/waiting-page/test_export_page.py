@@ -28,13 +28,13 @@ Contract the page cases assume (the builder builds to it):
     host with no credentials passes.
   Verdict words: `changed N`, `same`, `refused` (exit 1), `unknown` (exit 2), and a crash (exit 3, one line).
   Not pinned here: whether a supporting file no longer fetched is deleted.
-  Picture checks (roadmap step page-check-at-publish, decision page-item-design). Each fetched item that carries a
+  Picture checks. Each fetched item that carries a
     picture (a `designs` list or an option `design`) and is an open decision (not closed, not a ruling, not answered)
     is checked by the page's own check, check_designs.mjs. A miss prints `held item <n>: <the page's sentence>` after
     the verdict line and exits 4; the copy is still written. A check that cannot run prints one
     `checks unknown: <why>` line, the copy is written, and the exit code is as without checks. Never a pass line.
     --all holds the same way in the waiting-page entry, with the artifact id before the line.
-  --check (decision of the owner, item 298): `export_page.py --check --fetched DIR --page FILE` runs the same item checks
+  --check: `export_page.py --check --fetched DIR --page FILE` runs the same item checks
     and writes nothing. A held item prints its `held item <n>: <sentence>` line and exits 4; a clean run prints one line
     `checks pass` and exits 0; a check that cannot run prints `checks unknown: <why>` and exits 3.
 """
@@ -1348,7 +1348,7 @@ class NoExport(Base):
 
 
 # ---------------------------------------------------------------------------------------------- picture checks at export
-# Roadmap step page-check-at-publish. Each fetched item with a picture that is an open decision gets the page's own
+# Each fetched item with a picture that is an open decision gets the page's own
 # check. Item 292 is the red control in each case: on main nothing is held, so a case that holds nothing cannot show a
 # false alarm alone. Each false-alarm case runs beside item 292 and fails at its scope assert on main.
 PAGE_FILE = os.path.join(HERE, "page.html")
@@ -1364,7 +1364,7 @@ def phone(label, inner):
 
 
 # Item 292's shape, as a literal: two options, each with its own design, and a focus (#pickview) that neither mockup
-# holds. Copied by hand from the owner's dummy-phone item; its owner and reply fields are left out. CI has no roadmap branch.
+# holds. Its owner and reply fields are left out, so the cases need no other branch to run.
 ITEM_292 = {
     "id": "3d-dummy-phone", "n": 292, "kind": "decision", "status": "open",
     "title": "3D dummy on a phone: where does an item's detail panel sit?", "short": "3D dummy phone panel",
@@ -1658,8 +1658,8 @@ class PictureNoItems(Copied):
 
 
 # ------------------------------------------------------------------------------------- --check: the checks, no write
-# Owner's ruling (item 298): `export_page.py --check --fetched DIR --page FILE` runs the same item checks as the export
-# and writes nothing. Each case compares the whole run folder before and after the run, so a write anywhere shows.
+# `export_page.py --check --fetched DIR --page FILE` runs the export's item checks and writes nothing. Each case
+# compares the whole run folder before and after the run, so a write anywhere shows.
 class CheckMode(PictureChecks):
     """--check with node, Playwright and Chromium present: item 292 is held, a good item passes."""
 
