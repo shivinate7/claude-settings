@@ -15,7 +15,7 @@
 - ask-alone-tail-args-unchecked: echo and Write-Host tail arguments are not checked, so a PowerShell (...) subexpression tail counts harmless and asks alone (hooks/guard.py)
 - ask-alone-tail-test-gap: no ask-alone test puts a quoted #, /* or lone apostrophe inside a harmless && echo or ; Write-Host tail (hooks/test_guard.py)
 - ask-step-hidden-in-script: cap write inside command substitution, backticks or unspaced subshell, and force push inside bash -c, pass with no ask (hooks/guard.py)
-- bare-merge-reads-folder-not-repo: gh pr merge -R other/repo asks or allows by the current folder's merge-tool stamp, not the named repo (hooks/guard_merge.py)
+- bare-merge-reads-folder-not-repo: gh pr merge -R other/repo asks or allows by the current folder's merge-tool stamp, not the named repo; for that and for mcp__github__merge_pull_request, merge_check sets nothing_is_green from has_workflows(cwd), the caller's checkout, so a cross-repo merge can read green when the caller has no workflows and be refused when the caller has workflows but the target has none (hooks/guard_merge.py merge_check)
 - bare-merge-skips-host-merge-tool: merge-checks guards mcp__github__merge_pull_request, and lint/test_settings_matcher.py keeps its name in the guard matcher; the gap left is that a merge-tool repo gets no bare-merge ask for it (hooks/guard.py)
 - bare-merge-tool-unloadable: when merge/merge.py cannot load, merge-checks refuses a bare merge before the bare-merge ask reaches the owner (hooks/guard_merge.py)
 - bare-words-shares-env-list: the bare_words search-tool exemption and the env-file rule share ENV_PATTERN_COMMANDS; a tool added for one changes both (hooks/guard_core.py)
