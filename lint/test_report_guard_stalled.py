@@ -11,7 +11,10 @@ print. The rules the cases pin:
 - An entry line is `stalled step: <id> (...)` or `stalled step: item <n> (...)`. An unknown line is not an entry.
 - The refusal names the ids of the newest output's entries, says to dispose each (resume, pause or done) and
   to rebuild.
-- An owner `override` typed for the session lifts the hold.
+- A second Stop (stop_hook_active) is refused again, unless the report's Input Needed section names every
+  entry id and item n. One missing id keeps the refusal. The escape is an escalation to the coordinator.
+- An owner `override` typed for the session lifts the hold, as guard_core's refuse() honours override.grant.
+  The Stop that the override lifts spends it: the next Stop is held again.
 
 The stalled lines come from build.stalled_lines, the one emitter, so a change to the format reaches these cases.
 A held case is red where no hold exists: its Stop is not refused. A control case pins what must stay released,
@@ -101,6 +104,13 @@ def set_tags(session_ids):
                      {"session_ids": list(session_ids), "add": ["cs-build:lane"]}, "ok")
 
 
+def report(*names):
+    """A report whose Input Needed item names each of `names`. It holds no question, pick or option."""
+    return "\n".join(["> **Done** OTHER read the build",
+                      "> **Input Needed** Stalled for this wake: " + "; ".join(names) + ".",
+                      "> **Next** wait"])
+
+
 class StalledFixture(trg.SameTurnWriter):
     """test_report_guard's QuestionReachesPageTests fixture, borrowed name by name. A case here reuses it and does
     not copy it, so a change to the shared fixture reaches both files."""
@@ -127,6 +137,17 @@ class StalledFixture(trg.SameTurnWriter):
         """The Stop was not refused."""
         self.assertFalse(out and out.get("decision") == "block",
                          "the Stop was refused with no held entry on the newest build output: %r" % (out,))
+
+    def stalled_wake(self, steps=("build-stalled-check",), items=()):
+        """A triage wake whose newest build run prints an entry for each id and item. No reply yet."""
+        return [human("wake"), *own_record(TRIAGE_ID, ["cs-build:triage"]),
+                *build_run(stalled_lines(steps=list(steps), items=list(items)), exit_code=1)]
+
+    def grant_once(self):
+        """The owner's typed `override`: the once-override file the prompt hook writes for the session."""
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg}):
+            granted = override.grant(OWNER_SESSION, "override", datetime.fromisoformat(NOW))
+        self.assertIsNotNone(granted, "the typed override wrote no override file")
 
 
 class TriageHoldTests(StalledFixture, unittest.TestCase):
@@ -193,17 +214,37 @@ class TriageHoldTests(StalledFixture, unittest.TestCase):
                              assistant_text("Build read.")], stop_active=True)
         self.held(out, "build-stalled-check")
 
+    def test_st_red_second_stop_with_every_id_under_input_needed_is_released(self):
+        # Catches: no escalation path, so a wake whose every stall the report names as Input Needed loops forever.
+        steps = ["build-stalled-check", "pause-wait-owner"]
+        records = self.stalled_wake(steps, items=[(7, "idle-lane")])
+        self.held(self.run_stop(records + [assistant_text("Build read.")], stop_active=True),
+                  *steps, "item 7")  # precondition: with no names the second Stop is refused again
+        out = self.run_stop(records + [assistant_text(report(*steps, "item 7"))], stop_active=True)
+        self.released(out)
+
+    def test_st_red_second_stop_with_one_id_missing_under_input_needed_stays_refused(self):
+        # Catches: an Input Needed that names most entries releases the wake, so one stall escapes escalation.
+        records = self.stalled_wake(["build-stalled-check", "pause-wait-owner"], items=[(7, "idle-lane")])
+        out = self.run_stop(records + [assistant_text(report("build-stalled-check", "item 7"))], stop_active=True)
+        self.held(out, "pause-wait-owner")
+
     def test_st_red_owner_override_lifts_the_hold(self):
         # Catches: the owner's typed override does not reach the hold, so the wake cannot end for the owner's act.
-        records = [human("wake"), *own_record(TRIAGE_ID, ["cs-build:triage"]),
-                   *build_run(stalled_lines(steps=["build-stalled-check"]), exit_code=1),
-                   assistant_text("Build read.")]
+        records = self.stalled_wake() + [assistant_text("Build read.")]
         with mock.patch.dict(os.environ, {"LOCAL_TIME_NOW": NOW}):
             self.held(self.run_stop(records), "build-stalled-check")  # the hold stands before the override
-            with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg}):
-                granted = override.grant(OWNER_SESSION, "override", datetime.fromisoformat(NOW))
-            self.assertIsNotNone(granted, "the typed override wrote no override file")
+            self.grant_once()
             self.released(self.run_stop(records))
+
+    def test_st_red_a_stop_the_override_lifts_spends_it(self):
+        # Catches: one typed override lifts every later Stop, so a stalled triage is released for good on one act.
+        records = self.stalled_wake() + [assistant_text("Build read.")]
+        with mock.patch.dict(os.environ, {"LOCAL_TIME_NOW": NOW}):
+            self.held(self.run_stop(records), "build-stalled-check")  # the hold stands before the override
+            self.grant_once()
+            self.released(self.run_stop(records))  # the one lifted Stop
+            self.held(self.run_stop(records), "build-stalled-check")  # the next Stop is held again: it was spent
 
     # Controls: each must stay released. They pass where no hold exists, and they pin the release rules.
 
