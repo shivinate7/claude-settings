@@ -3577,8 +3577,7 @@ def step_up_reason(prompt: str, role, model) -> str:
 # holds a report-shaped block or a verdict line. Each shape is read at line start, never as a word, so a brief that quotes the
 # rule passes. A later round's findings list (file, line, claim) and a fix check's one finding hold neither shape. An argument
 # pasted as plain prose is not caught. Cost: no process start and no file written; one pass over the brief's text.
-CHALLENGER = "challenger"
-BRIEF_BLIND_ROLES = ("reviewer", CHALLENGER)
+BRIEF_BLIND_ROLES = ("reviewer", guard_core.REFUTER_ROLE)
 REVIEWER_VERDICT_WORDS = ("PASS", "FAIL", "PARTIAL", "CHANGES")
 BRIEF_REPORT_LABELS = ("Done", "Deviations", "Input Needed", "Next")
 BRIEF_BLIND_LABELS = re.compile(r"^[ \t]*(%s)[ \t]*(?::|$)" % "|".join(BRIEF_REPORT_LABELS), re.M)
