@@ -21,11 +21,11 @@
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
-  "pick": "a",
+  "pick": "b",
   "rank": 4,
   "ref": "item 278; step auto-mode-refusal-survey",
   "short": "Finish refusal scan?",
   "status": "open",
   "title": "Finish the auto-mode refusal scan of the other ~230 sessions?",
-  "why": "One more agent run turns a partial count into a whole one, and only then is 'nothing else recurs' proven."
+  "why": "Only the force-push came back more than once, and PR #1316 and step lease-sha-form-hint already cover it. At 0.3%, a new act that keeps coming back is unlikely in the rest. Pick a for full coverage."
 }

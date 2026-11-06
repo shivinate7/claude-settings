@@ -1,16 +1,9 @@
 {
   "added": "2026-11-03T21:52:00Z",
-  "context": "Goal: cloud sessions reach the sessions on your computer without limiting any session for good.\nProblem (cannot undo): a cloud session cannot message a session on your computer; the trust card would open that, but it limits a session to trusted devices for good, and once it stopped every message into a session.\nBased on (read): draft PR #1051 (docs/plans/local-session-reach.md, section 4) plans a read path with no trust card.\nBased on (incident): on Oct 30 a session that took the trust card stopped receiving every message from other sessions, so the card is refused in coordinator, lane and runner sessions.\nDeparts from: main, with no reply path from cloud to your computer \u2014 adds one of the paths below.\nOn Nov 2 00:56 CST you picked \"Other picks\" but named none; this asks again with each pick as its own option.",
+  "context": "Goal: cloud sessions and the sessions on your Mac and Windows computers message each other both ways, with no 10-message stop and no trust card.\nProblem (goal): sessions on your computer stop after 10 messages until you type, cloud sessions cannot message your computer at all, and the trust card limits a session for good.\nBased on (measured): lane test 13:17 CST: the 10-message stop does not count cloud-to-cloud messages; it hits only messages between sessions on one computer.\nBased on (read): Claude Code 2.1.319: a page republish wakes every session that watches it, and the stop does not count that wake. Unmeasured: whether a session on your computer wakes from its watch.\nDeparts from: main \u2014 adds a mailbox that sessions on your computer and cloud sessions both read, in place of direct messages to your computer.\nMeanwhile: no build starts on this before your pick. Your earlier note asked for something better than the four old options; these are the lane's new ones (record session-messages, commit ddc0f83c).",
   "holds": "Building the way cloud sessions reach your computer's sessions.",
-  "home": "local-session-reach",
-  "id": "local-reach-plan",
+  "home": "docs/decisions/session-messages.md",
   "kind": "decision",
-  "lane": "folded into lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6), which designs one way for sessions to reach each other that replaces plain messages; routed 13:12 CST",
-  "lastAnswer": {
-    "at": "2026-11-06T18:58:16.910Z",
-    "choice": "none",
-    "note": "Owner: are these the only four options? With the 10-message limit this gets complicated; find something better that replaces normal messaging. Routed 13:12 CST to the session-messaging lane."
-  },
   "links": [
     {
       "label": "Draft PR #1051",
@@ -20,41 +13,40 @@
   "n": 153,
   "options": [
     {
-      "gain": "No session is limited for good; coordinators, lanes and runners keep taking messages.",
-      "how": "The session on your computer reads the cloud session's transcript at its own wake, and falls back to a shared artifact board. The trust card stays refused.",
+      "gain": "One path for cloud and computer, no extra program running, no admin setting.",
+      "how": "Each receiving session gets a private mailbox page. A sender writes a row and republishes the page to wake it. First, a 12-message test on your Mac, before any build.",
       "key": "a",
-      "label": "Read path, keep the guard",
-      "lose": "Your computer's session hears only at its own wake; board rows are data, never grants."
+      "label": "Mailbox page",
+      "lose": "One page publish per message; Codex cannot use it."
     },
     {
-      "gain": "One simple path that works the same both ways.",
-      "how": "Both sides write and read one shared artifact board; no transcript reads.",
+      "gain": "Works in Codex and any tool with git; full history.",
+      "how": "Messages are comments on one pull request per receiver, in a new private repo.",
       "key": "b",
-      "label": "Board only",
-      "lose": "Every message waits for the other side's next wake; no transcript detail."
+      "label": "Git mailbox",
+      "lose": "Sessions on your computer wake only when you next type; one more private repo."
     },
     {
-      "gain": "Direct two-way messages for the sessions you pick.",
-      "how": "A session takes the trust card only when you say yes for that session.",
+      "gain": "Instant wakes on your computer.",
+      "how": "A small program on each computer pushes mailbox rows into local sessions at once.",
       "key": "c",
-      "label": "Trust card, on your word each time",
-      "lose": "Each trusted session is limited to trusted devices for good, which cannot be undone, and may stop taking messages as on Oct 30."
+      "label": "Local relay program",
+      "lose": "A program always running; your org admin must turn on a setting; each session starts with an extra flag."
     },
     {
-      "gain": "A measured answer on why the card blocked messages, before any real session takes it.",
-      "how": "One new session takes the card; a lane measures whether messages still reach it, then archives it.",
+      "gain": "Nothing to build.",
+      "how": "Nothing changes.",
       "key": "d",
-      "label": "Test the card once, in a throwaway session",
-      "lose": "One throwaway session is limited for good; the reach plan waits for the test."
+      "label": "Keep messages as they are",
+      "lose": "The 10-message stop stays, and cloud still cannot reach your computer."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6)",
   "pick": "a",
   "rank": 2,
-  "ref": "draft PR #1051, docs/plans/local-session-reach.md, section 4; roadmap step local-session-reach",
-  "reply": "No, they aren't the only ones. Your ask from this morning (a plan for messages between sessions that would work in any harness) is now a lane, and it's the right place to answer this too. I've sent it this question with your note: design one way to reach sessions that doesn't depend on Claude Code's message limit. It comes back here with new options.",
-  "short": "local reach plan",
+  "ref": "record session-messages, section \"Reach between the cloud and the owner's computer\" (commit ddc0f83c); step session-messaging-plan; draft PR #1051",
+  "short": "Replace session messages",
   "status": "open",
-  "title": "Which way should cloud sessions reach the sessions on your computer?",
-  "why": "It reaches your computer with no act that cannot be undone."
+  "title": "Which path should replace messages between sessions, so the 10-message stop and the cloud-to-computer gap both go away?",
+  "why": "One path for cloud and computer, nothing extra running, and a 12-message test on your Mac before any build."
 }

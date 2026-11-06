@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-06T19:22:00Z",
+  "context": "Goal: mailaudit's Recent log gets built, the last open piece of item 193.\nProblem (money): it is a whole new web log feature, many hours of work. A long build like that runs best on Opus, and an Opus lane needs your yes.\nBased on (read): debt recent-log-unbuilt in mailaudit. It is unblocked because item 280 is b and record PR mailaudit #202 is with batch runner 9.\nDeparts from: main \u2014 adds one Opus lane session for the Recent log build.\nMeanwhile: nothing starts. The brief also settles what an open panel does when the Recent cell hides.",
+  "home": "mailaudit debt recent-log-unbuilt",
+  "kind": "decision",
+  "n": 288,
+  "options": [
+    {
+      "gain": "The Recent log ships, and item 193 is fully done.",
+      "how": "The coordinator starts one Opus lane session for the build.",
+      "key": "a",
+      "label": "Yes, start it now",
+      "lose": "The cost of one long Opus lane."
+    },
+    {
+      "gain": "No spend now.",
+      "how": "The debt stays open until you say go.",
+      "key": "b",
+      "label": "Later",
+      "lose": "The Recent log stays unbuilt."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "mailaudit debt recent-log-unbuilt; items 193, 280; mailaudit #202",
+  "short": "mailaudit Recent log: Opus lane?",
+  "status": "open",
+  "title": "Start the mailaudit Recent log build as an Opus lane?",
+  "why": "It is the last open piece of item 193, and nothing blocks it now."
+}
