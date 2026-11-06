@@ -1458,8 +1458,9 @@ ALL_ROWS = [CITED_ROW, SAME_ACT_ROW, ALT_ROW, ALT_ROW_B, OTHER_ROW]
 CITED_ID = CITED_ROW["id"]
 SAME_ACT_ID = SAME_ACT_ROW["id"]
 
-# The incident (decision claims-carry-backing, incident PR #1299): a commit's trailer is a hand-off, and the
-# session could have cherry-picked the commit to a new branch with no refusal.
+# A reply must not hand a commit's trailer to the owner as "only you can": a cherry-pick to a new
+# branch carries the trailer with no refusal, so the judge flags that step as doable
+# (decision claims-carry-backing).
 TRAILER_REPLY = (
     "> **Done**\n> BUILT: the hook change is pushed on branch prose-truth-reply-judge-t.\n"
     "> Input Needed: commit abc1234 needs a new trailer.\n\n"
