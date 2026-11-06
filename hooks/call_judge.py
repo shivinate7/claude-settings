@@ -391,7 +391,8 @@ def main():
             full += "\n" + NONE_DIRECTION_RULE  # after `%`, so the rule's text never meets the formatter
         if widening:
             full += "\n" + widening_rule()
-        verdict, error = invoke_model(full + tail, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
+        verdict, error = invoke_model(full + tail, model=model, timeout=timeout, shape=OK_SHAPE, effort=None,
+                                      session_id=payload.get("session_id"))
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
               file=sys.stderr)

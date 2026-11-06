@@ -68,7 +68,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | SendMessage busy judge (`hooks/sendmessage_state.py`, PreToolUse; a model call only when the receiver is busy on the session board) | haiku, through `decision_watch.invoke_model` | xhigh |
 | SendMessage wording judge (the same script, one call on every send, so an override can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
 | plain-diff mod note (`mods/plain-diff/hooks/register.mjs`, `$.model.complete`, one call per file with no note) | haiku, set in the call | none set: the call passes no effort field |
-| decision watch (`hooks/decision_watch.py`) | haiku | xhigh |
+| decision watch (`hooks/decision_watch.py`; its `--auth-check` login probe, SessionStart, one call only with no token file, passes no effort) | haiku | xhigh |
 | decision watch mod (`mods/decision-watch`, the Stop-time judge) | haiku, through `$.model.complete`, the app login; the python path above stays xhigh | session default: the call passes no effort field |
 | every other hook and guard | no model; plain code | n/a |
 

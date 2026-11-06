@@ -232,7 +232,7 @@ def main():
             return 0
         import decision_watch
         verdict, error = decision_watch.invoke_model(
-            build_prompt(reply), timeout=MODEL_TIMEOUT, shape=OK_SHAPE)
+            build_prompt(reply), timeout=MODEL_TIMEOUT, shape=OK_SHAPE, session_id=hook.get("session_id"))
     except Exception as exc:
         error, verdict = "%s: %s" % (type(exc).__name__, exc), None
     if error:

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Claude Code hook: decision/guard/settings watch (Stop).
 
+Modes:
+- --auth-check: At session start, checks that a model call can log in. With a token file it does nothing.
+  With none it makes one short probe call. It prints one systemMessage line with the fix when that call cannot
+  authenticate, and nothing otherwise.
+
 WHAT THIS FILE DOES. A command hook. A command hook receives the Stop JSON (`transcript_path`,
 `session_id`, `cwd`) with no permission check at all, so it cannot fail in `auto` mode the way a
 `type: agent` hook can. It answers the cheap part of the question itself,
@@ -663,7 +668,16 @@ def _judge_isolation():
 VERDICT_SHAPE = {"verdict": ("ALLOW", "FLAG")}
 
 
-def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE, effort="xhigh"):
+class ReplyError(str):
+    """An `invoke_model` error text for a call that ran and answered, but whose answer was unusable
+    (not JSON, no result, off-shape). The model authenticated, so `auth_check` and the failure
+    streak read this as a working login. A plain str error is a call that could not run: a failed
+    start, a timeout, a non-zero exit, an unreadable token file. The type is the signal, so no
+    caller parses English."""
+
+
+def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE, effort="xhigh",
+                 session_id=None):
     """Run the judgment prompt through `claude -p`, isolated. Return (verdict_dict, error).
 
     `verdict_dict` is `{"verdict": "ALLOW"}` or `{"verdict": "FLAG", "why": "..."}` on
@@ -674,7 +688,15 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
     `shape` is the caller's accepted answer: one key and the values it may hold. The default
     is this hook's own ALLOW/FLAG verdict. `hooks/reply_judge.py` passes `{"ok": (True, False)}`.
     `effort` None passes no --effort, so the model runs at its default, as a prompt hook does.
+    `session_id` is the calling hook's session. A non-empty one records the outcome for the Stop
+    line (`record_model_outcome`); none records nothing.
     """
+    verdict, error = _invoke_model(prompt, model, timeout, shape, effort)
+    record_model_outcome(session_id, error)
+    return verdict, error
+
+
+def _invoke_model(prompt, model, timeout, shape, effort):
     try:
         root, env = _judge_isolation()
     except TokenUnreadable:
@@ -712,11 +734,12 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
     try:
         envelope = json.loads(stdout)
     except Exception:
-        return None, "model output was not JSON"
+        return None, ReplyError("model output was not JSON")
     text = envelope.get("result") if isinstance(envelope, dict) else None
     if not isinstance(text, str):
-        return None, "model output carried no result text"
-    return parse_verdict(text, shape)
+        return None, ReplyError("model output carried no result text")
+    verdict, error = parse_verdict(text, shape)
+    return verdict, ReplyError(error) if error else None
 
 
 def parse_verdict(text, shape=VERDICT_SHAPE):
@@ -733,6 +756,106 @@ def parse_verdict(text, shape=VERDICT_SHAPE):
     if verdict.get(key) not in values:
         return None, "model result named neither %s" % " nor ".join(map(str, values))
     return verdict, None
+
+
+# ------------------------------------------------------------------ auth check and failure streak
+
+# A model call that cannot authenticate must not be quiet: every hook judge fails open on an error,
+# so a lost login turns them all off with no sign. Two readers, no timer and no new process:
+#   `auth_check`, the SessionStart entry (`--auth-check`). One file read per session start. At most
+#     one probe call (about 2-3 s, measured 2026-11-06) and only when no token file exists. The probe
+#     goes through `invoke_model`, the path real calls take, so it does not depend on the credential
+#     it checks. A token file means no probe. No token file is not a failure by itself: a cloud
+#     session called the model with no token file and no credentials file, so only the probe knows.
+#   `record_model_outcome` and `streak_line`. One small write per outcome change (none for a success
+#     with no failure on record), one file read per Stop (`hooks/stall_watch.py --stop`). Stop hooks
+#     run side by side, so a Stop line reports failures from calls that ended before it began.
+# The probe warns only when the call could not run or authenticate (an unmarked error). A `ReplyError`
+# means the model ran and answered badly: that login works, so it stays silent and resets the streak.
+# A token is never printed or written: `invoke_model` scrubs it from the error before either reader.
+STREAK_SUB = "model-streak"
+STREAK_MIN = 3  # failures in a row before the Stop line speaks
+PROBE_TIMEOUT = 20  # seconds; far under MODEL_TIMEOUT and the hook's own timeout in settings.json
+PROBE_PROMPT = 'Reply with exactly {"ok": true}'
+PROBE_SHAPE = {"ok": (True, False)}
+
+
+def _token_path():
+    return os.path.join(guard.config_dir(), "state", "hook-token")
+
+
+def _token_fix():
+    """The one fix text. It needs nothing from the state it repairs."""
+    return "run `claude setup-token`, then save the printed token as %s" % _token_path()
+
+
+def _one_line(text):
+    return " ".join(str(text).split())
+
+
+def auth_check(model_call=invoke_model):
+    """Return one owner line when model calls cannot authenticate, else ''."""
+    try:
+        token = _hook_token()
+    except TokenUnreadable:
+        return ("Model calls: the token file %s is not readable text, so hook judges are not running. Fix: %s."
+                % (_token_path(), _token_fix()))
+    if token:
+        return ""
+    _verdict, error = model_call(PROBE_PROMPT, model=MODEL, timeout=PROBE_TIMEOUT, shape=PROBE_SHAPE, effort=None)
+    if error is None or isinstance(error, ReplyError):
+        return ""
+    return ("Model calls cannot authenticate (%s). Hook judges are not running. Fix: %s."
+            % (_one_line(error), _token_fix()))
+
+
+def _streak_path(session_id):
+    if not session_id or not isinstance(session_id, str):
+        return None
+    key = hashlib.sha256(session_id.encode("utf-8", "replace")).hexdigest()
+    return os.path.join(guard.config_dir(), STATE_DIR_NAME, STREAK_SUB, key + ".json")
+
+
+def _read_streak(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        count, last = int(data["n"]), str(data["last"])
+        return (count, last) if count > 0 else (0, "")
+    except Exception:
+        return 0, ""  # absent, damaged or unreadable reads as no failures: the next failure starts over
+
+
+def record_model_outcome(session_id, error):
+    """Count this session's consecutive model-call failures. `error` None is a success. A `ReplyError` is
+    a call that ran, so it counts as a success. No session id records nothing. Never raises."""
+    path = _streak_path(session_id)
+    if not path:
+        return
+    try:
+        if error is None or isinstance(error, ReplyError):
+            if os.path.exists(path):
+                os.remove(path)
+            return
+        count, _last = _read_streak(path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            json.dump({"n": count + 1, "last": _one_line(error)[:200]}, f)
+        os.replace(path + ".tmp", path)  # two calls at once may lose a count; the line still comes
+    except Exception:
+        pass  # a failed write loses a count, never a model verdict
+
+
+def streak_line(session_id):
+    """The Stop line for STREAK_MIN or more failures in a row this session, else ''."""
+    path = _streak_path(session_id)
+    if not path:
+        return ""
+    count, last = _read_streak(path)
+    if count < STREAK_MIN:
+        return ""
+    return ("Model calls: %d failed in a row this session (last: %s). Hook judges are not running. Fix: %s"
+            % (count, last, _token_fix()))
 
 
 # ------------------------------------------------------------------ orchestration
@@ -1193,8 +1316,22 @@ def _split_key(args):
     return args, None
 
 
+def auth_check_main():
+    """`--auth-check`, the SessionStart entry. Stdout is one systemMessage line or nothing: only that
+    shape reaches the owner, and plain text would land in the model's context."""
+    try:
+        text = auth_check()
+    except Exception as exc:  # unknown stays unknown: never read as a working login
+        text = "Model calls: the login check itself failed (%s), so it is unknown." % type(exc).__name__
+    if text:
+        print(json.dumps({"systemMessage": text}))
+    sys.exit(0)
+
+
 def main():
     guard._force_utf8_streams()
+    if sys.argv[1:] == ["--auth-check"]:
+        auth_check_main()
     try:
         hook = json.load(sys.stdin)
     except Exception:
@@ -1213,6 +1350,8 @@ def main():
 
         def tracked(prompt):
             used.append(True)
+            if model_call is invoke_model:
+                return model_call(prompt, session_id=hook.get("session_id"))
             return model_call(prompt)
 
         message = run(hook, tracked, expect_key)
