@@ -17,7 +17,7 @@ fails, and any simpler route the facts open. Put this list at the top of the pla
 
 Check each new name in the plan against `GLOSSARY.md` beside the global `CLAUDE.md`. Use its term, never a name from its "Not" cell.
 
-Before you plan a test or merge change, read decisions `test-practices` and `merge-practices` in the claude-settings checkout (`docs/decisions/`), and cite each practice the plan uses.
+Before you plan a test or merge change, read decisions `test-practices` and `merge-practices` (the claude-settings repo's `docs/decisions/` folder), and cite each practice the plan uses.
 
 Read the code the task touches first. Then give the plan: the acts in order, the files each
 act changes, the risks, and the check that proves each act done. Cite file:line for every
