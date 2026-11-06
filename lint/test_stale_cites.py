@@ -1677,7 +1677,7 @@ class RouteClaimTests(StaleCase):
             ("- The cloud blocks pushes to main.", True),
             ("- Auto mode is not available for this branch.", True),
             ("- The cloud works for read-only tasks.", True),
-            ("- Local runs cannot push to main.", True),
+            ("- Local sessions cannot push to main.", True),
             ("- Auto mode cannot push to main.", True),
             ("- The classifier cannot push to main.", True),
             ("- gh cannot push to main.", True),
@@ -1722,6 +1722,26 @@ class RouteClaimTests(StaleCase):
         ]
         rng, flagged = self.route_range(rows)
         self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_is_silent_on_a_local_branch_because_local_alone_is_no_route_word(self):
+        rows = [
+            ("- A local branch cannot hold the record.", False),  # `local` alone names no route
+            ("- The cloud cannot hold the record.", True),  # the same verb with a route word fires
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_reads_locally_on_the_owners_computer_and_a_local_session_as_route_words(self):
+        sentences = [
+            "- Locally, the push cannot reach main.",
+            "- On the owner's computer, the push cannot reach main.",
+            "- On the owner’s computer, the push cannot reach main.",
+            "- A local session cannot hold the record.",
+        ]
+        for sentence in sentences:
+            with self.subTest(sentence=sentence):
+                rng, flagged = self.route_range([("# Notes", False), ("", False), (sentence, True)])
+                self.assert_route_claims(rng, flagged)
 
     def test_route_claim_past_tense_incident_is_silent_beside_a_present_claim(self):
         rows = [
