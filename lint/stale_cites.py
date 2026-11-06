@@ -19,15 +19,23 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             `stale-cites: unknown, <path>:<line> ...` and keeps the exit 0. It prints only when the range also
             removes a path or a Python name, since only then is Markdown read. A range that touches only such
             files prints nothing and passes.
-  STALE005  (range mode only, report only) an ADDED line of governed prose states a capability by route with no
-            backing. It holds a capability verb (cannot, can't, refuses, is refused, blocks, is not available,
-            works) and a route word (cloud, local, auto mode, classifier, gh, MCP, proxy, harness) outside a
-            heading, a quote line, a fence, a code span and an HTML comment, and has none of these in
-            parentheses: a premise kind from PREMISE_KINDS with a source path (`(read hooks/x.py:12)`),
-            `(test path::name)`, or `(route <id>)` whose id is a row of hooks/route_rows.json at head. A route id
-            that is no row is a dead route. It prints as `stale-cites: report, path:line: STALE005 ...` and never
-            changes the exit code, so it ships dark (decision source-prose-lint-ships-dark). A line marked
-            `<!-- ste-disable-line STALE005 -->` is left out.
+  STALE005  (range mode only, report only) a SENTENCE of governed prose, in a paragraph the range adds a line to,
+            states a capability by route with no backing. A paragraph is a run of prose rows; a blank row, a heading,
+            a quote row, a fence and a list item end one. A sentence ends at . ! or ? before a space, so a claim
+            wrapped over lines fires on its first line and its backing may sit on a later line of the same sentence.
+            It holds a capability verb (cannot, can't, won't, refuses, denies, blocks, is refused or blocked,
+            is not available, works, does not work, a 403) outside a code span and a comment, and a route word
+            (cloud, locally, local session, on the owner's computer, auto mode, classifier, gh, MCP, proxy,
+            harness; `local` alone is none) outside a comment, in a code span too when the span names no path.
+            It has none of these in parentheses: a premise kind from PREMISE_KINDS that is no weak kind
+            (notes, assumed) with a source path (`(read hooks/x.py:12)`), `(test path::name)`, or `(route <id>)`
+            whose id is a row of the rows file. A `(read ...)` or `(test ...)` whose file is absent at head is a
+            dead backing; a route id that is no row is a dead route. The rows file is hooks/route_rows.json at
+            head, or the file the env GUARD_ROUTE_ROWS names (hooks/route_match.py `rows_path()`, the one home of
+            that path). An absent or unreadable rows file is one unknown line, and no route is called dead. A range
+            that changes the rows file also reports each prose line at head that cites a row id it removes. It prints
+            as `stale-cites: report, path:line: STALE005 ...` and never changes the exit code, so it ships dark
+            (decision source-prose-lint-ships-dark). A line marked `<!-- ste-disable-line STALE005 -->` is left out.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
 `<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004). Fenced blocks count as prose.
@@ -61,9 +69,11 @@ line starts `stale-cites: report, `. It has two halves, and STALE005 lines first
 Cost, per ste-lint changed-scope run (CostTests in lint/test_stale_cites.py proves it): one python3 start.
 Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and changes only
 Markdown outside RULE_FILES. That one diff is `--raw -p -U0`, so it also carries the added lines STALE005 reads and
-a code-only range pays only for the patch text. An added governed line that holds a verb and a route word reads its
-file's head blob (the fences above it) and, when it cites a route, hooks/route_rows.json, both through the one
-`cat-file` the run opens: one more start, and none for a range with no such line.
+a code-only range pays only for the patch text. An added governed line that holds a verb or a route word reads its
+file's head blob (the paragraph around it) and, when a sentence cites a route or a `(read ...)` or `(test ...)` file,
+the rows file or that file's presence at head, all through the one `cat-file` the run opens: one more start, and none
+for a range with no such line. A range that changes the rows file reads it at base and head through the same `cat-file`;
+when a row id is gone it also lists the tree once and reads each tracked .md once.
 A touched .py adds one `git cat-file --batch` and, through the report below, one `ls-tree`, so it starts 5. A removed
 or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once, and only
 when a removed or renamed path, or a name that a touched .py no longer defines, gives the findings something to
@@ -78,6 +88,7 @@ once, and each file a line anchor names once more, even when that file is a .md.
 """
 import argparse
 import ast
+import bisect
 import importlib.util
 import json
 import os
@@ -91,6 +102,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import layout  # noqa: E402  the one home of where a repo keeps its decisions (lint/layout.py)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds (hooks/precompact_handoff.py)
+import route_match  # noqa: E402  the one home of the route rows file's path (hooks/route_match.py)
 from rule_audit import ANCHOR_RE, RULE_FILES  # noqa: E402  the one home of the anchor pattern and the rule files
 
 RECORDS_PAGE = "docs/records.md"
@@ -479,19 +491,33 @@ class ForeignReader:
         return messages
 
 
-ROUTE_ROWS = "hooks/route_rows.json"  # a route id is a row of this file at head
+# The rows file as a repo path, for a read at head. Derived from the one home of its path, never copied.
+ROWS_AT_HEAD = os.path.relpath(route_match.ROUTE_ROWS_FILE, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                                       "..")).replace(os.sep, "/")
 HTML_COMMENT = re.compile(r"<!--.*?-->")
 HEADING_OR_QUOTE = re.compile(r"^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>)")
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
 PAREN_GROUP = re.compile(r"\(([^()]*)\)")
+LIST_ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
+# A sentence ends at . ! or ? before a space or the end. "e.g.", "i.e.", "vs." and "cf." end none, so a paren group
+# such as "(e.g. read hooks/x.py:2)" stays in one sentence.
+SENTENCE_END = re.compile(r"(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\bcf)[.!?](?=\s|\Z)")
 # A capability verb. `is refused` and `are refused` are present; a bare `refused` is an incident and never matches.
-VERB = re.compile(r"\b(?:cannot|can\s+not|can['\u2019]t|refuses|(?:is|are)\s+(?:not\s+)?refused|blocks"
-                  r"|not\s+available|works)\b", re.I)
-ROUTE_WORD = re.compile(r"\b(?:cloud|local|auto\s+mode|classifier|gh|mcp|proxy|harness)\b", re.I)
+VERB = re.compile(r"\b(?:cannot|can\s+not|can['’]t|won['’]t|will\s+not|refuses|denies|blocks"
+                  r"|(?:is|are)\s+(?:not\s+)?(?:refused|blocked|denied)"
+                  r"|not\s+available|(?:isn|aren)['’]t\s+available|works"
+                  r"|(?:does\s+not|doesn['’]t|do\s+not|don['’]t)\s+work"
+                  r"|gets?\s+an?\s+40[357])\b", re.I)
+# `local` alone names a branch or a run, so it is no route word; the three forms below name the owner's computer.
+ROUTE_WORD = re.compile(r"\b(?:cloud|locally|local\s+sessions?|auto[\s-]+mode|classifier|gh|mcp|proxy|harness)\b"
+                        r"|\bon\s+the\s+owner['’]s\s+computer\b", re.I)
 # A source is a path, with an optional line anchor; a bare date or version has neither a folder nor an extension.
 SOURCE = re.compile(r"(?=[^\s]*(?:/|\.[A-Za-z]))[\w./@+~-]+(?::\d+(?:-\d+)?)?(?:::\w+)*\Z")
 TEST_CITE = re.compile(r"(%s)::[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*\Z" % RUN)
 ROUTE_CITE = re.compile(r"[\w.-]+\Z")
+# A premise kind that backs nothing: its source is a note or a guess. The rest of PREMISE_KINDS back a claim.
+WEAK_KINDS = ("notes", "assumed")
+BACKING_KINDS = tuple(kind for kind in PREMISE_KINDS if kind not in WEAK_KINDS)
 
 
 def fenced_lines(rows):
@@ -561,83 +587,214 @@ def backed_lines(texts, changed):
     return found
 
 
+def blanked(text):
+    """(outside, route): `text` twice, each the same length, with the newlines kept.
+    outside: each code span and HTML comment blanked, so a verb or a sentence end inside one is a mention.
+    route: the same, except the words of a code span that names no path stay: a route word used as the subject,
+    "`gh` cannot close", still counts. A span with a `/` or `.` names a file, so its words are not a route."""
+    outside, route = list(text), list(text)
+
+    def blank(chars, start, end):
+        for i in range(start, end):
+            if chars[i] != "\n":
+                chars[i] = " "
+    for match in CODE_SPAN.finditer(text):
+        start, end = match.span()
+        ticks = len(match.group(1))
+        blank(outside, start, end)
+        if "/" in text[start:end] or "." in text[start:end]:
+            blank(route, start, end)
+        else:
+            blank(route, start, start + ticks)
+            blank(route, end - ticks, end)
+    for match in HTML_COMMENT.finditer("".join(outside)):
+        blank(outside, *match.span())
+        blank(route, *match.span())
+    return "".join(outside), "".join(route)
+
+
+def paragraphs(rows, fenced):
+    """[(first row number, [rows])]: the runs of prose rows. A blank row, a heading, a quote row, a fenced row and a
+    list item each end a run; a list item also starts the next, so a code span never pairs across two items."""
+    found, current = [], None
+    for number, row in enumerate(rows, 1):
+        if number in fenced or not row.strip() or HEADING_OR_QUOTE.match(row):
+            current = None
+            continue
+        if current is None or LIST_ITEM.match(row):
+            current = (number, [])
+            found.append(current)
+        current[1].append(row)
+    return found
+
+
+def sentences(text, outside):
+    """[(start, end)] offsets of each sentence of a paragraph, found in `outside` so that no code span or comment ends
+    one, and trimmed in `text`. A sentence with nothing outside a span or comment is left out."""
+    found, start = [], 0
+    for match in list(SENTENCE_END.finditer(outside)) + [None]:
+        end = match.end() if match else len(text)
+        piece = text[start:end]
+        lead = len(piece) - len(piece.lstrip())
+        a, b = start + lead, start + len(piece.rstrip())
+        if outside[a:b].strip():
+            found.append((a, b))
+        start = end
+    return found
+
+
+def blob_ids(blob):
+    """The set of row ids of a rows file blob, or None when it is not {"rows": [...]}."""
+    try:
+        rows = json.loads(blob.decode("utf-8", "replace")).get("rows")
+        return {row["id"] for row in rows if isinstance(row, dict) and isinstance(row.get("id"), str)}
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
 class RouteClaimReader:
-    """STALE005: an ADDED governed line that states a capability by route with no backing. Report only: it reads the
-    lines the range adds, never the whole tree, and its messages never become findings (decision
-    source-prose-lint-ships-dark)."""
+    """STALE005: a sentence of governed prose that states a capability by route with no backing, in a paragraph the
+    range adds a line to. Report only: its messages never become findings (decision source-prose-lint-ships-dark).
+    A sentence is judged whole, so a claim wrapped over several lines fires on its first line, and its backing may sit
+    on a later line of the same sentence. The range also reports each prose line at head that cites a route row the
+    range removes."""
     code = "STALE005"
     scope = "added"
 
     def prepare(self, rng):
-        """{path: [(number, text)]} of the governed Markdown files the range adds lines to, or None."""
+        """(files, rows changed), or None. files: {path: [(number, text)]} of the governed Markdown files the range
+        adds lines to. rows changed: the range touches the rows file."""
         excludes = exclude_patterns(".")
         files = {p: rows for p, rows in rng.added_lines.items() if rows and governed(p, excludes)}
-        return files or None
+        changed = ROWS_AT_HEAD in rng.changed
+        return (files, changed) if files or changed else None
 
-    def claims(self, rng, files):
-        """[(path, number, message)]. The head blob of a file is read only when one of its added lines is a claim
-        candidate, and hooks/route_rows.json only when a candidate cites a route; both go through `rng.batch`."""
-        out, rows_at_head = [], []
+    def claims(self, rng, state):
+        """[(path, number, message)]. The head blob of a file is read only when one of its added lines holds a verb or
+        a route word, and the rows file or a backing file only when a sentence cites it; all go through `rng.batch`."""
+        files, rows_changed = state
+        found, rows_at_head = {}, []
         for path in sorted(files):
-            fenced = None
-            for number, row in files[path]:
-                if "ste-disable-line" in row and self.code in disabled(row):
-                    continue
-                if HEADING_OR_QUOTE.match(row):
-                    continue
-                prose = HTML_COMMENT.sub(" ", CODE_SPAN.sub(" ", row))
-                if not (VERB.search(prose) and ROUTE_WORD.search(prose)):
-                    continue
-                if fenced is None:
-                    blob = rng.batch.get("%s:%s" % (rng.head, path))
-                    fenced = fenced_lines((blob or b"").decode("utf-8", "replace").replace("\r\n", "\n").split("\n"))
-                if number in fenced:
-                    continue
-                message = self.judge(rng, row, rows_at_head)
-                if message:
-                    out.append((path, number, message))
+            added = dict(files[path])
+            if not any(VERB.search(HTML_COMMENT.sub(" ", t)) or ROUTE_WORD.search(HTML_COMMENT.sub(" ", t))
+                       for t in added.values()):
+                continue
+            blob = rng.batch.get("%s:%s" % (rng.head, path))
+            rows = (blob or b"").decode("utf-8", "replace").replace("\r\n", "\n").split("\n")
+            numbers = sorted(added)
+            for first, block in paragraphs(rows, fenced_lines(rows)):
+                i = bisect.bisect_left(numbers, first)
+                if i == len(numbers) or numbers[i] >= first + len(block):
+                    continue  # the range adds no line to this paragraph
+                for number, message in self.judge_paragraph(rng, first, block, set(numbers), rows_at_head):
+                    found[(path, number)] = message
+        if rows_changed:
+            self.removed_rows(rng, found, rows_at_head)
+        return [(path, number, message) for (path, number), message in found.items()]
+
+    def judge_paragraph(self, rng, first, block, added, rows_at_head):
+        """[(first row number of the sentence, message)] for each unbacked claim sentence of the paragraph that
+        holds an added row and carries no `ste-disable-line STALE005` mark."""
+        text = "\n".join(block)
+        outside, route = blanked(text)
+        starts, offset = [], 0
+        for row in block:
+            starts.append(offset)
+            offset += len(row) + 1
+        out = []
+        for a, b in sentences(text, outside):
+            if not (VERB.search(outside[a:b]) and ROUTE_WORD.search(route[a:b])):
+                continue
+            top, bottom = (first + bisect.bisect_right(starts, x) - 1 for x in (a, b - 1))
+            if not any(n in added for n in range(top, bottom + 1)):
+                continue
+            if any("ste-disable-line" in block[n - first] and self.code in disabled(block[n - first])
+                   for n in range(top, bottom + 1)):
+                continue
+            message = self.judge(rng, text[a:b], rows_at_head)
+            if message:
+                out.append((top, message))
         return out
 
-    def judge(self, rng, row, rows_at_head):
-        """The message for one claim line, or None when it is backed."""
-        backed, dead = False, []
-        for cite in paren_cites(row):
+    def judge(self, rng, sentence, rows_at_head):
+        """The message for one claim sentence, or None when it is backed."""
+        backed, dead, dead_files, unchecked = False, [], [], []
+        for cite in paren_cites(sentence):
             kind, rest = cite_kind(cite)
-            if kind in PREMISE_KINDS:
-                backed = backed or has_source(rest)
-            elif kind == "test":
-                backed = backed or bool(TEST_CITE.match(rest))
+            path = backing_path(kind, rest)
+            if kind in BACKING_KINDS or kind == "test":
+                sourced = bool(TEST_CITE.match(rest)) if kind == "test" else has_source(rest)
+                if sourced and path is not None and rng.batch.get("%s:%s" % (rng.head, posixpath.normpath(path))) is None:
+                    dead_files.append(path)  # a read or test backing is dead when its file is not at head
+                else:
+                    backed = backed or sourced
             elif kind == "route" and ROUTE_CITE.match(rest):
-                ids = route_ids(rng, rows_at_head)
+                ids, why = route_ids(rng, rows_at_head)
                 if ids is None:
-                    backed = True  # the rows file could not be read; that is one unknown, not a dead route
+                    unchecked.append((rest, why))
                 elif rest in ids:
                     backed = True
                 else:
                     dead.append(rest)
         if dead:
-            return "cites %s, a dead route: no row of %s at head has that id" % (
-                ", ".join(dead), ROUTE_ROWS)
+            return "cites %s, a dead route: no row of the route rows at head has that id" % ", ".join(dead)
+        if dead_files:
+            return "cites %s as its backing, a file absent at head" % ", ".join(dead_files)
         if backed:
             return None
-        return ("states a capability by route with no backing; cite (KIND source) with KIND one of %s, "
-                "(test path::name), or (route <id>)" % ", ".join(PREMISE_KINDS))
+        if unchecked:
+            return "cites route %s, not checked: the route rows file is %s" % (unchecked[0][0], unchecked[0][1])
+        return ("states a capability by route with no backing; cite (KIND source) with KIND one of %s "
+                "(%s back nothing), (test path::name), or (route <id>)"
+                % (", ".join(BACKING_KINDS), " and ".join(WEAK_KINDS)))
+
+    def removed_rows(self, rng, found, rows_at_head):
+        """Add to `found` each prose line at head that cites a route row the range removes. Reads the rows file at
+        base and at head, and the tracked Markdown only when a row id is gone."""
+        base = rng.batch.get("%s:%s" % (rng.base, ROWS_AT_HEAD))
+        base_ids = blob_ids(base) if base is not None else None
+        head = rng.batch.get("%s:%s" % (rng.head, ROWS_AT_HEAD))
+        head_ids = blob_ids(head) if head is not None else set()
+        if not base_ids or head_ids is None:
+            return
+        gone = base_ids - head_ids
+        if not gone:
+            return
+        if rng.tree is None:
+            rng.tree = tracked_entries(rng.head)
+        for md in markdown_files(rng.tree, exclude_patterns(".")):
+            rows = read_markdown(rng.batch, rng.head, md).split("\n")
+            fenced = fenced_lines(rows)
+            for number, row in enumerate(rows, 1):
+                if "(" not in row or number in fenced or HEADING_OR_QUOTE.match(row):
+                    continue
+                if "ste-disable-line" in row and self.code in disabled(row):
+                    continue
+                ids = [rest for kind, rest in map(cite_kind, paren_cites(row)) if kind == "route" and rest in gone]
+                if ids:
+                    found.setdefault((md, number), "cites %s, a route row this range removes" % ", ".join(ids))
 
 
 def route_ids(rng, cache):
-    """The set of ids of hooks/route_rows.json at head, read once; empty when the file is absent. None when the
-    file does not read (one unknown is noted), so a claim that cites a route is not called dead on a bad read."""
+    """(ids, why) of the route rows at head, read once. ids is the set of row ids, or None with `why` ("absent" or
+    "unreadable") when the file is missing or is not {"rows": [...]}: one unknown is noted, and no id is called dead.
+    The env seam of hooks/route_match.py (`rows_path()`) names a file on disk and wins over the blob at head."""
     if not cache:
-        blob = rng.batch.get("%s:%s" % (rng.head, ROUTE_ROWS))
-        ids = set()
-        if blob is not None:
+        seam = route_match.rows_path() != route_match.ROUTE_ROWS_FILE
+        label = route_match.rows_path() if seam else ROWS_AT_HEAD
+        if seam:
             try:
-                rows = json.loads(blob.decode("utf-8", "replace")).get("rows")
-                ids = {row["id"] for row in rows if isinstance(row, dict) and isinstance(row.get("id"), str)}
-            except (ValueError, AttributeError, TypeError):
-                rng.unknowns.append("%s is not {\"rows\": [...]}; route cites were not checked" % ROUTE_ROWS)
-                ids = None
-        cache.append(ids)
+                with open(label, "rb") as f:
+                    blob = f.read()
+            except OSError:
+                blob = None
+        else:
+            blob = rng.batch.get("%s:%s" % (rng.head, ROWS_AT_HEAD))
+        ids = blob_ids(blob) if blob is not None else None
+        why = ("absent" if seam else "absent at head") if blob is None else "unreadable, not {\"rows\": [...]}"
+        if ids is None:
+            rng.unknowns.append("%s is %s; route cites were not checked" % (label, why))
+        cache.append((ids, why))
     return cache[0]
 
 
