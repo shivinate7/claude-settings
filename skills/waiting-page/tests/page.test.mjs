@@ -2337,7 +2337,9 @@ for (const value of ["stay", "sink"]) {
 test("answered-sink: a card sent on this visit moves to the Answered section, folded, and the open cards keep their order (SENT_MOVE sink)", async (t) => {
   const sent = mk("send-sink", 1, { added: at(1) }), o1 = mk("send-open-1", 2, { added: at(2) }), o2 = mk("send-open-2", 3, { added: at(3) });
   const page = await open(t, { items: [sent, o1, o2], pageHtml: withSentMove("sink") }); if (!page) return;
+  // A note gives the sunk card a fold with something in it; a fold with nothing to hide would say something false.
   await choose(page, sent, "a");
+  await addNote(page, sent, "Kept it.");
   await send(page);
   await waitAnswered(page, [sent.id]);
   await card(page, sent).locator(".receipt").waitFor();
@@ -2368,6 +2370,7 @@ test("answered-sink: a Change on a card sent this visit reopens it in place in t
   const sent = mk("change-sent", 1, { added: at(1) }), o1 = mk("change-open", 2, { added: at(2) });
   const page = await open(t, { items: [sent, o1], pageHtml: withSentMove("sink") }); if (!page) return;
   await choose(page, sent, "a");
+  await addNote(page, sent, "Kept it."); // a note gives the sunk card a fold, as in the case above
   await send(page);
   await waitAnswered(page, [sent.id]);
   await card(page, sent).locator(".receipt").waitFor();
@@ -2403,6 +2406,14 @@ test("answered-sink: a reload with the same data puts the former arrival in its 
 });
 
 // Case 4 (regression): a saved card with a lane sinks at load, folded, with its Filing pending pill and "waits on lane" said once.
+// A sunk card with no note, last answer or reply has nothing to fold, so it draws no fold control.
+test("answered-sink: a sunk card with no note, last answer or reply shows no fold control", async (t) => {
+  const it = mk("bare-sunk", 1, { added: at(5) }), other = mk("bare-open", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other], answers: answerOf(it) }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  assert.equal(await card(page, it).locator("button.unfold").count(), 0, `No. ${it.n} draws a fold control with nothing to hide`);
+});
+
 test("answered-sink: a saved card with a lane sinks at load, folded, with its Filing pending pill and its lane said once", async (t) => {
   const it = mk("lane-sunk", 1, { added: at(5), lane: "ci-done-comment" }), other = mk("lane-open", 2, { added: NEW_ADDED });
   const page = await open(t, { items: [it, other], answers: answerOf(it, "a", { note: "Kept the red one." }) }); if (!page) return;
