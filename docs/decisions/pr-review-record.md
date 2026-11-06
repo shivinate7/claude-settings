@@ -45,7 +45,7 @@ CI: read live by merge --reviewed
 
 A change is done when one of these holds (rule `roles-review-cap-three`):
 
-- round 1 or 2 is its last round, that round is PASS, and the last `design-reviewer` line (across all rounds) is PASS or absent;
+- round 1 or 2 is its last round, that round is PASS or a fix check PASSes after its FAIL, and the last `design-reviewer` line (across all rounds) is PASS or absent;
 - round 3 is done, and Guard or check is `no`;
 - round 3 is done, Guard or check is `yes`, and Net value is zero or positive;
 - Kind is `delete-only`, Guard or check is `no`, and round 1 is done;
@@ -53,7 +53,7 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 
 - A last `design-reviewer` line of FAIL or PARTIAL keeps a record open on the PASS rule. The round 3 and `delete-only` done rules stay done, and their reason names the design failure.
 - A round 3 verdict does not decide done. When Guard or check is `yes`, Net value does, even after a round 3 PASS: `not owed` is open, and `negative` holds the change (record `hold-unsafe-after-round-3`).
-- A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open. The rule owes rounds 2 and 3 when round 1 finds a safety hole.
+- A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open unless a fix check PASSes. The rule owes rounds 2 and 3 when round 1 finds a safety hole.
 - `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
 
 ## The cost
@@ -74,7 +74,7 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 - Open: an integration PR has no record of its own.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
-- One fix check per record. A second fix on a fixed head starts a new lane at round 1. The tool does not check this.
+- One fix check per record. A second fix on a fixed head starts a new lane at round 1. `--fix-check` refuses unless its reviewed head equals the Head of the newest earlier record on the PR and that record has no Fix check line. Open: that refusal is not built yet.
 
 ## Lane picks
 
