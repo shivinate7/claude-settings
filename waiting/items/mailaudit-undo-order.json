@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-06T21:10:00Z",
+  "context": "Goal: undoing a row never counts a copy twice.\nProblem (rule): the rule \"any row can be undone in any order\" double-counts. Probe: check copy X, uncheck X, check X again. Undoing the uncheck sets X to 2 when one copy was checked, and undoing the first check erases the third.\nBased on (record): mailaudit decision undo-removes-only-its-delta: a hand edit made after the row survives.\nDeparts from: recent-checks-can-be-undone, \"any order\" \u2014 a row that a later opposite write reversed can no longer be undone (a).\nMeanwhile: the lane builds a; it fails toward the safe side.",
+  "holds": "Which Recent rows mailaudit lets you undo.",
+  "home": "mailaudit decision recent-checks-can-be-undone",
+  "id": "mailaudit-undo-order",
+  "kind": "decision",
+  "lane": "mailaudit-recent-log: builds a meanwhile (session_013NEJL44PzZ5EQbqb3wHYuB)",
+  "n": 306,
+  "options": [
+    {
+      "gain": "No double counts.",
+      "how": "A count row reads NOTHING TO UNDO once a later write on that card moved the count the other way, and an undo never goes above the row's own highest count.",
+      "key": "a",
+      "label": "Lock rows a later write reversed",
+      "lose": "An old row behind a reversal cannot be undone."
+    },
+    {
+      "gain": "Matches the record.",
+      "how": "Every row stays undoable in any order, as the record says today.",
+      "key": "b",
+      "label": "Keep any order",
+      "lose": "Double counts, as the probe shows."
+    }
+  ],
+  "owner": "lane mailaudit-recent-log (session_013NEJL44PzZ5EQbqb3wHYuB)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "lane mailaudit-recent-log; item 288",
+  "short": "Undo in any order",
+  "status": "open",
+  "title": "mailaudit: undoing Recent rows in any order can count a copy twice. Limit which rows can be undone?",
+  "why": "A double count shows a copy as checked in when it is not."
+}

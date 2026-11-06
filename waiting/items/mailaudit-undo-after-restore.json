@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-06T21:10:00Z",
+  "context": "Goal: an undo after a restore never removes a check-in the restore brought back.\nProblem (rule): today a Recent row stays live while the card's last-saved time is at or after the row's time. A restore stamps every card with the restore time, so every old row passes. Probe: a count is 1, a row moves it to 2, you restore to 1, and undoing the row sets it to 0.\nBased on (record): mailaudit decision recent-checks-can-be-undone: a row is live only while its card still holds the change it describes.\nDeparts from: recent-checks-can-be-undone, \"last-saved time at or after the row's time\" \u2014 becomes \"last-saved time equals the newest log entry on this card\" (a), or a stored restore time (b).\nMeanwhile: the lane builds a; it fails toward the safe side.",
+  "holds": "When a mailaudit Recent row can still be undone after a restore.",
+  "home": "mailaudit decision recent-checks-can-be-undone",
+  "id": "mailaudit-undo-after-restore",
+  "kind": "decision",
+  "lane": "mailaudit-recent-log: builds a meanwhile (session_013NEJL44PzZ5EQbqb3wHYuB)",
+  "n": 305,
+  "options": [
+    {
+      "gain": "A restore, or any write the log did not record, makes old rows read NOTHING TO UNDO.",
+      "how": "A row is live only while the card's last-saved time equals the newest log entry on it.",
+      "key": "a",
+      "label": "Live only while the card's last save is the row's",
+      "lose": "A row can stop being undoable after a sync from a device on an old build."
+    },
+    {
+      "gain": "Exact.",
+      "how": "The undo log stores when the last restore happened, and rows older than it go inert.",
+      "key": "b",
+      "label": "Store the restore time",
+      "lose": "A new saved field in the app's data."
+    }
+  ],
+  "owner": "lane mailaudit-recent-log (session_013NEJL44PzZ5EQbqb3wHYuB)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "lane mailaudit-recent-log; item 288",
+  "short": "Undo after a restore",
+  "status": "open",
+  "title": "mailaudit: after a restore, an undo can remove a check-in the restore brought back. Which test decides a Recent row is still live?",
+  "why": "An undo that removes restored data loses a check-in you meant to keep."
+}
