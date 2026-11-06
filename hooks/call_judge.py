@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""PreToolUse judge for an Agent spawn, an AskUserQuestion call and an ArtifactData write of a
-waiting-page item. One command hook replaces the settings.json `prompt` hook on Agent and the `agent`
+"""PreToolUse judge for an Agent spawn, an AskUserQuestion call, an ArtifactData write of a
+waiting-page item and a lane brief sent by send_message. One command hook replaces the settings.json `prompt` hook on Agent and the `agent`
 hook on AskUserQuestion. A prompt hook sees only the call's JSON. An agent hook reads files with tools and
 returns ok. Neither has a command field, so neither runs guard_core.refuse, the one home of the owner
 override (decision owner-override).
@@ -28,6 +28,13 @@ that passes item_hit is judged on its new_str alone, as a fragment: the prompt t
 only plain words, unexplained ids and pointers outside the item, and never to flag a missing line or
 option. The ArtifactData str_replace field is one top-level string key, so only `context` occurs in
 practice (note page-judge-dead-fragment-fields).
+
+A send_message whose first non-blank line carries the lane brief marker (shared_names.BRIEF_LINE) gets the check refuter
+(hooks/check_refuter.py, the one home): one blind Sonnet call that reads the step's title and why from the record and the
+brief's Done check line, and asks whether the check could pass while the ask stays unmet. A gap, an unknown (a model
+error, an odd answer, a missing record or any crash of this branch) or a brief with no Done check line refuses under rule
+`check-refuter` through refuse(); only a met verdict allows. Any other send_message exits 0 before importing check_refuter,
+with no model call. Cost: one Sonnet call (REFUTER_TIMEOUT s) per lane brief, none per other message.
 
 Veto (an act no override lifts): an Explore spawn whose model field is neither sonnet nor opus. That
 is the Explore row of agent-model-cap, a model guard. Every other refusal is liftable.
@@ -65,12 +72,14 @@ if HERE not in sys.path:
 # shared_names is standard library only and adds about 2 ms.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402
 from shared_names import DATA_TOOL  # noqa: E402  stdlib only: the one home of the tool name
+from shared_names import BRIEF_LINE, BRIEF_MARKER_LINE, BRIEF_TOOL  # noqa: E402  the lane brief's names, stdlib only
 
 OK_SHAPE = {"ok": (True, False)}
-SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
+SPAWN_RULE, QUESTION_RULE, REFUTER_RULE = "spawn-judge", "question-judge", "check-refuter"
 # The record each refusal cites. The spawn judge has its own; every other rule here (the model's question verdict
 # and the code rules question_form.chat_hit names) is the question reviewer's.
 SPAWN_CITE = "(decision haiku-prompt-hooks, the spawn judge refuses a brief that breaks the spawn rules)"
+REFUTER_CITE = "(a lane brief's Done check line is read blind against the step's ask before the brief is sent)"
 QUESTION_CITE = "(decision question-reviewer-agent-hook, a question is reviewed before it reaches the owner)"
 # THE TIME BUDGET. One model call per hook run, so the longest path is the question call's 60 s plus
 # start-up. The settings.json PreToolUse entry for this hook carries "timeout": 70.
@@ -335,7 +344,7 @@ def refuse(payload, tool, args, rule, reason):
     if reason.startswith(rule):
         reason = reason[len(rule):].lstrip(" :-")
     vetoed = explore_off_model(tool, args)
-    text = reason + " " + {SPAWN_RULE: SPAWN_CITE}.get(rule, QUESTION_CITE)  # the text both paths below carry
+    text = reason + " " + {SPAWN_RULE: SPAWN_CITE, REFUTER_RULE: REFUTER_CITE}.get(rule, QUESTION_CITE)  # the text both paths below carry
     try:
         import guard_core
         guard_core.set_log_session(payload.get("session_id"))
@@ -377,10 +386,46 @@ def past_ruling_context(payload, units):
             question_form.unreadable_sources(unknown))
 
 
+def refute_brief(payload, args):
+    """The send_message site: judge a lane brief's Done check line. 0 for a message without the lane brief marker, before
+    any heavy import. Fails CLOSED for a brief: no check line, a gap, an unknown or a crash all refuse under
+    check-refuter, because a refuter that fails open would let any brief through by breaking it."""
+    message = args.get("message") if isinstance(args, dict) else None
+    first = next((line.strip() for line in message.splitlines() if line.strip()), "") if isinstance(message, str) else ""
+    if not BRIEF_MARKER_LINE.match(first):
+        return 0
+    try:
+        import check_refuter
+        found = BRIEF_LINE.match(first)
+        check_line = check_refuter.done_check_line(message)
+        if check_line is None:
+            verdict, case = "gap", "the brief has no `Done check:` line at a line start, so nothing says when the work is done"
+        else:
+            if not found:
+                raise ValueError("the brief's first line names no step")
+            import question_form
+            root = question_form._git_root_of(payload.get("cwd") or "")
+            if not root:
+                raise ValueError("no checkout holds the brief's record")
+            title, why = check_refuter.ask_for_step(root, found.group("step"))
+            verdict, case = check_refuter.refute(title, why, check_line)
+    except Exception as exc:
+        verdict, case = "unknown", " ".join(("%s: %s" % (type(exc).__name__, exc)).split())
+    if verdict == "met":
+        return 0
+    if verdict == "gap":
+        reason = "the Done check line could pass with the ask unmet: %s Rewrite the check so a pass proves the ask." % case
+    else:
+        reason = "the check refuter's verdict is unknown (%s), so the brief's Done check line is unchecked. Send again." % case
+    return refuse(payload, BRIEF_TOOL, args, REFUTER_RULE, reason)
+
+
 def main():
     try:
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
         tool, args = payload.get("tool_name"), payload.get("tool_input")
+        if tool == BRIEF_TOOL:
+            return refute_brief(payload, args)
         if tool not in JUDGES:
             return 0
         if not isinstance(args, dict):
