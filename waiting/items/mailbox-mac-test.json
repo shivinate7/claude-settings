@@ -17,9 +17,9 @@
   "owner": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6)",
   "rank": 3,
   "ref": "item 153 a; record session-messages, commit a2bbba0a",
-  "reply": "Ready now (13:58 CST). Yes: open Claude Code desktop in your local claude-settings folder, paste the text below, press Enter. The mailbox link is in it. When that session ends its first turn, it is watching; mark this done and the lane sends round 1.",
+  "reply": "Done with a result (13:57 CST): your Mac runs on another Claude account, so it cannot read this account's page, and a desktop session has no page-watch tool. No page mailbox can wake a Mac session. Item 153 is asked again with git-based options.",
   "short": "Mac mailbox test",
-  "status": "open",
+  "status": "closed",
   "steps": [
     "Open Claude Code desktop on your Mac in your local claude-settings folder.",
     "Paste the text below and press Enter. No branch checkout or fetch is needed.",

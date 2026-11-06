@@ -1,16 +1,11 @@
 {
   "added": "2026-11-03T21:52:00Z",
-  "context": "Goal: cloud sessions and the sessions on your Mac and Windows computers message each other both ways, with no 10-message stop and no trust card.\nProblem (goal): sessions on your computer stop after 10 messages until you type, cloud sessions cannot message your computer at all, and the trust card limits a session for good.\nBased on (measured): lane test 13:17 CST: the 10-message stop does not count cloud-to-cloud messages; it hits only messages between sessions on one computer.\nBased on (read): Claude Code 2.1.319: a page republish wakes every session that watches it, and the stop does not count that wake. Unmeasured: whether a session on your computer wakes from its watch.\nDeparts from: main \u2014 adds a mailbox that sessions on your computer and cloud sessions both read, in place of direct messages to your computer.\nMeanwhile: no build starts on this before your pick. Your earlier note asked for something better than the four old options; these are the lane's new ones (record session-messages, commit ddc0f83c).",
+  "context": "Goal: cloud sessions and the sessions on your Mac message each other both ways, without the 10-message stop.\nProblem (goal): your Mac uses another Claude account, and its sessions have no page-watch tool, so a page mailbox can neither be read nor wake them there.\nBased on (ruling): your pick a (mailbox page) on this item, 13:21 CST Nov 6. Your Mac test (task 294, 13:57 CST) showed it cannot reach your Mac, so this asks again.\nBased on (read): GitHub is the one store both accounts reach.\nDeparts from: main \u2014 adds a mailbox in git that sessions on both sides read.\nMeanwhile: nothing builds. The lane records the test result in decision session-messages after PR #1326 merges.",
   "holds": "Building the way cloud sessions reach your computer's sessions.",
   "home": "docs/decisions/session-messages.md",
   "id": "local-reach-plan",
   "kind": "decision",
-  "lane": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6): 12-message Mac test, then the build; routed 13:30 CST",
-  "lastAnswer": {
-    "at": "2026-11-06T19:21:14.149Z",
-    "choice": "a",
-    "note": "Owner: a. Routed 13:30 CST to the lane: the 12-message test on your Mac comes first."
-  },
+  "lane": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6): re-asked 13:59 CST after the Mac test",
   "links": [
     {
       "label": "Draft PR #1051",
@@ -20,32 +15,32 @@
   "n": 153,
   "options": [
     {
-      "gain": "One path for cloud and computer, no extra program running, no admin setting.",
-      "how": "Each receiving session gets a private mailbox page. A sender writes a row and republishes the page to wake it. First, a 12-message test on your Mac, before any build.",
+      "gain": "Works on both accounts and in any tool with git. No admin setting, no program running.",
+      "how": "Messages are files on a mailbox branch of claude-settings (or a new private repo). Cloud sessions wake as today. A Mac session reads its mail at each turn start.",
       "key": "a",
-      "label": "Mailbox page",
-      "lose": "One page publish per message; Codex cannot use it."
+      "label": "Git mailbox, read at turn start",
+      "lose": "A Mac session sees mail only when it next starts a turn."
     },
     {
-      "gain": "Works in Codex and any tool with git; full history.",
-      "how": "Messages are comments on one pull request per receiver, in a new private repo.",
+      "gain": "Mac sessions wake within minutes with no typing.",
+      "how": "As a, plus one desktop scheduled task on the Mac that checks the mailbox every few minutes and starts the right session.",
       "key": "b",
-      "label": "Git mailbox",
-      "lose": "Sessions on your computer wake only when you next type; one more private repo."
+      "label": "Git mailbox plus a Mac doorbell",
+      "lose": "A timer on your Mac, which your rule outcomes-mechanize-rules bars unless you allow it. It uses your Mac's plan quota."
     },
     {
-      "gain": "Instant wakes on your computer.",
-      "how": "A small program on each computer pushes mailbox rows into local sessions at once.",
+      "gain": "Instant wakes.",
+      "how": "A small program on the Mac reads the git mailbox and pushes messages into local sessions at once.",
       "key": "c",
       "label": "Local relay program",
-      "lose": "A program always running; your org admin must turn on a setting; each session starts with an extra flag."
+      "lose": "A program always running; your org admin must turn on a setting (channelsEnabled); each session starts with an extra flag."
     },
     {
       "gain": "Nothing to build.",
       "how": "Nothing changes.",
       "key": "d",
       "label": "Keep messages as they are",
-      "lose": "The 10-message stop stays, and cloud still cannot reach your computer."
+      "lose": "The 10-message stop stays, and cloud still cannot reach your Mac."
     }
   ],
   "owner": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6)",
@@ -54,6 +49,6 @@
   "ref": "record session-messages, section \"Reach between the cloud and the owner's computer\" (commit ddc0f83c); step session-messaging-plan; draft PR #1051",
   "short": "Replace session messages",
   "status": "open",
-  "title": "Which path should replace messages between sessions, so the 10-message stop and the cloud-to-computer gap both go away?",
+  "title": "Item 153's mailbox page cannot reach your Mac. Which path should replace it?",
   "why": "One path for cloud and computer, nothing extra running, and a 12-message test on your Mac before any build."
 }

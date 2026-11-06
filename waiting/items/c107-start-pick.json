@@ -1,0 +1,40 @@
+{
+  "added": "2026-11-06T19:59:00Z",
+  "context": "Goal: your Mac coordinator starts its lane sessions with no click from you.\nProblem (goal): the desktop app shows a card for each start unless it is kind user_asked on a turn you typed; no setting or hook removes it.\nBased on (measured): your probe, 13:55 CST Nov 6 (item 296): user_asked on your typed turn, no card, 2 of 2; offer, card.\nBased on (read): \"Allow rules have no effect in bypassPermissions\" (code.claude.com/docs/en/permission-modes.md); the card showed in Bypass on Oct 26.\nDeparts from: main, decision lanes-start-as-agents \"each Mac lane start is one press\" \u2014 becomes one typed line per batch.\nMeanwhile: the lane waits for your pick, then builds it. Probe 2 (item 296) checks the branch cut and does not block this pick.",
+  "holds": "How the Mac coordinator starts lane sessions.",
+  "home": "decision lanes-start-as-agents",
+  "id": "c107-start-pick",
+  "kind": "decision",
+  "n": 297,
+  "options": [
+    {
+      "gain": "One line from you per batch, no card.",
+      "how": "You type \"start the lanes\"; on that turn the coordinator starts every ready lane with kind user_asked.",
+      "key": "a",
+      "label": "One typed line per batch",
+      "lose": "A lane that becomes ready later waits for your next line."
+    },
+    {
+      "gain": "No line and no card, ever.",
+      "how": "Mac lanes run as background agents in the coordinator, not sessions.",
+      "key": "b",
+      "label": "Lanes as background agents",
+      "lose": "Goes against your ruling of 2026-11-04 (item 168, a lane is a session); a lane dies with the coordinator."
+    },
+    {
+      "gain": "No change.",
+      "how": "Nothing changes.",
+      "key": "c",
+      "label": "Keep one press per start",
+      "lose": "One card per lane, as today."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 2,
+  "ref": "step c107; lane local-lane-start-no-click (session_013NEJL2TLonvddw6ByF5XGE)",
+  "short": "Mac lane start, no click",
+  "status": "open",
+  "title": "How should your Mac coordinator start lanes with no click?",
+  "why": "Your ask (13:24 CST): local coordinators still need your press to start each lane."
+}
