@@ -10,7 +10,7 @@
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V]
-                          print the review record for the head SHA that was reviewed. Stops (exit 1) when the PR's live head is another
+                          print the review record for the head SHA that was reviewed. It refuses a Kind or Guard that the diff contradicts. Stops (exit 1) when the PR's live head is another
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
@@ -55,6 +55,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
+import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -92,6 +93,8 @@ UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not r
 # The two role cites name no tier: a lane must not learn which tier may claim a merge.
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
+# The paths a review record's `--guard no` refuses: the rule dirs, then the tool and the settings. It reads RULE_DIRS, never a copy.
+GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "settings.json")
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 
@@ -800,6 +803,16 @@ class Host:
             if m and body.splitlines()[:1] == [REVIEW_MARKER]:
                 found.setdefault(int(m.group(1)), []).append(body)
         return found
+
+    def pr_files(self, n):
+        """-> [(path, status)] of the pull request's changed files, one paged read of pulls/<n>/files. A rename also gives its old path as removed.
+        A failed read is a Stop, never an empty list, which would read as a clean diff."""
+        out = []
+        for f in self.pages(f"pulls/{n}/files"):
+            out.append((f["filename"], f["status"]))
+            if f.get("previous_filename"):
+                out.append((f["previous_filename"], "removed"))
+        return out
 
     def open_heads(self):
         """-> {head branch name: (head sha, PR base)} of the open pull requests, every page. A failed read raises Stop: never an empty set,
@@ -2916,6 +2929,18 @@ def write_merge_role(tier):
             tmp.unlink()
         raise Stop(f"cannot write the merge role to {path} {ROLE_CITE}: {e}.")
 
+def guard_hits(paths):
+    """-> the sorted paths that start with a GUARD_PATHS entry."""
+    return sorted(p for p in paths if p.startswith(GUARD_PATHS))
+
+def kind_misfits(kind, files):
+    """-> the sorted paths that break the kind, over (path, status) pairs. docs-only: a path not ending .md. delete-only: a status other than removed."""
+    if kind == "docs-only":
+        return sorted(p for p, _ in files if not p.endswith(".md"))
+    if kind == "delete-only":
+        return sorted(p for p, st in files if st != "removed")
+    return []
+
 def main(argv, host=None, lock=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
     p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")
@@ -3003,6 +3028,13 @@ def main(argv, host=None, lock=None):
                 raise Stop(f"the pull request is {info['state']} " + REVIEW_CITE)
             if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
+            files = h.pr_files(a.pr)
+            hits = guard_hits([p for p, _ in files])
+            if a.guard == "no" and hits:
+                raise Stop("Guard or check: the diff changes " + ", ".join(hits) + ", so --guard no is false. Write the record with --guard yes. " + REVIEW_CITE)
+            misfits = kind_misfits(a.kind, files)
+            if misfits:
+                raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
                 earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
                 last = earlier[-1] if earlier else None
