@@ -1,9 +1,9 @@
 {
- "title": "Each child repo's guards get a verdict: promote to claude-settings, duplicate, stays, or delete",
- "phase": "now",
- "status": "doing",
- "order": 494,
- "why": "Owner ask, Nov 3 15:58 CST: guards built in child repos may belong in claude-settings, which is the law in every child repo.",
- "note": "Survey only: a plan record gives each child-repo guard one verdict (promote, duplicate, stays, delete). Builds nothing; promotions are their own steps, prose-path-check-whole-tree through mjs-load-files (orders 500-510, rank = work order). Lane session_013NEJL38qbqasnCHAbZCNnu done; with the batch runner: PR #1119, head ea66d8e. Its owner questions: coordinator is asking in chat (Nov 3 16:42 CST). Owner question 3 (page item 215, single-repo promote rows mailaudit 7, 17, 18; banchi 30; degen 17): coordinator took pick a, promote now, Nov 3 16:58 CST (undoable; serves the owner's 15:58 CST ask). Their promotion lanes start as plan lanes free up.",
- "updatedAt": "2026-11-03T23:12:00Z"
+  "title": "Each child repo's guards get a verdict: promote to claude-settings, duplicate, stays, or delete",
+  "phase": "now",
+  "status": "done",
+  "order": 494,
+  "why": "Owner ask, Nov 3 15:58 CST: guards built in child repos may belong in claude-settings, which is the law in every child repo.",
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): DONE, evidence on main: ea66d8ee1, #1119.\nSurvey only: a plan record gives each child-repo guard one verdict (promote, duplicate, stays, delete). Builds nothing; promotions are their own steps, prose-path-check-whole-tree through mjs-load-files (orders 500-510, rank = work order). Lane session_013NEJL38qbqasnCHAbZCNnu done; with the batch runner: PR #1119, head ea66d8e. Its owner questions: coordinator is asking in chat (Nov 3 16:42 CST). Owner question 3 (page item 215, single-repo promote rows mailaudit 7, 17, 18; banchi 30; degen 17): coordinator took pick a, promote now, Nov 3 16:58 CST (undoable; serves the owner's 15:58 CST ask). Their promotion lanes start as plan lanes free up.",
+  "updatedAt": "2026-11-06T18:03:00Z"
 }

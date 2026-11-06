@@ -1,9 +1,9 @@
 {
- "title": "No-undo check: narrow to the two undo shapes",
- "phase": "checks",
- "status": "doing",
- "order": 529,
- "why": "Owner picked a on page item 167 (Nov 3 18:16 CST).",
- "note": "Lane session_013NEJL2Yi1iyx98kfwkRJxW, PR #1099. Close item 167 when the ruling lands in its home record. Named by the coordinator Nov 3 18:19 CST.",
- "updatedAt": "2026-11-04T00:21:00Z"
+  "title": "No-undo check: narrow to the two undo shapes",
+  "phase": "checks",
+  "status": "todo",
+  "order": 529,
+  "why": "Owner picked a on page item 167 (Nov 3 18:16 CST).",
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): HELD until foundations F1-F3 (guard files) land.\nLane session_013NEJL2Yi1iyx98kfwkRJxW, PR #1099. Close item 167 when the ruling lands in its home record. Named by the coordinator Nov 3 18:19 CST.",
+  "updatedAt": "2026-11-06T18:03:00Z"
 }

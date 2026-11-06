@@ -1,9 +1,9 @@
 {
- "title": "ios-adblock: bot pin-bump merges start no push CI run on main",
- "phase": "next",
- "status": "todo",
- "order": 516,
- "why": "Found by the ios-adblock CI-hygiene lane, Nov 3: bot pin-bump merges #131 to #134 started no push CI run on main.",
- "note": "Find why the bot's merges trigger no push run (token kind or workflow trigger), then fix so main is checked after each merge. Coordinator note, Nov 3 17:16 CST.",
- "updatedAt": "2026-11-03T23:18:00Z"
+  "title": "ios-adblock: bot pin-bump merges start no push CI run on main",
+  "phase": "next",
+  "status": "doing",
+  "order": 516,
+  "why": "Found by the ios-adblock CI-hygiene lane, Nov 3: bot pin-bump merges #131 to #134 started no push CI run on main.",
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): lane started now (resume-now, no foundation files).\nFind why the bot's merges trigger no push run (token kind or workflow trigger), then fix so main is checked after each merge. Coordinator note, Nov 3 17:16 CST.",
+  "updatedAt": "2026-11-06T18:03:00Z"
 }

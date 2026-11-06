@@ -1,9 +1,9 @@
 {
- "title": "The session-start hook tells an owner-started session to merge its own PR under the repo's grant; a coordinator-started lane hands off",
- "phase": "now",
- "status": "doing",
- "order": 519,
- "why": "hooks/session_start.sh. Feedback fb-1538-1. Scope from handoffs/next-coordinator-lanes.md on branch handoff/next-coordinator (coordinator, Nov 3 17:27 CST).",
- "note": "Lane session_013NEJL47tq8a72GBSwC9JY9, started by the coordinator Nov 3 17:26 CST.",
- "updatedAt": "2026-11-03T23:30:00Z"
+  "title": "The session-start hook tells an owner-started session to merge its own PR under the repo's grant; a coordinator-started lane hands off",
+  "phase": "now",
+  "status": "done",
+  "order": 519,
+  "why": "hooks/session_start.sh. Feedback fb-1538-1. Scope from handoffs/next-coordinator-lanes.md on branch handoff/next-coordinator (coordinator, Nov 3 17:27 CST).",
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): DONE, evidence on main (coordinator's replan check).\nLane session_013NEJL47tq8a72GBSwC9JY9, started by the coordinator Nov 3 17:26 CST.",
+  "updatedAt": "2026-11-06T18:03:00Z"
 }

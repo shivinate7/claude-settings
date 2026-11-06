@@ -1,9 +1,9 @@
 {
- "title": "A red main run may be re-run once; a green re-run clears it",
- "phase": "merge",
- "status": "doing",
- "order": 530,
- "why": "Owner answered page item 166 with 'one time rerun' (Nov 3 18:16 CST); coordinator reading.",
- "note": "Lane session_013NEJL3r8JbyJKhCzBoC6sF. Close item 166 when the ruling lands in no-merge-onto-red-main. Named by the coordinator Nov 3 18:19 CST.",
- "updatedAt": "2026-11-04T00:21:00Z"
+  "title": "A red main run may be re-run once; a green re-run clears it",
+  "phase": "merge",
+  "status": "doing",
+  "order": 530,
+  "why": "Owner answered page item 166 with 'one time rerun' (Nov 3 18:16 CST); coordinator reading.",
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): step red-main-same-sha-green merged here.\nLane session_013NEJL3r8JbyJKhCzBoC6sF. Close item 166 when the ruling lands in no-merge-onto-red-main. Named by the coordinator Nov 3 18:19 CST.",
+  "updatedAt": "2026-11-06T18:03:00Z"
 }

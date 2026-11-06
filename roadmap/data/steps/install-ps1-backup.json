@@ -1,9 +1,9 @@
 {
- "title": "install.ps1 keeps a backup of a plain settings.json, as install.sh does",
- "phase": "now",
- "status": "doing",
- "order": 490,
- "why": "Deep audit 1102 (report docs/plans/deep-audit/report.md on audit/deep-1102 6b6a41f3, table 'claude-settings: homes'): install.ps1:985-1000 overwrites a plain settings.json with no backup; decision copy-mode-overwrites-no-backup:5 makes settings.json the exception, and install.sh:1004-1008 keeps one.",
- "note": "Carry install.sh's backup form (first .orig, later .bak.<time>.<pid>, newest kept) to install.ps1. Done: a test of install.ps1 with a tool-written plain settings.json keeps a backup, red on old code. Windows proof is unmeasured from the cloud. Lane session_013NEJL2KFeT8wgfxsZapdBV, started by the coordinator Nov 3. Ready. Done Nov 3 17:06 CST: PR #1120, with batch runner 8.",
- "updatedAt": "2026-11-03T23:07:00Z"
+  "title": "install.ps1 keeps a backup of a plain settings.json, as install.sh does",
+  "phase": "now",
+  "status": "done",
+  "order": 490,
+  "why": "Deep audit 1102 (report docs/plans/deep-audit/report.md on audit/deep-1102 6b6a41f3, table 'claude-settings: homes'): install.ps1:985-1000 overwrites a plain settings.json with no backup; decision copy-mode-overwrites-no-backup:5 makes settings.json the exception, and install.sh:1004-1008 keeps one.",
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): DONE, evidence on main: #1120.\nCarry install.sh's backup form (first .orig, later .bak.<time>.<pid>, newest kept) to install.ps1. Done: a test of install.ps1 with a tool-written plain settings.json keeps a backup, red on old code. Windows proof is unmeasured from the cloud. Lane session_013NEJL2KFeT8wgfxsZapdBV, started by the coordinator Nov 3. Ready. Done Nov 3 17:06 CST: PR #1120, with batch runner 8.",
+  "updatedAt": "2026-11-06T18:03:00Z"
 }

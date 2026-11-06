@@ -1,9 +1,9 @@
 {
- "title": "The shared map check MAP7 reads only files under mapPaths",
- "phase": "now",
- "status": "todo",
- "order": 103.26,
- "why": "MAP7 reads every tracked file with a mapped extension in the whole repo, not only mapPaths. With json in banchi's codeExtensions that is 606 files, and map-check stalls for over 5 min on demo-assets/mirror/bundle/chunk-0.json (41 MB).",
- "note": "Nov 5 09:17 CST (coordinator): fix is MAP7 reads only files under mapPaths, plus a test on a large file outside them. It unblocks a small banchi lane that adds json map lines and restores decision hints on 22 files (91 ids), which banchi-retire-map-py ships without, as a banchi debt. The coordinator starts the lane.",
- "updatedAt": "2026-11-05T15:17:00Z"
+  "title": "The shared map check MAP7 reads only files under mapPaths",
+  "phase": "now",
+  "status": "done",
+  "order": 103.26,
+  "why": "MAP7 reads every tracked file with a mapped extension in the whole repo, not only mapPaths. With json in banchi's codeExtensions that is 606 files, and map-check stalls for over 5 min on demo-assets/mirror/bundle/chunk-0.json (41 MB).",
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): DONE, evidence on main (coordinator's replan check).\nNov 5 09:17 CST (coordinator): fix is MAP7 reads only files under mapPaths, plus a test on a large file outside them. It unblocks a small banchi lane that adds json map lines and restores decision hints on 22 files (91 ids), which banchi-retire-map-py ships without, as a banchi debt. The coordinator starts the lane.",
+  "updatedAt": "2026-11-06T18:03:00Z"
 }

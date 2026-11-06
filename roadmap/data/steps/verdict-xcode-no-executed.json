@@ -1,9 +1,9 @@
 {
- "title": "verdict prints PASS for an Xcode run that executed no test",
- "phase": "now",
- "status": "doing",
- "order": 514,
- "why": "Found by the ios-adblock CI-hygiene lane, Nov 3: verdict reads PASS with no test count for an xcodebuild run.",
- "note": "Lane session_013NEJKzkmWLHdJfNqySLNuA, started by the coordinator Nov 3 17:16 CST.",
- "updatedAt": "2026-11-03T23:18:00Z"
+  "title": "verdict prints PASS for an Xcode run that executed no test",
+  "phase": "now",
+  "status": "done",
+  "order": 514,
+  "why": "Found by the ios-adblock CI-hygiene lane, Nov 3: verdict reads PASS with no test count for an xcodebuild run.",
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): DONE, evidence on main (coordinator's replan check).\nLane session_013NEJKzkmWLHdJfNqySLNuA, started by the coordinator Nov 3 17:16 CST.",
+  "updatedAt": "2026-11-06T18:03:00Z"
 }

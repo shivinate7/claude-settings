@@ -1,0 +1,9 @@
+{
+  "title": "page_grant.py proves where each fetched answer came from",
+  "phase": "now",
+  "status": "doing",
+  "order": 103.344,
+  "why": "page_grant.py proves where each fetched answer came from.",
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): PR #1299 in batch 31 #1300; fixes review round 1 findings F1 to F3 on #1293 (first as #1295).",
+  "updatedAt": "2026-11-06T18:03:00Z"
+}

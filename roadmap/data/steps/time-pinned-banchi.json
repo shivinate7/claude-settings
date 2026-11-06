@@ -1,9 +1,9 @@
 {
- "title": "banchi: judge its time-pinned test candidates and fix the true ones",
- "phase": "cleanup",
- "status": "todo",
- "order": 103.21041000000001,
- "why": "Part 2 of step time-pinned-tests-go. The finder in PR #1026 listed 357 candidates in banchi (docs/plans/time-pinned-tests.md).",
- "note": "Candidates: sleep 119, elapsed-assert 2, test-cap 0, wait-cap 236, total 357. Many may be false matches; judge each first. Replace each true finding with an outcome check (fake clock, wait for a condition), or record it as a debt, per decision test-strategy-reset. Then re-measure banchi's job caps. Starts once PR #1026 merges.",
- "updatedAt": "2026-11-02T03:26:00Z"
+  "title": "banchi: judge its time-pinned test candidates and fix the true ones",
+  "phase": "cleanup",
+  "status": "done",
+  "order": 103.21041000000001,
+  "why": "Part 2 of step time-pinned-tests-go. The finder in PR #1026 listed 357 candidates in banchi (docs/plans/time-pinned-tests.md).",
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): merged into time-pinned-tests-go.\nCandidates: sleep 119, elapsed-assert 2, test-cap 0, wait-cap 236, total 357. Many may be false matches; judge each first. Replace each true finding with an outcome check (fake clock, wait for a condition), or record it as a debt, per decision test-strategy-reset. Then re-measure banchi's job caps. Starts once PR #1026 merges.",
+  "updatedAt": "2026-11-06T18:03:00Z"
 }

@@ -1,9 +1,9 @@
 {
- "title": "A coordinator can send its own batch runner a merge go without an auto-mode refusal",
- "phase": "now",
- "status": "doing",
- "order": 491,
- "why": "Owner ask, Nov 3 15:53 CST: the auto-mode 'Owner Session Message' entry refused the coordinator's merge-go message to its batch runner, which blocks page item 154 (q_max #1011 batch).",
- "note": "Narrow the merge carve-out of the 'Owner Session Message' entry in decision auto-mode-owner-acts so a coordinator may send its own batch runner a merge go under decision standing-merge-grant. Changes an allow entry: net-value test after round 3. Lane session_013NEJL3cgfDJovZogH9rqZD, started by the coordinator Nov 3. Ready.",
- "updatedAt": "2026-11-03T22:05:00Z"
+  "title": "A coordinator can send its own batch runner a merge go without an auto-mode refusal",
+  "phase": "now",
+  "status": "done",
+  "order": 491,
+  "why": "Owner ask, Nov 3 15:53 CST: the auto-mode 'Owner Session Message' entry refused the coordinator's merge-go message to its batch runner, which blocks page item 154 (q_max #1011 batch).",
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): DONE, evidence on main: 08c6ae363.\nNarrow the merge carve-out of the 'Owner Session Message' entry in decision auto-mode-owner-acts so a coordinator may send its own batch runner a merge go under decision standing-merge-grant. Changes an allow entry: net-value test after round 3. Lane session_013NEJL3cgfDJovZogH9rqZD, started by the coordinator Nov 3. Ready.",
+  "updatedAt": "2026-11-06T18:03:00Z"
 }

@@ -1,9 +1,9 @@
 {
- "title": "The owner's plain-word Opus ask in his own typed message lifts the Opus refusal",
- "phase": "now",
- "status": "todo",
- "order": 537,
- "why": "Owner chat Nov 3 19:47 CST, \"a read plain asks\", to triage's question: when he says \"send opus agents\" or \"some opus judges\" in chat, the spawn just runs, without the keyword `opus 2h` or `override`. He asked 19:31 CST: \"i thought we fixed this ... when i type saying send opus agents it just works its just quotable my words and the guard lets it through\".",
- "note": "Ruling home: decision owner-override (rewrite in place: a plain Opus ask in the owner's own typed prompt grants an Opus override, beside the keyword forms) and decision agent-model-cap. It adds to the Oct 29 ruling that a grant can live on the roadmap step (step opus-grant-on-step); that route stays. Shape for the lane: the UserPromptSubmit hook reads only the owner's typed prompt, never agent text or tool output; a model judge (call_judge) reads the sentence, so \"maybe opus?\" or a question grants nothing; the grant is kind opus with the owner's words in guard.log, for the session and its agents, with a bounded time and the role the words name, else every role. Red tests first: a plain ask lifts the refusal; a question, a negation, quoted agent text and a notice tag do not. Ready. Landed Nov 5 in batch 10 (59bff081): #1244 scopes a plain Opus ask from the owner's earlier prompts (item 226 b). Open: item 256, whether later prompts may narrow a live grant.",
- "updatedAt": "2026-11-05T12:40:00Z"
+  "title": "The owner's plain-word Opus ask in his own typed message lifts the Opus refusal",
+  "phase": "now",
+  "status": "done",
+  "order": 537,
+  "why": "Owner chat Nov 3 19:47 CST, \"a read plain asks\", to triage's question: when he says \"send opus agents\" or \"some opus judges\" in chat, the spawn just runs, without the keyword `opus 2h` or `override`. He asked 19:31 CST: \"i thought we fixed this ... when i type saying send opus agents it just works its just quotable my words and the guard lets it through\".",
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): DONE, evidence on main: #1204, #1208; item 256's later-messages scope stays a follow-up.\nRuling home: decision owner-override (rewrite in place: a plain Opus ask in the owner's own typed prompt grants an Opus override, beside the keyword forms) and decision agent-model-cap. It adds to the Oct 29 ruling that a grant can live on the roadmap step (step opus-grant-on-step); that route stays. Shape for the lane: the UserPromptSubmit hook reads only the owner's typed prompt, never agent text or tool output; a model judge (call_judge) reads the sentence, so \"maybe opus?\" or a question grants nothing; the grant is kind opus with the owner's words in guard.log, for the session and its agents, with a bounded time and the role the words name, else every role. Red tests first: a plain ask lifts the refusal; a question, a negation, quoted agent text and a notice tag do not. Ready. Landed Nov 5 in batch 10 (59bff081): #1244 scopes a plain Opus ask from the owner's earlier prompts (item 226 b). Open: item 256, whether later prompts may narrow a live grant.",
+  "updatedAt": "2026-11-06T18:03:00Z"
 }

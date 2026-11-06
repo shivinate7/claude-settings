@@ -1,9 +1,9 @@
 {
- "title": "The plain-prose lint, its CI step and shared action drop the STE name",
- "phase": "cleanup",
- "status": "todo",
- "order": 103.2104,
- "why": "Owner pick b, Nov 2 13:22 CST (page item 172): drop STE as a named standard everywhere. Draft PR #1105 left the lint's names as they are.",
- "note": "Rename lint/ste_lint.py, the CI step 'STE lint' and actions/ste-lint to plain-prose names; child repos pin the action by SHA, so keep the old action path working until each child moves its pin (rule action-pins-follow-sessions). Also remove unwired lint/ste_gate.py and lint/md_sweep.py, which decision ste-guard-fixes-not-nags says were deleted. After #1105 merges. Ready. Held (one lane, one topic): starts after ste-lint-diff-fail-closed lands. (coordinator, Nov 3 16:57 CST)",
- "updatedAt": "2026-11-03T23:10:00Z"
+  "title": "The plain-prose lint, its CI step and shared action drop the STE name",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 501.5,
+  "why": "Owner pick b, Nov 2 13:22 CST (page item 172): drop STE as a named standard everywhere. Draft PR #1105 left the lint's names as they are.",
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): ordered after ste-lint-diff-fail-closed.\nRename lint/ste_lint.py, the CI step 'STE lint' and actions/ste-lint to plain-prose names; child repos pin the action by SHA, so keep the old action path working until each child moves its pin (rule action-pins-follow-sessions). Also remove unwired lint/ste_gate.py and lint/md_sweep.py, which decision ste-guard-fixes-not-nags says were deleted. After #1105 merges. Ready. Held (one lane, one topic): starts after ste-lint-diff-fail-closed lands. (coordinator, Nov 3 16:57 CST)",
+  "updatedAt": "2026-11-06T18:03:00Z"
 }
