@@ -787,9 +787,13 @@ def cmd_exe_delete_hit(segment: str) -> str:
     return ""
 
 
+# The one lease form the remedy offers: push_verdict lets it through once a sha fills it, and the
+# auto-mode "Own Branch Lease Push" entry in settings.json quotes it (owner page item 286 b, Nov 6).
+LEASE_PUSH_FORM = "git push --force-with-lease=<branch>:<expected sha>"
 PUSH_REASON = (
     "Rule (Git): a forced push can overwrite newer remote work with a stale copy. "
-    "Remedy: retry with --force-with-lease --force-if-includes."
+    "Remedy: on a branch this session pushed, retry as `" + LEASE_PUSH_FORM + "`, with the remote tip "
+    "you expect as <expected sha> (`git rev-parse origin/<branch>`)."
 )
 PUSH_MAIN_REASON = (
     "Rule (Git): this push writes the default branch, main or master. Main moves only by pull request "

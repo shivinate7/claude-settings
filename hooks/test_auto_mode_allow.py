@@ -333,9 +333,11 @@ class OwnBranchLeasePushIsAllowed(unittest.TestCase):
     def test_guard_lets_the_filled_form_through(self):
         self.assertTrue(LEASE_FORM, "guard_push_delete must define LEASE_PUSH_FORM")
         filled = LEASE_FORM.replace("<branch>", "feat").replace("<expected sha>", "0" * 40)
-        args = filled.split()[2:] + ["origin", "feat"]
-        self.assertEqual(guard_push_delete.push_verdict(args, ""), "")
-        self.assertEqual(guard_push_delete.push_verdict(["--force-with-lease", "origin", "feat"], ""), "deny")
+        # (force, mirror, every, includes, unpinned, leased): a lease that names its own sha is pinned.
+        parsed = guard_push_delete._push_parse(filled.split()[2:] + ["origin", "feat"])[:6]
+        self.assertEqual(parsed, (False, False, False, False, False, True))
+        bare = guard_push_delete._push_parse(["--force-with-lease", "origin", "feat"])[:6]
+        self.assertEqual(bare, (False, False, False, False, True, True))
 
 
 class OwnCiRunCancelIsAllowed(unittest.TestCase):
