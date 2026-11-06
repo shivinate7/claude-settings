@@ -421,6 +421,23 @@ class Provenance(Base):
                              answers={ITEM_ID: answer()})
         self.assertNotCounted(self.check(self.repo(), fetched), "folder holds another item's file", reason="holds")
 
+    def test_wrong_page_url_check_uses_the_folder_up(self):
+        root, fetched = self.repo(), self.pair()
+        self.assertNotCounted(self.check(root, fetched, page=OTHER_URL), "first check, wrong page URL")
+        self.assertNotCounted(self.check(root, fetched), "same folder, right URL", reason="already checked")
+
+    def test_unknown_registry_check_uses_the_folder_up(self):
+        fetched = self.pair()
+        self.assertUnknown(self.check(self.repo(extras=False), fetched), "first check, repo with no extras file")
+        self.assertNotCounted(self.check(self.repo(), fetched), "same folder, right root", reason="already checked")
+
+    def test_stray_file_check_uses_the_folder_up(self):
+        fetched = self.fetch(items={ITEM_ID: item(), "other-item": item(id="other-item")},
+                             answers={ITEM_ID: answer()})
+        self.assertNotCounted(self.check(self.repo(), fetched), "first check, stray file", reason="holds")
+        os.remove(os.path.join(fetched, "items", "other-item.json"))
+        self.assertNotCounted(self.check(self.repo(), fetched), "stray file removed", reason="already checked")
+
     def test_stamp_copied_onto_a_hand_built_folder_not_counted(self):
         made = self.new_fetch()
         fetched = self.fetch(items={ITEM_ID: item()}, answers={ITEM_ID: answer()}, hand=True)

@@ -21,12 +21,13 @@ Verdict, one line on stdout, then exit:
   unknown: REASON                                exit 2. No readable registry or waiting-page entry, a fetched file that is
                                                  not one JSON object, or a crash.
 Counted only when all hold:
-  1. --page-url is the same artifact (layout.artifact_id) as the registry's `waiting-page` entry.
+  1. Rule 2's stamp is used up first. Then --page-url is the same artifact (layout.artifact_id) as the registry's `waiting-page` entry.
   2. DIR came from this fetch: `--new-fetch` made it (its stamp names DIR), no check used it before, it holds nothing
      but answers/ID.json and items/ID.json, and no file in it is older than the stamp. A folder made by hand, a reused
      folder (an answer the owner withdrew stays in it, as a re-fetch of an absent doc saves no file), or a file copied
      with its old time (`cp -p`) is not counted. A plain copy gets a new time, so the checker cannot see it.
-     Every check uses the folder up, whatever its verdict: a retry, such as one with the right --pick, fetches again. answers/ID.json and items/ID.json exist. Relay text alone never counts.
+     A check uses the folder up first, so every verdict uses it up: a retry fetches again into a new folder.
+     answers/ID.json and items/ID.json exist. Relay text alone never counts.
   3. The answer's `item` is --item and the item's `id`, and the answer's `n` is the item's `n`.
   4. The item is open: `status` is `open`, or absent (the page hides only `closed`, page.html `state.items`). A closed
      item takes no answer, except an arbiter ruling (`arbiter` true, written closed) answered `overturn`.
@@ -125,9 +126,9 @@ def new_fetch(parent):
     return folder
 
 
-def prove_fresh(fetched, item_id):
-    """Not counted unless `fetched` is a --new-fetch folder no check used, holding only this item's two docs, each no
-    older than the stamp. Uses the stamp up, so a second check of the folder is not counted."""
+def use_stamp(fetched):
+    """Use up the stamp of `fetched`, a --new-fetch folder no check used, and return (folder, stamp time). The first
+    step of every check, so any verdict, even one for a wrong --root, URL or pick, uses the folder up."""
     folder = os.path.realpath(fetched)
     stamp = folder + STAMP
     if not os.path.isfile(stamp):
@@ -141,7 +142,12 @@ def prove_fresh(fetched, item_id):
         named = None
     if named != folder:
         raise not_counted("stamp names another folder: make this one with --new-fetch, then fetch into it")
-    made = os.stat(stamp).st_mtime_ns
+    os.replace(stamp, folder + USED)  # a rename keeps the stamp's mtime
+    return folder, os.stat(folder + USED).st_mtime_ns
+
+
+def prove_fresh(folder, made, item_id):
+    """Not counted unless `folder` holds only this item's two docs, each no older than the stamp."""
     allowed = {"answers", "items", os.path.join("answers", item_id + ".json"), os.path.join("items", item_id + ".json")}
     for dirpath, dirnames, filenames in os.walk(folder):
         for name in dirnames + filenames:
@@ -151,7 +157,6 @@ def prove_fresh(fetched, item_id):
                 raise not_counted("fetch folder holds %s: it holds only this item's answer and item" % json.dumps(rel))
             if name in filenames and os.stat(path).st_mtime_ns < made:
                 raise not_counted("%s is older than the fetch folder: it came from an earlier fetch" % rel)
-    os.replace(stamp, folder + USED)
 
 
 def option_keys(item):
@@ -196,6 +201,10 @@ def choice_of(item, answer):
 
 def judge(args):
     """The counted line, or a Verdict raised."""
+    folder, made = use_stamp(args.fetched)
+    if not args.item or os.sep in args.item or "/" in args.item or args.item in (".", ".."):
+        raise not_counted("item id %r is not a plain id" % args.item)
+    prove_fresh(folder, made, args.item)
     layout = load_layout()
     try:
         entries = layout.artifacts(args.root)
@@ -207,9 +216,6 @@ def judge(args):
     page_id = layout.artifact_id(args.page_url)
     if not page_id or page_id != layout.artifact_id(pages[0]["url"]):
         raise not_counted("page URL is not the registered waiting page")
-    if not args.item or os.sep in args.item or "/" in args.item or args.item in (".", ".."):
-        raise not_counted("item id %r is not a plain id" % args.item)
-    prove_fresh(args.fetched, args.item)
 
     answer = read_doc(args.fetched, "answers", args.item)
     if answer is None:
