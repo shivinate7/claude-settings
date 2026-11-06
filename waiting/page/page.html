@@ -1,3 +1,4 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <meta charset="utf-8">
 <title>claude-settings Cockpit</title>
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -142,6 +143,12 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .inbundle { font-weight: 600; color: var(--acc); }
 /* The lane the item waits on: the weight and colour of "goes with No. 4". It never holds the owner's answer, so it is no stake line. */
 .onlane { font-weight: 600; color: var(--acc); min-width: 0; overflow-wrap: anywhere; }
+/* A wait on a CI run or a PR extends the lane span: same weight and accent, and its link is the one target in it. */
+.onlane.waits a { display: inline-flex; align-items: center; gap: 2px; min-height: 24px; color: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1.5px; border-radius: 4px; }
+.onlane.waits a:hover { text-decoration-thickness: 2.5px; }
+.onlane.waits a:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+@media (pointer: coarse) { .onlane.waits a { min-height: 44px; } }
+@media (forced-colors: active) { .onlane.waits a { color: LinkText; } }
 
 /* Options side by side; each card's rows line up so lose sits beside lose. */
 .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 10px; }
@@ -892,7 +899,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 
 <!-- The one list of top-level item fields. The page warns on a field outside it, and the guard (rule item-field-rendered) refuses a write of one.
      Add a field here when the page draws it. A key inside options or steps is not listed. -->
-<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "lastAnswer", "lane"]</script>
+<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "lastAnswer", "lane", "waits"]</script>
 
 <!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The page writer replaces it on each publish
      (splice.py) and keeps designData. Empty, the Status tab says the plan is unknown. -->
@@ -1076,7 +1083,7 @@ function freezeSeen() {
   // The last Send is the newest answer anywhere, a closed item's last answer included.
   const times = [...Object.values(state.answers).map((a) => a && a.at), ...feed.all.map((i) => i && lastOf(i) && lastOf(i).at)].map(ts).filter(Number.isFinite);
   const last = times.length ? Math.max(...times) : -Infinity;
-  const old = (it) => !isRuling(it) && !state.answers[it.id] && ts(it.added) < last;
+  const old = (it) => !isRuling(it) && !state.answers[it.id] && !answeredByWait(it) && ts(it.added) < last;
   state.seen = new Set(state.items.filter(old).map((it) => it.id));
 }
 // Sunk, worked out once and kept like seen: an item with a saved answer when the items and answers loaded (isSaved reads no receipts).
@@ -1086,13 +1093,13 @@ function freezeSeen() {
 const isSunk = (it) => !!state.sunk && mates(it).every((x) => state.sunk.has(x.id));
 function freezeSunk() {
   if (state.sunk || !feed.items || !feed.answers) return;
-  state.sunk = new Set(state.items.filter((it) => !isRuling(it) && isSaved(it)).map((it) => it.id));
+  state.sunk = new Set(state.items.filter((it) => !isRuling(it) && (isSaved(it) || answeredByWait(it))).map((it) => it.id));
 }
 function sorted() {
   const by = { holds: [], due: [], calm: [], stands: [], answered: [] };
   state.items.forEach((it) => by[isSunk(it) ? "answered" : tierOf(it)].push(it));
   // Newest answer first; a group sits at its newest member's time.
-  const sentAt = (it) => Math.max(...mates(it).map((x) => Date.parse((state.answers[x.id] || {}).at) || 0));
+  const sentAt = (it) => Math.max(...mates(it).map((x) => Date.parse(sentOf(x).at) || 0));
   by.answered.sort((a, b) => sentAt(b) - sentAt(a) || a.n - b.n);
   const age = (it) => Math.min(...mates(it).map((x) => ts(x.added)));
   const dl = (it) => Math.min(...mates(it).map((x) => ts(x.by)));
@@ -1116,6 +1123,28 @@ const answerable = () => [...state.items, ...state.rulings];
 // The owner's saved answer. A ruling was an open item once, so a record under its id that is no overturn is stale and counts as none.
 const savedOf = (it) => { const a = state.answers[it.id]; return a && (!isRuling(it) || a.choice === OVERTURN) ? a : undefined; };
 const isSaved = (it) => !!savedOf(it) && !state.changing[it.id];
+// An item the owner answered that now waits on a CI run or a PR: `waits` and `lastAnswer` are both set. The page keeps no answers record for it.
+// savedOf and isSaved stay out of this on purpose (Withdraw and the receipts read them), so each place that counts it asks here too.
+const waitsOf = (it) => {
+  const w = it.waits;
+  if (!w || typeof w !== "object" || typeof w.repo !== "string" || !/^[\w.-]+\/[\w.-]+$/.test(w.repo)) return null;
+  // A run id or PR number is a whole number above zero, or a string of digits with no leading zero (stale_pages.py parse_waits reads the same form).
+  const num = (v) => (Number.isInteger(v) && v > 0) || (typeof v === "string" && /^[1-9][0-9]*$/.test(v));
+  if (num(w.run)) return { repo: w.repo, run: w.run };
+  if (num(w.pr)) return { repo: w.repo, pr: w.pr };
+  return null;
+};
+const answeredByWait = (it) => !!waitsOf(it) && !!lastOf(it);
+// Drawn as answered on the page: a saved answer, or answered by its wait. A Change on either draws it as open again, until the next Send.
+const isByWait = (it) => !isRuling(it) && answeredByWait(it) && !savedOf(it) && !state.changing[it.id];
+const isAnswered = (it) => isSaved(it) || isByWait(it);
+// The answer record that sets a card's place in the Answered section: its answers record, else (answered by its wait) lastAnswer.
+const sentOf = (it) => state.answers[it.id] || (answeredByWait(it) && lastOf(it)) || {};
+const waitUrl = (w) => "https://github.com/" + w.repo + (w.run ? "/actions/runs/" + w.run : "/pull/" + w.pr);
+// The page has no repo slug of its own, so the words never name the repo: the link's address holds it. A run reads as "a CI run", never by its id (ux-machine-text-hidden).
+const waitWords = (w) => (w.pr ? "PR #" + w.pr : "a CI run");
+// The link holds the whole phrase after "waits on", so the words read as one link and its arrow and screen-reader words follow.
+const waitLink = (w, pre) => h("a", { href: waitUrl(w), target: "_blank", rel: "noopener" }, (pre || "") + waitWords(w), h("span", { "aria-hidden": "true" }, "↗"), h("span", { class: "sr" }, ", opens in a new tab"));
 // The answer a card holds: the owner's draft, or my pick on a question whose pick stands.
 const stoodNow = (it) => standsOk(it) && !savedOf(it);
 const eff = (it) => {
@@ -1123,12 +1152,14 @@ const eff = (it) => {
   if (it.park) return d;
   // A ruling holds one draft, overturn. A pick draft left from when the item was open is ignored.
   if (isRuling(it)) return d && d.choice === OVERTURN ? d : undefined;
+  if (d && d.act === "park") return d; // Park beats a stood pick: the pick stays as text and goes with no answer
   if (d && stoodNow(it) && !d.choice && !d.unstood) return { ...d, choice: pickChoice(it), auto: true, stood: true };
   return d || (stoodNow(it) ? { choice: pickChoice(it), auto: true, stood: true } : undefined);
 };
 function draftReady(it) {
   if (it.park) return ACTS.includes((state.draft[it.id] || {}).act);
   const d = eff(it); if (!d || blocked(it)) return false;
+  if (d.act === "park") return true;
   if (isRuling(it)) return d.choice === OVERTURN;
   if (it.kind === "task") return !!d.done || !!(d.note || "").trim(); // a note alone is a note, not a done mark
   if (!d.choice || d.choice === NONE) return !!(d.note || "").trim(); // a note alone is a none answer
@@ -1182,7 +1213,7 @@ function problem(it) {
   return null;
 }
 const blocked = (it) => { const p = problem(it); return !!(p && p.blocks); };
-const staged = () => [...answerable(), ...parkItems()].filter((it) => !isSaved(it) && draftReady(it));
+const staged = () => [...answerable(), ...parkItems()].filter((it) => !isAnswered(it) && draftReady(it));
 // A changed answer whose draft the owner emptied: Send withdraws the saved record.
 const withdrawing = (it) => !!savedOf(it) && !!state.changing[it.id] && !state.draft[it.id];
 const withdrawn = () => [...answerable(), ...parkItems()].filter(withdrawing);
@@ -1192,15 +1223,20 @@ const withdrawn = () => [...answerable(), ...parkItems()].filter(withdrawing);
 // Each live line is modelled as a pseudo item, so staged, Send, Undo, Withdraw and the draft store take it with no second path.
 // Its key is "park.<id>". An item slug holds no dot, so it can never meet an item's key, and no card or count reads it.
 const ACTS = ["unpark", "drop"], PARK_ID = /^[a-z0-9-]{1,32}$/, parkKey = (id) => "park." + id;
+// An entry whose id is an open item's id is stale: the item is open again, so the page draws no line and no badge for it.
+const parkList = () => { const m = state.meta; return (m && Array.isArray(m.parked) ? m.parked : []).filter((p) => p && typeof p === "object" && !byId(p.id)); };
 function parkItems() {
-  const m = state.meta, list = (m && Array.isArray(m.parked) ? m.parked : []).filter((p) => p && typeof p === "object"), count = new Map(); // a Map: an id such as "constructor" is no prototype name here
+  const m = state.meta, list = parkList(), count = new Map(); // a Map: an id such as "constructor" is no prototype name here
   list.forEach((p) => { count.set(p.id, (count.get(p.id) || 0) + 1); });
   const owner = plain(m && m.writer) || "the page's writer";
   return list.filter((p) => typeof p.id === "string" && PARK_ID.test(p.id) && count.get(p.id) === 1).map((p) => ({ id: parkKey(p.id), park: p, owner, n: "parked " + shorten(plain(p.ref), 60) }));
 }
+// A parked line stages Unpark or Drop. An open card stages Park: it clears the pick and the done mark, and keeps the note.
 function pressPark(it, act) {
   edited();
-  if ((state.draft[it.id] || {}).act === act) delete state.draft[it.id]; else state.draft[it.id] = { act };
+  const on = (state.draft[it.id] || {}).act === act;
+  if (!it.park) { setDraft(it, on ? { act: null } : { act, choice: null, auto: false, done: false }); render(); return; }
+  if (on) delete state.draft[it.id]; else state.draft[it.id] = { act };
   saveDraft(); render();
 }
 function changePark(it, sv) { state.changing[it.id] = true; edited(); state.draft[it.id] = { act: sv.act }; saveDraft(); render(); }
@@ -1223,13 +1259,13 @@ function keepRouted(was, now) {
 }
 function setDraft(it, patch) {
   const next = Object.assign({}, state.draft[it.id], patch);
-  if (!next.choice && !next.done && !next.unstood && !(next.note || "").length) delete state.draft[it.id]; else state.draft[it.id] = next;
+  if (!next.choice && !next.done && !next.unstood && !next.act && !(next.note || "").length) delete state.draft[it.id]; else state.draft[it.id] = next;
   saveDraft();
 }
 function choose(it, key) {
   const cur = state.draft[it.id] || {};
   // A "none" note says what the owner wants instead. It does not carry over to an option.
-  const patch = { choice: key, auto: false };
+  const patch = { choice: key, auto: false, act: null };
   if (key === null && stoodNow(it)) patch.unstood = true; // else my pick would stand again
   if (cur.choice === NONE && key !== NONE) patch.note = "";
   edited(); setDraft(it, patch); repaint(it);
@@ -1242,7 +1278,7 @@ function toggle(it, key) {
   const cur = tickList(it), on = !cur.includes(key);
   const next = it.ranked === true ? (on ? [...cur, key] : cur.filter((k) => k !== key))
     : (it.options || []).map((o) => o.key).filter((k) => k === key ? on : cur.includes(k));
-  const patch = { choice: next.length ? next : null, auto: false };
+  const patch = { choice: next.length ? next : null, auto: false, act: null };
   if (!next.length && stoodNow(it)) patch.unstood = true;
   if ((eff(it) || {}).choice === NONE) patch.note = "";
   edited(); setDraft(it, patch); repaint(it);
@@ -1256,6 +1292,7 @@ function move(it, key, dir) {
 function answerBody(it, d, at) {
   if (it.park) return { parked: true, id: it.park.id, act: d.act, ref: String(it.park.ref == null ? "" : it.park.ref), note: String(it.park.note == null ? "" : it.park.note), at };
   const typed = d.note != null ? d.note : "";
+  if (d.act === "park") return { item: it.id, n: it.n, at, act: "park", note: typed };
   const body = { item: it.id, n: it.n, at, note: typed || (d.auto ? "accepted pick" : "") };
   if (isRuling(it)) body.choice = OVERTURN; else if (it.kind === "decision") body.choice = d.choice || NONE; else if (d.done) body.done = true;
   return body;
@@ -1269,6 +1306,7 @@ function arrow(dir) { const d = document.createElement("span"); d.innerHTML = '<
 function readyText(it) {
   const d = eff(it) || {};
   if (blocked(it)) return "This item cannot be sent.";
+  if (d.act === "park") return "Ready to send: park.";
   if (isRuling(it)) return d.choice === OVERTURN ? "Ready to send: overturn." : "";
   if (it.kind === "task") return d.done ? "Ready to send: done." : (d.note || "").trim() ? "Ready to send: note, not done." : "";
   if (d.stood) return "My pick goes with your next Send.";
@@ -1376,9 +1414,10 @@ function ruledOf(it) {
 }
 // noNote: the owner's note is held by the fold of a card in the Answered section, so the answer line shows without it.
 function receipt(it, noNote) {
-  const sv = savedOf(it), rc = rcOf(it);
+  const sv = savedOf(it) || lastOf(it), rc = savedOf(it) ? rcOf(it) : {};
   let what, picks = null;
-  if (isRuling(it) && sv.choice === OVERTURN) { const r = ruledOf(it); what = "You overturned " + (r.letters ? r.letters + ": " : "") + r.label; }
+  if (sv.act === "park") what = ACT_DONE.park;
+  else if (isRuling(it) && sv.choice === OVERTURN) { const r = ruledOf(it); what = "You overturned " + (r.letters ? r.letters + ": " : "") + r.label; }
   else if (it.kind === "task") what = sv.done ? "Marked done" : "Not marked done";
   else if (sv.choice === NONE) what = "None of these";
   else if (isMulti(it) && validKeys(it, sv.choice)) {
@@ -1389,7 +1428,7 @@ function receipt(it, noNote) {
   return h("div", { class: "receipt" },
     h("div", { class: "line" }, glyph("done"), h("b", {}, picks ? what : what + "."),
       rc.read && !rc.filed ? h("span", { class: "read" }, "Read by " + it.owner + " " + fmt(rc.read, false)) : null,
-      h("button", { class: "btn quiet changebtn", type: "button", onclick: () => { state.changing[it.id] = true; edited(); setDraft(it, { choice: Array.isArray(sv.choice) ? sv.choice.slice() : sv.choice, note: sv.note || "", done: !!sv.done }); repaint(it); } }, "Change")),
+      h("button", { class: "btn quiet changebtn", type: "button", onclick: () => { state.changing[it.id] = true; edited(); setDraft(it, sv.act === "park" ? { act: "park", note: sv.note || "" } : { choice: Array.isArray(sv.choice) ? sv.choice.slice() : sv.choice, note: sv.note || "", done: !!sv.done }); repaint(it); } }, "Change")),
     picks,
     !noNote && sv.note && sv.note !== "accepted pick" ? h("p", { class: "rnote" }, "Note: " + sv.note) : null);
 }
@@ -1401,7 +1440,8 @@ const laneOf = (it) => (typeof it.lane === "string" ? it.lane.trim() : "");
 function lastAnswerEl(it) {
   const la = lastOf(it), c = la.choice, t = fmt(la.at);
   let what = null, picks = null;
-  if (it.kind === "task") what = la.done === true ? "Marked done." : "Not marked done.";
+  if (la.act === "park") what = ACT_DONE.park + ".";
+  else if (it.kind === "task") what = la.done === true ? "Marked done." : "Not marked done.";
   else if (c === NONE) what = "None of these.";
   else if (c != null && isMulti(it)) {
     if (!validKeys(it, c)) what = "You chose options that are no longer listed.";
@@ -1417,8 +1457,9 @@ function lastAnswerEl(it) {
     picks,
     typeof la.note === "string" && la.note && la.note !== "accepted pick" ? h("p", { class: "rnote" }, "Note: " + la.note) : null);
 }
-function threadEl(it) {
-  const la = lastOf(it), rp = replyOf(it);
+// noLast: the card already draws the last answer as its answer line (answered by its wait), so the thread holds the reply only.
+function threadEl(it, noLast) {
+  const la = noLast ? null : lastOf(it), rp = replyOf(it);
   if (!la && !rp) return null;
   const long = rp.length > 220, open = !!state.moreReply[it.id];
   return h("section", { class: "thread", id: "thread-" + it.id, "aria-label": la && rp ? "Your last answer and the reply" : la ? "Your last answer" : "The reply" },
@@ -1526,17 +1567,23 @@ function foldEls(it, parts, ncmd, words) {
   if (locked) state.unfold[it.id] = true;
   return [unfoldBtn(it, !!state.unfold[it.id], locked, ncmd, words), h("div", { class: "foldbody", id: "fold-" + it.id, hidden: !state.unfold[it.id] }, ...parts)];
 }
+const parkBtn = (it, d) => h("button", { class: "btn dash parkbtn", type: "button", id: "b-park-" + it.id, "aria-pressed": String(d.act === "park"), onclick: () => pressPark(it, "park") }, ACT_NAME.park);
 function buildCard(it) {
   if (isRuling(it)) return buildRuling(it);
-  const T = tierOf(it), saved = isSaved(it), d = eff(it) || {}, rc = rcOf(it), sunk = isSunk(it);
+  const T = tierOf(it), byWait = isByWait(it), saved = isSaved(it) || byWait, d = eff(it) || {}, rc = rcOf(it), sunk = isSunk(it);
   // A sunk card holds nothing up, so it drops its tier class.
   const card = h("article", { class: "card" + (sunk ? "" : " " + T) + (saved ? " answered" : ""), id: "item-" + it.id, "aria-labelledby": "t-" + it.id, "data-seen": isSeen(it) ? "true" : null });
   const top = h("div", { class: "top" }, h("span", { class: "num", "aria-label": "No. " + it.n + ", " + (it.kind === "decision" ? "decision" : "task") + ", from " + it.owner, title: "From " + it.owner }, "No. " + it.n),
     // The section head says "Answered", so its pill drops the word: the ring or tick carries it.
-    saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? (sunk ? "Filed in " : "Answered, filed in ") + it.home + " " : sunk ? "Filing pending, sent " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at))) : h("span", {}, waited(it.added)));
+    byWait ? h("span", { class: "ans" }, (sunk ? "" : "Answered, "), h("span", { class: "t" }, "Sent" + (fmt(lastOf(it).at) ? " " + fmt(lastOf(it).at) : "")))
+    : saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? (sunk ? "Filed in " : "Answered, filed in ") + it.home + " " : sunk ? "Filing pending, sent " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at))) : h("span", {}, waited(it.added)));
   if (it.minutes && !saved) top.append(h("span", {}, minutesText(it.minutes)));
   if (it.group) { const m = mates(it).filter((x) => x.id !== it.id); if (m.length) top.append(h("span", { class: "inbundle" }, "goes with No. " + m.map((x) => x.n).join(", No. "))); }
-  if (laneOf(it)) top.append(h("span", { class: "onlane" }, "waits on lane " + laneOf(it)));
+  // A lane and a wait share one span, so "waits on" is said once. The link is the wait only.
+  const wt = waitsOf(it), lane = laneOf(it);
+  if (lane && wt) top.append(h("span", { class: "onlane waits" }, "waits on lane " + lane + " and ", waitLink(wt)));
+  else if (wt) top.append(h("span", { class: "onlane waits" }, waitLink(wt, "waits on ")));
+  else if (lane) top.append(h("span", { class: "onlane" }, "waits on lane " + lane));
   card.append(top, h("h3", { class: "title", id: "t-" + it.id }, it.title));
   const bad = problem(it);
   if (bad) card.append(h("p", { class: "status broken", role: "alert" }, bad.text));
@@ -1546,15 +1593,17 @@ function buildCard(it) {
     h("details", { class: "cmd-more" }, h("summary", {}, "Which " + (odd.length === 1 ? "field" : "fields")), h("p", {}, odd.join(", ") + ". Ask the session to add " + (odd.length === 1 ? "it" : "each") + " to itemFields in the page or to remove " + (odd.length === 1 ? "it" : "each") + "."))));
   if (saved && sunk) {
     // The fold holds the parts below the answer line, named by the parts that are present. With none, there is no control.
-    const sv = savedOf(it), parts = [sv.note && sv.note !== "accepted pick" ? "your note" : null, lastOf(it) ? "your last answer" : null, replyOf(it) ? "the reply" : null].filter(Boolean);
+    const sv = savedOf(it) || lastOf(it), noteOk = typeof sv.note === "string" && sv.note && sv.note !== "accepted pick";
+    // Answered by its wait, the answer line is lastAnswer, so the fold does not show it again.
+    const parts = [noteOk ? "your note" : null, !byWait && lastOf(it) ? "your last answer" : null, replyOf(it) ? "the reply" : null].filter(Boolean);
     card.append(receipt(it, true));
     if (parts.length) {
       const list = parts.length < 2 ? parts[0] : parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1];
-      card.append(...foldEls(it, [parts[0] === "your note" ? h("p", { class: "rnote" }, "Note: " + sv.note) : null, threadEl(it)], 0, { show: "Show " + list, hide: "Hide " + list }));
+      card.append(...foldEls(it, [parts[0] === "your note" ? h("p", { class: "rnote" }, "Note: " + sv.note) : null, threadEl(it, byWait)], 0, { show: "Show " + list, hide: "Hide " + list }));
     }
     return card;
   }
-  if (saved) { card.append(receipt(it)); const th = threadEl(it); if (th) card.append(th); return card; }
+  if (saved) { card.append(receipt(it)); const th = threadEl(it, byWait); if (th) card.append(th); return card; }
   if (looseDesigns(it).length) card.append(designPreview(it));
   if (it.holds) card.append(h("p", { class: "stake holds" }, glyph("holds"), h("span", {}, it.holds)));
   if (it.by && validT(it.by)) {
@@ -1580,14 +1629,14 @@ function buildCard(it) {
     if (multi) put(h("p", { class: "multihint", id: "mh-" + it.id }, it.ranked === true ? "Tick any that apply, then order them, best first." : "Tick any that apply."));
     put(opts, ...((it.options || []).some((o) => marks(it, o).length) ? [h("p", { class: "difkey" }, ne(), h("span", {}, "marks what sets an option apart."))] : []), readyRow,
       h("div", { class: "alts" },
-        h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these")));
+        h("button", { class: "btn dash nonebtn", type: "button", id: "b-none-" + it.id, "aria-pressed": String(d.choice === NONE), onclick: () => choose(it, d.choice === NONE ? null : NONE) }, "None of these"), parkBtn(it, d)));
   } else {
     const cmds = cmdBlocks(it); ncmd = cmds.length;
     put(h("ol", { class: "steps" }, (it.steps || []).map((s) => h("li", {}, s))));
     put(...cmds);
     if (linksOf(it).length) put(h("div", { class: "links" }, linksOf(it).map(linkEl)));
     put(ready, h("div", { class: "alts" },
-      h("button", { class: "btn dash donebtn", type: "button", id: "b-done-" + it.id, "aria-pressed": String(!!d.done), onclick: () => { edited(); setDraft(it, { done: !d.done }); repaint(it); } }, "Mark done")));
+      h("button", { class: "btn dash donebtn", type: "button", id: "b-done-" + it.id, "aria-pressed": String(!!d.done), onclick: () => { edited(); setDraft(it, { done: !d.done, act: null }); repaint(it); } }, "Mark done"), parkBtn(it, d)));
   }
   const need = d.choice === NONE, nb = h("div", { class: "note" + (need && !(d.note || "").trim() ? " need" : "") });
   const ta = h("textarea", { id: "n-" + it.id, placeholder: need ? "Say what you want instead." : "Anything the session should know" });
@@ -1604,7 +1653,7 @@ function buildCard(it) {
   nb.append(h("label", { for: "n-" + it.id }, need ? "What do you want instead? (needed)" : "Note to the session (optional)"), ta);
   put(nb);
   if (fold) card.append(...foldEls(it, fold, ncmd));
-  if (blocked(it)) card.querySelectorAll(".opts input, .mv, .nonebtn, .donebtn, .note textarea").forEach((e) => { e.disabled = true; });
+  if (blocked(it)) card.querySelectorAll(".opts input, .mv, .nonebtn, .donebtn, .parkbtn, .note textarea").forEach((e) => { e.disabled = true; });
   card.append(h("p", { class: "dest" }, "Lands in " + it.home + "." + (validT(it.added) ? " Added " + fmt(it.added) + "." : "")));
   return card;
 }
@@ -1661,7 +1710,7 @@ function releaseSent() {
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
   const d = eff(it) || {};
-  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), isSunk(it), state.unfold[it.id], state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
+  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.act, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), isSunk(it), state.unfold[it.id], state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
 }
 const copyAttrs = (to, from) => { [...to.attributes].forEach((a) => to.removeAttribute(a.name)); [...from.attributes].forEach((a) => to.setAttribute(a.name, a.value)); };
 // Replace old's children with nu's but leave each kept node ([old node, nu stand-in, optional sync]) in place: moving an iframe reloads it.
@@ -1770,7 +1819,7 @@ function rulingsEl() {
 }
 // The items answered before this visit (isSunk), newest first. Open on load, each card folded.
 function answeredEl(items, place) {
-  const on = state.answeredOpen, stamps = items.map((i) => Date.parse((state.answers[i.id] || {}).at)).filter(Number.isFinite);
+  const on = state.answeredOpen, stamps = items.map((i) => Date.parse(sentOf(i).at)).filter(Number.isFinite);
   const body = [], done = new Set();
   items.forEach((it) => { if (!done.has(it.id)) place(items, it, done, body); });
   return sectionEl("answered", { cls: "sunk", glyph: "done", name: "Answered", count: items.length, open: on, listId: "ab", btnId: "b-answered", body,
@@ -1796,7 +1845,7 @@ function renderList() {
   TIERS.forEach((T) => {
     const items = by[T.k]; if (!items.length) return;
     const te = tierEl(T), body = [], done = new Set();
-    te.count.textContent = String(items.filter((i) => !isSaved(i)).length);
+    te.count.textContent = String(items.filter((i) => !isAnswered(i)).length);
     let lined = false;
     items.forEach((it) => {
       if (done.has(it.id)) return;
@@ -1819,7 +1868,8 @@ function renderList() {
   // The block is rebuilt on each render, so a press keeps its focus here. Change leaves the line for its toggles.
   if (focusId) { const f = $(focusId) || $(focusId.replace(/^pk-change-/, "pk-unpark-")); if (f) f.focus({ preventScroll: true }); }
 }
-const ACT_NAME = { unpark: "Unpark", drop: "Drop" }, ACT_SENT = { unpark: "Unpark sent", drop: "Drop sent" }, ACT_DONE = { unpark: "Unparked", drop: "Dropped" };
+// park is no line act (it is not in ACTS): it names the card press and its receipt.
+const ACT_NAME = { unpark: "Unpark", drop: "Drop", park: "Park" }, ACT_SENT = { unpark: "Unpark sent", drop: "Drop sent" }, ACT_DONE = { unpark: "Unparked", drop: "Dropped", park: "Parked" };
 // Only a line with no id is off. A view with no store has no meta/page, so it draws no parked block.
 const WHY_NOID = "The page's writer has not prepared this line yet. Paste your answer in chat instead.";
 // Every parked DOM id is "pk-<part>-<key>". The key is the entry's id, or "_<index>" for a line that is not live: a slug holds no underscore, so two keys never meet.
@@ -1845,7 +1895,7 @@ function pkLine(p, it, routed, index) {
     it && state.notice[it.id] ? h("p", { class: "status", role: "status" }, state.notice[it.id]) : null);
 }
 function parkedEl() {
-  const live = parkItems(), rows = ((state.meta && state.meta.parked) || []).filter((p) => p && typeof p === "object").map((p, i) => pkLine(p, live.find((x) => x.park === p), null, i));
+  const live = parkItems(), rows = parkList().map((p, i) => pkLine(p, live.find((x) => x.park === p), null, i));
   Object.values(state.routed).sort((a, b) => a.i - b.i).forEach((r) => { const el = pkLine(r.p, null, r); rows.splice(Math.min(r.i, rows.length), 0, el); routedWatch.observe(el); });
   if (!rows.length) return null;
   return h("section", { class: "parked", id: "parked", "aria-labelledby": "pk-h" }, h("h2", { id: "pk-h" }, "Parked by you"),
@@ -1867,13 +1917,13 @@ function jump(id) { const el = $(id); if (el) el.scrollIntoView({ behavior: "smo
 const shortOf = (it) => typeof it.short === "string" && it.short.trim() && it.short.trim().length <= 24 ? it.short.trim() : it.title;
 function renderRail() {
   const rail = $("rail"), by = sorted(), active = document.activeElement, focusId = active && rail.contains(active) ? active.id : "";
-  const total = state.items.length, sent = state.items.filter(isSaved).length, ready = staged().filter((i) => !isRuling(i) && !i.park).length;
+  const total = state.items.length, sent = state.items.filter(isAnswered).length, ready = staged().filter((i) => !isRuling(i) && !i.park).length;
   rail.hidden = !total && !state.rulings.length;
   const kids = !total ? [] : [h("div", { class: "ov-prog" },
     h("div", { class: "big" }, h("b", {}, String(sent)), "of " + total + " sent"),
     h("div", { class: "sub" + (ready ? "" : " none") }, h("i", { class: "sw" }), ready + " ready to send"),
     h("div", { class: "track", "aria-hidden": "true" }, h("i", { class: "s", style: "width:" + (total ? (sent / total) * 100 : 0) + "%" }), h("i", { class: "r", style: "width:" + (total ? (ready / total) * 100 : 0) + "%" })))];
-  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" + (rcOf(it).filed ? " filed" : "") : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? (rcOf(it).filed ? ", answered, filed" : ", answered, filing pending") : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => { if (isSunk(it) && !state.answeredOpen) { state.answeredOpen = true; render(); } jump("item-" + it.id); } }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, shortOf(it)));
+  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" + (rcOf(it).filed ? " filed" : "") : isByWait(it) ? " sent" : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? (rcOf(it).filed ? ", answered, filed" : ", answered, filing pending") : isByWait(it) ? ", answered, waits on " + waitWords(waitsOf(it)) : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => { if (isSunk(it) && !state.answeredOpen) { state.answeredOpen = true; render(); } jump("item-" + it.id); } }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, shortOf(it)));
   // The chips of a tier or of the Answered section, a group's chips side by side.
   const chipRow = (list) => {
     const row = h("div", { class: "chips-n" }), seen = new Set();
@@ -1887,7 +1937,7 @@ function renderRail() {
   };
   TIERS.forEach((T) => {
     const list = by[T.k]; if (!list.length) return;
-    const open = list.filter((i) => !isSaved(i)).length, row = chipRow(list);
+    const open = list.filter((i) => !isAnswered(i)).length, row = chipRow(list);
     kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-" + T.k, "aria-label": open + " open, " + T.name, onclick: (e) => { e.preventDefault(); jump("tier-" + T.k); } }, glyph(T.k), T.name, h("span", { class: "ct" }, String(open))), row));
   });
   // The Answered row: the section's chips. Its count is the section's size, and a press opens a folded section before it jumps.
@@ -1901,12 +1951,12 @@ function renderRail() {
 
 /* ---------- Bar and Send ---------- */
 function renderBar() {
-  const st = staged(), open = state.items.filter((i) => !isSaved(i)), sa = $("send");
-  const over = st.filter(isRuling).length, pks = st.filter((i) => i.park).length, stood = st.filter((i) => (eff(i) || {}).stood).length, left = open.length - (st.length - over - pks);
+  const st = staged(), open = state.items.filter((i) => !isAnswered(i)), sa = $("send");
+  const over = st.filter(isRuling).length, pks = st.filter((i) => i.park).length, toPark = st.filter((i) => !i.park && (eff(i) || {}).act === "park").length, stood = st.filter((i) => (eff(i) || {}).stood).length, left = open.length - (st.length - over - pks);
   const parts = [];
   if (state.barNote) parts.push(state.barNote);
   else {
-    if (st.length) { parts.push(h("b", {}, String(st.length)), " ready"); const why = [stood && stood + " where my pick stands", over && over + " overturn", pks && pks + " on " + (pks === 1 ? "a parked line" : "parked lines")].filter(Boolean); if (why.length) parts.push(" (" + why.join(", ") + ")"); parts.push(". "); }
+    if (st.length) { parts.push(h("b", {}, String(st.length)), " ready"); const why = [stood && stood + " where my pick stands", toPark && toPark + " to park", over && over + " overturn", pks && pks + " on " + (pks === 1 ? "a parked line" : "parked lines")].filter(Boolean); if (why.length) parts.push(" (" + why.join(", ") + ")"); parts.push(". "); }
     if (left) parts.push(h("b", {}, String(left)), " stay open.");
     if (state.items.length && !open.length) parts.push(h("b", {}, "All answered."));
   }
@@ -1937,7 +1987,7 @@ function fitBytes(text) {
 }
 function noticeText(entries, head, tail) {
   const owners = [...new Set(entries.map((e) => plain(e.owner).slice(0, MAX_OWNER) || "?"))].join(", ");
-  const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + (tail ? "" : " " + (e.choice ? choiceText(e.choice) : e.done ? "done" : "note, not done") + (note ? " (" + note + ")" : "")); }).join(", ");
+  const line = entries.map((e) => { const note = plain(e.note).slice(0, MAX_NOTE); return e.n + (tail ? "" : " " + (e.act === "park" ? "park" : e.choice ? choiceText(e.choice) : e.done ? "done" : "note, not done") + (note ? " (" + note + ")" : "")); }).join(", ");
   return fitBytes(head + " Owners: " + owners + ". Items: " + line + (tail || "."));
 }
 // Asked before the answer write, so only the write and the send sit between the click and the send.
@@ -1986,7 +2036,7 @@ async function sendAll() {
       catch (e) { state.barNote = "Not saved (" + (e && e.code || "error") + ")" + (wrote.length ? " from " + nList([it.n]) : "") + ". Copy the answers and paste them in chat."; state.copyOffer = true; break; }
       wrote.push({ it, prior, draft: state.draft[it.id] || null, changing: !!state.changing[it.id], act: body.act });
       state.answers[it.id] = body; delete state.draft[it.id]; delete state.changing[it.id]; delete state.notice[it.id];
-      entries.push(it.park ? { n: it.n, choice: body.act, owner: it.owner } : { n: it.n, choice: body.choice, done: body.done, note: body.note, owner: it.owner });
+      entries.push(it.park ? { n: it.n, choice: body.act, owner: it.owner } : { n: it.n, act: body.act, choice: body.choice, done: body.done, note: body.note, owner: it.owner });
     }
     saveDraft();
     if (wrote.length) openSent(wrote, at);
@@ -2068,7 +2118,8 @@ function answerLine() {
     if (blocked(it)) return;
     const a = savedOf(it), d = eff(it) || {};
     const choice = d.choice || (a && a.choice), note = d.note != null ? d.note : (a && a.note);
-    if ((it.kind === "decision" || isRuling(it)) && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
+    if (state.draft[it.id] ? d.act === "park" : !!(a && a.act === "park")) parts.push(it.n + " park" + (note ? " (" + note + ")" : ""));
+    else if ((it.kind === "decision" || isRuling(it)) && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
     else if (it.kind === "task") {
       const live = !!state.draft[it.id] && draftReady(it); // only a draft that would send replaces the saved answer
       const done = live ? !!d.done : !!(a && a.done), tnote = live ? d.note : (a && a.note);
@@ -2558,7 +2609,7 @@ function withState(html, state) {
   const sc = "<script>try{location.hash=" + JSON.stringify(stateHash(state)) +"}catch(e){}<\/script>", m = /^\s*<!doctype[^>]*>/i.exec(html);
   return m ? m[0] + sc + html.slice(m[0].length) : sc + html;
 }
-const allDesigns = () => state.items.filter((it) => !isSaved(it)).flatMap((it) => designsOf(it).map((d) => ({ ...d, it })));
+const allDesigns = () => state.items.filter((it) => !isAnswered(it)).flatMap((it) => designsOf(it).map((d) => ({ ...d, it })));
 // A mockup is drawn FIT_W wide, as a phone is, and scaled to the width it has. It reports its own height, so none of it is cut.
 const MIN_PIC = 120; // a capped picture is never narrower than this, however tall the mockup
 const PHONE_H = 844; // a picture that scrolls draws as wide as a FIT_W x PHONE_H phone picture gets in its box
@@ -2717,7 +2768,7 @@ document.addEventListener("keydown", (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const fc = document.activeElement && document.activeElement.closest && document.activeElement.closest(".card");
   const it = byId(fc ? fc.id.replace("item-", "") : hoverItem);
-  if (!it || isSaved(it) || it.kind !== "decision") return;
+  if (!it || isAnswered(it) || it.kind !== "decision") return;
   const k = e.key.toLowerCase();
   if ((it.options || []).some((o) => o.key === k)) { e.preventDefault(); if (isMulti(it)) toggle(it, k); else choose(it, k); const r = $("o-" + it.id + "-" + k); if (r) r.focus({ preventScroll: true }); }
 });
@@ -2728,7 +2779,7 @@ function render() {
   const nd = allDesigns().length;
   $("dCount").textContent = nd || ""; $("tabD").hidden = !state.items.some((i) => designsOf(i).length);
   // The count box has a fixed width, so a count that grows moves no tab. It stays empty until the items load.
-  $("qCount").textContent = state.loaded ? String(state.items.filter((i) => !isSaved(i)).length) : "";
+  $("qCount").textContent = state.loaded ? String(state.items.filter((i) => !isAnswered(i)).length) : "";
 }
 
 render(); renderAsks();
@@ -3286,3 +3337,5 @@ window.addEventListener("resize", () => {
 });
 })();
 </script>
+
+</body></html>
