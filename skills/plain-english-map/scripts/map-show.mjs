@@ -1,7 +1,7 @@
 // The show command: prints one part of `docs/map/` as short plain text.
 // Use: node <skill>/scripts/map-show.mjs <path|area|folder/|decision-id> [--full], run from the root of a repository that has `map.config.json`.
 //   a file path  prints its area, its map line, its fact lines, its tested-by line, its Homes lines and its trace steps.
-//                A non-code file (a record can name any file) prints its map line, its `Decisions:` ids and its `Debts:` slugs, when its map line has either.
+//                A non-code file (a record can name any file) prints its map line, then its `Decisions:` ids and its `Debts:` slugs when it has them.
 //                A test path also prints `Named as a test of:` and the files whose tested-by line names it. A test with no map line prints that alone.
 //   an area id   prints each map line of that area as `path — sentence`.
 //   a folder     (ends with `/`) prints each map line whose path starts with it.
@@ -40,7 +40,7 @@ try {
   areas = mapFilePaths(files).map((f) => {
     const text = read(f);
     const cites = subLineEntries(text, re).entries;
-    return { id: path.posix.basename(f, '.md'), text, lines: mapLines(text, re), cites, others: cites.filter((e) => !e.code && (e.ids.length || e.slugs.length)) };
+    return { id: path.posix.basename(f, '.md'), text, lines: mapLines(text, re), cites, others: cites.filter((e) => !e.code) };
   });
   traces = files.flatMap((f) => {
     const m = f.match(TRACE_PAGE_RE);
@@ -90,6 +90,8 @@ if (cfg.decisionsDir && new RegExp(`^(?:${cfg.decisionIdPattern})$`).test(arg)) 
   for (const a of areas) {
     const files = new Set(a.cites.filter((e) => e.ids.some((id) => idKey(id) === key)).map((e) => e.file));
     for (const l of a.lines) if (files.has(l.path)) cites.push(row(l));
+    // A non-code file whose decisions line holds the id.
+    for (const e of a.others) if (e.ids.some((id) => idKey(id) === key)) cites.push(row({ path: e.file, sentence: e.sentence }));
   }
   if (!cites.length) fail(`no map line cites ${arg}`, 1);
   out.push(...cites);
@@ -115,7 +117,7 @@ if (cfg.decisionsDir && new RegExp(`^(?:${cfg.decisionIdPattern})$`).test(arg)) 
       if (steps.length) out.push('Trace:', ...steps);
     }
   }
-  // A non-code file that a record names: its map line, then its decisions line and its debts line. A non-code map line with neither stays unlisted here.
+  // A non-code file: its map line, then its decisions line and its debts line when it has them.
   for (const a of areas) {
     for (const e of a.others) {
       if (e.file !== want) continue;

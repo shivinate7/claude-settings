@@ -68,7 +68,7 @@ With no match it prints `no map line for <arg>` and exits 1.
   The sentence shows each number of the cite, and names each item of a set or a list. A number outside backticks anywhere else in the map fails MAP9.
 - **A decisions line.** Indented under a map line: `  - Decisions: ` + each id in backticks, joined by `, `. An id names a record, a `.md` file directly in `decisionsDir`,
   when the file name without `.md` is the id or starts with the id and `-`. A run of digits compares by value: `D7` names `D007-x.md`.
-- **A non-code map line.** A decision record (in `decisionsDir`) or a debt record (a `.md` file directly in the debts folder, except `notes.md` and `README.md`) names a file by a backticked token that equals a tracked path exactly.
+- **A non-code map line.** A decision record or a debt record (a `.md` file directly in `decisionsDir` or in the debts folder, except `notes.md` and `README.md`) names a file by a backticked token that equals a tracked path exactly.
   A bare name, a prefix or a suffix names nothing. A tracked non-code file that a record names needs a map line under `## Code files`, like a code file (MAP1, still filtered by `mapPaths`).
   A record, a `docs/map/` page and `map.config.json` need none, and a code file needs no ids. Its decisions line carries the id of each naming decision record: the leading match of `decisionIdPattern` on the record's file name.
   A record whose file name has no such id adds none. Its debts line is `  - Debts: ` + the slug (the file name without `.md`) of each debt record that names it, in backticks, joined by `, `. A slug that names no debt record fails.
@@ -94,7 +94,7 @@ With no match it prints `no map line for <arg>` and exits 1.
   A tested-by line under a table line, a screen line or a home fails.
 - `scripts/map-fix.mjs` adds the ids and slugs that MAP10 finds missing, and never removes or reorders one. With no flag it prints each file and id it would add and writes nothing. With `--write` it adds them, and creates the decisions line (and the debts line after it) right under the map line when there is none. A second `--write` changes no byte.
 - `scripts/map-picture.mjs` builds the picture data and the page, and it is the page command. It reads no decision records, so the rulings tab is empty.
-- `scripts/map-show.mjs` is the show command. It prints the map for one file, area, folder or decision id (`--full` adds the record line for an id), through the readers of `map-check.mjs`. A non-code file whose map line has a decisions line or a debts line prints them.
+- `scripts/map-show.mjs` is the show command. It prints the map for one file, area, folder or decision id (`--full` adds the record line for an id), through the readers of `map-check.mjs`. A non-code file prints its map line, and its decisions line and debts line when it has them. A decision id also lists the non-code files whose decisions line holds it.
 - `scripts/map-stale.mjs` is the stale command. It runs 1 `git rev-parse`, 1 `git blame` for each map page and 1 `git log` for all files, never a `git log` for each file. A shallow clone, no repository or no git prints an unknown line, never "nothing stale".
 - `scripts/map-upgrade.mjs` is the upgrade command, and holds the list of upgrade steps.
 - `scripts/lib/map-config.mjs` reads and checks `map.config.json`. It is the one home of the validator.

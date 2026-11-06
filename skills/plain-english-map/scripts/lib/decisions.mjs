@@ -41,7 +41,8 @@ export const citedIds = (src, file, pattern) => {
 
 // ---- The files a record names ----
 
-const NOT_DEBTS = new Set(['notes.md', 'README.md']);
+// A folder of records holds files that are no record: its index and its notes. One list for the decisions folder and the debts folder.
+const NOT_RECORDS = new Set(['notes.md', 'README.md']);
 const stemOf = (name) => name.slice(0, -3);
 
 // lint/layout.json sits in the claude-settings root, four folders above this file. Through the install link its real path is inside the clone.
@@ -79,7 +80,7 @@ const mdNames = (root, dir) => {
 /** The debt records of `root`: each `.md` file directly in the debts folder, except notes.md and README.md. As { dir, exists, slugs }; `slugs` are the file names without `.md`. */
 export const debtRecords = (root) => {
   const dir = debtsDir(root);
-  return { dir, exists: !!dir && existsSync(path.join(root, dir)), slugs: dir ? mdNames(root, dir).filter((n) => !NOT_DEBTS.has(n)).map(stemOf) : [] };
+  return { dir, exists: !!dir && existsSync(path.join(root, dir)), slugs: dir ? mdNames(root, dir).filter((n) => !NOT_RECORDS.has(n)).map(stemOf) : [] };
 };
 
 /** The id of a decision record: the leading match of `pattern` on its file name without `.md`, when that id names the record. Else null. */
@@ -107,7 +108,7 @@ export const recordNaming = ({ root, read, all, decisionsDir, idPattern }) => {
       if (name && !list.some((x) => idKey(x) === idKey(name))) list.push(name);
     }
   };
-  if (dd) for (const n of mdNames(root, dd)) scan(`${dd}${n}`, 'decisions', recordId(stemOf(n), idPattern));
+  if (dd) for (const n of mdNames(root, dd).filter((x) => !NOT_RECORDS.has(x))) scan(`${dd}${n}`, 'decisions', recordId(stemOf(n), idPattern));
   if (debts.dir) for (const slug of debts.slugs) scan(`${debts.dir}/${slug}.md`, 'debts', slug);
   return found;
 };
