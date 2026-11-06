@@ -12422,7 +12422,7 @@ class ProseJudge(Env):
 
     def run_capped(self):
         """The merge with the cap at PROSE_CAP. -> (rc, out)."""
-        with unittest.mock.patch.object(merge, CAP_NAME, PROSE_CAP, create=True):
+        with unittest.mock.patch.object(merge, CAP_NAME, PROSE_CAP):  # no create=True: a renamed constant fails here, not passes
             return self.run_merge("7", "--confirm")
 
     def judge(self, answer):
@@ -12643,6 +12643,32 @@ class ProseJudge(Env):
         lines = judge_lines(out, "%s:3" % PROSE, "stale")
         self.assertTrue(lines, "scope: no stale line at %s:3" % PROSE)
         self.assertEqual(controls("\n".join(lines)), [], "the report carries control characters from why: %r" % controls("\n".join(lines)))
+
+    def test_the_default_cap_is_three_model_calls(self):
+        # Already true on ff60289f: the pin keeps the default from drifting. Unpatched, so the value is the one a merge uses.
+        self.assertEqual(merge.PROSE_JUDGE_MAX_CALLS, 3, "the default cap on model calls per merge is not 3")
+
+    def test_the_default_cap_sends_three_files_and_reads_the_fourth_unknown(self):
+        # Already true on ff60289f. Unpatched: four selected files make three calls, and the fourth reads UNKNOWN.
+        names = ("docs/notes/a.md", "docs/notes/b.md", "docs/notes/c.md", "docs/notes/d.md")
+        self.setup_range({p: CITE_DOC for p in names}, {BACKING: BACKING_TEXT})
+        stub = JudgeStub(verdict_for(3, "holds"))
+        with unittest.mock.patch.object(decision_watch, "invoke_model", stub):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(len(stub.prompts), 3, "model calls: %d for 4 selected files, want the default cap of 3" % len(stub.prompts))
+        sent = {p for p in names if any(p in prompt for prompt in stub.prompts)}
+        (skipped,) = set(names) - sent
+        self.assertTrue(judge_lines(out, skipped, "UNKNOWN"), "no UNKNOWN line names %s, which the default cap left unjudged" % skipped)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_selected_line_the_model_skips_reads_unknown(self):
+        # Already true on ff60289f: confirm reads a selected line with no verdict as UNKNOWN. The held line still prints nothing.
+        self.setup_range({PROSE: TWO_CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertTrue(judge_lines(out, "%s:5" % PROSE, "UNKNOWN"), "no UNKNOWN line at %s:5, which the reply skipped" % PROSE)
+        self.assertFalse(judge_lines(out, "%s:3" % PROSE, "UNKNOWN"), "%s:3 reads UNKNOWN, but the reply held it" % PROSE)
+        self.assertEqual(rc, 0, out)
 
 
 class OrderLock(merge.GitLock):
