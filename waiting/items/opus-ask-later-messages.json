@@ -1,9 +1,10 @@
 {
   "added": "2026-11-04T14:09:00Z",
-  "context": "Goal: a plain \"use Opus\" message grants Opus only to the work your nearby messages name (your 226 b).\nProblem (money): 226 said the scope comes from your messages before and after the ask. When you send the ask, no later message exists yet. Reading later messages means one model call on each of your messages while the grant lives, even ones that never say \"opus\".\nBased on (read): #1244 (batch 10, Nov 5 06:36 CST) put option a on main: hooks/local_time.py reads your earlier messages with the ask.\nDeparts from: main (earlier messages only) \u2014 b also lets a later message narrow a live grant.",
+  "context": "Goal: a plain \"use Opus\" message grants Opus only to the work your nearby messages name (your 226 b).\nWhat this is: when you type \"use opus\" with no time and no role, a hook asks a model which work your messages name, and Opus covers only that work. Example: you write \"fix the map lint\", then \"use opus\": Opus covers the map-lint lane only.\n- a (main today, since #1244): the hook reads the messages you sent before \"use opus\". One model read, at the ask.\n- b: the hook also reads each message you send after it, while the grant lives. A later \"also the waiting page\" or \"only the tests\" changes what Opus covers. One model read on each of your messages, even ones that never mention Opus.\nProblem (money): b adds a model call to each of your messages while a grant lives.\nBased on (ruling): 226 b: the scope comes from your nearby messages.\nBased on (ruling): 256 none (11:22 CST Nov 6): \"i dont understand my two options here\". Asked again with this explanation.\nBased on (read): #1244 (batch 10, Nov 5 06:36 CST) put a on main: hooks/local_time.py reads your earlier messages with the ask.\nDeparts from: main (earlier messages only) \u2014 b also lets a later message change a live grant.",
   "home": "claude-settings decision owner-override; lane opus-plain-ask-scope record",
   "id": "opus-ask-later-messages",
   "kind": "decision",
+  "lastAnswer": "none (11:22 CST Nov 6): \"i dont understand my two options here\". Re-asked 11:30 CST with an example of each.",
   "n": 256,
   "options": [
     {

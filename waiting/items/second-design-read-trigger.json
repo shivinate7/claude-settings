@@ -4,6 +4,8 @@
   "home": "decision design-agents",
   "id": "second-design-read-trigger",
   "kind": "decision",
+  "lane": "step second-design-read-any-change (coordinator starts it): rewrite one line of decision design-agents",
+  "lastAnswer": "a (11:22 CST Nov 6): any change to a screen file after code round 1 gets a second design read. Roadmap step second-design-read-any-change; open until its PR merges.",
   "n": 259,
   "options": [
     {

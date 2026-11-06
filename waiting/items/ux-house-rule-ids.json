@@ -1,37 +1,96 @@
 {
   "added": "2026-11-04T04:30:00Z",
-  "context": "Goal: builders and reviewers judge screens by one list.\nProblem (rule): the house-rules record lists 14 ids, while the design docs hold 34 ux headings, and no check compares them.\nBased on (read): docs/decisions/ux-house-rules.md:14-19 lists 14 ids as the house rules.\nBased on (read): docs/design/principles.md has 27 ux headings and docs/design/layout.md has 7.\nBased on (read): no lint or hook reads either list.\nDeparts from: main, with two lists that differ \u2014 makes one list and checks it.\n\nAll 34, each with its rule sentence:\nThe 14 the record lists:\n- ux-label-once: A label or a status word shows once on a screen.\n- ux-answer-at-press: The answer to a press shows where the press was.\n- ux-long-run-stops: A run that takes more than a few seconds shows a Stop control.\n- ux-all-is-well: A status summary names only what is not normal.\n- ux-thumb-zone: On a phone layout, the main input and the main action sit in reach of the thumb.\n- ux-works-when-script-fails: When JavaScript, WebGL or WebGPU is off or fails, the person still reaches the content and the main action, or a page that says what is missing and leads on.\n- ux-lost-scene-recovers: When the GPU drops a 3D scene, the person sees words that say so, and the scene comes back when the GPU returns.\n- ux-still-scene-draws-nothing: A 3D scene that does not move draws no frames, so it does not spend the person's battery.\n- ux-canvas-has-words: A canvas or 3D view that carries information has a name and a text equivalent, and each act in it works from the keyboard.\n- ux-scroll-stays-native: Scroll moves the page at the person's pace, so they can read and find their way.\n- ux-forced-colors-hold: In forced-colors mode, such as a Windows contrast theme, each control, its edge, its focus ring and its state stay visible.\n- ux-full-height-fits: A full-height region fits the visible phone screen, with the browser bars shown or hidden, so its bottom content and actions are never under the bars.\n- ux-vitals-measured: Each changed route's Core Web Vitals meet the \"good\" lines on web.dev in a mobile lab trace and, where it exists, at the 75th percentile of field data.\n- ux-feature-baseline-or-fallback: A web feature outside the repo's browser target runs only behind a feature test, with a fallback the person can use.\n\nThe other 20 (in the design docs only):\n- ux-press-moves-nothing: A press, a load or a change of state moves no other content.\n- ux-order-holds-still: A list keeps a plain, predictable order, and an act on a row does not re-rank the list.\n- ux-unknown-is-not-empty: A screen shows loading, failed, unknown and loaded as different states.\n- ux-statements-are-true: Screen copy claims only what the product does and what the owner confirmed.\n- ux-machine-text-hidden: A code, a path, a record id or raw server text shows only in a closed disclosure.\n- ux-no-dead-end: Each refusal, error and end page has a control on that screen that leads on: a fix, or another way such as a phone number.\n- ux-empty-one-action: An empty state is one sentence that says what fills it, and one control that fills it.\n- ux-ask-or-undo: A destructive press asks first when it cannot be undone, and acts and offers Undo when it can.\n- ux-keep-what-was-made: Never discard input that a person made and that no server can return.\n- ux-control-earns-place: A control that changes nothing on a view is absent, and an expected control that is off says why.\n- ux-one-plain-name: Each screen and each act has one plain name, and each icon has one meaning.\n- ux-a11y-floor: Each screen meets the accessibility floor in `a11y.md`.\n- ux-haptics-feel-substantial: An app on a device with haptics considers a haptic on controls that change a value, such as sliders, steppers and toggles, so the change feels substantial.\n- ux-gap-on-parent: The parent spaces its children.\n- ux-layout-primitives: A page is built from a few named layout primitives.\n- ux-control-beside-area: A control sits next to the area it changes.\n- ux-component-reads-its-box: A shared component changes its shape from its own width, with a container query.\n- ux-variant-extends-home: A screen that needs a shared component to look or act a little different extends the component.\n- ux-fluid-tokens: Space and type that grow with the box use clamp() tokens.\n- ux-swift-same-intent: A Swift screen follows the same four rules with its own tools.",
+  "context": "Goal: builders and reviewers judge screens by one list of house rules.\nProblem (rule): the house-rules record lists 14 ids and the design docs hold 34; your note settled most of them and asked about the rest.\nBased on (ruling): 183 none (11:22 CST Nov 6). Asked again because your note asked for explanations of the rules below.\nBased on (read): docs/decisions/ux-house-rules.md lists 14; docs/design/principles.md and layout.md hold 34.\nDeparts from: ux-house-rules.md, which lists 14 house rules \u2014 your ticks plus the settled list below set the new list.\n\nSettled by your note (a lane writes it once this item is answered):\n- House rules: the first 13 the record lists; ux-unknown-is-not-empty, with ux-empty-one-action folded into it; ux-haptics-feel-substantial; ux-gap-on-parent.\n- Not house rules, kept in the design docs as guidance (\"skip\"): ux-order-holds-still, ux-statements-are-true, ux-no-dead-end.\n- Removed from the design docs too: ux-ask-or-undo (\"disagree as a guideline even anywhere\").\n- ux-swift-same-intent: a lane checks whether it holds (roadmap step ux-swift-same-intent-check).\nIf I read \"skip\" or ux-ask-or-undo wrong, say so in the note.\n\nTick each rule below that should be a house rule. An unticked rule stays in the design docs as guidance only.\n- ux-feature-baseline-or-fallback: a page uses a new browser feature (such as a CSS trick only the newest Chrome has) only after it checks the browser has it, and else shows a plain version that still works. It stops a blank or broken screen on an older phone.\n- ux-press-moves-nothing: a press or a load never shoves other things on the screen (a banner appears and the button you were about to tap jumps down). From banchi D118 and D313.\n- ux-keep-what-was-made, softened: typed input that no server can bring back survives leaving and coming back. \"Never\" is dropped. From q_max D-399.\n- ux-machine-text-hidden: error codes, file paths and record ids sit behind a closed \"Details\", so the screen speaks plainly. From banchi D196 and D269.\n- ux-control-earns-place: a button or filter that would do nothing on this screen is not shown, and an expected one that is off says why (\"Export: no rows yet\"). From q_max D-675.\n- ux-one-plain-name: the menu label is the page title, an act such as \"Archive\" has the same name on every screen, and an icon means one thing. From q_max D-582.\n- ux-a11y-floor: each screen passes the basics in a11y.md: readable contrast, labels a screen reader reads, keyboard use, tap size. Who made it: built from q_max D-648 (contrast floor) and banchi's automatic accessibility test (axe on its component gallery).\n- ux-layout-primitives: pages are built from a few named blocks (a stack, a row, a grid, a sidebar), each owning its own spacing, not one-off spacing on each page.\n- ux-control-beside-area: tabs, a filter or a toggle sit right next to the list or panel they change, with nothing between.\n- ux-component-reads-its-box: a shared piece, such as a card, picks its narrow or wide shape from the space it is given, not from the window size. Near ux-gap-on-parent: that one says who sets the spacing; this one says who picks the shape.\n- ux-variant-extends-home: when a screen needs a slightly different card, the shared card gets an option; nobody copies it. Your home repo's \"shared screens\" rule says the same for views.\n- ux-fluid-tokens: sizes that grow with the space (a heading that scales with the box) come from named shared values, not numbers typed in each file. Yes, near ux-gap-on-parent: both keep layout values in one place.",
   "home": "ux-house-rules",
   "id": "ux-house-rule-ids",
   "kind": "decision",
-  "lastAnswer": {
-    "at": "2026-11-04T04:28:21Z",
-    "choice": "none",
-    "note": "Asked: \"i need to see them all to decide\". Rewritten 22:30 CST: all 34 rules listed in the context, split 14 listed and 20 not."
-  },
+  "lastAnswer": "none (11:22 CST Nov 6), with a per-rule note. Settled parts are in the context; re-asked 11:30 CST on the 12 rules the note left open.",
+  "multi": true,
   "n": 183,
   "options": [
     {
-      "gain": "One list; every ux heading binds builders and reviewers.",
-      "how": "The record cites the headings in principles.md and layout.md instead of listing ids. A check fails when a cited heading is missing.",
+      "gain": "No screen breaks on an older browser.",
       "key": "a",
-      "label": "All 34 are house rules",
-      "lose": "20 more rules bind every screen review."
+      "label": "ux-feature-baseline-or-fallback: Feature test plus fallback",
+      "lose": "Each repo states its browser target."
     },
     {
-      "gain": "Fewer binding rules on each screen review.",
-      "how": "Keep the record's list. Mark the other 20 headings as guidance, and add a check that the 14 exist as headings.",
+      "gain": "Nothing jumps under your finger.",
       "key": "b",
-      "label": "Only the 14",
-      "lose": "Two kinds of ux heading for readers to tell apart."
+      "label": "ux-press-moves-nothing: A press moves nothing else",
+      "lose": "Reserved space for late content."
+    },
+    {
+      "gain": "Typed work is not lost.",
+      "key": "c",
+      "label": "ux-keep-what-was-made: Keep typed input (softened)",
+      "lose": "A screen keeps its input when you leave."
+    },
+    {
+      "gain": "Screens speak plainly.",
+      "key": "d",
+      "label": "ux-machine-text-hidden: Machine text behind Details",
+      "lose": "Errors need a Details control."
+    },
+    {
+      "gain": "Fewer dead buttons.",
+      "key": "e",
+      "label": "ux-control-earns-place: No control that does nothing",
+      "lose": "An off control needs a reason line."
+    },
+    {
+      "gain": "No guessing which name is which.",
+      "key": "f",
+      "label": "ux-one-plain-name: One name per screen and act",
+      "lose": "Renames to match titles."
+    },
+    {
+      "gain": "Each screen is usable by screen reader and keyboard.",
+      "key": "g",
+      "label": "ux-a11y-floor: Accessibility floor",
+      "lose": "A CI accessibility check per repo."
+    },
+    {
+      "gain": "Pages look and space alike.",
+      "key": "h",
+      "label": "ux-layout-primitives: Named layout blocks",
+      "lose": "Pages refit to the blocks."
+    },
+    {
+      "gain": "You see what a control changes.",
+      "key": "i",
+      "label": "ux-control-beside-area: Control beside its area",
+      "lose": "Some layouts move controls."
+    },
+    {
+      "gain": "A card fits wherever it sits.",
+      "key": "j",
+      "label": "ux-component-reads-its-box: Component picks shape from its box",
+      "lose": "Container queries in shared parts."
+    },
+    {
+      "gain": "A fix lands in every screen.",
+      "key": "k",
+      "label": "ux-variant-extends-home: Extend, never copy",
+      "lose": "Shared parts grow options."
+    },
+    {
+      "gain": "Sizes change in one place.",
+      "key": "l",
+      "label": "ux-fluid-tokens: Growing sizes from tokens",
+      "lose": "Raw clamp() values move to tokens."
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
-  "pick": "a",
+  "pick": [
+    "a",
+    "b",
+    "c"
+  ],
   "rank": 7,
   "ref": "deep audit 1102, report docs/plans/deep-audit/report.md on audit/deep-1102 (6b6a41f3), table 'claude-settings: homes', row ux-house-rule-ids",
-  "short": "UX house rule list",
+  "short": "UX house rules: the last 12",
   "status": "open",
-  "title": "Are all 34 UX headings house rules, or only the 14 the record lists?",
-  "why": "Builders already read the design docs whole; one list with a check ends the drift."
+  "title": "Which of these 12 UX rules should also be house rules?",
+  "why": "Recommended: the first three. Each stops a harm a person feels (a broken screen, a mis-tap, lost typing). The rest stay as guidance until a screen shows the harm."
 }

@@ -1,0 +1,12 @@
+{
+  "answered": "2026-11-06T17:31:00Z",
+  "at": "2026-11-06T17:22:44.615Z",
+  "filed": "2026-11-06T17:31:00Z",
+  "home": "step:ask-dismiss",
+  "id": "ask-mw58sz5zv9",
+  "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "re": "ask-mw3lqbojbc",
+  "read": "2026-11-06T17:31:00Z",
+  "reply": "Right: an answered ask stays on the page, and nothing lets you clear it. I filed roadmap step ask-dismiss: each answered ask gets a Dismiss press, and a dismissed ask leaves your view. The coordinator starts the lane.",
+  "text": "there doesn't seem to be a way to dismiss completed items like this one"
+}

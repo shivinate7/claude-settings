@@ -1,0 +1,8 @@
+{
+  "at": "2026-11-06T17:27:05.426Z",
+  "id": "ask-mw58ykeqal",
+  "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "read": "2026-11-06T17:31:00Z",
+  "reply": "An Opus research agent started at 11:28 CST, on your word. It compares three paths with sources: keep Claude Code, build on the Agent SDK, or build your own harness on the API, and why the app is not optimal. Its answer comes back here.",
+  "text": "i need an opus agent to determine whether the claude code as a harness is best or if i should just build my own and call claude via api if it'd mean cloud sesoins that could communicate with eachotehr across local and pc etc (why is the claude code harness app on electron/terminal not so optimal)"
+}

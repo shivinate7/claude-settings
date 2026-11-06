@@ -4,6 +4,7 @@
   "home": "ios-adblock project.yml",
   "id": "adblock-mac-vision",
   "kind": "decision",
+  "lastAnswer": "a (11:22 CST Nov 6): leave Mac and Vision Pro on, Xcode default. No change to ios-adblock; closed by triage 11:30 CST.",
   "n": 233,
   "options": [
     {
@@ -25,7 +26,7 @@
   "rank": 3,
   "ref": "item 216 a; ios-adblock #144, lane adblock-iphone-only",
   "short": "adblock: Mac and Vision Pro",
-  "status": "open",
+  "status": "closed",
   "title": "ios-adblock: turn off the iPhone app on Apple Silicon Macs and Vision Pro too?",
   "why": "Recommended: b. It matches 216's goal: every shipped device is tested. Meanwhile #144 goes on in its batch."
 }

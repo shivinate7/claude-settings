@@ -4,6 +4,8 @@
   "home": "banchi D243 (every posted price is recorded once)",
   "id": "banchi-d243-master-takeoff",
   "kind": "decision",
+  "lane": "coordinator starts a banchi lane: _master_take_off records each posting (D243)",
+  "lastAnswer": "a (11:22 CST Nov 6): fix the code so the master take-off records each posting. Routed to the coordinator 11:30 CST; open until the banchi PR merges.",
   "n": 237,
   "options": [
     {

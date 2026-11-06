@@ -1,37 +1,38 @@
 {
   "added": "2026-11-05T17:42:00Z",
-  "context": "Goal: retiring banchi's docs/map.py loses nothing (your item 209 a).\nProblem (rule): 8 non-code files (icons, the web manifest, an onnx model, the STE licence) carried 19 decision ids in the old map. The shared map maps code files only, so an edit to one of them now shows no decision hint. banchi #1064 restores the other 72 ids, on the json files.\nBased on (ruling): 209 a, \"no loss\"; rule building-port-keeps-behaviour. Asked again because your note asked whether banchi's map had a feature the shared map lacks.\nBased on (read): yes, two. First, decision lookup (`make map ARGS=D17` listed the files that cite a decision). The shared map has it now: map-show takes a decision id (#1264, merged). Second, decision hints on non-code files: this item. No other gap is on record; no session listed every feature of banchi's docs/map.py side by side with the shared map.\nDeparts from: banchi main before #1063 gave decision hints on those 8 files \u2014 a keeps them without hints, as a notes line; b maps them again.\n\nNot blocking: #1064 merges either way.",
+  "context": "Goal: a decision or a debt shows every file it governs, so an edit to any of them shows the record (your 268 note).\nProblem (rule): the shared map lists code files only. In banchi, 8 non-code files (icons, the web manifest, an onnx model, the STE licence) lost 19 decision hints, and every repo on the shared map has the same gap for its non-code files.\nBased on (ruling): 268 none (11:22 CST Nov 6): \"fix our shared map too so that way the map can show files under a prose thing like a decision (or a debt etc)\". Asked again to fix the scope of that change before a lane starts.\nBased on (read): map-show takes a decision id since #1264 (map-show finds a decision's files); it can list only the files the map holds, which are code files.\nDeparts from: the shared map, which lists code files only \u2014 a lists each file a decision or debt names, code or not; b maps banchi's 8 files only.\n\nNot blocking: banchi #1064 merges either way.",
   "home": "banchi docs/debts notes; claude-settings skill plain-english-map",
   "id": "banchi-map-binary-hints",
   "kind": "decision",
-  "lastAnswer": {
-    "at": "2026-11-06T03:31:31Z",
-    "choice": "none",
-    "note": "wait did banchi's map have a feature we didn't adopt? Answered 21:33 CST Nov 5 in the Based on (read) line above; asked again for your pick."
-  },
+  "lastAnswer": "none (11:22 CST Nov 6), note: fix the shared map so it shows files under a decision or debt. Re-asked 11:30 CST to settle the scope.",
   "n": 268,
   "options": [
     {
-      "gain": "No shared-tool change for binary files.",
-      "how": "The lane writes one notes line in banchi's debt store.",
+      "gain": "In every repo, an edit to an icon, a model, a licence or a config file shows the decisions and debts that govern it. banchi gets its 19 hints back.",
       "key": "a",
-      "label": "Accept the loss, kept as a notes line",
-      "lose": "An edit to an icon or the model shows no decision hint."
+      "label": "Yes: list every file a decision or debt names",
+      "lose": "One claude-settings lane on the shared map. The map grows by each non-code file a record names."
     },
     {
-      "gain": "No loss of the 19 hints.",
-      "how": "A lane adds the 8 files' extensions to the map and writes their map lines.",
+      "gain": "A smaller change.",
       "key": "b",
-      "label": "Map them anyway by adding their extensions",
-      "lose": "Map lines for binary files, and a map-check run that reads them. If it needs a shared-tool change: Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "label": "banchi only: map its 8 files",
+      "lose": "Other repos keep the gap. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
       "widens": true
+    },
+    {
+      "gain": "No work.",
+      "key": "c",
+      "label": "Accept the loss",
+      "lose": "An edit to those files shows no decision; other repos keep the gap."
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
   "rank": 3,
   "ref": "item 209 a; banchi #1063, #1064",
-  "short": "banchi: decision hints on 8 binary files",
+  "short": "map: files a record names",
   "status": "open",
-  "title": "banchi: accept losing decision hints on 8 non-code files?",
-  "why": "Recommended: a. The 19 hints sit on files that rarely change, and b may bend the shared map to fit one repo."
+  "title": "Should the shared map list every file a decision or debt names, not only code files?",
+  "why": "Recommended: a. It is the fix your note asks for, in the shared tool, so every repo gets it."
 }

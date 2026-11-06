@@ -1,9 +1,10 @@
 {
   "added": "2026-11-04T05:16:00Z",
-  "context": "Goal: the keep-output rule says exactly what its guard checks, in the fewest words.\nProblem (rule): decision cull-rules (you, 2026-10-17) caps a checked rule's reminder at 3 words. Main now reads option c, which is 6 words, so it breaks that cap.\nBased on (ruling): cull-rules, 3-word cap.\nBased on (ruling): 177 a (22:29 CST Nov 3), git writes only.\nBased on (read): #1188 merged Nov 4 01:09 CST and put c on main.\nDeparts from: CLAUDE.md git-never-discard-output \"Never silence a git write's output.\" \u2014 a or b shortens it; c keeps it and leaves the cap broken.",
+  "context": "Goal: the keep-output rule's line in your CLAUDE.md says what its guard checks, in the fewest words.\nWhat this is: rule git-never-discard-output reads \"Never silence a git write's output.\" A guard already refuses the act: a git push, commit or merge whose output is thrown away (such as `git push -q` or `> /dev/null`), because a hidden failure looks like a success. On Oct 17 you ruled (decision cull-rules) that once a guard holds a rule, its CLAUDE.md line shrinks to a reminder of 3 words or fewer plus a one-line reason: the guard does the work, and every word loads in every session. Item 177 a then narrowed the rule to git writes only. The line now has 6 words, over your cap. Only the wording changes; the guard stays as it is.\nProblem (rule): the line breaks your 3-word cap.\nBased on (ruling): cull-rules (Oct 17): a checked rule keeps a reminder of 3 words or fewer.\nBased on (ruling): 177 a (22:29 CST Nov 3): git writes only.\nBased on (ruling): 238 none (11:22 CST Nov 6): \"i need more context\". Asked again with it.\nBased on (read): #1188 merged Nov 4 01:09 CST and put c on main.\nDeparts from: CLAUDE.md git-never-discard-output \"Never silence a git write's output.\" \u2014 a or b shortens it; c keeps it and leaves the cap broken.",
   "home": "CLAUDE.md rule git-never-discard-output",
   "id": "keep-output-wording",
   "kind": "decision",
+  "lastAnswer": "none (11:22 CST Nov 6): \"i need more context\". Re-asked 11:30 CST with what the rule, the guard and the cap are.",
   "n": 238,
   "options": [
     {

@@ -1,32 +1,37 @@
 {
   "added": "2026-11-03T22:00:00Z",
-  "context": "Goal: An undo stays reachable when the ledger is empty.\nProblem (rule): recent-checks-can-be-undone says the Recent cell shows only when the ledger holds data, as Reset does. Reset shows on every ledger, so the cell would hide right after a Reset empties it. The same record states a paper fill as settled, and another record calls it an unbuilt default.\nBased on (read): mailaudit src/app.jsx:6573-6576 says Reset shows on an empty ledger; recent-checks-can-be-undone.md:145 (main cd3e12f).\nBased on (ruling): recovery-control-not-state-gated: a recovery control must not depend on the state it recovers.\nDeparts from: The Recent cell shows only when the ledger holds data \u2014 the record is rewritten so it shows on every ledger, and the paper fill is called an unbuilt default.",
+  "context": "Goal: you can always undo a recent check, and no control shows that does nothing.\nProblem (rule): a (show on every ledger) shows a dead cell on an empty ledger; b (show only when the ledger holds data) hides the undo right after Reset empties the ledger, the moment it is needed. The record recent-checks-can-be-undone says b today.\nBased on (ruling): 193 none (11:22 CST Nov 6): \"neither of these seem correct from an outcome perspective\". Asked again with an option keyed to the outcome.\nBased on (ruling): recovery-control-not-state-gated: a recovery control must not depend on the state it recovers.\nBased on (read): mailaudit src/app.jsx:6573-6576 says Reset shows on an empty ledger; recent-checks-can-be-undone.md:145 (main cd3e12f).\nDeparts from: the record (the cell shows only when the ledger holds data) \u2014 c shows it whenever something can be undone, Reset included.",
   "home": "mailaudit docs/decisions/recent-checks-can-be-undone.md",
   "id": "recent-cell-gate",
   "kind": "decision",
+  "lastAnswer": "none (11:22 CST Nov 6): neither option fits the outcome. Re-asked 11:30 CST with option c.",
   "n": 193,
   "options": [
     {
-      "gain": "Undo stays reachable; the record matches Reset.",
-      "how": "Rewrite :145 to show the cell always and :56 to call the fill unbuilt. No code moves.",
-      "key": "a",
-      "label": "Show on every ledger",
-      "lose": "The cell shows on an empty ledger, where it does nothing."
+      "gain": "The undo shows exactly when it works, also right after a Reset, and never as a dead cell.",
+      "key": "c",
+      "label": "Show while anything can be undone",
+      "lose": "A mailaudit lane: the cell reads the undo list, not the ledger; if Reset itself cannot be undone yet, that lane adds it."
     },
     {
-      "gain": "The cell hides when there is nothing to undo.",
-      "how": "Leave :145 as written.",
+      "gain": "Undo is always reachable.",
+      "key": "a",
+      "label": "Show on every ledger",
+      "lose": "The cell shows on an empty ledger, where it may do nothing."
+    },
+    {
+      "gain": "No change.",
       "key": "b",
       "label": "Keep the data gate",
       "lose": "The undo hides after Reset empties the ledger, the day it is needed."
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
-  "pick": "a",
+  "pick": "c",
   "rank": 19,
   "ref": "deep audit 1102, mailaudit homes; coordinator handoff/audit-child-questions 9d97c9b, recent-cell-gate",
   "short": "Recent cell gate",
   "status": "open",
-  "title": "mailaudit: Show the Recent cell on every ledger?",
-  "why": "Recommended in the audit report: yes."
+  "title": "mailaudit: when should the Recent cell (undo of recent checks) show?",
+  "why": "Recommended: c. It ties the cell to what you can undo, the outcome, not to the ledger."
 }

@@ -1,14 +1,14 @@
 {
   "added": "2026-11-05T13:51:00Z",
+  "command": {
+    "mac": "cd ~\nclaude 'Check two things on this Mac and give PASS or FAIL for each, with the lines you read. Change nothing. 1. Decision watch: read the last 20 lines of ~/.claude/decision-watch-shadow/shadow.log. PASS if the newest END line names a verdict such as ALLOW or FLAG. FAIL if it says UNKNOWN or the file is missing. 2. Mods: run claude plugin list. PASS if the decision watch mod shows 0.0.11 or later and each claude-settings mod shows the version on main of github.com/shivinate7/claude-settings.'",
+    "powershell": "cd $env:USERPROFILE\nclaude 'Check two things on this PC and give PASS or FAIL for each, with the lines you read. Change nothing. 1. Decision watch: read the last 20 lines of .claude\\decision-watch-shadow\\shadow.log in my home folder. PASS if the newest END line names a verdict such as ALLOW or FLAG. FAIL if it says UNKNOWN or the file is missing. 2. Mods: run claude plugin list. PASS if the decision watch mod shows 0.0.11 or later and each claude-settings mod shows the version on main of github.com/shivinate7/claude-settings.'"
+  },
   "context": "Both already passed on your Mac on Oct 27. Each step (c29 and c58) can only close when Windows passes too.\n\nThe decision watch (c29) is a small program that reads each turn and records whether it followed your recorded decisions; \"judged\" means it ran and gave a verdict, \"UNKNOWN\" means it could not run. The mods (c58) are the small add-ons claude-settings installs into the Claude app; each should update itself to the version on main.",
   "home": "c29",
   "id": "windows-live-checks",
   "kind": "task",
-  "lastAnswer": {
-    "at": "2026-11-04T23:44:50Z",
-    "done": false,
-    "note": "Unparked 17:48 CST on your press."
-  },
+  "lastAnswer": "note, not done (11:22 CST Nov 6): asked for a small prompt to test it in Claude Code. Added 11:30 CST as the command below.",
   "minutes": 5,
   "n": 10,
   "owner": "Triage the roadmap (9)",
@@ -18,9 +18,8 @@
   "status": "open",
   "steps": [
     "Restart the Claude app on your Windows PC and take one turn (any message).",
-    "Open the file %USERPROFILE%\\.claude\\decision-watch-shadow\\shadow.log and read its last lines. The newest END line should name a verdict (such as ALLOW or FLAG); if it says UNKNOWN, the decision watch could not judge the turn.",
-    "In a terminal, run: claude plugin list. Each claude-settings mod should show the version on main (the decision watch shows 0.0.11 or later).",
-    "Mark done. If either check failed, add a note saying which and what it showed."
+    "Paste the command below into PowerShell. It opens Claude Code with a prompt that runs both checks and prints PASS or FAIL for each.",
+    "Mark done. If either check failed, add a note with what it showed."
   ],
   "title": "Two checks on your Windows PC: the decision watch and the mod updates"
 }

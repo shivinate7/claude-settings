@@ -4,6 +4,8 @@
   "home": "q_max D-799, A browser check deletes the rows it seeds",
   "id": "qmax-d799-runner-cleanup",
   "kind": "decision",
+  "lane": "qmax-browser-red-checks (session_013NEJKz3jwH1Hgo3i865Jqu), via the coordinator: rewrite D-799, the shared runner removes each check's finished jobs",
+  "lastAnswer": "a (11:22 CST Nov 6): rewrite D-799 so the shared runner cleans up each check's jobs. Routed to the coordinator 11:30 CST; open until the q_max PR merges.",
   "links": [
     {
       "label": "q_max PR #1029",

@@ -1,0 +1,9 @@
+{
+  "title": "An answered ask on the waiting page can be dismissed",
+  "phase": "now",
+  "status": "ready",
+  "order": 103.39,
+  "why": "Your ask, 11:22 CST Nov 6: there is no way to dismiss a completed ask. Answered asks stay on the page for good, so old ones bury new ones.",
+  "note": "Nov 6 11:33 CST (triage): done means each answered ask has a Dismiss press next to its reply box (step ask-reply-back); a press writes `dismissed` on asks/<id>, the page hides dismissed asks, and the writer never rewrites a dismissed ask. The coordinator starts the lane; it touches a screen, so it gets a designer and a design reviewer.",
+  "updatedAt": "2026-11-06T17:33:00Z"
+}
