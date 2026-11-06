@@ -2022,6 +2022,16 @@ MUTATIONS = [
      'spawn_role=opus_role or "general-purpose", spawn_markers=opus_kinds)',
      'spawn_role=opus_role or "general-purpose")',
      "guard", 'judge marker: control, a Judge: grant allows the reviewer brief that starts with Judge:'),
+    # A Judge: grant's kinds are every uncovered Opus spawn's kinds, intersected (opus_spawn_hit). Each row below
+    # puts back a rule the fix replaced, and the Workflow case where a Judge: spawn is followed by a plain one must die.
+    ("step grant marker: the kinds are the first uncovered spawn's, not the call's intersection",
+     'kinds = held if kinds is None else kinds & held',
+     'kinds = held if kinds is None else kinds',
+     "guard", 'judge marker: one Workflow with a Judge: reviewer, then a plain reviewer, is refused'),
+    ("step grant marker: the kinds are the union of the call's spawns, not their intersection",
+     'kinds = held if kinds is None else kinds & held',
+     'kinds = held if kinds is None else kinds | held',
+     "guard", 'judge marker: one Workflow with a Judge: reviewer, then a plain reviewer, is refused'),
     # THE OVERRIDE LINE (step c80, hooks/override.py and refuse() in hooks/guard_core.py). A refusal ends with
     # the line the owner types, or with the sentence that no override lifts it.
     ("override line: a vetoed refusal offers an override that cannot lift it",
