@@ -31,9 +31,9 @@
   "pick": "b",
   "rank": 4,
   "ref": "item 278; step auto-mode-refusal-survey",
-  "reply": "a: finish the scan (about 1.5M tokens). Sent to the coordinator at 14:15 CST. Closes when step auto-mode-refusal-survey records the full count.",
+  "reply": "Done (14:21 CST): 359 of 360 sessions read, with 18 refusals in about 6,216 acts (0.3%). Only three kinds recur: a lane's own force push (7, fixed by PR #1324), remote branch deletes (3, a Mac session's job under your standing grant), and send_message with a status note (2). No new allow line is needed. Recorded on step auto-mode-refusal-survey.",
   "short": "Refusal scan: spend 1.5M tokens?",
-  "status": "open",
+  "status": "closed",
   "title": "Finishing the refusal scan costs about 1.5M tokens. Still finish it?",
   "why": "Recommended b: the only act that comes back already has its fix, and the rest costs about 1.5M tokens."
 }

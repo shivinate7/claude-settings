@@ -1,9 +1,9 @@
 {
   "title": "Survey every act auto mode refused, beyond the three allow lines",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 103.3693,
   "why": "The owner asks whether the allow lines cover everything that gets refused.",
-  "note": "Coordinator 13:16 CST Nov 6, PARTIAL (about 131 of 360 cloud sessions since Nov 2): 9 auto-mode refusals in about 2,623 judged acts; only the lane force-push recurs (4), lease with sha and --force-if-includes included. Once each: remote branch delete by refspec, .claude/CLAUDE.md edit, send_message with batch heads, archive probe push brief, rev-parse beside a refused push. No new allow line proposed. Item 287 asks the owner: finish the scan (a, recommended) or close.\nOwner on item 278, 12:58 CST Nov 6: \"were these also all that we needed to add permissions for, we haven't found anything else that gets refused atm?\". Routed to the coordinator 13:13 CST: scan the refusal log and bring back recurring acts.",
-  "updatedAt": "2026-11-06T19:20:00Z"
+  "note": "Coordinator 14:21 CST Nov 6, FULL (owner item 287 a): 359 of 360 cloud sessions since Nov 2, page 1 each (unread: session_013NEJL4LniUvGXrcRXsLkcK). 18 auto-mode refusals in about 6,216 judged acts (0.3%).\nRecurring: force-with-lease push of a lane's own branch, 7 (fix: lane lease-sha-form-hint, PR #1324, prints the form the guard allows). Remote branch delete, 3 (refspec, git push --delete, gh api DELETE refs): the standing grant gives these to a Mac session. send_message carrying a status note or batch heads, 2.\nOnce each: .claude/CLAUDE.md edit, commit --amend, an Agent records edit, bash merge/install_from_main.sh, an archive probe push brief, rev-parse beside a refused push.\nReading: no new allow line. Answer to owner item 278: the force-push is the one recurring gap, and #1324 fixes it.",
+  "updatedAt": "2026-11-06T20:22:00Z"
 }
