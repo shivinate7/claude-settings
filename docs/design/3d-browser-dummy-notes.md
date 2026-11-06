@@ -154,6 +154,29 @@ has rank 30 and every other item has 1 to 4; height by rank would flatten the re
 - Departs from: the meaning of the ring shape. On the Cockpit `.g.calm` marks the calm tier; here it
   marks "open". The builder keeps the Cockpit's tier shape once real tier fields exist.
 
+## 11. Option files for the owner page (skill waiting-page, "Add a design")
+
+One file per option, each drawn in that option's own state, with its own Sample banner and the dashed
+Today and New labels. Each file is one self-contained HTML page with no frame inside, so a `focus`
+selector reaches the part being decided. `#t=dark` or `#t=light` in the hash sets the theme; with
+none, `prefers-color-scheme` does.
+
+| Question | Option | File | State drawn | `focus` | Widths |
+|---|---|---|---|---|---|
+| Scene mapping (item 1) | Status floors | `docs/design/3d-browser-dummy/layout-a.html` | nothing picked | `#scene` | 390 (default), 1440 (`drawn: 1440`) |
+| Scene mapping (item 1) | Kind floors | `docs/design/3d-browser-dummy/layout-b.html` | nothing picked | `#scene` | 390 (default), 1440 (`drawn: 1440`) |
+| Phone detail (item 5) | Under the scene | `docs/design/3d-browser-dummy/phone-a.html` | item 279 picked | `#pickview` | 390 |
+| Phone detail (item 5) | Over the scene | `docs/design/3d-browser-dummy/phone-b.html` | item 279 picked | `#pickview` | 390 |
+
+- `#scene` is the scene box. `#pickview` wraps the view switch, the scene and the picked card; it
+  exists only in the two phone files (config `wrap`).
+- The four files are copies of this mockup's `#screencss`, `#screenjs` and `#data` blocks, with each
+  option's config. Reason for the copies: the owner page takes each option as one HTML string. A change
+  to the main mockup needs the four files rebuilt.
+- Check, headless Chrome, light and dark: layout files at 390 and 1440, phone files at 390. Each has
+  no horizontal scroll, its banner and labels, and a `focus` element with a size. Verdict: 12 of 12
+  pass.
+
 ## Not drawn
 
 - Forced-colours captures and a screen-reader pass: hand checks for the built page.

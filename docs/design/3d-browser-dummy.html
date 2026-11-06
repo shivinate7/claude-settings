@@ -109,6 +109,12 @@ p { margin: 0; }
 .who { min-width: 0; display: flex; align-items: baseline; gap: 10px; }
 .who .repo { margin: 0; font: var(--wmw) 18px/1.2 var(--wm); letter-spacing: var(--wmls); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .who .copy { flex: none; font-size: 13px; font-weight: 600; padding: 0 8px; border: 1.5px solid currentColor; border-radius: 999px; line-height: 20px; }
+/* Option files only: their own Sample banner, and #pickview, one column that holds the switch, scene and detail. */
+.sample { background: #5b21b6; color: #fff; font: 700 14px/1.4 system-ui, sans-serif; text-align: center; padding-block: 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.main3.wrapped { grid-template-columns: minmax(0, 1fr); grid-template-areas: none; }
+#pickview { display: grid; gap: 16px; min-width: 0; }
+/* !important: the area names on #scene, .detail and the rest come later and would put the column back on the frame grid. */
+#pickview > *, .main3.wrapped > * { grid-area: auto !important; }
 .lede { padding-block: 12px 4px; font-size: 14.5px; color: var(--muted); max-width: 70ch; }
 
 /* Today: the Cockpit's state shapes. New: doing and to-do shapes for roadmap steps. */
@@ -441,7 +447,12 @@ function drawScene(svg) {
     if (o.tag.top) { p = PP(o.x, o.y, o.h + 0.2); dy = -6; }
     else {
       const cs = [[o.x, o.y], [o.x + o.w, o.y], [o.x + o.w, o.y + o.d], [o.x, o.y + o.d]].map(([x, y]) => PP(x, y, 0));
-      if (o.cls === "shelf") { p = cs.sort((a, b) => b[0] - a[0])[0]; p = [p[0] + 8, p[1]]; anchor = "start"; dy = 5; } else { p = cs.sort((a, b) => a[0] - b[0])[0]; anchor = "start"; dy = 22; }
+      if (o.cls === "shelf") {
+        p = cs.sort((a, b) => b[0] - a[0])[0];
+        /* Beside the right corner when it fits in the box; else under it, ending at the corner. */
+        if (p[0] + 8 + tw(o.tag.text + " 00", "700 12.5px system-ui") + 8 <= W) { p = [p[0] + 8, p[1]]; anchor = "start"; dy = 5; }
+        else { p = [p[0] - 4, p[1]]; anchor = "end"; dy = 22; }
+      } else { p = cs.sort((a, b) => a[0] - b[0])[0]; anchor = "start"; dy = 22; }
     }
     s += `<text class="gt" x="${p[0]}" y="${p[1] + dy}" text-anchor="${anchor}" aria-hidden="true">${esc(o.tag.text)}${o.tag.count != null ? ` <tspan class="ct">${o.tag.count}</tspan>` : ""}</text>`;
   });
@@ -533,10 +544,13 @@ function legendHtml() {
 /* ---------- Page ---------- */
 const st = CFG.s;
 const nogl = st === "nowebgl";
-document.body.innerHTML = `
+/* CFG.banner: an option file's own Sample banner. CFG.wrap: an option file at phone width wraps the
+   view switch, scene and detail in #pickview, so one selector frames the part being decided. */
+const wrap = !!CFG.wrap;
+document.body.innerHTML = `${CFG.banner ? `<div class="sample">${esc(CFG.banner)}</div>` : ""}
 <header class="hdr" data-today="Cockpit repo bar"><div class="in"><div class="mark" aria-hidden="true">c</div><div class="who"><h1 class="repo">claude-settings</h1><span class="copy">3D test copy</span></div></div></header>
 <div class="in"><p class="lede">The Cockpit's items and roadmap steps, drawn as objects you can turn and pick. This copy only shows. Answer items on the Cockpit. Read Nov 6, 2026.</p></div>
-<main class="in main3">
+<main class="in main3${wrap ? " wrapped" : ""}">${wrap ? `<div id="pickview">` : ""}
   <div class="bar3"${nogl ? " hidden" : ""} data-new="view switch">
     <div class="views" role="group" aria-label="Show in the scene"><button type="button" data-view="all">All</button><button type="button" data-view="items">Items</button><button type="button" data-view="roadmap">Roadmap</button></div>
     <button class="btn" type="button" data-act="reset" aria-label="Reset view">Reset</button>
@@ -548,7 +562,7 @@ document.body.innerHTML = `
       <div class="zoom"><button type="button" data-act="in" aria-label="Zoom in">+</button><button type="button" data-act="out" aria-label="Zoom out">&minus;</button></div>
       <p class="hint" aria-hidden="true"><span class="pt">Drag sideways to turn. Pinch, or Ctrl and scroll, to zoom.</span><span class="kb">Arrow keys move. [ and ] turn. + and &minus; zoom. Esc clears.</span></p>
     </section>`}
-  <aside class="detail" aria-live="polite" aria-label="Picked object" data-today="Cockpit card look"></aside>
+  <aside class="detail" aria-live="polite" aria-label="Picked object" data-today="Cockpit card look"></aside>${wrap ? "</div>" : ""}
   <section class="legend"${nogl ? " hidden" : ""} data-new="legend">${legendHtml()}</section>
   <section class="plain" aria-labelledby="listH" data-new="plain list">${listHtml()}</section>
 </main>`;
