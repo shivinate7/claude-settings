@@ -140,6 +140,12 @@ unknown (<why>)`, and build.py exits 0; the page's stalled block then reads not 
 open item row with no `lane` key reads the items unknown, so a publisher that does not send `lane` never
 passes for zero stalled items.
 
+build.py also prints `ready not started: <id> (<age>h)` for each step with status `todo` or `ready`, phase
+`now`, no live lane (the same test as above), no valid `paused` field, and no open item homed on it that
+has no lane. The age is whole hours from `updatedAt` to the live read, or `(age unknown)` when `updatedAt`
+is missing or has no zone. The page's ready block lists the same steps. With no usable live read, one line
+reads `ready not started: unknown (<why>)`, never zero. These lines never change the exit code.
+
 Triage disposes each stalled step by writing, on the record branch, one of three things. It sets the step
 `todo` (the lane is gone and the work is not done) or `done` (it landed). Or it adds `paused`:
 `{"why": "<text>", "decides": "owner" | "coordinator" | "triage", "at": "<ISO time with a zone>", "by":
@@ -185,7 +191,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   The session also needs the tag `cs-repo:<owner>/<repo>` for this
   repo's GitHub name, in any case, because `list_sessions` is account-wide and step ids repeat across
   repos. A session row with no `tags` key, or null `tags`, has no tags and is not skipped. A step
-  whose status is none of `todo`, `doing`, `active` or `done` is listed as `<id> (unknown status
+  whose status is none of `todo`, `ready`, `doing`, `active` or `done` is listed as `<id> (unknown status
   "<status>")`. Each other entry reads `<id> (set to todo)`, or `<id> (set to done: landed in #N)` when
   a `Step:` trailer is on main. Triage sets each step back. The red line prints a `stalled step:` line
   for each entry except an unknown-status one, built from the same test. The row reads one `unknown (<why>)` entry,
