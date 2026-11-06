@@ -1,9 +1,9 @@
 {
   "title": "A full wake thread starts a new one, so a page save still wakes the writer",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 103.3,
   "why": "At 11:33 CST Nov 6 the Cockpit's wake thread b9ad3b14 hit the comment limit (100). The page sends each Send's wake comment into the stored thread (localStorage waiting.thread), and on any error but not_found it gives up quietly. So from now on a save writes the answers but wakes no session.",
-  "note": "Nov 6 11:36 CST (triage): read from skills/waiting-page/page.html notifyClaude (lines 2003-2018 of the installed copy). Done means: when the stored thread refuses a comment for any reason (limit, resolved, gone), the page starts a new thread on the h1 anchor, stores its id, and the wake still lands; a test drives the limit error. Until it lands, the writer reads answers and asks at each wake from any other source, and the owner may need to tell a session in chat after a save. The coordinator starts the lane; it touches no screen layout.",
-  "updatedAt": "2026-11-06T17:36:00Z"
+  "note": "Nov 6 11:32 CST (coordinator): lane started, session_013NEJL1yE8hwH5UeffrVTyX.\nNov 6 11:36 CST (triage): read from skills/waiting-page/page.html notifyClaude (lines 2003-2018 of the installed copy). Done means: when the stored thread refuses a comment for any reason (limit, resolved, gone), the page starts a new thread on the h1 anchor, stores its id, and the wake still lands; a test drives the limit error. Until it lands, the writer reads answers and asks at each wake from any other source, and the owner may need to tell a session in chat after a save. The coordinator starts the lane; it touches no screen layout.",
+  "updatedAt": "2026-11-06T17:34:00Z"
 }

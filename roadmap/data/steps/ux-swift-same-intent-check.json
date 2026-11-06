@@ -1,9 +1,9 @@
 {
   "title": "Check whether rule ux-swift-same-intent holds for Swift screens",
   "phase": "now",
-  "status": "ready",
+  "status": "done",
   "order": 103.41,
   "why": "Your note on item 183, 11:22 CST Nov 6: send a lane to determine whether ux-swift-same-intent (a Swift screen follows the same four layout rules with its own tools) is right to apply.",
-  "note": "Nov 6 11:33 CST (triage): an Explore or research lane reads docs/design/layout.md's Swift table and the Swift screens in the owner's iOS repos (home, degen, ios-adblock), and reports per rule whether the Swift tool gives the same outcome. It edits nothing; its report becomes a page question. The coordinator starts it.",
-  "updatedAt": "2026-11-06T17:33:00Z"
+  "note": "Nov 6 11:34 CST (triage): the coordinator's lane scanned: home 30/302 stacks set no spacing, degen 37/214, mailaudit 10/87 plus a padding push; ios-adblock holds. Its question is page item 272 (narrow and check, debts, or retire).\nNov 6 11:33 CST (triage): an Explore or research lane reads docs/design/layout.md's Swift table and the Swift screens in the owner's iOS repos (home, degen, ios-adblock), and reports per rule whether the Swift tool gives the same outcome. It edits nothing; its report becomes a page question. The coordinator starts it.",
+  "updatedAt": "2026-11-06T17:34:00Z"
 }
