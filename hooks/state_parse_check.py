@@ -19,7 +19,9 @@ What it reads: only the files the call names.
 
 No false alarm mid-edit: an Edit or MultiEdit rebuilds the before-state from old_string and new_string
 (the after-state with new_string put back to old_string). When the before-state already had the fault,
-or cannot be rebuilt (new_string empty, or not found in the file), it says nothing. A file that is gone
+or cannot be rebuilt (new_string not found in the file, or too many places to try), it says nothing.
+An Edit that only removed text (new_string empty) puts old_string back at each place it could have been:
+the fault counts when some such before-state was fine, so a removal from an already broken file is silent. A file that is gone
 says nothing: a delete is not a break. A Write or a shell write is judged as left.
 
 Fence rules, one home each: an inbox uses feedback_guard.scan (parse()'s loop, so this check and the Stop
@@ -51,6 +53,9 @@ EDIT_TOOLS = ("Edit", "MultiEdit")
 FILE_TOOLS = ("Write",) + EDIT_TOOLS
 MAX_PATHS = 20           # files judged per call
 MAX_CANDIDATES = 64      # before-states tried for one Edit whose new_string occurs more than once
+SHORT_TEXT = 2000        # a text this short is tried at every character for an Edit that only removed text
+MAX_INSERTS = 3000       # before-states tried for one Edit that only removed text
+MAX_WORK = 60_000_000    # candidates times file size: a costlier rebuild is skipped, and the check is silent
 MAX_BYTES = 8_000_000    # a state file larger than this is not read
 SEPARATORS = {"|", "||", "&&", ";", "&", ";;", "|&", "(", ")"}
 REDIRECTS = {">", ">>", ">|", "&>", "&>>"}
@@ -155,23 +160,12 @@ def read_text(path):
         return None
 
 
-def position(text, index):
-    return text.count("\n", 0, index) + 1, index - (text.rfind("\n", 0, index) + 1) + 1
-
-
 def json_fault(text):
-    """(line, column, why) when json.loads rejects the text, else None. A trailing comma is named at the
-    comma, as Python 3.13 does, so the verdict does not depend on the Python version."""
+    """(line, column, why) when json.loads rejects the text, else None."""
     try:
         json.loads(text)
     except json.JSONDecodeError as error:
-        index, why = error.pos, error.msg
-        if why.startswith("Expecting") and text[index:index + 1] in ("}", "]"):
-            before = text[:index].rstrip()
-            if before.endswith(","):
-                index, why = len(before) - 1, "trailing comma"
-        line, column = position(text, index)
-        return line, column, why
+        return error.lineno, error.colno, error.msg
     except Exception:  # a RecursionError on deep nesting: not a verdict
         return None
     return None
@@ -188,68 +182,101 @@ def facts(kind, text, guard):
             "premises": precompact_handoff._PREMISES_HEAD.search(text) is not None}
 
 
+def inserts(text, old):
+    """The texts that put `old` back into `text` at each place a removal could have been: every line
+    start and the end, and every character when the text is short."""
+    if not old:
+        return [text]
+    short = len(text) <= SHORT_TEXT
+    return [text[:i] + old + text[i:] for i in range(len(text) + 1)
+            if short or i == 0 or i == len(text) or text[i - 1] == "\n"]
+
+
 def unapply(text, edit):
-    """The before-states of one edit: `text` with new_string put back to old_string, one per place
-    new_string occurs, or None when that cannot be done."""
+    """(before-states, removal) for one edit: `text` with new_string put back to old_string, one per place
+    new_string occurs. An empty new_string occurs everywhere, so its candidates put old_string back at each
+    place a removal could have been, and `removal` is True. None when that cannot be done."""
     old, new = edit.get("old_string"), edit.get("new_string")
-    if not isinstance(old, str) or not isinstance(new, str) or not new:
+    if not isinstance(old, str) or not isinstance(new, str):
         return None
+    if not new:
+        return inserts(text, old), True
     if edit.get("replace_all"):
-        return [text.replace(new, old)] if new in text else None
+        return ([text.replace(new, old)], False) if new in text else None
     states, start = [], text.find(new)
     while start >= 0 and len(states) <= MAX_CANDIDATES:
         states.append(text[:start] + old + text[start + len(new):])
         start = text.find(new, start + 1)
-    return states if 0 < len(states) <= MAX_CANDIDATES else None
+    return (states, False) if 0 < len(states) <= MAX_CANDIDATES else None
 
 
 def before_states(tool, tool_input, after):
-    """None for a call judged as left; [] when an Edit's before-state cannot be rebuilt; else the candidates."""
+    """(candidates, removal). candidates is None for a call judged as left, [] when an Edit's before-state
+    cannot be rebuilt (or costs too much to try), else the candidate before-states. removal is True when an
+    edit only removed text, so the place it was removed from is unknown."""
     if tool not in EDIT_TOOLS:
-        return None
+        return None, False
     edits = tool_input.get("edits") if tool == "MultiEdit" else [tool_input]
     if not isinstance(edits, list):
-        return []
-    states = [after]
+        return [], False
+    states, removal = [after], False
     for edit in reversed(edits):
         if not isinstance(edit, dict):
-            return []
+            return [], False
         nxt = []
         for state in states:
             back = unapply(state, edit)
             if back is None:
-                return []
-            nxt += back
-        states = nxt[:MAX_CANDIDATES]
-    return states
+                return [], False
+            nxt += back[0]
+            removal = removal or back[1]
+            if len(nxt) > MAX_INSERTS or len(nxt) * len(after) > MAX_WORK:
+                return [], False
+        states = nxt
+    return states, removal
 
 
-def judge(path, kind, after, befores, written, guard):
+def judge(path, kind, after, befores, removal, written, guard):
     """The fault lines for one file. `befores` is None (judge as left), [] (silent), or the candidate
-    before-states: a fault counts only when no candidate already had it."""
+    before-states. A fault counts only when it was not already there: for an Edit that put text in place, when
+    no candidate had it; for an Edit that only removed text, when some candidate did not (every place the
+    removal could have been leaves the fault, so the file was broken before)."""
     if befores is not None and not befores:
         return []
     now = facts(kind, after, guard)
-    was = [facts(kind, text, guard) for text in befores or []]
+    memo = {}
+
+    def was(index):
+        if index not in memo:
+            memo[index] = facts(kind, befores[index], guard)
+        return memo[index]
+
+    def already(key):
+        flags = (bool(was(i)[key]) for i in range(len(befores or [])))
+        return all(flags) if removal else any(flags)
+
     name, lines = path, []
     if kind == "json":
-        if now["json"] and not any(w["json"] for w in was):
+        if now["json"] and not already("json"):
             line, column, why = now["json"]
             lines.append("%s is not valid JSON: %s at line %d column %d" % (name, why, line, column))
         return lines
-    if now["fence"] and not any(w["fence"] for w in was):
+    if now["fence"] and not already("fence"):
         lines.append("%s has a code fence left open: the fence at line %d is never closed" % (name, now["fence"]))
-    if kind == "inbox" and was:
+    if kind == "inbox" and befores:
         lost = None
-        for w in was:
-            gone = list(w["stamps"])
+        for index in range(len(befores)):
+            gone = list(was(index)["stamps"])
             for stamp in now["stamps"]:
                 if stamp in gone:
                     gone.remove(stamp)
             lost = gone if lost is None else [s for s in lost if s in gone]
+            if not lost:
+                break
         if lost:
             lines.append("%s lost %d block header(s): %s" % (name, len(lost), ", ".join(lost)))
-    if kind == "handoff" and written and not now["premises"] and (not was or any(w["premises"] for w in was)):
+    if kind == "handoff" and written and not now["premises"] and (
+            not befores or any(was(i)["premises"] for i in range(len(befores)))):
         lines.append("%s has no `## Working premises` heading" % name)
     return lines
 
@@ -285,8 +312,8 @@ def check(payload):
         after = read_text(path)
         if after is None:
             continue
-        befores = before_states(payload.get("tool_name"), payload.get("tool_input"), after)
-        lines += judge(path, kind, after, befores, written, guard)
+        befores, removal = before_states(payload.get("tool_name"), payload.get("tool_input"), after)
+        lines += judge(path, kind, after, befores, removal, written, guard)
     if not lines:
         return ""
     return "state_parse_check: a state file this call touched no longer parses.\n- " + "\n- ".join(lines)
