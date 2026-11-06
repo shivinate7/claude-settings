@@ -97,20 +97,26 @@ test('B1. the ids the command prints equal the keys of mapChecks', async () => {
   assert.deepEqual(printed, keys, `the command must run every check that mapChecks holds, from one list\n${r.out.slice(0, 1500)}`);
 });
 
-// The checks run first: the verdicts must be the clean ones, so an UNKNOWN below answers the seam read and no other check.
-test('C1. a modelSeam with no model-call reader bound prints UNKNOWN and exits 0 locally', () => {
+// Lane ruling R3: with no model-call reader bound, the seam check is a declared limit, not an unread input. It prints its
+// note and exits 0, CI set or not. It prints no UNKNOWN line. The checks run first, so the verdicts must be the clean ones.
+const SEAM_NOTE = /^\[NOTE\] no model-call reader is bound/m;
+
+test('C1. a modelSeam with no model-call reader bound prints its note, no UNKNOWN, and exits 0 locally', () => {
   needFile(REL);
   const r = run([CLI], seamRepo(), undefined, {}, ['CI']);
-  assert.equal(verdicts(r.out), expected(), `the checks must run before the seam read is judged\n${r.out.slice(0, 1500)}`);
-  assert.match(r.out, /UNKNOWN/, `the seam read printed no UNKNOWN line\n${r.out.slice(0, 1500)}`);
-  assert.equal(r.status, 0, `locally an unknown read exits 0\n${r.out.slice(0, 1500)}`);
+  assert.equal(verdicts(r.out), expected(), `the checks must run before the seam note is judged\n${r.out.slice(0, 1500)}`);
+  assert.match(r.out, SEAM_NOTE, `the declared limit printed no note line\n${r.out.slice(0, 1500)}`);
+  assert.doesNotMatch(r.out, /UNKNOWN/, `a declared limit must not print UNKNOWN\n${r.out.slice(0, 1500)}`);
+  assert.equal(r.status, 0, `locally the seam note exits 0\n${r.out.slice(0, 1500)}`);
 });
 
-test('C2. the same unknown seam read is red in CI: with env CI set the command exits non-zero', () => {
+test('C2. the same declared limit with env CI set prints its note, no UNKNOWN, and exits 0', () => {
   needFile(REL);
   const r = run([CLI], seamRepo(), undefined, { CI: '1' });
-  assert.equal(verdicts(r.out), expected(), `the checks must run before the seam read is judged\n${r.out.slice(0, 1500)}`);
-  assert.notEqual(r.status, 0, `with env CI set, an unknown read must exit non-zero\n${r.out.slice(0, 1500)}`);
+  assert.equal(verdicts(r.out), expected(), `the checks must run before the seam note is judged\n${r.out.slice(0, 1500)}`);
+  assert.match(r.out, SEAM_NOTE, `the declared limit printed no note line in CI\n${r.out.slice(0, 1500)}`);
+  assert.doesNotMatch(r.out, /UNKNOWN/, `a declared limit must not print UNKNOWN in CI\n${r.out.slice(0, 1500)}`);
+  assert.equal(r.status, 0, `a declared limit exits 0 in CI\n${r.out.slice(0, 1500)}`);
 });
 
 test('C3. control: with no modelSeam, env CI set, the command prints no UNKNOWN and exits 0', () => {
