@@ -1997,6 +1997,31 @@ MUTATIONS = [
      '    if at >= until or (role is not None',
      '    if at > until or (role is not None',
      "override", 'opus override: `opus 2h` lets an Opus spawn through'),
+    # THE JUDGE MARKER ON A STEP GRANT (hooks/override.py _take_step, hooks/shared_names.py). A grant's marker only
+    # narrows the Opus spawn it covers, and one grant must hold the role and the marker together.
+    ("step grant marker: the marker check is dropped, so a Judge: grant covers every brief",
+     '(kind is None or kind in (markers or ()))',
+     'True',
+     "override", 'judge marker: a Judge: grant refuses a reviewer brief with no marker'),
+    ("step grant marker: the role and the marker are read from different grants",
+     '    if status == "done" or not any((r is None or r == role) and (kind is None or kind in (markers or ()))\n'
+     '                                   for r, kind in covers):',
+     '    if status == "done" or not (any(r is None or r == role for r, _ in covers)\n'
+     '                                and any(kind is None or kind in (markers or ()) for _, kind in covers)):',
+     "override", 'judge marker: two grants, a Judge: reviewer and a builder with no marker, refuse a plain reviewer'),
+    ("step grant marker: an empty or null marker reads as no marker, so it widens the grant",
+     '    if "marker" not in grant:\n        return role, None\n',
+     '    if not grant.get("marker"):\n        return role, None\n',
+     "override", 'judge marker: a grant whose marker is the empty string is wrong-shape'),
+    ("step grant marker: the marker is read case-insensitively",
+     '_MARKER_ROWS = tuple((kind, re.compile(text), position) for kind, text, position in BRIEF_MARKERS)',
+     '_MARKER_ROWS = tuple((kind, re.compile(text, re.I if kind == "judge" else 0), position)\n'
+     '                     for kind, text, position in BRIEF_MARKERS)',
+     "guard", 'judge marker: a lowercase judge: first line does not satisfy a Judge: grant'),
+    ("step grant marker: the guard hands the override no marker kinds",
+     'spawn_role=opus_role or "general-purpose", spawn_markers=opus_kinds)',
+     'spawn_role=opus_role or "general-purpose")',
+     "guard", 'judge marker: control, a Judge: grant allows the reviewer brief that starts with Judge:'),
     # THE OVERRIDE LINE (step c80, hooks/override.py and refuse() in hooks/guard_core.py). A refusal ends with
     # the line the owner types, or with the sentence that no override lifts it.
     ("override line: a vetoed refusal offers an override that cannot lift it",
