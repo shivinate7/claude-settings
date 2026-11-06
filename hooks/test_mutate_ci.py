@@ -849,6 +849,24 @@ class KnownDefectsTests(unittest.TestCase):
                          % (code, out, err))
         self.assertNotIn("Traceback", err, "a bad profile file prints one ERROR line, never a traceback:\n" + err)
 
+    def test_two_parts_with_one_lockfile_and_link_but_different_installs_read_unknown_naming_the_link_path(self):
+        # Both installs succeed. Only one folder can sit at the link, so the second part must read UNKNOWN, not reuse it.
+        repo = defect_repo(extra_files={ROOT_LOCK: LOCK_TEXT, "test_oracle.py": ORACLE_SUITE})
+        other = [PY, "-c", "import pathlib\npathlib.Path('node_modules').mkdir(exist_ok=True)\n"
+                 "pathlib.Path('node_modules', 'kb_other.py').write_text(%r, encoding='utf-8')" % "X = 1\n"]
+        profile = {"parts": {"a": {"install": ORACLE_INSTALL, "lockfile": ROOT_LOCK},
+                             "b": {"install": other, "lockfile": ROOT_LOCK}}}
+        defects = [defect("kb-l1", "return a + b", "return a - b", "test_oracle.py"),
+                   defect("kb-l2", "return a * b", "return a + b", "test_calc.py")]
+        code, out, err = known_run(defects, repo, profile=profile)
+        self.assertEqual(verdicts_of(out), {"kb-l1": "UNKNOWN", "kb-l2": "UNKNOWN"},
+                         "two installs cannot share one link: every defect reads UNKNOWN\n" + out + err)
+        lines = [line for line in out.splitlines() if line.startswith("UNKNOWN kb-l")]
+        self.assertEqual(len(lines), 2, "one UNKNOWN line per defect:\n" + out)
+        for line in lines:
+            self.assertIn("node_modules", line, "the UNKNOWN reason must name the link path: " + line)
+        self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
+
 
 class RealListTests(unittest.TestCase):
     """The list the repository ships, read at HEAD: the three pinned entries and their anchors."""
