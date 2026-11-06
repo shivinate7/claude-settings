@@ -1,0 +1,10 @@
+{
+  "title": "A scroll-hold test checks where cards sit on screen, not scrollY",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 105,
+  "why": "A test that asserts window.scrollY stays the same can pass while cards still jump on screen.",
+  "note": "Lane page-lane-answered-sinks, 16:59 CST Nov 6. Its test brief asserted that scrollY stays unchanged, but the outcome to protect is that cards hold their place on screen. That cost a builder round on PR #1373. Proposed check: the test-author agent file, or a lint on page.test.mjs, flags a scroll-hold case that asserts scrollY equality without checking viewport positions.",
+  "owner": "coordinator",
+  "updatedAt": "2026-11-06T23:12:00Z"
+}
