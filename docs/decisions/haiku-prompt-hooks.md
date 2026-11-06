@@ -32,16 +32,16 @@ Cost, per `outcomes-mechanize-rules`. `decision_watch.invoke_model` is the one m
 
 | Hook (event) | Process starts | Files written | How often |
 |---|---|---|---|
-| `call_judge` (PreToolUse on Agent, AskUserQuestion, ArtifactData) | a judged call: 1 model call, 1 `git` read; fast exit: none | a refusal: one `guard.log` line | each matching call |
+| `call_judge` (PreToolUse on Agent, AskUserQuestion, ArtifactData) | a judged call: 1 model call, plus 1 `git` read when it carries rulings to check; an Agent spawn reads no `git`; fast exit: none | a refusal: one `guard.log` line | each matching call |
 | `prose_judge` (PreToolUse on Edit and Write) | 1 model call per edit under `docs/decisions/`; any other path: none | a refusal: one `guard.log` line | each Edit or Write |
 | `reply_judge` (Stop) | a sampled Stop: 1 model call; a sampled-out Stop: none | its sample counter | each Stop |
 | `feedback_guard` (Stop) | a judging Stop: 1 model call, 1 `grep`, 1 `git rev-parse`; a quiet Stop: none | turn state and the inbox | each Stop |
-| `report_guard` (Stop) | a reply with two or more questions: 1 model call, 1 `git` read; else none | none | each Stop |
+| `report_guard` (Stop) | a reply with one or more questions: 1 model call, 1 `git` read; else none | none | each Stop |
 | `sendmessage_state` (PreToolUse on SendMessage) | a busy receiver: 2 model calls and 1 `node` board read; idle: 1 model call and 1 `node`; a structured message: 1 model call, no `node`. The `node` read is killed, with its group, at its timeout | none | each SendMessage |
 
 Each row's file under `hooks/` or `lint/` holds a `CostTests` class that pins its counts.
 
-One more model caller is not among the six and is not ruled here: `decision_watch.run`, in the decision-watch mod. `hooks/local_time.py` makes no model call (checked by grep).
+Two more model callers are not among the six and are not ruled here. `decision_watch.run`, in the decision-watch mod. And `hooks/local_time.py` on UserPromptSubmit: an owner prompt that asks for Opus agents reaches `override.grant_opus_ask`, then `call_judge.opus_ask`, for up to 2 model calls; any other prompt makes none.
 
 Re-check the move to prompt hooks, and rewrite this section in place, when Claude Code adds any of these:
 
