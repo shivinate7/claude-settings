@@ -1,0 +1,22 @@
+{
+  "added": "2026-11-06T17:36:00Z",
+  "context": "Your ask (11:27 CST Nov 6) was whether to build your own harness so sessions talk across machines. The research says keep Claude Code and fix only the gaps in messaging. This test shows which directions work today. A direction that fails becomes a claude-settings step, not a rebuild. It starts no process beyond Remote Control.",
+  "home": "ask ask-mw58ykeqal",
+  "id": "cross-machine-message-test",
+  "kind": "task",
+  "n": 273,
+  "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "rank": 3,
+  "ref": "ask ask-mw58ykeqal; Opus research report 11:33 CST",
+  "short": "Cross-machine message test",
+  "status": "open",
+  "steps": [
+    "Turn on Remote Control on your Mac and on your PC: in the Claude desktop app, Settings, Claude Code, Remote Control.",
+    "On the Mac, in a Claude Code session, type /list-agents. Check that the PC session and at least one cloud session are listed.",
+    "From the PC session, send the Mac session a message, and send one back.",
+    "From a cloud session, send the PC session a message (a cloud session uses send_message).",
+    "From the Mac, send a cloud session a message.",
+    "Mark done, with a note naming each direction that failed."
+  ],
+  "title": "Test whether sessions on your Mac, PC and the cloud can message each other"
+}

@@ -1,0 +1,36 @@
+{
+  "added": "2026-11-06T17:34:00Z",
+  "context": "Goal: Swift screens follow the same layout standard as web screens (your 183 note).\nWhat this is: rule ux-swift-same-intent says a Swift screen spaces its items from the parent stack (VStack(spacing:) and the like), never by padding one item to push its neighbour away, and uses shared spacing values that grow with text size (@ScaledMetric).\nProblem (rule): no check holds the rule. home, degen and mailaudit break it; ios-adblock holds it. Two of its demands may ask for more than the outcome needs: every stack must set spacing (the platform's default gap is fine), and spacing must use @ScaledMetric tokens (no app does).\nBased on (ruling): 183 note (11:22 CST Nov 6): send a lane to find out whether the rule is right to apply.\nBased on (measured): lane ux-swift-same-intent-check scan, Nov 6: home 30 of 302 stacks set no spacing, degen 37 of 214, mailaudit 10 of 87, plus a padding push at native/Manifest/ItemLine.swift:90.\nDeparts from: main states the Swift rule with no check \u2014 a adds a check and narrows the rule; b files debts; c retires the section.\n\nNot blocking: nothing waits on it.",
+  "home": "docs/design/layout.md ux-swift-same-intent",
+  "id": "ux-swift-layout-rule",
+  "kind": "decision",
+  "n": 272,
+  "options": [
+    {
+      "gain": "The rule asks only what matters (no padding that pushes a neighbour) and a check holds it in all 4 apps.",
+      "key": "a",
+      "label": "Narrow it and add a check",
+      "lose": "A check to build, then one fix lane per app that breaks it."
+    },
+    {
+      "gain": "No work now.",
+      "key": "b",
+      "label": "Keep it as written, one debt per app",
+      "lose": "The rule stays unenforced and asks for what no app does."
+    },
+    {
+      "gain": "Least work.",
+      "key": "c",
+      "label": "Retire the Swift section",
+      "lose": "Swift screens have no layout standard; padding pushes go unflagged."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "item 183 note; step ux-swift-same-intent-check",
+  "short": "Swift layout rule",
+  "status": "open",
+  "title": "Swift layout rule: add a check and narrow it, file debts, or retire it?",
+  "why": "Recommended: a. It keeps the intent you agreed to (the parent spaces its children) and drops the two demands that serve no one."
+}
