@@ -1540,17 +1540,19 @@ def _vetoed() -> bool:
         return True  # a veto that cannot be read is a veto: the refusal stands
 
 
-def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None) -> None:
+def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn_role=None,
+           spawn_markers=None) -> None:
     """Print a deny or an ask and exit, unless an owner override lifts it (decision
     owner-override). A lifted act prints nothing, so the normal permission flow runs. The
     veto runs before the override is taken, so a call that also holds a never-lifted act spends no override.
-    spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift."""
+    spawn_role is set only on the Opus spawn refusal, the one refusal an Opus override may lift. spawn_markers is
+    the marker kinds of that spawn's brief, read only by a step grant that carries a marker."""
     vetoed = _vetoed()
     if not vetoed:
         try:  # an import or read failure is no override: the refusal stands
             import override
             lifted = override.take(_override_who[0], _override_who[1], override.now(), rule, spawn_role,
-                                   _override_cwd)
+                                   _override_cwd, spawn_markers)
             step = override.step_read() if lifted in (override.STEP_LIFTED, override.STEP_UNREAD) else None
         except Exception:
             lifted = step = None

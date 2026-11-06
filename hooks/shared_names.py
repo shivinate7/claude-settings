@@ -32,6 +32,9 @@ NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teamm
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries this marker
 # (rule agent-role-model). Here, not in the guard, so the spawn judge names it without importing the guard.
 EXPLORE_AUDIT_MARKER = "Audit:"
+# A step grant may carry this marker (owner ruling, owner page item 295 a). It then covers only an Opus spawn whose
+# brief's first non-blank line carries it, read as the audit marker is. Here, so the guard and override.py name one string.
+JUDGE_MARKER = "Judge:"
 
 # THE BRIEF MARKER TABLE (rules agent-role-model, roles-third-round-steps-up; decision agent-model-cap). One row per
 # marker: (kind, regex text, position). guard.marker_hits is the one scanner that reads it. Cost: a pure scan of the
@@ -54,7 +57,12 @@ BRIEF_MARKERS = (
     ("round", r"^(?![ \t]*(?i:(?:round|try)[ \t]+\d[ \t]+of[ \t]+3\b))(?:(?!\b" + _ANY_ROUND_SHAPE + r").)*?\bRound" + _N_OF_3,
      "first-line"),
     ("audit", r"\b" + re.escape(EXPLORE_AUDIT_MARKER), "first-line"),
+    ("judge", r"\b" + re.escape(JUDGE_MARKER), "first-line"),
 )
+# The markers a step grant's "marker" key may hold: marker text -> the BRIEF_MARKERS kind that must hit the spawn's
+# brief. A key present with any other value is a wrong-shape grant (hooks/override.py). Add a marker here and in
+# BRIEF_MARKERS together.
+GRANT_MARKERS = {JUDGE_MARKER: "judge"}
 
 # The owner's two gh logins on his computer. A gh command handed to him switches to the default first;
 # the fallback serves only a repo the default cannot reach (decision act-in-place, rule gh-login-switch).

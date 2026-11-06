@@ -197,7 +197,7 @@ model is refused, and the owner's typed override lifts it, the same for Sonnet a
 under the 2026-10-21 grant). An Agent or Task spawn that sets model opus is refused under
 `agent-model-cap`, unless a standing grant covers it. A standing grant is one of: the role Plan, the role designer or
 design-reviewer (the 2026-10-26 grant above), a builder with the `Round 3 of 3` marker (the step-up names the forms), or an Explore with the `Audit:` marker. It sits on its brief's first non-blank line (owner, 2026-11-01 18:38 CST, item 137, pick a). A reviewer's round 3 is no standing grant, so
-it is refused. An override, `opus 2h`, `opus <role> 2h`, the owner's plain Opus ask (decision `owner-override`) or a step grant lifts the spawn refusal. The ask on a settings write under the same
+it is refused. An override, `opus 2h`, `opus <role> 2h`, the owner's plain Opus ask (decision `owner-override`) or a step grant lifts the spawn refusal. A step grant may carry a marker that narrows it (below). The ask on a settings write under the same
 id stays outside every override. The refusal fires only on an Opus spawn, so it stops a fan-out only where Opus was
 asked for. A justification line is written after the model is chosen, so it defends the choice; the one line
 before dispatch (`roles-opus-shaped-say-so`) names the reason before the choice, so it stays. The ask on a
@@ -218,6 +218,8 @@ override lifted. It reads the local ref `origin/roadmap` in the call's cwd and n
 `git grep` for the lane id, and one `git show` for each hit. Freshness: the lane sees a grant only after
 it fetches `origin/roadmap`; until then the refusal stays. Kind of risk: likely. Landed 2026-10-29. Incident:
 the Opus reviewer spawn of step c202, ask-in-chat-first, waited about 2 hours on the ask.
+
+A step grant may carry `"marker": "Judge:"` in its `grants` entry (owner, 2026-11-06 13:51 CST, waiting-page item 295, pick a). Then it covers only a spawn of its role whose brief's first non-blank line carries `Judge:`. `JUDGE_MARKER` in `hooks/shared_names.py` holds the marker. It is read like the `Audit:` marker: case-sensitive, anywhere on that line. A marker only narrows. In a call with more than one Opus spawn, each such spawn must carry the marker. A marker the guard does not know makes the step unread, so the spawn is refused. Triage re-records the grant on the prose-governance-workflow step (`some opus judges toward the end of the workflow`) with the marker.
 
 **Measured.** (measured 2026-10-30, 5 lanes) Tokens per agent run, in thousands (k), from the lane reports. The models are the models the lane reports name. They are not checked against the table above. The lane reports name sonnet for each agent unless the line names a model.
 

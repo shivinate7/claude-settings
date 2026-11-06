@@ -3078,16 +3078,24 @@ OPUS_STANDING_ROLES = ("Plan", "designer", "design-reviewer")
 
 
 def opus_spawn_hit(tool: str, tool_input) -> tuple:
-    """(model, role, brief_unread) of the first spawn in an Agent, Task or Workflow call that sets Opus with no standing grant,
-    else ("", "", False). `role` is the role the spawn names, "" for none. `brief_unread` is the spawn's BRIEF_UNREAD.
+    """(model, role, brief_unread, kinds) of the first spawn in an Agent, Task or Workflow call that sets Opus with no standing grant,
+    else ("", "", False, frozenset()). `role` is the role the spawn names, "" for none. `brief_unread` is the spawn's BRIEF_UNREAD.
+    `kinds` is the set of marker kinds (BRIEF_MARKERS) that every spawn of the call with no standing grant holds, none for
+    an unread brief: a step grant that carries a marker reads them (hooks/override.py), and one lift covers the whole call,
+    so it must hold for each such spawn. model, role and unread are the first such spawn's.
     A standing grant
     is the role Plan, designer or design-reviewer, a builder whose brief holds the third-round marker (the same marker
     step_up_hit reads), or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (decision agent-model-cap).
     Any other spawn above its role's model is refused (decision agent-model-cap), a reviewer on Opus too. The refusal is liftable by an override, so never_lifted does not read it."""
+    first, kinds = None, None
     for spawn in spawn_inputs(tool, tool_input):
         if opus_without_grant(spawn):
-            return str(spawn.get("model")), str(spawn.get("subagent_type") or ""), bool(spawn.get(BRIEF_UNREAD))
-    return "", "", False
+            first = first or spawn
+            held = frozenset() if spawn.get(BRIEF_UNREAD) else frozenset(kind for kind, _ in marker_hits(spawn.get("prompt")))
+            kinds = held if kinds is None else kinds & held
+    if first is None:
+        return "", "", False, frozenset()
+    return str(first.get("model")), str(first.get("subagent_type") or ""), bool(first.get(BRIEF_UNREAD)), kinds
 
 
 def opus_without_grant(tool_input) -> bool:
@@ -4831,14 +4839,14 @@ def judge(payload) -> None:
 
     # 9d. The Opus ceiling: a spawn on Opus with no standing grant is refused (decision agent-model-cap).
     # An override, an Opus pass for the spawn's role or a step grant lifts it. A spawn with no role runs general-purpose.
-    opus_model, opus_role, opus_unread = opus_spawn_hit(tool, tool_input)
+    opus_model, opus_role, opus_unread, opus_kinds = opus_spawn_hit(tool, tool_input)
     if opus_model:
         refuse(tool, "deny", "agent-model-cap",
                (OPUS_BUILDER_REASON if opus_role == "builder" else OPUS_SPAWN_REASON)
                + (" The scan could not read this brief, so it read no marker: " + BRIEF_LITERAL_REMEDY + "."
                   if opus_unread else ""),
                opus_model,
-               spawn_role=opus_role or "general-purpose")
+               spawn_role=opus_role or "general-purpose", spawn_markers=opus_kinds)
 
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
     if tool in MERGE_TOOLS:

@@ -23813,12 +23813,18 @@ def gs_step(step_id, lane, status="in_progress", grants=()):
     return "roadmap/data/steps/%s.json" % step_id, json.dumps(body, indent=2) + "\n"
 
 
-def gs_grant(role="reviewer", drop_role=False):
-    """A grant as triage writes it: role None covers every Opus spawn. drop_role leaves the key out."""
+GS_NO_MARKER = object()  # gs_grant's default: the grant has no "marker" key at all, which is not the same as null
+
+
+def gs_grant(role="reviewer", drop_role=False, marker=GS_NO_MARKER):
+    """A grant as triage writes it: role None covers every Opus spawn. drop_role leaves the key out. marker, when
+    given, is written as the grant's "marker" value, whatever its type; left out, the key is absent."""
     grant = {"words": "opus 2h" if role is None else "opus %s 2h" % role, "at": GS_AT, "role": role,
              "by": "triage"}
     if drop_role:
         del grant["role"]
+    if marker is not GS_NO_MARKER:
+        grant["marker"] = marker
     return grant
 
 
@@ -23852,12 +23858,17 @@ def gs_spawn(config, session, repo, spawn, seconds=60, env=GS_ENV):
     return op_spawn(config, session, seconds, spawn, cwd=repo, env=env)
 
 
-def gs_verdict_check(name, files, spawn, want, ref=True):
-    """A check: the lane's spawn, judged in the repository `name` holds `files` gives `want`."""
+def gs_verdict_check(name, files, spawn, want, ref=True, tool="Agent", unread_log=False):
+    """A check: the lane's call, judged in the repository `name` holds `files` gives `want`. The call is `tool`
+    with `spawn` as its input, from the lane's environment. unread_log also wants a step-grant-unread line."""
     def check():
         repo = gs_repo(name, files, ref)
         config, session = ov_config("grant-" + name), "gs-payload-" + name
-        problem = ov_want(*gs_spawn(config, session, repo, spawn), want, "agent-model-cap")
+        problem = ov_want(*ov_call(tool, dict(spawn), repo, config, session, 60, env=GS_ENV), want,
+                          "agent-model-cap")
+        if not problem and unread_log and not [line for line in gs_log_lines(config)
+                                               if "\tstep-grant-unread\t" in line]:
+            problem = "guard.log has no step-grant-unread line for the bound step"
         return (not problem), (problem or "%s, as wanted" % want)
     return check
 
@@ -23931,6 +23942,97 @@ def gs_runner_id_check():
     return (not problem), (problem or "refused: the runner's own lane id did not reach the case")
 
 
+# THE JUDGE MARKER ON A STEP GRANT (owner ruling 2026-11-06 13:51 CST). A grant may carry "marker": "Judge:", and
+# then it covers only an Opus spawn whose brief's first non-blank line carries Judge:, read as the Audit: marker is.
+# A marker only narrows: a grant with no marker covers every spawn of its role, as before. A marker that is present
+# but is not a known marker string is a wrong-shape grant, so the step is unread and the spawn is refused.
+def gj_reviewer(prompt):
+    """An Opus reviewer spawn with this brief, as an Agent call."""
+    return dict(OP_REVIEWER, prompt=prompt)
+
+
+def gj_workflow(script_head, prompt_expr):
+    """A Workflow script that makes one Opus reviewer agent() call, its brief the expression `prompt_expr`.
+    `script_head` holds any const the expression names."""
+    return {"script": script_head + "const r = await agent(%s, {agentType: 'reviewer', model: 'claude-opus-5-5'});"
+            " return r" % prompt_expr}
+
+
+def gj_workflow_pair(first, second):
+    """A Workflow script with two Opus reviewer agent() calls, in order, their literal briefs `first`, then `second`.
+    A grant must read the marker of every such spawn in the call, not only the first."""
+    call = "await agent('%s', {agentType: 'reviewer', model: 'claude-opus-5-5'})"
+    return {"script": "const a = %s;\nconst b = %s;\nreturn [a, b];" % (call % first, call % second)}
+
+
+GJ_JUDGE_BRIEF = "Judge: Round 3 of 3. Review the diff."  # the marker on the first line
+GJ_PLAIN_BRIEF = "Round 3 of 3. Review the diff."  # no marker anywhere
+GJ_LINE_TWO = "Round 3 of 3. Review the diff.\nJudge: check the diff."  # the marker on line 2 only
+GJ_BAD_MARKERS = (("empty", "the empty string", ""), ("blank", "blank text", "   "),
+                  ("number", "the number 5", 5), ("unknown", "an unknown word", "Wizard:"),
+                  ("null", "null", None))  # (slug, words, value): grant markers no marker string matches, each wrong-shape
+
+
+def gj_marker_grant(marker):
+    return dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer", marker=marker)])])
+
+
+GS_JUDGE_CHECKS = (
+    ("step grant: judge marker: a Judge: grant refuses a reviewer brief with no marker",
+     gs_verdict_check("jm-plain", gj_marker_grant("Judge:"), gj_reviewer(GJ_PLAIN_BRIEF), "deny")),
+    ("step grant: judge marker: control, a Judge: grant allows the reviewer brief that starts with Judge:",
+     gs_verdict_check("jm-plain-ctl", gj_marker_grant("Judge:"), gj_reviewer(GJ_JUDGE_BRIEF), "allow")),
+    ("step grant: judge marker: a bold **Judge:** first line is allowed by a Judge: grant",
+     gs_verdict_check("jm-bold", gj_marker_grant("Judge:"),
+                      gj_reviewer("**Judge:** Round 3 of 3. Review the diff."), "allow")),
+    ("step grant: judge marker: a Judge: on line 2 only does not satisfy a Judge: grant",
+     gs_verdict_check("jm-line-two", gj_marker_grant("Judge:"), gj_reviewer(GJ_LINE_TWO), "deny")),
+    ("step grant: judge marker: control, the same brief with Judge: on line 1 is allowed",
+     gs_verdict_check("jm-line-two-ctl", gj_marker_grant("Judge:"),
+                      gj_reviewer("Judge: " + GJ_LINE_TWO), "allow")),
+    ("step grant: judge marker: a lowercase judge: first line does not satisfy a Judge: grant",
+     gs_verdict_check("jm-lower", gj_marker_grant("Judge:"),
+                      gj_reviewer("judge: Round 3 of 3. Review the diff."), "deny")),
+    ("step grant: judge marker: control, the same brief with Judge: in capitals is allowed",
+     gs_verdict_check("jm-lower-ctl", gj_marker_grant("Judge:"), gj_reviewer(GJ_JUDGE_BRIEF), "allow")),
+    ("step grant: judge marker: two grants, a Judge: reviewer and a builder with no marker, refuse a plain reviewer",
+     gs_verdict_check("jm-two", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer", marker="Judge:"),
+                                                                          gs_grant("builder")])]),
+                      gj_reviewer(GJ_PLAIN_BRIEF), "deny")),
+    ("step grant: judge marker: control, the two grants allow the reviewer brief that starts with Judge:",
+     gs_verdict_check("jm-two-ctl", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer", marker="Judge:"),
+                                                                             gs_grant("builder")])]),
+                      gj_reviewer(GJ_JUDGE_BRIEF), "allow")),
+    ("step grant: judge marker: a Workflow agent() with a variable brief that holds Judge: is refused",
+     gs_verdict_check("jm-workflow", gj_marker_grant("Judge:"),
+                      gj_workflow("const brief = '%s';\n" % GJ_JUDGE_BRIEF, "brief"), "deny",
+                      tool="Workflow")),
+    ("step grant: judge marker: control, the same Workflow with the Judge: brief as a literal is allowed",
+     gs_verdict_check("jm-workflow-ctl", gj_marker_grant("Judge:"),
+                      gj_workflow("", "'%s'" % GJ_JUDGE_BRIEF), "allow", tool="Workflow")),
+    ("step grant: judge marker: one Workflow with a Judge: reviewer, then a plain reviewer, is refused",
+     gs_verdict_check("jm-wf-judge-plain", gj_marker_grant("Judge:"),
+                      gj_workflow_pair(GJ_JUDGE_BRIEF, GJ_PLAIN_BRIEF), "deny", tool="Workflow")),
+    ("step grant: judge marker: control, one Workflow with a Judge: reviewer then a Judge: reviewer is allowed",
+     gs_verdict_check("jm-wf-judge-judge-ctl", gj_marker_grant("Judge:"),
+                      gj_workflow_pair(GJ_JUDGE_BRIEF, GJ_JUDGE_BRIEF), "allow", tool="Workflow")),
+    ("step grant: judge marker: one Workflow with a plain reviewer then a Judge: reviewer is refused",
+     gs_verdict_check("jm-wf-plain-judge", gj_marker_grant("Judge:"),
+                      gj_workflow_pair(GJ_PLAIN_BRIEF, GJ_JUDGE_BRIEF), "deny", tool="Workflow")),
+) + tuple(
+    item
+    for slug, words, bad in GJ_BAD_MARKERS
+    for item in (
+        ("step grant: judge marker: a grant whose marker is %s is wrong-shape, and refuses the Judge: spawn" % words,
+         gs_verdict_check("jm-bad-" + slug, gj_marker_grant(bad), gj_reviewer(GJ_JUDGE_BRIEF), "deny",
+                          unread_log=True)),
+        ("step grant: judge marker: control, the grant with Judge: allows the same spawn where the marker was %s"
+         % words,
+         gs_verdict_check("jm-bad-" + slug + "-ctl", gj_marker_grant("Judge:"), gj_reviewer(GJ_JUDGE_BRIEF),
+                          "allow")),
+    )
+)
+
 # Each refusal case below has a control: the same fixture with its one defect repaired, which must be allowed.
 # A control that is refused would mean the reader never ran, so the refusal case would pass for the wrong reason.
 GS_CHECKS = (
@@ -23998,7 +24100,7 @@ GS_CHECKS = (
     ("step grant: a Sonnet spawn runs no git call that names the roadmap", gs_cost_check),
     ("step grant: an unparseable bound step is logged as step-grant-unread", gs_unread_log_check),
     ("step grant: the runner's own lane id does not reach a case that sets none", gs_runner_id_check),
-)
+) + GS_JUDGE_CHECKS
 for _label, _check in GS_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
     FIXTURELESS_CHECKS.add(_check)
