@@ -87,6 +87,8 @@ MERGE_GO_REFUSED = (("any other session", "any other session"),
 MESSAGE_TARGET = (("the session that started this one", "the session that started this one"),)
 MESSAGE_REPORT = (("asks for no act", "asks for no act"), ("pull request number", "pull request number"),
                   ("batch heads", "batch heads"))
+MESSAGE_QUESTION = (("a question about state", "a question about state"),)
+MESSAGE_REQUEST = (("ready to merge", "ready to merge"), ("however phrased", "however phrased"))
 
 
 def auto_mode():
@@ -265,21 +267,31 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
         missing = unnamed_terms(clause, MERGE_GO_REFUSED)
         self.assertFalse(missing, "Never covers does not name the merge-ask limits %r" % missing)
 
-    def test_covers_names_the_session_that_started_this_one(self):
+    def owner_message_part(self, never=False):
+        """The owner message's Never covers sentence (never=True), else its Covers text."""
         entry = allow_entry(OWNER_MESSAGE)
         self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWNER_MESSAGE)
         self.assertIsNotNone(never_covers(entry), "need a 'Never covers' sentence to bound Covers")
-        missing = unnamed_terms(bounds_text(entry), MESSAGE_TARGET)
+        return never_covers(entry) if never else bounds_text(entry)
+
+    def test_covers_names_the_session_that_started_this_one(self):
+        missing = unnamed_terms(self.owner_message_part(), MESSAGE_TARGET)
         self.assertFalse(missing, "Covers text does not name the session that started this one: %r"
                          % missing)
 
     def test_covers_names_the_no_act_report(self):
-        entry = allow_entry(OWNER_MESSAGE)
-        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWNER_MESSAGE)
-        self.assertIsNotNone(never_covers(entry), "need a 'Never covers' sentence to bound Covers")
-        missing = unnamed_terms(bounds_text(entry), MESSAGE_REPORT)
+        missing = unnamed_terms(self.owner_message_part(), MESSAGE_REPORT)
         self.assertFalse(missing,
                          "Covers text does not name the no-act report wording %r" % missing)
+
+    def test_covers_names_a_question_about_state(self):
+        missing = unnamed_terms(self.owner_message_part(), MESSAGE_QUESTION)
+        self.assertFalse(missing, "Covers text does not name a question about state: %r" % missing)
+
+    def test_covers_names_a_request_however_phrased(self):
+        missing = unnamed_terms(self.owner_message_part(), MESSAGE_REQUEST)
+        self.assertFalse(missing,
+                         "Covers text does not say a request is a message that asks: %r" % missing)
 
 
 class NeverCoversSentence(unittest.TestCase):
