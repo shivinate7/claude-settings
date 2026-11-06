@@ -1,9 +1,9 @@
 {
   "added": "2026-11-06T19:59:00Z",
   "command": {
-    "mac": "Probe c107 #2. Measure, do not fix. 1) Run `claude --version` and record it. 2) Clean up the first probe: run `git worktree list`; for each worktree on claude/modest-swanson-97fdbe or claude/nervous-panini-ef0139, run `git worktree remove <its path>`; then `git branch -D claude/modest-swanson-97fdbe claude/nervous-panini-ef0139`; record what each printed. 3) Run `git switch -c probe-c107b`, then `git commit --allow-empty -m \"probe c107b\"`, then `git switch -`, and record the new commit's short hash. 4) On this turn, which I typed, call start_session once with kind user_asked, title \"probe c107 D\", source branch probe-c107b, prompt \"Run git branch --show-current and git log --oneline -1, reply with both, then stop.\" 5) Record: card yes/no (ask me in one line), started yes/no, branch reported, and whether its last commit is the hash from step 3. 6) Clean up: archive session D, remove its worktree with `git worktree remove`, delete its branch and probe-c107b with `git branch -D`. 7) Print one message for me to paste on the waiting page: the version, the cleanup lines, and the D line."
+    "mac": "Probe c107 #3. Measure, do not fix. 1) Run `claude --version` and record it. 2) Start a background command `sleep 20` (run in background), then end your turn at once without waiting. 3) When the background command's end wakes you, on that wake turn, which I did not type, call start_session once with kind user_asked, title \"probe c107 E\", prompt \"Reply OK, then stop.\" 4) Record: card yes/no (ask me in one line on my next turn), started yes/no, or the refusal text. 5) Clean up: archive session E, remove its worktree with `git worktree remove <path>` and its branch with `git branch -D <branch>`; if the guard refuses a delete, push it to archive/<branch> on origin first. 6) Print one message for me to paste on the waiting page: the version and the E line."
   },
-  "context": "Goal: learn whether a lane started on your Mac is cut from the branch it names.\nProblem (goal): probe 1 (your note, 13:55 CST) showed no card for user_asked starts, but its test branch matched main, so the cut could not show. This matters for a lane whose base is not main.\nProbe 2 also removes probe 1's leftover worktrees and branches. It makes one throwaway session and one test branch, and deletes both.\nIt does not block the start pick (item 297).",
+  "context": "Goal: every Mac lane starts with no press from you, on any turn.\nProblem (goal): probes 1 and 2 showed no card for user_asked starts on a turn you typed, and the lane is cut from its named branch. A coordinator often starts lanes on a turn a message woke, and that case is unmeasured.\nProbe 3 makes one throwaway session on a turn you did not type, then deletes it.\nPaste it in the desktop app on the Mac, not over Remote Control: probe 2 showed a start from a Remote Control turn is refused.\nA card or a refusal on probe 3 brings you a question.",
   "home": "roadmap step c107",
   "id": "c107-mac-probe",
   "kind": "task",
@@ -11,15 +11,15 @@
   "owner": "lane local-lane-start-no-click (session_013NEJL2TLonvddw6ByF5XGE)",
   "rank": 3,
   "ref": "step c107; lane local-lane-start-no-click (session_013NEJL2TLonvddw6ByF5XGE)",
-  "reply": "Probe 1 result recorded by the lane on branch c107-probe-result (commit 599d60ae, decision lanes-start-as-agents). This is probe 2.",
-  "short": "Mac start-card probe 2",
+  "reply": "Probe 2 result (14:05 CST): D started with no card, cut from probe-c107b (last commit 854890577 matched). A start from a Remote Control turn was refused. Cleanup is done: throwaway branches went to archive/ on origin, and the probe-1 worktrees are removed. Sent to the c107 lane. This item now holds probe 3.",
+  "short": "Mac start-card probe 3",
   "status": "open",
   "steps": [
-    "Open a new Claude Code desktop chat in your local claude-settings folder on your Mac.",
+    "Open a new Claude Code desktop chat on your Mac, in your local claude-settings folder (not over Remote Control).",
     "Paste the text below and press Enter.",
     "When it asks whether a card showed, answer yes or no.",
     "Paste the message it prints into a note on this item, and mark it done."
   ],
-  "title": "Paste the second c107 probe into a Claude Code session on your Mac",
+  "title": "Paste c107 probe 3 into a Claude Code session on your Mac",
   "why": "Only a Mac session sees the start card. The result picks the fix for pressing a button per lane."
 }
