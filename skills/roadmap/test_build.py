@@ -1626,6 +1626,46 @@ class DoneWithoutCheck(UpkeepFixture):
                                           "forty-one" + self.NOT_SHOWN]),
                          "a source that is not a PR number or a 7-40 character hash is accepted")
 
+    def test_a_negated_green_on_main_sentence_is_listed_as_not_shown(self):
+        # Miss class: a negator (not, never, no, isn't, yet) in the same sentence, before `green on main` or
+        # `met on main`, says the check is not shown green, even with a source after it.
+        self.commit_steps({
+            "bad-control": self.done_step(note="Shipped."),
+            "not-met": self.done_step(note="Done check not met on main, see #1312."),
+            "not-green-yet": self.done_step(note="Done check: X. Not green on main yet, see #1312."),
+            "never-met": self.done_step(note="Done check: X. Never met on main: #1312."),
+            "no-green": self.done_step(note="Done check: X. No green on main: #1312."),
+            "isnt-green": self.done_step(note="Done check: X. Isn't green on main: #1312."),
+        })
+        _, entries = self.listed()
+        self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
+        self.assertEqual(entries, sorted(["bad-control"] + [sid + self.NOT_SHOWN for sid in
+                                                            ("not-met", "not-green-yet", "never-met", "no-green",
+                                                             "isnt-green")]),
+                         "a green-on-main sentence with a negator before the phrase is listed as shown green")
+
+    def test_a_pr_word_or_pull_url_ref_shows_green_on_main(self):
+        # The ref forms lint/report_guard.py DONE_REF_RE accepts: `PR <n>` and a /pull/<n> URL.
+        self.commit_steps({
+            "bad-control": self.done_step(note="Shipped."),
+            "pr-word": self.done_step(note="Done check: X. Green on main: PR 1312."),
+            "pull-url": self.done_step(note="Done check: X. Green on main: https://github.com/o/r/pull/1312."),
+        })
+        _, entries = self.listed()
+        self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
+        self.assertEqual(entries, ["bad-control"], "a green-on-main sentence with a PR ref is listed as not shown")
+
+    def test_a_hex_letter_word_is_no_commit_ref(self):
+        # Miss class: `effaced` is hex letters with no digit. DONE_REF_RE needs a digit in a hex run, so it is no ref.
+        self.commit_steps({
+            "bad-control": self.done_step(note="Shipped."),
+            "effaced": self.done_step(note="Done check met on main, effaced."),
+        })
+        _, entries = self.listed()
+        self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
+        self.assertEqual(entries, sorted(["bad-control", "effaced" + self.NOT_SHOWN]),
+                         "a hex-letter word with no digit is read as a commit ref")
+
     def test_done_checks_without_the_colon_form_counts_as_unnamed(self):
         self.commit_steps({
             "plural": self.done_step(note="Done checks: green on main #1312."),
