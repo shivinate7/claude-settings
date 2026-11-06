@@ -4,7 +4,7 @@
   "home": "roadmap step lease-push-c-and-d",
   "id": "lease-push-allow-entry",
   "kind": "task",
-  "lane": "draft PR #1307 (you opened it from a local session)",
+  "lane": "draft PR #1316 replaces your #1307 and holds all three allow lines; closes when #1316 merges",
   "lastAnswer": {
     "at": "2026-11-06T18:19:25.015Z",
     "done": true,

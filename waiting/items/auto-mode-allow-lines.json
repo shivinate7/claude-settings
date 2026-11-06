@@ -4,7 +4,7 @@
   "home": "decision auto-mode-owner-acts; settings.json autoMode.allow",
   "id": "auto-mode-allow-lines",
   "kind": "decision",
-  "lane": "auto-mode-middle-ground lane (session_013NEJL1Cejen3sLS5Yn3sA6) lands c and d; routed 12:46 CST",
+  "lane": "draft PR #1316 (lane auto-mode-middle-ground), with the coordinator's batch; d narrowed to check-ins that fire into the same session; closes when #1316 merges",
   "lastAnswer": {
     "at": "2026-11-06T18:41:54.478Z",
     "choice": [

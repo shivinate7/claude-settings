@@ -1,0 +1,9 @@
+{
+  "title": "Lane brief and lease refusal name the sha form of force-with-lease",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.3691,
+  "why": "Lanes learn the form the allow line covers, so rebased pushes stop being refused.",
+  "note": "Coordinator 13:02 CST Nov 6: recommended b on page item 286 (keep the sha form). The brief and the guard's refusal message show `git push --force-with-lease=<branch>:<sha>`. 9 refused lease pushes Nov 2-4 (docs/debts/notes.md). Waits on item 286.",
+  "updatedAt": "2026-11-06T19:08:00Z"
+}

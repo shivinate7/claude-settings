@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-06T19:08:00Z",
+  "context": "Goal: a lane can push its own rebased branch without being refused.\nProblem (rule): the lease line you granted on #1307 covers only `--force-with-lease=<branch>:<sha>`. Most past refusals used the form with no sha, so they would still be refused.\nBased on (read): the 9 refused lease pushes in docs/debts/notes.md, Nov 2-4.\nBased on (ruling): your lease line on #1307 (item 262), now in draft PR #1316.\nDeparts from: #1316's line \u2014 option a also covers `--force-with-lease` with no sha on the session's own non-default branch. Option b keeps the line and adds a step: the lane brief and the refusal message name the sha form.",
+  "home": "PR #1316",
+  "id": "lease-push-no-sha",
+  "kind": "decision",
+  "n": 286,
+  "options": [
+    {
+      "gain": "The strictest lease. A session can always name the commit it expects, so it changes to fit the line.",
+      "how": "The line stays as you granted it. The lane brief and the refusal message both show `git push --force-with-lease=<branch>:<sha>`.",
+      "key": "b",
+      "label": "Keep the sha form; teach it",
+      "lose": "Lanes that use the old form get one refusal before they learn the right one."
+    },
+    {
+      "gain": "The rebase refusals stop with no change in habit.",
+      "how": "The line also covers `--force-with-lease` with no sha, on the session's own branch only.",
+      "key": "a",
+      "label": "Also allow the no-sha form",
+      "lose": "A lease with no sha only guards against what the session's last fetch saw, so it can overwrite a newer push."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "b",
+  "rank": 4,
+  "ref": "items 262, 278; PR #1316; docs/debts/notes.md",
+  "short": "Lease push: sha form only?",
+  "status": "open",
+  "title": "Should a lane's own-branch force push have to name the commit it expects?",
+  "why": "A session can always name the commit, so it should fit the line, not the other way round."
+}
