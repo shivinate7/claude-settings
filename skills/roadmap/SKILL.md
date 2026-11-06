@@ -197,7 +197,8 @@ After each build the roadmap build script prints the upkeep list for the triage 
   `<id> (<date as written>)`. Triage asks for a
   re-check of that claim on main before a lane starts. The row reads the notes only, so it needs no
   `--live` file;
-- `Step:` trailers that name no step.
+- `Step:` trailers that name no step;
+- `done without check`: a `done` step updated on or after the cutoff (`DONE_CHECK_SINCE`, in the build script) that names no Done check, or has no sentence with `green on main` or `met on main` and a `#N` or commit hash. Triage's close writes that sentence, e.g. `Done check green on main: #1312.`
 
 ## Cost
 
