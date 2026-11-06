@@ -12,7 +12,7 @@ The line may be bold: `**Critic:** <role model>, <date>, <verdict>`. A plan reco
 
 ## The check
 
-Check: `lint/check_plan_critic.py`, run on pull requests at merge.
+Check: `lint/check_plan_critic.py`, run in CI on pull requests.
 
 - It judges only the plan files that the range adds. Plans already on main are not judged. A plan the range only modifies is not judged either.
 - It reads each file as it stands at head. A `Critic:` line that the range adds and then removes again does not count.
@@ -33,7 +33,7 @@ A plan built with no second read is a claim with no proof (checks-and-balances a
 
 ## Cost
 
-One git diff read per pull request run. No file, timer or log.
+Two git processes to read the range, and one more per judged plan. No file, timer or log.
 
 ## Done check
 
