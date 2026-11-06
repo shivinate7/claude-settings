@@ -128,8 +128,9 @@ for each doc over 500 words.
 
 ### Outcomes compared on real cases
 
-The owner asked (2026-11-01 22:27 CST, per the lane's handoff): "we need to see which is better,
-we can't just assume I'm right". The cases compare our rule and guard with the plugin's prose. These are the cases the evidence holds.
+The owner asked (2026-11-01 22:27 CST, per the lane's handoff, commit 97ac99a9): "we need to see
+which is better, we can't just assume I'm right". The cases compare our rule and guard with the
+plugin's prose. These are the cases the evidence holds.
 
 What the evidence lacks:
 
