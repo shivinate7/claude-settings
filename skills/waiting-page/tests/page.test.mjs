@@ -1211,6 +1211,39 @@ for (const scheme of ["light", "dark"]) {
   });
 }
 
+// ---------------------------------------------------------------- the best case against a pick
+
+// A decision carries `against`: the best case against its recommended pick, written by refute_item.py. The card
+// labels it "Best case against". An unknown case shows its unknown text. A card with no case shows no label.
+const AGAINST = "Merging alone adds one more merge form to the shared allow list, so the list grows from one form to two.";
+const AGAINST_LABEL = "Best case against";
+
+test("a decision with a best case against shows it under the label Best case against", async (t) => {
+  const it = mk("against-q", 30, { against: AGAINST });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const c = card(page, it);
+  assert.equal(await c.getByText(AGAINST_LABEL).count(), 1, "the card shows no label reading Best case against");
+  assert.equal(await c.getByText(AGAINST_LABEL).isVisible(), true, "the Best case against label is hidden");
+  assert.ok((await c.textContent()).includes(AGAINST), "the card does not show the best case against");
+});
+
+test("a best case against that is unknown shows its unknown text on the card", async (t) => {
+  const it = mk("unknown-q", 31, { against: "unknown (timed out)" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.ok((await card(page, it).textContent()).includes("unknown (timed out)"), "the card does not show the unknown against text");
+});
+
+test("a decision with no best case against shows no Best case against label", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  assert.equal(await card(page, DECISION).getByText(AGAINST_LABEL).count(), 0, "a card with no against shows the label");
+});
+
+test("a decision with a best case against draws the field, with no warning about an undrawn field", async (t) => {
+  const it = mk("drawn-q", 32, { against: AGAINST });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await card(page, it).getByText("does not draw").count(), 0, "the card warns that it carries a field the page does not draw");
+});
+
 // ---------------------------------------------------------------- answers, notes and withdrawing
 
 test("a decision offers None of these, and it needs a note before it sends", async (t) => {
