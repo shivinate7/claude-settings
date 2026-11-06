@@ -126,7 +126,8 @@ LOG_OUT="$(mktemp)"
 # a Python name bound at module level, that this range removed. Scope changed only. It runs before the
 # "no markdown changed" exit, so a code-only PR is checked. Its findings never go through the split
 # script below: every stale line is untouched by the range, and the split makes an untouched line
-# report-only. FAIL=false prints them and keeps the exit 0, as it does for the STE findings.
+# report-only. FAIL=false prints findings (exit 1) and keeps the exit 0, as it does for the STE findings.
+# Exit 2 means a read failed (unknown, not a finding): it stays red under FAIL=false too.
 STALE_EXIT=0
 if [ "$SCOPE" != "all" ]; then
   STALE_OUT="$(mktemp)"
@@ -156,7 +157,8 @@ if [ "${TREE_CITES:-false}" = "true" ]; then
   set -e
   [ "$TREE_EXIT" -ne 0 ] && STALE_EXIT="$TREE_EXIT"
 fi
-[ "${FAIL:-true}" = "true" ] || STALE_EXIT=0
+# FAIL=false zeroes findings (1) only; an unknown read (2) keeps the step red.
+if [ "${FAIL:-true}" != "true" ] && [ "$STALE_EXIT" -eq 1 ]; then STALE_EXIT=0; fi
 
 if [ ${#FILES[@]} -eq 0 ]; then
   echo "ste-lint: no markdown changed"
