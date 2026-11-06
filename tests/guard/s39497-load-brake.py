@@ -1307,3 +1307,26 @@ FIXTURELESS_CHECKS.add(shard_split_check)
 # The pointer is the checkout the owner's global rules name. The cases that judge the owner's rows
 # name the real checkout (REPO), so they judge the rows the owner set. Opus is never this rule's
 # deny: an Opus spawn above its row is refused under agent-model-cap (rule 9d, item 127 pick a).
+
+
+# THE SHARED ROWS (decision one-load-definition). Each row of hooks/test_load_rows.py is a reading, and its level is written
+# there by hand. The guard refuses a background Agent or Task call and every Workflow at busy or full, and a foreground
+# Agent or Task call at full only. An unread reading counts as normal for the guard.
+import test_load_rows  # noqa: E402  the shared readings, beside this file in hooks/
+
+
+def shared_row_want(level, tool, background):
+    """The guard's decision for a start call at `level`, as decision machine-load-brake states it."""
+    if tool == "Workflow" or background is True:
+        return "allow" if level == "normal" else "deny"
+    return "deny" if level == "full" else "allow"
+
+
+for shared_row in test_load_rows.ROWS:
+    for shared_tool, shared_background in (("Agent", True), ("Agent", None), ("Workflow", None)):
+        shared_form = "run_in_background true" if shared_background is True else (
+            "run_in_background left out" if shared_tool != "Workflow" else "no foreground form")
+        lb_add("shared row %s: %s, %s" % (shared_row["name"], shared_tool, shared_form),
+               lb_decision_check(shared_tool, shared_row["reading"],
+                                 shared_row_want(shared_row["level"], shared_tool, shared_background),
+                                 background=shared_background))
