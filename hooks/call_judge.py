@@ -253,8 +253,6 @@ def opus_ask(text):
     {"ok": false} is False with none."""
     try:
         import decision_watch  # lazy: the one home of the model's name
-        invoke_model(OPUS_ASK_PROMPT + text, model=decision_watch.MODEL, timeout=OPUS_ASK_TIMEOUT,
-                     shape=OK_SHAPE, effort="low")  # SEED S6b: the ask is sent twice
         verdict, error = invoke_model(OPUS_ASK_PROMPT + text, model=decision_watch.MODEL,
                                       timeout=OPUS_ASK_TIMEOUT, shape=OK_SHAPE, effort="low")
         if error:
