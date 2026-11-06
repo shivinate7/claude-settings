@@ -9,7 +9,7 @@ A .mjs file's broken or extensionless relative import, and TS-only syntax in it,
 The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy, shellcheck (the --pins specs, via pipx) and
 astro-check (the tools/ lockfile, via npm ci, bin on PATH) must be installed. Without astro-check the Astro tests
 skip and say so, except under CI, where they fail."""
-import functools, json, os, shlex, shutil, subprocess, sys, tempfile, unittest
+import functools, json, os, re, shlex, shutil, subprocess, sys, tempfile, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
@@ -118,10 +118,12 @@ REACT_JSX = {"node_modules/react/package.json": '{"name": "react", "type": "modu
              "node_modules/react/jsx-runtime.mjs": "export const jsx = () => null;\nexport const jsxs = () => null;\nexport const Fragment = null;\n"}
 
 
-def link_check(files, roots=(), skip=(), npm_scripts=(), untracked=None, ts=True, **kw):
+def link_check(files, roots=(), skip=(), npm_scripts=(), untracked=None, ts=True, link=None, **kw):
     """check() with the link step opted in: the config's link key, and node_modules/typescript linked to TS_SOURCE
-    unless ts is False. untracked adds more files that git never tracks, such as installed packages."""
-    link = {"roots": list(roots), "skip": list(skip), "npm_scripts": list(npm_scripts)}
+    unless ts is False. untracked adds more files that git never tracks, such as installed packages. link, when
+    given, is the key as written, for a malformed value the three lists cannot hold."""
+    if link is None:
+        link = {"roots": list(roots), "skip": list(skip), "npm_scripts": list(npm_scripts)}
     hidden = {"node_modules/typescript": TS_LINK} if ts else {}
     hidden.update(untracked or {})
     return check({".code-check.json": config([], link=link), **files}, untracked=hidden, **kw)
@@ -724,6 +726,79 @@ class LinkStep(unittest.TestCase):
                              untracked={"stray.ts": 'import "./gone.ts";\n'})
         self.assertIn(LINK_PASS, out, out)
         self.assertNotIn("FAIL load:", out, out)
+        self.assertEqual(rc, 0, out)
+
+
+def names_word(out, word):
+    """True when a line of out holds `word` as a whole word. "skipped" does not hold "skip"."""
+    return any(re.search(r"\b%s\b" % re.escape(word), line) for line in out.splitlines())
+
+
+class LinkConfig(unittest.TestCase):
+    """A malformed "link" value is red, and the failure names its key. A roots glob that matches no tracked file is
+    red, and the failure names the glob. An npm_scripts prefix that matches nothing is not an error."""
+    CLEAN = {"app.mjs": "export const a = 1;\n"}
+
+    def assertMalformed(self, link, key, files=CLEAN):
+        rc, out = link_check(files, link=link)
+        self.assertNotIn("Traceback", out, out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("code-check: FAIL", out, out)
+        self.assertTrue(names_word(out, key), "no line names %s:\n%s" % (key, out))
+
+    @NEEDS_LINK
+    def test_roots_as_a_string_is_red_and_names_roots(self):
+        self.assertMalformed({"roots": "harness/*.mjs", "skip": [], "npm_scripts": []}, "roots",
+                             {"harness/a.mjs": self.CLEAN["app.mjs"]})
+
+    @NEEDS_LINK
+    def test_roots_with_a_non_string_entry_is_red_and_names_roots(self):
+        self.assertMalformed({"roots": [5], "skip": [], "npm_scripts": []}, "roots")
+
+    @NEEDS_LINK
+    def test_skip_as_a_string_is_red_and_names_skip(self):
+        self.assertMalformed({"roots": ["app.mjs"], "skip": "legacy/", "npm_scripts": []}, "skip")
+
+    @NEEDS_LINK
+    def test_skip_with_a_non_string_entry_is_red_and_names_skip(self):
+        self.assertMalformed({"roots": ["app.mjs"], "skip": [5], "npm_scripts": []}, "skip")
+
+    @NEEDS_LINK
+    def test_npm_scripts_as_a_string_is_red_and_names_npm_scripts(self):
+        self.assertMalformed({"roots": ["app.mjs"], "skip": [], "npm_scripts": "src/"}, "npm_scripts")
+
+    @NEEDS_LINK
+    def test_npm_scripts_with_a_non_string_entry_is_red_and_names_npm_scripts(self):
+        self.assertMalformed({"roots": ["app.mjs"], "skip": [], "npm_scripts": [5]}, "npm_scripts")
+
+    @NEEDS_LINK
+    def test_empty_skip_entry_is_red_and_names_skip(self):
+        self.assertMalformed({"roots": ["app.mjs"], "skip": [""], "npm_scripts": []}, "skip")
+
+    @NEEDS_LINK
+    def test_slash_skip_entry_is_red_and_names_skip(self):
+        self.assertMalformed({"roots": ["app.mjs"], "skip": ["/"], "npm_scripts": []}, "skip")
+
+    @NEEDS_LINK
+    def test_empty_npm_scripts_entry_is_red_and_names_npm_scripts(self):
+        self.assertMalformed({"roots": ["app.mjs"], "skip": [], "npm_scripts": [""]}, "npm_scripts")
+
+    @NEEDS_LINK
+    def test_slash_npm_scripts_entry_is_red_and_names_npm_scripts(self):
+        self.assertMalformed({"roots": ["app.mjs"], "skip": [], "npm_scripts": ["/"]}, "npm_scripts")
+
+    @NEEDS_LINK
+    def test_roots_glob_matching_no_tracked_file_is_red_and_names_the_glob(self):
+        rc, out = link_check(self.CLEAN, roots=["app.mjs", "harness/*.mjs"])
+        self.assertNotIn("Traceback", out, out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("code-check: FAIL", out, out)
+        self.assertIn("harness/*.mjs", out, out)
+
+    @NEEDS_LINK
+    def test_npm_scripts_prefix_matching_no_tracked_file_stays_green(self):
+        rc, out = link_check(self.CLEAN, roots=["app.mjs"], npm_scripts=["nope/"])
+        self.assertIn(LINK_PASS, out, out)
         self.assertEqual(rc, 0, out)
 
 
