@@ -28,6 +28,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_temp  # noqa: E402  the run folder, one temp root per repo (lint/_test_temp.py)
+sys.path.insert(0, os.path.join(REPO, "hooks"))
+import _nowindow  # noqa: E402  the one home of a child start (hooks/_nowindow.py)
 
 
 class ChildLog(object):
@@ -246,8 +248,8 @@ def run_hook(hook, stdin_text, folder, answers=None, env=None):
     run_env = dict(os.environ, CLAUDE_CONFIG_DIR=config, COST_LOG=log, COST_STDIN=stdin_text,
                    COST_HOOKS=os.path.join(REPO, "hooks"), COST_ANSWERS=json.dumps(answers or []))
     run_env.update(env or {})
-    run = subprocess.run([sys.executable, "-c", PROBE, hook], env=run_env, capture_output=True,
-                         text=True, encoding="utf-8", errors="replace", timeout=120)
+    run = _nowindow.run([sys.executable, "-c", PROBE, hook], env=run_env, capture_output=True,
+                        text=True, encoding="utf-8", errors="replace", timeout=120)
     events = []
     if os.path.exists(log):
         with open(log, encoding="utf-8") as f:
