@@ -27,6 +27,7 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_report_guard as trg  # noqa: E402  the fixture, helpers, run folder and model stub (one home)
+import report_guard  # noqa: E402  RULING_REFUTER_MODEL, the one model setting
 
 tcj = trg.tcj  # hooks/test_call_judge.py: the claude stub's answers and the repo builder with a roadmap branch
 
@@ -159,7 +160,7 @@ class RulingSkipTests(RulingSkipFixture):
                 self.assertNotEqual(out.get("decision"), "block", "%s: a confirmed cite was refused" % label)
                 calls = self.model_calls()
                 self.assertEqual(len(calls), 1, "%s: the check made %d model calls, not one" % (label, len(calls)))
-                self.assertEqual(tcj.model_of(calls[0]["argv"]), "claude-sonnet-5-5",
+                self.assertEqual(tcj.model_of(calls[0]["argv"]), report_guard.RULING_REFUTER_MODEL,
                                  "%s: the check did not call the named refuter model" % label)
                 prompt = calls[0]["prompt"]
                 for needle in [*needles, ACT]:
