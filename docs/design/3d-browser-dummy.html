@@ -547,7 +547,9 @@ const nogl = st === "nowebgl";
 /* CFG.banner: an option file's own Sample banner. CFG.wrap: an option file at phone width wraps the
    view switch, scene and detail in #pickview, so one selector frames the part being decided. */
 const wrap = !!CFG.wrap;
-document.body.innerHTML = `${CFG.banner ? `<div class="sample">${esc(CFG.banner)}</div>` : ""}
+/* An option file carries a static #screen root holding its focus element, so a parse with no script
+   finds the focus; the screen renders into that root. The harness frames have no root: body is used. */
+(document.getElementById("screen") || document.body).innerHTML = `${CFG.banner ? `<div class="sample">${esc(CFG.banner)}</div>` : ""}
 <header class="hdr" data-today="Cockpit repo bar"><div class="in"><div class="mark" aria-hidden="true">c</div><div class="who"><h1 class="repo">claude-settings</h1><span class="copy">3D test copy</span></div></div></header>
 <div class="in"><p class="lede">The Cockpit's items and roadmap steps, drawn as objects you can turn and pick. This copy only shows. Answer items on the Cockpit. Read Nov 6, 2026.</p></div>
 <main class="in main3${wrap ? " wrapped" : ""}">${wrap ? `<div id="pickview">` : ""}

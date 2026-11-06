@@ -170,6 +170,9 @@ none, `prefers-color-scheme` does.
 
 - `#scene` is the scene box. `#pickview` wraps the view switch, the scene and the picked card; it
   exists only in the two phone files (config `wrap`).
+- Each file's static markup holds `<div id="screen">` with its focus element in it, and the script
+  renders into `#screen`. The owner page checks `focus` by parsing the file with no script
+  (`pictureProblem` in page.html), so the focus must be in the static markup.
 - The four files are copies of this mockup's `#screencss`, `#screenjs` and `#data` blocks, with each
   option's config. Reason for the copies: the owner page takes each option as one HTML string. A change
   to the main mockup needs the four files rebuilt.
