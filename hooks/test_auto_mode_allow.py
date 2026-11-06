@@ -90,6 +90,7 @@ MESSAGE_REPORT = (("asks for no act", "asks for no act"), ("pull request number"
 MESSAGE_QUESTION = (("a question about state", "a question about state"),)
 MESSAGE_REQUEST = (("ready to merge", "ready to merge"), ("however phrased", "however phrased"))
 MESSAGE_ONLY = (("only informs and asks for no act", "only informs and asks for no act"),)
+MESSAGE_OUTSIDE = (("never a session outside the owner's account", "never a session outside the owner's account"),)
 
 
 def auto_mode():
@@ -297,7 +298,14 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
     def test_covers_says_only_informs_and_asks_for_no_act(self):
         missing = unnamed_terms(self.owner_message_part(), MESSAGE_ONLY)
         self.assertFalse(missing,
-                         "Covers text does not say 'only informs and asks for no act': %r" % missing)
+                         "Covers text does not say 'only informs and asks for no act': %r"
+                         % missing)
+
+    def test_never_covers_names_a_session_outside_the_owners_account(self):
+        missing = unnamed_terms(self.owner_message_part(never=True), MESSAGE_OUTSIDE)
+        self.assertFalse(missing,
+                         "Never covers does not name a session outside the owner's account: %r"
+                         % missing)
 
 
 class NeverCoversSentence(unittest.TestCase):
