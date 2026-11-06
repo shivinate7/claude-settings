@@ -25,7 +25,9 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   `lane` when the page item has one, so it can list an item whose lane is gone.
   At each publish, triage also disposes each `stalled step:` line the build prints (the build exits 1 on one): a
   step with no live lane and no open PR becomes `todo` or `done`, or gets a `paused` field with who decides; an item
-  is re-routed or closed. Triage does not end its wake while such a line prints.
+  is re-routed or closed. Triage does not end its wake while such a line prints: the Stop hook (`lint/report_guard.py`)
+  refuses to end a turn while the newest build output in the transcript has one. A second Stop is released only when
+  the report's Input Needed section names every stalled step id and item number, which escalates it to the coordinator.
   Triage, as the page writer, splices it into the repo's one page and
   publishes it (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
   asks. At each review, triage reads standing sessions' `Recovered:` lines, counts their `Handoff gave:` lines, and brings the no-limit

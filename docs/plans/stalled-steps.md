@@ -72,3 +72,5 @@ Base 7975f6d (the merge of batch 30). Command: `python3 skills/roadmap/test_buil
 fail on the base: 45 failures. StalledStep fails 16 times in 11 cases, StalledItem fails 5 times, and the
 re-pointed StaleInProgress and FeelRows cases fail 24 subtests (they now expect exit 1 where a step
 is stalled). On this branch the same command passes.
+
+Triage hold, lint/test_report_guard_stalled.py on d23c7bc94: 12 failed, 11 passed.
