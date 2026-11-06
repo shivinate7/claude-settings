@@ -1,0 +1,10 @@
+{
+  "title": "Guard refuses a session's write to a page's answers collection",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 104,
+  "why": "Only the owner's Send may write answers/. A session write forges his answer, and the skill says that sentence is the only guard.",
+  "note": "Incident, triage 6, Nov 6: triage wrote answers/local-triage-tier-build (item 310) from the owner's chat words at 15:45 CST, and before that restored answers for items 289 and 290. The skill's 'Never write answers/' rule did not stop either write. Fix: a PreToolUse rule on ArtifactData set, update and batch whose collection is answers refuses it. Deletes on close stay allowed. An owner chat answer goes to the item's lastAnswer and reply instead.",
+  "owner": "coordinator",
+  "updatedAt": "2026-11-06T23:07:00Z"
+}
