@@ -115,7 +115,9 @@ function pageName() {
 }
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null, noStore = false, hold = {} } = {}) {
+// clock: a fixed browser time (an ISO string), so a case reads the page's clock without the real one. keepStorage: each storage key is set
+// only when absent, so a reload keeps what the page wrote on the earlier load (a reload that resets storage would undo it).
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport });
@@ -130,9 +132,10 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
   await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText, comments, meta, groups, receipts, holdReceipts, dbExtra, noStore, hold });
-  await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
+  await page.addInitScript(({ kv, keep }) => { for (const k in kv) { if (keep && localStorage.getItem(k) !== null) continue; localStorage.setItem(k, kv[k]); } }, { kv: storage, keep: keepStorage });
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
+  if (clock) await page.clock.setFixedTime(new Date(clock));
   await page.goto(ORIGIN);
   // With no store there are no items to wait for: the page is loaded once its empty state is drawn.
   if (noStore) { await page.waitForFunction("state.loaded"); return page; }
@@ -2097,6 +2100,8 @@ test("a group with one new member is new as a whole, so a seen item in its tier 
 // carries the mark; an owed card never folds. The mark uses the asks' green New answer style, so no case asserts a colour.
 const VISIT_AT = "2026-10-27T00:00:00Z";
 const VISIT = { "waiting.visit": VISIT_AT };
+// The page's clock for the cases that load a page: fixed, so the visit the page writes is known without the real clock.
+const LOAD_AT = "2026-11-06T18:00:00Z";
 // Later than the last Send (ANSWERED_AT, 2026-10-26T01:00Z) and later than the visit.
 const REPLIED_AT = "2026-10-28T09:00:00Z";
 const NEW_MARK = "New reply since your last Send";
@@ -2190,6 +2195,45 @@ test("card order is the same with and without replied", async (t) => {
   assert.equal(layoutBefore.length, 3, "the page did not draw the three cards");
   const after = await open(t, { items: dated, answers, storage: VISIT }); if (!after) return;
   assert.deepEqual(await layout(after), layoutBefore, "a replied time moved a card");
+});
+
+// Case (a), coordinator 2026-11-06: after load, waiting.visit holds the load's time. The page's clock is fixed at LOAD_AT, so the
+// time the page writes is LOAD_AT. The stored visit starts at VISIT_AT, earlier than LOAD_AT, so a page that writes nothing fails here.
+test("after load, waiting.visit holds an ISO time no earlier than the load's start", async (t) => {
+  const page = await open(t, { storage: VISIT, clock: LOAD_AT }); if (!page) return;
+  const visit = await page.evaluate(() => localStorage.getItem("waiting.visit"));
+  assert.match(visit ?? "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/, `waiting.visit is "${visit}", not an ISO time`);
+  assert.ok(Date.parse(visit) >= Date.parse(LOAD_AT), `waiting.visit is "${visit}", earlier than the load's start ${LOAD_AT}`);
+});
+
+// Case (b), coordinator 2026-11-06: a reload that keeps storage drops the first load's marks. The first load must mark the card
+// and the step; on the page as it stands it marks neither, so the case fails at that first check, not at the reload.
+test("a reload that keeps storage drops the first load's marks: the card and the step fold and close again", async (t) => {
+  const it = repliedCard();
+  const steps = stepsOf([["c1", "v2", 1, "active"], ["a2", "v2", 2, "todo"]]);
+  steps.a2.updatedAt = REPLIED_AT;
+  const page = await open(t, { pageHtml: phasePage(steps), items: [it], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT, keepStorage: true, clock: LOAD_AT }); if (!page) return;
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control on the first load`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", "the first load does not open the reply card");
+  assert.equal(await markName(page, it), NEW_MARK, `the first load draws no New reply mark on No. ${it.n}`);
+  await openStatus(page);
+  const row = page.locator('button[data-row="a2"]');
+  await need(row, "the step a2 has no row in the phase list");
+  assert.equal(await row.getAttribute("aria-expanded"), "true", "the first load does not open the updated step");
+  // The reload runs the page's load again, with the visit the first load wrote (storage is kept, not reset).
+  await page.reload();
+  await page.waitForFunction("state.items.length > 0");
+  await page.waitForSelector(`#item-${it.id}`);
+  assert.equal(await markName(page, it), null, `after a reload No. ${it.n} still draws the New reply mark`);
+  const again = card(page, it).locator("button.unfold");
+  await need(again, `No. ${it.n} has no fold control after a reload`);
+  assert.equal(await again.getAttribute("aria-expanded"), "false", "after a reload the reply card is open again");
+  await openStatus(page);
+  const rowAgain = page.locator('button[data-row="a2"]');
+  await need(rowAgain, "the step a2 has no row after a reload");
+  assert.equal(await rowAgain.getAttribute("aria-expanded"), "false", "after a reload the updated step is open again");
+  assert.doesNotMatch(await rowAgain.getAttribute("aria-label"), /Updated since your last visit/, "after a reload the updated step still says Updated");
 });
 
 // ---------------------------------------------------------------- answered sink
