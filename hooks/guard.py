@@ -4738,6 +4738,103 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     return False
 
 
+GRANT_TAIL_BYTES = 4 << 20  # the transcript tail the spawn-grant check reads: older lines grant nothing
+GET_SESSION_TOOL = "mcp__claude-code-remote__get_session"
+GET_EVENT_TOOL = "mcp__claude-code-remote__get_event"
+STEP_TAG = "cs-step:"
+
+
+def _transcript_module():
+    """lint/_transcript.py, the one home of the transcript readers."""
+    lint = os.path.join(_HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import _transcript
+    return _transcript
+
+
+def _tool_json(text):
+    """The JSON object inside a tool result's text, or None. A read of another session wraps its JSON in
+    `<other-session>` lines, so the text from the first brace to the last is parsed."""
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end < start:
+        return None
+    try:
+        found = json.loads(text[start:end + 1])
+    except ValueError:
+        return None
+    return found if isinstance(found, dict) else None
+
+
+def _marked(node):
+    """True when `node` holds an `origin` key or a true `isSynthetic` at any depth: the event is not the owner's typing."""
+    if isinstance(node, dict):
+        return "origin" in node or node.get("isSynthetic") is True or any(_marked(v) for v in node.values())
+    if isinstance(node, list):
+        return any(_marked(v) for v in node)
+    return False
+
+
+def _owner_grant(event):
+    """(act, slug, seconds, text, created, created_at) of an owner event that holds a grant word, else None. The
+    content is a plain string, and the event has no origin key and no true isSynthetic (the owner's value for
+    `origin` is unmeasured, so any origin fails closed)."""
+    import grant_word
+    try:
+        message = event["user"]["internal_anthropic_catchall"]["message"]
+        text = message["content"]
+        if message.get("role") != "user" or not isinstance(text, str) or _marked(event):
+            return None
+        word = grant_word.parse(text)
+        created = _transcript_module().parse_utc_timestamp(event.get("created_at"))
+    except (KeyError, TypeError, AttributeError):
+        return None
+    if word is None or created is None:
+        return None
+    return word[0], word[1], word[2], text.strip(), created, event["created_at"]
+
+
+def spawn_grant_hit(payload, tool, transcript):
+    """The reason text of a live spawn grant for this lane, or "". The lead session's Agent or Task call only.
+    One bounded read of the transcript tail finds this lane's own get_session result (no session_id, one
+    cs-step tag) and the newest get_event result whose event is the owner's grant word for that slug (decision
+    grant-reaches-lanes). A grant is live until created_at plus its length, and a newer `grant off` ends it."""
+    import grant_word
+    if tool not in grant_word.ACTS["spawn"] or payload.get("agent_id") or not transcript:
+        return ""
+    transcripts = _transcript_module()
+    records = list(transcripts.tail_records(transcript, GRANT_TAIL_BYTES))
+    records.reverse()  # oldest first, so a tool call precedes its result
+    calls, slug, grants = {}, None, []
+    for rec in records:
+        for use in transcripts.tool_uses(rec):
+            if isinstance(use.get("id"), str) and isinstance(use.get("input"), dict):
+                calls[use["id"]] = (use.get("name"), use["input"])
+        for result in transcripts.tool_results(rec):
+            name, given = calls.get(result.get("tool_use_id"), (None, None))
+            body = _tool_json(transcripts.result_text(result)) if name in (GET_SESSION_TOOL, GET_EVENT_TOOL) else None
+            ccr = body.get("ccr") if body else None
+            if not isinstance(ccr, dict):
+                continue
+            if name == GET_SESSION_TOOL and not given.get("session_id"):
+                tags = ccr.get("tags")
+                steps = [t[len(STEP_TAG):] for t in tags if isinstance(t, str) and t.startswith(STEP_TAG)] \
+                    if isinstance(tags, list) else []
+                slug = steps[0] if len(steps) == 1 else None  # the newest read of the lane's own record
+            elif name == GET_EVENT_TOOL and isinstance(ccr.get("data"), list) and ccr["data"] \
+                    and isinstance(ccr["data"][0], dict):
+                grant = _owner_grant(ccr["data"][0])
+                if grant:
+                    grants.append(grant)
+    mine = [g for g in grants if slug and g[1] == slug]
+    if not mine:
+        return ""
+    act, _slug, seconds, text, created, stamp = max(mine, key=lambda g: g[4])
+    if act != "spawn" or time.time() >= created + seconds:
+        return ""
+    return "spawn grant: the owner typed `%s` at %s (decision grant-reaches-lanes)" % (text, stamp)
+
+
 def judge(payload) -> None:
     if payload.get("hook_event_name") == "SubagentStop":
         judge_stop(payload)
@@ -4868,6 +4965,17 @@ def judge(payload) -> None:
     briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # The spawn-grant check: a live owner grant for this lane lets its own Agent or Task call through. Placed after
+    # every refusal above, which it never lifts. A read that fails grants nothing (decision grant-reaches-lanes).
+    try:
+        granted = spawn_grant_hit(payload, tool, trust_transcript if isinstance(trust_transcript, str) else "")
+    except Exception:
+        granted = ""
+    if granted:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
+                                                 "permissionDecisionReason": granted}}))
+        sys.exit(0)
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)

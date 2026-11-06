@@ -7,6 +7,8 @@ Modes:
   A prompt whose first word is `override` also grants a one-act owner override, and the rest is the
   reason, logged to guard.log. `override <n>[m|h]` and `override off` mean that only as the whole prompt
   (decision owner-override; hooks/override.py). It prints one more line.
+  A prompt that is a spawn grant word (`grant <slug> spawn <n>m|h`, `grant off <slug>`; hooks/grant_word.py) prints one
+  more line: the grant, and the relay to send the lane (decision grant-reaches-lanes). It writes no file.
 - --agent: At SubagentStart, gives the agent the time in US Central as context.
 - --page-note: After an ArtifactData read of one waiting-page answer, saves the owner's note on it to the session's inbox, like a chat message (decision owner-feedback-inbox). It prints no time line.
 
@@ -334,6 +336,33 @@ def grant_override(raw, at):
         print("local_time: override: %s" % e, file=sys.stderr)
 
 
+def grant_line(raw):
+    """Owner prompt that is a grant word (hooks/grant_word.py, decision grant-reaches-lanes): prints one line, the
+    grant parsed and the relay the coordinator sends to the lane. It writes no file. With no session id (the
+    lane's gate needs this session's id to find the event) the line says the relay cannot run."""
+    try:
+        hook = json.loads(raw.decode("utf-8"))
+        import grant_word
+        import override
+        text = hook.get("prompt")
+        word = grant_word.parse(text)
+        if word is None:
+            return
+        act, slug, seconds = word
+        what = ("Spawn grant ended for lane %s." % slug if act == "off"
+                else "Spawn grant: lane %s may start agents for %s." % (slug, text.strip().split()[-1]))
+        sender = override.remote_session_id()
+        if sender is None:
+            print("%s The relay cannot run: this session has no id." % what)
+            return
+        print('%s Relay: send_message to the lane tagged cs-step:%s with "grant in session %s: %s".'
+              % (what, slug, sender, text.strip()))
+    except (ValueError, AttributeError):
+        pass  # stdin is no hook payload: capture() reports that once
+    except Exception as e:  # advisory: the time line and capture still run
+        print("local_time: grant: %s" % e, file=sys.stderr)
+
+
 OLD_FLAG_ENDS = "2026-11-09"
 
 
@@ -354,6 +383,7 @@ def main(argv):
         if not agent:
             raw = sys.stdin.buffer.read()
             grant_override(raw, now)
+            grant_line(raw)
             capture(raw, stamp[len("Local time: "):])
     except Exception as e:  # advisory hook: fail open; one stderr line shows in --debug
         print("local_time: %s" % e, file=sys.stderr)
