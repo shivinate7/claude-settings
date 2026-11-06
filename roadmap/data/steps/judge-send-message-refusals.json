@@ -1,16 +1,10 @@
 {
   "title": "Auto mode's judge stops refusing ordinary lane messages",
   "phase": "next",
-  "status": "todo",
+  "status": "doing",
   "order": 103.393,
   "why": "Owner page answer.",
-  "note": "Not started (coordinator, 17:01 CST Nov 6): auto mode refused the lane brief as Self-Modification, because the lane must edit settings.json's autoMode text. It needs the owner's typed word in the coordinator's chat or in a Mac session (page item 316). Owner ask: item 315 b note.\nOwner on item 301 (15:24 CST Nov 6): \"maybe we fix the judge itself for send messages though in general i think it's only blocked problematically\". Item 301 picked a: lanes get a send_message allow line. This step looks at the 3 send_message refusals in the item 287 scan and fixes the cause in the judge's rules, if any is ours to fix.",
+  "note": "Doing (local, Windows): the owner runs the lane from a session on his Windows laptop, 17:04 CST (coordinator relay). Done when that session sends the coordinator its PR. Auto mode refused it in the cloud at 17:01 CST (Self-Modification).\nOwner on item 301 (15:24 CST Nov 6): \"maybe we fix the judge itself for send messages though in general i think it's only blocked problematically\". Item 301 picked a: lanes get a send_message allow line. This step looks at the 3 send_message refusals in the item 287 scan and fixes the cause in the judge's rules, if any is ours to fix.",
   "owner": "coordinator",
-  "updatedAt": "2026-11-06T23:18:00Z",
-  "paused": {
-    "why": "Needs the owner's typed word for a settings.json autoMode edit",
-    "decides": "owner",
-    "at": "2026-11-06T23:18:00Z",
-    "by": "triage"
-  }
+  "updatedAt": "2026-11-06T23:06:00Z"
 }
