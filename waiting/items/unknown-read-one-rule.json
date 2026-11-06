@@ -5,6 +5,12 @@
   "home": "decision ci-unknown-is-red; decision stale-cites-at-merge",
   "id": "unknown-read-one-rule",
   "kind": "decision",
+  "lane": "coordinator: one rule for an unknown read, and rewrite stale-cites-at-merge line 18; routed 12:46 CST. Unblocks lane ste-lint-diff-fail-closed and item 275",
+  "lastAnswer": {
+    "at": "2026-11-06T18:39:19.396Z",
+    "choice": "a",
+    "note": "Granted. Routed 12:46 CST to the coordinator."
+  },
   "n": 276,
   "options": [
     {

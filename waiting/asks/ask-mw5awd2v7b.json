@@ -1,10 +1,12 @@
 {
-  "answered": "2026-11-06T18:36:00Z",
+  "answered": "2026-11-06T18:42:00Z",
   "at": "2026-11-06T18:21:21.847Z",
+  "filed": "2026-11-06T18:42:00Z",
+  "home": "step:cloud-snapshot-age-check",
   "id": "ask-mw5awd2v7b",
   "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
   "re": "ask-mw5aaa9gvg",
   "read": "2026-11-06T18:36:00Z",
-  "reply": "I sent this to the coordinator at 12:36 CST. Each live child session that still prints the old CLAUDE_CODE_EXECPATH line gets a message to restart, or it is replaced with a fresh one.",
+  "reply": "Restarting won't help (coordinator, measured in its container, 12:41 CST). Every new cloud session starts from a saved copy of the environment, and that copy holds claude-settings as of Nov 4 07:09 UTC (d7eb5c94). The fix that runs the fresh start-up hooks (#1195) merged at 08:33 UTC that day, after the copy was made. So every new lane still prints the old line: 31 of them, including lanes started today. The fix is yours to do: open the cloud environment menu in a session's title bar, choose Edit, and save any change to the Setup script, such as a comment line with today's date. That rebuilds the copy, and new sessions then start current. I also filed step cloud-snapshot-age-check: the start-up hook will warn once when the copy falls behind main on a change that matters.",
   "text": "maybe coordinator messages sesssions that still see it telling them to restart or archive and re-spin off so it's no longe rbuggged? would be weird coordinator didn't get the update to its children when im prettty sure coordinator itself is cured of it"
 }

@@ -1,10 +1,10 @@
 {
-  "answered": "2026-11-06T18:36:00Z",
+  "answered": "2026-11-06T18:38:00Z",
   "at": "2026-11-06T18:22:09.232Z",
   "id": "ask-mw5axdn4ea",
   "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
   "re": "ask-mw5a0ekdlv",
   "read": "2026-11-06T18:36:00Z",
-  "reply": "Sorry, I'll say it more plainly. We don't know yet where the 10-message limit comes from. I only checked one place, our own settings code, and nothing there counts messages between sessions. That leaves two places: Claude Code itself, or something installed on your Mac. Only a session on your Mac can see the message, so the lane runs there. It finds the exact text of the message and what prints it, then tells you how to lift the limit. If you saw the message in a particular app or window, tell me which one and I'll add it to the brief.",
+  "reply": "Found it, and no Mac was needed. Lane session-messaging-plan read the Claude Code 2.1.319 program itself. The limit is a built-in guard in Claude Code, not our code. Each message between sessions carries a list of the sessions it has passed through. Once a session appears 10 times in that list, Claude Code drops the message as a loop. A back-and-forth between two sessions adds one entry each round, so the talk stops after about 10 rounds. A message you type yourself starts a fresh list, which is why your word resets it. The limit comes from a setting on Anthropic's servers, and we found no setting you can change. Step session-messaging-plan will design around it.",
   "text": "this makes zero sense though"
 }

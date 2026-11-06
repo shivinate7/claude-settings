@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-06T18:40:00Z",
+  "context": "Goal: cloud auto mode acts closer to your desktop bypass mode, on acts that can be undone (your ask, 12:20 CST).\nProblem (risk): each line lets every later session, in every repo, skip the safety check for that act. So each one needs your yes. Tick any that you want, or none.\nBased on (notes): the safety check refused a cancel of a CI run once, and a delete of the session's own check-in once.\nBased on (ruling): decision auto-mode-owner-acts says a line needs a named refusal, a way to undo it, and a \"Never covers\" sentence.\nDeparts from: main settings.json autoMode.allow \u2014 adds the lines you tick.\n\nNot asked here: the lane lease push. You already granted it (items 239 a and 257 c), and it is being built from your draft PR #1307. A close of a PR through the GitHub tool needs no line, because lane idle-lane-archive fixes it.",
+  "home": "decision auto-mode-owner-acts; settings.json autoMode.allow",
+  "id": "auto-mode-allow-lines",
+  "kind": "decision",
+  "lane": "auto-mode-middle-ground lane (session_013NEJL1Cejen3sLS5Yn3sA6) lands c and d; routed 12:46 CST",
+  "lastAnswer": {
+    "at": "2026-11-06T18:41:54.478Z",
+    "choice": [
+      "c",
+      "d"
+    ],
+    "note": "Owner picked c and d, and asked why they were marked as going against the ruling, and said \"never\" is too firm: it should be a guideline. Routed 12:46 CST: c and d to the lane; the wording change to the coordinator (step widening-rule-guideline)."
+  },
+  "multi": true,
+  "n": 278,
+  "options": [
+    {
+      "gain": "A stuck CI run can be stopped.",
+      "how": "Only cancel_workflow_run, on a run for a branch this session pushed.",
+      "key": "c",
+      "label": "Cancel a CI run of your own",
+      "lose": "No guard covers it. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "A session cleans up its own check-ins.",
+      "how": "delete_trigger, only on an id this session created.",
+      "key": "d",
+      "label": "Delete a check-in of your own",
+      "lose": "No guard covers it, and the check-in's run history is lost. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    }
+  ],
+  "owner": "auto-mode-middle-ground lane (session_013NEJL1Cejen3sLS5Yn3sA6)",
+  "rank": 3,
+  "ref": "step auto-mode-middle-ground; your ask ask-mw5av97rcg",
+  "reply": "You're right, they don't. That ruling is about one repo getting an exception from a shared tool. These two lines apply the same way to every repo, so the mark was wrong. I've filed step widening-rule-guideline to (1) tag only per-repo exceptions and (2) reword the line as a guideline: \"a repo should change to fit the shared tool, rather than the tool change to fit a repo\". It changes the output style, so the coordinator sends it to a lane. Your c and d picks went to the lane.",
+  "short": "Auto-mode allow lines",
+  "status": "open",
+  "title": "Which auto-mode allow lines should land?",
+  "why": "No recommendation: each line widens what auto mode allows, so it's your call alone."
+}

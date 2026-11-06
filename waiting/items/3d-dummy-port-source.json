@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-06T18:37:00Z",
+  "context": "Goal: a first browser 3D page (three.js), built as a throwaway test copy, as you suggested on item 130.\nProblem (goal): the port needs a source page, and you named this one only as an example (\"like this artifact\").\nBased on (ruling): item 130 pick a, browser 3D first (12:35 CST).\nDeparts from: main has no 3D page \u2014 adds a three.js test copy at a new URL.\n\nNot blocking: nothing waits on it.",
+  "home": "step 3d-browser-dummy",
+  "id": "3d-dummy-port-source",
+  "kind": "decision",
+  "n": 277,
+  "options": [
+    {
+      "gain": "A page you already know well, so you can judge the 3D version at a glance. The live page is never touched.",
+      "key": "a",
+      "label": "The Cockpit page, as a separate test copy",
+      "lose": "A busy page of text may not show off 3D well."
+    },
+    {
+      "gain": "You can pick a page that suits 3D better.",
+      "key": "b",
+      "label": "Another page (say which in your note)",
+      "lose": "One more choice for you to make."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 4,
+  "ref": "item 130; step 3d-browser-dummy",
+  "short": "3D test copy: which page",
+  "status": "open",
+  "title": "Which page should the first 3D test copy port: this Cockpit page, or another one?",
+  "why": "Recommended: a. It's a page you know, and the copy lives at its own URL, never the live page."
+}

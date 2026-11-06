@@ -6,8 +6,8 @@
   "kind": "decision",
   "lastAnswer": {
     "at": "2026-11-06T18:29:31.096Z",
-    "choice": "none",
-    "note": "\"Likely a combo of A and C\". Routed 12:36 CST to the coordinator to rewrite the options as that combination."
+    "choice": "a+c",
+    "note": "Your \"combo of A and C\", worded as a rule by the coordinator at 12:35 CST. Nothing stores 3D files yet, so it can be undone."
   },
   "links": [
     {
@@ -42,8 +42,9 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "ref": "step 3d-tools-survey",
+  "reply": "The rule: source files always go to cloud storage. Shipped files go in Git LFS while the repo stays under half the free allowance (5 GiB stored, 5 GiB downloaded a month). Past that, shipped files move to cloud storage too.",
   "short": "Where 3D files live",
-  "status": "open",
+  "status": "closed",
   "title": "Where should big 3D files live?",
   "why": "Keeps what ships with the code, and keeps big files off the paid allowance."
 }

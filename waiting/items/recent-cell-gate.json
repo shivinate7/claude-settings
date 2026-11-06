@@ -4,7 +4,12 @@
   "home": "mailaudit docs/decisions/recent-checks-can-be-undone.md",
   "id": "recent-cell-gate",
   "kind": "decision",
-  "lastAnswer": "none (11:22 CST Nov 6): neither option fits the outcome. Re-asked 11:30 CST with option c.",
+  "lane": "coordinator to start a mailaudit lane for c; routed 12:46 CST",
+  "lastAnswer": {
+    "at": "2026-11-06T18:36:55.244Z",
+    "choice": "c",
+    "note": "Routed 12:46 CST to the coordinator for a mailaudit lane: show the Recent cell while anything can be undone."
+  },
   "n": 193,
   "options": [
     {

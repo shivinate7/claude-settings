@@ -4,6 +4,12 @@
   "home": "grant-reaches-lanes",
   "id": "grant-client-fields-test",
   "kind": "decision",
+  "lane": "coordinator checks whether lane grant-reaches-lanes (PR #1049) still needs the test lines; routed 12:46 CST",
+  "lastAnswer": {
+    "at": "2026-11-06T18:36:55.244Z",
+    "choice": "a",
+    "note": "Owner: \"is this still valid? A is ok to do\". Read as a: you'll type the two test lines. Routed 12:46 CST to the coordinator, which checks whether the lane still needs them."
+  },
   "n": 221,
   "options": [
     {
@@ -31,6 +37,7 @@
   "pick": "a",
   "rank": 21,
   "ref": "decision grant-reaches-lanes (PR #1049), plan section 3, Design A step 5; page item 152",
+  "reply": "Sent to the coordinator to check whether the lane still needs the lines. If it does, this turns into a task with the exact line to type. If not, it closes.",
   "short": "Grant test: web and phone",
   "status": "open",
   "title": "Type two test lines, one from the claude.ai web app and one from the phone app, so grants work from every client?",

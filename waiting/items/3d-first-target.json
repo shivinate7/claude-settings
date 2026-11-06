@@ -6,8 +6,8 @@
   "kind": "decision",
   "lastAnswer": {
     "at": "2026-11-06T18:29:31.096Z",
-    "choice": "none",
-    "note": "Your question went to the coordinator at 12:36 CST: is browser 3D the only free option worth starting from, and could a dummy copy of this page be the first port?"
+    "choice": "a",
+    "note": "Pick a, recorded by the coordinator at 12:35 CST from your note. The follow-up is item 277."
   },
   "n": 130,
   "options": [
@@ -36,8 +36,9 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "ref": "step 3d-tools-survey; docs/plans/3d-tools-survey.md (draft PR to follow)",
+  "reply": "Yes. Browser 3D is the only free option that a cloud session can both build and check by eye. Godot is free too, but the cloud can check only its file structure. So: a. Which page to port first is item 277.",
   "short": "First 3D target",
-  "status": "open",
+  "status": "closed",
   "title": "What should your first 3D work be built in?",
   "why": "Free, and the cloud can build and check it end to end."
 }

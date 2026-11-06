@@ -1,0 +1,59 @@
+{
+  "added": "2026-11-06T18:43:00Z",
+  "context": "Goal: every verdict that merges has an independent agent arguing back (your ask, 12:25 CST).\nProblem (money): the audit found that no hook that calls a model has an independent agent arguing back. Only design review (two blind reviewers) and the mutation tests in CI are both blind and adversarial, and nothing reads a wrong allow. Options d and e add model calls on every plan or every guard PR.\nBased on (measured): debate-coverage-audit, an Opus agent, 12:40 CST.\nBased on (ruling): rules roles-each-layer-proves-once and roles-review-cap-three.\nDeparts from: main roles rules have no blind refuter, and the round-1 fix check runs on haiku \u2014 adds the picks you tick. Options a to c change role rules in CLAUDE.md, so they need your word.",
+  "home": "CLAUDE.md roles rules",
+  "id": "debate-adopt",
+  "kind": "decision",
+  "multi": true,
+  "n": 279,
+  "options": [
+    {
+      "gain": "The reviewer judges the code, not the builder's story about it.",
+      "how": "A reviewer's brief holds only the task, the diff and the rulings. It never holds the builder's report or an earlier verdict. A check holds this.",
+      "key": "a",
+      "label": "Blind reviewer brief",
+      "lose": "Nothing: 0 extra calls."
+    },
+    {
+      "gain": "A judge that starts allowing what it should refuse is caught before it merges.",
+      "how": "A set of known allow and deny cases runs in CI whenever a judge's prompt or model changes.",
+      "key": "b",
+      "label": "Replay cases for each judge",
+      "lose": "Model calls in CI only, when a judge changes."
+    },
+    {
+      "gain": "A stronger read on the changes that matter most for safety.",
+      "how": "The fix check on a PR that changes a guard or check runs on sonnet, not haiku.",
+      "key": "c",
+      "label": "Guard fix check on sonnet",
+      "lose": "A slightly more costly model for those fix checks."
+    },
+    {
+      "gain": "Weak plans are caught before anyone builds them.",
+      "how": "A second Opus agent gets only the brief and the plan, and tries to prove the plan wrong.",
+      "key": "d",
+      "label": "Blind plan refuter",
+      "lose": "One more Opus call per plan."
+    },
+    {
+      "gain": "Safety holes in guard changes are hunted on purpose.",
+      "how": "On a guard or check PR, a second blind reviewer is asked to find an act that main refuses and this change allows.",
+      "key": "e",
+      "label": "Second blind reviewer on guard PRs",
+      "lose": "One more call per review round."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": [
+    "a",
+    "b",
+    "c",
+    "d"
+  ],
+  "rank": 3,
+  "ref": "step debate-coverage-audit; your ask ask-mw5b1v54gc",
+  "short": "Independent pushback: which to adopt",
+  "status": "open",
+  "title": "Which ways of adding an independent agent that argues back should we adopt?",
+  "why": "Recommended: a, b and c, which cost little, then d. e adds a call to every round of every guard PR."
+}
