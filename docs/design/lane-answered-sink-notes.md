@@ -1,17 +1,22 @@
 # Waiting page, lane page-lane-answered-sinks: design notes
 
 Mockup: `docs/design/lane-answered-sink.html`. Screen: `skills/waiting-page/page.html` (8cfba982, PR #1345 page-reply-uncollapse).
-Deep links: `#s=page|today|sent-drops`, `&w=all|390|800|1280`, `&t=light|dark`, `&lab=off`, `&hide=<state>,...`.
-`#s=today` draws the base for comparison. Sizes: phone 390, mid 800 and wide 1280, light and dark. `layout.py devices`
-prints `unknown` for this repo, so the sizes come from the brief and page.html's breakpoints at 520 and 960. The mockup
-draws with page.html's own `<style>` (lines 8 to 850 at 8cfba982) and adds no CSS. Options are named by name, never by a letter.
+Deep links: `#s=page|stay|today`, `&w=all|390|800|1280`, `&t=light|dark`, `&lab=off`. `#s=page` draws SENT_MOVE "sink",
+`#s=stay` draws "stay", and `#s=today` draws the base. Sizes: phone 390, mid 800 and wide 1280, light and dark.
+`layout.py devices` prints `unknown` for this repo, so the sizes come from the brief and page.html's breakpoints at 520 and
+960. The mockup draws with page.html's own `<style>` (lines 8 to 850 at 8cfba982) and adds no CSS.
 
-The sample: the page loaded at 15:32. In Blocking, the owner sent No. 21, No. 25 and No. 27 on this visit. They stay in
-place, answered, until the next load (`freezeSunk`). No. 23 is still open. No. 61 arrived at 15:40, like page item 309.
+The sample: the page loaded at 15:32. In Blocking, the owner sent No. 21, No. 25 and No. 27 on this visit. No. 23 is still
+open. No. 61 arrived at 15:40, like page item 309.
 
-Settled by the rulings of Nov 6, not options here:
+Settled by the rulings of Nov 6:
 - A lane item sinks only when its answers record exists (`isSaved`), as the base does. No lane + `lastAnswer` predicate (coordinator, 15:47 CST).
-- New open questions come first, above every answered or sunk card (owner, about 15:45 CST, on roadmap step f569b25b8).
+- Owner, page item 311 (page save 21:51:10Z): in each tier, every open card sits above every card answered on this visit,
+  at all times. Arrivals after load go first. A Send moves the sent card below the open ones, and a Change brings it back
+  up. His words: "ux-order-holds-still ... is applied too strictly and is taking me away from the outcome i want here".
+- Coordinator, 15:51 CST, on top of item 311: arrivals after load go to the top of their tier. A card sent on this visit
+  moves through one switch, SENT_MOVE. "sink" (the default, option a, now paged through triage) and "stay" (today's
+  in-place behaviour). The sort-order change merges only after the ruling on rule ux-order-holds-still lands.
 
 ## 1. A saved answer routed to a lane: no change (regression state)
 
@@ -20,27 +25,27 @@ Settled by the rulings of Nov 6, not options here:
   what it waits on. Drawn unchanged in every state (labelled "Today"), with No. 44 (`waits.pr`) beside it.
 - The design reviewer checks it as a regression state only.
 
-## 2. Where an item that arrives after load goes
+## 2. The order in a tier
 
-- Cause (base): `sorted()` orders a tier by new before seen, then rank, then age. A card the owner sent on this visit keeps
-  its place (ux-order-holds-still). An item that arrives after load is new and unranked, so it lands under every ranked card,
-  sent ones included (`#s=today`: No. 61 under No. 21, No. 25 and No. 27).
-- Pick, "Arrivals on top" (`#s=page`): an item that was not on the page at load goes to the top of its tier, above the
-  new and seen parts. Two arrivals keep the tier's own order between them. Every card shown at load keeps its place, so a
-  Send moves nothing. At the next load, the cards sent on this visit sink into Answered, and the tier holds open cards only.
-  Gain: the new question is the first card in its tier, above every card sent on this visit. Loss: an open card from load
-  (No. 23) can still sit under a card the owner sent above it. The owner has already passed that card on this visit.
-- How it squares with ux-order-holds-still: the rule is "an act on a row does not re-rank the list". An arrival is not an
-  act on a row, and the rows already shown keep their order. ux-press-moves-nothing: an arrival already pushes the cards
-  below it down today. On top, it pushes the whole tier down instead of part of it. Same kind of move, no new one.
-- Builder: freeze the set of item ids at load, beside `freezeSeen`. In `sorted()`, the tier sort's first key is "not in
-  that set" (first), then today's `part` (new, then seen). The rail chips follow the tier order (drawn).
-- Option "Sent cards drop below open ones" (`#s=sent-drops`): at each Send, the page also moves every card sent on this
-  visit below the open cards of its tier. Gain: every open card sits above every answered card at all times. Loss: a Send
-  re-sorts cards the owner can see. Content above the bar moves after his press.
-  Departs from: ux-order-holds-still ("an act on a row does not re-rank the list") and ux-press-moves-nothing; page.html
-  `freezeSunk` keeps a sent card in place until reload. Owner grant: yes, if picked.
-- Recommendation: "Arrivals on top". It fixes the case the owner hit (item 309) and keeps both house rules.
+- Arrivals (`#s=page`, `#s=stay`): an item that was not on the page at load goes to the top of its tier, above the new and
+  seen parts. Two arrivals keep the tier's own order between them. Base (`#s=today`): No. 61 has no rank, so it sorts under
+  every ranked card, the three sent ones included.
+- SENT_MOVE "sink" (`#s=page`, the default): at a Send, each sent card leaves its tier for the Answered section, folded, at
+  its place by time (newest first). The next open card takes its slot (No. 23 moves up). The tier holds open cards only, so
+  item 311's order holds with no sort inside the tier. The rail chips move with their cards.
+- SENT_MOVE "stay" (`#s=stay`): a sent card keeps its place in its tier until the next load, as today. Only arrivals move.
+- Change: with "sink", a Change on a card sent this visit brings it back to its tier as an open card, at its place by the
+  tier's own order (item 311). A card sunk at load keeps today's Change: open in place in Answered. The ruling does not say
+  which applies to it; the builder asks before it changes that.
+- Answered sub-head: with "sink" the section also holds cards sent on this visit, so "Sent before this visit, newest first."
+  becomes "Your sent answers, newest first." (ux-statements-are-true).
+- Departs from: ux-order-holds-still (a Send re-ranks the tier) and ux-press-moves-nothing (cards move after the Send), and
+  page.html `freezeSunk` (a sent card stays in place until reload). Owner grant: item 311. Merge waits for the rule's ruling.
+- Builder: freeze the set of item ids at load, beside `freezeSeen`. In `sorted()`, the first key of the tier sort is "not in
+  that set". SENT_MOVE "sink" adds each item sent on this visit to the sunk set at the Send; a Change removes it again.
+- Rejected, item 311:
+  - "Arrivals on top" as the whole design: it left an open card under a card sent on this visit. It lives on as SENT_MOVE "stay".
+  - "Sent cards drop below open ones" inside the tier: superseded by SENT_MOVE "sink", which takes them out of the tier.
 
 ## Checked
 

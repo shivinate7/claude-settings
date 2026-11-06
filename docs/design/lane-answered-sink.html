@@ -32,16 +32,11 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
 <body>
 <div class="sample" id="sampleBanner">Sample. No item, number, name, repo, lane, PR or time on this page is real.</div>
 <header class="tool">
-  <h1>Waiting page, lane page-lane-answered-sinks: a question that arrives after load goes to the top of its tier, above the cards answered this visit</h1>
+  <h1>Waiting page, lane page-lane-answered-sinks: open cards come first in each tier; a sent card sinks into Answered (SENT_MOVE)</h1>
   <div class="row" id="rowS"><span>State</span>
-    <button data-s="page">Arrivals on top (pick)</button>
+    <button data-s="page">SENT_MOVE sink (default)</button>
+    <button data-s="stay">SENT_MOVE stay</button>
     <button data-s="today">Today (base), for comparison</button>
-  </div>
-  <div class="row" id="rowO"><span>Options</span>
-    <button data-s="sent-drops">Sent cards drop below open ones</button>
-  </div>
-  <div class="row" id="rowH"><span>Hide</span>
-    <button class="hide" data-hide="sent-drops" data-name="Sent cards drop below open ones"></button>
   </div>
   <div class="row" id="rowW"><span>Size</span>
     <button data-w="all">All three</button><button data-w="390">Phone 390</button><button data-w="800">Mid 800</button><button data-w="1280">Wide 1280</button>
@@ -50,14 +45,14 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
     <button data-t="light">Light</button><button data-t="dark">Dark</button>
     <button id="labBtn">Labels on</button>
   </div>
-  <p>Deep links: <code>#s=page|today|sent-drops</code>, <code>&amp;w=all|390|800|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=&lt;state&gt;,...</code>. The page loaded at 15:32. Since then the owner sent No. 21, No. 25 and No. 27 (they stay in Blocking until the next load), left No. 23 open, and No. 61 arrived at 15:40. The Answered section below holds No. 52, a saved answer routed to a lane, drawn as the base draws it (no change). Drawn from page.html at 8cfba982. Notes: lane-answered-sink-notes.md.</p>
+  <p>Deep links: <code>#s=page|stay|today</code>, <code>&amp;w=all|390|800|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=&lt;state&gt;,...</code>. The page loaded at 15:32. Since then the owner sent No. 21, No. 25 and No. 27 (with SENT_MOVE "sink" they move into Answered; with "stay" they keep their place), left No. 23 open, and No. 61 arrived at 15:40. The Answered section below holds No. 52, a saved answer routed to a lane, drawn as the base draws it (no change). Drawn from page.html at 8cfba982. Notes: lane-answered-sink-notes.md.</p>
 </header>
 <main id="stage"></main>
 
 <!-- The waiting page reads each option's state and focus from this static markup (pictureProblem parses the HTML string).
      In its frame, the script below draws the state as the screen itself, and the drawn screen carries the same ids. -->
 <div id="pics" hidden>
-  <i data-state="page"></i><i data-state="today"></i><i data-state="sent-drops"></i>
+  <i data-state="page"></i><i data-state="stay"></i><i data-state="today"></i>
   <i id="tier-holds"></i><i id="item-61"></i><i id="item-52"></i>
 </div>
 
@@ -1032,7 +1027,7 @@ function sunkCard(it, o = {}) {
   const words = "Show " + joinAnd(names), hide = "Hide " + joinAnd(names);
   const fold = names.length ? `<button type="button" class="unfold" id="unfold-${it.n}" aria-expanded="false" aria-controls="fold-${it.n}"><span class="chev" aria-hidden="true"></span><span class="uf-labels"><span class="uf-show">${esc(words)}</span><span class="uf-hide">${esc(hide)}</span><span class="uf-lock">Stays open: your answer is ready</span></span><span class="sr"> for No. ${it.n}</span></button><div class="foldbody" id="fold-${it.n}" hidden>${parts.join("")}</div>` : "";
   const pill = it.saved ? `<span class="ans">Filing pending, sent <span class="t">${esc(fmt(it.saved.at))}</span></span>` : `<span class="ans"><span class="t">${esc("Sent " + fmt(it.lastAnswer.at))}</span></span>`;
-  return `<article class="card answered" id="item-${it.n}" aria-labelledby="t-${it.n}" data-sunk="true"${lab("today", o.tag)}><div class="top">${num(it)}${pill}${waitSpan(it)}</div><h3 class="title" id="t-${it.n}">${esc(it.title)}</h3>${receiptEl(it, true)}${fold}</article>`;
+  return `<article class="card answered" id="item-${it.n}" aria-labelledby="t-${it.n}" data-sunk="true"${lab(o.kind || "today", o.tag)}><div class="top">${num(it)}${pill}${waitSpan(it)}</div><h3 class="title" id="t-${it.n}">${esc(it.title)}</h3>${receiptEl(it, true)}${fold}</article>`;
 }
 
 /* ---------- Questions chrome ---------- */
@@ -1051,8 +1046,9 @@ function rail(rows, sent, total) {
 function tier(k, name, parts, count) {
   return `<section class="tier" id="tier-${k}" aria-labelledby="th-${k}"><header><h2 id="th-${k}">${G(k)}${name}<span class="ct">${count}</span></h2></header>${parts.join("")}</section>`;
 }
-function answeredSec(cards) {
-  return `<section class="tier sunk" id="tier-answered" aria-labelledby="th-answered"><header><h2 id="th-answered"><button class="rhead" type="button" id="b-answered" aria-expanded="true" aria-controls="ab"><span class="chev" aria-hidden="true"></span>${G("done")}Answered<span class="ct">${cards.length}</span></button></h2><p class="rsub">Sent before this visit, newest first. Each leaves the page once its session closes it.</p></header><div class="rlist" id="ab">${cards.join("")}</div></section>`;
+// With "sink" the section also holds cards sent on this visit, so its sub-head drops "before this visit" (ux-statements-are-true).
+function answeredSec(cards, sink) {
+  return `<section class="tier sunk" id="tier-answered" aria-labelledby="th-answered"><header><h2 id="th-answered"><button class="rhead" type="button" id="b-answered" aria-expanded="true" aria-controls="ab"><span class="chev" aria-hidden="true"></span>${G("done")}Answered<span class="ct">${cards.length}</span></button></h2><p class="rsub"${sink ? lab("new", "words: no longer only before this visit") : ""}>${sink ? "Your sent answers, newest first." : "Sent before this visit, newest first."} Each leaves the page once its session closes it.</p></header><div class="rlist" id="ab">${cards.join("")}</div></section>`;
 }
 const hdr = () => `<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">S</div><div class="who"><h1 class="repo">sample-repo</h1></div></div></header>`;
 const tabs = (n) => `<nav class="in tabs" aria-label="Page"><div class="tl" role="tablist" aria-label="Page parts"><a href="#" role="tab" aria-selected="true">Questions <span class="cnt">${n}</span></a><a href="#" role="tab" aria-selected="false" tabindex="-1">Status</a></div></nav>`;
@@ -1062,24 +1058,25 @@ function chrome(railHtml, listHtml) {
 
 /* ---------- States: the Blocking tier's order ---------- */
 // today: the tier's rule (rank, then age) for every card, so No. 61 (no rank, newest) lands under the three cards the owner sent.
-// page (pick): an item that arrived after load goes to the top of its tier. Every other card keeps its place; a Send moves nothing.
-// sent-drops (option): the page also moves each card sent this visit below the open ones, at the Send.
+// Owner ruling, item 311 (Nov 6, 21:51 UTC): in each tier, every open card sits above every card sent on this visit; arrivals after load go first.
+// Coordinator, 15:51 CST: one switch, SENT_MOVE. page = "sink" (default): a Send moves the card into Answered, folded, and the next open card
+// takes its slot. stay = "stay": the sent card keeps its place in the tier, as today. today = the base, arrivals sorted by rank and age.
 function questions(s) {
-  const tag61 = s === "today" ? "arrived 15:40, no rank: sorts under every card you sent" : s === "page" ? "arrived 15:40, after load: top of its tier" : "arrived 15:40: top of its tier";
-  const c61 = openCard(ARRIVED, { kind: s === "today" ? "today" : "new", tag: tag61 });
-  const c21 = sentCard(A21, { tag: s === "today" ? "sent 15:34: stays in place" : s === "page" ? "sent this visit: keeps its place" : "" });
-  const c23 = openCard(O23, { kind: s === "sent-drops" ? "new" : "today", tag: s === "sent-drops" ? "open: above every sent card" : s === "page" ? "open since load: keeps its place" : "" });
-  const c25 = sentCard(A25, { kind: s === "sent-drops" ? "new" : "today", tag: s === "sent-drops" ? "sent: moved below the open cards at the Send" : "" });
-  const c27 = sentCard(A27, {});
-  const order = s === "today" ? [[A21, c21], [O23, c23], [A25, c25], [A27, c27], [ARRIVED, c61]]
-    : s === "page" ? [[ARRIVED, c61], [A21, c21], [O23, c23], [A25, c25], [A27, c27]]
-    : [[ARRIVED, c61], [O23, c23], [A21, c21], [A25, c25], [A27, c27]];
-  const ans = [sunkCard(S52, { tag: "saved, routed to a lane: no change" }), sunkCard(S44, {})];
-  const rows = [{ k: "holds", name: "Blocking", count: 2, kind: s === "today" ? "" : "new", tag: s === "today" ? "" : "chips follow the tier order", chips: order.map((x) => x[0]) },
-    { k: "answered", glyph: "done", name: "Answered", href: "tier-answered", aria: "2 answered", count: 2, chips: [S52, S44] }];
-  return chrome(rail(rows, 5, 7), tier("holds", "Blocking", order.map((x) => x[1]), 2) + answeredSec(ans));
+  const t = s === "today", sink = s === "page";
+  const c61 = openCard(ARRIVED, { kind: t ? "today" : "new", tag: t ? "arrived 15:40, no rank: sorts under every card you sent" : "arrived 15:40, after load: top of its tier" });
+  const c23 = openCard(O23, { kind: sink ? "new" : "today", tag: sink ? "open since load: takes the slot of No. 21" : "" });
+  const inTier = (it, tag) => sentCard(it, { kind: "today", tag });
+  const order = t ? [[A21, inTier(A21, "sent 15:34: stays in place")], [O23, c23], [A25, inTier(A25)], [A27, inTier(A27)], [ARRIVED, c61]]
+    : sink ? [[ARRIVED, c61], [O23, c23]]
+    : [[ARRIVED, c61], [A21, inTier(A21, "sent this visit: stays in place")], [O23, c23], [A25, inTier(A25)], [A27, inTier(A27)]];
+  // With "sink", the cards sent on this visit join Answered, newest first, folded like any sunk card.
+  const sentNow = sink ? [[A27, sunkCard(A27, { kind: "new", tag: "sent 15:38 on this visit: sinks, folded" })], [A25, sunkCard(A25, {})], [A21, sunkCard(A21, {})]] : [];
+  const ansList = [...sentNow, [S52, sunkCard(S52, { tag: "saved, routed to a lane: no change" })], [S44, sunkCard(S44, {})]];
+  const rows = [{ k: "holds", name: "Blocking", count: 2, kind: t ? "" : "new", tag: t ? "" : "chips follow the tier order", chips: order.map((x) => x[0]) },
+    { k: "answered", glyph: "done", name: "Answered", href: "tier-answered", aria: ansList.length + " answered", count: ansList.length, chips: ansList.map((x) => x[0]) }];
+  return chrome(rail(rows, 5, 7), tier("holds", "Blocking", order.map((x) => x[1]), 2) + answeredSec(ansList.map((x) => x[1]), sink));
 }
-const STATES = ["page", "today", "sent-drops"];
+const STATES = ["page", "stay", "today"];
 function screen(s) { return questions(STATES.includes(s) ? s : "page"); }
 
 /* ---------- Harness: state, size, theme, labels and hidden options from the URL hash ---------- */
