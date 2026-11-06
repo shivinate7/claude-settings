@@ -2184,6 +2184,7 @@ snap_seed() {
     oldrepo) sd_cmd=$snap_old; sd_extra='{"matcher": "", "hooks": [{"type": "command", "command": "python3 \"$HOME/.claude/hooks/daily_note.py\""}]}' ;;
     compact) sd_cmd=$snap_new; sd_extra='{"matcher": "compact", "hooks": [{"type": "command", "command": "echo COMPACT_ONLY"}]}' ;;
     oldonly) sd_cmd=$snap_old ;;
+    oldcompact) sd_cmd=$snap_old; sd_extra='{"matcher": "compact", "hooks": [{"type": "command", "command": "echo COMPACT_ONLY"}]}' ;;
   esac
   mkdir -p "$1/.claude-cfg"
   jq -n --arg cmd "$sd_cmd" --argjson extra "[${sd_extra}]" \
@@ -2392,6 +2393,37 @@ snapstale9() {
   else
     ok "$name"
   fi
+}
+
+# A pinned ref (CLAUDE_SETTINGS_REF) moves the run to another ref, so the run's own refresh hook differs from the one a
+# main snapshot holds. snap_pin_ref makes branch pinned at main's tip, so the run's fetch lands on a ref that exists.
+snap_pin_ref() { git -C "$1/bare.git" update-ref "refs/heads/pinned" "$(fixture_sha "$1")"; }
+# snap_pinned_check NAME KIND: one startup run at the pinned ref, with the old file KIND seeded at main. Prints why the run
+# fails, and returns 1; prints nothing and returns 0 when the run stays silent, as it should.
+snap_pinned_check() {
+  move_fixture "$1"; snap_pin_ref "$fx"; snap_seed "$h" "$2"
+  if [ "$(snap_repo_count "$h/.claude-cfg/settings.json")" != 0 ]; then
+    printf 'fixture fault: the seeded refresh hook at main is not read as a refresh hook'; return 1
+  fi
+  snap_run "$co" "$h" CS_HOOK_INPUT='{"source":"startup"}' CLAUDE_SETTINGS_REF=pinned
+  if [ "$rc" -ne 0 ]; then printf 'install.sh exited %s: %s' "$rc" "$err"; return 1; fi
+  if ! snap_at_main; then printf 'fixture fault: the pinned ref did not land, so the checkout is not at main'; return 1; fi
+  if [ "$(snap_warns)" -ne 0 ]; then printf 'warned at the pinned ref for a refresh hook built at main: %s' "$(snap_stale_line)"; return 1; fi
+  return 0
+}
+
+# The new form, built at main, beside a compact entry: a pinned-ref run stays silent.
+snapstale10() {
+  name="snapstale10: a startup run at a pinned ref stays silent when the old settings.json holds the new refresh hook built at main and a compact entry"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  if msg=$(snap_pinned_check snap10 compact); then ok "$name"; else bad "$name" "$msg"; fi
+}
+
+# The old form, built at main, beside a compact entry: a pinned-ref run stays silent.
+snapstale11() {
+  name="snapstale11: a startup run at a pinned ref stays silent when the old settings.json holds the old refresh hook built at main and a compact entry"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  if msg=$(snap_pinned_check snap11 oldcompact); then ok "$name"; else bad "$name" "$msg"; fi
 }
 
 # ---- skills backups, cloud mode: a repeat run replaces its own copy, and a needed backup lands outside skills/ ----
@@ -5936,6 +5968,8 @@ run snapstale6
 run snapstale7
 run snapstale8
 run snapstale9
+run snapstale10
+run snapstale11
 run skills_bak1
 run skills_bak2
 run skills_bak3
