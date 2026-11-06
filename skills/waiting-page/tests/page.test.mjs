@@ -5151,7 +5151,7 @@ test("a paused row's time sits inside a .num element", async (t) => {
   assert.ok(times.some((x) => /16:20/.test(x)), "the paused time of step a3 is not inside a .num element: " + JSON.stringify(times));
 });
 
-// Q3 (ruling, 2026-11-06 11:48 CST): In progress is for a live doing step only. A stalled or paused row reads its own word.
+// In progress tells the owner that someone is working on the step. A stalled or paused step has no one working on it, so its row must read its own word.
 test("a stalled or paused row reads Stalled or Paused in its status, label and mark, never In progress", async (t) => {
   const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
   await openStatus(page);

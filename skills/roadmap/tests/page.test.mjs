@@ -75,8 +75,8 @@ test("zero stalled steps with the items not read: the band does not say No stall
   assert.match(text, /not read/i, "the waiting-items part does not say not read: " + text);
 });
 
-// ---------------------------------------------------------------- the stalled band: a row never reads In progress (ruling Q3)
-// Q3: In progress is for a live doing step only. A stalled or paused step reads Stalled or Paused, in its label and its mark.
+// ---------------------------------------------------------------- the stalled band: a row never reads In progress
+// In progress is for a live doing step only. A stalled or paused step reads Stalled or Paused, in its label and its mark.
 // Each row's label, and every mark in it, is checked. Index: the same word must be the row's own, not In progress.
 async function assertRowReads(page, id, word) {
   assert.match(await statusLabel(page, id), new RegExp(word), `step ${id} does not read ${word} in its status mark`);
@@ -97,15 +97,15 @@ test("a paused step's row reads Paused, never In progress", async (t) => {
 // ---------------------------------------------------------------- the plan list: a live doing step reads In progress
 test("a live doing step reads In progress", async (t) => {
   const steps = { a: stepOf("Step a", "doing", 2) };
-  // Step a has a live thread, so something is working on it.
-  const live = { readAt: new Date().toISOString(), threads: [{ title: "Work on step a", state: "working", step: "a" }], pulls: [], branches: [], sessions: [] };
+  // Step a has an open pull request on its branch a, which makes it a live lane.
+  const live = { readAt: new Date().toISOString(), threads: [], pulls: [{ number: 7, title: "Step a", branch: "a" }], branches: [], sessions: [] };
   const page = await open(t, builtPage({ steps, live })); if (!page) return;
   assert.match(await statusLabel(page, "a"), /In progress/, "step a has a live thread but does not read In progress");
 });
 
 // ---------------------------------------------------------------- the plan list: a stalled step is marked at first load, with no live thread
-// The build sets the stalled read from the steps and the live file; this fixture has no thread for step b.
-test("a stalled step carries the Stalled tag and the Doing now mark at first load, with no live thread", async (t) => {
+// The build sets the stalled read from the steps and the live file. Step b has no session and no pull request, so no live lane.
+test("a stalled step carries the Stalled tag and the Doing now mark at first load, with no live lane", async (t) => {
   const steps = { b: stepOf("Step b", "doing", 3) };
   const live = { readAt: new Date().toISOString(), threads: [], pulls: [], branches: [], sessions: [] };
   const page = await open(t, builtPage({ steps, live })); if (!page) return;

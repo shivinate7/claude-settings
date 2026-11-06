@@ -19,6 +19,7 @@ import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent.parent.parent
+GITHUB = "fixture-owner/roadmap-fixture"  # the fixture repo's GitHub name, as its origin remote gives it
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / "skills" / "roadmap"))
 sys.path.insert(1, str(ROOT / "lint"))
@@ -38,6 +39,8 @@ def main():
     try:
         repo = test_build.make_repo(folder, steps=fixture.get("steps"), meta=fixture.get("meta"))
         test_build.git(repo, "checkout", "-q", "main")
+        # The build names the repo for the live file's sessions. Without a GitHub name the stalled read is unknown.
+        test_build.git(repo, "remote", "add", "origin", "https://github.com/" + GITHUB + ".git")
         page = os.path.join(folder, "page.html")
         build = [sys.executable, str(ROOT / "skills" / "roadmap" / "build.py"), "--repo", str(repo), "--out", page]
         if args.live:
