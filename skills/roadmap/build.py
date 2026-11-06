@@ -85,6 +85,16 @@ date with no year takes the build year, or the year before if it would be in the
 not exist is skipped. When the newest claim in a note is STALE_DAYS or more days old, the entry reads
 `<step id> (<date as written>)`. The row reads the notes only, so it needs no live file.
 
+The last upkeep row, "done without check", names each done step that closed without showing its Done check green on
+main (step done-needs-check). Only a done step whose updatedAt is on or after DONE_CHECK_SINCE (an ISO UTC time) is read.
+Its note, why and ask are searched for the whole phrase `Done check` (any case; `Done checks` does not count). With no
+such phrase the entry is `<step id>`. With the phrase, one sentence of the three texts (a sentence ends at ". " or at
+the end of a text) must hold the whole phrase `green on main` or `met on main` (any case), with no negator (not, never,
+no, yet, or a word ending in n't) before it in that sentence, and a source: a ref that DONE_REF_RE in
+lint/report_guard.py accepts (the one home: `#<digits>`, `PR <n>`, a /pull/ or /commit/ URL, a hex commit hash). With none the entry is `<step id> (not shown green on main)`. A missing or
+unparsable updatedAt gives `<step id> (updatedAt unreadable)`. The row reads the step files only, so it needs no live
+file. It adds no process, file, timer or log: it reads the notes already loaded.
+
 Before it builds, it refuses a record branch with git conflict markers (step c72) in any file under
 SCANNED, and writes no page.
 
@@ -133,6 +143,11 @@ ARCHIVED_SESSION = "SESSION_STATUS_ARCHIVED"
 FUTURE_MINUTES = 5
 KNOWN_STATUS = ("todo", "doing", "active", "done")
 TOP = 5
+DONE_CHECK_SINCE = "2026-11-07T00:00:00Z"  # ISO UTC: a done step updated before this time is not read for a Done check
+DONE_CHECK = re.compile(r"(?<![\w-])done check(?![\w-])", re.I)
+GREEN_ON_MAIN = re.compile(r"(?<![\w-])(?:green|met) on main(?![\w-])", re.I)
+# A negator before the phrase in its sentence: the check is said not to be green. `\w+n't` covers isn't, wasn't, hasn't.
+NEGATOR = re.compile(r"(?<![\w'-])(?:not|never|no|yet|\w+n['’]t)(?![\w'-])", re.I)
 DATA = "roadmap/data"
 # roadmap.html is left out: this script rewrites it, so a conflict there is resolved by building.
 SCANNED = ("roadmap", "briefs", "plans", "handoffs")
@@ -164,6 +179,11 @@ sys.path.insert(0, str(HERE.parent.parent / "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import git_reads  # noqa: E402  the one home of a checkout's GitHub repo, shared with the guard (hooks/git_reads.py)
 from shared_names import REPO_TAG, STEP_TAG, repo_tag_names  # noqa: E402,F401  REPO_TAG: test_build pins build.REPO_TAG to the shared object  the one home of the tag names, shared with the guard (hooks/shared_names.py)
+sys.path.insert(0, str(LINT))
+try:
+    from report_guard import DONE_REF_RE  # noqa: E402  the one home of a source ref in a Done line (lint/report_guard.py)
+finally:
+    sys.path.remove(str(LINT))
 
 
 def git(repo, *args, stdin=None):
@@ -1095,6 +1115,39 @@ def unfiled(steps, work):
     return out
 
 
+def shown_green(sentence):
+    """True when the sentence holds `green on main` or `met on main` with no negator before it, and a source."""
+    plain = any(not NEGATOR.search(sentence[:m.start()]) for m in GREEN_ON_MAIN.finditer(sentence))
+    return plain and bool(DONE_REF_RE.search(sentence))
+
+
+def done_without_check(steps):
+    """Entries for each done step updated on or after DONE_CHECK_SINCE that does not show its Done check green on main."""
+    since = datetime.datetime.fromisoformat(DONE_CHECK_SINCE.replace("Z", "+00:00"))
+    out = []
+    for k, d in sorted(steps.items()):
+        if d.get("status") != "done":
+            continue
+        try:
+            at = datetime.datetime.fromisoformat(d["updatedAt"].replace("Z", "+00:00"))
+        except (KeyError, AttributeError, ValueError):
+            out.append("%s (updatedAt unreadable)" % k)
+            continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=datetime.timezone.utc)
+        if at < since:
+            continue
+        texts = [v for v in (d.get(key) for key in MOCKUP_TEXT) if isinstance(v, str)]
+        if not any(DONE_CHECK.search(t) for t in texts):
+            out.append(k)
+            continue
+        # Each text splits on its own, so a sentence never runs from one field into the next.
+        sentences = [part for t in texts for part in re.split(r"\.\s", t)]
+        if not any(shown_green(x) for x in sentences):
+            out.append("%s (not shown green on main)" % k)
+    return out
+
+
 def upkeep(steps, added, marks, strays, work=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = sorted(((k, d) for k, d in steps.items() if d.get("status") != "done"),
@@ -1142,7 +1195,8 @@ def upkeep(steps, added, marks, strays, work=None):
             ("landed, waiting for triage to close", closing),
             ("Step trailers naming no step", strays),
             ("live threads naming no open step", (work or {}).get("strays", [])),
-            ("live file entries skipped", (work or {}).get("skipped", []))]
+            ("live file entries skipped", (work or {}).get("skipped", [])),
+            ("done without check", done_without_check(steps))]
     print("upkeep: " + "; ".join(f"{label}: {len(v)}" for label, v in rows))
     for label, v in rows:
         if v:

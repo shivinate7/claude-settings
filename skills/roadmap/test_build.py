@@ -1433,6 +1433,266 @@ class ReadyAndDraftRows(UpkeepFixture):
         self.assertTrue(detail.startswith("unknown (") and "--live" in detail, detail)
 
 
+class DoneWithoutCheck(UpkeepFixture):
+    """The upkeep row `done without check`, the last row. It reads the done steps whose updatedAt is on or after
+    build.DONE_CHECK_SINCE (an ISO UTC time), and lists each whose note, why and ask (joined) fail the close check:
+    no Done check named, `<id>`; a Done check named, but no sentence holds `green on main` or `met on main` (whole
+    words, any case) with a source (`#<digits>`, `PR <n>`, a /pull/<n> URL, or a 6-40 character hex commit hash with a digit), `<id> (not shown green on main)`;
+    an updatedAt that is missing or unparsable, `<id> (updatedAt unreadable)`. A sentence ends at ". " or at the end
+    of the text. The row reads the step files only, so it needs no --live file."""
+
+    ROW = "done without check"
+    NOT_SHOWN = " (not shown green on main)"
+    UNREADABLE = " (updatedAt unreadable)"
+    HASH_40 = "0123456789abcdef0123456789abcdef01234567"
+    # The fourteen rows before this one, in print order. The control case reads them.
+    OLD_ROWS = ["notes over %d words" % build.NOTE_WORDS, "untouched %d days in a live phase" % build.STALE_DAYS,
+                "no note in a live phase", "new in top %d with no placement line" % build.TOP,
+                "in progress with no live lane or open PR", "ready todo steps",
+                "draft PRs over %d h with no live lane" % build.STALE_DRAFT_HOURS,
+                "dated claims to re-check before a lane starts", "page rulings not on their step",
+                "landed, waiting for a device trial", "landed, waiting for triage to close",
+                "Step trailers naming no step", "live threads naming no open step", "live file entries skipped"]
+    # A build without the constant gets this value, so a case fails on its own assert, not on an AttributeError.
+    # test_the_constant_is_an_iso_utc_time names the missing constant.
+    SINCE_FALLBACK = "2000-01-01T00:00:00Z"
+
+    def since(self):
+        """build.DONE_CHECK_SINCE, read through getattr for the reason above."""
+        return getattr(build, "DONE_CHECK_SINCE", self.SINCE_FALLBACK)
+
+    def since_dt(self):
+        raw = self.since()
+        try:
+            return datetime.datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            self.fail("build.DONE_CHECK_SINCE is not an ISO time: %r" % (raw,))
+
+    def just_before(self):
+        """The whole second before the constant, as an ISO UTC time."""
+        at = self.since_dt()
+        at = at if at.tzinfo else at.replace(tzinfo=datetime.timezone.utc)
+        return (at.astimezone(datetime.timezone.utc) - datetime.timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def done_step(self, updated=None, **fields):
+        """A done step, in scope by default: updatedAt is the constant. Each field given replaces the default."""
+        step = {"title": "t", "status": "done", "phase": "cleanup", "order": 1,
+                "updatedAt": self.since() if updated is None else updated}
+        step.update(fields)
+        return step
+
+    def commit_steps(self, steps):
+        """Write each {id: step} on the record branch, then commit once. Commit before the build: build_from_main
+        leaves HEAD on main, where the step folder is not."""
+        for sid, step in steps.items():
+            self.write_step(sid, step)
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "steps")
+
+    def listed(self):
+        """(count, sorted entries) of the row, from a build of main with no --live file."""
+        _, out = self.build_from_main()
+        count, detail = self.row(out, self.ROW)
+        return count, self.entries(detail)
+
+    def test_the_row_is_the_last_row(self):
+        self.commit_steps({"bad": self.done_step(note="Shipped.")})
+        _, out = self.build_from_main()
+        self.assertEqual(list(self.summary_counts(out))[-1], self.ROW)
+
+    def test_the_fourteen_rows_before_it_keep_their_order(self):
+        # Control, green on main: the rows before this one print as they did, with or without this row.
+        self.commit_steps({"bad": self.done_step(note="Shipped.")})
+        _, out = self.build_from_main()
+        self.assertEqual(list(self.summary_counts(out))[:len(self.OLD_ROWS)], self.OLD_ROWS)
+
+    def test_the_constant_is_an_iso_utc_time(self):
+        self.assertTrue(hasattr(build, "DONE_CHECK_SINCE"), "build has no DONE_CHECK_SINCE")
+        self.assertEqual(self.since_dt().utcoffset(), datetime.timedelta(0),
+                         "build.DONE_CHECK_SINCE is not UTC: %r" % (self.since(),))
+
+    def test_a_done_step_with_no_done_check_is_listed_plain(self):
+        self.commit_steps({
+            "no-check": self.done_step(note="Shipped the feed."),
+            "blank": self.done_step(note="", why="", ask=""),
+            "no-keys": self.done_step(),  # no note, why or ask key at all
+        })
+        _, entries = self.listed()
+        self.assertEqual(entries, ["blank", "no-check", "no-keys"], "a done step with no Done check is not listed plain")
+
+    def test_a_done_step_updated_before_the_constant_is_never_listed(self):
+        self.commit_steps({
+            "on-the-line": self.done_step(updated=self.since(), note="Shipped."),
+            "one-second-early": self.done_step(updated=self.just_before(), note="Shipped."),
+            "early-named": self.done_step(updated=self.just_before(), note="Done check: X."),
+        })
+        _, entries = self.listed()
+        self.assertIn("on-the-line", entries)  # scope first: the step on the constant is in scope and listed
+        self.assertEqual(entries, ["on-the-line"], "a done step updated before the constant is listed")
+
+    def test_only_done_steps_are_listed(self):
+        self.commit_steps({
+            "done": self.done_step(note="Shipped."),
+            "todo": self.done_step(status="todo", note="Shipped."),
+            "doing": self.done_step(status="doing", note="Shipped."),
+            "active": self.done_step(status="active", note="Shipped."),
+            "todo-unreadable": self.done_step(status="todo", updated="yesterday", note="Shipped."),
+        })
+        _, entries = self.listed()
+        self.assertIn("done", entries)
+        self.assertEqual(entries, ["done"], "a step that is not done is listed")
+
+    def test_an_unreadable_updated_at_is_listed_as_unreadable(self):
+        missing = self.done_step(note="Shipped.")
+        del missing["updatedAt"]
+        self.commit_steps({
+            "readable": self.done_step(note="Shipped."),
+            "missing-at": missing,
+            "word-at": self.done_step(updated="yesterday", note="Shipped."),
+            "bad-month": self.done_step(updated="2026-13-45T00:00:00Z", note="Shipped."),
+        })
+        _, entries = self.listed()
+        self.assertIn("readable", entries)
+        self.assertEqual(entries, sorted(["readable", "missing-at" + self.UNREADABLE, "word-at" + self.UNREADABLE,
+                                          "bad-month" + self.UNREADABLE]),
+                         "a done step with an unreadable updatedAt is not listed as unreadable")
+
+    def test_a_well_formed_close_is_not_listed(self):
+        # False-alarm class: a Done check, and a green-on-main sentence that holds a source, are not listed.
+        closes = {"colon-ref": "Done check: X. Green on main: #1312.",
+                  "met-short-hash": "Done check met on main (a1b2c3d).",
+                  "any-case": "DONE CHECK: X. GREEN ON MAIN: #1312.",
+                  "met-long-hash": "Done check: X. Met on main (%s)." % self.HASH_40}
+        steps = {"bad-control": self.done_step(note="Shipped.")}
+        steps.update({sid: self.done_step(note=note) for sid, note in closes.items()})
+        self.commit_steps(steps)
+        _, entries = self.listed()
+        self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
+        self.assertEqual(entries, ["bad-control"], "a well-formed close is listed")
+
+    def test_a_named_check_with_no_green_on_main_sentence_is_listed_as_not_shown(self):
+        steps = {"named-only": self.done_step(note="Done check: the feed loads."),
+                 "named-upper": self.done_step(note="DONE CHECK: the feed loads."),
+                 "named-in-why": self.done_step(note="Shipped.", why="done check: the feed loads."),
+                 "named-in-ask": self.done_step(note="Shipped.", ask="Done check: the feed loads."),
+                 "plain-control": self.done_step(note="Shipped.")}
+        self.commit_steps(steps)
+        _, entries = self.listed()
+        self.assertIn("plain-control", entries)
+        expected = sorted(["plain-control"] + [sid + self.NOT_SHOWN for sid in
+                                               ("named-only", "named-upper", "named-in-why", "named-in-ask")])
+        self.assertEqual(entries, expected, "a named check with no green-on-main sentence is not listed as not shown")
+
+    def test_the_source_must_share_the_green_sentence(self):
+        # Miss class: a source in another sentence does not back a green-on-main sentence.
+        self.commit_steps({
+            "ok-same-sentence": self.done_step(note="Done check: X. Green on main: #1312."),
+            "no-source": self.done_step(note="Done check: X. Green on main."),
+            "source-after": self.done_step(note="Done check: X. Green on main. Fixed in #1312."),
+            "source-before": self.done_step(note="Done check: X. Fixed in #1312. Green on main."),
+        })
+        _, entries = self.listed()
+        self.assertIn("no-source" + self.NOT_SHOWN, entries)
+        self.assertEqual(entries, sorted(["no-source" + self.NOT_SHOWN, "source-after" + self.NOT_SHOWN,
+                                          "source-before" + self.NOT_SHOWN]),
+                         "a green-on-main sentence with its source in another sentence is not listed")
+
+    def test_the_phrase_must_be_whole_words(self):
+        # Miss class: `green on main` must be whole words. `met on main` with a source still counts.
+        self.commit_steps({
+            "ok-met": self.done_step(note="Done check: X. Met on main: #1312."),
+            "red-green": self.done_step(note="Done check: red on main and green on the fix #1312."),
+            "mainline": self.done_step(note="Done check: X. Green on mainline #1312."),
+            "greens": self.done_step(note="Done check: X. Greens on main #1312."),
+        })
+        _, entries = self.listed()
+        self.assertIn("mainline" + self.NOT_SHOWN, entries)
+        self.assertEqual(entries, sorted(["red-green" + self.NOT_SHOWN, "mainline" + self.NOT_SHOWN,
+                                          "greens" + self.NOT_SHOWN]),
+                         "a green-on-main phrase that is not whole words is not listed as not shown")
+
+    def test_the_source_must_have_the_shape_of_a_ref(self):
+        # Miss class: `#` with no digits and a 41-character hash are not sources. 6 to 40 hex characters with a
+        # digit are, as lint/report_guard.py DONE_REF_RE takes them (one home).
+        self.commit_steps({
+            "ok-seven": self.done_step(note="Done check: X. Green on main: a1b2c3d."),
+            "ok-six": self.done_step(note="Done check: X. Green on main: a1b2c3."),
+            "ok-forty": self.done_step(note="Done check: X. Green on main: %s." % self.HASH_40),
+            "hash-only": self.done_step(note="Done check: X. Green on main: #."),
+            "forty-one": self.done_step(note="Done check: X. Green on main: %s0." % self.HASH_40),
+        })
+        _, entries = self.listed()
+        self.assertIn("hash-only" + self.NOT_SHOWN, entries)
+        self.assertEqual(entries, sorted(["hash-only" + self.NOT_SHOWN, "forty-one" + self.NOT_SHOWN]),
+                         "a source that is not a PR number or a 6-40 character hash with a digit is not accepted")
+
+    def test_a_negated_green_on_main_sentence_is_listed_as_not_shown(self):
+        # Miss class: a negator (not, never, no, isn't, yet) in the same sentence, before `green on main` or
+        # `met on main`, says the check is not shown green, even with a source after it.
+        self.commit_steps({
+            "bad-control": self.done_step(note="Shipped."),
+            "not-met": self.done_step(note="Done check not met on main, see #1312."),
+            "not-green-yet": self.done_step(note="Done check: X. Not green on main yet, see #1312."),
+            "never-met": self.done_step(note="Done check: X. Never met on main: #1312."),
+            "no-green": self.done_step(note="Done check: X. No green on main: #1312."),
+            "isnt-green": self.done_step(note="Done check: X. Isn't green on main: #1312."),
+        })
+        _, entries = self.listed()
+        self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
+        self.assertEqual(entries, sorted(["bad-control"] + [sid + self.NOT_SHOWN for sid in
+                                                            ("not-met", "not-green-yet", "never-met", "no-green",
+                                                             "isnt-green")]),
+                         "a green-on-main sentence with a negator before the phrase is listed as shown green")
+
+    def test_a_pr_word_or_pull_url_ref_shows_green_on_main(self):
+        # The ref forms lint/report_guard.py DONE_REF_RE accepts: `PR <n>` and a /pull/<n> URL.
+        self.commit_steps({
+            "bad-control": self.done_step(note="Shipped."),
+            "pr-word": self.done_step(note="Done check: X. Green on main: PR 1312."),
+            "pull-url": self.done_step(note="Done check: X. Green on main: https://github.com/o/r/pull/1312."),
+        })
+        _, entries = self.listed()
+        self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
+        self.assertEqual(entries, ["bad-control"], "a green-on-main sentence with a PR ref is listed as not shown")
+
+    def test_a_hex_letter_word_is_no_commit_ref(self):
+        # Miss class: `effaced` is hex letters with no digit. DONE_REF_RE needs a digit in a hex run, so it is no ref.
+        self.commit_steps({
+            "bad-control": self.done_step(note="Shipped."),
+            "effaced": self.done_step(note="Done check met on main, effaced."),
+        })
+        _, entries = self.listed()
+        self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
+        self.assertEqual(entries, sorted(["bad-control", "effaced" + self.NOT_SHOWN]),
+                         "a hex-letter word with no digit is read as a commit ref")
+
+    def test_done_checks_without_the_colon_form_counts_as_unnamed(self):
+        self.commit_steps({
+            "plural": self.done_step(note="Done checks: green on main #1312."),
+            "no-name": self.done_step(note="Green on main: #1312."),
+        })
+        _, entries = self.listed()
+        self.assertEqual(entries, ["no-name", "plural"], "a `Done checks` phrase is read as a named check")
+
+    def test_no_done_step_in_scope_reads_zero_with_no_detail(self):
+        self.commit_steps({
+            "open": self.done_step(status="todo", note="Shipped."),
+            "old": self.done_step(updated=self.just_before(), note="Shipped."),
+        })
+        _, out = self.build_from_main()
+        self.assertEqual(self.row(out, self.ROW), (0, ""))
+
+    def test_full_size_fixture_lists_every_bad_close_and_no_good_one(self):
+        steps, bad = {}, []
+        for n in range(120):
+            steps["bad-%03d" % n] = self.done_step(note="Shipped.")
+            steps["good-%03d" % n] = self.done_step(note="Done check: X. Green on main: #1312.")
+            bad.append("bad-%03d" % n)
+        self.commit_steps(steps)
+        count, entries = self.listed()
+        self.assertEqual((count, entries), (120, bad), "the full-size fixture lists the wrong entries")
+
+
 def baked(text, key):
     """The JSON value right after `key` in a page or a block. The data is plain JSON in a script."""
     at = text.index(key) + len(key)
