@@ -152,9 +152,14 @@ jobs:
       - run: echo ok
 YML
 bad=0
+# CI_RUN=1 on a call runs that case with env CI set, as the CI runner has it: an unknown verdict then exits non-zero.
+# Otherwise CI is unset, so the local rule is what runs. set_ci sets CI_WORDS for one run; want_exit gives the exit.
+set_ci() { CI_WORDS=(-u CI); [ "${CI_RUN:-}" = 1 ] && CI_WORDS=(CI=1); return 0; }
+want_exit() { if [ "$1" = unknown ] && [ "${CI_RUN:-}" = 1 ]; then echo nonzero; else echo 0; fi; }
 t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs reads: "none", or the run paths read, in any order]
+  set_ci
   : > "$tmp/log"; : > "$tmp/reads"
-  out="$(PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" JOBS="$tmp/jobs" READS="$tmp/reads" LOG="$tmp/log" \
+  out="$(env "${CI_WORDS[@]}" PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" JOBS="$tmp/jobs" READS="$tmp/reads" LOG="$tmp/log" \
     FAIL="${3:-}" EMPTY="${4:-}" CONTENTS="$tmp/contents" CONTENTS_DEFAULT="$tmp/no-if.yml" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" 2>"$tmp/err")"
   code=$?
   shown="$(grep -v '^::warning::' <<<"$out")" # the verdict, without annotations
@@ -164,7 +169,7 @@ t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs rea
     red) [ "$shown" = red ] && grep -q ISSUE "$tmp/log" && ok=1 ;;
     unknown) [ "$shown" = unknown ] && [ ! -s "$tmp/log" ] && grep -q '::warning::' <<<"$out"$'\n'"$(cat "$tmp/err")" && ok=1 ;;
   esac
-  [ "$code" = 0 ] || ok=0
+  if [ "$(want_exit "$1")" = nonzero ]; then [ "$code" != 0 ] || ok=0; else [ "$code" = 0 ] || ok=0; fi
   if [ -n "${5:-}" ] && ! grep -qF -- "$5" "$tmp/log"; then ok=0; fi
   if [ -n "${6:-}" ]; then
     expect_reads="$(tr ' ' '\n' <<<"$6" | grep -v '^none$' | sort | tr '\n' ' ')"
@@ -175,8 +180,10 @@ t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs rea
 }
 runs_are "$(gh_run ci failure 2026-01-02 u1 push 1)" "$(gh_run ci success 2026-01-01 u0 push 2)"
 t red latest-red-opens-issue
+CI_RUN=1 t red latest-red-opens-issue-under-ci
 runs_are "$(gh_run ci success 2026-01-02 u1 push 1)" "$(gh_run ci failure 2026-01-01 u0 push 2)"
 t green red-then-fixed-is-quiet
+CI_RUN=1 t green red-then-fixed-is-quiet-under-ci
 runs_are "$(gh_run alarm failure 2026-01-02 u1 push 1)"
 t green own-workflow-is-ignored
 runs_are "$(gh_run ci success 2026-01-02 u1 push 1)" "$(gh_run deploy timed_out 2026-01-01 u2 push 2)"
@@ -255,6 +262,7 @@ runs_are "$(gh_run ci success 2026-01-02 https://runs/green-2 workflow_dispatch 
 jobs_of 1 checks:failure
 jobs_of 2 checks:success
 t unknown green-runs-jobs-read-fails-is-unknown "api *actions/runs/2/jobs*"
+CI_RUN=1 t unknown green-runs-jobs-read-fails-is-unknown-under-ci "api *actions/runs/2/jobs*"
 runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"
 jobs_of 1 checks:failure
 t red red-run-with-no-candidate-reads-no-jobs "" "" https://runs/red-1 none
@@ -278,17 +286,24 @@ runs_are "$(gh_run dinact failure 2026-01-02 u1 push 1)"
 t red red-run-of-an-inactivity-disabled-workflow-is-judged
 runs_are "$(gh_run ci failure 2026-01-02 u1 push 1)"
 t unknown run-list-fails-is-unknown "run list"
+CI_RUN=1 t unknown run-list-fails-is-unknown-under-ci "run list"
 t unknown run-list-with-empty-stdout-is-unknown "" "run list"
+CI_RUN=1 t unknown run-list-with-empty-stdout-is-unknown-under-ci "" "run list"
 printf 'not json' > "$tmp/runs"
 t unknown run-list-that-is-not-json-is-unknown
+CI_RUN=1 t unknown run-list-that-is-not-json-is-unknown-under-ci
 printf '[1]' > "$tmp/runs"  # an array passes the list check, but its element is no run: the jq that reads the runs fails
 t unknown run-list-of-non-runs-is-unknown
+CI_RUN=1 t unknown run-list-of-non-runs-is-unknown-under-ci
 runs_are "$(gh_run ci failure 2026-01-02 u1 push 1)"
 t unknown workflow-list-fails-is-unknown "api *actions/workflows*"
+CI_RUN=1 t unknown workflow-list-fails-is-unknown-under-ci "api *actions/workflows*"
 t unknown workflow-list-with-empty-stdout-is-unknown "" "api *actions/workflows*"
+CI_RUN=1 t unknown workflow-list-with-empty-stdout-is-unknown-under-ci "" "api *actions/workflows*"
 t unknown issue-create-fails-is-unknown-exit-0 "issue create"
+CI_RUN=1 t unknown issue-create-fails-is-unknown-exit-0-under-ci "issue create"
 : > "$tmp/log"
-OPEN=42 PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" LOG="$tmp/log" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" >/dev/null 2>&1
+env -u CI OPEN=42 PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" LOG="$tmp/log" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" >/dev/null 2>&1
 if grep -q "COMMENT issue comment 42" "$tmp/log" && ! grep -q ISSUE "$tmp/log"; then echo "ok   open-issue-gets-a-comment-not-a-duplicate"
 else echo "FAIL open-issue-gets-a-comment-not-a-duplicate"; bad=1; fi
 # A failed run's red job is cleared by a newer green run of the other group only when that run passes every job the red run needs.
@@ -308,6 +323,7 @@ live_pair
 t green live-nightly-red-schedule-is-cleared-by-the-newer-push-run-that-passed-its-red-job "" ""
 live_pair
 t unknown live-nightly-failed-read-of-the-workflow-file-is-unknown-not-clear "api *contents/*"
+CI_RUN=1 t unknown live-nightly-failed-read-of-the-workflow-file-is-unknown-not-clear-under-ci "api *contents/*"
 # A red job whose if: excludes the push event (all-jobs-passed is pull_request-only) is never dropped, so the failed schedule run alarms.
 runs_are "$(gh_run checks success 2026-11-03T14:12:08Z https://runs/pr-only-push-52 push 52)" \
   "$(gh_run checks failure 2026-11-02T06:00:21Z https://runs/pr-only-schedule-51 schedule 51)"
@@ -328,6 +344,47 @@ jobs_of 63 checks-windows-merge-3:skipped all-jobs-passed:skipped
 t red red-job-skipped-in-the-newer-run-is-red-when-the-workflow-read-fails "api *contents/*" "" https://runs/skipped-schedule-62
 
 # --- dropped-start: dropped.sh alarms on a pull request whose all-jobs-passed run never started ---
+# hundred <n>: n successful push runs of ci, newest last, as the runs list gives them (databaseId 1..n).
+hundred() {
+  local i ts runs=()
+  for i in $(seq 1 "$1"); do
+    printf -v ts '2026-01-01T%02d:%02d:00Z' $((i / 60)) $((i % 60))
+    runs+=("$(gh_run ci success "$ts" "https://runs/ci-$i" push "$i")")
+  done
+  runs_are "${runs[@]}"
+}
+# A full window (the list's --limit, 100 runs) with an active judged workflow (deploy) among none of them: its last run
+# may lie beyond the window, so it is unknown, not skipped. 99 runs is not a full window: the same absence is skipped.
+hundred 100
+t unknown full-window-with-a-judged-workflow-absent-is-unknown
+CI_RUN=1 t unknown full-window-with-a-judged-workflow-absent-is-unknown-under-ci
+hundred 99
+t green short-window-with-a-judged-workflow-absent-is-skipped
+CI_RUN=1 t green short-window-with-a-judged-workflow-absent-is-skipped-under-ci
+
+# issue_t <FAIL glob or ""> <OPEN or ""> <unknown or ok> <label>: runs issue.sh once on the fake gh. A failed read or
+# write prints unknown and a warning; under CI_RUN=1 it must exit non-zero, else 0. A success prints nothing.
+issue_t() {
+  local out code shown wx ok=1
+  set_ci
+  out="$(env "${CI_WORDS[@]}" PATH="$tmp/bin:$PATH" FAIL="$1" OPEN="$2" LOG="$tmp/log" GITHUB_REPOSITORY=o/r \
+    bash "$here/issue.sh" "CI red on main" "body" 2>"$tmp/err")"
+  code=$?
+  shown="$(grep -v '^::warning::' <<<"$out")"
+  wx="$(want_exit "$3")"
+  if [ "$wx" = nonzero ]; then [ "$code" != 0 ] || ok=0; else [ "$code" = 0 ] || ok=0; fi
+  if [ "$3" = unknown ]; then [ "$shown" = unknown ] && grep -q '^::warning::issue: ' <<<"$out" || ok=0
+  else [ -z "$out" ] || ok=0; fi
+  if [ "$ok" = 1 ]; then echo "ok   $4"; else echo "FAIL $4 (exit $code, want $wx; got: $out)"; bad=1; fi
+}
+CI_RUN=1 issue_t "issue list" "" unknown issue-list-fails-is-unknown-under-ci
+CI_RUN=1 issue_t "issue create" "" unknown issue-create-fails-is-unknown-under-ci
+CI_RUN=1 issue_t "issue comment" 42 unknown issue-comment-fails-is-unknown-under-ci
+issue_t "issue list" "" unknown issue-list-fails-is-unknown
+issue_t "issue create" "" unknown issue-create-fails-is-unknown
+issue_t "issue comment" 42 unknown issue-comment-fails-is-unknown
+CI_RUN=1 issue_t "" "" ok issue-create-that-succeeds-under-ci-is-green
+
 # A case builds its fixtures under $dd, then drun runs dropped.sh once: CHECK unset, NOW given, fake gh.
 dropped="$here/dropped.sh"
 DNOW=1800000000                       # 2027-01-15T08:00:00Z, given so no case reads the real clock
@@ -365,7 +422,8 @@ drun() {
   done < "$dd/pulls.lines"
   jq -s . "$dd/page.lines" > "$dd/pulls/$n"
   : > "$dd/reads"; : > "$dd/log"
-  out="$(env -u CHECK PATH="$tmp/bin:$PATH" DROP_PULLS="$dd/pulls" DROP_CHECKS="$dd/checks" DROP_COMMENTS="$dd/comments" \
+  set_ci
+  out="$(env -u CHECK "${CI_WORDS[@]}" PATH="$tmp/bin:$PATH" DROP_PULLS="$dd/pulls" DROP_CHECKS="$dd/checks" DROP_COMMENTS="$dd/comments" \
     DROP_READS="$dd/reads" DROP_LOG="$dd/log" FAIL="$1" GH_TOKEN=x GITHUB_REPOSITORY=o/r NOW="$DNOW" \
     bash "$dropped" 2>"$dd/err")"
   code=$?
@@ -383,7 +441,8 @@ td() {
   shown="$(grep -v '^::warning::' <<<"$out")"
   got="$(grep -c '^pulls' "$dd/reads") $(grep -c '^checks' "$dd/reads") $(grep -c '^comments' "$dd/reads") $(grep -c '^post' "$dd/reads")"
   read -r gp gk gc gw <<<"$got"
-  if [ "$code" != 0 ]; then why="exit $code, want 0"
+  wx="$(want_exit "$want")"
+  if { [ "$wx" = nonzero ] && [ "$code" = 0 ]; } || { [ "$wx" = 0 ] && [ "$code" != 0 ]; }; then why="exit $code, want $wx"
   elif [ "$shown" != "$want" ]; then why="verdict '$shown', want '$want'"
   elif [ "$want" = unknown ] && ! grep -q '::warning::' <<<"$out"$'\n'"$(cat "$dd/err")"; then why="no ::warning:: line"
   elif ! countok "$ep" "$gp" || ! countok "$ek" "$gk" || ! countok "$ec" "$gc" || ! countok "$ew" "$gw"; then
@@ -415,6 +474,7 @@ dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[{"name":"all-jobs-passed","concl
 td red dropped-skipped-only-run-counts-as-absent "" 1 1 1 1 "POST repos/o/r/issues/1/comments"
 dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[{"name":"all-jobs-passed","conclusion":"success"}]'
 td green dropped-success-run-is-green-with-no-comment "" 1 1 0 0 "!POST repos/"
+CI_RUN=1 td green dropped-success-run-is-green-under-ci "" 1 1 0 0 "!POST repos/"
 dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[]'
 dcomments 1 "<!-- dropped-start-alarm:$SHA_A -->
 already flagged"
@@ -425,8 +485,10 @@ an older head"
 td red dropped-marker-for-another-head-does-not-suppress "" 1 1 1 1 "POST repos/o/r/issues/1/comments" "<!-- dropped-start-alarm:$SHA_A -->"
 dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[]'; dcomments 1
 td unknown dropped-check-run-read-fails-is-unknown-with-no-comment "api *check-runs*" 1 1 0 0 "!POST repos/"
+CI_RUN=1 td unknown dropped-check-run-read-fails-is-unknown-under-ci "api *check-runs*" 1 1 0 0 "!POST repos/"
 dnew; dpr 1 "$SHA_A" "$OLD"; dpr 2 "$SHA_B" "$OLD"; dchecks "$SHA_A" '[]'; dchecks "$SHA_B" '[]'; dcomments 1; dcomments 2
 td unknown dropped-comment-write-fails-is-unknown-and-stops "api --method*" 1 '*' '*' 1 "!POST repos/"
+CI_RUN=1 td unknown dropped-comment-write-fails-is-unknown-under-ci "api --method*" 1 '*' '*' 1 "!POST repos/"
 dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[{"name":"all-jobs-passed","conclusion":"success"}]'
 drun ""
 # The default is compared with the constant itself (hooks/required_check.py, the one home), never a string match.
@@ -490,8 +552,10 @@ done
 td red dropped-full-page-of-100-flags-only-the-last "" 1 100 1 1 "POST repos/o/r/issues/100/comments"
 dnew; dpr 1 "$SHA_A" "$OLD"
 td unknown dropped-pulls-read-fails-is-unknown "api *pulls*" 1 0 0 0 "!POST repos/"
+CI_RUN=1 td unknown dropped-pulls-read-fails-is-unknown-under-ci "api *pulls*" 1 0 0 0 "!POST repos/"
 dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[]'; dcomments 1
 td unknown dropped-comments-read-fails-is-unknown-with-no-post "api *issues/*/comments*" 1 1 1 0 "!POST repos/"
+CI_RUN=1 td unknown dropped-comments-read-fails-is-unknown-under-ci "api *issues/*/comments*" 1 1 1 0 "!POST repos/"
 
 dnew; dpr 1 "$SHA_A" "$OLD"; dchecks "$SHA_A" '[]'; dcomments 1
 td red dropped-comment-remedy-is-ready-and-undo-not-a-workflow-run "" 1 1 1 1 "POST repos/o/r/issues/1/comments" "gh pr ready 1 --undo" 're:gh pr ready 1([^0-9 ]|$)' "!gh workflow run"

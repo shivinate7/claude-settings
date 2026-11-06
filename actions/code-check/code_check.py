@@ -7,6 +7,9 @@ branch (the exclude list likewise only shrinks). A module renamed since that ref
 Against main, only entries the branch's merge-base with main also holds count, so a branch merely behind main passes.
 Known limit: a move whose edits fall below git's 50% rename similarity reads as a plain delete and may leave the list.
 Rare false alarm: a deleted module paired by git with an unrelated, similar new file reads as a rename.
+A read the check cannot make (a base or main ref still missing after one fetch from origin, a comment-check child that is
+missing or exits 2, a failed git ls-files, git diff or git show) prints UNKNOWN: exit 0 when env CI is unset, non-zero
+when CI is set (decision ci-unknown-is-red). An empty or all-zero base is a skip, not an unknown read.
 Tools are pinned in standard.json and run through pipx or npx. Astro projects are checked by astro-check, the
 @astrojs/check CLI that `astro check` calls. CODE_CHECK_TOOLS=path runs the tools already on PATH instead (tests,
 a dev machine). The javascript typecheck layer runs tsc over the tracked .mjs files and keeps only broken imports of
@@ -22,22 +25,33 @@ CONFIG = ".code-check.json"
 ZERO = "0" * 40
 
 
-def sh(cmd, cwd, text=True):
+UNKNOWNS = []  # one line per read the run could not make; main() turns them into the exit code
+FETCH_FAILED = []  # why the one fetch from origin failed, if it did; named in the unknown text of each missing ref
+FETCH_SECONDS = 120
+
+
+def sh(cmd, cwd, text=True, timeout=None):
     # nowindow: runs on a Linux CI runner only; the action may be used without hooks/_nowindow.py
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=text)
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=text, timeout=timeout)
+
+
+def unknown(message):
+    """Prints a read the run could not make and records it; main() exits non-zero on it when env CI is set."""
+    print(message)
+    UNKNOWNS.append(message)
 
 
 COMMENT_CHECK = os.path.join(HERE, "..", "..", "lint", "check_comment_narration.py")
 
 
 def comment_check(root, base, exclude):
-    """Failures from the comment check on lines added since base. No base is a skip, an unread diff is unknown;
-    neither fails. The check is the one in lint/, run as a child, so it has one home."""
+    """Failures from the comment check on lines added since base. No base is a skip; an unread diff is unknown,
+    which fails only when env CI is set. The check is the one in lint/, run as a child, so it has one home."""
     if not base or base == ZERO:
         print("comment check: skipped, no base to diff against")
         return []
     if not os.path.isfile(COMMENT_CHECK):
-        print("comment check: unknown, %s is not in this copy of the action" % os.path.normpath(COMMENT_CHECK))
+        unknown("comment check: unknown, %s is not in this copy of the action" % os.path.normpath(COMMENT_CHECK))
         return []
     cmd = [sys.executable, COMMENT_CHECK, "--base", base] + ["--exclude=" + e for e in exclude if e.strip().strip("/")]
     p = sh(cmd, root)
@@ -48,7 +62,7 @@ def comment_check(root, base, exclude):
     err = (p.stderr.strip().splitlines() or ["exit %d" % p.returncode])[-1]
     hits = ["comment check: %s" % r for r in rows]
     if p.returncode == 2:  # an unread file ends the run, but hits found before it still fail
-        print("comment check: unknown, %s" % err)
+        unknown("comment check: unknown, %s" % err)
         return hits
     if p.returncode == 1 and rows:
         return hits
@@ -80,7 +94,13 @@ def table_problems(std, runners):
 
 
 def tracked(root, exclude):
-    raw = sh(["git", "ls-files", "-z"], root, text=False).stdout.decode("utf-8", "replace")
+    """The tracked files outside exclude, or None (printed as unknown) when git cannot list them."""
+    p = sh(["git", "ls-files", "-z"], root, text=False)
+    if p.returncode:
+        err = p.stderr.decode("utf-8", "replace").strip().splitlines()
+        unknown("code-check: unknown, git ls-files failed: %s" % (err[-1] if err else "exit %d" % p.returncode))
+        return None
+    raw = p.stdout.decode("utf-8", "replace")
     names = [n for n in raw.split("\0") if n and os.path.isfile(os.path.join(root, n))]
     return [n for n in names if not any(n.startswith(p) for p in exclude)]
 
@@ -123,6 +143,22 @@ def classify(root, files, std):
     return found, missing
 
 
+def fetch_missing(root, refs):
+    """One fetch from origin for every ref the clone lacks, base and main together, completing a shallow history so
+    merge-base can see it. The fetch is lint/git_fetch.py, the one home also used by bin/ci-job. A failure is kept in
+    FETCH_FAILED, and each ref that is still missing names it."""
+    sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
+    try:
+        import git_fetch
+    except ImportError:
+        FETCH_FAILED.append("lint/git_fetch.py is not in this copy of the action")
+        return
+    names = [r[len("origin/"):] if r.startswith("origin/") else r for r in refs]
+    ok, message = git_fetch.fetch(root, names, unshallow=git_fetch.is_shallow(root), timeout=FETCH_SECONDS)
+    if not ok:
+        FETCH_FAILED.append(message)
+
+
 def commit(root, ref):
     """The commit a ref names, or None when it is empty or not in this clone."""
     if not ref or ref == ZERO:
@@ -134,13 +170,28 @@ def commit(root, ref):
 def base_config(root, base, label="base"):
     """The ref's .code-check.json as a dict, or None (printed as unknown) when it cannot be read."""
     if not base or base == ZERO:
-        print("code-check: list shrink check unknown: no %s ref given" % label)
+        print("code-check: list shrink check skipped: no %s ref given" % label)
         return None
     if commit(root, base) is None:
-        print("code-check: list shrink check unknown: %s %s is not in this clone (use fetch-depth 0)" % (label, base))
+        why = "fetch from origin failed: %s" % FETCH_FAILED[0] if FETCH_FAILED else "origin does not hold it"
+        unknown("code-check: list shrink check unknown: %s %s is not in this clone, and %s (use fetch-depth 0)"
+                % (label, base, why))
         return None
+    # ls-tree tells an absent file (first adoption, no error) from a git that cannot read the tree.
+    tree = sh(["git", "ls-tree", "--name-only", base, "--", CONFIG], root)
+    if tree.returncode:
+        unknown("code-check: list shrink check unknown: git ls-tree failed for %s %s" % (label, base))
+        return None
+    if not tree.stdout.strip():
+        return None  # first adoption
     old = sh(["git", "show", "%s:%s" % (base, CONFIG)], root)
-    return json.loads(old.stdout) if old.returncode == 0 else None  # none: first adoption
+    try:
+        if old.returncode:
+            raise ValueError("git show exit %d" % old.returncode)
+        return json.loads(old.stdout)
+    except ValueError as e:
+        unknown("code-check: list shrink check unknown: cannot read %s at %s %s: %s" % (CONFIG, label, base, e))
+        return None
 
 
 def main_config(root, main):
@@ -152,7 +203,7 @@ def main_config(root, main):
         return None, None
     p = sh(["git", "merge-base", main, "HEAD"], root)
     if p.returncode:
-        print("code-check: list shrink check unknown: main %s shares no merge-base with HEAD" % main)
+        unknown("code-check: list shrink check unknown: main %s shares no merge-base with HEAD" % main)
         return None, None
     fork = p.stdout.strip()
     at_fork = base_config(root, fork, "merge-base") or {}
@@ -164,7 +215,10 @@ def main_config(root, main):
 def renames(root, ref):
     """{old path: new path} for files git sees renamed between ref and the working tree, so it holds pre-commit."""
     p = sh(["git", "diff", "-M", "--name-status", "-z", "--diff-filter=R", ref], root)
-    words = p.stdout.split("\0") if p.returncode == 0 else []
+    if p.returncode:
+        unknown("code-check: list shrink check unknown: git diff -M against %s failed, renames not read" % ref)
+        return {}
+    words = p.stdout.split("\0")
     return {words[i + 1]: words[i + 2] for i in range(0, len(words) - 2, 3) if words[i].startswith("R")}
 
 
@@ -338,13 +392,20 @@ def main(argv):
     for e in cfg.get("exclude", []):
         if not e.strip().strip("/"):
             failures.append("empty exclude entry %r in %s matches every file" % (e, CONFIG))
+    UNKNOWNS.clear()
+    FETCH_FAILED.clear()
     files = tracked(root, [e for e in cfg.get("exclude", []) if e.strip().strip("/")])
+    listed = files is not None  # unlisted: every check that compares against the file list is unknown, and skipped
+    files = files or []
     found, missing = classify(root, files, std)
     for n in missing:
         failures.append("%s: language has no row in actions/code-check/standard.json; add a row or list the path in %s exclude" % (n, CONFIG))
-    refs = [(args.base, "base")]
-    main_commit = commit(root, args.main)
-    if main_commit is None or main_commit != commit(root, args.base):
+    wanted = [r for r in (args.base, args.main) if r and r != ZERO]
+    if listed and any(commit(root, r) is None for r in wanted):
+        fetch_missing(root, wanted)
+    refs = [(args.base, "base")] if listed else []
+    main_commit = commit(root, args.main) if listed else None
+    if listed and (main_commit is None or main_commit != commit(root, args.base)):
         refs.append((args.main, "main"))
     for ref, label in refs:
         if label == "main":
@@ -354,10 +415,10 @@ def main(argv):
         moved = renames(root, ref) if old is not None else {}
         # Both refs often report the same loss; print it once.
         failures += [f for f in list_problems(old, cfg, files, moved) if f not in failures]
-    for m in modules:
+    for m in modules if listed else []:
         if m not in files:
             failures.append("mypy list names %s, which is not a tracked file; remove it from mypy_modules, or list its new path" % m)
-    if "python" not in found and modules:
+    if listed and "python" not in found and modules:
         failures.append("mypy list is set but the repo tracks no Python")
     ctx = {"std": std, "files": files, "found": found, "modules": [m for m in modules if m in files]}
     for lang in sorted(found):
@@ -379,8 +440,15 @@ def main(argv):
         print(f)
         if f and not f.startswith((" ", "\t")):
             print("::error title=code-check::%s" % f.replace("\n", " ").replace("%", "%25"))
-    print("code-check: %s" % ("FAIL, %d problems" % len(failures) if failures else "PASS"))
-    return 1 if failures else 0
+    if failures:
+        print("code-check: FAIL, %d problems" % len(failures))
+        return 1
+    if UNKNOWNS:
+        red = bool(os.environ.get("CI"))  # CI exit code is a verdict: unknown is red there
+        print("code-check: UNKNOWN, %d reads could not be made%s" % (len(UNKNOWNS), "; red because CI is set" if red else ""))
+        return 1 if red else 0
+    print("code-check: PASS")
+    return 0
 
 
 if __name__ == "__main__":

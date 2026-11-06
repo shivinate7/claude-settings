@@ -4,7 +4,8 @@ a listed module is red, a shrunk mypy list is red against the base ref, a missin
 a listed module renamed off the list is red, a shrink against --main (current main) is red,
 Swift, .entitlements and zsh files have rows and zsh skips ShellCheck, web app data and image files have rows, archive, sheet, model and node config files have rows, an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
 standard's table is whole (every layer runs or has a one-line reason). The comment check reads only added
-lines; with no base it is skipped with a reason, and with a base outside the clone it is unknown, never red.
+lines; with no base it is skipped with a reason, and with a base outside the clone it is unknown: exit 0 locally, red when env CI is set (decision ci-unknown-is-red).
+A comment-check child that is missing or exits 2 and a failed git ls-files are unknown the same way.
 A .mjs file's broken or extensionless relative import, and TS-only syntax in it, is red; its builtin, bare, JSON, .cjs and type-error imports, a JSDoc type, and npm notice lines on stderr are not; a .js or .cjs file is not checked, and a clean .mjs with no tsc on PATH is red.
 The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy, shellcheck (the --pins specs, via pipx) and
 astro-check (the tools/ lockfile, via npm ci, bin on PATH) must be installed. Without astro-check the Astro tests
@@ -56,13 +57,17 @@ def head(d):
     return subprocess.run(["git", "rev-parse", "HEAD"], cwd=d, capture_output=True, text=True).stdout.strip()
 
 
-def check(files, base_files=None, base=None, main_files=None, main=None, send_base=True, path_tools=True, unset=(), **env):
+def check(files, base_files=None, base=None, main_files=None, main=None, send_base=True, path_tools=True,
+          unset=("CI",), runner=RUNNER, plain=False, **env):
     """Commit base_files (when given) as the base, then files on top (None deletes); run the runner.
     main_files (when given) are a commit on top of the base that the PR does not hold, passed as --main;
     the PR's files then go on the base. `base` and `main` name a ref outright; send_base=False omits --base.
-    unset names are dropped from the run env; env adds or replaces variables there. Returns (exit, output)."""
+    plain=True makes no git repo, so git cannot list the folder. runner is the code_check.py to run.
+    unset names are dropped from the run env; CI is dropped by default, so a CI runner does not make the local
+    rule red. env adds or replaces variables after that, so a CI case passes CI=1. Returns (exit, output)."""
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
-        git(d, "init", "-q", "-b", "main")
+        if not plain:
+            git(d, "init", "-q", "-b", "main")
         if base_files is not None:
             put(d, base_files)
             git(d, "add", "-A"); git(d, "commit", "-qm", "base")
@@ -73,11 +78,13 @@ def check(files, base_files=None, base=None, main_files=None, main=None, send_ba
             main = head(d)
             git(d, "checkout", "-q", base)
         put(d, files)
-        git(d, "add", "-A"); git(d, "commit", "-qm", "head", "--allow-empty")
-        args = [sys.executable, RUNNER, "--root", d] + (["--base", base] if base and send_base else []) + (["--main", main] if main else [])
-        run_env = dict(os.environ, **env)
+        if not plain:
+            git(d, "add", "-A"); git(d, "commit", "-qm", "head", "--allow-empty")
+        args = [sys.executable, runner, "--root", d] + (["--base", base] if base and send_base else []) + (["--main", main] if main else [])
+        run_env = dict(os.environ)
         for name in unset:
             run_env.pop(name, None)
+        run_env.update(env)
         run_env.pop("CODE_CHECK_TOOLS", None)
         if path_tools:
             run_env["CODE_CHECK_TOOLS"] = "path"
@@ -577,6 +584,129 @@ class CommentCheck(unittest.TestCase):
         rc, out = check(head, base_files=base)
         self.assertNotEqual(rc, 0, out)
         self.assertTrue(one_line_with(out, "bin/tool:2", "round 2"), out)
+
+
+CHILD_EXITS_2 = ("import sys\n"
+                 "print('UNKNOWN: the stub child cannot read its input', file=sys.stderr)\n"
+                 "sys.exit(2)\n")
+
+
+def copied_runner(tmp, child=None):
+    """code_check.py and standard.json copied to tmp/a/b, so the comment check's child (../../lint, two folders up)
+    is missing. With child (source text), that child is written at tmp/lint/check_comment_narration.py.
+    Returns the copy's code_check.py."""
+    folder = os.path.join(tmp, "a", "b")
+    os.makedirs(folder)
+    for name in ("code_check.py", "standard.json"):
+        shutil.copy(os.path.join(HERE, name), folder)
+    if child is not None:
+        put(tmp, {"lint/check_comment_narration.py": child})
+    return os.path.join(folder, "code_check.py")
+
+
+class UnknownReadsRed(unittest.TestCase):
+    """A read the check cannot make prints unknown: exit 0 locally, non-zero when env CI is set (decision
+    ci-unknown-is-red). Each red case names its cause in its precondition; each control stays green on main."""
+    BASE = {".code-check.json": config(["a.py"]), "a.py": GOOD_PY}
+
+    def test_base_not_in_clone_under_ci_is_red(self):
+        rc, out = check({".code-check.json": config(["a.py"]), "a.py": GOOD_PY}, base="1" * 40, main="main", CI="1")
+        self.assertIn("list shrink check unknown", out, out)
+        self.assertNotEqual(rc, 0, out)
+
+    def test_base_not_in_clone_unset_ci_is_unknown_and_exits_zero(self):
+        rc, out = check({".code-check.json": config(["a.py"]), "a.py": GOOD_PY}, base="1" * 40, main="main")
+        self.assertIn("list shrink check unknown", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_comment_child_missing_under_ci_is_red(self):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as tmp:
+            rc, out = check({"a.py": GOOD_PY}, base_files=self.BASE, main="main", runner=copied_runner(tmp), CI="1")
+        self.assertIn("not in this copy of the action", out, out)
+        self.assertNotEqual(rc, 0, out)
+
+    def test_comment_child_missing_unset_ci_is_unknown_and_exits_zero(self):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as tmp:
+            rc, out = check({"a.py": GOOD_PY}, base_files=self.BASE, main="main", runner=copied_runner(tmp))
+        self.assertTrue(one_line_with(out, "comment check: unknown", "not in this copy"), out)
+        self.assertEqual(rc, 0, out)
+
+    def test_comment_child_exit_2_under_ci_is_red(self):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as tmp:
+            rc, out = check({"a.py": GOOD_PY}, base_files=self.BASE, main="main",
+                            runner=copied_runner(tmp, CHILD_EXITS_2), CI="1")
+        self.assertTrue(one_line_with(out, "comment check: unknown", "stub child"), out)
+        self.assertNotEqual(rc, 0, out)
+
+    def test_comment_child_exit_2_unset_ci_is_unknown_and_exits_zero(self):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as tmp:
+            rc, out = check({"a.py": GOOD_PY}, base_files=self.BASE, main="main", runner=copied_runner(tmp, CHILD_EXITS_2))
+        self.assertTrue(one_line_with(out, "comment check: unknown", "stub child"), out)
+        self.assertEqual(rc, 0, out)
+
+    def test_git_ls_files_failure_under_ci_is_red(self):
+        rc, out = check({"a.py": GOOD_PY}, plain=True, CI="1")
+        self.assertNotEqual(rc, 0, out)
+
+    def test_git_ls_files_failure_unset_ci_names_it_as_unknown_and_exits_zero(self):
+        rc, out = check({"a.py": GOOD_PY}, plain=True)
+        self.assertTrue(any("ls-files" in row and "unknown" in row.lower() for row in out.splitlines()), out)
+        self.assertEqual(rc, 0, out)
+
+    def test_empty_base_with_a_main_under_ci_skips_and_exits_zero(self):
+        rc, out = check({"c.py": GOOD_PY}, main="main", send_base=False, CI="1")
+        self.assertTrue(one_line_with(out, "comment check: skipped"), out)
+        self.assertEqual(rc, 0, out)
+
+    def test_clean_base_and_main_under_ci_is_green(self):
+        rc, out = check({"a.py": GOOD_PY}, base_files=self.BASE, main="main", CI="1")
+        self.assertEqual(rc, 0, out)
+
+    def test_shallow_clone_whose_origin_holds_the_base_is_green_under_ci(self):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            origin, clone = os.path.join(d, "origin"), os.path.join(d, "clone")
+            os.makedirs(origin)
+            git(origin, "init", "-q", "-b", "main")
+            put(origin, self.BASE)
+            git(origin, "add", "-A"); git(origin, "commit", "-qm", "base")
+            base = head(origin)
+            put(origin, {"c.py": GOOD_PY})
+            git(origin, "add", "-A"); git(origin, "commit", "-qm", "head")
+            subprocess.run(["git", "clone", "-q", "--depth", "1", "file://" + origin, clone], check=True)
+            # Scope first: the base is in origin, and this clone is shallow without it.
+            gone = subprocess.run(["git", "cat-file", "-e", base + "^{commit}"], cwd=clone, capture_output=True)
+            self.assertNotEqual(gone.returncode, 0, "the clone holds the base, so the case tests nothing")
+            p = subprocess.run([sys.executable, RUNNER, "--root", clone, "--base", base, "--main", "main"],
+                               capture_output=True, text=True, env=dict(os.environ, CI="1", CODE_CHECK_TOOLS="path"))
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+
+
+class FetchAndSkipReads(unittest.TestCase):
+    """A fetch that fails is named in the unknown text. Base and main together fetch at most once. An empty base is a
+    skip, so its line does not say unknown."""
+
+    def test_failed_fetch_is_named_in_the_unknown_text(self):
+        # The fixture repo has no origin, so the fetch of the missing base fails.
+        rc, out = check({".code-check.json": config(["a.py"]), "a.py": GOOD_PY}, base="1" * 40, main="main")
+        self.assertTrue(any("unknown" in row.lower() and "fetch" in row.lower() and "fail" in row.lower()
+                            for row in out.splitlines()), out)
+
+    def test_base_and_main_both_missing_fetch_at_most_once(self):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as tmp:
+            trace = os.path.join(tmp, "trace")
+            rc, out = check({".code-check.json": config(["a.py"]), "a.py": GOOD_PY},
+                            base="1" * 40, main="2" * 40, GIT_TRACE=trace)
+            with open(trace, encoding="utf-8", errors="replace") as f:
+                lines = f.read().splitlines()
+        self.assertTrue(any("built-in: git rev-parse" in row for row in lines), "the trace has no git call:\n" + out)
+        fetches = [row for row in lines if "built-in: git fetch" in row]
+        self.assertLessEqual(len(fetches), 1, "\n".join(fetches) + "\n" + out)
+
+    def test_empty_base_skip_does_not_print_the_word_unknown(self):
+        rc, out = check({"c.py": GOOD_PY}, main="main", send_base=False)
+        self.assertTrue(one_line_with(out, "comment check: skipped"), out)
+        self.assertNotIn("unknown", out.lower(), out)
+        self.assertEqual(rc, 0, out)
 
 
 JS_BASE = "const a = 1;\n"

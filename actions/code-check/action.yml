@@ -16,7 +16,8 @@ inputs:
   base:
     description: >
       Base commit for the mypy list shrink check, and the ref the comment check diffs against.
-      Empty skips both checks and says so.
+      Empty skips both checks and says so. A base the clone lacks is fetched from origin once; if it is still
+      missing, or any other read fails, the check prints UNKNOWN and is red when env CI is set.
     required: false
     default: ""
 runs:

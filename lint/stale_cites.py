@@ -35,10 +35,14 @@ change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
 2 a read that could not run, except a base that does not resolve (a shallow clone): that prints
 `stale-cites: unknown, ...` naming fetch-depth 0 and exits 0, so a repo that pins the ste-lint action and
-checks out shallow is not red at its pin move. A touched .py that does not parse at base or head is unknown
-the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the exit non-zero.
+checks out shallow is not red at its pin move. Other unknown lines print `stale-cites: unknown, ...` and exit 0, or
+1 with a final `stale-cites: UNKNOWN` line when env CI is set and nothing else failed (decision ci-unknown-is-red).
+Those lines are: a touched .py that does not parse at base or head, a malformed rule_mechanisms.json, and a report
+read that failed. A cited JavaScript or shell name is a limit of the check, not an unread input: its unknown line never
+changes the exit.
 
-The report prints after the findings and never changes the exit code (decision claude-md-change-is-flagged). Each
+The report's findings never change the exit code (decision claude-md-change-is-flagged); a report read that failed is
+one of the unknown lines above. Each
 line starts `stale-cites: report, `. It has two halves.
   Anchors   for each `<!-- rule:id -->` anchor whose sentence changed in a RULE_FILES file (a real anchor; one in a
             code span is a mention): the row in lint/rule_mechanisms.json (kind, ref, test), then the files this range
@@ -327,6 +331,11 @@ def path_cites(line, gone, exotic):
     return hits
 
 
+class Limit(str):
+    """An unknown line that states what the check is built not to read (a cited JavaScript or shell name), not a read
+    that failed. It never turns a CI run red."""
+
+
 class Range:
     """What the readers share: the range's blobs, its changed paths and the texts a read could not judge."""
 
@@ -469,7 +478,7 @@ def find_stale(rng):
                 if reader.code not in off:
                     for message in reader.line(state, line, claimed):
                         if getattr(reader, "unknown", False):
-                            rng.unknowns.append("%s:%d: %s" % (md, number, message))
+                            rng.unknowns.append(Limit("%s:%d: %s" % (md, number, message)))
                         else:
                             found.setdefault((md, number, reader.code), []).append(message)
     return found
@@ -714,8 +723,15 @@ def main(argv):
         print("stale-cites: unknown, %s" % text)
     for line in lines:
         print(line)
-    print("stale-cites: %s" % ("FAIL, %d finding(s)" % len(found) if found else "PASS"))
-    return 1 if found else 0
+    if found:
+        print("stale-cites: FAIL, %d finding(s)" % len(found))
+        return 1
+    unread = [text for text in unknowns if not isinstance(text, Limit)]
+    if unread and os.environ.get("CI"):  # CI exit code is a verdict: an unread file is red there
+        print("stale-cites: UNKNOWN, %d read(s) could not be made; red because CI is set" % len(unread))
+        return 1
+    print("stale-cites: PASS")
+    return 0
 
 
 if __name__ == "__main__":

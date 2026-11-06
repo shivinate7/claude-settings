@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Open the issue titled $1, or comment on it when one is already open. Body is $2.
 # One open issue collects every repeat, so a week of red nights is one issue. Needs GH_TOKEN.
-# Prints nothing on success. A failed read or write prints `unknown` and a warning, and exits 0.
+# Prints nothing on success. A failed read or write prints `unknown` and a warning, and exits 0, or 1 when env CI is set
+# (decision ci-unknown-is-red).
 title="$1"; body="$2"; repo="${GITHUB_REPOSITORY:?}"
-unknown() { echo unknown; echo "::warning::issue: $1"; exit 0; }
+unknown() { echo unknown; echo "::warning::issue: $1"; [ -n "${CI:-}" ] && exit 1; exit 0; }
 open="$(gh issue list --repo "$repo" --state open --search "\"$title\" in:title" \
   --json number,title --jq "[.[] | select(.title == \"$title\")][0].number // empty")" \
   || unknown "gh issue list failed"

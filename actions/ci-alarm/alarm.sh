@@ -11,12 +11,14 @@
 # such an N: one jobs read for R, and for each N one jobs read and, unless N leaves a red job of R unpassed (a certain red), one contents read of N's workflow file at N's head (headSha), each once;
 # a failed read is unknown. The same failed-run rule as Host.base_state. Needs python3 (stdlib only) and
 # clear_rule.py beside this file; no checkout. Env: BRANCH, SELF
-# (this workflow's name, left out), GH_TOKEN, GITHUB_REPOSITORY. Exit 0 always: the alarm is the
-# issue, not a red job. Prints "green", "red" or "unknown"; a failed read or write is unknown, never red.
+# (this workflow's name, left out), GH_TOKEN, GITHUB_REPOSITORY. Exit 0 for green and red: the alarm is the
+# issue, not a red job. Prints "green", "red" or "unknown". A failed read or write is unknown, never a red verdict;
+# it exits 0 locally and non-zero when env CI is set (decision ci-unknown-is-red), so a scheduled run that could not
+# judge the branch shows red.
 set -o pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 branch="${BRANCH:-main}"
-unknown() { echo unknown; echo "::warning::ci-alarm: $1"; exit 0; }
+unknown() { echo unknown; echo "::warning::ci-alarm: $1"; [ -n "${CI:-}" ] && exit 1; exit 0; }
 runs="$(gh run list --repo "$GITHUB_REPOSITORY" --branch "$branch" --status completed \
   --limit 100 --json workflowName,workflowDatabaseId,databaseId,conclusion,createdAt,url,event,headSha)" \
   || unknown "gh run list failed"
@@ -27,6 +29,14 @@ jq -e 'type == "array"' >/dev/null 2>&1 <<<"$runs" || unknown "gh run list gave 
 wf="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows" --paginate)" || unknown "gh api workflows failed"
 flows="$(jq -e -s 'if length > 0 and all(.[]; (.workflows | type) == "array") then [.[].workflows[]] else empty end' <<<"$wf" 2>/dev/null)" \
   || unknown "gh api workflows gave no list of workflows"
+# A full window (100 runs, the list's --limit) may have pushed a workflow's last run out of sight: an active workflow
+# file other than SELF with no run in a full window is unknown, since its last run could be red. Workflow level only.
+absent="$(jq -r --arg self "${SELF:-}" --argjson flows "$flows" 'if length < 100 then empty else
+  (map(.workflowDatabaseId) | unique) as $seen
+  | [$flows[] | select(.state == "active" and .name != $self and (.path | startswith(".github/workflows/"))
+      and (.id as $i | $seen | index($i) | not)) | .name] | join(", ") end' <<<"$runs")" \
+  || unknown "could not read the runs"
+[ -z "$absent" ] || unknown "the newest 100 runs hold no run of $absent, so its last run may be out of sight"
 # Latest completed run per workflow and event group, one JSON array.
 newest="$(jq -c --arg self "${SELF:-}" --slurpfile ev "$here/events.json" --argjson flows "$flows" '
   ([$flows[] | select(.state != "deleted" and (.path | startswith(".github/workflows/"))) | .id]) as $ids
@@ -88,4 +98,4 @@ red="${red%$'\n'}"
 if [ -z "$red" ]; then echo green; exit 0; fi
 # issue.sh prints nothing on success and `unknown` plus a warning when the issue write fails.
 res="$(bash "$here/issue.sh" "CI red on $branch" "$(printf 'Latest run is red on %s:\n\n%s' "$branch" "$red")")"
-if grep -qx unknown <<<"$res"; then echo "$res"; else echo red; fi
+if grep -qx unknown <<<"$res"; then echo "$res"; [ -n "${CI:-}" ] && exit 1; exit 0; else echo red; fi
