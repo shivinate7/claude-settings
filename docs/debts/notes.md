@@ -1444,3 +1444,4 @@
 - ci-wake-gh-proxy: `CostTests` in hooks/test_ci_wake.py stubs `watch_pr` and `gh`, so it counts status reads, not `gh` starts. Decision: ci-wait-reads-run-status.
 - janitor-log-dir-cost: install_launchd.py creates the log folder; the install cost line names only the job file. Decision: the-janitor-is-one-machine-wide-sweep.
 - catalog-local-time-no-model: docs/catalog.md says `local_time` calls no model, but a prompt with the word `opus` reaches `call_judge.opus_ask`. The generator reads the model table, which has no `local_time` row (lint/hook_catalog.py). Decision: haiku-prompt-hooks.
+- report-guard-cost-bounds: haiku-prompt-hooks rows for `report_guard` and `local_time` state upper bounds. `report_guard` also cuts the window at a peer message and starts no `git` outside a repo; `local_time` makes no model call for the `opus <n>[m|h]` and `opus off` keyword grants, nor past the source, fired-task and cloud-seed gates. Decision: haiku-prompt-hooks.
