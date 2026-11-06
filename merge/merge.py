@@ -809,7 +809,7 @@ class Host:
         """-> (conclusion, head sha) of the workflow run at `url`, one read. A failed read is a Stop, never a green run."""
         m = re.search(r"/actions/runs/(\d+)", url)
         if not m:
-            raise Stop(f"{url} is not a workflow run URL")
+            raise Stop(f"{url} is not a workflow run URL {DEBT_CITE}")
         c, out = self.api(f"actions/runs/{m.group(1)}")
         try:
             if c:
@@ -817,7 +817,7 @@ class Host:
             d = json.loads(out)
             return d["conclusion"], d["head_sha"]
         except (ValueError, KeyError, TypeError) as e:
-            raise Stop(f"reading the run {url} from GitHub failed: {e}")
+            raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
     def review_comments(self, since):
         """-> {PR number: [review record bodies, oldest first]}: one list read of the repo's issue comments updated since `since`. A body counts only
