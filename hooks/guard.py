@@ -494,8 +494,9 @@ _HERE = os.path.dirname(os.path.realpath(__file__))
 if sys.path[:1] != [_HERE]:
     sys.path.insert(0, _HERE)
 
-# The rule families in import order: each one imports only guard_core and the families before it.
-_FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer",
+# The rule families in import order: each one imports only guard_core and the families before it. guard_load
+# (the one definition of a loaded machine, decision one-load-definition) imports no guard module and comes first.
+_FAMILY_MODULES = ("guard_load", "guard_branch_worktree", "guard_shared_tree", "guard_pointer",
                    "guard_push_delete", "guard_merge", "guard_frozen", "guard_env",
                    "guard_kill", "guard_argv", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
 # guard.py and each guard_*.py the installer copies carry `INSTALL_ID = "<id>"`, one value per install
@@ -545,6 +546,8 @@ while True:
             segment_tokens, split_segments, strip_heredoc_bodies,
             _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
         )
+        _loading = "guard_load"
+        from guard_load import load_verdict, read_load
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
             BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
@@ -3869,7 +3872,8 @@ def role_model_one(tool_input):
     return ROLE_NO_MODEL_REASON % ("" if row == ROLE_MODEL_RANK[0] else " (%s)" % row), ROLE_NO_MODEL_MATCH + role, False
 
 
-# THE MACHINE-LOAD BRAKE (decision machine-load-brake). A start call (a call that starts a lane or an agent) reads the machine's load once. Memory in
+# THE MACHINE-LOAD BRAKE (decision machine-load-brake). The readings, the limits and the level live in hooks/guard_load.py (decision
+# one-load-definition); the numbers below are for the reader. A start call (a call that starts a lane or an agent) reads the machine's load once. Memory in
 # use is a share of this machine's memory; disk free on the home drive is in GB (2**30 bytes) against the drive's
 # size. Busy (memory over 85%, or disk free under the smaller of 10% of the disk and 15 GB) refuses a Workflow and an
 # explicit background Agent or Task call. An Agent or Task call passes at busy only when it leaves
@@ -3879,76 +3883,12 @@ def role_model_one(tool_input):
 # agent's shell or file write also reads load (RUNNING_AGENT_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
 # "true") skips the brake and reads nothing, because the brake guards the owner's own machine.
 START_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
-LOAD_BUSY_MEMORY = 85.0
-LOAD_FULL_MEMORY = 95.0
-LOAD_BUSY_DISK_SHARE, LOAD_BUSY_DISK_GB = 10.0, 15.0   # busy: free under the smaller of the two
-LOAD_FULL_DISK_SHARE, LOAD_FULL_DISK_GB = 5.0, 5.0
-GIB = 2 ** 30
 LOAD_CITE = "(decision machine-load-brake, a busy or full machine starts no new lane or agent)"
 LOAD_LANE_CITE = "(decision machine-load-brake, a full machine stops a running agent at its next shell or file write)"
 LOAD_BUSY_REASON = "the machine is busy (%s). %s " + LOAD_CITE
 LOAD_BUSY_AGENT_FORM = ", or make this an Agent call that leaves run_in_background out or sets it false"
 LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
 LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. Wait, then retry. " + LOAD_CITE
-
-
-def _read_memory():
-    """Percent of physical memory in use, from the OS's own counter, or None on another platform."""
-    import ctypes
-    if sys.platform == "win32":
-        from ctypes import wintypes
-
-        class MemoryStatus(ctypes.Structure):
-            _fields_ = [("dwLength", wintypes.DWORD), ("dwMemoryLoad", wintypes.DWORD),
-                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
-                        ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
-                        ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
-                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
-
-        status = MemoryStatus()
-        status.dwLength = ctypes.sizeof(status)
-        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
-            return None
-        return 100.0 * (status.ullTotalPhys - status.ullAvailPhys) / status.ullTotalPhys
-    if sys.platform == "darwin":
-        # kern.memorystatus_level is the free share that `memory_pressure` prints.
-        level, size = ctypes.c_int(0), ctypes.c_size_t(ctypes.sizeof(ctypes.c_int))
-        if ctypes.CDLL(None).sysctlbyname(b"kern.memorystatus_level", ctypes.byref(level),
-                                          ctypes.byref(size), None, 0) != 0:
-            return None
-        return 100.0 - level.value
-    return None
-
-
-def _read_disk():
-    """(GB free, GB total) of the drive that holds the home folder, 2**30 bytes to the GB."""
-    import shutil
-    usage = shutil.disk_usage(os.path.expanduser("~"))
-    return usage.free / GIB, usage.total / GIB
-
-
-def read_load() -> dict:
-    """The readings: memory_pct (percent in use, clamped to 0-100) and disk_free_gb
-    and disk_total_gb (GB, not clamped). No child process and no file. A reading that fails or cannot be read
-    is None, and one failure hides no other."""
-    out = {}
-    for key, read in (("memory_pct", _read_memory),):
-        try:
-            value = read()
-            out[key] = None if value is None else min(100.0, max(0.0, float(value)))
-        except Exception:
-            out[key] = None
-    try:
-        out["disk_free_gb"], out["disk_total_gb"] = _read_disk()
-    except Exception:
-        out["disk_free_gb"] = out["disk_total_gb"] = None
-    return out
-
-
-def _load_value(reading: dict, key: str):
-    """A reading as a float, or None when it is unread or not a number."""
-    v = reading.get(key)
-    return None if isinstance(v, bool) or not isinstance(v, (int, float)) else float(v)
 
 
 def load_hit(tool: str, tool_input) -> tuple:
@@ -3962,14 +3902,8 @@ def load_hit(tool: str, tool_input) -> tuple:
         return "", ""
     if not isinstance(reading, dict):
         return "", ""
-    memory = _load_value(reading, "memory_pct")
-    disk, disk_total = _load_value(reading, "disk_free_gb"), _load_value(reading, "disk_total_gb")
-    disk_text = None if disk is None or disk_total is None else "disk %.1f GB free of %.0f GB" % (disk, disk_total)
-
-    def disk_under(share, gb):
-        return disk_text is not None and disk < min(disk_total * share / 100.0, gb)
-
-    full = load_full(reading)
+    verdict = load_verdict(reading)
+    full = verdict["full"]
     if full:
         return LOAD_FULL_REASON % ", ".join(full), ", ".join(full)
     # An Agent or Task call that leaves run_in_background out or sets it false passes busy. Any other present value
@@ -3977,8 +3911,7 @@ def load_hit(tool: str, tool_input) -> tuple:
     if tool == SESSION_TOOL or (tool in SPAWN_TOOLS and (
             "run_in_background" not in tool_input or tool_input["run_in_background"] is False)):
         return "", ""
-    busy = [t for t in (memory is not None and memory > LOAD_BUSY_MEMORY and "memory %.1f%% in use" % memory,
-                        disk_under(LOAD_BUSY_DISK_SHARE, LOAD_BUSY_DISK_GB) and disk_text) if t]
+    busy = verdict["busy"]
     if busy:
         # The remedy matches the reading: load drops by waiting, disk space comes back only when it is freed.
         waits = [t for t in busy if not t.startswith("disk")]
@@ -4011,7 +3944,7 @@ def running_agent_hit(payload, tool: str) -> tuple:
         reading = read_load()
     except Exception:
         return "", ""
-    full = load_full(reading)
+    full = load_verdict(reading)["full"]
     return (LOAD_LANE_FULL_REASON % ", ".join(full), ", ".join(full)) if full else ("", "")
 
 
@@ -4031,7 +3964,7 @@ def lane_session_hit(payload, tool: str) -> tuple:
         own_id = override.remote_session_id()
         if own_id is None:
             return "", ""
-        full = load_full(read_load())
+        full = load_verdict(read_load())["full"]
         transcript = payload.get("transcript_path")
         if not full or not isinstance(transcript, str) or not transcript:
             return "", ""
@@ -4043,18 +3976,6 @@ def lane_session_hit(payload, tool: str) -> tuple:
     except Exception:
         return "", ""
     return LOAD_SESSION_FULL_REASON % ", ".join(full), ", ".join(full)
-
-
-def load_full(reading) -> list:
-    """The readings over the full line, as text, or []. An unread or malformed reading counts as normal."""
-    if not isinstance(reading, dict):
-        return []
-    memory = _load_value(reading, "memory_pct")
-    disk, disk_total = _load_value(reading, "disk_free_gb"), _load_value(reading, "disk_total_gb")
-    disk_full = (disk is not None and disk_total is not None
-                 and disk < min(disk_total * LOAD_FULL_DISK_SHARE / 100.0, LOAD_FULL_DISK_GB))
-    return [t for t in (memory is not None and memory > LOAD_FULL_MEMORY and "memory %.1f%% in use" % memory,
-                        disk_full and "disk %.1f GB free of %.0f GB" % (disk, disk_total)) if t]
 
 
 OPUS_SPAWN_REASON = (

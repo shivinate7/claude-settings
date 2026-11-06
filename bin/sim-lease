@@ -14,13 +14,16 @@ take  queues PID and waits for its turn. Granted: prints the slot, `1`, `2` or `
 give  frees PID's lease and its queue place. It is idempotent and always exits 0.
 status  prints one line per lease, one per waiter, and the load.
 
-Limits on every grant: the 5-minute load is under 100 and the 1-minute load is under 60.
-  duo: slot 1 when it is free; slot 2 only while slot 1 is held and the 5-minute load is under 60.
+Limits on every grant (decision one-load-definition; the limits and the verdict live in hooks/guard_load.py, the same
+ones the guard uses): the machine is not full, and no reading is unread. A busy machine still grants slot 1 and pro.
+  duo: slot 1 when it is free; slot 2 only while slot 1 is held and the machine is normal (neither busy nor full).
   pro: only while nothing else is leased. A held pro lease refuses every duo.
 The queue is strict FIFO: only its head is granted, so a later take never passes an earlier one.
 Reaping, on every call: a lease or waiter whose pid is dead, or whose `ps -o lstart=` start time differs from the one
 recorded at take, is dropped. A holder that dies therefore never needs to give.
-Load: `sysctl -n vm.loadavg` only. No-op: when `uname -s` is not Darwin, or CI or GITHUB_ACTIONS equals `true`,
+Load: guard_load.read_load() and guard_load.load_verdict(): memory in use, and disk free on the home drive. No load
+average, no sysctl. An unread reading (a failed read, or one the platform does not offer) holds the grant, and take's
+refusal line and status print it as unknown. No-op: when `uname -s` is not Darwin, or CI or GITHUB_ACTIONS equals `true`,
 take prints `none` (with --udid too) and exits 0, give exits 0, and no file is written. On Darwin, a no-op take also prints one stderr
 line saying no lease was taken. Any other CI value, such as `false` or empty, is not a no-op.
 Start times: `ps` runs with TZ=UTC, so a start time recorded under one TZ matches the same process read under another.
@@ -28,7 +31,8 @@ Start times: `ps` runs with TZ=UTC, so a start time recorded under one TZ matche
 State: ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-lease/leases.json, written through a temp file and os.replace
 under an fcntl.flock on the file lock in the same folder. The lock is held for one read-decide-write step, never
 while sleeping.
-Cost: per call, one `uname`, one `ps` per recorded pid, and one `sysctl` on take and status (take: one `sysctl` per poll). Files written:
+Cost: per call, one `uname`, one `ps` per recorded pid, and one guard_load read on take and status (take: one read per
+poll; a read is one memory counter and one statfs, no child process). Files written:
 leases.json, only when its content changes, plus the empty lock file. No daemon, no log.
 Reader: the guard calls live_leases() (SLOT_UDID maps a slot to its device) to let a session's MCP launch boot the device
 its own live lease holds. It takes no flock and writes nothing: one read of leases.json and one `ps` per lease.
@@ -45,10 +49,8 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+import guard_load  # noqa: E402  the one home of the load readings, limits and verdict (hooks/guard_load.py)
 
-MAX_5MIN = 100.0   # a grant needs the 5-minute load under this
-MAX_1MIN = 60.0    # a grant needs the 1-minute load under this
-SLOT2_5MIN = 60.0  # slot 2 needs the 5-minute load under this
 # The device each slot boots: the one home of the device IDs (skills/ios-apps/SKILL.md, Phone simulators). The guard
 # reads it to match a lease to the device an MCP launch names (hooks/guard.py sim_boot_refusal); `take --udid` prints
 # it, so bin/sim-test keeps no UDID.
@@ -85,15 +87,23 @@ def start_time(pid):
 
 
 def read_load():
-    """(1-minute, 5-minute, 15-minute) as the raw strings of `sysctl -n vm.loadavg`, or None when unreadable."""
-    parts = out(["sysctl", "-n", "vm.loadavg"]).replace("{", " ").replace("}", " ").split()
-    if len(parts) < 3:
-        return None
+    """(reading, verdict) from guard_load, or (None, None) when the reader itself raises."""
     try:
-        [float(p) for p in parts[:3]]
-    except ValueError:
-        return None
-    return tuple(parts[:3])
+        reading = guard_load.read_load()
+        return reading, guard_load.load_verdict(reading)
+    except Exception:
+        return None, None
+
+
+def load_text(load):
+    """The load as one line: each reading as read or as unknown, then the level. `load` is read_load()'s pair."""
+    reading, verdict = load
+    if verdict is None:
+        return "memory unknown, disk unknown"
+    memory, free, total = (reading.get(k) for k in ("memory_pct", "disk_free_gb", "disk_total_gb"))
+    parts = ["memory unknown" if "memory" in verdict["unread"] else "memory %.1f%% in use" % memory,
+             "disk unknown" if "disk" in verdict["unread"] else "disk %.1f GB free of %.0f GB" % (free, total)]
+    return "%s, level %s" % (", ".join(parts), verdict["level"])
 
 
 def is_live(entry):
@@ -173,11 +183,10 @@ class State:
 
 
 def decide(data, entry, load):
-    """The slot for entry (`1`, `2` or `pro`) when it may be granted now, else None."""
-    if load is None or data["queue"][0]["pid"] != entry["pid"]:
-        return None
-    one, five = float(load[0]), float(load[1])
-    if five >= MAX_5MIN or one >= MAX_1MIN:
+    """The slot for entry (`1`, `2` or `pro`) when it may be granted now, else None. `load` is read_load()'s pair: a
+    grant needs a verdict that is not full and has no unread reading; slot 2 needs level normal."""
+    verdict = load[1]
+    if verdict is None or verdict["unread"] or verdict["level"] == "full" or data["queue"][0]["pid"] != entry["pid"]:
         return None
     held = {e["slot"] for e in data["leases"]}
     if entry["device"] == "pro":
@@ -186,7 +195,7 @@ def decide(data, entry, load):
         return None
     if "1" not in held:
         return "1"
-    if "2" not in held and five < SLOT2_5MIN:
+    if "2" not in held and verdict["level"] == "normal":
         return "2"
     return None
 
@@ -194,8 +203,7 @@ def decide(data, entry, load):
 def describe(data, load):
     holders = ", ".join("slot %s pid %s (%s)" % (e["slot"], e["pid"], e["device"]) for e in data["leases"]) or "none"
     waiters = ", ".join("pid %s (%s)" % (e["pid"], e["device"]) for e in data["queue"]) or "none"
-    shown = "unreadable" if load is None else "1-min %s 5-min %s 15-min %s" % load
-    return "holders: %s; waiting: %s; load %s" % (holders, waiters, shown)
+    return "holders: %s; waiting: %s; load %s" % (holders, waiters, load_text(load))
 
 
 def shown(slot, args):
@@ -274,7 +282,7 @@ def cmd_status(_args):
         for e in st.data["queue"]:
             print("waiter pid %s device %s session %s" % (e["pid"], e["device"], e.get("session") or "-"))
     load = read_load()
-    print("load %s" % ("unreadable" if load is None else "1-min %s 5-min %s 15-min %s" % load))
+    print("load %s" % load_text(load))
     return 0
 
 
