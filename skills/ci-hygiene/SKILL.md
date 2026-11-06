@@ -242,7 +242,7 @@ The seven opt-in templates of that decision:
   event group on a branch (default `main`) is red. Groups: `actions/ci-alarm/events.json`. Runs of
   other events, such as a Pages build, a `workflow_run` or a `repository_dispatch`, and runs of a
   deleted workflow, are not judged. A failed `gh` read prints `unknown` with a warning, never an alarm that
-  the branch is red. It is red in CI: the step fails when env CI is set, and exits 0 locally. The caller is a scheduled workflow with `permissions: {actions: read, issues: write}`. It
+  the branch is red. It is red in CI: the step fails when env CI is set, and exits 0 locally. The caller is a scheduled workflow with `permissions: {actions: read, contents: read, issues: write}`. It
   needs no checkout. Not enabled in this repo.
 - `readme-links`: checks the external https links in a markdown file (default `README.md`). Run it
   from a weekly schedule, never per PR. `open-issue: true` opens or updates one issue.
