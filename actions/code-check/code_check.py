@@ -26,7 +26,7 @@ ZERO = "0" * 40
 
 
 UNKNOWNS = []  # one line per read the run could not make; main() turns them into the exit code
-FETCHED = set()  # refs already fetched once, so a ref missing from origin too costs one fetch
+FETCH_FAILED = []  # why the one fetch from origin failed, if it did; named in the unknown text of each missing ref
 FETCH_SECONDS = 120
 
 
@@ -143,43 +143,39 @@ def classify(root, files, std):
     return found, missing
 
 
-def fetch(root, ref):
-    """One fetch of ref from origin, for a shallow clone that lacks it; a failure leaves the ref missing."""
-    if ref in FETCHED:
-        return
-    FETCHED.add(ref)
-    name = ref[len("origin/"):] if ref.startswith("origin/") else ref
+def fetch_missing(root, refs):
+    """One fetch from origin for every ref the clone lacks, base and main together, completing a shallow history so
+    merge-base can see it. The fetch is lint/git_fetch.py, the one home also used by bin/ci-job. A failure is kept in
+    FETCH_FAILED, and each ref that is still missing names it."""
+    sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
     try:
-        # A shallow head has no parent link to a fetched base, so merge-base needs the whole history.
-        if sh(["git", "rev-parse", "--is-shallow-repository"], root).stdout.strip() == "true":
-            sh(["git", "fetch", "--quiet", "--unshallow", "origin"], root, timeout=FETCH_SECONDS)
-        if sh(["git", "rev-parse", "--verify", "--quiet", ref + "^{commit}"], root).returncode:
-            sh(["git", "fetch", "--quiet", "origin", name], root, timeout=FETCH_SECONDS)
-    except (OSError, subprocess.SubprocessError):
-        pass  # a hung remote or no git: the ref stays missing and the caller prints it as unknown
+        import git_fetch
+    except ImportError:
+        FETCH_FAILED.append("lint/git_fetch.py is not in this copy of the action")
+        return
+    names = [r[len("origin/"):] if r.startswith("origin/") else r for r in refs]
+    ok, message = git_fetch.fetch(root, names, unshallow=git_fetch.is_shallow(root), timeout=FETCH_SECONDS)
+    if not ok:
+        FETCH_FAILED.append(message)
 
 
 def commit(root, ref):
-    """The commit a ref names, or None when it is empty or not in this clone, even after one fetch from origin."""
+    """The commit a ref names, or None when it is empty or not in this clone."""
     if not ref or ref == ZERO:
         return None
-    for attempt in (0, 1):
-        p = sh(["git", "rev-parse", "--verify", "--quiet", ref + "^{commit}"], root)
-        if p.returncode == 0:
-            return p.stdout.strip()
-        if attempt == 0:
-            fetch(root, ref)
-    return None
+    p = sh(["git", "rev-parse", "--verify", "--quiet", ref + "^{commit}"], root)
+    return p.stdout.strip() if p.returncode == 0 else None
 
 
 def base_config(root, base, label="base"):
     """The ref's .code-check.json as a dict, or None (printed as unknown) when it cannot be read."""
     if not base or base == ZERO:
-        print("code-check: list shrink check unknown: no %s ref given" % label)  # a skip: no ref was asked for
+        print("code-check: list shrink check skipped: no %s ref given" % label)
         return None
     if commit(root, base) is None:
-        unknown("code-check: list shrink check unknown: %s %s is not in this clone, and origin does not hold it "
-                "(use fetch-depth 0)" % (label, base))
+        why = "fetch from origin failed: %s" % FETCH_FAILED[0] if FETCH_FAILED else "origin does not hold it"
+        unknown("code-check: list shrink check unknown: %s %s is not in this clone, and %s (use fetch-depth 0)"
+                % (label, base, why))
         return None
     # ls-tree tells an absent file (first adoption, no error) from a git that cannot read the tree.
     tree = sh(["git", "ls-tree", "--name-only", base, "--", CONFIG], root)
@@ -397,13 +393,16 @@ def main(argv):
         if not e.strip().strip("/"):
             failures.append("empty exclude entry %r in %s matches every file" % (e, CONFIG))
     UNKNOWNS.clear()
-    FETCHED.clear()
+    FETCH_FAILED.clear()
     files = tracked(root, [e for e in cfg.get("exclude", []) if e.strip().strip("/")])
     listed = files is not None  # unlisted: every check that compares against the file list is unknown, and skipped
     files = files or []
     found, missing = classify(root, files, std)
     for n in missing:
         failures.append("%s: language has no row in lint/code_check_standard.json; add a row or list the path in %s exclude" % (n, CONFIG))
+    wanted = [r for r in (args.base, args.main) if r and r != ZERO]
+    if listed and any(commit(root, r) is None for r in wanted):
+        fetch_missing(root, wanted)
     refs = [(args.base, "base")] if listed else []
     main_commit = commit(root, args.main) if listed else None
     if listed and (main_commit is None or main_commit != commit(root, args.base)):
