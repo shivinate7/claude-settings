@@ -1,0 +1,9 @@
+{
+  "title": "File one debt per app that breaks the Swift layout rule",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.3525,
+  "why": "Owner pick 272 b (11:46 CST Nov 6): keep rule ux-swift-same-intent as written and file one debt per app that breaks it.",
+  "note": "Coordinator 12:12 CST. Rule home: docs/design/layout.md ux-swift-same-intent. Breaches (lane ux-swift-same-intent-check scan, Nov 6): home 30 of 302 stacks set no spacing; degen 37 of 214; mailaudit 10 of 87, plus a padding push at native/Manifest/ItemLine.swift:90. ios-adblock holds the rule.",
+  "updatedAt": "2026-11-06T18:14:00Z"
+}

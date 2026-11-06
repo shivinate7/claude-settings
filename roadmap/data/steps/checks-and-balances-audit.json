@@ -1,9 +1,9 @@
 {
   "title": "Audit: is there enough independent pushback on hooks, tool use, prompts and plans?",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.348,
   "why": "The owner wants to know where an independent reviewer or a check pushes back today, and where nothing does.",
-  "note": "Owner ask ask-mw59xljoxp (page, 11:54 CST Nov 6): an Opus agent, open-ended. The Audit: marker lets an Explore agent run Opus (P24). Output: a ranked list of gaps by harm, and its findings go to the page.",
+  "note": "Nov 6 12:12 CST (coordinator): started as an Opus Explore audit.\nOwner ask ask-mw59xljoxp (page, 11:54 CST Nov 6): an Opus agent, open-ended. The Audit: marker lets an Explore agent run Opus (P24). Output: a ranked list of gaps by harm, and its findings go to the page.",
   "updatedAt": "2026-11-06T18:14:00Z"
 }
