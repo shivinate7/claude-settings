@@ -16,9 +16,11 @@ The modes, as the builder implements them. This file is their interface.
   a suite still running then is killed, its mutant not_run too. `--log PATH` writes one JSON file with the keys base,
   head, profile, made, killed, crashed, survived, not_run and untested, and writes nothing else into REPO. With no
   changed mutant the share reads `0/0` with no percentage.
-- `--known-defects FILE --repo REPO [--suite-timeout S] [--log PATH]`. FILE is a JSON list of planted defects. Each defect
-  prints one line, `CAUGHT|MISS|UNKNOWN id: name [reason]`. It exits 1 when any defect is MISS or UNKNOWN, else 0. A
-  missing FILE prints one `UNKNOWN` line that names the path, and exits 1. An empty list prints one line and exits 0.
+- `--known-defects FILE --repo REPO (--profile NAME | --profile-file JSON) [--suite-timeout S] [--log PATH]`. FILE is a JSON
+  list of planted defects. The profile is required, as for `--changed`: its install runs and its folder is linked into the
+  checkout. Each defect prints one line, `CAUGHT|MISS|UNKNOWN id: name [reason]`. It exits 1 when any defect is MISS or
+  UNKNOWN, else 0. A missing FILE prints one `UNKNOWN` line that names the path, and exits 1. An empty list prints one line
+  and exits 0. A missing profile exits 2.
 - `--tests-for PATH`. It prints the REPORT_TARGETS suites for PATH when listed, and nothing else. Else it prints each
   tracked `test_<stem>.py` and `test_<stem>_*.py` beside PATH. A .py PATH also gets each tracked `test_*.py` in the
   repository that loads the module `<stem>`: an `import`, an `importlib.import_module` or `__import__` call, or a file
@@ -782,6 +784,70 @@ class KnownDefectsTests(unittest.TestCase):
         code, out, err = run_cli(["--known-defects", spec, "--repo", repo])
         self.assertEqual(code, 2, "--known-defects takes --profile or --profile-file, and exits 2 without one: "
                          "exit %d\n%s%s" % (code, out, err))
+
+    def test_a_failed_install_of_one_part_reads_every_defect_unknown_when_another_part_shares_its_lockfile(self):
+        repo = defect_repo(extra_files={ROOT_LOCK: LOCK_TEXT, "test_oracle.py": ORACLE_SUITE})
+        profile = {"parts": {"a": {"install": ORACLE_INSTALL, "lockfile": ROOT_LOCK},
+                             "b": {"install": [PY, "-c", "import sys\nsys.exit(3)"], "lockfile": ROOT_LOCK}}}
+        defects = [defect("kb-f1-dep", "return a + b", "return a - b", "test_oracle.py"),
+                   defect("kb-f1-plain", "return a * b", "return a + b", "test_calc.py")]
+        code, out, err = known_run(defects, repo, profile=profile)
+        self.assertEqual(verdicts_of(out), {"kb-f1-dep": "UNKNOWN", "kb-f1-plain": "UNKNOWN"},
+                         "part b's install failed, so every defect reads UNKNOWN; a shared lockfile must not hide it\n"
+                         + out + err)
+        lines = [line for line in out.splitlines() if line.startswith("UNKNOWN kb-f1-")]
+        self.assertEqual(len(lines), 2, "one UNKNOWN line per defect:\n" + out)
+        for line in lines:
+            self.assertIn("install", line, "the UNKNOWN reason must name the install: " + line)
+        self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
+
+    def test_a_tracked_file_at_the_link_path_reads_unknown_naming_the_path_and_never_runs_on_it(self):
+        # The tracked node_modules/kb_oracle.py is the module itself. A run that silently used it would read CAUGHT.
+        repo = defect_repo(extra_files={ROOT_LOCK: LOCK_TEXT, "test_oracle.py": ORACLE_SUITE,
+                                        "node_modules/kb_oracle.py": ORACLE_MODULE})
+        profile = {"install": ORACLE_INSTALL, "lockfile": ROOT_LOCK}
+        code, out, err = known_run([defect("kb-f2", "return a + b", "return a - b", "test_oracle.py")], repo,
+                                   profile=profile)
+        self.assertIn("kb-f2", verdicts_of(out), "no verdict line for kb-f2 (exit %d):\n%s%s" % (code, out, err))
+        self.assertEqual(verdicts_of(out)["kb-f2"], "UNKNOWN",
+                         "a tracked file at the link path is a link failure: UNKNOWN, never a silent run\n" + out + err)
+        lines = [line for line in out.splitlines() if line.startswith("UNKNOWN kb-f2")]
+        self.assertEqual(len(lines), 1, "one UNKNOWN line for kb-f2:\n" + out)
+        self.assertIn("node_modules", lines[0], "the UNKNOWN reason must name the link path: " + lines[0])
+        self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
+
+    def test_two_parts_with_one_lockfile_and_one_install_share_one_link_and_read_caught(self):
+        # Good skip, pinned: the second part finds the link its first part made and leaves it. Green on the current code.
+        repo = defect_repo(extra_files={ROOT_LOCK: LOCK_TEXT, "test_oracle.py": ORACLE_SUITE})
+        profile = {"parts": {"a": {"install": ORACLE_INSTALL, "lockfile": ROOT_LOCK},
+                             "b": {"install": ORACLE_INSTALL, "lockfile": ROOT_LOCK}}}
+        code, out, err = known_run([defect("kb-f2b", "return a + b", "return a - b", "test_oracle.py")], repo,
+                                   profile=profile)
+        self.assertIn("kb-f2b", verdicts_of(out), "no verdict line for kb-f2b (exit %d):\n%s%s" % (code, out, err))
+        self.assertEqual(verdicts_of(out), {"kb-f2b": "CAUGHT"},
+                         "two parts with one lockfile and one install share one link, so the catcher reads CAUGHT\n"
+                         + out + err)
+        self.assertEqual(code, 0, "all defects caught must exit 0: exit %d\n%s%s" % (code, out, err))
+
+    def test_a_failed_install_with_several_output_lines_gives_a_one_line_reason(self):
+        repo = defect_repo(extra_files={ROOT_LOCK: LOCK_TEXT, "test_oracle.py": ORACLE_SUITE})
+        profile = {"install": [PY, "-c", "import sys\nprint('one')\nprint('two')\nprint('three', file=sys.stderr)\n"
+                                         "sys.exit(4)\n"], "lockfile": ROOT_LOCK}
+        code, out, err = known_run([defect("kb-f3", "return a + b", "return a - b", "test_oracle.py")], repo,
+                                   profile=profile)
+        self.assertEqual(verdicts_of(out), {"kb-f3": "UNKNOWN"}, "a failed install reads UNKNOWN\n" + out + err)
+        self.assertEqual(len(out.strip().splitlines()), 2,
+                         "the UNKNOWN reason is one line, so the output is one defect line and the totals line:\n"
+                         + out + err)
+        self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
+
+    def test_a_profile_file_holding_a_json_list_is_a_bad_argument_exit_2_with_no_traceback(self):
+        repo = defect_repo()
+        code, out, err = known_run([defect("kb-f4", "return a + b", "return a - b", "test_calc.py")], repo,
+                                   profile=[1])
+        self.assertEqual(code, 2, "a profile that is not a JSON object is a bad argument: exit %d\n%s%s"
+                         % (code, out, err))
+        self.assertNotIn("Traceback", err, "a bad profile file prints one ERROR line, never a traceback:\n" + err)
 
 
 class RealListTests(unittest.TestCase):
