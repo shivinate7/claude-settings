@@ -10,11 +10,17 @@ an unrelated commit is no drift, an unknown pin changes no exit code, a shallow 
 says unknown and never "not on main", and LINT_FILES holds every file the step runs.
 Also asserts a zizmor pin, `claude-settings/actions/zizmor@<sha>`, is read with the same verdict lines, compared on
 actions/zizmor/run.sh, one line per action, and that a workflow pinning both actions at one commit keeps both lines.
+Also asserts a diff the step cannot read (no merge base, or a root commit with no HEAD~1) exits non-zero and says
+ste-lint: unknown, with FAIL=false too. In a shallow clone whose main is two commits deep, the step deepens once after
+a failed read and reads again: the finding on the topic commit fails it, for a pull request and for a push to main.
+A diff the step cannot read in a repo that is not shallow still exits non-zero and says unknown.
+Also asserts a pull request clone of only `refs/pull/1/merge` at depth 1 (the merge commit, with its parents cut) reads its diff
+and fails on the topic commit's finding, and that a stale-cites call that exits 2 (UNKNOWN) fails the step with FAIL=false too.
 Also asserts the installed copy: install.sh run into a temp HOME, in cloud (copy) mode and in local (symlink) mode, lands
 bin/ste-changed where its own folder holds no actions/. The command still finds the claude-settings checkout the global
 CLAUDE.md names, reads the pin check from it, and with no checkout prints one line, never a traceback.
 Also asserts the tree-cites input: off by default, passed to the step as TREE_CITES, and on, the step checks the whole tree."""
-import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
+import ast, atexit, contextlib, os, pathlib, re, shutil, subprocess, sys, tempfile, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
@@ -262,6 +268,226 @@ check("pull request: an earlier commit of the branch is linted", rc == 1 and "a.
 # A push to the default branch has no other side: HEAD~1..HEAD only, so the earlier commit is skipped.
 rc, out = run("changed", change=two_commits, on_main=True, BASE_REF="", REF_NAME="main", EVENT_NAME="push")
 check("push to default branch: only the last commit is linted", rc == 0 and "STE001" not in out, out)
+
+
+# The step diffs origin/<base>...HEAD. A diff it cannot read must fail the step and say the read is unknown.
+# It must never print "no markdown changed" and exit 0: that would pass a change nobody linted.
+def orphan_other(work):
+    """Branch `other` on origin with history unrelated to main, then the topic commit on top of main."""
+    git(work, "checkout", "-q", "--orphan", "other")
+    git(work, "rm", "-rqf", ".")
+    write(work, "o.md", "# O\n")
+    git(work, "add", "o.md"); git(work, "commit", "-qm", "other: unrelated root")
+    git(work, "push", "-q", "origin", "other")
+    git(work, "checkout", "-q", "topic")
+    default_change(work)
+
+
+def no_merge_base(work):
+    """True when origin/other exists and shares no commit with HEAD."""
+    git(work, "rev-parse", "--verify", "-q", "refs/remotes/origin/other")
+    try:
+        git(work, "merge-base", "origin/other", "HEAD")
+    except subprocess.CalledProcessError:
+        return True
+    return False
+
+
+# Scope before subject: the fixture really has no merge base, so the cases below test the read, not a bad fixture.
+with scratch("orphan") as d:
+    fixture_ok = no_merge_base(make_repo(d, BASE_FILES, orphan_other))
+check("orphan fixture: origin/other and HEAD share no commit", fixture_ok, "git merge-base found a shared commit")
+# The same fixture with the base on main reads the topic commit, so the read itself works here.
+rc, out = run("changed", change=orphan_other)
+check("orphan fixture, base main: the read works and the finding on the topic commit fails the step",
+      rc == 1 and "a.md:5: STE001 " in out and "ste-lint: unknown" not in out, out)
+rc, out = run("changed", change=orphan_other, BASE_REF="other")
+check("no merge base: the step exits non-zero", rc != 0, out)
+check("no merge base: the output says the read is unknown", "ste-lint: unknown" in out, out)
+rc, out = run("changed", change=orphan_other, BASE_REF="other", FAIL="false")
+check("no merge base, fail=false: the step still exits non-zero, since a broken read is no finding", rc != 0, out)
+check("no merge base, fail=false: the output says the read is unknown", "ste-lint: unknown" in out, out)
+# A push to the default branch whose HEAD is the root commit has no HEAD~1, so HEAD~1..HEAD cannot be read.
+rc, out = run("changed", change=lambda work: None, on_main=True, BASE_REF="", REF_NAME="main", EVENT_NAME="push")
+check("root commit push: the step exits non-zero", rc != 0, out)
+check("root commit push: the output says the read is unknown", "ste-lint: unknown" in out, out)
+
+
+# A shallow clone cuts main's history. The step's diff read then has no merge base (a pull request) or no HEAD~1
+# (a push to main). The read fails, the step deepens once and reads again, and the finding must fail the step.
+def deep_origin(d, change, on_main, merge_ref=False):
+    """A bare origin whose main is two commits deep. `change` commits on top of main: on main when on_main, else on
+    a topic branch. The origin's HEAD stays on main, and each clone names its own branch. merge_ref also holds the
+    merge of topic into main at refs/pull/1/merge, as GitHub does for a pull request, with main as first parent."""
+    origin, work = os.path.join(d, "origin.git"), os.path.join(d, "w")
+    git(d, "init", "-q", "--bare", "-b", "main", origin)
+    git(d, "clone", "-q", origin, work)
+    write(work, "a.md", BASE_FILES["a.md"])
+    git(work, "add", "."); git(work, "commit", "-qm", "base")
+    write(work, "b.md", "# B\n")
+    git(work, "add", "."); git(work, "commit", "-qm", "main: second")
+    git(work, "push", "-q", "origin", "main")
+    if not on_main:
+        git(work, "checkout", "-q", "-b", "topic")
+    change(work)
+    git(work, "push", "-q", "origin", "HEAD:" + ("main" if on_main else "topic"))
+    if merge_ref:
+        git(work, "checkout", "-q", "--detach", "main")
+        git(work, "merge", "-q", "--no-ff", "-m", "merge topic", "topic")
+        git(work, "push", "-q", "origin", "HEAD:refs/pull/1/merge")
+    return origin
+
+
+def shallow_clone_of(origin, dest, branch):
+    """A depth-1 clone of every branch of `origin`, checked out on `branch`, as a CI job with no history makes it.
+    A file:// URL, so --depth applies. Returns the git error text, "" when the clone worked."""
+    done = subprocess.run(["git", "clone", "-q", "--depth", "1", "--no-single-branch", "-b", branch,
+                           pathlib.Path(origin).as_uri(), dest], capture_output=True, text=True)
+    return done.stderr.strip() if done.returncode else ""
+
+
+def shallow_env(d, **over):
+    """The step's env for a pull request into main. TMPDIR is the case folder, so the step's temp files stay in it."""
+    env = dict(os.environ, TMPDIR=d, EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main",
+               REF_NAME="topic", SCOPE="changed", FAIL="true", PATHS_GLOB="**/*.md", EXCLUDE="",
+               CHANGED_PATHS_GLOB="*.md", DECISIONS_DIR="", GITHUB_STEP_SUMMARY=os.path.join(d, "sum"))
+    env.update(over)
+    return env
+
+
+# A pull request: the clone's origin/main is the cut tip, so the merge base is missing. The control clone is the same
+# clone with its history restored, so the same diff reads and fails: the depth is the only defect.
+with scratch("shallow-pr") as d:
+    origin = deep_origin(d, default_change, on_main=False)
+    cut, control = os.path.join(d, "cut"), os.path.join(d, "control")
+    errors = [shallow_clone_of(origin, cut, "topic"), shallow_clone_of(origin, control, "topic")]
+    git(control, "fetch", "-q", "--unshallow")
+    cut_facts = shallow_clone.facts(cut, "origin/main")
+    ctl_rc, ctl_out = run_step(d, control, shallow_env(d))
+    rc, out = run_step(d, cut, shallow_env(d))
+check("shallow pull request fixture: the clone is shallow, origin/main resolves, and the cut breaks their merge base",
+      errors == ["", ""] and cut_facts["shallow"] is True and cut_facts["pin_present"] is True
+      and cut_facts["ancestor_rc"] == 1, "%s %s" % (errors, cut_facts))
+check("shallow pull request, control: after git fetch --unshallow the step reads the diff and the finding fails it",
+      ctl_rc == 1 and "a.md:5: STE001 " in ctl_out and "ste-lint: unknown" not in ctl_out, ctl_out)
+check("shallow pull request: the step deepens after the failed read, and the topic commit's finding fails the step",
+      rc == 1 and "a.md:5: STE001 " in out and "ste-lint: unknown" not in out, out)
+
+# A push to main: the clone's HEAD is the pushed commit, and HEAD~1 is cut off, so HEAD~1..HEAD cannot be read.
+with scratch("shallow-push") as d:
+    origin = deep_origin(d, default_change, on_main=True)
+    cut, control = os.path.join(d, "cut"), os.path.join(d, "control")
+    errors = [shallow_clone_of(origin, cut, "main"), shallow_clone_of(origin, control, "main")]
+    git(control, "fetch", "-q", "--unshallow")
+    cut_facts = shallow_clone.facts(cut, "HEAD~1")
+    push = dict(BASE_REF="", REF_NAME="main", EVENT_NAME="push")
+    ctl_rc, ctl_out = run_step(d, control, shallow_env(d, **push))
+    rc, out = run_step(d, cut, shallow_env(d, **push))
+check("shallow push fixture: the clone is shallow and HEAD~1 is not in it",
+      errors == ["", ""] and cut_facts["shallow"] is True and cut_facts["pin_present"] is False,
+      "%s %s" % (errors, cut_facts))
+check("shallow push, control: after git fetch --unshallow the step lints HEAD~1..HEAD and the finding fails it",
+      ctl_rc == 1 and "a.md:5: STE001 " in ctl_out and "ste-lint: unknown" not in ctl_out, ctl_out)
+check("shallow push to main: the step deepens after the failed read, and the finding on the pushed commit fails it",
+      rc == 1 and "a.md:5: STE001 " in out and "ste-lint: unknown" not in out, out)
+
+
+def git_out(cwd, *a):
+    """Stdout of one git command run in `cwd`, stripped. "" when git fails."""
+    return subprocess.run(["git", "-C", cwd, *a], capture_output=True, text=True).stdout.strip()
+
+
+def merge_ref_clone(origin, dest, depth=1):
+    """What actions/checkout makes of a pull request at its default depth 1: refs/pull/1/merge fetched at `depth` and
+    checked out detached, then run.sh line 44's fetch of main at the same depth. depth None fetches the full history.
+    A file:// URL, so --depth applies. Returns the git error text, "" when every call worked."""
+    init = subprocess.run(["git", "init", "-q", dest], capture_output=True, text=True)
+    if init.returncode:
+        return init.stderr.strip() or "git init failed"
+    depth_arg = ["--depth=%d" % depth] if depth else []
+    steps = [["remote", "add", "origin", pathlib.Path(origin).as_uri()],
+             ["fetch", "-q", *depth_arg, "origin", "+refs/pull/1/merge:refs/remotes/pull/1/merge"],
+             ["checkout", "-q", "--detach", "refs/remotes/pull/1/merge"],
+             ["fetch", "-q", *depth_arg, "origin", "main"]]
+    for args in steps:
+        done = subprocess.run(["git", "-C", dest, *args], capture_output=True, text=True)
+        if done.returncode:
+            return done.stderr.strip() or "git %s failed" % args[0]
+    return ""
+
+
+def merge_ref_facts(clone):
+    """What the clone holds: whether it is shallow, the parents in HEAD's own object, whether HEAD is one of the
+    shallow commits (its parents are cut), and shallow_clone.facts' ancestor_rc for origin/main against HEAD."""
+    path = git_out(clone, "rev-parse", "--git-path", "shallow")
+    listed = []
+    if path and os.path.isfile(os.path.join(clone, path)):
+        with open(os.path.join(clone, path), encoding="utf-8") as f:
+            listed = f.read().split()
+    parents = [l for l in git_out(clone, "cat-file", "-p", "HEAD").splitlines() if l.startswith("parent ")]
+    facts = shallow_clone.facts(clone, "origin/main")
+    return {"shallow": facts["shallow"], "parents": len(parents), "ancestor_rc": facts["ancestor_rc"],
+            "head_in_shallow_file": bool(listed) and git_out(clone, "rev-parse", "HEAD") in listed}
+
+
+# A pull request clone at actions/checkout's default depth 1 holds refs/pull/1/merge alone: the merge commit, its parents
+# cut. run.sh line 44 fetches main at depth 1. The step's unshallow fetches the branch refs only, so the merge commit may
+# stay shallow and the merge base stays missing. The control is the same clone with its full history.
+with scratch("shallow-merge-ref") as d:
+    origin = deep_origin(d, default_change, on_main=False, merge_ref=True)
+    cut, control = os.path.join(d, "cut"), os.path.join(d, "control")
+    errors = [merge_ref_clone(origin, cut), merge_ref_clone(origin, control, depth=None)]
+    cut_facts = merge_ref_facts(cut)
+    env = shallow_env(d, REF_NAME="1/merge", GITHUB_REF="refs/pull/1/merge")
+    rc, out = run_step(d, cut, env) if errors[0] == "" else (None, "")
+    ctl_rc, ctl_out = run_step(d, control, env) if errors[1] == "" else (None, "")
+    after = merge_ref_facts(cut)
+check("shallow pull request merge ref: the clone is shallow and HEAD is a merge commit with two parents",
+      errors == ["", ""] and cut_facts["shallow"] is True and cut_facts["parents"] == 2, "%s %s" % (errors, cut_facts))
+check("shallow pull request merge ref: HEAD is one of the shallow commits, so its parents are cut",
+      cut_facts["head_in_shallow_file"] is True, "%s" % cut_facts)
+check("shallow pull request merge ref: origin/main is no ancestor of HEAD in the clone, so the merge base is missing",
+      cut_facts["ancestor_rc"] == 1, "%s" % cut_facts)
+check("shallow pull request merge ref, control: the full clone reads the diff and the finding fails it",
+      ctl_rc == 1 and "a.md:5: STE001 " in ctl_out and "ste-lint: unknown" not in ctl_out, ctl_out)
+check("shallow pull request merge ref: the step reads the diff and the topic commit's finding fails it",
+      rc == 1 and "a.md:5: STE001 " in out and "ste-lint: unknown" not in out, out)
+print("note - shallow pull request merge ref, after the step: HEAD still in the shallow file: %s"
+      % after["head_in_shallow_file"])
+
+
+# stale-cites exits 2 (UNKNOWN) when a tracked Markdown blob the range reads is missing from the store: read_markdown
+# raises Unknown. The fixture deletes that file's loose object, so cat-file answers missing and no git command fails.
+# The step then runs stale-cites with FAIL=false. Its exit 2 must still fail the step: a read that could not run is no pass.
+STALE_CITES = os.path.join(ROOT, "lint", "stale_cites.py")
+STALE_UNKNOWN_BASE = {"a.md": BASE_FILES["a.md"], "old.md": "# Old\n", "docs/keep.md": "# Keep\n"}
+
+
+def old_removed(work):
+    git(work, "rm", "-q", "old.md")
+    git(work, "commit", "-qm", "remove old.md")
+
+
+with scratch("stale-unknown") as d:
+    work = make_repo(d, STALE_UNKNOWN_BASE, old_removed)
+    blob = git_out(work, "rev-parse", "HEAD:docs/keep.md")
+    loose = os.path.join(work, ".git", "objects", blob[:2], blob[2:])
+    was_loose = os.path.isfile(loose)
+    if was_loose:
+        os.chmod(loose, 0o644)  # Windows: git makes its loose objects read-only
+        os.remove(loose)
+    stale = subprocess.run([sys.executable, STALE_CITES, "--range", "origin/main...HEAD"], cwd=work,
+                           capture_output=True, text=True, env=dict(os.environ, EXCLUDE=""))
+    ctl_rc, ctl_out = run_step(d, work, shallow_env(d, FAIL="true"))
+    rc, out = run_step(d, work, shallow_env(d, FAIL="false"))
+check("stale-cites unknown fixture: the loose object of docs/keep.md was in the store and is now gone",
+      was_loose and not os.path.exists(loose), "loose object: %s" % loose)
+check("stale-cites unknown fixture: stale-cites exits 2 and says UNKNOWN on this range",
+      stale.returncode == 2 and "stale-cites: UNKNOWN" in stale.stdout, stale.stdout + stale.stderr)
+check("stale-cites unknown, FAIL=true: the step exits 2",
+      ctl_rc == 2, ctl_out)
+check("stale-cites unknown, FAIL=false: the step still exits non-zero, since the read did not run",
+      rc != 0 and "stale-cites: UNKNOWN" in out, out)
 
 
 # The action's `exclude` input keeps working (a pinned caller passes it): comma- or newline-separated

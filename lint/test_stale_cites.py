@@ -8,6 +8,8 @@ or renamed is STALE001. A `<file.py> <name>` pair on one line is STALE002 when t
 level in that file at base (a def, class, assignment or import) and is not bound there at head. Each finding
 is one line, `path:line: CODE message`.
 A clean run prints `stale-cites: PASS` and exits 0.
+The step (bin/ste-changed) fails closed when its diff cannot be read, even with FAIL=false: non-zero exit and
+`ste-lint: unknown` (UnknownTests).
 The report (decision stale-cites-at-merge) prints after the findings and never changes the exit code. It names
 each anchor whose sentence changed in CLAUDE.md or the output style, with its rule_mechanisms.json row and the changed
 files under hooks/, lint/, bin/, actions/ and .github/ (no touched or untouched verdict), and each changed code file
@@ -752,7 +754,8 @@ class ReadAtHeadTests(StaleCase):
 
 
 class UnknownTests(StaleCase):
-    """A base the repo cannot resolve is unknown, not a finding: the check exits 0 and says so."""
+    """A base the repo cannot resolve is unknown, not a finding: the check exits 0 and says so. The step reads the
+    diff first, so the same base makes the step exit non-zero and say unknown."""
 
     def test_an_unresolvable_base_prints_unknown_and_exits_zero(self):
         def change(repo):
@@ -763,19 +766,20 @@ class UnknownTests(StaleCase):
         self.assertEqual(rc, 0, out)
         self.assertTrue(any(line.startswith("stale-cites: unknown") for line in out.splitlines()), out)
 
-    def test_step_with_an_unresolvable_base_exits_zero(self):
+    def test_step_with_an_unresolvable_base_fails_closed(self):
         def change(repo):
             move(repo, "hooks/lib.mjs", MOVED)
             commit(repo)
         rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n"), change)
         # A base with no shared history: origin/main resolves, but the three-dot range has no merge base.
+        # The repo is not shallow, so the step's deepen does not run and the read stays unknown.
         orphan = git(rng.repo, "commit-tree", EMPTY_TREE, "-m", "unrelated")
         git(rng.repo, "update-ref", "refs/remotes/origin/main", orphan)
         done = subprocess.run([sys.executable, STEP, "main"], cwd=rng.repo, env=direct_step_env(rng, "true"),
                               capture_output=True, text=True, encoding="utf-8", errors="replace")
         out = done.stdout + done.stderr
-        self.assertEqual(done.returncode, 0, out)
-        self.assertIn("stale-cites: unknown", out)
+        self.assertNotEqual(done.returncode, 0, out)
+        self.assertIn("ste-lint: unknown", out)
 
 
 class PinTests(unittest.TestCase):

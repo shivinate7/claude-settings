@@ -2,8 +2,8 @@
 # The ste-lint step. One home: actions/ste-lint/action.yml and bin/ste-changed both run it.
 # Reads the env that action.yml sets; bin/ste-changed sets the same names.
 set -euo pipefail
-# Needs actions/checkout with fetch-depth 0: scope 'changed' diffs against the
-# base branch, and a shallow clone would not carry that history.
+# Wants actions/checkout with fetch-depth 0: scope 'changed' diffs against the base branch. When the
+# diff read fails in a shallow clone, the step runs git fetch --unshallow once and reads again.
 LINTER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lint/ste_lint.py"
 STALE_CITES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lint/stale_cites.py"
 
@@ -49,12 +49,31 @@ else
   else
     RANGE="origin/$BASE...HEAD"
   fi
+  # A diff read in a process substitution drops git's exit status and turns a failed read into an empty
+  # list. Read into a variable in this shell and stop: a read that failed is unknown, not clear.
+  DIFF_ERR="$(mktemp)"
+  # A shallow clone cuts the history the range needs: deepen it once per run, keep the fetch's stderr.
+  DEEPENED=0
+  diff_names() {
+    if ! DIFF_OUT="$(git diff --name-only --diff-filter=AMR "$RANGE" -- "$@" 2>"$DIFF_ERR")"; then
+      if [ "$DEEPENED" -eq 0 ] && [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+        DEEPENED=1
+        if git fetch --unshallow origin 2>>"$DIFF_ERR"; then
+          DIFF_OUT="$(git diff --name-only --diff-filter=AMR "$RANGE" -- "$@" 2>"$DIFF_ERR")" && return 0
+        fi
+      fi
+      echo "ste-lint: unknown, could not read the diff of $RANGE: $(tr '\n' ' ' < "$DIFF_ERR")"
+      exit 1
+    fi
+  }
+  diff_names "$CHANGED_PATHS_GLOB"
   while IFS= read -r f; do
     [ -n "$f" ] && RAW_FILES+=("$f")
-  done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB")
+  done <<< "$DIFF_OUT"
+  diff_names "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"}
   while IFS= read -r f; do
     [ -n "$f" ] && FILES+=("$f")
-  done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})
+  done <<< "$DIFF_OUT"
 fi
 
 # In-script fallback: a caller that passes a plain glob (no ':(exclude)' magic
@@ -107,7 +126,8 @@ LOG_OUT="$(mktemp)"
 # a Python name bound at module level, that this range removed. Scope changed only. It runs before the
 # "no markdown changed" exit, so a code-only PR is checked. Its findings never go through the split
 # script below: every stale line is untouched by the range, and the split makes an untouched line
-# report-only. FAIL=false prints them and keeps the exit 0, as it does for the STE findings.
+# report-only. FAIL=false prints findings (exit 1) and keeps the exit 0, as it does for the STE findings.
+# Exit 2 means a read failed (unknown, not a finding): it stays red under FAIL=false too.
 STALE_EXIT=0
 if [ "$SCOPE" != "all" ]; then
   STALE_OUT="$(mktemp)"
@@ -137,7 +157,8 @@ if [ "${TREE_CITES:-false}" = "true" ]; then
   set -e
   [ "$TREE_EXIT" -ne 0 ] && STALE_EXIT="$TREE_EXIT"
 fi
-[ "${FAIL:-true}" = "true" ] || STALE_EXIT=0
+# FAIL=false zeroes findings (1) only; an unknown read (2) keeps the step red.
+if [ "${FAIL:-true}" != "true" ] && [ "$STALE_EXIT" -eq 1 ]; then STALE_EXIT=0; fi
 
 if [ ${#FILES[@]} -eq 0 ]; then
   echo "ste-lint: no markdown changed"
