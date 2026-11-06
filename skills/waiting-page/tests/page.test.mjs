@@ -4981,6 +4981,153 @@ for (const [label, phase, status] of [["a number", 5, "active"], ["null", null, 
   });
 }
 
+// ---------------------------------------------------------------- the stalled band on the Status tab (lane doing-needs-live-lane)
+// The build writes window.ROADMAP_BUILD.stalled and the page only draws it. These cases set that key on a built page, so the
+// band is proved apart from the build. Mockup: docs/design/stalled-band.html, option "Words once": the action once in the
+// band, and the rows carry marks only.
+
+// The built page's ROADMAP_BUILD block: the one regex that reads it. withStalled rewrites it; the --live case reads it back.
+const BUILD_BLOCK = /window\.ROADMAP_BUILD = (\{.*\});<\/script>/;
+function withStalled(html, stalled) {
+  assert.match(html, BUILD_BLOCK, "the built page has no ROADMAP_BUILD block to set the stalled read on");
+  return html.replace(BUILD_BLOCK, (_, j) => {
+    const b = JSON.parse(j);
+    if (stalled === undefined) delete b.stalled; else b.stalled = stalled;
+    return "window.ROADMAP_BUILD = " + JSON.stringify(b).replace(/</g, "\\u003c") + ";</script>";
+  });
+}
+const NO_ITEMS = { itemsWhy: "" };
+// c1, a2, a5 stalled (a2 landed, a5 with a pause that holds no one to decide it); a3 paused; a4 has a live lane; d6 is doing with a live lane.
+function stalledFixture() {
+  const steps = stepsOf([["c1", "cleanup", 1, "doing"], ["a2", "cleanup", 2, "doing"], ["a3", "cleanup", 3, "doing"], ["a4", "cleanup", 4, "active"], ["a5", "cleanup", 5, "doing"], ["d6", "cleanup", 6, "doing"]]);
+  steps.a3.paused = { why: "Waits for a month of CI numbers.", decides: "owner", at: "2026-11-05T16:20:00-06:00", by: "triage" };
+  return steps;
+}
+const STALLED = {
+  why: "", steps: [{ id: "c1", fix: "todo" }, { id: "a2", fix: ["#9"] }, { id: "a5", fix: "todo" }], paused: ["a3"],
+  badPause: [{ id: "a5", why: "it names no one to decide" }], items: [{ n: 14, lane: "fold-done-steps" }], itemsWhy: "",
+};
+const stalledPage = (stalled) => withStalled(phasePage(stalledFixture()), stalled);
+const band = (page) => page.locator("#stBand");
+// The band's text on one line. A page with no band fails here by name, before a text read waits out its timeout.
+async function bandText(page) {
+  assert.equal(await band(page).count(), 1, "the Status tab draws no stalled band (#stBand)");
+  return (await band(page).textContent()).replace(/\s+/g, " ");
+}
+
+test("the stalled band counts each stalled step and each item whose lane is gone, and names what to do once", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  const text = await bandText(page);
+  assert.match(text, /Stalled:\s*4/, "the band does not count 3 steps and 1 item as Stalled: 4: " + text);
+  for (const id of ["c1", "a2", "a5"]) assert.equal(await band(page).locator(`button[data-go="${id}"]`).count(), 1, `the band does not list step ${id}`);
+  assert.match(text, /Step c1/, "the band shows no step title");
+  assert.match(text, /done: landed in #9/, "a landed step does not say it is done and where it landed");
+  assert.match(text, /Pause not counted: it names no one to decide/, "a pause the build refused is not said");
+  assert.match(text, /Item\s*14/);
+  assert.match(text, /fold-done-steps/);
+  assert.match(text, /lane gone/);
+  assert.equal((text.match(/Triage resumes, pauses or closes each/g) || []).length, 1, "the action words are not in the band exactly once");
+  assert.equal(await shows(page, /Resume, pause or done/), false, "a row repeats the action words");
+  assert.equal(await band(page).evaluate((el) => el.classList.contains("hot")), true, "a band with something stalled has no red edge");
+});
+
+test("the paused fold stays closed while something is stalled, and gives why, who decides and when", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  const fold = band(page).locator("details.pz");
+  assert.equal(await fold.count(), 1, "the band has no paused fold");
+  assert.equal(await fold.evaluate((d) => d.open), false, "the paused fold is open with steps stalled");
+  assert.match((await fold.locator("summary").textContent()).replace(/\s+/g, " "), /Paused:\s*1/);
+  await fold.locator("summary").click();
+  const text = (await fold.textContent()).replace(/\s+/g, " ");
+  assert.match(text, /Step a3/);
+  assert.match(text, /Waits for a month of CI numbers\./);
+  assert.match(text, /Owner decides; paused Nov 5, 16:20 CST/);
+});
+
+test("with nothing stalled but a pause the band says so and opens the paused fold", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage({ why: "", steps: [], paused: ["a3"], badPause: [], items: [], ...NO_ITEMS }) }); if (!page) return;
+  await openStatus(page);
+  const text = await bandText(page);
+  assert.match(text, /No stalled step/);
+  assert.doesNotMatch(text, /Stalled:/);
+  assert.equal(await band(page).locator("details.pz").evaluate((d) => d.open), true, "the paused fold is shut with nothing stalled");
+  assert.equal(await band(page).evaluate((el) => el.classList.contains("hot")), false, "an empty band has a red edge");
+});
+
+test("with nothing stalled and nothing paused the band is one quiet line", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage({ why: "", steps: [], paused: [], badPause: [], items: [], ...NO_ITEMS }) }); if (!page) return;
+  await openStatus(page);
+  const text = await bandText(page);
+  assert.match(text, /No stalled step/);
+  assert.equal(await band(page).locator("li, details").count(), 0, "a zero band draws more than its one line");
+});
+
+test("steps not read: the band says not read and why, never none and never zero", async (t) => {
+  const unread = { why: "unknown (steps unknown)", steps: null, paused: [], badPause: [], items: null, itemsWhy: "unknown (steps unknown)" };
+  for (const [name, html] of [["a null read", stalledPage(unread)], ["a build with no stalled key", stalledPage(undefined)]]) {
+    const page = await open(t, { pageHtml: html }); if (!page) return;
+    await openStatus(page);
+    const text = await bandText(page);
+    assert.match(text, /not read/i, name + ": the band does not say not read: " + text);
+    assert.doesNotMatch(text, /No stalled step|Stalled:\s*\d/, name + ": an unread band claims a count: " + text);
+  }
+  const page = await open(t, { pageHtml: stalledPage(unread) }); if (!page) return;
+  await openStatus(page);
+  assert.match(await bandText(page), /steps unknown/, "the band hides the build's reason");
+});
+
+test("items not read: the step list shows and the items part says not read, never none", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage({ why: "", steps: [{ id: "c1", fix: "todo" }], paused: [], badPause: [], items: null, itemsWhy: "unknown (live file rows carry no lane yet)" }) }); if (!page) return;
+  await openStatus(page);
+  const text = await bandText(page);
+  assert.match(text, /Stalled:\s*1/, text);
+  assert.match(text, /Waiting items/);
+  assert.match(text, /not read/i);
+  assert.doesNotMatch(text, /\bnone\b|No waiting item/i, "an unread items part reads as none");
+});
+
+test("a stalled step's row carries a Stalled mark, a paused one a Paused mark, and each says its word once", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#s-c1 [aria-label="Stalled"]').count(), 1, "the stalled row has no Stalled mark");
+  assert.equal(await page.locator('#s-a3 [aria-label="Paused"]').count(), 1, "the paused row has no Paused mark");
+  assert.equal(await page.locator('#s-a4 .meta .tag').count(), 0, "a step with a live lane carries a tag");
+  assert.doesNotMatch(await page.locator("#s-c1 .meta").innerText(), /Stalled/, "the row repeats the word the band says");
+  assert.match(await page.locator("#s-c1 .rrow").getAttribute("aria-label"), /Stalled/, "a screen reader does not hear the row is stalled");
+  assert.match(await page.locator("#s-a3 .rrow").getAttribute("aria-label"), /Paused/);
+});
+
+test("Doing now shows the stalled or paused mark in place of the in-progress mark", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  // Scoped to the Doing now list: Up next draws its own li for each step, so #svNow alone matches those too.
+  const doingNow = page.locator("#svNow > div", { has: page.getByRole("heading", { name: "Doing now", exact: true }) });
+  const row = (id) => doingNow.locator(`li:has(.id:text-is("${id}"))`);
+  for (const id of ["c1", "a3", "d6"]) assert.equal(await row(id).count(), 1, `step ${id} is not in Doing now`);
+  const mark = async (id) => { assert.equal(await row(id).locator('[role="img"]').count(), 1, `step ${id} in Doing now has no state mark`); return row(id).locator('[role="img"]').getAttribute("aria-label"); };
+  assert.equal(await mark("c1"), "Stalled");
+  assert.equal(await mark("a3"), "Paused");
+  assert.equal(await row("a4").count(), 1, "step a4 is not in Doing now, so its mark is not read");
+  assert.equal(await row("a4").locator('[role="img"]').count(), 0, "a step with a live lane shows a state mark");
+});
+
+test("a doing step with a live lane reads In progress, not To do", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage({ why: "", steps: [], paused: [], badPause: [], items: [], ...NO_ITEMS }) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator("#s-d6").count(), 1, "step d6 has no row in the Status list");
+  assert.match(await page.locator("#s-d6 .rrow").getAttribute("aria-label"), /In progress/, "a doing step does not read In progress");
+  assert.equal(await page.locator("#s-d6").evaluate((li) => li.classList.contains("active")), true);
+});
+
+test("merged_page.py --live hands its JSON to the build as the live file", () => {
+  const live = { readAt: new Date().toISOString(), threads: [], pulls: [] };
+  const html = mergedPage("--live", JSON.stringify(live));
+  const b = JSON.parse(BUILD_BLOCK.exec(html)[1]);
+  assert.ok(b.live && Array.isArray(b.live.threads), "the build did not read the live file: " + JSON.stringify(b.live ?? null));
+});
+
 // ---------------------------------------------------------------- c135: a question that takes several answers
 // Spec: the c135 spec (Data, Answer, Page). Labels: docs/design/c135-multi.html. A multi item sets `multi: true`; `ranked: true` also orders the ticks.
 
