@@ -1,4 +1,4 @@
-# A repo matches a shared format; the shared tool never grows a second form
+# A repo should match a shared format, rather than the shared tool grow a second form
 
 ## The ruling
 

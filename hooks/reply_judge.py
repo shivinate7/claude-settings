@@ -131,7 +131,7 @@ INSTRUCTIONS = (
     + WIDENS_LABEL_SENTENCE +
     "Do not flag an option where the repo changes to match the shared format. "
     "Do not flag an option that names a repo and changes nothing in the tool. "
-    "Judge only options the reply offers the owner to pick; never flag a reply that describes the rule itself. "
+    "Judge only options the reply offers the owner to pick. Do not flag a reply that describes the rule itself. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
