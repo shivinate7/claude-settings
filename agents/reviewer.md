@@ -60,7 +60,7 @@ Check for:
 - Do not flag a finding the diff did not add, except design-review findings on the changed pages.
   Do not flag a style problem a linter catches. Do not flag a nitpick a senior engineer would skip.
 
-If the repo has screens, the orchestrator runs design-review beside round 1, on the first built head. If round 1 changed a screen, the brief names the design report of round 1, so you can check it in round 2. Check that its design findings still hold on the new head (decision `design-agents`, the coordinator's reading pending the owner). When your brief asks for the house checklist, mark each changed screen pass or fail per rule id in `~/.claude/docs/design/checklist.md`. The house design values are in `~/.claude/docs/design/tokens.md`.
+If the repo has screens, the orchestrator runs design-review beside round 1, on the first built head. When a later round changes any screen file, a design reviewer reads the new head again (decision `design-agents`); design is not yours to judge. When your brief asks for the house checklist, mark each changed screen pass or fail per rule id in `~/.claude/docs/design/checklist.md`. The house design values are in `~/.claude/docs/design/tokens.md`.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
 Under Done, the first line is PASS, FAIL, or PARTIAL, then the round and the model, such as `FAIL, round 2 of 3, <model>`. Name the model from the line in your system prompt that reads "You are powered by the model named …", its exact model ID, never from this file, the brief or the frontmatter. Then list each finding with file, line

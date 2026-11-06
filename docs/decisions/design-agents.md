@@ -14,10 +14,9 @@ text-only change (owner, 2026-11-03: design reviewer only).
 - The design reviewer (`agents/design-reviewer.md`) runs beside review round 1, on the first built
   head. It judges each built screen against the mockup and the repo's design rules, at every size and
   theme, with a verdict per screen. Its fixes go to the builder with the round-1 code findings.
-  - Coordinator's reading, for the owner to correct: when round 1 changes a screen, the round-2 reviewer
-    checks that the design reviewer's findings still hold. No second design review runs unless
-    round 1 changed a screen's layout.
-    Open for the owner: they judge what counts as a layout change, and so when a second design review runs.
+  - Owner, 2026-11-06 11:22 CST (owner item 259 a): any change to a screen file after review round 1
+    gets a second design read. A screen file is any file the screen is built from: markup, component,
+    style, token or copy. The design reviewer reads the new head, on the screens that file renders.
 - Routing has one test, one exception: does the lane touch a screen (`roles-one-role-per-agent`). `agents/reviewer.md`
   still reviews the code. Exception: a text-only change skips the designer. The design
   reviewer still runs beside round 1. Owner ask `ask-mw18vywh8g` (small text changes on existing
