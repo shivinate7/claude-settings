@@ -28,9 +28,14 @@ export const cleanEnv = () => apply(Object.fromEntries(Object.entries(process.en
 /** A path in one comparable form. `native` expands 8.3 names such as SHIVAM~1. Windows paths compare in lower case. */
 export const real = (p) => (process.platform === 'win32' ? realpathSync.native(p).toLowerCase() : realpathSync.native(p));
 
-/** Runs node with `args`. The cwd is the folder the case names, and `input` goes to stdin. `env` adds to the clean env, or replaces a key of it. */
-export const run = (args, cwd, input, env = {}) => {
-  const r = spawnSync(process.execPath, args, { cwd, env: { ...cleanEnv(), ...env }, input, encoding: 'utf8', timeout: 120000, maxBuffer: 64 * 1024 * 1024 });
+/**
+ * Runs node with `args`. The cwd is the folder the case names, and `input` goes to stdin. `env` adds to the clean env, or replaces a key of it.
+ * `drop` names the keys the child must not see, such as `CI`, which a runner sets for the whole job.
+ */
+export const run = (args, cwd, input, env = {}, drop = []) => {
+  const childEnv = { ...cleanEnv(), ...env };
+  for (const key of drop) delete childEnv[key];
+  const r = spawnSync(process.execPath, args, { cwd, env: childEnv, input, encoding: 'utf8', timeout: 120000, maxBuffer: 64 * 1024 * 1024 });
   return { status: r.status, signal: r.signal, stdout: r.stdout ?? '', out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 };
 
