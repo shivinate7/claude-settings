@@ -8,7 +8,8 @@ Run it from the repository root:
 Standard library only, and no test runner. Each case runs against a bare store on a file:// URL
 (MAILBOX_REPO) with one scratch cache per machine (MAILBOX_CACHE). No case sleeps or reads the clock.
 
-Contract the builder codes against. Every case is red until the product exists.
+Contract the builder codes against. Each case asserts one named cause. Pinned choice 11 lists the cases
+that pass on the base commit, and why each stays.
 - bin/mail send --to <addr> --kind request|inform|reply [--re <id>] --body-file F
   The sender's address is cloud/<CLAUDE_CODE_REMOTE_SESSION_ID>. It writes mail/<addr>/<id>.md on
   refs/heads/mail with plumbing only, never a working tree.
@@ -23,7 +24,9 @@ Contract the builder codes against. Every case is red until the product exists.
 
 Pinned choices (each one a departure or an open point, not settled by the spec):
 1. Retry trigger. A push is retried only after a non-fast-forward, at most 5 retries, so 6 pushes
-   in all. Any other refused push prints "not sent: <reason>" at once and exits 1 (the lane ruling).
+   in all. Any other refused push prints "not sent: <reason>" at once and exits 1. The ruling is
+   page item 153 (the git mailbox), owner pick a, 2026-11-06 15:24 CST: push retry on non-fast-forward
+   only, at most 5 retries.
 2. A non-fast-forward on every try. Git forbids ref updates inside a pre-receive hook, and a
    server refusal reads "[remote rejected]", so the case pushes to a second store whose tip the
    sender never fetched. The client refuses each push itself, as "[rejected]", before it sends
@@ -32,14 +35,36 @@ Pinned choices (each one a departure or an open point, not settled by the spec):
    is the remote check, and the turn writes no file.
 4. A request stays listed after its reply lands, until take. An inform closes by take alone; that
    case asserts that take removes it from turn start and creates nothing else.
-5. Only the cloud address form is covered. The pc/<host> form has no seam for a test.
+5. The pc/<host> form is covered in-process. The checkout gets an origin URL, and socket.gethostname is
+   patched to a fixed host. The CLI subprocess sees the real host, so the --addr cases pass the address.
 6. The sweep of old run folders is proven in hooks/test_feedback_inbox.py. Not repeated here.
+7. A stand-in git (a script named git, first on the case's PATH; POSIX only, CI runs on ubuntu) stands in
+   for the git calls of one machine. It logs each call's env, fails a named subcommand, or runs an
+   interloper once before its push, then execs the real git. ReadShowFails, PushRefusedRetry,
+   TakeBothFromOneTip and PromptEnv use it.
+8. Timeouts. Each git call of a turn start carries its own bound. The bounds of one moved turn sum to
+   10 s or less: fixed per-step bounds, the worst case where every step runs its full bound. A shared
+   deadline would also pass. The case reads no clock (P5).
+9. A hang is simulated. Starts raises subprocess.TimeoutExpired for a named git subcommand, the exception
+   a real bound raises, so no case waits out a bound.
+10. Cloud ids: CLAUDE_CODE_REMOTE_SESSION_ID cse_<x> is the address cloud/session_<x>. The older cases keep
+   plain ids such as sess-b, which the cse_ mapping must not change.
+11. Cases that pass on the base commit 7e79b56d. Each is a regression guard for its named claim, and each
+   has a mutant check (the mutant is a copy of the built code with one line changed; it is not in the repo):
+   PushRefusedRetry (retries set to 1: "not sent", exit 1) and TakeBothFromOneTip (a lost push read as a win:
+   the second taker prints taken). The race cases give their two machines distinct git identities. With one
+   identity and one address, two takers can build the same take commit in the same second, and the second
+   push then succeeds as a no-op and prints "taken". That is a product finding. It depends on the second, so
+   no case pins it.
 
 Every machine gets a git identity, as a configured Mac does. A machine with no identity is not covered.
 """
+import contextlib
 import importlib.util
+import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import unittest
@@ -63,7 +88,48 @@ SCRUBBED = ("CLAUDE_CODE_REMOTE_SESSION_ID", "MAILBOX_REPO", "MAILBOX_CACHE", "G
             "GIT_ALTERNATE_OBJECT_DIRECTORIES", "CLAUDE_CODE_EXECPATH", "AI_AGENT")
 IDENTITY = {"GIT_AUTHOR_NAME": "Mail Test", "GIT_AUTHOR_EMAIL": "mail-test@example.invalid",
             "GIT_COMMITTER_NAME": "Mail Test", "GIT_COMMITTER_EMAIL": "mail-test@example.invalid"}
+# A second machine's identity. Two takers with one identity and one address can build byte-identical
+# take commits in the same second, so a race case gives its two machines different identities.
+OTHER_IDENTITY = {"GIT_AUTHOR_NAME": "Mail Other", "GIT_AUTHOR_EMAIL": "mail-other@example.invalid",
+                  "GIT_COMMITTER_NAME": "Mail Other", "GIT_COMMITTER_EMAIL": "mail-other@example.invalid"}
 UNKNOWN = "mail unknown: "
+REAL_GIT = shutil.which("git")  # resolved before any case edits PATH: the stand-in execs this
+ORIGIN = "https://github.com/acme/widgets.git"  # the pc slug is acme-widgets
+PC_HOST = "box-one"
+PC_BASE = "pc/box-one/acme-widgets"
+# The stand-in git. @PYTHON@, @CONF@ and @REAL@ are filled in by Machine.install_stub.
+STUB = """#!@PYTHON@
+import json, os, subprocess, sys
+CONF = @CONF@
+REAL = @REAL@
+WATCH = ("GIT_TERMINAL_PROMPT", "GCM_INTERACTIVE")
+
+
+def subcommand(argv):
+    rest = list(argv)
+    while rest and rest[0] in ("-c", "-C", "--git-dir", "--work-tree"):
+        rest = rest[2:]
+    return rest[0] if rest else None
+
+
+with open(CONF, encoding="utf-8") as handle:
+    conf = json.load(handle)
+args = sys.argv[1:]
+sub = subcommand(args)
+if conf.get("log"):
+    with open(conf["log"], "a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"sub": sub, "env": {k: os.environ.get(k) for k in WATCH}}) + "\\n")
+action = (conf.get("actions") or {}).get(sub)
+if action and action["kind"] == "fail":
+    sys.stderr.write(action["stderr"] + "\\n")
+    sys.exit(128)
+if action and action["kind"] == "before" and not os.path.exists(action["once"]):
+    open(action["once"], "w").close()
+    done = subprocess.run(action["argv"], env=action["env"], capture_output=True, text=True)
+    with open(action["record"], "w", encoding="utf-8") as handle:
+        json.dump({"code": done.returncode, "out": done.stdout + done.stderr}, handle)
+os.execv(REAL, [REAL] + args)
+"""
 
 
 def load_hook():
@@ -164,20 +230,27 @@ class Store:
 class Machine:
     """One machine: its own home, its own cache, and a scratch checkout as its working directory."""
 
-    def __init__(self, case, name, repo_url, session=None, push_to=None, trace=None):
+    def __init__(self, case, name, repo_url, session=None, push_to=None, trace=None, origin=None,
+                 stub=False, prompt_env=True, identity=None):
         self.name = name
         self.session = session
+        self.case = case
         self.home = os.path.join(case, name + "-home")
         self.cache = os.path.join(case, name + "-cache.git")
         self.checkout = os.path.join(case, name + "-checkout")
         os.makedirs(self.home, exist_ok=True)
         os.makedirs(self.checkout, exist_ok=True)
         git(self.checkout, ["init", "-q"], fixture_env(self.home))
+        if origin is not None:
+            git(self.checkout, ["remote", "add", "origin", origin], fixture_env(self.home))
         env = scrubbed_environ()
-        env.update(IDENTITY)
+        env.update(identity or IDENTITY)
         env.update({"HOME": self.home, "USERPROFILE": self.home, "XDG_CONFIG_HOME": self.home,
                     "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1",
                     "MAILBOX_REPO": repo_url, "MAILBOX_CACHE": self.cache})
+        if not prompt_env:  # the product must set both itself
+            for key in ("GIT_TERMINAL_PROMPT", "GCM_INTERACTIVE"):
+                env.pop(key, None)
         if session is not None:
             env["CLAUDE_CODE_REMOTE_SESSION_ID"] = session
         if push_to is not None:
@@ -185,33 +258,74 @@ class Machine:
         if trace is not None:
             env["GIT_TRACE2_EVENT"] = trace
         self.env = env
+        self.stub_conf = None
+        if stub:
+            self.install_stub()
+
+    def install_stub(self):
+        """Puts the stand-in git first on this machine's PATH. Its actions come from stub_actions."""
+        folder = os.path.join(self.case, self.name + "-stub")
+        os.makedirs(folder)
+        self.stub_conf = os.path.join(folder, "conf.json")
+        script = os.path.join(folder, "git")
+        body = (STUB.replace("@PYTHON@", sys.executable).replace("@CONF@", repr(self.stub_conf))
+                .replace("@REAL@", repr(REAL_GIT)))
+        with open(script, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(body)
+        os.chmod(script, 0o755)
+        self.env["PATH"] = folder + os.pathsep + self.env.get("PATH", "")
+        self.stub_actions({})
+
+    def stub_actions(self, actions, log=None):
+        """actions: {git subcommand: {"kind": "fail", "stderr": ...} | {"kind": "before", "once", "argv", "env", "record"}}.
+        log: a file that gets one line per git start (its subcommand and the two prompt variables)."""
+        with open(self.stub_conf, "w", encoding="utf-8") as handle:
+            json.dump({"actions": actions, "log": log}, handle)
 
 
 class Starts:
-    """Counts the processes started inside this block. Popen covers subprocess.run and the no-window wrapper."""
+    """Counts the processes started inside this block, and the timeout each git run was given. Popen covers
+    subprocess.run and the no-window wrapper. `expire` names git subcommands whose run raises TimeoutExpired
+    at once, the exception a hang past its bound raises, so no case waits out a bound."""
 
-    def __init__(self):
+    def __init__(self, expire=()):
         self.argv = []
+        self.bounds = []
+        self.expire = tuple(expire)
 
     def __enter__(self):
-        starts = self.argv
+        starts, bounds, expire = self.argv, self.bounds, self.expire
         real = subprocess.Popen
+        real_run = subprocess.run
 
         class Counting(real):
             def __init__(self, args, *rest, **kwargs):
                 starts.append(args)
                 super().__init__(args, *rest, **kwargs)
 
-        self.patch = mock.patch.object(subprocess, "Popen", Counting)
-        self.patch.start()
+        def counting_run(args, *rest, **kwargs):
+            if program_name(args) == "git":
+                bounds.append(kwargs.get("timeout"))
+                if git_subcommand(args) in expire:
+                    raise subprocess.TimeoutExpired(args, kwargs.get("timeout"))
+            return real_run(args, *rest, **kwargs)
+
+        self.patches = [mock.patch.object(subprocess, "Popen", Counting),
+                        mock.patch.object(subprocess, "run", counting_run)]
+        for patch in self.patches:
+            patch.start()
         return self
 
     def __exit__(self, *exc):
-        self.patch.stop()
+        for patch in reversed(self.patches):
+            patch.stop()
         return False
 
     def git_starts(self):
         return [args for args in self.argv if program_name(args) == "git"]
+
+    def git_bounds(self):
+        return list(self.bounds)
 
 
 def program_name(args):
@@ -279,8 +393,9 @@ def add_git_config(env, key, value):
     env["GIT_CONFIG_COUNT"] = str(count + 1)
 
 
-def turn(machine):
-    payload = {"session_id": machine.session, "cwd": machine.checkout,
+def turn(machine, session_id=None):
+    """One UserPromptSubmit payload. A local session has no env id, so its payload names it with session_id."""
+    payload = {"session_id": machine.session if session_id is None else session_id, "cwd": machine.checkout,
                "hook_event_name": "UserPromptSubmit", "prompt": "continue"}
     with mock.patch.dict(os.environ, machine.env, clear=True):
         return turn_start_lines(payload, machine.env)
@@ -302,8 +417,10 @@ class MailCase(unittest.TestCase):
     def store(self, name="store"):
         return Store(self.case, name)
 
-    def machine(self, name, store, session=None, push_to=None, trace=None):
-        return Machine(self.case, name, store.url, session, push_to=push_to, trace=trace)
+    def machine(self, name, store, session=None, push_to=None, trace=None, origin=None, stub=False,
+                prompt_env=True, identity=None):
+        return Machine(self.case, name, store.url, session, push_to=push_to, trace=trace, origin=origin,
+                       stub=stub, prompt_env=prompt_env, identity=identity)
 
     def body(self, marker):
         self.counter += 1
@@ -521,6 +638,203 @@ class ReplyThenTake(MailCase):
         self.assertEqual(taken.returncode, 0, "the take exited %d: %s" % (taken.returncode, combined(taken)))
         after = listed_with(turn(receiver), "0a1b2c3d4e54")
         self.assertEqual(after, [], "the request is still listed after take: %r" % after)
+
+
+class CloudAddress(MailCase):
+    def test_cloud_id_cse_maps_to_session_address_and_mail_to_it_is_listed(self):
+        store = self.store()
+        sender = self.machine("a", store, session="cse_SENDER")
+        receiver = self.machine("b", store, session="cse_ABC")
+        sent = self.send(sender, "cloud/session_ABC", "request", "cloud-address")
+        self.assertEqual(sent.returncode, 0, "mail send exited %d: %s" % (sent.returncode, combined(sent)))
+        landed = store.files("mail/cloud/session_ABC/")
+        self.assertEqual(len(landed), 1, "control: one send should land one message at cloud/session_ABC: %r" % landed)
+        listed = listed_with(turn(receiver), message_id(landed[0]))
+        self.assertEqual(len(listed), 1, "the receiver with CLAUDE_CODE_REMOTE_SESSION_ID=cse_ABC does not list "
+                         "mail to cloud/session_ABC: its own address is not cloud/session_ABC: %r" % listed)
+
+
+class PcSessionScope(MailCase):
+    def test_session_mail_reaches_only_its_session_and_repo_mail_reaches_both(self):
+        store = self.store()
+        box = self.machine("pc", store, origin=ORIGIN)
+        store.seed(PC_BASE + "/S1", "0a1b2c3d4e91", "request", PC_BASE + "/S2", "Body marker: s1-only\n")
+        store.seed(PC_BASE, "0a1b2c3d4e92", "inform", PC_BASE + "/S2", "Body marker: repo-wide\n")
+        with mock.patch("socket.gethostname", return_value=PC_HOST):
+            s1 = turn(box, "S1")
+            s2 = turn(box, "S2")
+        self.assertEqual(len(listed_with(s1, "0a1b2c3d4e91")), 1,
+                         "control: session S1 does not list mail to its own address: %r" % s1)
+        self.assertEqual(listed_with(s2, "0a1b2c3d4e91"), [],
+                         "session S2 lists mail addressed to session S1: %r" % s2)
+        self.assertEqual(len(listed_with(s1, "0a1b2c3d4e92")), 1,
+                         "control: session S1 does not list repo-wide mail: %r" % s1)
+        self.assertEqual(len(listed_with(s2, "0a1b2c3d4e92")), 1,
+                         "session S2 does not list mail to the repo address: %r" % s2)
+
+
+class PcCommands(MailCase):
+    def seeded(self):
+        store = self.store()
+        box = self.machine("pc", store, origin=ORIGIN)
+        store.seed(PC_BASE + "/S1", "0a1b2c3d4e93", "request", PC_BASE + "/S2", "Body marker: s1-commands\n")
+        return store, box
+
+    def test_turn_start_line_names_take_with_addr_for_session_mail(self):
+        store, box = self.seeded()
+        with mock.patch("socket.gethostname", return_value=PC_HOST):
+            lines = listed_with(turn(box, "S1"), "0a1b2c3d4e93")
+        self.assertEqual(len(lines), 1, "control: session S1 does not list its own mail: %r" % lines)
+        command = "mail take --addr %s/S1 0a1b2c3d4e93" % PC_BASE
+        self.assertIn(command, lines[0], "the turn-start line does not name the exact take command: %r" % lines[0])
+
+    def test_cli_read_and_take_with_addr_reach_session_mail(self):
+        store, box = self.seeded()
+        addr = PC_BASE + "/S1"
+        read = run_cli(box, "read", "--addr", addr, "0a1b2c3d4e93")
+        self.assertEqual(read.returncode, 0, "mail read --addr exited %d: %s" % (read.returncode, combined(read)))
+        self.assertIn("Body marker: s1-commands", read.stdout, "mail read --addr did not show the body: %r" % read.stdout)
+        taken = run_cli(box, "take", "--addr", addr, "0a1b2c3d4e93")
+        self.assertEqual(taken.returncode, 0, "mail take --addr exited %d: %s" % (taken.returncode, combined(taken)))
+        self.assertEqual(len(store.files("done/" + addr + "/")), 1,
+                         "mail take --addr left no done file for session S1: %r" % store.files("done/"))
+        self.assertEqual(store.files("mail/" + addr + "/"), [], "mail take --addr left the message open")
+
+
+class TurnBound(MailCase):
+    def seeded_receiver(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4e71", "request", "cloud/sess-a", "Body marker: bound\n")
+        return self.machine("b", store, session="sess-b")
+
+    def test_moved_turn_git_bounds_sum_to_ten_seconds_or_less(self):
+        receiver = self.seeded_receiver()
+        with Starts() as moved:
+            lines = turn(receiver)
+        self.assertTrue(listed_with(lines, "0a1b2c3d4e71"), "control: the moved turn does not list the message: %r" % lines)
+        self.assertTrue(moved.git_starts(), "control: the moved turn started no git")
+        self.assertNotIn(None, moved.git_bounds(), "a git start in the turn has no timeout: %r" % moved.git_bounds())
+        total = sum(moved.git_bounds())
+        self.assertLessEqual(total, 10, "the moved turn's git timeouts %r sum to %s s, over the 10 s bound"
+                             % (moved.git_bounds(), total))
+
+    def test_hung_fetch_prints_mail_unknown_timeout(self):
+        receiver = self.seeded_receiver()
+        with Starts(expire=("fetch",)):
+            lines = turn(receiver)
+        self.assertIn(UNKNOWN + "timeout", lines, "a hung fetch did not print 'mail unknown: timeout': %r" % lines)
+        self.assertFalse(any("no mail" in line.lower() for line in lines),
+                         "a hung fetch read as an empty mailbox: %r" % lines)
+
+
+class LocalTimeMailLines(MailCase):
+    def hook_stdout(self, **patch_kwargs):
+        import local_time  # hooks/local_time.py: the caller of mail.turn_start_lines
+        import mail as mail_module
+        raw = json.dumps({"session_id": "sess-b", "cwd": self.case}).encode("utf-8")
+        out, escaped = io.StringIO(), None
+        with mock.patch.object(mail_module, "turn_start_lines", **patch_kwargs), contextlib.redirect_stdout(out):
+            try:
+                local_time.mail_lines(raw)
+            except Exception as error:  # reported by the assert below, so the cause reads as the assert
+                escaped = error
+        return out.getvalue().splitlines(), escaped
+
+    def test_control_prints_the_lines_the_mail_module_returns(self):
+        lines, escaped = self.hook_stdout(return_value=["mail: control-line"])
+        self.assertIsNone(escaped, "control: mail_lines raised on a healthy mail module: %r" % escaped)
+        self.assertEqual(lines, ["mail: control-line"], "control: mail_lines did not print the module's lines")
+
+    def test_mail_module_error_prints_mail_unknown_line_on_stdout(self):
+        lines, escaped = self.hook_stdout(side_effect=RuntimeError("boom"))
+        self.assertIsNone(escaped, "mail_lines let the mail module's error out instead of printing a line: %r" % escaped)
+        self.assertIn(UNKNOWN + "boom", lines, "stdout has no 'mail unknown: <reason>' line: %r" % lines)
+
+
+class ReadShowFails(MailCase):
+    def test_read_with_git_show_failing_prints_mail_unknown_not_no_open_message(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4e81", "request", "cloud/sess-a", "Body marker: show\n")
+        reader = self.machine("b", store, session="sess-b", stub=True)
+        ok = run_cli(reader, "read", "0a1b2c3d4e81")
+        self.assertEqual(ok.returncode, 0, "control: a healthy mail read exited %d: %s" % (ok.returncode, combined(ok)))
+        self.assertIn("Body marker: show", ok.stdout, "control: a healthy mail read did not show the body")
+        absent = run_cli(reader, "read", "0a1b2c3d4e82")
+        self.assertIn("no open message 0a1b2c3d4e82", combined(absent), "control: an absent id did not say no open message")
+        reader.stub_actions({"show": {"kind": "fail", "stderr": "fatal: bad object 0a1b2c3d4e81"}})
+        broken = run_cli(reader, "read", "0a1b2c3d4e81")
+        self.assertIn(UNKNOWN, combined(broken), "mail read with git show failing did not print 'mail unknown:': %r"
+                      % combined(broken))
+        self.assertNotIn("no open message", combined(broken), "mail read with git show failing read as no open message: %r"
+                         % combined(broken))
+
+
+class PushRefusedRetry(MailCase):
+    def test_push_refused_by_an_interloper_lands_on_try_two(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4e95", "request", "cloud/sess-x", "Body marker: base\n")
+        interloper = self.machine("c", store, session="sess-c")
+        trace = os.path.join(self.case, "trace2.jsonl")
+        sender = self.machine("b", store, session="sess-b", trace=trace, stub=True)
+        record = os.path.join(self.case, "interloper.json")
+        sender.stub_actions({"push": {
+            "kind": "before", "once": os.path.join(self.case, "once.marker"), "record": record, "env": interloper.env,
+            "argv": [sys.executable, MAIL_CLI, "send", "--to", "cloud/sess-b", "--kind", "inform",
+                     "--body-file", self.body("interloper")]}})
+        sent = self.send(sender, "cloud/sess-b", "request", "push-race-sender")
+        with open(record, encoding="utf-8") as handle:
+            landed_first = json.load(handle)
+        self.assertEqual(landed_first["code"], 0, "control: the interloper's send did not land: %r" % landed_first["out"])
+        self.assertEqual(sent.returncode, 0, "the send that lost the push race exited %d: %s"
+                         % (sent.returncode, combined(sent)))
+        self.assertEqual(push_count(trace), 2, "the send made %d pushes, expected 2 (one refused, one landed)"
+                         % push_count(trace))
+        landed = [path for path in store.files("mail/cloud/sess-b/") if "push-race-sender" in store.read(path)]
+        self.assertEqual(len(landed), 1, "the send's message did not land once on the store: %r" % landed)
+        header = store.read(landed[0]).splitlines()[0]
+        self.assertEqual(header.split()[-2:], ["try", "2"], "the message did not land on try 2: %r" % header)
+
+
+class TakeBothFromOneTip(MailCase):
+    def test_two_takers_from_one_tip_one_takes_and_the_other_is_taken_by_another(self):
+        store = self.store()
+        mid = "0a1b2c3d4e96"
+        store.seed("cloud/sess-b", mid, "request", "cloud/sess-a", "Body marker: both-takers\n")
+        first = self.machine("a", store, session="sess-b", identity=OTHER_IDENTITY)
+        second = self.machine("b", store, session="sess-b", stub=True)
+        record = os.path.join(self.case, "first-taker.json")
+        second.stub_actions({"push": {
+            "kind": "before", "once": os.path.join(self.case, "once.marker"), "record": record, "env": first.env,
+            "argv": [sys.executable, MAIL_CLI, "take", mid]}})
+        lost = run_cli(second, "take", mid)
+        with open(record, encoding="utf-8") as handle:
+            won = json.load(handle)
+        self.assertEqual(won["code"], 0, "control: the first taker did not take: %r" % won["out"])
+        self.assertIn("taken %s" % mid, won["out"], "control: the first taker did not print taken: %r" % won["out"])
+        self.assertNotEqual(lost.returncode, 0, "the second taker exited 0 after the first one took: %r" % combined(lost))
+        self.assertIn("taken by another", combined(lost), "the second taker did not say taken by another: %r"
+                      % combined(lost))
+        self.assertNotIn("taken %s" % mid, combined(lost), "both takers printed taken: %r" % combined(lost))
+        self.assertEqual(len(store.files("done/cloud/sess-b/")), 1, "the take race left %r done files, expected one"
+                         % store.files("done/cloud/sess-b/"))
+
+
+class PromptEnv(MailCase):
+    def test_every_git_start_sets_no_prompt_and_no_credential_prompt(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4e97", "request", "cloud/sess-a", "Body marker: prompt\n")
+        log = os.path.join(self.case, "git-starts.jsonl")
+        receiver = self.machine("b", store, session="sess-b", stub=True, prompt_env=False)
+        receiver.stub_actions({}, log=log)
+        turn(receiver)
+        sent = self.send(receiver, "cloud/sess-a", "reply", "prompt-reply", re_id="0a1b2c3d4e97")
+        self.assertEqual(sent.returncode, 0, "control: the reply exited %d: %s" % (sent.returncode, combined(sent)))
+        starts = [json.loads(line) for line in read_lines(log)]
+        self.assertTrue(starts, "control: no git start was logged")
+        self.assertEqual([s["sub"] for s in starts if s["env"].get("GIT_TERMINAL_PROMPT") != "0"], [],
+                         "git starts ran without GIT_TERMINAL_PROMPT=0")
+        self.assertEqual([s["sub"] for s in starts if s["env"].get("GCM_INTERACTIVE") != "never"], [],
+                         "git starts ran without GCM_INTERACTIVE=never")
 
 
 if __name__ == "__main__":
