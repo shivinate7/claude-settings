@@ -571,12 +571,12 @@ class UnreadConfigTests(unittest.TestCase):
         with open(os.path.join(self.tree, name), "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
 
-    def run_lint(self, ci=False):
-        """The CLI's exit code and output, run in the fixture folder. Env CI is off unless `ci` sets it."""
+    def run_lint(self, ci=False, extra=()):
+        """The CLI's exit code and output, run in the fixture folder. Env CI is off unless `ci` sets it. `extra` adds options."""
         env = {k: v for k, v in os.environ.items() if k != "CI"}
         if ci:
             env["CI"] = "1"
-        done = subprocess.run([sys.executable, STE, "doc.md"], cwd=self.tree, capture_output=True, text=True,
+        done = subprocess.run([sys.executable, STE, "doc.md", *extra], cwd=self.tree, capture_output=True, text=True,
                               encoding="utf-8", env=env, timeout=60)
         return done.returncode, done.stdout + done.stderr
 
@@ -611,6 +611,16 @@ class UnreadConfigTests(unittest.TestCase):
         rc, out = self.run_lint(ci=True)
         self.assertDocRead(out)
         self.assertNotEqual(rc, 0, "a .ste.toml that does not parse passed in CI:\n" + out)
+
+    @unittest.skipUnless(sys.version_info >= (3, 11), "tomllib, which reads .ste.toml, needs Python 3.11 or later")
+    def test_a_malformed_toml_with_fail_on_never_prints_unknown_and_summary_and_exits_0_in_ci(self):
+        # The caller's opt-out (lane ruling R2): `--fail-on never` keeps the run's exit at 0. The UNKNOWN and the summary still print.
+        self.write(".ste.toml", "[ste\nmax_words = \n")
+        rc, out = self.run_lint(ci=True, extra=("--fail-on", "never"))
+        self.assertDocRead(out)
+        self.assertIn("ste-lint: 1 files", out, "the summary did not print:\n" + out)
+        self.assertIn("UNKNOWN", out, "the unparsed .ste.toml printed no UNKNOWN line:\n" + out)
+        self.assertEqual(rc, 0, "--fail-on never is the caller's opt-out: an UNKNOWN must not fail the run in CI:\n" + out)
 
     def test_a_readable_config_is_green_in_ci_with_no_unknown(self):
         # Green control: a config that parses passes in CI, with the doc still read and no UNKNOWN line.
