@@ -90,7 +90,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml) on="$on code " ;;
       # Map skill .md files: its tests read them, so this arm turns on `mods` before the *.md arm.
       skills/plain-english-map/*.md) on="$on $W $X mods " ;;
-      # The claude CLI pin of the judge-replay job: only that job reads it, and hooks/judge_replay.py --paths turns its flag on.
+      # The claude CLI pin and the judge corpora (corpus/) of the judge-replay job: only that job reads them, and hooks/judge_replay.py --paths turns its flag on.
       .github/judge-replay/*) ;;
       # Docs: nothing runs on them but the lints in `checks`. (hooks/*.md, the precompact prompt, matches hooks/* above.)
       *.md) ;;

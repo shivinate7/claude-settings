@@ -7,7 +7,7 @@ measured against what the judge must keep doing (decision judge-replay-corpus).
     python3 hooks/judge_replay.py --all                   # every judge
     git diff --name-only A...B | python3 hooks/judge_replay.py --paths   # the touched names, one per line
 
-A corpus is a JSON list in hooks/judge_corpus/<name>.json. Each case: {"id", "expect": "allow" | "deny", "source",
+A corpus is a JSON list in .github/judge-replay/corpus/<name>.json. Each case: {"id", "expect": "allow" | "deny", "source",
 "input", "agreement"?}. `input` is the judge's own input, and one adapter per name turns it into the arguments of the
 judge's real entry function. The runner holds no prompt: each case drives the entry, which builds its own prompt and
 calls decision_watch.invoke_model, the one model seam, looked up at call time. The adapter reads what the entry did:
@@ -47,7 +47,7 @@ PAGE_ITEM = "283"
 UNKNOWN_AUTH_LINE = ("UNKNOWN: model calls cannot authenticate. Add repo secret CLAUDE_CODE_OAUTH_TOKEN "
                      "(owner, waiting page item %s)." % PAGE_ITEM)
 
-CORPUS_DIR = "hooks/judge_corpus"
+CORPUS_DIR = ".github/judge-replay/corpus"  # out of hooks/: the installer lands hooks/ but not its subfolders
 SEAM = "hooks/decision_watch.py"
 GUARD = "hooks/guard.py"  # decision_watch imports it
 SHARED_NAMES = "hooks/shared_names.py"  # holds prompt text: the spawn marker and the gh logins
