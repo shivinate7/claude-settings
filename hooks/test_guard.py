@@ -27298,6 +27298,9 @@ rbb_allow("reviewer-brief-blind: allowed: a builder spawn whose brief holds a re
 rbb_allow("reviewer-brief-blind: allowed: a findings line holding a lone quote and comment openers",
           "Round 2 of 3. Re-check the findings.\nFinding 1: hooks/guard.py:2454, don't skip /* the // check # now.",
           model="sonnet")
+# One report label at line start is not a pasted report. A guard that refuses at one label, not two, fails this case.
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with exactly one report label at line start",
+          "Check the floor fix.\nDone: when `verdict python3 hooks/test_guard.py` is green.\nFiles: hooks/guard.py.")
 # The empty state: a reviewer brief with no text holds no report, so it passes.
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with an empty prompt", "")
 add("reviewer-brief-blind: allowed: a Workflow agent() reviewer on Round 2 of 3 with a findings list",
