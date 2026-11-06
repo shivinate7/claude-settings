@@ -293,6 +293,19 @@ class CostTests(unittest.TestCase):
         self.assertEqual(root.find(".//" + NS + "DaysInterval").text, "1", "every one day")
         self.assertIsNone(root.find(".//" + NS + "Repetition"), "no repetition inside the day")
 
+    def test_the_task_has_exactly_one_trigger_the_daily_calendar_time_and_no_boot_or_logon_start(self):
+        # Task Scheduler has no RunAtLoad key. The task starts by itself only through its Triggers, so the one
+        # trigger must be a calendar trigger that repeats every day, and no boot or logon trigger may sit beside it.
+        code, log, out_dir = self.install()
+        root = ET.parse(os.path.join(out_dir, install_schtasks.TASK_NAME + ".xml")).getroot()
+        triggers = root.find(NS + "Triggers")
+        self.assertIsNotNone(triggers, "the task has a Triggers element")
+        self.assertEqual([child.tag for child in triggers], [NS + "CalendarTrigger"],
+                         "one trigger, a calendar trigger, and no other; got %r" % [c.tag for c in triggers])
+        calendar = triggers.find(NS + "CalendarTrigger")
+        schedules = [child.tag for child in calendar if child.tag.startswith(NS + "Schedule")]
+        self.assertEqual(schedules, [NS + "ScheduleByDay"], "the calendar trigger repeats by day; got %r" % schedules)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
