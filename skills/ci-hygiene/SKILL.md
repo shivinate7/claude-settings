@@ -92,7 +92,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    the merge tool.
    Batch across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
-   notice. Never run `gh run watch`. One watch made 131 API calls in one minute (decision
+   notice. In cloud, mark ready by MCP `update_pull_request` `draft: false` (decision
+   `github-routes-in-cloud`); it sends no wake, so wait on the PR subscription and a check-in. Never run `gh run watch`. One watch made 131 API calls in one minute (decision
    `ci-wait-reads-run-status`, CI waits read the run status). Never poll with a sleep loop. Repeated
    `gh run view` or `gh pr checks` calls are a poll. To wait for any other condition, use the
    Monitor tool (decision `agents-wait-with-monitor`, agents wait with the Monitor tool). See
@@ -112,7 +113,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     A workflow that also has `on: push` for all branches still runs on a draft branch.
     `gh pr create --draft` then `gh pr ready` fires two runs. Keep the draft state in the concurrency
     group (step 4). Otherwise the skipped draft run cancels an in-progress ready run.
-    Run `gh pr ready` only after the draft run shows in `gh run list`. A ready sent seconds after the
+    Mark ready (`gh pr ready`, or in cloud MCP `update_pull_request`) only after the draft run shows in `gh run list`. A ready sent seconds after the
     PR opens can give both runs `draft=false`. One then cancels the other. Its cancelled check runs
     can stop the merge, even for an admin (PR 381, Sonnet prompt judges).
     After `gh pr ready`, a run of only skipped jobs proves nothing. Wait for a run on the head that

@@ -3,7 +3,8 @@
 
 PostToolUse hook for the Bash and PowerShell tools, registered with `asyncRewake: true`. Only
 `gh pr ready <N>` starts a watch, and each one in a command gets its own, in this one process.
-A push starts none. Per PR it reads the head once. It lists that head's runs until a run that
+A push starts none. Neither does MCP `update_pull_request`, the cloud's ready route, since a cloud
+session gets 403 on `gh pr ready` (decision github-routes-in-cloud; debt ci-wake-misses-mcp-ready). Per PR it reads the head once. It lists that head's runs until a run that
 ran has ended (a skipped draft run is no run), waits on it, and prints one line:
 
     CI <green|red|cancelled> on <sha7>: <failing job names>

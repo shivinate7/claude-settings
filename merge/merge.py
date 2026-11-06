@@ -1213,8 +1213,9 @@ class Host:
         red = [f"{k}: {b} {l}".strip() for k, rows in live.items() for b, l in rows if b not in ("pass", "skipping", "pending")]
         pending = sorted({k for k, rows in live.items() if any(b == "pending" for b, _ in rows)} | {k for k in names if not got.get(k)})
         if live and not red and not pending and not any(b == "pass" for rows in live.values() for b, _ in rows):
-            fix = ("Run `gh pr ready`, or push anew if the PR is ready" if DRAFT_SKIP_CHECK in names
-                   else f"Run `gh workflow run checks.yml --ref {branch}`, or push anew after `gh pr ready`")
+            fix = ("Mark the PR ready, or push anew if the PR is ready" if DRAFT_SKIP_CHECK in names
+                   else f"Run `gh workflow run checks.yml --ref {branch}`, or push anew after you mark the PR ready")
+            fix += f". {READY_ROUTES}"
             red = [f"no check ran on this head (every check skipped). {fix}"]
         if not red and DRAFT_SKIP_CHECK in names and live.get(DRAFT_SKIP_CHECK) and all(b == "skipping" for b, _ in live[DRAFT_SKIP_CHECK]):
             pending = sorted(set(pending) | {DRAFT_SKIP_CHECK})
@@ -1277,10 +1278,10 @@ class Host:
         self.pause(30)  # no gh call: the next pass reads the checks (decision ci-wait-reads-run-status)
 
     def ready(self, n):
-        """Mark a draft ready after the records step. -> (ok, why). Bandaid: it sends nothing and returns False. GitHub marks a
-        draft ready only through GraphQL (`gh pr ready`), which a cloud session answers with HTTP 403, and this tool sends no
-        GraphQL (c53). The caller then says to mark it ready by hand."""
-        return False, "GitHub marks a draft ready only through GraphQL, and this tool sends no GraphQL"
+        """Mark a draft ready after the records step. -> (ok, why). Bandaid: it sends nothing and returns False. `gh pr ready`
+        is GraphQL, which a cloud session answers with HTTP 403, and this tool sends no GraphQL (c53). The REST route this tool
+        could send is unmeasured (decision github-routes-in-cloud). The caller then says to mark it ready by the session's route."""
+        return False, f"this tool sends no GraphQL and no unmeasured REST route. {READY_ROUTES}"
 
     def merge(self, n, method, sha):
         """`PUT pulls/<n>/merge` with `sha`, so GitHub refuses (409) a head that moved. `self.commit_message`, when set, is the merge commit's message. Never --admin, never --delete-branch (cut_branch does that).
@@ -1444,6 +1445,8 @@ def records_proof(wt, base_ref):
 
 CI_JOB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "ci-job")  # the lint steps of a job, read from the workflow; the tool brings it
 CI_SCOPE = ".github/scripts/ci-scope.sh"  # the repo's one home of which jobs read which paths; a repo without it never takes a small move
+READY_ROUTES = ("Mark ready in cloud by MCP update_pull_request draft=false; on a computer by `gh pr ready`, "
+                "a GraphQL call a cloud session gets 403 on (routes: decision github-routes-in-cloud)")
 DRAFT_SKIP_CHECK = REQUIRED_CHECK  # the one required check a draft run skips (actions/all-jobs-passed): its skip means the ready run is still to come, not green
 LINT_SECONDS = 1200  # the bound on the lint run of the merge result, and again on the suites it hits; the lock is extended to cover each
 SUITE_LINE = re.compile(r"(python3|node|bash) ([\w./-]+\.(?:py|mjs|sh))(?: [^|&;`<>$(){}]*)?")  # a suite line run as written: no shell syntax
@@ -2477,11 +2480,12 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         f"          move local {base}, run {len(m.get('afterMerge', []))} afterMerge command(s)" + (", delete the branch and the batch's lane branches." if m.get("deleteBranch") else "."))
 
 def stale_page_remedy(n, claim=""):
-    """The one text of the remedy for a stale records page on a ready PR, for `confirm` and `preview`. A cloud session cannot
-    return a PR to draft (GraphQL only), so the owner's computer does that act. `claim`: the Record-claim the head holds, if any.
+    """The one text of the remedy for a stale records page on a ready PR, for `confirm` and `preview`. The session returns the
+    PR to draft by its own route (decision github-routes-in-cloud). `claim`: the Record-claim the head holds, if any.
     The draft step refuses a claim head, so the claim commit is reverted first or the remedy would loop."""
-    steps = (f"Return #{n} to draft (a cloud session cannot do that, so a session on the owner's computer does), "
-             f"run merge {n} --confirm on the draft (the records step), then mark it ready after its draft run shows.")
+    steps = (f"Return #{n} to draft (in cloud: MCP update_pull_request draft=true; on a computer: gh pr ready {n} --undo; "
+             f"routes: decision github-routes-in-cloud), run merge {n} --confirm on the draft (the records step), "
+             f"then mark it ready after its draft run shows.")
     if not claim:
         return steps
     return (f"The head holds a Record-claim ({claim}) that this base claims nothing for. "
