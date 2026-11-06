@@ -9,12 +9,13 @@ The contract the script must match:
   effort=REFUTER_EFFORT) in place of decision_watch.invoke_model. When it is None, the script looks up
   decision_watch.invoke_model at call time, so a patch of that module attribute takes effect.
 - Module constants: REFUTER_MODEL == "sonnet", REFUTER_SHAPE == {"verdict": ("AGAINST",)}, REFUTER_EFFORT.
-- In scope: status not "closed", and a pick: a str or a non-empty list, with any kind. This is the guard's
-  scope: an items write with a pick and a status other than closed needs `against`. Each in-scope item with
-  options makes exactly one call. The prompt holds the context, each option's label, how, gain and lose, and
+- In scope: status not "closed", a pick (a str or a non-empty list), and kind absent or "decision". This is the
+  guard's scope: an items write with a pick, a status other than closed, and kind absent or decision needs
+  `against`. Each in-scope item with options makes exactly one call. The prompt holds the context, each option's label, how, gain and lose, and
   the pick key or keys. It never holds the why text.
 - A pick with no options: no call, against is "unknown (no options)". Exit 0, or 1 when env CI is set.
-- Out of scope: no pick, an empty pick, or status "closed". No call, the file is not written, exit 0.
+- Out of scope: no pick, an empty pick, status "closed", or kind task or note. No call, the file is not
+  written, exit 0.
 - A model call that raises any exception is an unknown: against is "unknown (<reason>)", and no traceback
   escapes the script.
 - A written case: the model's "case" text, stripped, is the item's `against`. Every other key is kept. Exit 0.
@@ -78,6 +79,8 @@ def without(data, key):
 
 OUT_OF_SCOPE = {
     "a task with no pick": lambda: dict(without(item(), "pick"), kind="task", steps=["Plug in the Mac"]),
+    "a task with a pick": lambda: dict(item(), kind="task", steps=["Plug in the Mac"]),
+    "a note with a pick": lambda: dict(item(), kind="note"),
     "a closed decision": lambda: item(status="closed"),
     "a decision with no pick": lambda: without(item(), "pick"),
     "a decision with an empty pick": lambda: item(pick=""),
@@ -316,14 +319,6 @@ class RefuteItem(unittest.TestCase):
         run_main(refute, path, model_call=stub)
         self.assertEqual(len(stub.calls), 1, "an item with no kind and a pick makes %d calls, want 1" % len(stub.calls))
         self.assertEqual(read_json(path)["against"], "The case.", "an item with no kind was not written")
-
-    def test_a_task_with_a_pick_is_in_scope(self):
-        refute = load_refute()
-        path = write_item("task-pick", dict(item(), kind="task", steps=["Plug in the Mac"]))
-        stub = Stub(CASE_REPLY)
-        run_main(refute, path, model_call=stub)
-        self.assertEqual(len(stub.calls), 1, "a task with a pick makes %d calls, want 1" % len(stub.calls))
-        self.assertEqual(read_json(path)["against"], "The case.", "a task with a pick was not written")
 
     def test_a_pick_with_no_options_writes_unknown_without_a_call(self):
         refute = load_refute()
