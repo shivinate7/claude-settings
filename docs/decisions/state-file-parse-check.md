@@ -63,5 +63,15 @@ A path built at run time, such as `"$d/x.json"` or a Python script that writes J
 in a Bash call. Write and Edit see every path. `parse()` reads only the first fence in an inbox
 block, so a lost closer of a second fence there is missed, by this check and the Stop check alike.
 
+Review notes, round 2 (2026-11-06):
+
+- A removal-only Edit on an already-broken file of 2000 chars or fewer can raise a false alarm.
+  A made-up candidate place can repair the other fault.
+- A quoted lone `>` before a JSON path, such as `grep -c '>' a.json`, reads as a redirect.
+- Silent by cap: a `new_string` with more than 64 places, and a MultiEdit with two or more
+  removals on a file over about 5 KB. `sed --in-place=SUFFIX` is not matched.
+- The pre-filter greps the literal `handoffs`. Renaming the folder in
+  `precompact_handoff.handoff_path` needs the same change in `settings.json`.
+
 Kind: process
 Home: hooks/state_parse_check.py
