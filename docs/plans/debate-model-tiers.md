@@ -51,8 +51,10 @@ Each new place needs its own owner pick. This record proposes them. It adopts no
 ## 3. The owner question
 
 **Ruling.** Owner, 2026-11-06 13:59 CST, waiting-page item 289 (which refuters run Opus): "none of these
-(for now let's do sonnet for all)". The three item-284 refuters (case against the pick, ruling-skip check,
-done-check read) run Sonnet, at brief time and at step close. The plan refuter keeps Opus (item 279, pick d).
+(for now let's do sonnet for all)". The owner picked none of options a, b and c. For now, the three item-284
+agents that argue back (case against the pick, ruling-skip check, done-check read) run Sonnet, at brief time and
+at step close. Each takes its own Sonnet row in decision `agent-model-cap` when its lane lands. The `refuter` row
+on Opus stays the plan refuter's alone (item 279, pick d).
 The coordinator relayed the answer at 14:00 CST. The answer file was not yet on the record branch.
 The picks in section 1 stand as the case argued, not as the ruling. The places in section 2 stay proposed only.
 
