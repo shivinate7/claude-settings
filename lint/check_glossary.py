@@ -216,25 +216,39 @@ def inside(w, i, count, term):
                for j in range(len(w) - len(term) + 1))
 
 
-def clash(term, table):
-    """The problem with a term of a repo's own glossary, or None. A child glossary adds terms: one equal to a term
-    of `table`, or to a "not" name, plural or case aside, defines a claude-settings term again."""
-    w = words(term)
+def matches(term, table, camel=False):
+    """Yield (shared term, "not" name or None) for each row term or "not" name that a child term spells, plural or
+    case aside. `camel`: also read the term with a split at each case step, as a name of code is read."""
+    plain = term[:-len(THIS_SENSE)] if term.lower().endswith(THIS_SENSE) else term
+    forms = [f for f in ([words(plain), words(plain, camel=True)] if camel else [words(plain)]) if f]
     for shared, _homes, names in table:
-        if w and any(same(w, o) or same(o, w) for o in [words(shared)] if o):
-            return "child term '%s' defines the claude-settings term '%s' again" % (term, shared)
+        o = words(shared)
+        if o and any(same(w, o) or same(o, w) for w in forms):
+            yield shared, None
         for name in names:
             n = words(name[:-len(THIS_SENSE)] if name.endswith(THIS_SENSE) else name)
-            if w and n and (same(w, n) or same(n, w)):
-                return "child term '%s' is the retired name '%s'; the glossary name is '%s'" % (term, name, shared)
+            if n and any(same(w, n) or same(n, w) for w in forms):
+                yield shared, name
+
+
+def clash(term, table):
+    """The problem with a term of a repo's own glossary, or None. A child glossary adds terms: one that spells a
+    term of `table`, or an untagged "not" name, defines a claude-settings term again. A name tagged (this sense)
+    retires one sense only, so a child term may name its own sense of that word."""
+    for shared, name in matches(term, table, camel=True):
+        if name is None:
+            return "child term '%s' defines the claude-settings term '%s' again" % (term, shared)
+        if not name.endswith(THIS_SENSE):
+            return "child term '%s' is the retired name '%s'; the glossary name is '%s'" % (term, name, shared)
     return None
 
 
 def child_spans(child_table, table):
     """The word lists of the terms of a repo's own glossary that `name_problems` may honour as `spans`.
 
-    A term that clashes (`clash`) is left out: it is no spelling of its own, and `child_clashes` fails it."""
-    return [words(term) for term, _homes, _names in child_table if words(term) and not clash(term, table)]
+    A term that spells a term of `table` or any "not" name, tagged too, is left out: it is no spelling of its own."""
+    return [words(term) for term, _homes, _names in child_table
+            if words(term) and next(matches(term, table), None) is None]
 
 
 def child_clashes(child_text, table):

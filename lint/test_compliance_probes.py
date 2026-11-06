@@ -1022,8 +1022,10 @@ class Words(unittest.TestCase):
                 with self.subTest(word=word, term=term):
                     repo = child_glossary(Repo(self), term).write("src/%s_list.py" % term)
                     code, out = repo.run("words")
-                    self.assertEqual((code, sorted(hits(out))), (1, sorted([
-                        (term, "GLOSSARY.md", str(CHILD_ROW)), (word, "src/%s_list.py" % term, "-")])), out)
+                    # A tagged word retires one sense, so only the untagged one is a glossary clash. Neither spans.
+                    clashes = [] if prose else [(term, "GLOSSARY.md", str(CHILD_ROW))]
+                    self.assertEqual((code, sorted(hits(out))), (1, sorted(
+                        clashes + [(word, "src/%s_list.py" % term, "-")])), out)
 
     def test_a_child_term_that_repeats_a_claude_settings_term_is_not_honoured(self):
         # This repo's glossary never lets a repo define a term again that it defines. Here it defines `ad <word>` too.
@@ -1050,6 +1052,32 @@ class Words(unittest.TestCase):
                 code, out = child_glossary(Repo(self), "ad lane", child).run("words")
                 self.assertEqual((code, head(out), hits(out)), (1, "words: out", [(child, "GLOSSARY.md", str(CHILD_ROW + 1))]), out)
                 self.assertIn("defines the claude-settings term '%s' again" % term, out)
+
+    def test_a_tagged_or_camel_child_term_that_defines_a_claude_settings_term_again_is_red(self):
+        table = check_glossary.rows(check_glossary.read(check_glossary.GLOSSARY))
+        term = next(t for t, _homes, _names in table if ":" not in t)
+        pair = next(t for t, _homes, _names in table if re.fullmatch(r"[a-z]+ [a-z]+", t))
+        camel = pair.split()[0] + pair.split()[1].capitalize()
+        for child, shared in ((term + " (this sense)", term), ("`%s` (This Sense)" % term, term), (camel, pair)):
+            with self.subTest(child=child):
+                code, out = child_glossary(Repo(self), "ad lane", child).run("words")
+                self.assertEqual((code, [h[1:] for h in hits(out)]), (1, [("GLOSSARY.md", str(CHILD_ROW + 1))]), out)
+                self.assertIn("defines the claude-settings term '%s' again" % shared, out)
+
+    def test_a_child_term_may_name_its_own_sense_of_a_tagged_word(self):
+        # GLOSSARY.md: a "not" name tagged (this sense) retires one sense of an everyday word, so `block` in an ad
+        # blocker's glossary names its own sense.
+        word = planted(prose=True, one_word=True)
+        code, out = child_glossary(Repo(self), word).run("words")
+        self.assertEqual((code, head(out), hits(out)), (0, "words: in shape", []), out)
+
+    def test_an_unreadable_child_glossary_is_unknown(self):
+        repo = child_glossary(Repo(self), "ad lane").write("README.md")  # one readable file, so the read is not empty
+        with open(os.path.join(repo.root, "GLOSSARY.md"), "w", encoding="utf-16") as handle:
+            handle.write("# Glossary\n")
+        code, out = repo.run("words")
+        self.assertEqual(code, 2, out)
+        self.assertTrue(head(out).startswith("words: unknown"), out)
 
     def test_no_child_glossary_at_the_root_changes_nothing(self):
         word = planted(one_word=True)
