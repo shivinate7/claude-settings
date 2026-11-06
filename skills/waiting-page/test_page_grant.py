@@ -230,6 +230,18 @@ class Counted(Base):
         r = self.check(self.repo(), self.pair(item_fields={"status": ABSENT}), pick="a")
         self.assertCounted(r, verdict("a"))
 
+    def test_item_with_no_id_field_counted_under_its_key(self):
+        """The key of items/<key> is the item's id, so an item with no `id` field is counted under its key. Red on the old
+        checker, which refuses it: `answer is for item ..., not ...`, because it reads item.id."""
+        r = self.check(self.repo(), self.pair(item_fields={"id": ABSENT}), pick="a")
+        self.assertCounted(r, verdict("a"))
+
+    def test_item_whose_id_field_differs_from_its_key_counted(self):
+        """An `id` field that differs from the key is ignored: the key is the id. Red on the old checker, which refuses it
+        with `answer is for item ..., not ...`, because it reads item.id."""
+        r = self.check(self.repo(), self.pair(item_fields={"id": "other-id"}), pick="a")
+        self.assertCounted(r, verdict("a"))
+
     def test_closed_arbiter_ruling_overturn_counted(self):
         """An arbiter ruling is written closed; its overturn still counts. Green on the old code too."""
         r = self.check(self.repo(), self.pair(item_fields={"status": "closed", "arbiter": True},
