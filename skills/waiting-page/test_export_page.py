@@ -585,6 +585,16 @@ class Mirror(Base):
         self.assertEqual(read_text(os.path.join(out, "items", "a.json")), canonical({"z": 1, "a": ["uni", 2]}))
         self.assertEqual(read_text(os.path.join(out, "meta", "page.json")), canonical(META))
 
+    def test_an_items_doc_with_no_id_field_exports_under_its_key_unchanged(self):
+        """The doc key is the item's id, so an items doc with no `id` field lands at items/<key>.json as it was fetched.
+        Green on the old code too: the export never reads an `id` field, and this stays as a guard for that."""
+        data = {"n": 29, "kind": "decision", "status": "open", "title": "No id field", "options": [{"key": "a", "label": "A"}]}
+        fetched = self.fetch(items={"k29": data}, meta={"page": META})
+        out = self.out()
+        r = self.export(fetched, out)
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.assertEqual(read_text(os.path.join(out, "items", "k29.json")), canonical(data))
+
     def test_a_rewrite_with_the_same_data_is_same(self):
         fetched = self.fetch(items={"a": {"id": "a", "n": 2}})
         out = self.out()
