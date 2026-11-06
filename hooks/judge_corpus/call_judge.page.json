@@ -1,0 +1,148 @@
+[
+  {
+    "id": "ship-today-item-passes",
+    "expect": "allow",
+    "source": "hooks/test_call_judge.py good_page_item (the fixture item that meets the form)",
+    "input": {
+      "tool_input": {
+        "action": "set",
+        "collection": "items",
+        "doc_id": "p1",
+        "data": {
+          "kind": "decision",
+          "title": "Ship the change today?",
+          "status": "open",
+          "context": "Goal: ship the change today\nProblem (risk): the change touches the guard, so it needs your word\nBased on (read): the diff changes one rule\nDeparts from: lint/stamp.py:run_stamp — the stamp check moves to the lint job",
+          "options": [
+            {
+              "key": "a",
+              "label": "Ship it",
+              "gain": "The change lands today.",
+              "lose": "Nobody reads it first."
+            },
+            {
+              "key": "b",
+              "label": "Hold it",
+              "gain": "A reviewer reads it first.",
+              "lose": "The change lands a day later."
+            }
+          ]
+        }
+      }
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "task-with-whole-line-step-passes",
+    "expect": "allow",
+    "source": "hooks/test_call_judge.py good_task_item and GOOD_TASK_STEP",
+    "input": {
+      "tool_input": {
+        "action": "set",
+        "collection": "items",
+        "doc_id": "t1",
+        "data": {
+          "kind": "task",
+          "title": "Set the guard skip",
+          "status": "open",
+          "context": "Why yours: a session on your computer was asked first and none could reach the remote",
+          "steps": [
+            "Find the line `GUARD_SHELL_SKIP= scripts/guard-shell.py --hook` and replace the whole line with `GUARD_SHELL_SKIP=tree scripts/guard-shell.py --hook`. Change nothing else."
+          ]
+        }
+      }
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "ci-cap-item-already-ruled",
+    "expect": "deny",
+    "source": "hooks/test_call_judge.py case_past_ruling_replay_item_133; roadmap step c95",
+    "input": {
+      "tool_input": {
+        "action": "set",
+        "collection": "items",
+        "doc_id": "c133",
+        "data": {
+          "kind": "decision",
+          "title": "Raise the CI milestone job cap?",
+          "status": "open",
+          "context": "Goal: finish CI milestone runs without a false red\nProblem (risk): a milestone run ended at its job cap again, so the cap needs your word\nBased on (measured): the milestone job ran out of time at its cap on the last run\nDeparts from: lint/stamp.py:run_stamp — the stamp check moves to the lint job",
+          "options": [
+            {
+              "key": "a",
+              "label": "Raise the cap",
+              "gain": "The milestone run stops ending at its cap.",
+              "lose": "Each run takes longer and uses more minutes."
+            },
+            {
+              "key": "b",
+              "label": "Keep the cap",
+              "gain": "Nothing changes on main.",
+              "lose": "The milestone run may end at its cap again."
+            }
+          ]
+        }
+      },
+      "rulings": {
+        "c95": "Ruling (owner, Oct 27): a CI milestone run is red only when a test is broken, never because a job ran out of time."
+      }
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "options-carry-unexplained-ids",
+    "expect": "deny",
+    "source": "hooks/call_judge.py JUDGE_ITEMS items 4 and 5; hooks/test_call_judge.py PAGE_FLAG",
+    "input": {
+      "tool_input": {
+        "action": "set",
+        "collection": "items",
+        "doc_id": "p1",
+        "data": {
+          "kind": "decision",
+          "title": "Ship the change today?",
+          "status": "open",
+          "context": "Goal: ship the change today\nProblem (risk): the change touches the guard, so it needs your word\nBased on (read): the diff changes one rule\nDeparts from: lint/stamp.py:run_stamp — the stamp check moves to the lint job",
+          "options": [
+            {
+              "key": "a",
+              "label": "Ship it",
+              "gain": "Reuses D12 and lands via sha 9a3f1c2.",
+              "lose": "k_77 stays open."
+            },
+            {
+              "key": "b",
+              "label": "Hold it",
+              "gain": "Closes k_77.",
+              "lose": "c95 waits for lane 8."
+            }
+          ]
+        }
+      }
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "task-step-names-only-the-changed-part",
+    "expect": "deny",
+    "source": "hooks/test_call_judge.py ITEM_99_STEP and case_page_task_item_judged (waiting item 99)",
+    "input": {
+      "tool_input": {
+        "action": "set",
+        "collection": "items",
+        "doc_id": "t99",
+        "data": {
+          "kind": "task",
+          "title": "Set the guard skip",
+          "status": "open",
+          "context": "Why yours: a session on your computer was asked first and none could reach the remote",
+          "steps": [
+            "Find GUARD_SHELL_SKIP= ... change it to GUARD_SHELL_SKIP=tree. Change nothing else."
+          ]
+        }
+      }
+    },
+    "agreement": "3/3"
+  }
+]

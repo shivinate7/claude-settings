@@ -6,13 +6,17 @@
 #   The `checks` lint job and the checks-merge-install job always run, so they have no flag (their suites carry `code`).
 #   checks_macos gates both checks-macos and checks-macos-b.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event.
+# judge_replay is set apart too: true on a pull request whose diff touches a model judge's scope, its corpus, or the replay runner (hooks/judge_replay.py --paths
+# names the touched judges: the one home of the scope lists), and on workflow_dispatch. Push and schedule runs are false: the pull request ran the replay.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
 # BASE_SHA, HEAD_REF.
 set -u
+jr=""
 JOBS="checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos pointer_windows"
 ALL="$JOBS checks_guard code mods guard sweep shoot"
 range=""
+jr_all=0
 [ "${EVENT:-}" = pull_request ] && [ -n "${BASE_SHA:-}" ] && range="$BASE_SHA...HEAD"
 on=" "
 # --no-renames lists the old path of a rename too, so a move out of a mapped path counts.
@@ -21,7 +25,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
   while IFS= read -r f; do
     case "$f" in
       # Fail safe: this script, the workflow, and git settings that change every checkout.
-      .github/scripts/ci-scope.sh|.github/workflows/checks.yml|.gitattributes) on="$on $ALL " ;;
+      .github/scripts/ci-scope.sh|.github/workflows/checks.yml|.gitattributes) on="$on $ALL "; jr_all=1 ;;
       # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py.
       # guard_<family>.py modules are guard.py; guard_test_* is not (it falls to hooks/* below).
       hooks/guard_test_*) on="$on $R $Z $X code guard " ;;
@@ -104,6 +108,11 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       hooks/guard.py|hooks/guard_*.py|hooks/git_reads.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/shared_names.py|hooks/question_form.py|hooks/_nowindow.py|lint/report_guard.py|lint/_clause.py|lint/layout.py|lint/layout.json|lint/_test_temp.py|skills/waiting-page/SKILL.md|skills/waiting-page/reference/*|skills/waiting-page/export_page.py|hooks/call_judge.py|hooks/ci_wake.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/override.py|hooks/proc_env.py|hooks/reply_judge.py|hooks/reread_check.py|hooks/route_match.py|hooks/ruling_home.py|janitor/sweep.py|janitor/temp_sweep.py|lint/_transcript.py|lint/guard_log_report.py|lint/rule_audit.py|hooks/mail.py|hooks/agent_brief.py|hooks/stall_watch.py) on="$on shoot " ;;
     esac
   done <<< "$files"
+  # judge_replay: a readable diff narrows it to the judges the runner names. A runner that cannot run reads as true.
+  if [ "$jr_all" = 1 ]; then jr=true
+  elif judges=$(printf '%s\n' "$files" | python3 "$(dirname "$0")/../../hooks/judge_replay.py" --paths 2>/dev/null); then
+    if [ -n "$judges" ]; then jr=true; else jr=false; fi
+  else jr=true; fi
   # A new file under a landed dir (landed-dirs.txt, the one list) changes what test_install_src and
   # the guard suite see. An unreadable or empty list turns everything on.
   dirs=$(sed 's/#.*//; s/[[:space:]]//g; s#/$##' landed-dirs.txt 2>/dev/null | grep -v '^$' | paste -sd'|' -)
@@ -130,3 +139,9 @@ case "${EVENT:-}" in
   *) v=true ;;
 esac
 echo "mutation_report=$v" >> "$GITHUB_OUTPUT"
+# judge_replay: the judge-replay job's steps run when this is true. A pull request with a readable diff set it above; an unreadable diff, and
+# workflow_dispatch, are true; push and schedule are false.
+if [ -z "$jr" ]; then
+  case "${EVENT:-}" in push|schedule) jr=false ;; *) jr=true ;; esac
+fi
+echo "judge_replay=$jr" >> "$GITHUB_OUTPUT"
