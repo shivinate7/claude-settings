@@ -15,7 +15,9 @@ writes, so a session cannot grant itself an override. It is valid only while now
   `override off` ends any override at once. `override`, `override <n>[m|h]` and `override off` mean
   that only as the whole prompt: a word after the length or after `off` is ambiguous, so it grants
   nothing on this route (an intended "off" must never become a grant). A later line starting with the word grants
-  nothing.
+  nothing, except the last non-blank line when the prompt's start is no override word: a status block the app puts
+  before the owner's words does not hide it. That line grants only as the bare word, `off` or a length, with no
+  reason and no Opus word. Machine blocks are stripped first (BLOCKS); pasted text is never the owner's word.
   A plain ask (`yes override that`, `override that for 15 minutes please`) writes the same file when a model judges the
   prompt to be the owner's own present request to override a refusal (grant_override_ask, call_judge.override_ask). Cost:
   one model call, only for an owner prompt that holds the whole word `override` outside backtick code spans and
@@ -122,6 +124,7 @@ MACHINE_BLOCKS = "|".join(
      for name in sorted({m for tag in NOTICE_TAGS for m in re.findall(r"<([\w-]+)", tag)})]
     + [re.escape(tag) + ".*" for tag in NOTICE_TAGS if not tag.startswith("<")])
 BLOCKS = re.compile(PASTED + "|" + MACHINE_BLOCKS, re.I | re.S)
+MACHINE_ONLY = re.compile(MACHINE_BLOCKS, re.I | re.S) if MACHINE_BLOCKS else None  # an empty pattern matches everywhere
 OPUS_ASK_SOURCES = (None, "user")  # the payload `source` values a plain ask may carry: absent, null or the owner
 ROLE_WORDS = re.compile(r"[A-Za-z][\w\u2019'-]*")
 NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t",
@@ -273,6 +276,28 @@ def _write_opus(session_id, path, at, length, role, said=None, log=True):
 def _strip_blocks(prompt):
     """The prompt with each pasted or machine-tag block replaced by a marker: that text is not the owner's words."""
     return BLOCKS.sub("[pasted text]", prompt)
+
+
+def _override_rest(prompt):
+    """The text after the word `override` for one owner prompt, or None when the prompt holds no override word.
+    A machine block (a status block the app puts before the owner's words) is not the owner's, so the word may follow
+    one. Three reads, in order: the raw start; the start once machine blocks are gone (pasted text stays: it is never
+    the owner's typed word); the last non-blank line alone, which grants only as a bare word, `off` or a length, so
+    a reason or the Opus word there grants nothing. That last read drops pasted blocks too, so pasted text never
+    supplies the line."""
+    said = PROMPT.match(prompt)
+    if said:
+        return said.group(1)
+    if MACHINE_ONLY is None:
+        return None
+    said = PROMPT.match(MACHINE_ONLY.sub("", prompt))
+    if said:
+        return said.group(1)
+    lines = [line.strip() for line in _strip_blocks(prompt).splitlines() if line.strip()]
+    said = PROMPT.match(lines[-1]) if lines else None
+    if said and (not said.group(1).strip() or WORD.fullmatch(" ".join(said.group(1).split()))):
+        return said.group(1)
+    return None
 
 
 def _keyword_rest(rest):
@@ -523,17 +548,19 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
 def grant(session_id, prompt, at, defer=True):
     """Write, replace or remove the session's override for one owner prompt. Returns (kind, until) for a
     new override, ("off", None) when `override off` removed one, the _grant_opus result for the Opus word,
-    else None: the prompt is not a word. With `defer`, a first word `override` whose rest is no whole keyword form and
+    else None: the prompt is not a word. The word `override` counts at the start of the prompt, at the start once
+    machine blocks are stripped, or alone on the last non-blank line (_override_rest); only the first form may
+    carry a reason or the Opus word. With `defer`, a first word `override` whose rest is no whole keyword form and
     holds a length returns None too, so the plain ask (grant_override_ask) judges it; grant_override_ask calls again
     with `defer` False for main's result."""
     opus = OPUS_PROMPT.match(prompt) if isinstance(prompt, str) else None
     if opus:
         return _grant_opus(session_id, opus.group(1), at)
-    said = PROMPT.match(prompt) if isinstance(prompt, str) else None
+    rest = _override_rest(prompt) if isinstance(prompt, str) else None
     path = _path(session_id)
-    if not said or path is None:
+    if rest is None or path is None:
         return None
-    reason = " ".join(said.group(1).split())  # one log line: newlines and tabs fold to spaces
+    reason = " ".join(rest.split())  # one log line: newlines and tabs fold to spaces
     word = WORD.fullmatch(reason)
     if not word and WORD.fullmatch(reason.split(" ")[0]):
         return None  # a word after `off` or a length: ambiguous, grants nothing
