@@ -34,7 +34,7 @@ the live file's "sessions" list is not archived (any other status counts) and ca
 the tag cs-repo:<this repo's GitHub name> and the tag cs-step:<step id>, or when an open pull request's
 branch equals the step id or lane/<step id>. The step id matches exactly; the GitHub name ignores case. A session row
 with no tags key, or null tags, has no tags. The cs-repo tag is needed because list_sessions is
-account-wide and step ids repeat across repos. A step whose status is none of todo, doing, active or
+account-wide and step ids repeat across repos. A step whose status is none of todo, ready, doing, active or
 done is listed as unknown status. The row reads one unknown entry, never an empty list, when the live
 file is missing or unreadable; its readAt is not an ISO time, has no time zone, is over STALE_LIVE_MINUTES
 old or is more than FUTURE_MINUTES ahead; it has no sessions list; the repo's GitHub name cannot be read;
@@ -1020,7 +1020,7 @@ def todo_pairs(steps, work):
 
 
 def zoned_time(value):
-    """`value` as an aware datetime, or None when it is not a string or not ISO with a zone. The one home of this parse."""
+    """`value` as an aware datetime, or None when it is not a string or not ISO with a zone. device_check keeps an older copy of this parse."""
     try:
         at = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
     except (AttributeError, ValueError):

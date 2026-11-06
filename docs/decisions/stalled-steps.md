@@ -34,6 +34,8 @@ Process picks, reported to the owner, 2026-11-06 11:48 and 12:49 CST:
   `now`, no live lane, no valid `paused` field, no open unanswered item). `ready` reads as todo. The
   `Unstarted:` refusal is held until a re-measure (debt `unstarted-guard-held`, the Unstarted guard
   is held).
+- 2026-11-06 15:13 CST: `ready` reads as todo everywhere. A `ready` step that an open PR names gets
+  the red pair line, as a todo step does.
 
 ## Cost
 
