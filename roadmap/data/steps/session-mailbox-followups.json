@@ -1,0 +1,10 @@
+{
+  "title": "Session mailbox: Mac and Windows auth, settings default, and the trial",
+  "phase": "next",
+  "status": "todo",
+  "order": 3,
+  "why": "The git mailbox (#1371) works from the cloud. The owner's Mac and PC still need auth before every session can use it.",
+  "note": "WAITS: #1371 merges. Lane session-messaging-plan, 16:53 CST Nov 6. After the merge, three things stay open. (1) Build step 2: Mac and Windows auth for git ls-remote; this needs a Mac session. (2) Then MAILBOX_REPO gets a settings.json default. (3) The 20-message cloud-to-Mac trial. Also re-ask Q4 after #1346 lands.",
+  "owner": "coordinator",
+  "updatedAt": "2026-11-06T22:54:00Z"
+}
