@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-06T19:40:00Z",
+  "context": "Goal: Opus runs only where you granted it.\nProblem (rule): on Nov 3 19:25 CST you granted \"some opus judges toward the end of the workflow\" on step prose-governance-workflow. A step grant can only name a role, so it was recorded as \"reviewer\", and today a round-3 code reviewer on that step ran Opus under it.\nBased on (read): hooks/override.py takes a step grant's role as one agent role (OPUS_ROLES); it has no judge role and no brief marker.\nBased on (read): the lane's guard.log, 13:19:38 CST: the step grant let an Opus spawn through on step prose-governance-workflow.\nDeparts from: main step grants (one role for the whole step) \u2014 adds an optional brief marker, so a grant covers only spawns whose brief starts with it.\nMeanwhile: the grant record stays as it is; the step's merge does not wait on this.",
+  "home": "roadmap step prose-governance-workflow (grants)",
+  "kind": "decision",
+  "n": 295,
+  "options": [
+    {
+      "gain": "The grant means what you said; other reviewers stay on Sonnet.",
+      "how": "A step grant can require a brief whose first line is `Judge:`, like the `Audit:` marker. This grant then covers only judge spawns.",
+      "key": "a",
+      "label": "Add a Judge: marker",
+      "lose": "One small guard lane."
+    },
+    {
+      "gain": "No code.",
+      "how": "The lane asks you for each Opus judge with a one-act override.",
+      "key": "b",
+      "label": "Drop the grant",
+      "lose": "One prompt to you per judge."
+    },
+    {
+      "gain": "Nothing to do.",
+      "how": "Nothing changes.",
+      "key": "c",
+      "label": "Keep as is",
+      "lose": "Every reviewer on that step may run Opus."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "step prose-governance-workflow; hooks/override.py",
+  "short": "Narrow the judge Opus grant",
+  "status": "open",
+  "title": "Your Opus grant for workflow judges also covers every reviewer on that step. Narrow it?",
+  "why": "Recommended a: the grant then means what you said, and other reviewers stay on Sonnet."
+}
