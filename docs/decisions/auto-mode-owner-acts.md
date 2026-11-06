@@ -25,6 +25,11 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 | `mcp__claude-code-remote__add_repo` (`settings.json` `permissions.allow`) | Attach a GitHub repo to the session | this record |
 | `mcp__claude-code-remote__archive_session` (`settings.json` `permissions.allow`) | Archive a session in the owner's account | this record |
 
+This table states what each entry covers, not what the cloud does. What the cloud does with these acts is stated by route rows (`GLOSSARY.md`). The rows between the markers are generated from `hooks/route_rows.json`, once that file exists.
+
+<!-- route-rows:start -->
+<!-- route-rows:end -->
+
 The merge confirm is a permission allow rule, not an `autoMode` entry. The classifier does not judge it.
 
 An allow rule for `merge --role` waits on the tag check of #878 (merge role reads the session tag).
