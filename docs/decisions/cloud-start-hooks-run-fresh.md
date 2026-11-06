@@ -33,9 +33,9 @@ So `hooks/daily_note.py` ran the snapshot's stale `hooks/precompact_handoff.py` 
 
 - The fix lands in a container only once its snapshot holds the new `settings.json`. An older snapshot still runs its stale startup hooks, and then `install.sh` runs the fresh ones too.
   A stale line can show beside the fresh one until the environment's snapshot is rebuilt.
-  So on a startup run, `install.sh` warns once when the old `settings.json` still holds a startup entry other than the refresh hook, and names the fix: edit the environment and save its Setup script.
-  It stays silent at snapshot build (no hook input), on resume, and when this run did not confirm the checkout at the main tip.
-  Cost: one `jq` run on the old file per cloud start; no network call, no new file.
+  So on a startup run, `install.sh` warns once when the old `settings.json` still holds a startup entry other than the refresh hook (old or new form), and names the fix: edit the environment and save its Setup script.
+  It reads only local state. A run with no hook input (a snapshot from before the refresh hook passed it) counts as a hook run only when `CLAUDE_PROJECT_DIR` is set, so the snapshot build stays silent. A resume run is silent.
+  Cost: one `jq` run on the old file, only on a cloud startup run with that file present; no network call, no new file.
   Ruled by: the claude-settings coordinator, lane cloud-snapshot-age-check, 2026-11-06 14:42 CST (warn on the harm, a stale startup entry, never on hooks/ lag alone).
 - The setup script (`cloud-setup.sh`) runs `install.sh --cloud` with no hook input, so the startup entries also run once at snapshot build. `daily_note.py` then stamps that Central day, and a session on the same day skips its guard.log note. Note: cloud-setup-runs-start-hooks.
 - An entry that fires on resume but not on startup (matcher `resume`) is neither dropped nor run, so it still runs stale. The repo has none. Note: cloud-resume-only-hook-stale.

@@ -2150,39 +2150,65 @@ cloud_startup_local1() {
   rm -rf "$h"
 }
 
-# ---- snapstale: a startup run warns once when the old settings.json holds a repo startup entry -----------------
-# The old settings.json is the one the last cloud run wrote, read before this run overwrites it. A repo startup entry in
-# it means the snapshot holds hooks that a fix has since replaced, so the run warns once and names the fix. The gate, all
-# required: CLOUD, a hook input whose source is startup, and SRC confirmed at the origin/main tip this run. The fixture is
-# move_fixture's: a clean, detached session checkout that moves to main when the fetch lands. snap_fires is install.sh's
-# FIRES_JQ rule, copied as cloud_settings1 copies it.
+# ---- snapstale: a hook run warns once when the old settings.json holds a repo startup entry -------------------
+# The old settings.json is the one the last cloud run wrote, read before this run overwrites it. A repo startup entry in it
+# means the snapshot holds hooks that a fix has since replaced. The warning reads only local state, so its gate is a startup
+# hook input, or no input with CLAUDE_PROJECT_DIR set (a hook run). A snapshot build (cloud-setup.sh) sets neither and stays
+# silent. The refresh hook is skipped in its old form and its new form. snap_hook_forms reads the new form from install.sh's
+# own HOOK_CMD line, so no case copies the marker.
 snap_fires='def fires: (.matcher // "") as $m | if ($m == "" or $m == "*") then true else ("startup" | test("^(" + $m + ")$")) end;'
-# The refresh hook's command, as install.sh writes it. snap_repo_count never counts this entry.
-snap_refresh='i=$(cat); curl -fsSL https://raw.githubusercontent.com/shivinate7/claude-settings/main/install.sh | CS_HOOK_INPUT="$i" bash -s -- --cloud'
-# snap_seed HOME KIND: the old settings.json, in HOME's config dir. KIND repo: a repo startup entry (matcher "", running
-# daily_note.py) and the refresh hook. KIND compact: a compact entry and the refresh hook. No run executes the old file.
-snap_seed() {
-  mkdir -p "$1/.claude-cfg"
-  case "$2" in
-    repo) jq -n --arg cmd "$snap_refresh" '{hooks: {SessionStart: [
-      {matcher: "", hooks: [{type: "command", command: "python3 \"$HOME/.claude/hooks/daily_note.py\""}]},
-      {matcher: "startup|resume", hooks: [{type: "command", command: $cmd, timeout: 60}]}]}}' > "$1/.claude-cfg/settings.json" ;;
-    compact) jq -n --arg cmd "$snap_refresh" '{hooks: {SessionStart: [
-      {matcher: "compact", hooks: [{type: "command", command: "echo COMPACT_ONLY"}]},
-      {matcher: "startup|resume", hooks: [{type: "command", command: $cmd, timeout: 60}]}]}}' > "$1/.claude-cfg/settings.json" ;;
-  esac
+# The old form, as commit 6227ae905^ wrote it. No tree holds that line now, so it is written out here.
+snap_old_line='HOOK_CMD="curl -fsSL ${RAW}/install.sh | bash -s -- --cloud"'
+# snap_eval_hook LINE: the HOOK_CMD that LINE assigns, with the REPO, REF and RAW that install.sh sets (CLAUDE_SETTINGS_REF unset).
+snap_eval_hook() {
+  (
+    unset CLAUDE_SETTINGS_REF
+    eval "$(grep -E '^(REPO|REF|RAW)=' "$INSTALL_SH")"
+    eval "$1"
+    printf '%s' "$HOOK_CMD"
+  )
 }
-# snap_repo_count FILE: the SessionStart entries in FILE that fire on startup and are not the refresh hook.
+# snap_hook_forms: sets snap_new (the HOOK_CMD line of install.sh under test) and snap_old (the old form).
+snap_hook_forms() {
+  snap_new=$(snap_eval_hook "$(grep -E '^  HOOK_CMD=' "$INSTALL_SH" | head -n 1 | sed 's/^  //')")
+  snap_old=$(snap_eval_hook "$snap_old_line")
+}
+# snap_seed HOME KIND: the old settings.json, in HOME's config dir. KIND repo: a repo startup entry (matcher "", running
+# daily_note.py) and the new refresh hook. oldrepo: the same entry with the old refresh hook. compact: a compact entry and
+# the new refresh hook. oldonly: the old refresh hook alone. No run executes the old file.
+snap_seed() {
+  snap_hook_forms
+  sd_extra=
+  case "$2" in
+    repo) sd_cmd=$snap_new; sd_extra='{"matcher": "", "hooks": [{"type": "command", "command": "python3 \"$HOME/.claude/hooks/daily_note.py\""}]}' ;;
+    oldrepo) sd_cmd=$snap_old; sd_extra='{"matcher": "", "hooks": [{"type": "command", "command": "python3 \"$HOME/.claude/hooks/daily_note.py\""}]}' ;;
+    compact) sd_cmd=$snap_new; sd_extra='{"matcher": "compact", "hooks": [{"type": "command", "command": "echo COMPACT_ONLY"}]}' ;;
+    oldonly) sd_cmd=$snap_old ;;
+  esac
+  mkdir -p "$1/.claude-cfg"
+  jq -n --arg cmd "$sd_cmd" --argjson extra "[${sd_extra}]" \
+    '{hooks: {SessionStart: ($extra + [{matcher: "startup|resume", hooks: [{type: "command", command: $cmd, timeout: 60}]}])}}' \
+    > "$1/.claude-cfg/settings.json"
+}
+# snap_repo_count FILE: the SessionStart entries in FILE that fire on startup and are not a refresh hook, old or new form.
 snap_repo_count() {
-  jq -r "$snap_fires"' [.hooks.SessionStart[]? | select(fires) | select(([.hooks[]?.command] | join(" ")) | contains("install.sh | CS_HOOK_INPUT=") | not)] | length' "$1" 2>/dev/null
+  jq -r --arg new "$snap_new" --arg old "$snap_old" "$snap_fires"' [.hooks.SessionStart[]? | select(fires) | select(all(.hooks[]?; .command == $new or .command == $old) | not)] | length' "$1" 2>/dev/null
+}
+# snap_run CHECKOUT HOME [NAME=VALUE...]: one cloud run of CHECKOUT in HOME, as a hook runs it, with the extra environment.
+# Sets rc, out and err, as hk_envrun does.
+snap_run() {
+  sr_co=$1; sr_h=$2; shift 2
+  hk_envrun "$sr_co" PATH="$PATH" HOME="$sr_h" CLAUDE_CONFIG_DIR="$sr_h/.claude-cfg" CLAUDE_CODE_REMOTE=true "$@"
 }
 # snap_warns, snap_stale_line: the stale-snapshot warning lines in the last run's output, and the first of them.
 snap_warns() { printf '%s\n' "$out" | grep -c "^claude-settings: WARNING: this environment's snapshot is stale"; }
 snap_stale_line() { printf '%s\n' "$out" | grep "^claude-settings: WARNING: this environment's snapshot is stale" | head -n 1; }
-# snap_at_main: the checkout is at main after the last run. The fetch gate is met only then.
+# snap_names_fix: the stale-snapshot warning names the Setup script fix.
+snap_names_fix() { snap_stale_line | grep -qi "setup script"; }
+# snap_at_main: the checkout is at main after the last run, which is what a fetch that landed leaves.
 snap_at_main() { [ "$(git -C "$co" rev-parse HEAD 2>/dev/null)" = "$want" ]; }
 
-# The warning fires for a startup run, with the fetch ok, when the old file holds a repo startup entry.
+# A startup run with the fetch ok warns once for a repo startup entry in the new form.
 snapstale1() {
   name="snapstale1: a startup run with the fetch ok warns once when the old settings.json holds a repo startup entry, and the warning names the Setup script fix"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
@@ -2190,21 +2216,21 @@ snapstale1() {
   if [ "$(snap_repo_count "$h/.claude-cfg/settings.json")" != 1 ]; then
     bad "$name" "fixture fault: the seeded settings.json does not hold one repo startup entry"; return
   fi
-  hookfix_install "$h" "$co" '{"source":"startup"}'
+  snap_run "$co" "$h" CS_HOOK_INPUT='{"source":"startup"}'
   if [ "$rc" -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $err"
   elif ! snap_at_main; then
-    bad "$name" "the checkout is not at main after the run, so the fetch gate is not met: $(install_problems)"
+    bad "$name" "fixture fault: the fetch did not land, so the checkout is not at main: $(install_problems)"
   elif [ "$(snap_warns)" -ne 1 ]; then
     bad "$name" "want exactly one stale-snapshot warning line, got $(snap_warns)"
-  elif ! snap_stale_line | grep -qi "setup script"; then
+  elif ! snap_names_fix; then
     bad "$name" "the stale-snapshot warning does not name the Setup script fix: $(snap_stale_line)"
   else
     ok "$name"
   fi
 }
 
-# The silent cases each check their gate first, so a silence reads as the gate that failed, never as a fixture that never ran.
+# A startup run whose old file holds only a compact entry besides the refresh hook stays silent.
 snapstale2() {
   name="snapstale2: a startup run with the fetch ok stays silent when the old settings.json holds only the refresh hook and a compact entry"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
@@ -2212,11 +2238,11 @@ snapstale2() {
   if [ "$(snap_repo_count "$h/.claude-cfg/settings.json")" != 0 ]; then
     bad "$name" "fixture fault: the compact entry counts as a startup entry"; return
   fi
-  hookfix_install "$h" "$co" '{"source":"startup"}'
+  snap_run "$co" "$h" CS_HOOK_INPUT='{"source":"startup"}'
   if [ "$rc" -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $err"
   elif ! snap_at_main; then
-    bad "$name" "the checkout is not at main after the run, so the fetch gate is not met: $(install_problems)"
+    bad "$name" "fixture fault: the fetch did not land, so the checkout is not at main: $(install_problems)"
   elif [ "$(snap_warns)" -ne 0 ]; then
     bad "$name" "warned for an old settings.json with no repo startup entry: $(snap_stale_line)"
   else
@@ -2224,48 +2250,46 @@ snapstale2() {
   fi
 }
 
-# A refused fetch keeps the checkout where it was, so the gate is not met and the run stays silent.
+# The warning reads only local state, so a refused fetch does not stop it: the old file still holds the stale entry.
 snapstale3() {
-  name="snapstale3: a startup run whose fetch fails stays silent, even when the old settings.json holds a repo startup entry"
+  name="snapstale3: a startup run whose fetch fails still warns once when the old settings.json holds a repo startup entry"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
   move_fixture snap3; snap_seed "$h" repo
   write_redirect "$h" "$work/snap3-no-such.git"
   if [ "$(snap_repo_count "$h/.claude-cfg/settings.json")" != 1 ]; then
     bad "$name" "fixture fault: the seeded settings.json does not hold one repo startup entry"; return
   fi
-  hookfix_install "$h" "$co" '{"source":"startup"}'
+  snap_run "$co" "$h" CS_HOOK_INPUT='{"source":"startup"}'
   if [ "$rc" -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $err"
   elif snap_at_main; then
     bad "$name" "fixture fault: the checkout reached main, so the fetch did not fail"
-  elif [ "$(snap_warns)" -ne 0 ]; then
-    bad "$name" "warned although the fetch failed: $(snap_stale_line)"
+  elif [ "$(snap_warns)" -ne 1 ]; then
+    bad "$name" "fetch failed: want exactly one stale-snapshot warning line, got $(snap_warns)"
   else
     ok "$name"
   fi
 }
 
-# No hook input: a snapshot build. The gate needs source startup, so the run stays silent.
+# No hook input and CLAUDE_PROJECT_DIR unset: the snapshot build of cloud-setup.sh. Stays silent.
 snapstale4() {
-  name="snapstale4: a run with no hook input, with the fetch ok, stays silent when the old settings.json holds a repo startup entry"
+  name="snapstale4: a run with no hook input and CLAUDE_PROJECT_DIR unset stays silent when the old settings.json holds a repo startup entry"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
   move_fixture snap4; snap_seed "$h" repo
   if [ "$(snap_repo_count "$h/.claude-cfg/settings.json")" != 1 ]; then
     bad "$name" "fixture fault: the seeded settings.json does not hold one repo startup entry"; return
   fi
-  hookfix_install "$h" "$co"
+  snap_run "$co" "$h"
   if [ "$rc" -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $err"
-  elif ! snap_at_main; then
-    bad "$name" "the checkout is not at main after the run, so the fetch gate is not met: $(install_problems)"
   elif [ "$(snap_warns)" -ne 0 ]; then
-    bad "$name" "warned with no hook input: $(snap_stale_line)"
+    bad "$name" "warned with no hook input and CLAUDE_PROJECT_DIR unset: $(snap_stale_line)"
   else
     ok "$name"
   fi
 }
 
-# A resume run is not a startup run, so the gate stays shut.
+# A resume run is not a startup run, so it stays silent.
 snapstale5() {
   name="snapstale5: a resume run with the fetch ok stays silent when the old settings.json holds a repo startup entry"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
@@ -2273,11 +2297,11 @@ snapstale5() {
   if [ "$(snap_repo_count "$h/.claude-cfg/settings.json")" != 1 ]; then
     bad "$name" "fixture fault: the seeded settings.json does not hold one repo startup entry"; return
   fi
-  hookfix_install "$h" "$co" '{"source":"resume"}'
+  snap_run "$co" "$h" CS_HOOK_INPUT='{"source":"resume"}'
   if [ "$rc" -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $err"
   elif ! snap_at_main; then
-    bad "$name" "the checkout is not at main after the run, so the fetch gate is not met: $(install_problems)"
+    bad "$name" "fixture fault: the fetch did not land, so the checkout is not at main: $(install_problems)"
   elif [ "$(snap_warns)" -ne 0 ]; then
     bad "$name" "warned for a resume run: $(snap_stale_line)"
   else
@@ -2293,11 +2317,11 @@ snapstale6() {
   if [ -e "$h/.claude-cfg/settings.json" ]; then
     bad "$name" "fixture fault: a settings.json exists before the run"; return
   fi
-  hookfix_install "$h" "$co" '{"source":"startup"}'
+  snap_run "$co" "$h" CS_HOOK_INPUT='{"source":"startup"}'
   if [ "$rc" -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $err"
   elif ! snap_at_main; then
-    bad "$name" "the checkout is not at main after the run, so the fetch gate is not met: $(install_problems)"
+    bad "$name" "fixture fault: the fetch did not land, so the checkout is not at main: $(install_problems)"
   elif [ "$(snap_warns)" -ne 0 ]; then
     bad "$name" "warned with no old settings.json: $(snap_stale_line)"
   else
@@ -2313,19 +2337,58 @@ snapstale7() {
   if [ "$(snap_repo_count "$h/.claude-cfg/settings.json")" != 1 ]; then
     bad "$name" "fixture fault: the seeded settings.json does not hold one repo startup entry"; return
   fi
-  hookfix_install "$h" "$co" '{"source":"startup"}'
+  snap_run "$co" "$h" CS_HOOK_INPUT='{"source":"startup"}'
   if [ "$rc" -ne 0 ]; then
     bad "$name" "the first run exited $rc: $err"; return
   elif ! snap_at_main; then
-    bad "$name" "the first run did not reach main: $(install_problems)"; return
+    bad "$name" "fixture fault: the first run did not land the fetch, so the checkout is not at main: $(install_problems)"; return
   elif [ "$(snap_repo_count "$h/.claude-cfg/settings.json")" != 0 ]; then
     bad "$name" "the first run did not rewrite settings.json: it still holds a repo startup entry"; return
   fi
-  hookfix_install "$h" "$co" '{"source":"startup"}'
+  snap_run "$co" "$h" CS_HOOK_INPUT='{"source":"startup"}'
   if [ "$rc" -ne 0 ]; then
     bad "$name" "the second run exited $rc: $err"
   elif [ "$(snap_warns)" -ne 0 ]; then
     bad "$name" "the second run warned about the file the first run wrote: $(snap_stale_line)"
+  else
+    ok "$name"
+  fi
+}
+
+# A hook run with no input and CLAUDE_PROJECT_DIR set warns once for the old refresh hook beside a repo startup entry.
+snapstale8() {
+  name="snapstale8: a run with no hook input and CLAUDE_PROJECT_DIR set warns once when the old settings.json holds the old refresh hook and a repo startup entry"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture snap8; snap_seed "$h" oldrepo
+  if [ "$(snap_repo_count "$h/.claude-cfg/settings.json")" != 1 ]; then
+    bad "$name" "fixture fault: the seeded settings.json does not hold one repo startup entry beside the old refresh hook"; return
+  fi
+  snap_run "$co" "$h" CLAUDE_PROJECT_DIR="$co"
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $err"
+  elif [ "$(snap_warns)" -ne 1 ]; then
+    bad "$name" "want exactly one stale-snapshot warning line, got $(snap_warns)"
+  elif ! snap_names_fix; then
+    bad "$name" "the stale-snapshot warning does not name the Setup script fix: $(snap_stale_line)"
+  else
+    ok "$name"
+  fi
+}
+
+# The old refresh hook alone is skipped, as the new one is: a startup run stays silent.
+snapstale9() {
+  name="snapstale9: a startup run stays silent when the old settings.json holds only the old refresh hook"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture snap9; snap_seed "$h" oldonly
+  if [ "$(jq '.hooks.SessionStart | length' "$h/.claude-cfg/settings.json")" != 1 ] \
+     || [ "$(snap_repo_count "$h/.claude-cfg/settings.json")" != 0 ]; then
+    bad "$name" "fixture fault: the seeded settings.json is not the old refresh hook alone"; return
+  fi
+  snap_run "$co" "$h" CS_HOOK_INPUT='{"source":"startup"}'
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $err"
+  elif [ "$(snap_warns)" -ne 0 ]; then
+    bad "$name" "warned for the old refresh hook alone: $(snap_stale_line)"
   else
     ok "$name"
   fi
@@ -5871,6 +5934,8 @@ run snapstale4
 run snapstale5
 run snapstale6
 run snapstale7
+run snapstale8
+run snapstale9
 run skills_bak1
 run skills_bak2
 run skills_bak3
