@@ -239,7 +239,9 @@ n/a where an item says so. A no is a finding. A read that cannot run is unknown,
 
 1. Does a job named `all-jobs-passed` exist? Read `.github/workflows/*.yml`.
 2. Does that job list every other job in `needs:`, except `ci-done`, with `if:` holding `always()` and
-   the draft guard? Read its job block.
+   the draft guard? Read its job block. A job skipped by design, such as a design-check rollup or a
+   nightly-only job, may stay off `needs:` when the repo's own checker names it in an exclusion list.
+   Name that list in the answer. A job off `needs:` and off such a list is a no.
 3. Does branch protection require exactly one check, `all-jobs-passed`? Read
    `gh api repos/<owner>/<repo>/branches/main/protection`, and count `required_status_checks.checks`.
    A 403 is unknown.
@@ -269,6 +271,7 @@ n/a where an item says so. A no is a finding. A read that cannot run is unknown,
     `grep -nE "\| *(tail|head)" .github/workflows/*.yml`. Read each hit. A version print that decides
     no verdict is not a finding.
 15. Does an audit step run in CI, with a pinned version? Run
-    `grep -n "zizmor" .github/workflows/*.yml`. A version given as `zizmor==<x.y.z>` is a yes. A step
+    `grep -n -A4 "zizmor" .github/workflows/*.yml`. A version given as `zizmor==<x.y.z>`, or as an
+    action input such as `version: <x.y.z>`, is a yes. A step
     that runs the shared action (`actions/zizmor@<sha>` or `$/actions/zizmor`) is also a yes: its
     `run.sh` holds the pin. No version and no shared action is a no.
