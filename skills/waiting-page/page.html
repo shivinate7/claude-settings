@@ -484,6 +484,9 @@ body.sheet-open { overflow: hidden; }
 .stall li .fx.why { color: var(--ink); }
 .stall li .ln { font: 13px var(--mono); overflow-wrap: anywhere; }
 .stall li.unkrow { grid-template-columns: minmax(0, 1fr); }
+.stall li.unkrow details { font-size: 14px; color: var(--muted); }
+.stall li.unkrow summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
+.stall li.unkrow pre { margin: 0 0 6px; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .stall .pz { border-top: 1px solid var(--line); }
 .stall .pz > summary { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
 @container (max-width: 559px) { .stall li { grid-template-columns: 40px minmax(0, 1fr); gap: 0 8px; padding-inline: 10px; } .stall li.it, .stall li.unkrow { grid-template-columns: minmax(0, 1fr); } .stall .sth { padding-inline: 10px; } .stall .sth .lead { flex-basis: 100%; } }
@@ -2893,8 +2896,8 @@ const rgl = (s) => `<span class="rg" role="img" aria-label="${LBL[s] || LBL.todo
 const byOrder = (a, b) => (isNum(a.order) ? a.order : 1e9) - (isNum(b.order) ? b.order : 1e9) || String(a.id).localeCompare(String(b.id));
 const bag = (k) => (hasData && D[k] && typeof D[k] === "object" ? D[k] : {});
 const listOf = (k) => Object.entries(bag(k)).map(([id, v]) => ({ id, ...v })).sort(byOrder);
-// The roadmap writes a step in progress as `doing` or `active`: one state, drawn In progress. A step with no live lane
-// shows the stalled or paused mark on top of it (stall below), so a step that is not in progress never reads so.
+// The roadmap writes a step in progress as `doing` or `active`: one state in the data. A step with no live lane keeps it,
+// but stepRow and renderNow draw it Stalled or Paused (stall below), so only a live doing step reads In progress.
 const steps = listOf("steps").map((s) => ({ ...s, status: s.status === "doing" ? "active" : ORDER.includes(s.status) ? s.status : "todo" }));
 const topics = hasData ? listOf("topics") : null;
 const meta = bag("meta");
@@ -3053,7 +3056,8 @@ function stalledBand() {
   const title = (id) => { const s = steps.find((x) => x.id === id); return s && s.title ? s.title : "Untitled step"; };
   const head = n
     ? `<div class="sth"><h3>${rg("stalled")}Stalled: <span class="num">${n}</span></h3><span class="lead">No live lane and no open pull request. Triage resumes, pauses or closes each.</span></div>`
-    : `<div class="sth calm"><h3>${rg("done")}No stalled step</h3></div>`;
+    : items ? `<div class="sth calm"><h3>${rg("done")}No stalled step</h3></div>`
+    : `<div class="sth calm"><h3>No step is stalled</h3></div>`;
   const fix = (x) => {
     const marks = Array.isArray(x.fix) ? x.fix.filter((m) => typeof m === "string" && m) : typeof x.fix === "string" && x.fix !== "todo" ? [x.fix] : [];
     if (marks.length) return `<span class="fx land">done: landed in ${esc(marks.join(", "))}</span>`;
@@ -3061,14 +3065,15 @@ function stalledBand() {
   };
   const stepRows = stall.steps.map((x) => `<li><span class="k"><span class="id">${esc(x.id)}</span></span><span><button type="button" class="tx" data-go="${esc(x.id)}">${esc(title(x.id))}</button>${fix(x)}</span></li>`).join("");
   const itemPart = !items
-    ? `<h4>Waiting items</h4><ul><li class="unkrow"><span class="unk"><span class="rg unk" aria-hidden="true"></span> not read: ${esc(reason(stall.itemsWhy) || "no item carries its lane yet")}</span></li></ul>`
+    ? `<h4>Waiting items</h4><ul><li class="unkrow"><span class="unk"><span class="rg unk" aria-hidden="true"></span> not read: no item carries its lane yet</span>`
+      + (reason(stall.itemsWhy) ? `<details><summary>What the build said</summary><pre>${esc(reason(stall.itemsWhy))}</pre></details>` : "") + "</li></ul>"
     : items.length ? `<h4>Waiting items</h4><ul>${items.map((it) => `<li class="it"><span class="k"><span>Item <span class="num">${esc(it.n)}</span></span></span><span>Answer routed to <span class="ln">${esc(it.lane)}</span>; lane gone</span></li>`).join("")}</ul>` : "";
   const stepPart = stall.steps.length ? (items && !items.length ? `<ul>${stepRows}</ul>` : `<h4>Steps</h4><ul>${stepRows}</ul>`) : "";
   const pz = stall.paused.length
     ? `<details class="pz"${n ? "" : " open"}><summary>${rg("paused")}Paused: <span class="num">${stall.paused.length}</span></summary><ul>${stall.paused.map((id) => {
       const p = (steps.find((x) => x.id === id) || {}).paused || {}, at = when(p.at), who = DECIDES[p.decides];
-      const line = [who ? who + " decides" : "", at ? "paused " + fmt(at.toISOString()) : ""].filter(Boolean).join("; ");
-      return `<li><span class="k"><span class="id">${esc(id)}</span></span><span><button type="button" class="tx" data-go="${esc(id)}">${esc(title(id))}</button>${p.why ? `<span class="fx why">${esc(p.why)}</span>` : ""}${line ? `<span class="fx">${esc(line)}</span>` : ""}</span></li>`;
+      const line = [who ? who + " decides" : "", at ? `paused <span class="num">${esc(fmt(at.toISOString()))}</span>` : ""].filter(Boolean).join("; ");
+      return `<li><span class="k"><span class="id">${esc(id)}</span></span><span><button type="button" class="tx" data-go="${esc(id)}">${esc(title(id))}</button>${p.why ? `<span class="fx why">${esc(p.why)}</span>` : ""}${line ? `<span class="fx">${line}</span>` : ""}</span></li>`;
     }).join("")}</ul></details>`
     : "";
   return `<section class="stall${n ? " hot" : ""}" id="stBand" aria-label="Stalled steps">${head}${stepPart}${n || !items ? itemPart : ""}${pz}</section>`;
@@ -3148,9 +3153,9 @@ function stepRow(s, nextIds) {
   const ni = nextIds.indexOf(s.id), lw = landed(s.id);
   const stl = stalledIds.has(s.id), pzd = pausedIds.has(s.id);
   const tags = [ni >= 0 ? `Next ${ni + 1}` : "", s.status === "blocked" ? "Blocked" : "", lw ? "Landed in " + lw.join(", ") : "", stl ? "Stalled" : "", pzd ? "Paused" : ""];
-  const d = when(s.updatedAt), open = ui.open.has(s.id), noteOpen = ui.notes.has(s.id), lbl = LBL[s.status] || LBL.todo;
+  const d = when(s.updatedAt), open = ui.open.has(s.id), noteOpen = ui.notes.has(s.id), lbl = stl ? LBL.stalled : pzd ? LBL.paused : LBL[s.status] || LBL.todo;
   return `<li class="${s.status}${stl ? " stl-row" : ""}${open ? " open" : ""}" id="s-${esc(s.id)}">
-    <button type="button" class="rrow" data-row="${esc(s.id)}" aria-expanded="${open}" aria-label="${esc(s.id)}, ${lbl}: ${esc(s.title || "Untitled step")}${tags.filter(Boolean).length ? ". " + esc(tags.filter(Boolean).join(". ")) : ""}">${rg(s.status)}<span class="id">${esc(s.id)}</span><span class="ttl">${esc(s.title || "Untitled step")}</span>
+    <button type="button" class="rrow" data-row="${esc(s.id)}" aria-expanded="${open}" aria-label="${esc(s.id)}, ${lbl}: ${esc(s.title || "Untitled step")}${tags.filter(Boolean).length ? ". " + esc(tags.filter(Boolean).join(". ")) : ""}">${rg(stl ? "stalled" : pzd ? "paused" : s.status)}<span class="id">${esc(s.id)}</span><span class="ttl">${esc(s.title || "Untitled step")}</span>
       <span class="meta">${tags[0] ? `<span class="tag next">${tags[0]}</span>` : ""}${tags[1] ? '<span class="tag blk">Blocked</span>' : ""}${lw ? `<span class="tag landed" title="Merged; waiting for triage to close the step">${esc(tags[2])}</span>` : ""}${stl ? `<span class="tag stl ic" role="img" aria-label="Stalled" title="Stalled: no live lane and no open pull request">${GLY.stalled}</span>` : ""}${pzd ? `<span class="tag pzd ic" role="img" aria-label="Paused" title="Paused: ${esc((s.paused || {}).why || "")}">${GLY.paused}</span>` : ""}</span><span class="chev" aria-hidden="true">▶</span></button>
     <div class="rbody"><dl>
       <dt>Status</dt><dd>${lbl}</dd>

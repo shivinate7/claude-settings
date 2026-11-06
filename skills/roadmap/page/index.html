@@ -348,6 +348,8 @@ html{scrollbar-gutter:stable;overflow-y:scroll;overflow-x:hidden}
 .stall li .fx.why{color:var(--ink)}
 .stall li .ln{font-family:var(--font-num);font-size:12px;overflow-wrap:anywhere}
 .stall li.unkrow{grid-template-columns:minmax(0,1fr)}
+.stall li.unkrow summary{cursor:pointer;display:inline-flex;align-items:center;min-height:40px;font-size:13px;color:var(--muted)}
+.stall li.unkrow pre{margin:0 0 8px}
 .stall .g{display:inline-flex;vertical-align:-2px}
 .stall .pz{border-top:1px solid var(--line)}
 .stall .pz>summary{cursor:pointer;display:flex;align-items:center;gap:6px;min-height:40px;padding:0 12px;font-size:13px;font-weight:600;color:var(--muted)}
@@ -466,6 +468,8 @@ const GLYPH = {
   blocked:'<svg viewBox="0 0 14 14" aria-hidden="true"><rect x="1" y="1" width="12" height="12" rx="2.5" fill="var(--bad)"/><path d="M4 7h6" stroke="var(--surface)" stroke-width="1.8"/></svg>'
 };
 const glyph = s => `<span class="g">${GLYPH[s]||GLYPH.todo}</span>`;
+/* The stalled band's script sets this. A stalled or paused step is drawn Stalled or Paused, never In progress. */
+let stallKind = () => '';
 
 /* ---------- state ---------- */
 let db = null, steps = [], topics = null, cull = null, phases = null, advisor = null;
@@ -625,13 +629,13 @@ function metaTiles(k){
 
 /* ---------- steps ---------- */
 function stepRow(s, nextIds){
-  const ni = nextIds.indexOf(s.id);
-  const tags = (s.status==='active'?'<span class="tag t-now">Now</span>':'') + (ni>=0?`<span class="tag next">Next ${ni+1}</span>`:'') + (s.status==='blocked'?'<span class="tag blk">Blocked</span>':'');
+  const ni = nextIds.indexOf(s.id), sk = stallKind(s.id), shown = sk || s.status;
+  const tags = (s.status==='active'&&!sk?'<span class="tag t-now">Now</span>':'') + (ni>=0?`<span class="tag next">Next ${ni+1}</span>`:'') + (s.status==='blocked'?'<span class="tag blk">Blocked</span>':'');
   const d = when(s.updatedAt), open = ui.open.has(s.id), noteOpen = ui.notes.has(s.id);
-  const lbl = LABEL[s.status]||LABEL.todo;
+  const lbl = LABEL[shown]||LABEL.todo;
   return `<li class="st ${s.status}${open?' open':''}" id="s-${esc(s.id)}">
     <div class="rw">
-      <button class="sp" data-cycle="${esc(s.id)}" ${db&&!db.readOnly?'':'disabled'} title="${lbl}. Tap to change." aria-label="${esc(s.id)} status: ${lbl}. Tap to change.">${glyph(s.status)}</button>
+      <button class="sp" data-cycle="${esc(s.id)}" ${db&&!db.readOnly?'':'disabled'} title="${lbl}. Tap to change." aria-label="${esc(s.id)} status: ${lbl}. Tap to change.">${glyph(shown)}</button>
       <button class="tg" data-row="${esc(s.id)}" aria-expanded="${open}"><span class="id">${esc(s.id)}</span><span class="ttl">${esc(s.title||'Untitled step')}</span>
         <span class="meta">${tags}</span><span class="chev" aria-hidden="true">▶</span></button>
     </div>
@@ -882,7 +886,7 @@ function unavailable(){
   try { db = c && typeof c.use==='function' ? await c.use('db') : null; } catch(e) { db=null; }
   if(!db){ unavailable(); return; }
   db.collection('steps').orderBy('order').onSnapshot(snap=>{
-    steps=snap.docs.map(d=>({id:d.id, ...d.data()})).map(s=>({...s, status:ORDER.includes(s.status)?s.status:'todo'}));
+    steps=snap.docs.map(d=>({id:d.id, ...d.data()})).map(s=>({...s, status:s.status==='doing'?'active':ORDER.includes(s.status)?s.status:'todo'}));
     got.steps=true; renderPlan();
   }, ()=>unavailable());
   db.collection('topics').orderBy('order').onSnapshot(snap=>{ topics=snap.docs.map(d=>({id:d.id, ...d.data()})); got.topics=true; renderRef(); },
@@ -943,21 +947,22 @@ function unavailable(){
     const items = read.items, n = read.steps.length + (items ? items.length : 0);
     el.className = 'stall' + (n ? ' hot' : '');
     const head = n ? `<div class="sth"><h3>${mark('stalled')}Stalled: <span class="num">${n}</span></h3><span class="lead">No live lane and no open pull request. Triage resumes, pauses or closes each.</span></div>`
-      : `<div class="sth calm"><h3>${glyph('done')}No stalled step</h3></div>`;
+      : items ? `<div class="sth calm"><h3>${glyph('done')}No stalled step</h3></div>`
+      : `<div class="sth calm"><h3>No step is stalled</h3></div>`;
     const fix = x => {
       const m = Array.isArray(x.fix) ? x.fix.filter(v => typeof v === 'string' && v) : typeof x.fix === 'string' && x.fix !== 'todo' ? [x.fix] : [];
       if(m.length) return `<span class="fx land">done: landed in ${esc(m.join(', '))}</span>`;
       return Object.prototype.hasOwnProperty.call(read.bad, x.id) ? `<span class="fx bad">Pause not counted: ${esc(read.bad[x.id])}.</span>` : '';
     };
     const rows = read.steps.map(x => `<li><span class="id">${esc(x.id)}</span><span><button class="tx" data-go="${esc(x.id)}">${esc(title(x.id))}</button>${fix(x)}</span></li>`).join('');
-    const itemPart = !items ? `<h4>Waiting items</h4><ul><li class="unkrow"><span class="unk">not read: ${esc(reason(read.itemsWhy) || 'no item carries its lane yet')}</span></li></ul>`
+    const itemPart = !items ? `<h4>Waiting items</h4><ul><li class="unkrow"><span class="unk">not read: no item carries its lane yet</span>${reason(read.itemsWhy) ? `<details><summary>What the build said</summary><pre>${esc(reason(read.itemsWhy))}</pre></details>` : ''}</li></ul>`
       : items.length ? `<h4>Waiting items</h4><ul>${items.map(it => `<li class="it"><span>Item <span class="num">${esc(it.n)}</span></span><span>Answer routed to <span class="ln">${esc(it.lane)}</span>; lane gone</span></li>`).join('')}</ul>` : '';
     const stepPart = read.steps.length ? (items && !items.length ? `<ul>${rows}</ul>` : `<h4>Steps</h4><ul>${rows}</ul>`) : '';
     const open = pzOpen == null ? !n : pzOpen;
     const pz = read.paused.length ? `<details class="pz"${open ? ' open' : ''}><summary>${mark('paused')}Paused: <span class="num">${read.paused.length}</span></summary><ul>${read.paused.map(id => {
-      const p = step(id).paused || {}, d = new Date(p.at), who = DECIDES[p.decides];
-      const line = [who ? who + ' decides' : '', isNaN(d) ? '' : 'paused ' + d.toLocaleString('en-US', {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})].filter(Boolean).join('; ');
-      return `<li><span class="id">${esc(id)}</span><span><button class="tx" data-go="${esc(id)}">${esc(title(id))}</button>${p.why ? `<span class="fx why">${esc(p.why)}</span>` : ''}${line ? `<span class="fx">${esc(line)}</span>` : ''}</span></li>`;
+      const p = step(id).paused || {}, d = p.at ? new Date(p.at) : null, who = DECIDES[p.decides];
+      const line = [who ? who + ' decides' : '', !d || isNaN(d) ? '' : 'paused <span class="num">' + esc(d.toLocaleString('en-US', {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})) + '</span>'].filter(Boolean).join('; ');
+      return `<li><span class="id">${esc(id)}</span><span><button class="tx" data-go="${esc(id)}">${esc(title(id))}</button>${p.why ? `<span class="fx why">${esc(p.why)}</span>` : ''}${line ? `<span class="fx">${line}</span>` : ''}</span></li>`;
     }).join('')}</ul></details>` : '';
     el.innerHTML = head + stepPart + (n || !items ? itemPart : '') + pz;
     const d = el.querySelector('details.pz');
@@ -965,6 +970,8 @@ function unavailable(){
   };
   /* A stalled or paused step shows its mark, not the in-progress mark, in Doing now and as a tag on its row. */
   const label = k => k === 'stalled' ? 'Stalled' : 'Paused';
+  Object.assign(GLYPH, G); Object.assign(LABEL, {stalled: 'Stalled', paused: 'Paused'});
+  stallKind = id => stalledIds.has(id) ? 'stalled' : pausedIds.has(id) ? 'paused' : '';
   const marks = () => {
     document.querySelectorAll('#now li .tx[data-go]').forEach(b => {
       const k = stalledIds.has(b.dataset.go) ? 'stalled' : pausedIds.has(b.dataset.go) ? 'paused' : '';
@@ -981,7 +988,8 @@ function unavailable(){
   };
   const inner = renderPlan;
   renderPlan = function(){ inner(); draw(); marks(); };
-  draw();
+  /* The steps may have drawn before this script ran, with no stalled read. Draw them again with it. */
+  if(got.steps) renderPlan(); else { draw(); marks(); }
   if(box) new MutationObserver(marks).observe(box, {childList:true, subtree:true});
 })();
 /* "Landed in #N" on each open step a merged Step: trailer names, until triage closes it. */
