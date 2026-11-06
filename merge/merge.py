@@ -24,6 +24,10 @@
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. Takes no lock, merges
                           and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
                           measured once on one PR head), one worktree.
+  merge --idle-lanes --live FILE
+                          one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
+                          skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
+                          posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
 
@@ -2920,6 +2924,39 @@ def write_merge_role(tier):
             tmp.unlink()
         raise Stop(f"cannot write the merge role to {path} {ROLE_CITE}: {e}.")
 
+IDLE_BUILD = pathlib.Path(__file__).resolve().parents[1] / "skills/roadmap/build.py"  # the one home of the idle-lane rules
+
+def idle_lanes(live):
+    """merge --idle-lanes: print one line per lane to archive, then the summary line. Exit 1 with no summary when the
+    live file is not named or the roadmap build cannot be loaded or run, so an unread list never reads as an empty one."""
+    if not live:
+        print("merge: --idle-lanes needs --live FILE, the publisher's live-work file. No list was made.", file=sys.stderr)
+        return 1
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("roadmap_build", IDLE_BUILD)
+        build = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(build)
+    except (Exception, SystemExit) as e:  # a build that exits at import is unloadable too
+        print(f"merge: cannot load the roadmap build {IDLE_BUILD}: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
+        return 1
+    c, root = sh(["git", "rev-parse", "--show-toplevel"])
+    if c:
+        print("merge: not in a git checkout. No list was made.", file=sys.stderr)
+        return 1
+    try:
+        entries = build.idle_lanes_report(root, live)
+    except (Exception, SystemExit) as e:
+        print(f"merge: the roadmap build could not read the lanes: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
+        return 1
+    lanes = [x for x in entries if not x.startswith("unknown (")]
+    # An unknown entry with no lane beside it is the whole list unread: no summary, so it never reads as an empty list.
+    unread = bool(entries) and not lanes  # exit 1 then, so a caller never reads exit 0 as "no lanes"
+    if not unread:
+        entries = [*entries, f"merge: {len(lanes)} lanes to archive. Run get_session on each alone, then archive it."]
+    say(*entries)
+    return 1 if unread else 0
+
 def main(argv, host=None, lock=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
     p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")
@@ -2933,6 +2970,8 @@ def main(argv, host=None, lock=None):
     p.add_argument("--base-red-ok", default="", metavar="REASON", help="go on when the base's latest run is red or unreadable (the batch carries the fix); logged")
     p.add_argument("--session", default="", metavar="NAME", help="your session name; the lock shows it to waiting runs")
     p.add_argument("--config", default=".github/stamp.json")
+    p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
+    p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
     p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")
     p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it")
@@ -2945,12 +2984,19 @@ def main(argv, host=None, lock=None):
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
     if (a.head or a.kind or a.guard or a.round or a.fix_check or a.net_value != "not owed") and not a.review_record:
         p.error("--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record")
+    if a.live is not None and not a.idle_lanes:
+        p.error("--live goes with --idle-lanes")
+    if a.idle_lanes and (a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed
+                         or a.review_record or a.lane_lint):
+        p.error("--idle-lanes stands alone")
     if not a.lane_lint:
         if a.base or a.lint_unknown_ok:
             p.error("--base and --lint-unknown-ok go with --lane-lint")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
-    if a.lane_lint:
+    if a.idle_lanes:
+        pass  # stands alone: checked above
+    elif a.lane_lint:
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record:
             p.error("--lane-lint takes a pull request number, commit or ref, and stands alone")
     elif a.role is not None:
@@ -2975,6 +3021,8 @@ def main(argv, host=None, lock=None):
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, --unlock, --reviewed, or --role TIER")
     try:
+        if a.idle_lanes:
+            return idle_lanes(a.live)  # before the role check and any lock: it reads, merges and posts nothing
         if a.lane_lint:
             c, root = sh(["git", "rev-parse", "--show-toplevel"])
             if c:
