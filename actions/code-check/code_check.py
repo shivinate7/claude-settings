@@ -12,10 +12,14 @@ Tools are pinned in standard.json and run through pipx or npx. Astro projects ar
 a dev machine). The javascript typecheck layer runs tsc over the tracked .mjs files and keeps only broken imports of
 a relative specifier, extensionless relative imports, TypeScript-only syntax and syntax errors ("mjs-imports"); checkJs is on for
 import diagnostics only, and type errors are dropped. Formatter layers are skipped until o2 (one layout) lands; their rows say so.
+A "link" key in .code-check.json ({"roots": [globs, * crosses /], "skip": [prefixes], "npm_scripts": [prefixes]}) opts in to a
+link step, "mjs-link": link_check.mjs links each root unrun, so a missing named export or package in a script is red, and a root
+is any tracked .mjs, .ts, .tsx or .mts file that a glob names or that the root package.json scripts name under an npm_scripts
+prefix. It needs typescript in the repo's own node_modules; without it the step is unknown, red only under CI. No "link" key, no step.
 It also runs lint/check_comment_narration.py (rule building-comments-say-why) on the Python, JS/TS, Astro and Swift lines the change adds
 since --base, minus the exclude folders. It reads the lint/ and hooks/ folders of the repo the action is pinned to,
 which GitHub fetches whole at the pinned sha."""
-import argparse, json, os, re, subprocess, sys
+import argparse, fnmatch, json, os, re, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG = ".code-check.json"
@@ -55,6 +59,67 @@ def comment_check(root, base, exclude):
     # Exit 3 is the node tool failing to run; exit 1 with no hit row is a crash. Neither is a verdict, so neither is
     # a clean diff.
     return hits + ["comment check could not run: %s" % err.replace("COULD NOT RUN: ", "", 1)]
+
+
+LINK_SCRIPT = os.path.join(HERE, "link_check.mjs")
+LINK_LABEL = "code-check: javascript typecheck: mjs-link"
+LINK_EXTENSIONS = (".mjs", ".ts", ".tsx", ".mts")  # what link_check.mjs can load as a root
+LINK_UNKNOWN_EXIT = 2
+
+
+def link_roots(root, link, files):
+    """The tracked files to link: those a roots glob matches, plus the files a script of the root package.json
+    names that sit under an npm_scripts prefix, minus the skip prefixes."""
+    skip = tuple(link.get("skip", []))
+    names = set()
+    for pattern in link.get("roots", []):
+        names.update(n for n in files if fnmatch.fnmatchcase(n, pattern))
+    prefixes = tuple(link.get("npm_scripts", []))
+    pkg = os.path.join(root, "package.json")
+    if prefixes and os.path.isfile(pkg):
+        with open(pkg, encoding="utf-8") as f:
+            scripts = json.load(f).get("scripts") or {}
+        words = set(" ".join(str(v) for v in scripts.values()).split())
+        names.update(n for n in files if n in words and n.startswith(prefixes))
+    return sorted(n for n in names if n.endswith(LINK_EXTENSIONS) and not (skip and n.startswith(skip)))
+
+
+def link_step(root, cfg, files):
+    """Failures from the opt-in link step. No "link" key is no step. Typescript missing from the repo is unknown:
+    it fails only under CI (decision ci-unknown-is-red)."""
+    link = cfg.get("link")
+    if link is None:
+        return []
+    if not isinstance(link, dict):
+        return ["%s: the link key in %s must be an object" % (CONFIG, CONFIG)]
+    try:
+        roots = link_roots(root, link, files)
+    except (OSError, ValueError, AttributeError, TypeError) as e:
+        return ["mjs-link could not read its roots: %s" % e]
+    if not roots:
+        print("%s: nothing to run, no root matches" % LINK_LABEL)
+        return []
+    flags = ["--no-warnings", "--experimental-vm-modules", "--experimental-import-meta-resolve"]
+    try:
+        p = sh(["node"] + flags + [LINK_SCRIPT] + roots, root)
+    except FileNotFoundError as e:
+        return ["mjs-link could not start: %s" % e]
+    if p.returncode == 0:
+        print("%s pass" % LINK_LABEL)
+        return []
+    if p.returncode == LINK_UNKNOWN_EXIT:
+        reason = (p.stdout.strip().splitlines() or ["no reason given"])[0]
+        print("%s unknown: %s" % (LINK_LABEL, reason))
+        return ["mjs-link unknown: %s" % reason] if os.environ.get("CI") else []
+    lines = p.stdout.strip().splitlines()
+    if p.returncode != 1 or not any(r.startswith("FAIL load:") for r in lines):
+        err = (p.stderr.strip().splitlines() or ["exit %d" % p.returncode])[-1]
+        print("%s FAIL" % LINK_LABEL)
+        return ["mjs-link could not run: %s" % err]
+    print("%s FAIL" % LINK_LABEL)
+    # The root lines print as they are, so each error stays under its root; the one failure is the count.
+    print("\n".join(lines[:200]))
+    return ["mjs-link found problems: %s" % lines[-1]]
 
 
 def load_standard():
@@ -374,6 +439,7 @@ def main(argv):
             problems = execute(plan[0], plan[1], root, *plan[2:])
             print("code-check: %s %s: %s %s" % (lang, layer, plan[0], "FAIL" if problems else "pass"))
             failures += problems
+    failures += link_step(root, cfg, files)
     failures += comment_check(root, args.base, cfg.get("exclude", []))
     for f in failures:
         print(f)

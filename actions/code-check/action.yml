@@ -9,6 +9,9 @@ description: >
   tsc also checks the tracked .mjs files for what Node 22 rejects: a relative import of a missing file, of a
   name the file does not export, or with no extension; TypeScript-only syntax. checkJs is on for import
   diagnostics only; type errors in plain JS are dropped, so they are not red.
+  With a "link" key in .code-check.json, each root file also links unrun (link_check.mjs, label mjs-link): a missing
+  named export or package in a script is red, and the script never runs. It needs typescript in the repo's own
+  node_modules; without it the step is unknown, red only under CI.
   Formatter layers wait for o2 and do not run.
   It also runs the comment check on lines the change adds (Python, JS/TS, Astro and Swift), against base.
   The JS, TS and Astro part runs the pinned TypeScript through npx, so the runner needs network for it.
