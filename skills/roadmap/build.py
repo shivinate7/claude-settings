@@ -90,7 +90,8 @@ main (step done-needs-check). Only a done step whose updatedAt is on or after DO
 Its note, why and ask are searched for the whole phrase `Done check` (any case; `Done checks` does not count). With no
 such phrase the entry is `<step id>`. With the phrase, one sentence of the three texts (a sentence ends at ". " or at
 the end of a text) must hold the whole phrase `green on main` or `met on main` (any case), with no negator (not, never,
-no, yet, or a word ending in n't) before it in that sentence, and a source: a ref that DONE_REF_RE in
+no, yet, or a word ending in n't) before it in its clause (a clause breaks at ANSWERED_CLAUSE_BREAK_RE in
+lint/report_guard.py: `.` `;` `:` `!` `?` `,` a dash), and a source, which may sit anywhere in the sentence: a ref that DONE_REF_RE in
 lint/report_guard.py accepts (the one home: `#<digits>`, `PR <n>`, a /pull/ or /commit/ URL, a hex commit hash). With none the entry is `<step id> (not shown green on main)`. A missing or
 unparsable updatedAt gives `<step id> (updatedAt unreadable)`. The row reads the step files only, so it needs no live
 file. It adds no process, file, timer or log: it reads the notes already loaded.
@@ -181,7 +182,7 @@ import git_reads  # noqa: E402  the one home of a checkout's GitHub repo, shared
 from shared_names import REPO_TAG, STEP_TAG, repo_tag_names  # noqa: E402,F401  REPO_TAG: test_build pins build.REPO_TAG to the shared object  the one home of the tag names, shared with the guard (hooks/shared_names.py)
 sys.path.insert(0, str(LINT))
 try:
-    from report_guard import DONE_REF_RE  # noqa: E402  the one home of a source ref in a Done line (lint/report_guard.py)
+    from report_guard import ANSWERED_CLAUSE_BREAK_RE, DONE_REF_RE  # noqa: E402  the one home of a source ref in a Done line and of a clause break (lint/report_guard.py)
 finally:
     sys.path.remove(str(LINT))
 
@@ -1116,8 +1117,9 @@ def unfiled(steps, work):
 
 
 def shown_green(sentence):
-    """True when the sentence holds `green on main` or `met on main` with no negator before it, and a source."""
-    plain = any(not NEGATOR.search(sentence[:m.start()]) for m in GREEN_ON_MAIN.finditer(sentence))
+    """True when the sentence holds `green on main` or `met on main` with no negator before it in its clause, and a source."""
+    plain = any(not NEGATOR.search(ANSWERED_CLAUSE_BREAK_RE.split(sentence[:m.start()])[-1])
+                for m in GREEN_ON_MAIN.finditer(sentence))
     return plain and bool(DONE_REF_RE.search(sentence))
 
 
