@@ -5,8 +5,10 @@ description: >
   `--changed` mutates the lines the checkout adds past its merge base with the pull request base, runs the suites
   the profile selects for each file, and writes the catch share and the untested lines to the job summary. A low
   share never fails the action. `--known-defects` plants each defect of the list in a checkout of HEAD and runs its
-  catcher suite. A defect that is MISS or UNKNOWN fails the action (decision ci-unknown-is-red): that step is the
-  only one that can. Both JSON logs go up as one artifact, `mutation-report`. The caller needs actions/checkout
+  catcher suite, and fails when the list drops an id the base list holds, unless a commit of the change carries the
+  trailer `Known-defect-removed: <id>`, or changes an entry the base list holds, unless a commit carries
+  `Known-defect-changed: <id>`. A defect that is MISS or UNKNOWN, or an id that is MISSING or CHANGED, fails the action
+  (decision ci-unknown-is-red): that step is the only one that can. Both JSON logs go up as one artifact, `mutation-report`. The caller needs actions/checkout
   with fetch-depth 0 so the history reaches the base. A workflow_dispatch run reads the default branch. A push or a
   schedule has no batch to report, so the action skips there.
 inputs:
@@ -14,7 +16,7 @@ inputs:
     description: "A REPLAY_PROFILES name in hooks/mutate_guard.py: how to read the caller's repository."
     required: true
   known-defects:
-    description: "The caller's JSON list of planted defects. A missing file is UNKNOWN and fails the action. An empty list [] passes."
+    description: "The caller's JSON list of planted defects. A missing file is UNKNOWN and fails the action. An empty list [] passes only when the base list names no entry."
     required: false
     default: .github/known-defects.json
   limit:
@@ -82,14 +84,15 @@ runs:
         TOOL: ${{ github.action_path }}/../../hooks/mutate_guard.py
         KNOWN_DEFECTS: ${{ inputs.known-defects }}
         SUITE_TIMEOUT: ${{ inputs.suite-timeout }}
+        BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
         EVENT: ${{ github.event_name }}
         OUT: ${{ runner.temp }}/mutation-report
       run: |
         set +e  # the summary is written before the step exits with the tool's code
         case "$EVENT" in pull_request|workflow_dispatch) ;; *) echo "mutation-report: no batch pull request, skipped"; exit 0 ;; esac
         mkdir -p "$OUT"
-        python3 "$TOOL" --known-defects "$KNOWN_DEFECTS" --repo . --suite-timeout "$SUITE_TIMEOUT" \
-          --log "$OUT/known-defects.json" 2>&1 | tee "$OUT/known-defects.txt"
+        python3 "$TOOL" --known-defects "$KNOWN_DEFECTS" --repo . --base "origin/$BASE_REF" \
+          --suite-timeout "$SUITE_TIMEOUT" --log "$OUT/known-defects.json" 2>&1 | tee "$OUT/known-defects.txt"
         status=${PIPESTATUS[0]}
         {
           echo "### Known defects replayed"

@@ -18,7 +18,13 @@ The modes, as the builder implements them. This file is their interface.
   changed mutant the share reads `0/0` with no percentage.
 - `--known-defects FILE --repo REPO [--suite-timeout S] [--log PATH]`. FILE is a JSON list of planted defects. Each defect
   prints one line, `CAUGHT|MISS|UNKNOWN id: name [reason]`. It exits 1 when any defect is MISS or UNKNOWN, else 0. A
-  missing FILE prints one `UNKNOWN` line that names the path, and exits 1. An empty list prints one line and exits 0.
+  missing FILE prints one `UNKNOWN` line that names the path, and exits 1. An empty list prints one line and exits 0, and with `--base REF` an empty list `[]` exits 0 only when REF's list names no entry.
+  With `--base REF`, FILE is the head list and REF's list is read with `git show REF:<FILE relative to REPO>`. Each id on
+  REF's list needs a head row, unless a commit in `REF..HEAD` has a `Known-defect-removed: <id>` trailer naming that exact
+  id. A dropped id prints `MISSING <id>: ...` and exits 1. A REF that does not resolve, a FILE outside REPO, or a head with
+  no list prints an `UNKNOWN` line and exits 1. A REF with no list file checks nothing against it. An entry on REF's list with no `id` reads UNKNOWN. A base entry whose fields differ on the head, compared as parsed objects,
+  reads `CHANGED <id>` and exits 1, unless a commit in `REF..HEAD` has a `Known-defect-changed: <id>` trailer. A
+  `Known-defect-removed` trailer does not count for it.
 - `--tests-for PATH`. It prints the REPORT_TARGETS suites for PATH when listed, and nothing else. Else it prints each
   tracked `test_<stem>.py` and `test_<stem>_*.py` beside PATH. A .py PATH also gets each tracked `test_*.py` in the
   repository that loads the module `<stem>`: an `import`, an `importlib.import_module` or `__import__` call, or a file
@@ -713,6 +719,295 @@ class KnownDefectsTests(unittest.TestCase):
         spec = profile_file([defect("kb-caught", "return a + b", "return a - b", "test_calc.py")])
         code, out, err = run_cli(["--known-defects", spec])
         self.assertEqual(code, 2, "--repo is required: exit %d" % code)
+
+
+# ---------------------------------------------------------------------------------------------------
+# `--known-defects FILE --repo REPO --base REF`. The fixtures commit the list inside the repository, so FILE is a path in
+# it, and REF's list is read with `git show REF:<FILE relative to REPO>`. Each case checks its fixture before the run: the
+# base holds the id it probes, and the head has, or has not, the row it probes.
+
+BASE_TAG = "base"
+DROP = defect("kb-drop", "return a + b", "return a - b", "test_calc.py")  # CAUGHT on the clean calc.py (add)
+KEEP = defect("kb-keep", "return a * b", "return a + b", "test_calc.py")  # CAUGHT on the clean calc.py (mul)
+MISSING_LINE = re.compile(r"^MISSING (\S+):", re.M)
+CAUGHT_LINE = re.compile(r"^CAUGHT (\S+?): ", re.M)
+CHANGED_LINE = re.compile(r"^CHANGED (\S+?)(?::|\s|$)", re.M)
+
+
+def list_text(entries):
+    return json.dumps(entries, indent=1) + "\n"
+
+
+def base_list_repo(entries):
+    """defect_repo() with `entries` committed as the list, and the tag BASE_TAG on that commit."""
+    repo = defect_repo()
+    put(repo, {KNOWN_DEFECTS_FILE: list_text(entries)})
+    commit(repo, "List the planted defects")
+    git(repo, "tag", BASE_TAG)
+    return repo
+
+
+def head_list(repo, entries, message):
+    """Commit `entries` as the list at HEAD. None deletes the file. Returns the list's path in `repo`."""
+    put(repo, {KNOWN_DEFECTS_FILE: None if entries is None else list_text(entries)})
+    commit(repo, message)
+    return os.path.join(repo, KNOWN_DEFECTS_FILE)
+
+
+def base_ids(repo):
+    """The ids on the list at BASE_TAG. A base with no list file raises."""
+    return {entry["id"] for entry in json.loads(show(repo, BASE_TAG, KNOWN_DEFECTS_FILE))}
+
+
+def known_base_run(list_path, repo, base=BASE_TAG):
+    """`--known-defects LIST --repo REPO --base REF`. While the flag is not built, the case fails by name."""
+    code, out, err = run_cli(["--known-defects", list_path, "--repo", repo, "--base", base])
+    if code == 2 and "unrecognized arguments" in err and "--base" in err:
+        raise AssertionError("--known-defects has no --base flag, so no base list was compared:\n" + err)
+    return code, out, err
+
+
+def missing_of(out):
+    return set(MISSING_LINE.findall(out))
+
+
+def caught_of(out):
+    return set(CAUGHT_LINE.findall(out))
+
+
+def changed_of(out):
+    return set(CHANGED_LINE.findall(out))
+
+
+def unknown_lines(out):
+    return [line for line in out.splitlines() if line.startswith("UNKNOWN")]
+
+
+class KnownDefectsBaseTests(unittest.TestCase):
+    """`--base REF`: each id on REF's list needs a head row, or a `Known-defect-removed:` trailer in REF..HEAD that names
+    it exactly. A REF that does not resolve, a list outside the repository, and a head with no list read UNKNOWN. A base
+    entry whose fields change on the head reads CHANGED unless a `Known-defect-changed:` trailer names its id."""
+
+    def test_without_base_a_dropped_id_passes_as_today(self):
+        """The control, green on the old code: with no --base only the head list is read, so a dropped id passes."""
+        repo = base_list_repo([DROP, KEEP])
+        listed = head_list(repo, [KEEP], "Drop kb-drop")
+        self.assertEqual(base_ids(repo), {"kb-drop", "kb-keep"}, "the fixture: the base list holds both ids")
+        code, out, err = run_cli(["--known-defects", listed, "--repo", repo])
+        self.assertEqual(caught_of(out), {"kb-keep"}, "the head row for kb-keep must read CAUGHT\n" + out + err)
+        self.assertEqual(code, 0, "without --base the head list alone is read: exit %d\n%s%s" % (code, out, err))
+
+    def test_a_dropped_id_with_no_trailer_prints_missing_and_exits_1(self):
+        repo = base_list_repo([DROP, KEEP])
+        listed = head_list(repo, [KEEP], "Drop kb-drop")
+        self.assertIn("kb-drop", base_ids(repo), "the fixture: the base list holds kb-drop")
+        code, out, err = known_base_run(listed, repo)
+        self.assertIn("kb-drop", missing_of(out),
+                      "the head drops kb-drop, no commit names it, and no MISSING kb-drop: line is printed\n" + out + err)
+        self.assertEqual(code, 1, "a MISSING id exits 1: exit %d\n%s%s" % (code, out, err))
+
+    def test_a_dropped_id_named_by_a_known_defect_removed_trailer_exits_0(self):
+        repo = base_list_repo([DROP, KEEP])
+        listed = head_list(repo, [KEEP], "Drop kb-drop\n\nKnown-defect-removed: kb-drop")
+        self.assertIn("kb-drop", base_ids(repo), "the fixture: the base list holds kb-drop")
+        code, out, err = known_base_run(listed, repo)
+        self.assertEqual(missing_of(out), set(),
+                         "a commit in REF..HEAD names kb-drop in its trailer, so no MISSING line may print\n" + out + err)
+        self.assertEqual(caught_of(out), {"kb-keep"}, "the head row for kb-keep must read CAUGHT\n" + out + err)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+
+    def test_a_trailer_naming_a_longer_id_does_not_excuse_the_drop(self):
+        repo = base_list_repo([DROP, KEEP])
+        listed = head_list(repo, [KEEP], "Drop kb-drop\n\nKnown-defect-removed: kb-drop-2")
+        self.assertIn("kb-drop", base_ids(repo), "the fixture: the base list holds kb-drop")
+        code, out, err = known_base_run(listed, repo)
+        self.assertIn("kb-drop", missing_of(out),
+                      "the trailer naming kb-drop-2 excused kb-drop: a trailer must name the exact id\n" + out + err)
+        self.assertEqual(code, 1, "exit %d\n%s%s" % (code, out, err))
+
+    def test_an_id_renamed_on_head_prints_missing_for_the_old_id_and_exits_1(self):
+        repo = base_list_repo([DROP, KEEP])
+        renamed = dict(DROP, id="kb-renamed", name="kb-renamed")
+        listed = head_list(repo, [renamed, KEEP], "Rename kb-drop to kb-renamed")
+        self.assertIn("kb-drop", base_ids(repo), "the fixture: the base list holds kb-drop")
+        code, out, err = known_base_run(listed, repo)
+        self.assertIn("kb-drop", missing_of(out),
+                      "the old id kb-drop has no head row, so it must read MISSING\n" + out + err)
+        self.assertEqual(code, 1, "exit %d\n%s%s" % (code, out, err))
+        self.assertEqual(caught_of(out), {"kb-renamed", "kb-keep"},
+                         "the renamed entry must still run and read CAUGHT\n" + out + err)
+
+    def test_a_head_that_adds_an_entry_exits_0(self):
+        repo = base_list_repo([DROP, KEEP])
+        added = defect("kb-new", "return a * b", "return a - b", "test_calc.py")
+        listed = head_list(repo, [DROP, KEEP, added], "Add kb-new")
+        self.assertEqual(base_ids(repo), {"kb-drop", "kb-keep"}, "the fixture: the base list holds two ids")
+        code, out, err = known_base_run(listed, repo)
+        self.assertEqual(missing_of(out), set(), "an added entry drops nothing, so no MISSING line may print\n" + out + err)
+        self.assertEqual(caught_of(out), {"kb-drop", "kb-keep", "kb-new"},
+                         "every head row must read CAUGHT\n" + out + err)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+
+    def test_a_re_pointed_plant_with_no_trailer_reads_changed_and_exits_1(self):
+        repo = base_list_repo([DROP, KEEP])
+        repointed = dict(DROP, old="return a * b", new="return a - b")
+        listed = head_list(repo, [repointed, KEEP], "Re-point the plant of kb-drop")
+        self.assertIn("kb-drop", base_ids(repo), "the fixture: the base list holds kb-drop")
+        code, out, err = known_base_run(listed, repo)
+        self.assertIn("kb-drop", changed_of(out),
+                      "a base entry whose plant changed, with no Known-defect-changed trailer, must read CHANGED kb-drop\n"
+                      + out + err)
+        self.assertEqual(code, 1, "exit %d\n%s%s" % (code, out, err))
+
+    def test_a_re_pointed_plant_with_a_changed_trailer_in_the_range_exits_0(self):
+        repo = base_list_repo([DROP, KEEP])
+        repointed = dict(DROP, old="return a * b", new="return a - b")
+        message = ("Re-point the plant of kb-drop\n\nKnown-defect-changed: kb-drop\n"
+                   "Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>")
+        listed = head_list(repo, [repointed, KEEP], message)
+        self.assertIn("kb-drop", base_ids(repo), "the fixture: the base list holds kb-drop")
+        code, out, err = known_base_run(listed, repo)
+        self.assertEqual(changed_of(out), set(),
+                         "a commit in REF..HEAD names kb-drop in Known-defect-changed, so no CHANGED line may print\n"
+                         + out + err)
+        self.assertEqual(caught_of(out), {"kb-drop", "kb-keep"}, "both head rows must read CAUGHT\n" + out + err)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+
+    def test_a_re_pointed_plant_with_a_removed_trailer_still_reads_changed_and_exits_1(self):
+        repo = base_list_repo([DROP, KEEP])
+        repointed = dict(DROP, old="return a * b", new="return a - b")
+        message = ("Re-point the plant of kb-drop\n\nKnown-defect-removed: kb-drop\n"
+                   "Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>")
+        listed = head_list(repo, [repointed, KEEP], message)
+        self.assertIn("kb-drop", base_ids(repo), "the fixture: the base list holds kb-drop")
+        code, out, err = known_base_run(listed, repo)
+        self.assertIn("kb-drop", changed_of(out),
+                      "Known-defect-removed names kb-drop, but only Known-defect-changed excuses a changed entry\n"
+                      + out + err)
+        self.assertEqual(code, 1, "exit %d\n%s%s" % (code, out, err))
+
+    def test_an_argv_only_change_with_no_trailer_reads_changed_and_exits_1(self):
+        repo = base_list_repo([DROP, KEEP])
+        reargv = dict(DROP, argv=[PY, "test_calc.py", "-q"])
+        listed = head_list(repo, [reargv, KEEP], "Pass -q to the suite of kb-drop")
+        self.assertIn("kb-drop", base_ids(repo), "the fixture: the base list holds kb-drop")
+        code, out, err = known_base_run(listed, repo)
+        self.assertIn("kb-drop", changed_of(out),
+                      "an argv-only change with no Known-defect-changed trailer must read CHANGED kb-drop\n" + out + err)
+        self.assertEqual(code, 1, "exit %d\n%s%s" % (code, out, err))
+
+    def test_a_reordered_or_respaced_entry_is_the_same_entry_and_exits_0(self):
+        repo = base_list_repo([DROP, KEEP])
+        reordered = dict(reversed(list(DROP.items())))
+        text = json.dumps([reordered, KEEP], indent=3, separators=(" , ", " :  ")) + "\n"
+        self.assertEqual(json.loads(text)[0], DROP, "the fixture: the head entry parses to the same object")
+        self.assertNotEqual(show(repo, BASE_TAG, KNOWN_DEFECTS_FILE), text, "the fixture: the head bytes differ from the base")
+        put(repo, {KNOWN_DEFECTS_FILE: text})
+        commit(repo, "Reorder the keys and respace the list")
+        listed = os.path.join(repo, KNOWN_DEFECTS_FILE)
+        code, out, err = known_base_run(listed, repo)
+        self.assertEqual(changed_of(out), set(), "the same parsed entry must read no CHANGED line\n" + out + err)
+        self.assertEqual(caught_of(out), {"kb-drop", "kb-keep"}, "both head rows must read CAUGHT\n" + out + err)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+
+    def test_a_base_ref_that_does_not_resolve_reads_unknown_and_exits_1(self):
+        repo = base_list_repo([DROP, KEEP])
+        listed = os.path.join(repo, KNOWN_DEFECTS_FILE)
+        code, out, err = known_base_run(listed, repo, base="no-such-ref")
+        self.assertTrue(any("no-such-ref" in line for line in unknown_lines(out)),
+                        "an unresolved --base must print an UNKNOWN line that names the ref\n" + out + err)
+        self.assertEqual(code, 1, "exit %d\n%s%s" % (code, out, err))
+
+    def test_a_base_with_no_list_file_exits_0_on_first_adoption(self):
+        repo = defect_repo()
+        git(repo, "tag", BASE_TAG)
+        with self.assertRaises(AssertionError):
+            base_ids(repo)  # the fixture: the base commit has no list file
+        listed = head_list(repo, [DROP, KEEP], "Adopt the list")
+        code, out, err = known_base_run(listed, repo)
+        self.assertEqual(missing_of(out), set(), "a base with no list has nothing to be missing\n" + out + err)
+        self.assertEqual(caught_of(out), {"kb-drop", "kb-keep"}, "both head rows must read CAUGHT\n" + out + err)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+
+    def test_a_head_that_deletes_the_list_reads_unknown_and_exits_1(self):
+        repo = base_list_repo([DROP, KEEP])
+        listed = head_list(repo, None, "Delete the list")
+        self.assertFalse(os.path.exists(listed), "the fixture: the head has no list file")
+        self.assertEqual(base_ids(repo), {"kb-drop", "kb-keep"}, "the fixture: the base list holds both ids")
+        code, out, err = known_base_run(listed, repo)
+        self.assertTrue(any(listed in line for line in unknown_lines(out)),
+                        "a head with no list must print an UNKNOWN line that names %s\n" % listed + out + err)
+        self.assertEqual(code, 1, "exit %d\n%s%s" % (code, out, err))
+
+    def test_a_list_path_outside_the_repository_with_base_reads_unknown_and_exits_1(self):
+        repo = base_list_repo([DROP, KEEP])
+        outside = os.path.abspath(os.path.join(fresh(), "known-defects.json"))
+        with open(outside, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(list_text([KEEP]))
+        self.assertNotEqual(os.path.commonpath([outside, os.path.abspath(repo)]), os.path.abspath(repo),
+                            "the fixture: the list sits outside the repository")
+        code, out, err = known_base_run(outside, repo)
+        self.assertTrue(any(outside in line for line in unknown_lines(out)),
+                        "a list outside the repository must print an UNKNOWN line that names its path\n" + out + err)
+        self.assertEqual(code, 1, "exit %d\n%s%s" % (code, out, err))
+
+    def test_a_trailer_on_a_commit_before_the_base_does_not_excuse_the_drop(self):
+        """The trailer sits on a commit that is an ancestor of REF, so REF..HEAD does not hold it: the drop reads MISSING."""
+        repo = defect_repo()
+        put(repo, {"NOTES.md": "kb-drop was retired before the base.\n"})
+        retired = commit(repo, "Retire kb-drop\n\nKnown-defect-removed: kb-drop")
+        put(repo, {KNOWN_DEFECTS_FILE: list_text([DROP, KEEP])})
+        commit(repo, "List the planted defects")
+        git(repo, "tag", BASE_TAG)
+        listed = head_list(repo, [KEEP], "Drop kb-drop")
+        git(repo, "merge-base", "--is-ancestor", retired, BASE_TAG)  # the fixture: the trailer commit is before the base
+        self.assertIn("kb-drop", base_ids(repo), "the fixture: the base list holds kb-drop")
+        code, out, err = known_base_run(listed, repo)
+        self.assertIn("kb-drop", missing_of(out),
+                      "a trailer on a commit before REF excused kb-drop: only REF..HEAD may name it\n" + out + err)
+        self.assertEqual(code, 1, "exit %d\n%s%s" % (code, out, err))
+
+    def test_a_base_entry_with_no_id_and_an_empty_head_reads_unknown_and_exits_1(self):
+        """An entry on REF's list with no `id` is not skipped: an empty head would read green if it were."""
+        idless = {key: value for key, value in DROP.items() if key != "id"}
+        repo = base_list_repo([idless])
+        listed = head_list(repo, [], "Empty the list")
+        entries = json.loads(show(repo, BASE_TAG, KNOWN_DEFECTS_FILE))
+        self.assertEqual(len(entries), 1, "the fixture: the base list holds one entry")
+        self.assertNotIn("id", entries[0], "the fixture: the base entry has no id")
+        code, out, err = known_base_run(listed, repo)
+        self.assertTrue(unknown_lines(out), "a base entry with no id must read UNKNOWN, not be skipped\n" + out + err)
+        self.assertEqual(code, 1, "exit %d\n%s%s" % (code, out, err))
+
+
+class ReplayBaseWiringTests(unittest.TestCase):
+    """The replay step of actions/mutation-report/action.yml passes `--base "origin/$BASE_REF"` to --known-defects, and its
+    own env sets BASE_REF. Only that step's block is read: the catch-share step sets BASE_REF and passes --base too."""
+
+    ACTION = os.path.join(REPO, "actions", "mutation-report", "action.yml")
+    HEADER = "    - name: Replay the known defects\n"
+
+    def replay_step(self):
+        with open(self.ACTION, encoding="utf-8") as handle:
+            text = handle.read()
+        start = text.find(self.HEADER)
+        self.assertGreaterEqual(start, 0, "%s has no step named Replay the known defects" % self.ACTION)
+        after = start + len(self.HEADER)
+        ends = re.search(r"^    - name:", text[after:], re.M)
+        block = text[start:] if ends is None else text[start:after + ends.start()]
+        self.assertIn("      run: |\n", block, "the replay step has no run block:\n" + block)
+        self.assertIn("--known-defects", block, "the replay step runs no --known-defects command:\n" + block)
+        return block
+
+    def test_the_replay_step_passes_base_origin_base_ref_and_sets_base_ref(self):
+        env, _, run = self.replay_step().partition("      run: |\n")
+        joined = run.replace("\\\n", " ")  # a command continued on the next line is one command
+        commands = [line for line in joined.splitlines() if "--known-defects" in line]
+        self.assertEqual(len(commands), 1, "the replay step must run one --known-defects command:\n" + run)
+        self.assertRegex(commands[0], r'--base\s+"?origin/\$BASE_REF"?',
+                         "the replay command passes no --base origin/$BASE_REF:\n" + commands[0])
+        self.assertRegex(env, r"(?m)^        BASE_REF: ",
+                         "the replay step's env does not set BASE_REF:\n" + env)
 
 
 class RealListTests(unittest.TestCase):
