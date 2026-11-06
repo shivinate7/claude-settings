@@ -89,8 +89,9 @@ The last upkeep row, "done without check", names each done step that closed with
 main (step done-needs-check). Only a done step whose updatedAt is on or after DONE_CHECK_SINCE (an ISO UTC time) is read.
 Its note, why and ask are searched for the whole phrase `Done check` (any case; `Done checks` does not count). With no
 such phrase the entry is `<step id>`. With the phrase, one sentence of the three texts (a sentence ends at ". " or at
-the end of a text) must hold the whole phrase `green on main` or `met on main` (any case) and a source: `#<digits>` or a
-hex commit hash of 7 to 40 characters. With none the entry is `<step id> (not shown green on main)`. A missing or
+the end of a text) must hold the whole phrase `green on main` or `met on main` (any case), with no negator (not, never,
+no, yet, or a word ending in n't) before it in that sentence, and a source: a ref that DONE_REF_RE in
+lint/report_guard.py accepts (the one home: `#<digits>`, `PR <n>`, a /pull/ or /commit/ URL, a hex commit hash). With none the entry is `<step id> (not shown green on main)`. A missing or
 unparsable updatedAt gives `<step id> (updatedAt unreadable)`. The row reads the step files only, so it needs no live
 file. It adds no process, file, timer or log: it reads the notes already loaded.
 
@@ -145,7 +146,8 @@ TOP = 5
 DONE_CHECK_SINCE = "2026-11-07T00:00:00Z"  # ISO UTC: a done step updated before this time is not read for a Done check
 DONE_CHECK = re.compile(r"(?<![\w-])done check(?![\w-])", re.I)
 GREEN_ON_MAIN = re.compile(r"(?<![\w-])(?:green|met) on main(?![\w-])", re.I)
-SOURCE_REF = re.compile(r"#\d+|(?<![0-9a-f])[0-9a-f]{7,40}(?![0-9a-f])")
+# A negator before the phrase in its sentence: the check is said not to be green. `\w+n't` covers isn't, wasn't, hasn't.
+NEGATOR = re.compile(r"(?<![\w'-])(?:not|never|no|yet|\w+n['’]t)(?![\w'-])", re.I)
 DATA = "roadmap/data"
 # roadmap.html is left out: this script rewrites it, so a conflict there is resolved by building.
 SCANNED = ("roadmap", "briefs", "plans", "handoffs")
@@ -177,6 +179,11 @@ sys.path.insert(0, str(HERE.parent.parent / "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import git_reads  # noqa: E402  the one home of a checkout's GitHub repo, shared with the guard (hooks/git_reads.py)
 from shared_names import REPO_TAG, STEP_TAG, repo_tag_names  # noqa: E402,F401  REPO_TAG: test_build pins build.REPO_TAG to the shared object  the one home of the tag names, shared with the guard (hooks/shared_names.py)
+sys.path.insert(0, str(LINT))
+try:
+    from report_guard import DONE_REF_RE  # noqa: E402  the one home of a source ref in a Done line (lint/report_guard.py)
+finally:
+    sys.path.remove(str(LINT))
 
 
 def git(repo, *args, stdin=None):
@@ -1108,6 +1115,12 @@ def unfiled(steps, work):
     return out
 
 
+def shown_green(sentence):
+    """True when the sentence holds `green on main` or `met on main` with no negator before it, and a source."""
+    plain = any(not NEGATOR.search(sentence[:m.start()]) for m in GREEN_ON_MAIN.finditer(sentence))
+    return plain and bool(DONE_REF_RE.search(sentence))
+
+
 def done_without_check(steps):
     """Entries for each done step updated on or after DONE_CHECK_SINCE that does not show its Done check green on main."""
     since = datetime.datetime.fromisoformat(DONE_CHECK_SINCE.replace("Z", "+00:00"))
@@ -1130,7 +1143,7 @@ def done_without_check(steps):
             continue
         # Each text splits on its own, so a sentence never runs from one field into the next.
         sentences = [part for t in texts for part in re.split(r"\.\s", t)]
-        if not any(GREEN_ON_MAIN.search(x) and SOURCE_REF.search(x) for x in sentences):
+        if not any(shown_green(x) for x in sentences):
             out.append("%s (not shown green on main)" % k)
     return out
 
