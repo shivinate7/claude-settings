@@ -770,14 +770,14 @@ def main(args):
     # Given files are read whole; a change is read on the lines it adds.
     scope, unknown = ({p: None for p in args}, []) if args else added_lines()
     for rel, lines in sorted(scope.items()):
-        text = read(rel)
         if rel.startswith(SKIP_CODE):
             continue
+        text = read(rel)
         if text is None:
-            # A committed file that does not decode is left alone. An untracked one is new work that no
-            # read can judge, so it is unknown, never clean.
-            if not args and rel in untracked() and not binary(rel):
-                unknown.append("%s is untracked and cannot be read as text" % rel)
+            # A binary file (an image, bytecode) is not text to judge. Any other file that cannot be read is
+            # unknown, never clean: red in CI.
+            if not binary(rel):
+                unknown.append("%s cannot be read as text" % rel)
             continue
         try:
             bad += code_problems(rel, text, table, lines)
