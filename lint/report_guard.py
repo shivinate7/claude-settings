@@ -94,12 +94,14 @@ state/ per session (janitor/session_end_sweep.py runs the branch and worktree sw
 short keys, so it stays as the refusals and reply-judge counter files do.
 
 Hand-off cite (rule output-never-hand-off-doable-step): a "Why yours:" line, in prose above the report or in the Input
-Needed or Next item (plain, behind a list marker, or in bold), that gives a capability reason (can't, cannot, refuses,
-blocked, not available) must cite `(route <id>)` for a route row whose outcome on this surface is refused or asks, a
+Needed or Next item (plain, behind a list marker, or in bold), that gives a capability reason (can't, cannot, refuse,
+refused, unable to, denied, forbidden, no access, not allowed, not permitted, unavailable, 403, blocked, not available)
+must cite `(route <id>)` for a route row whose outcome on this surface is refused or asks, a
 tool in backticks that hooks/refusal_note.py recorded for this session, or `(measured <date>, <check and result>)`. A
-choice, login or safety-kept reason needs no cite. A "works" row, a dead id, an undated measurement and no cite block,
+line with a choice, login or safety-kept phrase needs no cite, and "blocked until" or "not available until" is a
+dependency, not a capability. A "works" row, a dead id, an undated measurement and no cite block,
 with a remedy that names no act. A rows file, a refusals file or an outcome that did not read is a systemMessage with
-the word UNKNOWN, never a block. Cost: a reply with no such line opens nothing new and imports nothing; one with it reads
+the word UNKNOWN, never a block, and never clears a "works" row or a dead id. Cost: a reply with no such line opens nothing new and imports nothing; one with it reads
 the session's refusals file, and the rows file (hooks/route_match.py read_rows) when a line carries a route cite. It
 runs on landed and unlanded turns and not on a stop_hook_active rewrite.
 """
@@ -1269,11 +1271,19 @@ def success_route_flags(hook, after):
 # The hand-off cite (rule output-never-hand-off-doable-step). A "Why yours:" line in prose above the report, or in the
 # Input Needed or Next item, says why an act is the owner's. When it gives a capability reason (the owner's session can do
 # what this one cannot), it must cite a route row that says the act is not doable here, a tool the classifier refused
-# this session, or a dated measurement. A check name is no cite. A choice, login or safety-kept reason needs no cite.
+# this session, or a dated measurement. A check name is no cite. A line with a choice, login or safety-kept phrase needs
+# no cite, even beside a capability verb: the owner keeps the act whatever this session can do.
 ROUTE_CITE_RE = re.compile(r"\(route\s+([\w.-]+)\)", re.I)
 MEASURED_RE = re.compile(r"\(measured\b([^)]*)\)", re.I)
 MEASURED_OK_RE = re.compile(r"\s+(\d{4}-\d{2}-\d{2}),\s*\S")
-CAPABILITY_RE = re.compile(r"\bcan(?:'|’)t\b|\bcannot\b|\brefuses\b|\bblocked\b|\bnot available\b", re.I)
+# "blocked until" and "not available until" wait on another act, so they are a dependency, not a capability.
+CAPABILITY_RE = re.compile(
+    r"\bcan['’]t\b|\bcannot\b|\brefuse[sd]?\b|\bunable to\b|\bdenied\b|\bforbidden\b|\bno access\b"
+    r"|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b|\bunavailable\b|\b403\b"
+    r"|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)", re.I)
+CHOICE_RE = re.compile(
+    r"\byour choice\b|\byour call\b|\bneeds your login\b|\bsign in as you\b|\ba safety rule\b.*?\bstays yours\b"
+    r"|\bthe safety rules keep\b", re.I)
 # question_form.WHY_YOURS_LINE judges a waiting-page task's context, where the label starts the line. A reply carries it
 # behind a list marker or in bold, so this reader allows those forms. Widening WHY_YOURS_LINE itself would let a page
 # task pass in forms the page refuses today.
@@ -1304,8 +1314,8 @@ def hand_off_lines(text):
 
 def _cited_refusal(hook, line):
     """True when the Why yours `line` names a tool in this session's refusals file, False when it does not, None when
-    the file did not read (it cannot be opened, or a line in it is not JSON) and names none. The file is read here,
-    before pending_refusals settles it: a reply that names the tool under Input Needed clears its row."""
+    the file did not read (it cannot be opened, is not UTF-8, or a line in it is not JSON) and names none. The file is
+    read here, before pending_refusals settles it: a reply that names the tool under Input Needed clears its row."""
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     import shared_names
     path = shared_names.refusals_path(hook.get("session_id"))
@@ -1314,7 +1324,7 @@ def _cited_refusal(hook, line):
     skipped = []
     try:
         rows = refusal_rows(path, skipped)
-    except OSError:
+    except (OSError, UnicodeDecodeError):  # a directory, a lost file or bytes that are not UTF-8: this read only
         return None
     if any(names_tool(line, row["tool_name"]) for _, row in rows):
         return True
@@ -1365,14 +1375,14 @@ def _route_verdict(ids):
 
 
 def hand_off_problem(hook, text):
-    """(refusal, note) for the reply's Why yours lines, else ('', ''). A line with no capability verb needs no cite. A
-    capability line passes on a tool this session's classifier refused, a dated `(measured ...)` cite, or a route cite
+    """(refusal, note) for the reply's Why yours lines, else ('', ''). A line with a choice phrase, or with no
+    capability verb, needs no cite. A capability line passes on a tool this session's classifier refused, a dated `(measured ...)` cite, or a route cite
     whose row says refused or asks. A "works" row, a dead id, an undated measurement or no cite is refused. A file or row
     that did not read is a note that says UNKNOWN. Cost: the reply's text; the refusals file and the rows file are
     read only for a reply that holds a capability Why yours line, the rows file only for a line with a route cite."""
     refusals, notes = [], []
     for line in hand_off_lines(text):
-        if not CAPABILITY_RE.search(line):
+        if CHOICE_RE.search(line) or not CAPABILITY_RE.search(line):
             continue
         refused = _cited_refusal(hook, line)
         measured = _measured(line)
