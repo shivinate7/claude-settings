@@ -92,6 +92,14 @@ shown. Cost: one small file per session, written only when a flag shows, read at
 _shown_flags, and a turn with no flag and no successful call reads no rows file. Cleanup: none. Nothing prunes
 state/ per session (janitor/session_end_sweep.py runs the branch and worktree sweep only), and a file holds a few
 short keys, so it stays as the refusals and reply-judge counter files do.
+
+Hand-off cite (decision task-names-its-check, rule `task-names-check`): a "Why yours:" line, in prose above the report or
+in the Input Needed item, must cite `(route <id>)` for a route row whose outcome on this surface is refused or asks, or
+name a tool in backticks that hooks/refusal_note.py recorded for this session. A "works" row, a dead id and a line with
+no cite block, with a remedy that names no act. A rows file or an outcome that did not read is a systemMessage with the
+word UNKNOWN, never a block. An Input Needed item with no Why yours label is not judged. Cost: a reply with no such line
+opens nothing new; one with it reads the session's refusals file, and the rows file (hooks/route_match.py read_rows) when
+a line carries a route cite. It runs on landed and unlanded turns and not on a stop_hook_active rewrite.
 """
 import json
 import os
@@ -1110,6 +1118,20 @@ def tool_use_sources(transcript_path):
     return agent, orchestrator
 
 
+def refusal_rows(path):
+    """(line, row) for each row of the refusals file at `path` that holds a tool_name. A bad line is skipped."""
+    rows = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(row, dict) and isinstance(row.get("tool_name"), str):
+                rows.append((line.rstrip("\n"), row))
+    return rows
+
+
 def pending_refusals(hook, text):
     """Settle the session's refusals file against the reply and return the tool names still unnamed.
 
@@ -1126,15 +1148,7 @@ def pending_refusals(hook, text):
         path = shared_names.refusals_path(hook.get("session_id"))
         if path is None or not os.path.exists(path):
             return []
-        with open(path, encoding="utf-8") as f:
-            rows = []
-            for line in f:
-                try:
-                    row = json.loads(line)
-                except Exception:
-                    continue
-                if isinstance(row, dict) and isinstance(row.get("tool_name"), str):
-                    rows.append((line.rstrip("\n"), row))
+        rows = refusal_rows(path)
         section = input_needed_section(text)
         agent_ids, orchestrator_ids = set(), set()
         transcript = hook.get("transcript_path")
@@ -1237,6 +1251,100 @@ def success_route_flags(hook, after):
         return _shown_flags(hook, flags)
     except Exception:
         return []
+
+
+# The hand-off cite (decision task-names-its-check, rule `task-names-check`, applied to the reply). A "Why yours:" line
+# in prose above the report or inside the Input Needed item says why an act is the owner's. It must cite a route row
+# that says the act is not doable here, or a tool the classifier refused this session. A check name is no cite.
+ROUTE_CITE_RE = re.compile(r"\(route\s+([\w.-]+)\)", re.I)
+HAND_OFF_TAIL = " (rule task-names-check)"
+HAND_OFF_NO_CITE = (
+    "Hand-off guard: a Why yours line cites no route row and no refusal of this session. Remedy: end the line with "
+    "`(route <id>)`, an id from the route rows file whose outcome on this surface is refused or asks, or name in "
+    "backticks a tool the auto-mode classifier refused this session. A check name is no cite. If no row or "
+    "refusal fits, the act may be one a session can do.")
+
+
+def hand_off_lines(text):
+    """Each "Why yours:" line of the reply (question_form.WHY_YOURS_LINE, the one home of the label), without its
+    quote marker, from the prose above the report and from the Input Needed item. The label counts only at line start."""
+    lines = text.splitlines()
+    start = find_block_start(lines)
+    above = lines if start is None else lines[:start]
+    sources = above + input_needed_section(text).splitlines()
+    if not any("why yours" in line.lower() for line in sources):  # the common reply imports nothing
+        return []
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import question_form
+    return [line.strip() for line in sources if question_form.WHY_YOURS_LINE.match(line.strip())]
+
+
+def _cited_refusal(hook, line):
+    """True when the Why yours `line` names a tool in this session's refusals file. The file is read here, before
+    pending_refusals settles it: a reply that names the tool under Input Needed clears its row."""
+    import shared_names
+    path = shared_names.refusals_path(hook.get("session_id"))
+    if path is None or not os.path.exists(path):
+        return False
+    return any(names_tool(line, row["tool_name"]) for _, row in refusal_rows(path))
+
+
+def _route_verdict(ids):
+    """(kind, text) for the route ids a Why yours line cites: kind "ok", "works" (a row says the act is doable),
+    "dead" (no row holds the id), or "unknown" (the file or the row's outcome on this surface did not read). Reads the
+    rows file once, through hooks/route_match.py. A row of another surface says nothing here, so it reads unknown."""
+    import route_match
+    rows = route_match.read_rows()
+    if rows is None:
+        return "unknown", ("the route rows file did not read, so the route cite %s went unchecked"
+                           % ", ".join(ids))
+    here = route_match.surface()
+    kinds = []
+    for rid in ids:
+        held = [row for row in rows if row.get("id") == rid]
+        row = next((r for r in held if r.get("surface") == here), None)
+        if not held:
+            kinds.append(("dead", "route id %s is in no row of the route rows file" % rid))
+        elif row is None or row.get("outcome") not in ("refused", "asks", "works"):
+            kinds.append(("unknown", "route row %s has no readable outcome on %s" % (rid, here)))
+        elif row["outcome"] == "works":
+            kinds.append(("works", "route row %s says this act works on %s, so it is not the owner's to do. "
+                          "Remedy: do it through the route %s" % (rid, here, row.get("route") or "that row names")))
+        else:
+            return "ok", ""
+    for kind in ("works", "dead", "unknown"):
+        for found, text in kinds:
+            if found == kind:
+                return kind, text
+    return "dead", "the cite names no route id"
+
+
+def hand_off_problem(hook, text):
+    """(refusal, note) for the reply's Why yours lines, else ('', ''). A line passes on a route cite whose row says
+    refused or asks, or a tool this session's classifier refused. A "works" row, a dead id or no cite is refused. A
+    row or file that did not read is a note that says UNKNOWN. Cost: the reply's text; the refusals file and the
+    rows file are read only for a reply that holds a Why yours line, the rows file only for a line with a route cite."""
+    refusals, notes = [], []
+    lines = hand_off_lines(text)
+    for line in lines:
+        if _cited_refusal(hook, line):
+            continue
+        ids = ROUTE_CITE_RE.findall(line)
+        if not ids:
+            refusals.append(HAND_OFF_NO_CITE)
+            continue
+        kind, detail = _route_verdict(ids)
+        if kind == "ok":
+            continue
+        if kind == "unknown":
+            notes.append("Hand-off guard: UNKNOWN, " + detail + ".")
+        elif kind == "works":
+            refusals.append("Hand-off guard: " + detail + ".")
+        else:
+            refusals.append("Hand-off guard: the Why yours line cites a route id the route rows file does not hold (%s). "
+                            "Remedy: cite an id the file holds, or name a tool refused this session in backticks." % detail)
+    unique = list(dict.fromkeys(refusals))
+    return (" ".join(unique) + HAND_OFF_TAIL if unique else ""), " ".join(dict.fromkeys(notes))
 
 
 def refusal_reason(tools):
@@ -1543,6 +1651,14 @@ def main():
         if payload:
             print(json.dumps(payload))
 
+    # The hand-off cite reads the refusals file before pending_refusals settles it away.
+    hand_off, hand_note = "", ""
+    try:
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        hand_off, hand_note = hand_off_problem(hook, last_reply(hook))
+    except Exception:
+        pass
+
     # Every Stop, landed or not, settles the refusals file; the reason joins whichever block follows.
     pending = pending_refusals(hook, last_reply(hook))
     refusal = refusal_reason(pending)
@@ -1589,6 +1705,7 @@ def main():
         pick_reason, note = question_problem(records, turn, text, hook)
     except Exception:
         pass
+    note = " ".join(filter(None, [note, hand_note]))
     relay = []
     if last_human_idx is not None:  # a transcript with no human message never ran the relay and answered checks
         relay = relay_reasons(after, text, hook.get("cwd"))
@@ -1605,6 +1722,7 @@ def main():
         except Exception:
             pass
         pick += relay
+        pick.append(hand_off)
         try:
             if report_shape_ok(text):
                 pick.append(recovered_problem(records, text))
@@ -1644,6 +1762,8 @@ def main():
     except Exception:
         pass
     reasons += [r for r in relay if r]
+    if hand_off:
+        reasons.append(hand_off)
     try:
         rewrite = rewrite_stamp_problem(text, records[last_human_idx].get("timestamp"), hook.get("cwd"))
         if rewrite:
