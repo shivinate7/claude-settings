@@ -15937,7 +15937,7 @@ up("a stood multi pick of non-widening keys is allowed", "allow",
 up("an update that carries options and a widening list pick is denied", "deny",
    {"multi": True, "options": UP_THREE, "pick": ["b", "a"]}, action="update")
 up("an update that carries options and a non-widening list pick is allowed", "allow",
-   {"multi": True, "options": UP_THREE, "pick": ["b", "c"]}, action="update")
+   {"multi": True, "options": UP_THREE, "pick": ["b", "c"], "against": AGAINST}, action="update")
 up("a task with a list pick is not judged", "allow",
    up_item(kind="task", multi=True, options=UP_THREE, pick=["a", "b"],
            context="Banchi's titles differ from the shared form.\n" + TN_WHY))
@@ -17015,8 +17015,12 @@ ifr("a set of listed fields only is allowed", "allow", if_item())
 ifr("a set that carries reply, lastAnswer and lane is allowed", "allow",
     if_item(reply="Use the blue.", lastAnswer=IF_LAST, lane="page-shows-last-answer", group="logo", rank=2, by="owner"))
 for _field in IF_REQUIRED:
-    ifr("an update of %s is allowed once the page lists it" % _field, "allow", {_field: IF_VALUE.get(_field, "x")},
-        action="update")
+    # An update that carries a pick is judged for its against, since the stored item is unseen. Only the pick
+    # fixture carries one, so each other field's case still judges that field alone.
+    _fixture = {_field: IF_VALUE.get(_field, "x")}
+    if _field == "pick":
+        _fixture["against"] = AGAINST
+    ifr("an update of %s is allowed once the page lists it" % _field, "allow", _fixture, action="update")
 
 # __delete__ removes a field, so it passes on an update, and only there.
 ifr("an update that deletes an unlisted field is allowed", "allow", {IF_BOGUS: {"__delete__": True}}, action="update")
