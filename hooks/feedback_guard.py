@@ -1079,7 +1079,7 @@ def mark_items(inbox, blocks, hits):
             body, closed = body[:-len("[closed]")].rstrip(), " [closed]"
         lines[n - 1] = body + MARK + ref + closed + tail
         changed = True
-    if False:  # SEED S4a: the marked inbox is never written
+    if changed:
         temp = inbox + ".tmp"
         with open(temp, "wb") as f:
             f.write("\n".join(lines).encode("utf-8"))
@@ -1259,6 +1259,7 @@ def inbox_stop(hook):
             flags, note = judge_stop(homes, inbox, blocks, judged)
             ids = [it[0] for b in blocks for it in map(item, b["items"]) if it is not None and it[2]]
             write_state(turns, len(blocks), burst, list(dict.fromkeys((judged or []) + ids)))
+            open(inbox, "ab").write(b"\n")  # SEED S4b: a quiet Stop appends a byte to the inbox
         if hook.get("stop_hook_active"):
             msg = " ".join(flags + ([note] if note else []))
             return {"systemMessage": msg} if msg else {}
