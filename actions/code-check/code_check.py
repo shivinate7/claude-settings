@@ -69,7 +69,7 @@ LINK_UNKNOWN_EXIT = 2
 
 def link_roots(root, link, files):
     """The tracked files to link: those a roots glob matches, plus the files a script of the root package.json
-    names that sit under an npm_scripts prefix, minus the skip prefixes."""
+    names that sit under an npm_scripts prefix, minus the skip prefixes. Returns (roots, the files skip dropped)."""
     skip = tuple(link.get("skip", []))
     names = set()
     for pattern in link.get("roots", []):
@@ -81,7 +81,9 @@ def link_roots(root, link, files):
             scripts = json.load(f).get("scripts") or {}
         words = set(" ".join(str(v) for v in scripts.values()).split())
         names.update(n for n in files if n in words and n.startswith(prefixes))
-    return sorted(n for n in names if n.endswith(LINK_EXTENSIONS) and not (skip and n.startswith(skip)))
+    loadable = sorted(n for n in names if n.endswith(LINK_EXTENSIONS))
+    dropped = [n for n in loadable if skip and n.startswith(skip)]
+    return [n for n in loadable if n not in dropped], dropped
 
 
 def link_config_problems(link, files):
@@ -94,11 +96,17 @@ def link_config_problems(link, files):
         value = link.get(key, [])
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             out.append("link.%s in %s must be a list of strings" % (key, CONFIG))
-        elif key != "roots" and any(not v.strip().strip("/") for v in value):
+        elif any(not (v.strip() if key == "roots" else v.strip().strip("/")) for v in value):
             out.append("link.%s in %s has an empty entry, which matches every file" % (key, CONFIG))
+    out += ["link has an unknown key %s in %s; the keys are roots, skip and npm_scripts" % (k, CONFIG)
+            for k in link if k not in ("roots", "skip", "npm_scripts")]
     if not out:
-        out = ["link.roots glob %s in %s matches no tracked file" % (g, CONFIG)
-               for g in link.get("roots", []) if g and not any(fnmatch.fnmatchcase(n, g) for n in files)]
+        for g in link.get("roots", []):
+            hits = [n for n in files if fnmatch.fnmatchcase(n, g)]
+            if not hits:
+                out.append("link.roots glob %s in %s matches no tracked file" % (g, CONFIG))
+            elif not any(n.endswith(LINK_EXTENSIONS) for n in hits):
+                out.append("link.roots glob %s in %s matches no %s file" % (g, CONFIG, "/".join(LINK_EXTENSIONS)))
     return out
 
 
@@ -112,9 +120,11 @@ def link_step(root, cfg, files):
     if bad:
         return bad
     try:
-        roots = link_roots(root, link, files)
+        roots, dropped = link_roots(root, link, files)
     except (OSError, ValueError, AttributeError, TypeError) as e:
         return ["mjs-link could not read its roots: %s" % e]
+    for n in dropped:
+        print("mjs-link: skip drops %s" % n)
     if not roots:
         print("%s: nothing to run, no root matches" % LINK_LABEL)
         return []
