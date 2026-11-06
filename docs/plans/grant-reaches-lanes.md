@@ -47,7 +47,7 @@ What counts as the owner's word:
   (permission-modes.md#approvals-you-state-in-conversation)
 - "Claude's own judgment that a condition was met does not lift it."
   (permission-modes.md#boundaries-you-state-in-conversation)
-- Hook context is "wrapped... in a system reminder" and "doesn't appear as a chat message"
+- Hook context is "wrapped... in a system reminder" and, per the docs, does not appear as a chat message
   (https://code.claude.com/docs/en/hooks.md#add-context-for-claude).
 - `classifierContext`: "the classifier treats the note as unverified, application-provided context.
   The note never establishes user intent" (hooks.md#annotate-a-result-for-the-auto-mode-classifier).
@@ -268,7 +268,7 @@ Design B: one file write per grant, one file read per tool call while the file e
 
 1. **The reframe.** The docs say hook text never becomes owner words to the classifier. Answered (a) by the 2026-11-03 sign-off (item 152 a): gate the named act before the classifier, as this plan does. Option (b), keep asking in each session, was not taken.
 2. **The grant form.** Answered (a) by the 2026-11-03 sign-off (item 152 a): the fixed words of section 2, catalogue in code. Option (b), free text judged by a model, lets a misread widen the act, against rule outcomes-grant-covers-named-act.
-3. **The first catalogue (open).** The act to gate is a lane's `Agent` spawn, not an Edit or Write. The candidate acts that wait on this question are `self-edit` (gates nothing as written, section 2) and `merge <pr>` (superseded). Options: (a) gate the lane's `Agent` spawn as the first act, as the refused act on record; (b) defer the first act until the hook gate is probed on an `Agent` spawn (section 2, Agents). Recommend (a): it is the only refused act on record. Meanwhile: the build waits.
+3. **The first catalogue (open).** The act to gate is a lane's `Agent` spawn, not an Edit or Write. The candidate acts that wait on this question are `self-edit` (gates nothing as written, section 2) and `merge <pr>` (superseded). Options: (a) gate the lane's `Agent` spawn first; (b) defer until a probe shows the hook gate reaches an `Agent` spawn (section 2, Agents). Recommend (a): it is the only refused act on record. Meanwhile: the build waits.
 4. **Agents.** Moot under section 2: `self-edit` gates nothing as written. Options were: (a) `self-edit` reaches the target's agents, as a timed override does, and `merge` stays with the batch runner; (b) the lead session only. The `[Self-Modification]` refusal was a builder's.
 5. **The gate.** Answered (a) by the 2026-11-03 sign-off (item 152 a): probe the hook gate first, the mod gate second. Option (b), the mod gate only, rested on its documented skip. The hook gate is known to load in cloud sessions.
 6. **Computer sessions.** Answered (a) by the 2026-11-03 sign-off (item 152 a): Design A only, Design B if its probes fail. Option (b), both now, was not taken; (a) keeps one home.
