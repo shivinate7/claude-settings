@@ -42,10 +42,11 @@ def safe(value):
 def git(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None):
     """One git process. Returns (returncode, stdout, stderr). Raises MailError on a timeout or a missing git.
     No prompt can open: a hook has no terminal to answer it. A ssh command or GIT_SSH program the caller set is kept;
-    otherwise ssh runs in batch mode, which overrides core.sshCommand."""
+    otherwise ssh runs in batch mode with a 3 s connect bound, which overrides core.sshCommand. The step's timeout kills
+    git but not its ssh child, so the connect bound stops a connecting ssh from outliving the step."""
     run_env = dict(env, GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="never")
     if not env.get("GIT_SSH_COMMAND") and not env.get("GIT_SSH"):
-        run_env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
+        run_env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=3"
     prefix = ["git", "-c", "commit.gpgsign=false"] + (["--git-dir", cache] if cache else [])
     try:
         done = _nowindow.run(prefix + args, env=run_env, input=input_text, capture_output=True, text=True,

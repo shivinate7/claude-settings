@@ -94,7 +94,7 @@ def main(argv):
     if not env.get("MAILBOX_REPO"):
         print("MAILBOX_REPO is not set", file=sys.stderr)
         return 2
-    addrs = [args.addr] if getattr(args, "addr", None) else mail.own_addrs(None, os.getcwd(), env)
+    addrs = [args.addr] if getattr(args, "addr", None) else mail.own_addrs(env.get("CLAUDE_CODE_SESSION_ID"), os.getcwd(), env)
     if not addrs:
         print("no address: set CLAUDE_CODE_REMOTE_SESSION_ID or run inside a git repo with an origin", file=sys.stderr)
         return 2
