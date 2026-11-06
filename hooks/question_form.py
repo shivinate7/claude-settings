@@ -105,7 +105,7 @@ FORM_REASON = ("A question to the owner states the form, in this order: a line \
 PAGE_FORM_REASON = FORM_REASON + (" On the waiting page the lines go in `context`, and each option has a "
                                   "non-empty `gain` and `lose`. If no stake fits, take your own pick and set "
                                   "stands: true. An open decision with a `pick` also carries `against`, the best "
-                                  "case against the pick: run `python3 ~/.claude/skills/waiting-page/refute_item.py "
+                                  "case against the pick: run `python3 skills/waiting-page/refute_item.py "
                                   "<item.json>` first, then write the item with the `against` it adds.")
 CHAT_FORM_REASON = FORM_REASON + (" In the question box the lines go in the question text, and each "
                                   "option's description holds \"Gain: <text>\" and \"Lose: <text>\".")
