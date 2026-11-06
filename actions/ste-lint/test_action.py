@@ -10,6 +10,8 @@ an unrelated commit is no drift, an unknown pin changes no exit code, a shallow 
 says unknown and never "not on main", and LINT_FILES holds every file the step runs.
 Also asserts a zizmor pin, `claude-settings/actions/zizmor@<sha>`, is read with the same verdict lines, compared on
 actions/zizmor/run.sh, one line per action, and that a workflow pinning both actions at one commit keeps both lines.
+Also asserts a diff the step cannot read (no merge base, or a root commit with no HEAD~1) exits non-zero and says
+ste-lint: unknown, with FAIL=false too.
 Also asserts the installed copy: install.sh run into a temp HOME, in cloud (copy) mode and in local (symlink) mode, lands
 bin/ste-changed where its own folder holds no actions/. The command still finds the claude-settings checkout the global
 CLAUDE.md names, reads the pin check from it, and with no checkout prints one line, never a traceback.
@@ -262,6 +264,49 @@ check("pull request: an earlier commit of the branch is linted", rc == 1 and "a.
 # A push to the default branch has no other side: HEAD~1..HEAD only, so the earlier commit is skipped.
 rc, out = run("changed", change=two_commits, on_main=True, BASE_REF="", REF_NAME="main", EVENT_NAME="push")
 check("push to default branch: only the last commit is linted", rc == 0 and "STE001" not in out, out)
+
+
+# The step diffs origin/<base>...HEAD. A diff it cannot read must fail the step and say the read is unknown.
+# It must never print "no markdown changed" and exit 0: that would pass a change nobody linted.
+def orphan_other(work):
+    """Branch `other` on origin with history unrelated to main, then the topic commit on top of main."""
+    git(work, "checkout", "-q", "--orphan", "other")
+    git(work, "rm", "-rqf", ".")
+    write(work, "o.md", "# O\n")
+    git(work, "add", "o.md"); git(work, "commit", "-qm", "other: unrelated root")
+    git(work, "push", "-q", "origin", "other")
+    git(work, "checkout", "-q", "topic")
+    default_change(work)
+
+
+def no_merge_base(work):
+    """True when origin/other exists and shares no commit with HEAD."""
+    git(work, "rev-parse", "--verify", "-q", "refs/remotes/origin/other")
+    try:
+        git(work, "merge-base", "origin/other", "HEAD")
+    except subprocess.CalledProcessError:
+        return True
+    return False
+
+
+# Scope before subject: the fixture really has no merge base, so the cases below test the read, not a bad fixture.
+with scratch("orphan") as d:
+    fixture_ok = no_merge_base(make_repo(d, BASE_FILES, orphan_other))
+check("orphan fixture: origin/other and HEAD share no commit", fixture_ok, "git merge-base found a shared commit")
+# The same fixture with the base on main reads the topic commit, so the read itself works here.
+rc, out = run("changed", change=orphan_other)
+check("orphan fixture, base main: the read works and the finding on the topic commit fails the step",
+      rc == 1 and "a.md:5: STE001 " in out and "ste-lint: unknown" not in out, out)
+rc, out = run("changed", change=orphan_other, BASE_REF="other")
+check("no merge base: the step exits non-zero", rc != 0, out)
+check("no merge base: the output says the read is unknown", "ste-lint: unknown" in out, out)
+rc, out = run("changed", change=orphan_other, BASE_REF="other", FAIL="false")
+check("no merge base, fail=false: the step still exits non-zero, since a broken read is no finding", rc != 0, out)
+check("no merge base, fail=false: the output says the read is unknown", "ste-lint: unknown" in out, out)
+# A push to the default branch whose HEAD is the root commit has no HEAD~1, so HEAD~1..HEAD cannot be read.
+rc, out = run("changed", change=lambda work: None, on_main=True, BASE_REF="", REF_NAME="main", EVENT_NAME="push")
+check("root commit push: the step exits non-zero", rc != 0, out)
+check("root commit push: the output says the read is unknown", "ste-lint: unknown" in out, out)
 
 
 # The action's `exclude` input keeps working (a pinned caller passes it): comma- or newline-separated
