@@ -11,7 +11,8 @@
       "Bash(gh pr merge:*)",
       "mcp__Claude_Browser",
       "mcp__claude-code-remote__add_repo",
-      "mcp__claude-code-remote__archive_session"
+      "mcp__claude-code-remote__archive_session",
+      "mcp__claude-code-remote__send_message"
     ],
     "deny": [
       "Read(.env)",
