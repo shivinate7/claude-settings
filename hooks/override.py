@@ -79,8 +79,6 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from shared_names import GRANT_MARKERS
-
 try:  # stdlib only: the one home of the machine-text tags
     from shared_names import MACHINE_TAGS, NOTICE_FRAMES
     NOTICE_TAGS = MACHINE_TAGS + NOTICE_FRAMES
@@ -593,6 +591,7 @@ def _grant_cover(grant):
         raise ValueError("unknown role")
     if "marker" not in grant:
         return role, None
+    from shared_names import GRANT_MARKERS  # lazy: a stale helper fails here, not at import, so keyword grants still run
     marker = grant["marker"]
     if not isinstance(marker, str) or marker not in GRANT_MARKERS:
         raise ValueError("unknown marker")  # a typo must not widen the grant to every brief: unread, so refused
