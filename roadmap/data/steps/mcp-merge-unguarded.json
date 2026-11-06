@@ -1,0 +1,9 @@
+{
+  "title": "The MCP merge tool skips the merge checks",
+  "phase": "now",
+  "status": "doing",
+  "order": 103.3535,
+  "why": "settings.json's guard.py matcher has had no mcp__github__* entry since commit 97ffeb3f (Oct 2), so a merge through the GitHub MCP tool is never checked.",
+  "note": "Coordinator 12:20 CST, from the checks-and-balances audit (Opus Explore): Measured by the coordinator. Lane session_013NEJL3XjWoVXFLZP2Lfwy4.",
+  "updatedAt": "2026-11-06T18:21:30Z"
+}

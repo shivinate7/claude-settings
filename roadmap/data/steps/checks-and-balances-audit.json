@@ -1,9 +1,9 @@
 {
   "title": "Audit: is there enough independent pushback on hooks, tool use, prompts and plans?",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 103.348,
   "why": "The owner wants to know where an independent reviewer or a check pushes back today, and where nothing does.",
-  "note": "Nov 6 12:12 CST (coordinator): started as an Opus Explore audit.\nOwner ask ask-mw59xljoxp (page, 11:54 CST Nov 6): an Opus agent, open-ended. The Audit: marker lets an Explore agent run Opus (P24). Output: a ranked list of gaps by harm, and its findings go to the page.",
-  "updatedAt": "2026-11-06T18:14:00Z"
+  "note": "Nov 6 12:20 CST (coordinator): DONE. The audit gave 4 new steps (mcp-merge-unguarded, merge-guard-flag-from-paths, state-file-parse-check, step-done-needs-check). Its gap 4 (non-GitHub \"only you can\" claims) is part (v) of prose-governance-workflow.\nNov 6 12:12 CST (coordinator): started as an Opus Explore audit.\nOwner ask ask-mw59xljoxp (page, 11:54 CST Nov 6): an Opus agent, open-ended. The Audit: marker lets an Explore agent run Opus (P24). Output: a ranked list of gaps by harm, and its findings go to the page.",
+  "updatedAt": "2026-11-06T18:21:30Z"
 }

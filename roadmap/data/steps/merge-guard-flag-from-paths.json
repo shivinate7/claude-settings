@@ -1,0 +1,9 @@
+{
+  "title": "merge.py sets \"Guard or check\" from the diff's paths",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.354,
+  "why": "A change to hooks/, lint/, settings.json or .github/ gets the guard-or-check review without relying on the author's word.",
+  "note": "Coordinator 12:20 CST, from the checks-and-balances audit (Opus Explore): Refuse a record that says \"no\" for such a diff. Refusing a missing record conflicts with item 113 a (\"no refusal now\"), so that half needs the stale-decision protocol and an owner question later.",
+  "updatedAt": "2026-11-06T18:21:30Z"
+}

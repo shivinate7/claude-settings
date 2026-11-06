@@ -1,0 +1,9 @@
+{
+  "title": "A step marked done names its check",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.355,
+  "why": "Done without a check is a claim with no proof.",
+  "note": "Coordinator 12:20 CST, from the checks-and-balances audit (Opus Explore): build.py prints \"done without check: <id>\". A lane brief for plans with no Critic: line is refused.",
+  "updatedAt": "2026-11-06T18:21:30Z"
+}
