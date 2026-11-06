@@ -1695,7 +1695,7 @@ class RouteClaimTests(StaleCase):
         rng, flagged = self.route_range(rows)
         self.assert_route_claims(rng, flagged)
 
-    def test_route_claim_is_silent_in_a_heading_a_quote_a_fence_and_a_code_span(self):
+    def test_route_claim_is_silent_in_a_heading_a_quote_a_fence_and_a_span_that_holds_the_whole_claim(self):
         rows = [
             ("## The cloud cannot push to main.", False),  # a heading
             ("> The cloud cannot push to main.", False),  # a quote line
@@ -1704,11 +1704,21 @@ class RouteClaimTests(StaleCase):
             ("```", False),
             ("The cloud cannot push to main, after the fence.", True),  # prose again after the closing fence
             ("- `The cloud cannot push to main.`", False),  # a code span holds the whole claim
-            ("- Use `cannot` and `cloud` only in code.", False),  # both words sit in code spans
+            ("- Use `cannot` and `cloud` only in code.", True),  # both words sit in spans; the line's claim is not a span
             ("- The cloud cannot push to main; see `hooks/guard.py`.", True),  # the words sit outside the span
             ("- Open a fence with `` ``` `` and the cloud cannot push to main.", True),  # no fence opens in a span
             ("- Open a comment with `<!--`. The cloud cannot push to main.", True),  # a comment opener in a span
             ("- Don't read `hooks/guard.py` for this. The cloud cannot push to main.", True),  # a lone quote
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_fires_on_a_code_span_used_as_the_subject_and_skips_only_a_span_holding_the_whole_claim(self):
+        rows = [
+            ("- `gh` cannot close a pull request.", True),  # the span is the subject; the claim is outside the span
+            ("- `The cloud` cannot push to main.", True),
+            ("- The cloud cannot push to `main`.", True),  # the span is an object; the claim is outside it
+            ("- `gh cannot close a pull request.`", False),  # the whole claim sits in the span
         ]
         rng, flagged = self.route_range(rows)
         self.assert_route_claims(rng, flagged)
