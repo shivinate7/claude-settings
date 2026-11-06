@@ -856,8 +856,8 @@ MISTAKE_CLAUSE_SPLIT_RE = re.compile(
     r"[,:;\u2014\u2013]|\s-{1,2}\s|\b(?:because|since|but|while|although)\b", re.I)
 MISTAKE_URL_RE = re.compile(r"https?://\S+")
 MISTAKE_STEP_RE = re.compile(r"\bstep:[a-z0-9][a-z0-9-]*")
-MISTAKE_DEBT_RE = re.compile(r"\bdebts?\b")
-MISTAKE_GUARD_WORD_RE = re.compile(r"\b(?:guard|check|hook)s?\b")
+MISTAKE_DEBT_RE = re.compile(r"\bdebts?\b", re.I)
+MISTAKE_GUARD_WORD_RE = re.compile(r"\b(?:guard|check|hook)s?\b", re.I)
 MISTAKE_REASON = (
     "Mistake guard: Deviations admits a mistake you made: %s. A mistake is a strong sign a guard or check is "
     "missing. Name the guard that would have stopped it: built (PR or commit), `step:<slug>`, or a debt "
