@@ -340,8 +340,12 @@ def mail_lines(raw):
         hook = json.loads(raw.decode("utf-8"))
     except ValueError:
         return
-    import mail
-    for text in mail.turn_start_lines(hook if isinstance(hook, dict) else {}, os.environ):
+    try:
+        import mail
+        lines = mail.turn_start_lines(hook if isinstance(hook, dict) else {}, os.environ)
+    except Exception as e:  # an unread mailbox shows as unknown, never as empty
+        lines = ["mail unknown: %s" % (" ".join(str(e).split())[:120] or type(e).__name__)]
+    for text in lines:
         print(text)
 
 

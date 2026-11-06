@@ -5,7 +5,8 @@ calls turn_start_lines on each UserPromptSubmit. The cache is a bare clone (MAIL
 plumbing touches it, never a working tree. No log is written.
 
 Cost of a turn start: one git process (ls-remote) when the ref has not moved, and no file written. When it moved: at most four
-(ls-remote, fetch, grep, log), and files written only in the cache. A failure prints "mail unknown: <reason>", never "no mail".
+(ls-remote, fetch, grep, log), and files written only in the cache. The four bounds sum to 10 s, so a hung remote costs the
+prompt at most 10 s. A failure prints "mail unknown: <reason>", never "no mail".
 """
 import hashlib
 import json
@@ -20,7 +21,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _nowindow  # noqa: E402  the one home of a no-window child start
 
 REF = "refs/heads/mail"
-REMOTE_BOUND, TRANSFER_BOUND = 3, 30
+# The git bounds of one moved turn start, in seconds. They sum to 10: each step may run its full bound.
+REMOTE_BOUND, FETCH_BOUND, GREP_BOUND, LOG_BOUND = 3, 4, 2, 1
+TRANSFER_BOUND = 30  # bin/mail's own git calls, which no prompt waits on
+LOG_LIMIT = "200"  # commits the age lookup may walk
 HEADER = re.compile(r"^Msg (\S+) from (\S+) to (\S+) kind (\S+) re (\S+) try (\d+)")
 SAFE = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
 NOT_FF = "[rejected]"  # local fast-forward refusal; a hook or ACL refusal says "[remote rejected]" and is not retried
@@ -36,17 +40,18 @@ def safe(value):
 
 
 def git(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None):
-    """One git process. Returns (returncode, stdout, stderr). Raises MailError on a timeout or a missing git."""
-    run_env = dict(env, GIT_TERMINAL_PROMPT="0")
-    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
-        if name not in env:
-            run_env.pop(name, None)
+    """One git process. Returns (returncode, stdout, stderr). Raises MailError on a timeout or a missing git.
+    No prompt can open: a hook has no terminal to answer it. A ssh command or GIT_SSH program the caller set is kept;
+    otherwise ssh runs in batch mode, which overrides core.sshCommand."""
+    run_env = dict(env, GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="never")
+    if not env.get("GIT_SSH_COMMAND") and not env.get("GIT_SSH"):
+        run_env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
     prefix = ["git", "-c", "commit.gpgsign=false"] + (["--git-dir", cache] if cache else [])
     try:
         done = _nowindow.run(prefix + args, env=run_env, input=input_text, capture_output=True, text=True,
                              encoding="utf-8", errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired:
-        raise MailError("timed out")
+        raise MailError("timeout")
     except OSError as error:
         raise MailError("git: %s" % error)
     return done.returncode, done.stdout, done.stderr
@@ -89,9 +94,9 @@ def remote_tip(env):
     return out.split()[0] if out.strip() else None
 
 
-def fetch(env):
+def fetch(env, timeout=TRANSFER_BOUND):
     ensure_cache(cache_path(env))
-    must(["fetch", "--quiet", "--no-tags", env["MAILBOX_REPO"], "+%s:%s" % (REF, REF)], env, cache_path(env))
+    must(["fetch", "--quiet", "--no-tags", env["MAILBOX_REPO"], "+%s:%s" % (REF, REF)], env, cache_path(env), timeout)
 
 
 def sync(env):
@@ -178,9 +183,11 @@ def repo_slug(start):
 
 
 def own_addrs(session_id, cwd, env):
-    """This session's addresses, most specific first. Cloud: cloud/<id>. Local: pc/<host>/<owner>-<repo>[/<session id>]."""
+    """This session's addresses, most specific first. Cloud: cloud/<id>, where the id `cse_X` is `session_X`. Local:
+    pc/<host>/<owner>-<repo>[/<session id>]."""
     cloud = env.get("CLAUDE_CODE_REMOTE_SESSION_ID")
     if cloud:
+        cloud = re.sub(r"^cse_", "session_", cloud)
         return ["cloud/%s" % cloud] if safe(cloud) else []
     slug = repo_slug(cwd)
     if not slug:
@@ -190,22 +197,28 @@ def own_addrs(session_id, cwd, env):
 
 
 def open_messages(env, tip, addrs):
-    """[{id, addr, from, kind, re, sent}] for each file under mail/<addr>/ at `tip`. Two git processes."""
+    """[{id, addr, from, kind, re, sent}] for each file directly under mail/<addr>/ at `tip`. Two git processes. A repo
+    address is a path prefix of its session addresses, so grep's hits are filtered to the folders named."""
     cache = cache_path(env)
     paths = ["mail/%s/" % addr for addr in addrs]
-    code, out, err = git(["grep", "-I", "--no-color", "-e", "^Msg ", tip, "--"] + paths, env, cache)
+    code, out, err = git(["grep", "-I", "--no-color", "-e", "^Msg ", tip, "--"] + paths, env, cache, GREP_BOUND)
     if code not in (0, 1):  # 1 is no match
         raise MailError(reason(err))
     found = {}
     for row in out.splitlines():
         _, path, content = row.split(":", 2)
         match = HEADER.match(content)
-        if match and path not in found:
+        if match and path not in found and path[len("mail/"):path.rindex("/")] in addrs:
             found[path] = match
     times, stamp = {}, None
     if found:
-        for row in must(["log", "--format=@%ct", "--name-only", "--diff-filter=A", "--no-renames", tip, "--"] + paths,
-                        env, cache).splitlines():
+        # The age is a courtesy: a slow or failed lookup leaves "age unknown" and never hides the mail.
+        try:
+            rows = must(["log", "-n", LOG_LIMIT, "--format=@%ct", "--name-only", "--diff-filter=A", "--no-renames", tip,
+                         "--"] + paths, env, cache, LOG_BOUND).splitlines()
+        except MailError:
+            rows = []
+        for row in rows:
             if row.startswith("@"):
                 stamp = int(row[1:])
             elif row:
@@ -225,10 +238,11 @@ def age(sent, now):
 def render(messages, now):
     if not messages:
         return []
-    lines = ["mail: %d open. `mail read <id>` shows one; `mail take <id>` before acting on it." % len(messages)]
+    lines = ["mail: %d open. Run the line's take command before acting on its message." % len(messages)]
     for m in messages:
-        lines.append("mail: %s from %s kind %s%s, %s old" % (
-            m["id"], m["from"], m["kind"], "" if m["re"] == "-" else " re " + m["re"], age(m["sent"], now)))
+        lines.append("mail: %s from %s kind %s%s, %s old; read: `mail read --addr %s %s`; take: `mail take --addr %s %s`" % (
+            m["id"], m["from"], m["kind"], "" if m["re"] == "-" else " re " + m["re"], age(m["sent"], now),
+            m["addr"], m["id"], m["addr"], m["id"]))
     return lines
 
 
@@ -259,14 +273,12 @@ def turn_start_lines(payload, env):
         path = listing_path(env, addrs)
         saved = read_listing(path)
         if saved.get("tip") != tip:
-            fetch(env)
+            fetch(env, FETCH_BOUND)
             saved = {"tip": tip, "messages": open_messages(env, tip, addrs)}
             tmp = "%s.%d" % (path, os.getpid())
             with open(tmp, "w", encoding="utf-8", newline="\n") as handle:
                 json.dump(saved, handle)
             os.replace(tmp, path)
         return render(saved["messages"], time.time())
-    except MailError as error:
-        return ["mail unknown: %s" % error]
-    except Exception as error:  # advisory: a bug here never blocks the prompt
+    except Exception as error:  # a MailError, or a bug: advisory, so it never blocks the prompt
         return ["mail unknown: %s" % error]

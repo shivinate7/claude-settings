@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # mail send --to <addr> --kind request|inform|reply [--re <id>] --body-file <file|->
-# mail read [<id>]    list the open messages, or show one with its body
-# mail take <id>      move one open message to done/; act on it only after this exits 0
+# mail read [--addr <addr>] [<id>]   list the open messages, or show one with its body
+# mail take [--addr <addr>] <id>     move one open message to done/; act on it only after this exits 0
+# --addr names the folder the message sits in, as the turn-start line prints it. Without it, the session's own address.
 # The git mailbox (decision session-messages). The plumbing and the addresses live in hooks/mail.py.
 # Exit 0 ok; 1 not sent, not taken, or mail unknown; 2 bad use or MAILBOX_REPO not set. Windows: bin/mail.cmd.
 import argparse
@@ -44,13 +45,14 @@ def show(env, addrs, mid):
         lines = mail.render(mail.open_messages(env, tip, addrs), time.time())
         print("\n".join(lines) if lines else "no open messages")
         return 0
-    for addr in addrs:
-        code, out, _ = mail.git(["show", "%s:mail/%s/%s.md" % (tip, addr, mid)], env, mail.cache_path(env))
-        if not code:
-            print(out, end="")
-            return 0
-    print("no open message %s" % mid, file=sys.stderr)
-    return 1
+    paths = ["mail/%s/%s.md" % (addr, mid) for addr in addrs]
+    found = mail.must(["ls-tree", "--name-only", tip, "--"] + paths, env, mail.cache_path(env)).split()
+    if not found:
+        print("no open message %s" % mid, file=sys.stderr)
+        return 1
+    # A show that fails on a path ls-tree found is a git fault, so it says unknown and never "no open message".
+    print(mail.must(["show", "%s:%s" % (tip, found[0])], env, mail.cache_path(env)), end="")
+    return 0
 
 
 def take(env, addrs, mid):
@@ -65,7 +67,7 @@ def take(env, addrs, mid):
             return 1
         text = mail.must(["show", "%s:%s" % (tip, left[0])], env, mail.cache_path(env))
         moved = "done/" + left[0][len("mail/"):]
-        text = text.rstrip("\n") + "\nTaken-by: %s %s\n" % (addrs[0], stamp())
+        text = text.rstrip("\n") + "\nTaken-by: %s %s %s\n" % (addrs[0], stamp(), secrets.token_hex(4))
         if mail.push(env, mail.commit_tree(env, tip, {moved: text}, [left[0]], "take %s" % mid)):
             print("taken %s" % mid)
             return 0
@@ -81,18 +83,23 @@ def main(argv):
     one.add_argument("--kind", required=True, choices=("request", "inform", "reply"))
     one.add_argument("--re")
     one.add_argument("--body-file", required=True)
-    sub.add_parser("read").add_argument("id", nargs="?")
-    sub.add_parser("take").add_argument("id")
+    one = sub.add_parser("read")
+    one.add_argument("--addr")
+    one.add_argument("id", nargs="?")
+    one = sub.add_parser("take")
+    one.add_argument("--addr")
+    one.add_argument("id")
     args = parser.parse_args(argv)
     env = dict(os.environ)
     if not env.get("MAILBOX_REPO"):
         print("MAILBOX_REPO is not set", file=sys.stderr)
         return 2
-    addrs = mail.own_addrs(None, os.getcwd(), env)
+    addrs = [args.addr] if getattr(args, "addr", None) else mail.own_addrs(None, os.getcwd(), env)
     if not addrs:
         print("no address: set CLAUDE_CODE_REMOTE_SESSION_ID or run inside a git repo with an origin", file=sys.stderr)
         return 2
-    named = [value for value in (getattr(args, "to", None), getattr(args, "re", None), getattr(args, "id", None)) if value]
+    named = [value for value in (getattr(args, "to", None), getattr(args, "re", None), getattr(args, "id", None),
+                               getattr(args, "addr", None)) if value]
     if not all(mail.safe(value) for value in named):
         print("bad address or id", file=sys.stderr)
         return 2
