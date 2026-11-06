@@ -1284,6 +1284,39 @@ for (const viewport of WIDTHS) {
     await card(page, it).locator(".rank:not(.gone)").nth(1).waitFor();
     await assertAgainstClear(page, it.id, "after a tick on b", { expectRank: true });
   });
+
+  test(`the pick line keeps the width and left edge it has with no against, when a best case against is drawn, at ${viewport.width} wide`, async (t) => {
+    const withIt = mk("pick-width-against", 35, { against: AGAINST });
+    const plainIt = mk("pick-width-bare", 36, {});
+    const page = await open(t, { items: [withIt, plainIt], viewport }); if (!page) return;
+    await card(page, withIt).locator(".against").waitFor({ state: "attached" });
+    const pickBox = (id) => page.evaluate((cardId) => {
+      const pick = document.querySelector(`#item-${cardId} .opt:has(#o-${cardId}-a) .pick`);
+      if (!pick) return null;
+      const r = pick.getBoundingClientRect();
+      return { left: r.left, width: r.width };
+    }, id);
+    const plainBox = await pickBox(plainIt.id), withBox = await pickBox(withIt.id);
+    assert.ok(plainBox, `${plainIt.id}: the card with no against has no pick line at ${viewport.width} wide`);
+    assert.ok(withBox, `${withIt.id}: the card with an against has no pick line at ${viewport.width} wide`);
+    assert.ok(Math.abs(withBox.left - plainBox.left) <= 1,
+      `the pick line's left edge is ${withBox.left}px with an against and ${plainBox.left}px without, at ${viewport.width} wide`);
+    assert.ok(Math.abs(withBox.width - plainBox.width) <= 1,
+      `the pick line is ${withBox.width}px wide with an against and ${plainBox.width}px without, at ${viewport.width} wide`);
+  });
+
+  test(`on a ranked multi card with one best case against, every picked option's pick line shares one top, at ${viewport.width} wide`, async (t) => {
+    const it = mk("against-tops", 37, { multi: true, ranked: true, pick: ["a", "c"], options: COLOURS.slice(0, 3), against: AGAINST });
+    const page = await open(t, { items: [it], viewport }); if (!page) return;
+    await card(page, it).locator(".against").waitFor({ state: "attached" });
+    const tops = await page.evaluate((id) => [...document.querySelectorAll(`#item-${id} .opt`)].map((opt) => {
+      const line = opt.querySelector(".pick");
+      return line ? { key: opt.querySelector("input")?.value, top: line.getBoundingClientRect().top } : null;
+    }).filter(Boolean), it.id);
+    assert.equal(tops.length, 2, `${it.id}: ${tops.length} pick lines, want one for each picked option, at ${viewport.width} wide`);
+    for (const { key, top } of tops) assert.ok(Math.abs(top - tops[0].top) <= 1,
+      `option ${key}'s pick line is at ${top}px and option ${tops[0].key}'s at ${tops[0].top}px at ${viewport.width} wide: the against block moved one option's row`);
+  });
 }
 
 // ---------------------------------------------------------------- answers, notes and withdrawing

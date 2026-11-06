@@ -9,10 +9,14 @@ The contract the script must match:
   effort=REFUTER_EFFORT) in place of decision_watch.invoke_model. When it is None, the script looks up
   decision_watch.invoke_model at call time, so a patch of that module attribute takes effect.
 - Module constants: REFUTER_MODEL == "sonnet", REFUTER_SHAPE == {"verdict": ("AGAINST",)}, REFUTER_EFFORT.
-- In scope: kind "decision", status not "closed", options a non-empty list, and a pick: a str, or a non-empty
-  list when multi. Each in-scope item makes exactly one call. The prompt holds the context, each option's
-  label, how, gain and lose, and the pick key or keys. It never holds the why text.
-- Out of scope: no call, the file is not written, exit 0.
+- In scope: status not "closed", and a pick: a str or a non-empty list, with any kind. This is the guard's
+  scope: an items write with a pick and a status other than closed needs `against`. Each in-scope item with
+  options makes exactly one call. The prompt holds the context, each option's label, how, gain and lose, and
+  the pick key or keys. It never holds the why text.
+- A pick with no options: no call, against is "unknown (no options)". Exit 0, or 1 when env CI is set.
+- Out of scope: no pick, an empty pick, or status "closed". No call, the file is not written, exit 0.
+- A model call that raises any exception is an unknown: against is "unknown (<reason>)", and no traceback
+  escapes the script.
 - A written case: the model's "case" text, stripped, is the item's `against`. Every other key is kept. Exit 0.
 - Unknown (the call returns (None, err), or "case" is missing, empty or not a string): `against` is
   "unknown (<reason>)". The verdict line says unknown and never ok. Exit 0, or 1 when env CI is set.
@@ -73,13 +77,32 @@ def without(data, key):
 
 
 OUT_OF_SCOPE = {
-    "a task": lambda: dict(item(), kind="task", steps=["Plug in the Mac"]),
+    "a task with no pick": lambda: dict(without(item(), "pick"), kind="task", steps=["Plug in the Mac"]),
     "a closed decision": lambda: item(status="closed"),
     "a decision with no pick": lambda: without(item(), "pick"),
     "a decision with an empty pick": lambda: item(pick=""),
-    "a decision with no options": lambda: item(options=[]),
-    "a list pick that is not multi": lambda: item(pick=["b"]),
+    "a decision with an empty list pick": lambda: item(pick=[]),
 }
+
+NO_OPTIONS = {
+    "an empty options list": lambda: item(options=[]),
+    "no options key": lambda: without(item(), "options"),
+}
+
+RAISES = {
+    "a RuntimeError": lambda: RuntimeError("the model host went away"),
+    "a ValueError": lambda: ValueError("the reply bytes are not JSON"),
+    "an OSError": lambda: OSError("the pipe closed"),
+    "a KeyError": lambda: KeyError("verdict"),
+    "a TokenUnreadable": lambda: decision_watch.TokenUnreadable(),
+}
+
+
+def raising(make):
+    """A model_call stand-in that raises the exception `make` builds."""
+    def boom(*args, **kwargs):
+        raise make()
+    return boom
 
 UNKNOWN_REPLIES = {
     "the model call failed": (None, "model subprocess timed out"),
@@ -157,6 +180,14 @@ def run_main(refute, path, **kwargs):
         except SystemExit as exc:
             code = exc.code
     return code, out.getvalue() + err.getvalue()
+
+
+@contextlib.contextmanager
+def ci_unset():
+    """The environment with CI removed, so a case that expects the unset exit code gets it on a CI runner too."""
+    with mock.patch.dict(os.environ):
+        os.environ.pop("CI", None)
+        yield
 
 
 def prompt_for(refute, **over):
@@ -261,6 +292,100 @@ class RefuteItem(unittest.TestCase):
                          "a multi decision with a pick list makes %d calls, want 1" % len(stub.calls))
         self.assertEqual(read_json(path)["against"], "The case.", "a multi decision was not written")
 
+    def test_a_list_pick_that_is_not_multi_is_in_scope(self):
+        refute = load_refute()
+        path = write_item("list-pick", item(pick=["b"]))
+        stub = Stub(CASE_REPLY)
+        run_main(refute, path, model_call=stub)
+        self.assertEqual(len(stub.calls), 1,
+                         "a list pick that is not multi makes %d calls, want 1: the scope is any pick" % len(stub.calls))
+        self.assertEqual(read_json(path)["against"], "The case.", "a list pick that is not multi was not written")
+
+    def test_a_ranked_pick_without_multi_is_in_scope(self):
+        refute = load_refute()
+        path = write_item("ranked", item(ranked=True, pick=["b", "a"]))
+        stub = Stub(CASE_REPLY)
+        run_main(refute, path, model_call=stub)
+        self.assertEqual(len(stub.calls), 1, "a ranked pick without multi makes %d calls, want 1" % len(stub.calls))
+        self.assertEqual(read_json(path)["against"], "The case.", "a ranked pick without multi was not written")
+
+    def test_an_item_with_no_kind_is_in_scope(self):
+        refute = load_refute()
+        path = write_item("no-kind", without(item(), "kind"))
+        stub = Stub(CASE_REPLY)
+        run_main(refute, path, model_call=stub)
+        self.assertEqual(len(stub.calls), 1, "an item with no kind and a pick makes %d calls, want 1" % len(stub.calls))
+        self.assertEqual(read_json(path)["against"], "The case.", "an item with no kind was not written")
+
+    def test_a_task_with_a_pick_is_in_scope(self):
+        refute = load_refute()
+        path = write_item("task-pick", dict(item(), kind="task", steps=["Plug in the Mac"]))
+        stub = Stub(CASE_REPLY)
+        run_main(refute, path, model_call=stub)
+        self.assertEqual(len(stub.calls), 1, "a task with a pick makes %d calls, want 1" % len(stub.calls))
+        self.assertEqual(read_json(path)["against"], "The case.", "a task with a pick was not written")
+
+    def test_a_pick_with_no_options_writes_unknown_without_a_call(self):
+        refute = load_refute()
+        for name, make in NO_OPTIONS.items():
+            with self.subTest(options=name):
+                data = make()
+                path = write_item("no-opts-" + re.sub(r"\W+", "-", name), data)
+                stub = Stub(WRITE_REPLY)
+                with ci_unset():
+                    code, text = run_main(refute, path, model_call=stub)
+                self.assertEqual(len(stub.calls), 0, "%s: a pick with no options makes a model call, want none" % name)
+                self.assertEqual(read_json(path), dict(data, against="unknown (no options)"),
+                                 "%s: the file is not the item with against unknown (no options)" % name)
+                self.assertEqual(code, 0, "%s: exit %r with CI unset, want 0" % (name, code))
+                self.assertNotRegex(text, r"(?i)\bok\b", "%s: the verdict line says ok on an unknown" % name)
+
+    def test_a_pick_with_no_options_exits_one_with_ci_set(self):
+        refute = load_refute()
+        path = write_item("no-opts-ci", item(options=[]))
+        with mock.patch.dict(os.environ, {"CI": "1"}):
+            code, _ = run_main(refute, path, model_call=Stub(WRITE_REPLY))
+        self.assertEqual(code, 1, "a pick with no options exits %r with CI set, want 1" % (code,))
+
+    def test_a_model_call_that_raises_writes_unknown_and_no_traceback_escapes(self):
+        refute = load_refute()
+        for name, make in RAISES.items():
+            with self.subTest(raised=name):
+                path = write_item("raise-" + re.sub(r"\W+", "-", name), item())
+                try:
+                    with ci_unset():
+                        code, text = run_main(refute, path, model_call=raising(make))
+                except Exception as exc:
+                    self.fail("%s escaped the script as %s: %s" % (name, type(exc).__name__, exc))
+                against = read_json(path).get("against")
+                self.assertTrue(isinstance(against, str) and re.match(r"unknown \(.+\)$", against),
+                                "%s: against is %r, want unknown (<reason>)" % (name, against))
+                self.assertNotIn("Traceback", text, "%s: the output holds a traceback" % name)
+                self.assertEqual(code, 0, "%s: exit %r with CI unset, want 0" % (name, code))
+
+    def test_a_model_call_that_raises_exits_one_with_ci_set(self):
+        refute = load_refute()
+        path = write_item("raise-ci", item())
+        with mock.patch.dict(os.environ, {"CI": "1"}):
+            try:
+                code, _ = run_main(refute, path, model_call=raising(RAISES["a RuntimeError"]))
+            except Exception as exc:
+                self.fail("the raised exception escaped the script as %s: %s" % (type(exc).__name__, exc))
+        self.assertEqual(code, 1, "a raised call exits %r with CI set, want 1" % (code,))
+
+    def test_the_default_call_that_raises_writes_unknown(self):
+        refute = load_refute()
+        path = write_item("default-raises", item())
+        with mock.patch.object(decision_watch, "invoke_model", side_effect=RuntimeError("the model host went away")):
+            try:
+                code, text = run_main(refute, path)
+            except Exception as exc:
+                self.fail("the default call's exception escaped the script as %s: %s" % (type(exc).__name__, exc))
+        against = read_json(path).get("against")
+        self.assertTrue(isinstance(against, str) and re.match(r"unknown \(.+\)$", against),
+                        "the default call raised and against is %r, want unknown (<reason>)" % (against,))
+        self.assertNotIn("Traceback", text, "the default call's failure printed a traceback")
+
     def test_a_failed_call_writes_its_reason_as_unknown(self):
         refute = load_refute()
         path = write_item("failed", item())
@@ -273,7 +398,8 @@ class RefuteItem(unittest.TestCase):
         for name, reply in UNKNOWN_REPLIES.items():
             with self.subTest(reply=name):
                 path = write_item("unk-" + re.sub(r"\W+", "-", name), item())
-                code, text = run_main(refute, path, model_call=Stub(reply))
+                with ci_unset():
+                    code, text = run_main(refute, path, model_call=Stub(reply))
                 written = read_json(path)
                 against = written.get("against")
                 self.assertTrue(isinstance(against, str) and against.startswith("unknown (")
@@ -315,7 +441,7 @@ class RefuteItem(unittest.TestCase):
     def test_the_command_line_leaves_an_out_of_scope_item_unchanged(self):
         if not os.path.exists(CMD):
             raise AssertionError("refute_item.py is not on this checkout (%s)" % CMD)
-        path = write_item("cli-task", dict(item(), kind="task"))
+        path = write_item("cli-task", dict(without(item(), "pick"), kind="task"))
         before = read_bytes(path)
         env = {k: v for k, v in os.environ.items() if k != "CI"}
         proc = subprocess.run([sys.executable, CMD, path], capture_output=True, text=True, env=env, timeout=120)

@@ -1574,6 +1574,37 @@ def case_page_draws_against():
           got == "", "item_field_hit named %r on the real page" % (got,))
 
 
+def case_against_on_updates_without_kind():
+    """Rule: an items write that carries a pick, with a status other than closed, needs a non-blank against.
+    An update with no kind is judged on it too, since the guard cannot see the stored kind."""
+    against_page("an update with a pick and no kind, and no against, is refused", "update",
+                 entry_of({"pick": "b"}))
+    against_page("an update with status open and a pick, and no kind or against, is refused", "update",
+                 entry_of({"status": "open", "pick": "b"}))
+    page("an update with status closed and a pick passes with no against", "update",
+         entry_of({"status": "closed", "pick": "b"}), None)
+    against_page("a task with a pick and no against is refused", "set",
+                 entry_of(task_item(["Plug in the Mac"], pick="a")))
+
+
+def skill_folder_refusal(name, got):
+    """The against refusal names refute_item.py and the waiting-page skill folder, and holds no path into the
+    repo's skills folder or the user's config folder."""
+    against_refused(name, got)
+    text = str(got[1])
+    for label, ok in (("names refute_item.py", "refute_item.py" in text),
+                      ("names the waiting-page skill folder", "waiting-page skill folder" in text),
+                      ("holds no skills/waiting-page/ path", "skills/waiting-page/" not in text),
+                      ("holds no .claude path", ".claude" not in text)):
+        check("%s: the against refusal %s" % (name, label), ok, "refusal text %r" % (text,))
+
+
+def case_against_refusal_names_the_skill_folder():
+    skill_folder_refusal("page item_hit: a set with no against", call("item_hit", "set", entry_of(without_against())))
+    skill_folder_refusal("page guard: a set with no against", guard_hit("set", entry_of(without_against())))
+    skill_folder_refusal("page guard: an update with a pick and no against", guard_hit("update", entry_of({"pick": "b"})))
+
+
 def main():
     with fixture_seam():
         return run_all()
@@ -1599,7 +1630,8 @@ def run_all():
                  case_past_rulings_skips_the_debt_notes_file,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
                  case_against_missing_is_refused, case_against_blank_is_refused,
-                 case_against_file_and_batch_are_refused, case_against_passes, case_page_draws_against):
+                 case_against_file_and_batch_are_refused, case_against_passes, case_page_draws_against,
+                 case_against_on_updates_without_kind, case_against_refusal_names_the_skill_folder):
         try:
             case()
         except Exception as exc:
