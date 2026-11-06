@@ -1754,6 +1754,13 @@ function releaseSent() {
   held.forEach((el) => { el.style.minHeight = ""; heldWatch.unobserve(el); });
   if (mark) window.scrollBy(0, mark.getBoundingClientRect().top - before);
 }
+// A Send can change the rail's height (the Answered row appears on the first card that sinks). On a phone the rail sits above the list, so the list moves by the same amount.
+// When the whole rail is above the viewport, nothing the owner reads is above the list, so the scroll follows by that amount and the cards in view hold still.
+const railBox = () => { const r = $("rail").getBoundingClientRect(); return { h: r.height, above: r.bottom <= document.querySelector(".hdr").getBoundingClientRect().bottom && r.bottom <= $("list").getBoundingClientRect().top + 1 }; };
+function holdRail(was) {
+  const d = railBox().h - was.h;
+  if (was.above && Math.abs(d) > 0.5) window.scrollBy(0, d);
+}
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
   const d = eff(it) || {};
@@ -2096,7 +2103,9 @@ async function sendAll() {
     saveDraft();
     if (wrote.length) openSent(wrote, at);
     sentNow = wrote.filter((w) => !w.withdrawn).map((w) => w.it.id);
+    const was = railBox();
     render();
+    holdRail(was);
     if (entries.length) {
       const told = await notifyClaude(noticeText(entries, "Saved on the waiting page."), can);
       setSentStatus(told === true ? TOLD : ANSWER_NOT_TOLD(told));
