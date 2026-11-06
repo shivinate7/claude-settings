@@ -1243,6 +1243,64 @@ class QuietStepKeepsTheStallWatchFed(Job):
         self.assertIn("still running", done.stderr, done.stdout + done.stderr)
 
 
+def load_ci_job():
+    """bin/ci-job as a fresh module, so a case can call or patch its functions."""
+    import importlib.machinery
+    import importlib.util
+    loader = importlib.machinery.SourceFileLoader("ci_job_under_test", CI_JOB)
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(module)
+    return module
+
+
+class WindowsShell(unittest.TestCase):
+    """On Windows a step's bash is Git Bash by full path, never the System32 WSL launcher that PATH finds
+    first (decision bare-bash-on-windows-can-resolve-to-the-wsl-stub). Built as a fake Windows tree on any host."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="winsh_", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.system32 = os.path.join(self.root, "Windows", "System32")
+        self.git_bin = os.path.join(self.root, "Program Files", "Git", "bin")
+        for folder in (self.system32, self.git_bin):
+            os.makedirs(folder)
+        open(os.path.join(self.system32, "bash.exe"), "w").close()
+        self.environ = {"SystemRoot": os.path.join(self.root, "Windows"), "PATH": self.system32}
+        self.ci_job = load_ci_job()
+
+    def git_bash(self):
+        path = os.path.join(self.git_bin, "bash.exe")
+        open(path, "w").close()
+        open(os.path.join(self.git_bin, "sh.exe"), "w").close()
+        return path
+
+    def test_the_wsl_launcher_alone_is_no_shell(self):
+        self.assertIsNone(self.ci_job.shell_argv(None, nt=True, environ=self.environ))
+
+    def test_git_bash_under_program_files_runs_the_step(self):
+        bash = self.git_bash()
+        environ = dict(self.environ, ProgramFiles=os.path.join(self.root, "Program Files"))
+        self.assertEqual(self.ci_job.shell_argv(None, nt=True, environ=environ), [bash, "-e"])
+        self.assertEqual(self.ci_job.shell_argv("bash", nt=True, environ=environ)[0], bash)
+        self.assertEqual(self.ci_job.shell_argv("sh", nt=True, environ=environ),
+                         [os.path.join(self.git_bin, "sh.exe"), "-e"])
+
+    def test_git_bash_on_path_after_system32_is_found(self):
+        bash = self.git_bash()
+        environ = dict(self.environ, PATH=self.system32 + ";" + self.git_bin)
+        self.assertEqual(self.ci_job.shell_argv(None, nt=True, environ=environ)[0], bash)
+
+    def test_a_step_with_no_git_bash_is_unknown_and_names_it(self):
+        self.ci_job.shell_argv = lambda shell, nt=None, environ=None: None
+        state, detail = self.ci_job.plan("      - name: lint\n        run: true\n", False, {}, self.root)[:2]
+        self.assertEqual((state, detail), ("unknown", self.ci_job.no_shell("bash")))
+        self.assertIn("Git Bash", self.ci_job.no_shell("bash", nt=True))
+
+    def test_off_windows_the_shell_is_unchanged(self):
+        self.assertEqual(self.ci_job.shell_argv(None, nt=False), [shutil.which("bash"), "-e"])
+        self.assertEqual(self.ci_job.shell_argv("python", nt=False), ["python3"])
+
+
 if __name__ == "__main__":
     try:
         unittest.main()
