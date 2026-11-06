@@ -12,7 +12,11 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # a runner other than `python agent_brief.py` still finds guard_core
-from guard_core import REFUTER_ROLE  # noqa: E402  the one home of the refuter role's name
+try:
+    from guard_core import REFUTER_ROLE  # noqa: E402  the one home of the refuter role's name
+except Exception as e:  # fail open, as the docstring says: READ_ONLY and SCOPE need the name, so stop here with exit 0
+    print(f"agent_brief: {e}", file=sys.stderr)
+    sys.exit(0)
 
 # Each line carries a flag: True = every type, False = only types that commit and push.
 COMMON = [
