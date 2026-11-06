@@ -8,7 +8,8 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 2,
   "ref": "r1 (compliance visits, degen and ios-adblock); the iOS standard (skill ios-apps, account ids row)",
-  "status": "open",
+  "reply": "Done (14:14 CST). Your Mac's account file holds the five Apple ids. Sent to the coordinator at 14:16 CST to start the lanes that remove the ids from degen and ios-adblock.",
+  "status": "closed",
   "steps": [
     "Open the Claude app on your Mac and start a local Claude Code session.",
     "Paste this prompt and send it: Work in my degen checkout (clone shivinate7/degen if missing). Read tools/ios-ship.json. Merge its Apple team id, device id, App Store Connect key id and issuer id into ~/.config/ios-ship/account.json as team_id, device_udid, asc_key_id, asc_issuer_id, plus asc_key_path (the AuthKey_<key id>.p8 path on this Mac; search ~/.appstoreconnect and ~/private_keys). Keep any keys already there, write the file mode 600, and never print a value: prove it by printing the five key names only. Then tell the claude-settings coordinator (session_013NEJL2pASwRjgJDnsvnpNe) the file is complete, so its lanes remove the ids from degen and ios-adblock.",
