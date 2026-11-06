@@ -191,14 +191,15 @@ Other tools, in `judge` order:
                        (agent-model-cap)
   reviewer-brief-blind deny. An Agent or Task spawn, or a Workflow `agent()` call, whose role is a
                        reviewer (BRIEF_BLIND_ROLES) and whose brief holds a report-shaped block (two
-                       report labels, or a BUILT or RECORDED item, each at line start) or a verdict
-                       line (a line that opens with `Verdict:`, a round label or `Prior ... verdict:`
-                       with a REVIEWER_VERDICT_WORDS word right after the colon, or a line whose first
-                       word is one). Marks (`-`, `*`, `#`, bold) before a line's first word are skipped.
+                       report labels, or a BUILT or RECORDED item, with or without a `Done:` label,
+                       each at line start) or a verdict line (a line with `verdict`, or a round label
+                       with or without `result`, before its colon and a REVIEWER_VERDICT_WORDS word
+                       right after it, or a report's `FAIL, round N of 3, ...` line). Marks (`-`, `*`,
+                       `#`, bold) before a line's first word are skipped.
                        Shapes at line start only, so a brief that quotes the rule's words passes. A
                        findings list passes. A Workflow call is judged with or without a model; one
                        whose agentType the scan cannot read passes. A reviewer call whose prompt the
-                       scan cannot read is refused, and the refusal names BRIEF_LITERAL_REMEDY.
+                       scan cannot read is refused with BRIEF_UNREAD_REASON.
                        An override lifts it. (reviewer-brief-blind)
   lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose prompt is
                        not exactly `/effort medium` (LANE_EFFORT), with no trimming. A lane tag is
@@ -2608,17 +2609,21 @@ def step_up_reason(prompt: str, role, model) -> str:
 # pasted as plain prose is not caught. Cost: no process start and no file written; one pass over the brief's text.
 BRIEF_BLIND_ROLES = ("reviewer", guard_core.REFUTER_ROLE)
 REVIEWER_VERDICT_WORDS = ("PASS", "FAIL", "PARTIAL", "CHANGES")
-BRIEF_REPORT_LABELS = ("Done", "Deviations", "Input Needed", "Next")
+BRIEF_DONE_LABEL = "Done"
+BRIEF_REPORT_LABELS = (BRIEF_DONE_LABEL, "Deviations", "Input Needed", "Next")
 # Markdown marks before a line's first word (bullet, heading, quote, bold) and bold closing a label are no reason to pass.
 BRIEF_BLIND_OPEN = r"^[ \t]*(?:[-*+#>_][ \t]*)*"
 BRIEF_BLIND_VERDICT_WORDS = "|".join(REVIEWER_VERDICT_WORDS)
 BRIEF_BLIND_LABELS = re.compile(BRIEF_BLIND_OPEN + r"(%s)[*_]*[ \t]*(?::|$)" % "|".join(BRIEF_REPORT_LABELS), re.M)
-BRIEF_BLIND_ITEM = re.compile(BRIEF_BLIND_OPEN + r"(?:BUILT|RECORDED)(?![\w-])", re.M)
-# A verdict line is one of three. A `Verdict:` line, a round label, or a `Prior ... verdict:` line, each with the verdict word
-# right after the colon. Or a line whose first word is the verdict, as in a report's `FAIL, round 1 of 3, ...`.
+# An item may follow a one-label report's `Done:`, as in `Done: BUILT c204a1f ...`.
+BRIEF_BLIND_DONE = r"(?:%s[*_]*[ \t]*:[*_]*[ \t]*)?" % BRIEF_DONE_LABEL
+BRIEF_BLIND_ITEM = re.compile(BRIEF_BLIND_OPEN + BRIEF_BLIND_DONE + r"(?:BUILT|RECORDED)(?![\w-])", re.M)
+# A verdict line is one of two. A line with `verdict`, or a round label with or without `result`, before its colon, and the
+# verdict word right after the colon. Or a report's leading verdict, `FAIL, round 1 of 3, ...`. A line that opens with a
+# verdict word and a colon (`FAIL: test_x`) is a quote.
 BRIEF_BLIND_VERDICT = re.compile(
-    BRIEF_BLIND_OPEN + r"(?:(?:Verdict|Round[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?(?:[ \t]+verdict)?|Prior\b[^\n:]*?\bverdict)"
-    r"[*_]*[ \t]*:[ \t]*[*_`\"'(]*(?:%s)\b|(?:%s)[*_]*[ \t]*(?:[,:;.]|$))" % (BRIEF_BLIND_VERDICT_WORDS, BRIEF_BLIND_VERDICT_WORDS),
+    BRIEF_BLIND_OPEN + r"(?:(?:[^\n:]*?\b[Vv]erdict\b[^\n:]*?|Round[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?(?:[^\n:]*?\b[Rr]esult\b[^\n:]*?)?)"
+    r"[*_]*[ \t]*:[ \t]*[*_`\"'(]*(?:%s)\b|(?:%s)[*_]*[ \t]*,[ \t]*[Rr]ound[ \t]+\d+)" % (BRIEF_BLIND_VERDICT_WORDS, BRIEF_BLIND_VERDICT_WORDS),
     re.M)
 BRIEF_BLIND_REASON = ("A reviewer's brief holds a builder's report or a prior verdict, so the reviewer anchors on it. "
                       "Send the task, the diff or a pointer to it, and the governing rulings. For a later round, send the "
@@ -2646,7 +2651,7 @@ def reviewer_brief_hit(tool: str, tool_input) -> str:
     A Workflow agent() call is read statically, with or without a model (spawn_inputs skips one with no model, so this
     reads script_agent_calls itself). A call whose agentType the scan cannot read passes: it never guesses the role. A
     reviewer call whose prompt it cannot read (a variable, or a template with `${...}`) returns BRIEF_UNREAD: the
-    reviewer's brief cannot be shown blind, and the refusal names BRIEF_LITERAL_REMEDY."""
+    reviewer's brief cannot be shown blind, and the refusal is BRIEF_UNREAD_REASON."""
     if tool in SPAWN_TOOLS:
         return brief_blind_shape(tool_input.get("prompt")) if brief_blind_role(tool_input.get("subagent_type")) else ""
     if tool == "Workflow" and isinstance(tool_input.get("script"), str):
@@ -2853,10 +2858,15 @@ def role_name(table, subagent_type) -> str:
     return next((name for name in table if role_key(name) == role_key(role)), role)
 
 
-# A Workflow spawn whose brief the scan could not read carries BRIEF_UNREAD; its refusal adds BRIEF_LITERAL_REMEDY.
-# The remedy stays lowercase mid-sentence, so both refusals carry the same words.
+# A Workflow spawn whose brief the scan could not read carries BRIEF_UNREAD. The role-row and Opus refusals add
+# BRIEF_MARKER_REMEDY, as they read a marker; the reviewer-brief refusal, BRIEF_UNREAD_REASON, reads none. The remedy stays
+# lowercase mid-sentence, so each refusal carries the same words.
 BRIEF_UNREAD = "brief_unread"
-BRIEF_LITERAL_REMEDY = "write the brief as a literal string so the marker is readable"
+BRIEF_LITERAL_REMEDY = "write the brief as a literal string"
+BRIEF_MARKER_REMEDY = BRIEF_LITERAL_REMEDY + " so the marker is readable"
+BRIEF_UNREAD_REASON = ("The guard could not read this reviewer's brief, so it cannot check that the brief holds no report "
+                       "or verdict: " + BRIEF_LITERAL_REMEDY + ". Pass work to the reviewer as a file it reads "
+                       "(decision reviewer-brief-blind).")
 
 
 def spawn_inputs(tool: str, tool_input):
@@ -2865,7 +2875,7 @@ def spawn_inputs(tool: str, tool_input):
     and the model read from the script, so the role and Opus checks judge it as they judge an Agent spawn
     (decision agent-model-cap). A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
     marker and grants nothing, so the spawn is judged with an empty brief and BRIEF_UNREAD set, and its refusal names
-    BRIEF_LITERAL_REMEDY, so the author can make the marker readable. A
+    BRIEF_MARKER_REMEDY, so the author can make the marker readable. A
     call whose model or agentType the scan cannot read, or that names no model, is skipped: a static read never
     guesses a role or a model. A shorthand or a spread with no literal agentType may set the role, so it is unread;
     a literal agentType beside a spread is read. step_up_hit still skips an unread brief, as a marker it cannot read
@@ -2936,7 +2946,7 @@ def role_model_one(tool_input):
                 extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(ROLE_REVIEWER_FREE_ROUNDS),
                                                     ", ".join("`Round %s of 3`" % n for n in ROLE_REVIEWER_FREE_ROUNDS))
             if tool_input.get(BRIEF_UNREAD):
-                extra += ", or " + BRIEF_LITERAL_REMEDY
+                extra += ", or " + BRIEF_MARKER_REMEDY
             return ROLE_MODEL_REASON % extra, model, False
         return "", "", False
     if os.environ.get(ROLE_MODEL_ENV, "").strip():
@@ -4890,8 +4900,7 @@ def judge(payload) -> None:
     brief_shape = reviewer_brief_hit(tool, tool_input)
     if brief_shape:
         refuse(tool, "deny", "reviewer-brief-blind",
-               BRIEF_BLIND_REASON + (" The scan could not read this brief: " + BRIEF_LITERAL_REMEDY + "."
-                                     if brief_shape == BRIEF_UNREAD else ""), brief_shape)
+               BRIEF_UNREAD_REASON if brief_shape == BRIEF_UNREAD else BRIEF_BLIND_REASON, brief_shape)
 
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
     # The override lifts the above-row refusal and never the no-model one (never_lifted).
@@ -4918,7 +4927,7 @@ def judge(payload) -> None:
     if opus_model:
         refuse(tool, "deny", "agent-model-cap",
                (OPUS_BUILDER_REASON if opus_role == "builder" else OPUS_SPAWN_REASON)
-               + (" The scan could not read this brief, so it read no marker: " + BRIEF_LITERAL_REMEDY + "."
+               + (" The scan could not read this brief, so it read no marker: " + BRIEF_MARKER_REMEDY + "."
                   if opus_unread else ""),
                opus_model,
                spawn_role=opus_role or "general-purpose")
