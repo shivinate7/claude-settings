@@ -7,7 +7,7 @@ and their checks are in `principles.md`.
 Screen: ____ Size: ____ Theme: ____
 
 - [ ] ux-press-moves-nothing: Do all other elements keep their place and size on each press and load?
-- [ ] ux-order-holds-still: Do the rows keep their order after an act on one row?
+- [ ] ux-order-holds-still: After an act on one row, do the other rows stay in the open list and keep their order? If that row left, did the next open row, if any, take its slot?
 - [ ] ux-unknown-is-not-empty: Do a failed read and an unknown state each show their own words?
 - [ ] ux-statements-are-true: Is each promise in the copy true of the product now?
 - [ ] ux-machine-text-hidden: Is each code, path, id and server text behind a closed disclosure?

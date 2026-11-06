@@ -7,7 +7,9 @@ also read [`layout.md`](layout.md).
 
 ## ux-press-moves-nothing
 
-A press, a load or a change of state moves no other content.
+A press, a load or a change of state moves no other content. A row that leaves an open list under
+ux-order-holds-still, and the rows that close its gap, are not a move under this rule (owner,
+2026-11-06 16:47 CST, item 313 a).
 Check: press each control and load each state. Pass when no other element moves or resizes. A
 loading area keeps its loaded size, and a control keeps the box of its widest label or icon.
 Source: banchi D118 (a press never moves other content) and D313 (nothing moves unless moved);
@@ -16,10 +18,15 @@ it); ios-adblock `ios/App/AdBlockApp.swift` (the state icon has a fixed frame).
 
 ## ux-order-holds-still
 
-A list keeps a plain, predictable order, and an act on a row does not re-rank the list.
-Check: act on a row. Pass when the other rows keep their order until the person sorts again.
+A list keeps a plain, predictable order, so the person reaches the next open row without a hunt
+and no other row changes its order. An act may move the row it acted on out of an open list,
+such as a sent card that sinks to Answered. Then the next open row, if any, takes its slot. No
+other row leaves the list, and the other rows keep their order until the person sorts again.
+Check: act on a row. Pass when no other row leaves the open list and the other rows keep their
+order among themselves. If the acted-on row left, pass only when the next open row, if any, took
+its slot. Fail when the acted-on row moved to another place in the same open list.
 Source: banchi D181 (order is taken once, a sale keeps it) and D263 (a sort press re-sorts,
-nothing else jumps).
+nothing else jumps); owner, 2026-11-06 16:47 CST, item 313 a (a sent card may sink).
 
 ## ux-unknown-is-not-empty
 
