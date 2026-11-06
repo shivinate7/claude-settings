@@ -6,15 +6,16 @@
 # `<!-- dropped-start-alarm:<sha> -->`. With no run and no marker it posts one comment holding the marker and
 # the remedy. Nothing is cancelled, re-run or pushed, and no empty commit is suggested. Env: GH_TOKEN,
 # GITHUB_REPOSITORY, CHECK (default all-jobs-passed, DRAFT_SKIP_CHECK in merge/merge.py), NOW (epoch
-# seconds, default the clock). Exit 0 always. Prints "green" (nothing posted), "red" (a comment posted) or
-# "unknown"; a failed read or write is unknown, never red, and nothing is posted after it. It starts no
+# seconds, default the clock). Prints "green" (nothing posted), "red" (a comment posted) or
+# "unknown". Exit 0 for green and red. A failed read or write is unknown, never a red verdict, and nothing is posted
+# after it; it exits 0 locally and non-zero when env CI is set (decision ci-unknown-is-red). It starts no
 # long-lived process and writes no file.
 set -o pipefail
 repo="${GITHUB_REPOSITORY:?}"
 # The default equals DRAFT_SKIP_CHECK in merge/merge.py; test_action.sh pins the two equal.
 check="${CHECK:-all-jobs-passed}"
 now="${NOW:-$(date -u +%s)}"
-unknown() { echo unknown; echo "::warning::ci-alarm dropped-start: $1"; exit 0; }
+unknown() { echo unknown; echo "::warning::ci-alarm dropped-start: $1"; [ -n "${CI:-}" ] && exit 1; exit 0; }
 [[ "$now" =~ ^[0-9]+$ ]] || unknown "NOW is not an epoch in seconds"
 pulls="$(gh api "repos/$repo/pulls?state=open&per_page=100" --paginate)" || unknown "gh api pulls failed"
 # Ready pull requests whose last update is over 300 s old: number and head sha.
