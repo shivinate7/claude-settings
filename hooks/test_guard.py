@@ -15298,18 +15298,24 @@ elif not PD_NODE:
           file=sys.stderr)
 
 
-def pd_repo(name, stamp):
+def pd_repo(name, stamp, origin=None):
     """A real checkout for one case: the waiting page's layout extras and one commit. `stamp` is the path the
-    stamp file holds, or None for no stamp. The stamp resolves as the stamp does: <git common dir>/PD_STAMP."""
+    stamp file holds, or None for no stamp. The stamp resolves as the stamp does: <git common dir>/PD_STAMP.
+    `origin` is a remote URL to add, for a case whose machine home is named by the repo's origin."""
     where = os.path.join(ROOT, "pd", name)
     wp_put(os.path.join(where, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "waiting-page": PQ_URL}))
     wp_put(os.path.join(where, "README.md"), "a checkout of the waiting-page fixture\n")
     wp_git(where, "init", "-q")
+    if origin:
+        wp_git(where, "remote", "add", "origin", origin)
     wp_git(where, "add", "-A")
     wp_git(where, *IDENT, "commit", "-q", "-m", "fixture: waiting page")
     if stamp is not None:
         wp_put(os.path.join(where, ".git", PD_STAMP), stamp + "\n")
     return where
+
+
+PD_FILE = "docs/design/item48/a.html"  # a design's file: inside the checkout's design folder (rule mockup-home)
 
 
 def pd_item(designs=None, **over):
@@ -15319,7 +15325,7 @@ def pd_item(designs=None, **over):
             "options": [{"key": "a", "label": "Full card", "how": "The card shows the full stock.", "design": "m1"},
                         {"key": "b", "label": "Empty card", "how": "The card shows no stock."}],
             "designs": designs if designs is not None else
-            [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]}
+            [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full", "file": PD_FILE}]}
     item.update(over)
     return with_stake(item, departs=True)
 
@@ -15381,22 +15387,26 @@ def pd_case(label, name, stamp, data, want, fragment="", action="set", note=Fals
 # The deny cases read the checker's answer, so they run only where the checker can render.
 if PD_NEEDS_NODE:
     pd_case("a focus the mockup does not draw is denied, with the page's sentence", "focus", PD_PAGE,
-            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full"}]),
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full",
+                              "file": PD_FILE}]),
             "deny", fragment="shows nothing the focus names")
     pd_case("a state the mockup does not draw is denied, with the page's sentence", "state", PD_PAGE,
-            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "empty"}]),
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "empty",
+                              "file": PD_FILE}]),
             "deny", fragment="a state its mockup does not draw")
     pd_case("a strip mockup below the picture floor is denied, naming option A", "strip", PD_PAGE,
             pd_item(designs=[{"slug": "m2", "label": "Full card", "option": "a", "focus": "#vol", "state": "full",
-                              "drawn": 2400}]),
+                              "drawn": 2400, "file": PD_FILE}]),
             "deny", fragment="option A")
     pd_case("an update that carries a missed picture is denied, with the page's sentence", "update", PD_PAGE,
-            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full"}]),
+            pd_item(designs=[{"slug": "m1", "label": "Full card", "option": "a", "focus": "#fill", "state": "full",
+                              "file": PD_FILE}]),
             "deny", fragment="shows nothing the focus names", action="update")
 
 pd_case("a good picture, focus #vol and state full, is allowed", "good", PD_PAGE, pd_item(), "allow")
 pd_case("a picture whose mockup slug is missing is allowed: the page warns in the frame", "missing", PD_PAGE,
-        pd_item(designs=[{"slug": "m9", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]),
+        pd_item(designs=[{"slug": "m9", "label": "Full card", "option": "a", "focus": "#vol", "state": "full",
+                          "file": PD_FILE}]),
         "allow")
 pd_case("no stamp is allowed, with one noted line", "nostamp", None, pd_item(), "allow", note=True)
 pd_case("a stamp of a file that is gone is allowed, with one noted line", "gone", os.path.join(ROOT, "pd", "gone.html"),
@@ -15516,7 +15526,7 @@ def pd_partial_options():
                                    {"key": "b", "label": "Empty card", "how": "The card shows no stock."}]})["options"]
 
 
-PD_FULL_DESIGN = [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full"}]
+PD_FULL_DESIGN = [{"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full", "file": PD_FILE}]
 
 
 def pd_partial(label, name, data, judged):
@@ -15581,6 +15591,111 @@ def pd_budget_case():
 
 
 LOG_CHECKS_EXTRA.append(("page-item-design: pictured items in one batch share one deadline", pd_budget_case))
+
+
+# --------------------------------------------------------------------------- a design names its file, in a mockup home
+
+# Rule mockup-home (the file of a waiting item's design, judged at write). The one mockup home is the repo's design
+# folder (docs/design/). A designs entry with no file, or a file the judge refuses (lint/layout.py mockup_home_problem),
+# is denied before the picture check starts node. The machine-home form ~/Developer/<repo name>-imports is refused too.
+# The checker here is a stub that passes, so a call of it is counted and nothing renders. The judge reads no file.
+MH_RULE = "mockup-home"
+MH_ORIGIN = "git@github.com:owner/fixture.git"
+MH_MACHINE = "~/Developer/fixture-imports/item48/a.html"
+MH_APP_SUPPORT = "~/Library/Application Support/Claude-Work/side-session-notes/abc123/a.html"
+MH_SHOT = "https://claude.ai/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/asset/shot.png"
+MH_WIN_OWNER = "C:/Users/x"  # a Windows owner's home, as Path.home returns it
+MH_WIN_HOME = "C:\\Users\\x"  # the same home, as the HOME variable holds it
+
+
+def mh_design(**over):
+    """One design entry with a picture and a file in the design folder. `over` sets a key; None removes it."""
+    entry = {"slug": "m1", "label": "Full card", "option": "a", "focus": "#vol", "state": "full", "file": PD_FILE}
+    entry.update(over)
+    return {key: value for key, value in entry.items() if value is not None}
+
+
+def mh_judged(name, data, action="set", windows=False):
+    """(decision, reason, checker calls, guard.log rows) for one ArtifactData write of the fixture's waiting page,
+    judged in this process. `windows` makes Path.home a Windows owner's home, the way a Windows computer reads it."""
+    import pathlib
+    from unittest import mock
+    repo = pd_repo(name, PD_PAGE, origin=MH_ORIGIN)
+    home = os.path.join(ROOT, "pd", "mh-home-" + name)
+    os.makedirs(home, exist_ok=True)
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(mock.patch.dict(os.environ, {"HOME": MH_WIN_HOME if windows else home}))
+        if windows:  # Path.home and HOME both name the owner's home, so a judge that reads either one sees it
+            stack.enter_context(mock.patch.object(pathlib.Path, "home", return_value=pathlib.PureWindowsPath(MH_WIN_OWNER)))
+        calls, out, rows = pd_judged(pd_body(repo, data, action), name, seam=lambda page_file, item: (0, ""))
+    decision, reason = read_decision(out)
+    return decision, reason, calls, rows
+
+
+def mh_case(label, name, data, want, checker, action="set", windows=False, says=(), not_says=()):
+    """One check of rule mockup-home. A deny names the rule and the file field, starts no checker, and logs a deny row
+    for the rule. An allow prints nothing and starts `checker` checker calls. A deny's reason holds each `says` text
+    and no `not_says` text."""
+    def check():
+        decision, reason, calls, rows = mh_judged(name, data, action, windows)
+        if decision != want:  # one cause per failure: a wrong decision is the cause, the rest follow from it
+            return False, "want %s, got %s: %s" % (want, decision, reason[:160])
+        if want == "deny":
+            if not reason.startswith(MH_RULE + ":"):
+                return False, "the reason does not open with rule %s: %s" % (MH_RULE, reason[:160])
+            if "file" not in reason.lower():
+                return False, "the reason does not name the file field: %s" % reason[:160]
+            leak = names_the_target(reason, MH_RULE)
+            if leak:
+                return False, "the reason names the forbidden target %r" % leak
+            for text in says:
+                if text not in reason:
+                    return False, "the reason does not name %r: %s" % (text, reason[:160])
+            for text in not_says:
+                if text in reason:
+                    return False, "the reason names %r, a home that holds no mockup now: %s" % (text, reason[:160])
+            if not any(len(r) == 6 and r[2] == "deny" and r[3] == MH_RULE for r in rows):
+                return False, "guard.log holds no deny row for %s" % MH_RULE
+        if calls != checker:
+            return False, "the checker was called %d time(s), want %d" % (calls, checker)
+        return True, "%s, as wanted" % want
+    LOG_CHECKS_EXTRA.append(("mockup-home: " + label, check))
+
+
+mh_case("a design with a file under the machine home is denied, on a machine with no Developer folder",
+        "mh-machine", pd_item(designs=[mh_design(file=MH_MACHINE)]), "deny", checker=0)
+mh_case("a design with a file in the design folder is allowed",
+        "mh-design", pd_item(designs=[mh_design(file=PD_FILE)]), "allow", checker=1)
+mh_case("a design with no file is denied, naming the file field",
+        "mh-nofile", pd_item(designs=[mh_design(file=None)]), "deny", checker=0)
+mh_case("a design with an empty file is denied",
+        "mh-empty", pd_item(designs=[mh_design(file="")]), "deny", checker=0)
+mh_case("a mockup under Application Support is denied, its path holds spaces",
+        "mh-appsupport", pd_item(designs=[mh_design(file=MH_APP_SUPPORT)]), "deny", checker=0)
+mh_case("a denied mockup's reason names the design folder, and not the machine home",
+        "mh-words", pd_item(designs=[mh_design(file=MH_APP_SUPPORT)]), "deny", checker=0,
+        says=("docs/design",), not_says=("-imports", "Developer"))
+mh_case("an image hosted as an artifact asset is denied",
+        "mh-asset", pd_item(designs=[mh_design(file=MH_SHOT)]), "deny", checker=0)
+mh_case("a file that escapes the design folder with .. is denied",
+        "mh-dotdot", pd_item(designs=[mh_design(file="docs/design/../../escape/a.html")]), "deny", checker=0)
+mh_case("a Windows owner's machine-home file is denied",
+        "mh-win-machine", pd_item(designs=[mh_design(file="C:\\Users\\x\\Developer\\fixture-imports\\item48\\a.html")]),
+        "deny", checker=0, windows=True)
+mh_case("a Windows owner's AppData mockup is denied",
+        "mh-win-appdata",
+        pd_item(designs=[mh_design(file="C:\\Users\\x\\AppData\\Roaming\\Claude-Work\\side-session-notes\\abc123\\a.html")]),
+        "deny", checker=0, windows=True)
+mh_case("an update that carries designs with no file is denied",
+        "mh-update", {"designs": [mh_design(file=None)]}, "deny", checker=0, action="update")
+mh_case("a closed item with a design that has no file is untouched",
+        "mh-closed", pd_item(status="closed", designs=[mh_design(file=None)]), "allow", checker=0)
+mh_case("a write with no designs is untouched by the file rule",
+        "mh-plain", pd_plain(), "allow", checker=0)
+mh_case("a design whose file is a folder is denied, since a folder holds no mockup",
+        "mh-folder", pd_item(designs=[mh_design(file="docs/design/item48/")]), "deny", checker=0)
+mh_case("a Windows-form design path inside the design folder is allowed, as it is today",
+        "mh-win-design", pd_item(designs=[mh_design(file="docs\\design\\a.html")]), "allow", checker=1)
 
 
 # --------------------------------------------------------------------------- a pick never widens a shared tool

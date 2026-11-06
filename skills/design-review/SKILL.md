@@ -66,6 +66,7 @@ the owner; decision `design-agents`).
    judges each screen against the mockup, or against those main screenshots when there is none, and
    against the repo's design rules, and sets each finding against them. Do not change the list. The design reviewer is not blind, so it never takes the
    place of Reviewer A or B.
+   Until the kept pair's PR merges, the mockup sits on the step's design branch, which the brief names; the reviewer does not wait for that PR.
 5. **Sort each finding.**
    - Agrees with the repo, or is a plain defect (accessibility, broken layout, overflow): fix
      before merge. The reviewers never fix. Send the fix to the builder.

@@ -3483,6 +3483,32 @@ def _run_check_designs(page_file, item):
     return 3, (run.stderr.strip().splitlines() or ["exit %d" % run.returncode])[-1]
 
 
+# ------------------------------------------------------------------ a design names its file, in a mockup home
+#
+# Rule `mockup-home` (decision mockup-home). An ArtifactData set or update of a waiting item whose data carries `designs`
+# is denied when a design has no `file`, or a `file` outside the repo's design folder (lint/layout.py mockup_home_problem;
+# a machine-home path is outside it). It judges the path's shape only, so it reads no file, asks no origin and starts no
+# node; the roadmap build checks that origin holds the file. It runs before `page-item-design`. An item that is closed or
+# has no `designs` is not judged. An unreadable layout allows and logs one `noted` line.
+MOCKUP_HOME_FIX = " (decision mockup-home, a mockup kept off the repo is gone with the machine or the account that holds it)"
+
+
+def mockup_home_hit(writes, tool_input, cwd):
+    """(reason, matched) for the first `designs` entry of `writes` with no `file` or a refused one, else None.
+    Fails open on any unread state."""
+    import question_form
+    try:
+        root = question_form.waiting_page_root(tool_input, cwd)
+        found = question_form.design_file_problems(writes, root) if root else []
+    except Exception as err:
+        record(DATA_TOOL, "noted", "mockup-home", "unknown: " + cap_safe(type(err).__name__ + ": " + str(err), 100))
+        return None
+    if not found:
+        return None
+    doc_id, slug, problem = found[0]
+    return "design " + cap_safe(slug, 40) + ": " + problem + MOCKUP_HOME_FIX, "item " + cap_safe(str(doc_id or "?"), 40)
+
+
 def page_design_hit(writes, tool_input, cwd):
     """(reason, matched) for the first write in `writes` whose picture the page would refuse, else None. A write
     with no picture leaves before the record is read. A set is judged whole. An update is judged only when it
@@ -4608,6 +4634,9 @@ def judge(payload) -> None:
         if rule == "item-field-rendered":
             refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
         if item_writes:
+            unhomed = mockup_home_hit(item_writes, tool_input, cwd)
+            if unhomed:
+                refuse(tool, "deny", "mockup-home", unhomed[0], unhomed[1])
             unseen = page_design_hit(item_writes, tool_input, cwd)
             if unseen:
                 refuse(tool, "deny", "page-item-design", unseen[0], unseen[1])

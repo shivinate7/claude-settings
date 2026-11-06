@@ -2274,6 +2274,10 @@ MUTATIONS = [
      '        return handoff if os.path.isfile(handoff) else ""',
      '        return handoff',
      "guard", "handoff-unread: a call is allowed when the flag is set and the handoff is missing"),
+    ("mockup-home: the refuse arm is dropped, so a design whose file sits under the machine home is allowed",
+     "            if unhomed:",
+     "            if False:",
+     "guard", "mockup-home: a design with a file under the machine home is denied"),
     # gh_call_of (hooks/guard_merge.py) is the one home every gh reader shares. Unread, a repo flag before
     # the verb hides `pr merge` and `pr create` from the merge guard, the draft read, ci_wake and the report guard.
     ("gh-root-flag: a repo flag before the pr verb goes unread",

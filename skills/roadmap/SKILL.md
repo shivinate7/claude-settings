@@ -120,6 +120,19 @@ fix is to set the step to `doing`, or to close the pull. With no usable `--live`
 `todo step with an open PR: unknown (<why>)` and build.py exits 0. The conflict-marker refusal also
 exits 1. The printed line tells the two apart.
 
+## Mockups
+
+A step's note, why or ask may cite a mockup by its id, `item<N>-<letter>` as a whole token (`item48-a`). The step then
+carries the field `mockups`, `{"<id>": "<path>"}`, one entry per cited id. Each path is a repo path under the design folder
+(`docs/design/<item folder>/<file>`), and the file is on origin as a file, on any ref under `refs/remotes/origin/` (decision `mockup-home`).
+
+The build judges only open steps (status not done); a done step is skipped. It prints `mockup with no file: <step id> <mockup id> (commit the file under the design folder and push it; if it is pushed, run git fetch)` for each cited id that has no usable file. A cited id misses when it has no entry, or its path is outside the
+design folder (a machine-home path, a link or a folder too). It also misses when origin does not hold the file, even if the checkout does. The build writes the
+page, then exits 1. The fix is to commit the file, push it, and name it in `mockups`.
+
+A checkout with no origin ref, or a shallow one, cannot show origin. So does a failed git read or an unreadable layout. The entry reads unknown, never a miss or a
+pass: the build prints `mockup file unread: <step id> <mockup id> (<why>)` and exits 0.
+
 ## Upkeep list
 
 After each build the roadmap build script prints the upkeep list for the triage thread. It names:
@@ -188,7 +201,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
 
 ## Cost
 
-About six git processes and one file written per build. With `--live`, the publisher's reads add
+About six git processes, plus up to four when a step cites a mockup, and one file written per build. With `--live`, the publisher's reads add
 one `list_threads` walk and one or two GitHub list calls, and one file it writes and the roadmap build script
 reads. The stale-step row adds one more `list_sessions` walk inside that publish, and three more
 fields per session in the file. The page-ruling row adds one `ArtifactData list items` read (every
@@ -197,6 +210,7 @@ dated-claim row reads the notes already loaded and adds nothing.
 The red line and the two stale-ready rows read the live file build.py already reads, and add no
 process, file, timer or log. The publisher adds one field, `createdAt`, per pull row, from the GitHub
 list call it already makes.
+The mockup check runs at most four git processes per build, however many entries and origin refs (the ref listing, the shallow check, one batched type read, and one batched link read when a ref holds a blob at an entry's path). Check: `test_five_entries_over_fifty_origin_refs_start_at_most_four_git_processes` in `skills/roadmap/test_build.py`. It adds no file, timer or log.
 No watcher, no timer, no log.
 
 ## Tests
