@@ -1615,20 +1615,54 @@ def author_path_ok(rel: str) -> bool:
             or norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS)
 
 
-# ---- workflow files: the one classifier both roles ask (decision builders-cannot-edit-tests).
-# A test-author changes a workflow only by adding, removing or moving whole test-run steps, so a new
-# suite gets its CI step. A builder changes any workflow line, except one that disables tests or drops a test run.
+# ---- workflow files (decision builders-cannot-edit-tests). The test-author check and the builder check are two
+# verdicts that share the step and run readers below. A test-author changes a workflow only by adding, removing or
+# moving whole test-run steps, so a new suite gets its CI step. A builder changes any workflow line, except one
+# that disables tests or drops a test run.
 WORKFLOW_REL = re.compile(r"^\.github/workflows/[^/]+\.ya?ml$")
 # The only keys a test-run step holds. `continue-on-error`, `env`, `uses`, `with` are no test-run key.
 WORKFLOW_STEP_KEYS = {"name", "if", "run", "shell", "working-directory", "timeout-minutes"}
 WORKFLOW_STEP_START = re.compile(r"^(\s*)-\s+(name|run):")
 WORKFLOW_KEY_LINE = re.compile(r"^(\s*)(?:-\s+)?([A-Za-z][\w-]*):\s*(.*)$")
 WORKFLOW_INTERPRETERS = {"python", "python3", "node", "bash", "sh", "pwsh"}
+# Interpreter flags whose next token is their value, not the script (`python -X utf8`, `node -r ts-node/register`).
+WORKFLOW_VALUE_FLAGS = {"-X", "-W", "-r", "--require", "--import", "-o"}
+# Interpreter flags after which a command or module follows, so no script path does (`python -m`, `bash -c`).
+WORKFLOW_NO_PATH_FLAGS = {"-c", "-m"}
+WORKFLOW_DISABLE_STEP = re.compile(
+    r"^\s*(?:-\s+)?(?:continue-on-error:\s*(?:true|\$\{\{\s*true\s*\}\})|if:\s*(?:false|\$\{\{\s*false\s*\}\}))\s*$")
 
 
 def is_workflow_rel(rel: str) -> bool:
     """True when a repository-relative path is a GitHub workflow file (`.github/workflows/*.yml|*.yaml`)."""
     return bool(WORKFLOW_REL.match(norm(rel).lstrip("/").lower()))
+
+
+def workflow_path(token: str) -> str:
+    """One spelling of a path a run line names: `\\` as `/`, no leading `./`."""
+    token = token.replace("\\", "/")
+    while token.startswith("./"):
+        token = token[2:]
+    return token
+
+
+def workflow_script_index(args):
+    """The index in `args` (the tokens after an interpreter) of the script it runs: the first token past the
+    interpreter's flags and their values, or None when a `-c` or `-m` runs a command or module instead."""
+    index = 0
+    while index < len(args) and args[index].startswith("-"):
+        if args[index] == "--":
+            index += 1
+            break
+        if args[index] in WORKFLOW_NO_PATH_FLAGS:
+            return None
+        index += 2 if args[index] in WORKFLOW_VALUE_FLAGS else 1
+    return index if index < len(args) else None
+
+
+def workflow_step_disables(line: str) -> bool:
+    """True when one step line is `continue-on-error: true` or `if: false`, so the step runs no test that counts."""
+    return bool(WORKFLOW_DISABLE_STEP.match(line))
 
 
 def workflow_run_is_test(value: str) -> bool:
@@ -1647,11 +1681,14 @@ def workflow_run_is_test(value: str) -> bool:
         return False
     if any(set(tok) <= set(lexer.punctuation_chars) for tok in tokens):
         return False
+    script = 0
     if tokens and tokens[0] in WORKFLOW_INTERPRETERS:
         tokens = tokens[1:]
-    if not tokens or ".." in norm(tokens[0]).split("/") or not is_test_rel(tokens[0]):
+        script = workflow_script_index(tokens)
+    if script is None or not tokens or ".." in norm(tokens[script]).split("/") or not is_test_rel(tokens[script]):
         return False
-    return not TEST_DISABLE_FLAGS.search(" ".join(tokens[1:])) and not disables_tests([value], [])
+    rest = tokens[:script] + tokens[script + 1:]
+    return not TEST_DISABLE_FLAGS.search(" ".join(rest)) and not disables_tests([value], [])
 
 
 def workflow_test_step(lines) -> bool:
@@ -1666,7 +1703,7 @@ def workflow_test_step(lines) -> bool:
                 line is not lines[0] and (len(found.group(1)) <= len(start.group(1)) or line.lstrip().startswith("- "))):
             return False
         keys.append((found.group(2), found.group(3)))
-        if disables_tests([line], []):
+        if disables_tests([line], []) or workflow_step_disables(line):
             return False
     runs = [value for key, value in keys if key == "run"]
     return len(runs) == 1 and len(set(key for key, _ in keys)) == len(keys) and workflow_run_is_test(runs[0])
@@ -1706,14 +1743,12 @@ def workflow_test_steps_only(old_text: str, new_text: str) -> bool:
 WORKFLOW_COMMAND_SPLIT = re.compile(r"&&|\|\||[;|]")
 WORKFLOW_RUN_PREFIX = re.compile(r"^\s*(?:-\s+)?run:\s*")
 WORKFLOW_RUN_BLOCK = re.compile(r"^(\s*)(?:-\s+)?run:\s*[|>][+-]?\s*$")
-WORKFLOW_DISABLE_STEP = re.compile(
-    r"^\s*(?:-\s+)?(?:continue-on-error:\s*(?:true|\$\{\{\s*true\s*\}\})|if:\s*(?:false|\$\{\{\s*false\s*\}\}))\s*$")
 
 
 def workflow_command_tests(command: str) -> set:
-    """The test paths one shell command line runs: the first argument of an interpreter, every test path
-    after a test runner, or the command itself when it is a test path. A lint tool that is given a test
-    folder (`ruff check tests/`) runs none."""
+    """The test paths one shell command line runs, each in its `workflow_path` spelling: the script an
+    interpreter runs past its flags, every test path after a test runner, or the command itself when it is a
+    test path. A lint tool that is given a test folder (`ruff check tests/`) runs none."""
     found = set()
     for segment in WORKFLOW_COMMAND_SPLIT.split(command):
         tokens = [tok.strip("\"'") for tok in segment.split()]
@@ -1723,10 +1758,11 @@ def workflow_command_tests(command: str) -> set:
             continue
         runner = bool(TEST_RUNNER_CONTEXT.search(segment))
         if tokens[0] in WORKFLOW_INTERPRETERS:
-            args = tokens[1:] if runner else [tok for tok in tokens[1:2] if not tok.startswith("-")]
+            script = workflow_script_index(tokens[1:])
+            args = tokens[1:] if runner else ([] if script is None else [tokens[1 + script]])
         else:
             args = tokens if runner else tokens[:1]
-        found.update(tok for tok in args if is_test_rel(tok))
+        found.update(workflow_path(tok) for tok in args if is_test_rel(workflow_path(tok)))
     return found
 
 
@@ -1797,7 +1833,7 @@ def workflow_disables_step(old_text: str, new_text: str) -> bool:
     """True when the change adds `continue-on-error: true` or `if: false` to a step that runs tests."""
     lines = new_text.splitlines()
     return any(
-        WORKFLOW_DISABLE_STEP.match(lines[index])
+        workflow_step_disables(lines[index])
         and any(workflow_command_is_test(cmd) for cmd in workflow_run_commands("\n".join(workflow_step_lines(lines, index))))
         for index in workflow_added_indexes(old_text, new_text))
 
