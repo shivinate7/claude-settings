@@ -6,9 +6,9 @@
   "kind": "decision",
   "lane": "lane timer-rules-conflict (session_013NEJKzMfgoe3c6cfDdjaS4): makes the two rules agree; started by the coordinator 14:02 CST",
   "lastAnswer": {
-    "at": "2026-11-06T19:59:40.189Z",
+    "at": "2026-11-06T20:07:03.508Z",
     "choice": "none",
-    "note": "shouldnt the rules first not conflict?"
+    "note": "are these really the two options i should consider?"
   },
   "n": 290,
   "options": [
@@ -31,9 +31,9 @@
   "pick": "a",
   "rank": 4,
   "ref": "record session-messages; step session-messaging-plan",
-  "reply": "Yes. The rules should agree before anyone picks. The coordinator started lane timer-rules-conflict at 14:02 CST to make outcomes-mechanize-rules and git-ci-wait-checks-in agree. If the wording needs your word, it comes to you as one question. The check-in question waits for that lane's PR.",
+  "reply": "No. These two options were written before you pointed out that the two rules conflict, and both work around that conflict instead of fixing it. They are withdrawn (14:09 CST). Lane timer-rules-conflict (session_013NEJKzMfgoe3c6cfDdjaS4) first makes the two rules agree. Only after that does the reply check-in come back, as a new question if it still needs you.",
   "short": "Check-in while awaiting a reply",
-  "status": "open",
+  "status": "deferred",
   "title": "When a session waits on a reply to its message, may it set one timed check-in?",
   "why": "Recommended a: a lost message gets caught, and the check-in starts no program and writes no file."
 }
