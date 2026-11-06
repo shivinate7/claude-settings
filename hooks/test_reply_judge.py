@@ -1284,7 +1284,7 @@ def case_prompt_flags_a_recommended_option_that_widens():
     check("prompt: a sentence judges only offered options and spares a reply that describes the rule",
           has_pin(sentences, ("judge only",), ("options",), ("offers",)), sentences)
     check("prompt: a sentence never flags a reply that describes the rule itself",
-          has_pin(sentences, ("never flag",), ("describes the rule",)), sentences)
+          has_pin(sentences, ("never flag", "do not flag"), ("describes the rule",)), sentences)
 
 
 def case_prompt_says_a_same_change_for_every_repo_is_not_widening():
@@ -1303,6 +1303,15 @@ def case_prompt_names_a_per_repo_exception_as_widening():
     sentences = rule_sentences(run, WIDENS_ASK)
     check("prompt: a sentence names a per-repo or one-repo exception as widening",
           has_pin(sentences, ("flag",), ("widen",), ("per-repo", "one repo")), sentences)
+
+
+def case_prompt_scopes_widening_to_one_repos_sake():
+    # The scope must say the widening is for one repo's sake: a sentence with "one repo" alone passes after
+    # " for that repo's sake" is dropped. One sentence must hold both words; rule_sentences lower-cases them.
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    sentences = rule_sentences(run, WIDENS_ASK)
+    check("prompt: a sentence holds both \"sake\" and \"one repo\", so widening is scoped to one repo's sake",
+          has_pin(sentences, ("sake",), ("one repo",)), sentences)
 
 
 # Roadmap c135, item 31's shape: options that can all be done together, asked as pick-one. The prompt
@@ -1451,6 +1460,7 @@ CASES = (
     case_prompt_flags_a_recommended_option_that_widens,
     case_prompt_says_a_same_change_for_every_repo_is_not_widening,
     case_prompt_names_a_per_repo_exception_as_widening,
+    case_prompt_scopes_widening_to_one_repos_sake,
     case_widens_finding_logs_its_rule,
     case_prompt_flags_a_pick_one_question_whose_options_could_combine,
 )
