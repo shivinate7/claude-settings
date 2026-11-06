@@ -15,6 +15,9 @@ so a triage session cannot end a wake that leaves a stall unread. The rules the 
   entry id and item n. One missing id keeps the refusal. The escape is an escalation to the coordinator.
 - An owner `override` typed for the session lifts the hold, as guard_core's refuse() honours override.grant.
   The Stop that the override lifts spends it: the next Stop is held again.
+- A build run through the verdict wrapper is read from the log path its result names, where its lines are kept.
+- A held Stop on a well-formed report carries no correction tail: the report is not to be sent again.
+- A session with no triage record opens its transcript at most once in a Stop.
 
 The stalled lines come from build.stalled_lines, the one emitter, so a change to the format reaches these cases.
 A held case is red where no hold exists: its Stop is not refused. A control case pins what must stay released,
@@ -26,6 +29,7 @@ lint/test_report_guard.py, and the Stop helper is its QuestionReachesPageTests.s
 import itertools
 import json
 import os
+import subprocess
 import sys
 import unittest
 from datetime import datetime
@@ -51,6 +55,23 @@ OWNER_SESSION = "session_stop1"  # the hook's own session id: the owner's overri
 NOW = "2026-11-06T12:40:00-06:00"  # LOCAL_TIME_NOW for the hook and the grant, so the override clock is fixed
 SUMMARY = "roadmap.md: 14 steps, 3 topics, 2 meta"  # the line every build run prints first
 BUILD = "python3 skills/roadmap/build.py --repo ."
+WELL_FORMED = "\n".join(["> **Done** BUILT abc123", "> **Deviations** none", "> **Input Needed** none", "> **Next** wait"])
+# Runs the guard with every open of the watched transcript logged to COUNT_OPENS_LOG. The main loop, the hold's read
+# and the own-record read all open it through builtins.open, so the count is every transcript read of the Stop.
+COUNT_OPENS_CODE = (
+    "import builtins, os, runpy, sys\n"
+    "watched = os.environ['COUNT_OPENS_PATH']\n"
+    "log = os.environ['COUNT_OPENS_LOG']\n"
+    "real_open = builtins.open\n"
+    "def counting_open(file, *args, **kwargs):\n"
+    "    if isinstance(file, (str, bytes, os.PathLike)) and os.path.abspath(os.fsdecode(file)) == watched:\n"
+    "        with real_open(log, 'a', encoding='utf-8') as f:\n"
+    "            f.write('open\\n')\n"
+    "    return real_open(file, *args, **kwargs)\n"
+    "builtins.open = counting_open\n"
+    "sys.argv = sys.argv[1:2]\n"
+    "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+)
 _IDS = itertools.count(1)
 
 
@@ -89,6 +110,14 @@ def build_run(lines, exit_code=0):
     if exit_code:
         body = "Exit code %d\n%s" % (exit_code, body)
     return tool_pair("Bash", {"command": BUILD}, body, is_error=bool(exit_code))
+
+
+def verdict_build_run(log_path):
+    """A build run through the verdict wrapper: its result shows the FAIL line and the log path only. The build's own
+    lines are in that log file, as the wrapper keeps them. The run exits 1, so its result is an error."""
+    body = "FAIL python3 skills/roadmap/build.py --repo . rc=1 (0.4s) log=%s" % log_path
+    return tool_pair("Bash", {"command": "~/.claude/bin/verdict python3 skills/roadmap/build.py --repo ."}, body,
+                     is_error=True)
 
 
 def own_record(session_id, tags, parent=None):
@@ -142,6 +171,25 @@ class StalledFixture(trg.SameTurnWriter):
         """A triage wake whose newest build run prints an entry for each id and item. No reply yet."""
         return [human("wake"), *own_record(TRIAGE_ID, ["cs-build:triage"]),
                 *build_run(stalled_lines(steps=list(steps), items=list(items)), exit_code=1)]
+
+    def transcript_opens(self, records, env_id=TRIAGE_ENV):
+        """How many times one Stop opens its transcript. The hook runs under COUNT_OPENS_CODE, which logs each open."""
+        path = trg.write_transcript(records, self.run_dir)
+        hook = {"hook_event_name": "Stop", "session_id": OWNER_SESSION, "transcript_path": path,
+                "stop_hook_active": False, "cwd": self.repo}
+        log = os.path.join(self.run_dir, "opens.log")
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, HOME=self.home,
+                   COUNT_OPENS_PATH=os.path.abspath(path), COUNT_OPENS_LOG=log)
+        env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+        if env_id:
+            env["CLAUDE_CODE_REMOTE_SESSION_ID"] = env_id
+        run = subprocess.run([sys.executable, "-c", COUNT_OPENS_CODE, REPORT_GUARD], input=json.dumps(hook),
+                             capture_output=True, text=True, timeout=15, env=env)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        if not os.path.exists(log):
+            return 0
+        with open(log, encoding="utf-8") as handle:
+            return sum(1 for _ in handle)
 
     def grant_once(self):
         """The owner's typed `override`: the once-override file the prompt hook writes for the session."""
@@ -327,6 +375,33 @@ class TriageHoldTests(StalledFixture, unittest.TestCase):
                              *build_run(stalled_lines(steps=["build-stalled-check"]), exit_code=1),
                              assistant_text("Build read.")], env_id=None)
         self.released(out)
+
+    # Held on the report's shape and on the run's log. Red on the current head: the refusal and the log read are missing.
+
+    def test_st_red_held_first_stop_on_a_well_formed_report_has_no_correction_tail(self):
+        # Catches: the hold's refusal carries the report's correction tail, so a well-formed report is told to send itself again.
+        out = self.run_stop(self.stalled_wake() + [assistant_text(WELL_FORMED)])
+        self.held(out, "build-stalled-check")
+        tails = ("Post only the corrected lines", "Never send the report again")
+        self.assertFalse(any(tail in out["reason"] for tail in tails),
+                         "the hold's refusal carries the report's correction tail: %r" % (out["reason"],))
+
+    def test_st_red_build_run_through_verdict_is_read_from_its_log(self):
+        # Catches: a build run through the verdict wrapper shows only its FAIL line and log path, so the stalled lines in that log go unread.
+        log = os.path.join(self.run_dir, "verdict-build.log")
+        with open(log, "w", encoding="utf-8") as handle:
+            handle.write("\n".join([SUMMARY] + stalled_lines(steps=["build-stalled-check"])) + "\n")
+        records = [human("wake"), *own_record(TRIAGE_ID, ["cs-build:triage"]),
+                   *verdict_build_run(log), assistant_text("Build read.")]
+        self.held(self.run_stop(records), "build-stalled-check")
+
+    def test_st_red_a_non_triage_stop_opens_the_transcript_at_most_once(self):
+        # Catches: every Stop opens its transcript twice, the main read and the hold's own read, even in a session
+        # with no triage record and no build run. The hold reads only what the main read already holds.
+        records = [human("wake"), assistant_text("Build read.")]
+        opens = self.transcript_opens(records, env_id=None)
+        self.assertLessEqual(opens, 1, "the Stop opened its transcript %d times; a session with no triage record "
+                                       "opens it at most once" % opens)
 
 
 if __name__ == "__main__":
