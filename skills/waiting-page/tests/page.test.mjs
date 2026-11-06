@@ -4548,6 +4548,102 @@ test("answered-sink: Undo of the Send that added the Answered row moves no card 
   await sinkUndoRailRow(t);
 });
 
+// Round 3. Scroll anchoring stays on in every case below. A Send is a script click, not a mouse press, since a press moves the focus to the Send button.
+const focusedId = (page) => page.evaluate(() => (document.activeElement && document.activeElement.id) || "");
+// A frame's load event does not reach the window in capture, so each frame counts its own load. A frame moved in the DOM reloads, and a new one is caught when it is added.
+const watchLoads = (page) => page.evaluate(() => {
+  window.__loads = 0;
+  const bump = () => { window.__loads++; };
+  const on = (f) => { if (f.tagName === "IFRAME") f.addEventListener("load", bump); };
+  const attach = (n) => { if (n.nodeType === 1) { on(n); n.querySelectorAll("iframe").forEach(on); } };
+  document.querySelectorAll("iframe").forEach(on);
+  new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach(attach))).observe(document.body, { childList: true, subtree: true });
+});
+
+// Focus on a radio of a card below the sent card (or above it, as a control), then a Send that sinks the sent card. Returns what the reader sees.
+async function sinkWithFocusBelow(t, { focusOn }) {
+  const sent = mk("rec-sent", 4), radio = mk("rec-radio", 5), frame = mk("rec-frame", 6, { designs: [{ slug: "s1", label: "Option a" }] });
+  const page = await open(t, { items: [...LEADS, sent, radio, frame, ...FILLER], designData: { s1: "<p>one</p>" }, viewport: { width: 1280, height: 800 }, pageHtml: withSentMove("sink") }); if (!page) return null;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", 60);
+  const target = focusOn === "above" ? LEADS[0] : radio, radioId = "o-" + target.id + "-a";
+  const frames = await page.locator("#item-rec-frame iframe.dframe").count();
+  await page.locator("#" + radioId).focus();
+  const focused = await focusedId(page);
+  await watchLoads(page);
+  await page.evaluate(() => document.getElementById("send").click());
+  await card(page, sent).locator(".receipt").waitFor();
+  await page.locator("#sent .stamp").waitFor();
+  await frameWait(page, 3);
+  return { frames, focused, radioId, active: await focusedId(page), loads: await page.evaluate(() => window.__loads) };
+}
+test("answered-sink: a Send that sinks a card keeps the focus on a radio below it, with scroll anchoring on, at 1280 wide (SENT_MOVE sink)", async (t) => {
+  const r = await sinkWithFocusBelow(t, { focusOn: "below" }); if (!r) return;
+  assert.equal(r.focused, r.radioId, "fixture: the radio below the sent card did not take the focus before Send");
+  assert.equal(r.active, r.radioId, `focus left the radio below the sent card on Send: now on "${r.active}"`);
+});
+test("answered-sink: a Send that sinks a card reloads no design frame below it, with scroll anchoring on, at 1280 wide (SENT_MOVE sink)", async (t) => {
+  const r = await sinkWithFocusBelow(t, { focusOn: "below" }); if (!r) return;
+  assert.equal(r.frames, 1, "fixture: the design frame below the sent card is not there");
+  assert.equal(r.loads, 0, "a design frame below the sent card reloaded on Send");
+});
+test("answered-sink: control: a Send that sinks a card keeps the focus on a radio above it, with scroll anchoring on, at 1280 wide (SENT_MOVE sink)", async (t) => {
+  const r = await sinkWithFocusBelow(t, { focusOn: "above" }); if (!r) return;
+  assert.equal(r.focused, r.radioId, "fixture: the radio above the sent card did not take the focus before Send");
+  assert.equal(r.active, r.radioId, `focus left the radio above the sent card on Send: now on "${r.active}"`);
+});
+
+// A sent card taller than the view, its top above the screen and its bottom below it. The next open card must take the sent card's old top,
+// and the view must not move to the card above. The control is a short card in view: the same rule, with nothing to hold.
+async function sinkSpanOrShort(t, { spanning }) {
+  // A long context folds after three lines, so the tall card carries many options instead.
+  const tallOpts = Array.from({ length: 24 }, (_, i) => opt(String.fromCharCode(97 + i), "Option " + (i + 1)));
+  const sent = mk("span-sent", 4, spanning ? { options: tallOpts } : {}), below = mk("span-below", 5, { context: LONG });
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width: 390, height: 800, scheme: "light", anchored: true, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", spanning ? -300 : 60);
+  const rd = await sendAndRead(page, [sent]);
+  const S = "item-span-sent", B = "item-span-below";
+  if (spanning) assert.ok(rd.pre[S].top < 0 && rd.pre[S].bottom > 800 && rd.pre[S].h > 800, `fixture: the sent card does not span the view: top ${rd.pre[S].top}, bottom ${rd.pre[S].bottom}, height ${rd.pre[S].h}`);
+  for (const [when, post] of reads(rd)) assert.ok(Math.abs(post[B].top - rd.pre[S].top) <= 2, `${when}: the next open card is at ${post[B].top}, not at the sent card's old top ${rd.pre[S].top}`);
+}
+test("answered-sink: a sent card taller than the view, with scroll anchoring on: the next open card takes its top and the view stays, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await sinkSpanOrShort(t, { spanning: true });
+});
+test("answered-sink: control: a sent card shorter than the view, with scroll anchoring on: the next open card takes its top, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await sinkSpanOrShort(t, { spanning: false });
+});
+
+// Undo of a Send from a card whose top sits at `want` in the viewport. Undo returns the card, and it must come back at its pre-Send top.
+async function undoFromTop(t, { width, want }) {
+  const sent = mk("undo-top", 4, { context: LONG }), below = mk("undo-top-below", 5, { context: LONG });
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width, height: 800, scheme: "light", anchored: true, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  const bt = (await bandOf(page)).top;
+  await settleAt(page, sent, "top", want - bt);
+  const S = "item-undo-top";
+  const pre = await cardMap(page);
+  assert.ok(Math.abs(pre[S].top - want) <= 2, `fixture: the sent card's top is ${pre[S].top}, not ${want}`);
+  await send(page);
+  await card(page, sent).locator(".receipt").waitFor();
+  await page.locator("#sent .stamp").waitFor();
+  await frameWait(page, 2);
+  await page.locator("#undoBtn").click();
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 0);
+  await frameWait(page, 3);
+  const back = await cardMap(page);
+  assert.ok(Math.abs(back[S].top - pre[S].top) <= 2, `the card came back at ${back[S].top}, not at its pre-Send top ${pre[S].top}`);
+}
+test("answered-sink: Undo of a Send from a card that starts above the screen returns it to its pre-Send top, with scroll anchoring on, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await undoFromTop(t, { width: 390, want: -76 });
+});
+test("answered-sink: Undo of a Send from a card that starts above the screen returns it to its pre-Send top, with scroll anchoring on, at 1280 wide (SENT_MOVE sink)", async (t) => {
+  await undoFromTop(t, { width: 1280, want: -76 });
+});
+test("answered-sink: control: Undo of a Send from a card in view returns it to its pre-Send top, with scroll anchoring on, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await undoFromTop(t, { width: 390, want: 60 });
+});
+
 // An answer that arrives without a Send, on a card in view: the card keeps its height while in view, and drops once wholly off the screen.
 async function answerWithoutSend(t, { width, scheme }) {
   const inView = mk("in-view", 4, { context: LONG }), below = mk("below", 5);
