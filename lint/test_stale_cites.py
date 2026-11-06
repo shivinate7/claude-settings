@@ -1836,11 +1836,15 @@ class RouteClaimTests(StaleCase):
         rng, flagged = self.route_range(rows)
         self.assert_route_claims(rng, flagged)
 
-    def test_route_claim_is_backed_by_a_premise_kind_with_its_source(self):
+    def test_route_claim_is_backed_by_a_strong_premise_kind_with_its_source_and_a_weak_one_is_not(self):
         kinds = tuple_named(PREMISE_HOME, "PREMISE_KINDS")
-        self.assertTrue({"measured", "read"} <= kinds, kinds)  # scope: the kinds this check reads
+        weak = {"notes", "assumed"}
+        self.assertTrue({"ruling", "measured", "read"} <= kinds, kinds)  # scope: the strong kinds this check reads
+        self.assertTrue(weak <= kinds, kinds)  # scope: the weak kinds are premise kinds the home file names
         self.assertNotIn("guess", kinds)
-        rows = [("- The cloud cannot push to main (%s hooks/guard.py:12)." % kind, False) for kind in sorted(kinds)]
+        rows = [("- The cloud cannot push to main (%s hooks/guard.py:12)." % kind, False)
+                for kind in sorted(kinds - weak)]
+        rows += [("- The cloud cannot push to main (%s hooks/guard.py:12)." % kind, True) for kind in sorted(weak)]
         rows += [
             ("- The cloud cannot push to main (measured 2026-11-06, hooks/guard.py:12).", False),
             ("- The cloud cannot push to main (guess hooks/guard.py:12).", True),  # a kind outside PREMISE_KINDS
@@ -1856,8 +1860,24 @@ class RouteClaimTests(StaleCase):
             ("- The cloud cannot push to main (test lint/test_x.py::keep) and merge.", False),
             ("- The cloud cannot merge to main.", True),  # no backing at all
         ]
-        rng, flagged = self.route_range(rows)
+        rng, flagged = self.route_range(rows, extra={"lint/test_x.py": "def keep():\n    return 1\n"})  # the file exists
         self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_read_or_test_backing_naming_a_file_absent_at_head_is_a_dead_backing(self):
+        rows = [
+            ("- The cloud cannot push to main (read hooks/guard.py:12).", False),  # the file exists at head: backed
+            ("- The cloud cannot push to main (read hooks/gone.py:12).", True),  # no such file: a dead backing
+            ("- The cloud cannot push to main (test lint/test_gone.py::keep).", True),  # no such file: a dead backing
+        ]
+        rng, flagged = self.route_range(rows)
+        tracked = git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split()
+        self.assertIn("hooks/guard.py", tracked, "scope: the backing that exists is tracked at head")
+        self.assertNotIn("hooks/gone.py", tracked, "scope: the read backing is absent at head")
+        self.assertNotIn("lint/test_gone.py", tracked, "scope: the test backing is absent at head")
+        out = self.assert_route_claims(rng, flagged)
+        texts = {number: text for path, number, text in stale005_hits(out) if path == NOTES}
+        self.assertIn("hooks/gone.py", texts.get(flagged[0], ""), out)  # the report names the file it cannot find
+        self.assertIn("lint/test_gone.py", texts.get(flagged[1], ""), out)
 
     def test_route_claim_cites_a_route_id_that_is_a_row_at_head_and_names_a_dead_one(self):
         rows = [
