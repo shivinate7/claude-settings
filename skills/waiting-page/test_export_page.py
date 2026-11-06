@@ -34,6 +34,9 @@ Contract the page cases assume (the builder builds to it):
     the verdict line and exits 4; the copy is still written. A check that cannot run prints one
     `checks unknown: <why>` line, the copy is written, and the exit code is as without checks. Never a pass line.
     --all holds the same way in the waiting-page entry, with the artifact id before the line.
+  --check (decision of the owner, item 298): `export_page.py --check --fetched DIR --page FILE` runs the same item checks
+    and writes nothing. A held item prints its `held item <n>: <sentence>` line and exits 4; a clean run prints one line
+    `checks pass` and exits 0; a check that cannot run prints `checks unknown: <why>` and exits 3.
 """
 import collections
 import glob
@@ -1652,6 +1655,52 @@ class PictureNoItems(Copied):
         self.assertCopied(r, out, "page/page.html", "page/designData.json")
         self.assertEqual(held_lines(r), [], "an empty fetch held an item. Output:\n" + shown(r))
         self.assertEqual(r.returncode, 0, "an empty fetch must exit 0. Output:\n" + shown(r))
+
+
+# ------------------------------------------------------------------------------------- --check: the checks, no write
+# Owner's ruling (item 298): `export_page.py --check --fetched DIR --page FILE` runs the same item checks as the export
+# and writes nothing. Each case compares the whole run folder before and after the run, so a write anywhere shows.
+class CheckMode(PictureChecks):
+    """--check with node, Playwright and Chromium present: item 292 is held, a good item passes."""
+
+    def test_check_mode_holds_item_292_and_writes_nothing(self):
+        fetched = self.fetch(items={ITEM_292["id"]: ITEM_292}, meta={"page": META})
+        page = write_text(os.path.join(self.tmp.name, "page-check-292.html"), page_with_mockups(MOCKS_292))
+        before = snapshot(self.tmp.name)
+        r = self.run_cmd("--check", "--fetched", fetched, "--page", page)
+        self.assertEqual(snapshot(self.tmp.name), before, "--check wrote a file. Output:\n" + shown(r))
+        self.assertEqual(held_lines(r), [(292, HELD_SENTENCE)],
+                         "--check did not hold item 292 with the page's sentence. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 4, "--check with a held item must exit 4. Output:\n" + shown(r))
+
+    def test_check_mode_passes_a_good_item_and_writes_nothing(self):
+        good = good_item()
+        fetched = self.fetch(items={good["id"]: good}, meta={"page": META})
+        page = write_text(os.path.join(self.tmp.name, "page-check-good.html"), page_with_mockups(GOOD_MOCKS))
+        before = snapshot(self.tmp.name)
+        r = self.run_cmd("--check", "--fetched", fetched, "--page", page)
+        self.assertEqual(snapshot(self.tmp.name), before, "--check wrote a file. Output:\n" + shown(r))
+        self.assertIn("checks pass", verdict_lines(r), "a clean --check did not print the line `checks pass`. Output:\n" + shown(r))
+        self.assertEqual(held_lines(r), [], "--check held a good item. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 0, "a clean --check must exit 0. Output:\n" + shown(r))
+
+
+class CheckModeUnknown(Copied):
+    """--check with node absent from PATH: one `checks unknown:` line, exit 3, and nothing written. Not gated: node absent
+    on purpose."""
+
+    def test_check_mode_without_node_is_unknown_and_writes_nothing(self):
+        fetched = self.fetch(items={ITEM_292["id"]: ITEM_292}, meta={"page": META})
+        page = write_text(os.path.join(self.tmp.name, "page-check-no-node.html"), page_with_mockups(MOCKS_292))
+        empty = os.path.join(self.tmp.name, "check-no-node")  # a PATH with no node in it
+        os.makedirs(empty)
+        before = snapshot(self.tmp.name)
+        r = self.run_cmd("--check", "--fetched", fetched, "--page", page,
+                         env=dict(os.environ, PATH=empty, PYTHONDONTWRITEBYTECODE="1"))
+        self.assertEqual(snapshot(self.tmp.name), before, "--check wrote a file. Output:\n" + shown(r))
+        unknown = [line for line in verdict_lines(r) if line.startswith("checks unknown: ")]
+        self.assertEqual(len(unknown), 1, "--check printed no `checks unknown: <why>` line. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 3, "an unknown --check must exit 3. Output:\n" + shown(r))
 
 
 if __name__ == "__main__":
