@@ -1446,3 +1446,5 @@
 - link-type-only-import-erased: the transpile drops a type-only named import that Node would reject when it runs a `.ts` file directly; reached only through a `.ts` file in a `.mjs` root's graph (actions/code-check/link_check.mjs). Decision: none.
 - link-script-word-exact: an npm script names a root only by its exact tracked path, so `node ./harness/x.mjs` is not a root; q_max's loader matches the same way (actions/code-check/code_check.py `link_roots`). Decision: none.
 - link-error-names-count: the `::error` line of a failing link names the count of failing roots, not each file; the `FAIL load:` lines above it name them (actions/code-check/code_check.py). Decision: none.
+- link-roots-all-skipped-green: a `link` roots glob whose every match sits under a skip prefix passes with "nothing to run"; each drop is printed (actions/code-check/code_check.py `link_step`). Decision: none.
+- link-non-dict-untested: the check that a `link` value that is not an object is red has no test (actions/code-check/code_check.py `link_config_problems`). Decision: none.
