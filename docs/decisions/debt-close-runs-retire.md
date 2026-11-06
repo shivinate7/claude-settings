@@ -14,5 +14,6 @@ Why: a docs-only PR skips review (decision `docs-only-prs-skip-review`, a docs-o
 Source: coordinator ruling 2026-11-06 13:00 CST (the `Retire-run:` form; a rename out of the folder counts as a close).
 
 Kind: process
+Home: lint/check_debt_retire.py
 Home: merge/merge.py
 Check: lint/check_debt_retire.py

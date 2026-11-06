@@ -11,7 +11,8 @@ check reads that debt's Retire paragraph from the base and runs what it names, o
             A missing interpreter, a failed start, or a timeout is unknown.
   prose     a Retire that names no runnable check holds the close, unless the PR body cites a run:
             `Retire-run: <slug> -- <run URL>`, read as the Drops-lines line of check_silent_undo is. The run must be
-            green and on the PR head or a commit above it. Only prose takes a cite: a red test stays red.
+            green and on the PR head or a commit above it. A cite also clears a check that could not run here (unknown);
+            a red check is never cleared by a cite.
 
 Exit 1 on any finding. Design: decision debt-close-runs-retire.
 """
@@ -145,6 +146,10 @@ def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None
                 got = run_span(wt, span, timeout)
                 if got and got[0] == "red":
                     break
+            if got and got[0] == "unknown" and slug in cited:  # a check this machine cannot run: a green cited run proves it ran
+                if (cite := judge_run(wt, head, cited[slug], run_state)) is None:
+                    continue
+                got = cite
             if got:
                 found.append(Finding(slug, got[0], "debt %s: its Retire check %s. Retire: %s" % (slug, got[1], text)))
             continue
