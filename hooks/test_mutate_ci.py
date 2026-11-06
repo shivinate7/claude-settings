@@ -912,7 +912,7 @@ def base_ids(repo):
 
 
 def known_base_run(list_path, repo, base=BASE_TAG):
-    """`--known-defects LIST --repo REPO --profile-file (no install) --base REF`. While the flag is not built, the case fails by name."""
+    """`--known-defects LIST --repo REPO --profile-file (no install) --base REF`. A missing --base flag fails the case by name."""
     code, out, err = run_cli(["--known-defects", list_path, "--repo", repo, "--profile-file", profile_file(NO_INSTALL), "--base", base])
     if code == 2 and "unrecognized arguments" in err and "--base" in err:
         raise AssertionError("--known-defects has no --base flag, so no base list was compared:\n" + err)
