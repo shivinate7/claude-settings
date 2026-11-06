@@ -29,9 +29,10 @@
 #  - One Mac-wide lock, state/sim-test.lock under the config dir, held for the whole run, a hold included, and freed on
 #    every exit, SIGHUP too. A live holder is waited for (SIM_TEST_LOCK_WAIT seconds, then refused). A dead holder is taken
 #    over. A lock folder with no pid file counts as held for 60 s, then it is taken over.
-#  - Its own boot takes the lease for its role (`sim-lease take --device duo|pro --udid`) before simctl boot. At a 5-minute
-#    load of 100 or a 1-minute load of 60 it waits, then exits 1 with no boot. The lease is released on every exit, INT and
-#    TERM too. The reuse path takes no lease.
+#  - Its own boot takes the lease for its role (`sim-lease take --device duo|pro --udid`) before simctl boot. At a full
+#    reading (memory over 95%, or disk free under the full line) it waits, then exits 1 with no boot. An unread reading
+#    holds the grant too (decision one-load-definition). The lease is released on every exit, INT and TERM too. The reuse
+#    path takes no lease.
 #  - Every xcodebuild call carries `-collect-test-diagnostics never`, so a failed UI test starts no simctl diagnose
 #    (up to 10 minutes). A caller's own `-collect-test-diagnostics VALUE` wins: its value stays, with no second copy.
 #  - A SpringBoard crash loop (3 new SpringBoard-*.ips reports during the run that name this run's UDID, or no device
@@ -80,6 +81,14 @@ trap 'rm -rf "$work"' EXIT
 stubs=$work/stubs; mkdir -p "$stubs" "$work/home"
 calls=$work/calls; booted_file=$work/booted
 export RUN=$work PATH="$stubs:$PATH"
+# The tool under test runs from a tree of this run: a copy of sim-test and sim-lease, beside a copy of hooks/ whose
+# guard_load.py is the fake (lint/test_support/guard_load_fake.py). The readings a case sets are the ones the lease judges
+# (decision one-load-definition). sim-lease finds hooks/ from its own realpath, so it finds the fake.
+tree=$work/tree; mkdir -p "$tree/bin" "$tree/hooks"
+cp "$root"/hooks/*.py "$tree/hooks/" && cp "$root/lint/test_support/guard_load_fake.py" "$tree/hooks/guard_load.py" || exit 1
+cp "$sim_lease" "$tree/bin/sim-lease" && cp "$script" "$tree/bin/sim-test" || exit 1
+script=$tree/bin/sim-test; sim_lease=$tree/bin/sim-lease
+export FAKE_LOAD_REAL=$root/hooks/guard_load.py FAKE_LOAD_READING=$work/reading FAKE_LOAD_LOG=$work/load_reads
 OTHER=AAAAAAAA-0000-4000-8000-000000000001
 THIRD=BBBBBBBB-0000-4000-8000-000000000002
 # The device UDIDs are read from SLOT_UDID in bin/sim-lease, the one home. This suite copies none of them.
@@ -165,12 +174,14 @@ cat > "$stubs/top" <<'SH'
 echo "top $*" >> "$RUN/topcalls"
 echo "CPU usage: 30.00% user, 5.00% sys, 90.00% idle"
 SH
-# sysctl: the load line sim-lease reads (`sysctl -n vm.loadavg`). A case writes $RUN/loadavg; with none the load is idle.
-# Each read is logged to $RUN/load_reads, so a case can count the polls of a waiting take.
+# sysctl: sim-lease reads no vm.loadavg (decision one-load-definition), so a run of it is a defect. The stub logs each run to
+# $RUN/sysctl_calls, and each read of the load (this stub or the fake guard_load) to $RUN/load_reads, so a case can count
+# the polls of a waiting take.
 cat > "$stubs/sysctl" <<'SH'
 #!/bin/sh
+echo sysctl >> "$RUN/sysctl_calls"
 echo read >> "$RUN/load_reads"
-if [ -f "$RUN/loadavg" ]; then cat "$RUN/loadavg"; else echo "{ 0.50 0.50 0.50 }"; fi
+echo "{ 0.50 0.50 0.50 }"
 SH
 # uname: sim-lease reads `uname -s` and does nothing unless it is Darwin, so the suite runs on any host.
 cat > "$stubs/uname" <<'SH'
@@ -211,8 +222,10 @@ fresh() {
     "$work/lock_alive" "$work/lock_pid_seen" "$work/lock_simctl" "$work/devices.json" \
     "$work/cmd_udid" "$work/cmd_args" "$work/cmd_lock_seen" "$work/cmd_lock_pid"
   rm -rf "$work/home/.claude" "$crashdir" "$work/sweep_root"
-  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release"
+  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/reading" "$work/load_reads" "$work/sysctl_calls" \
+    "$work/boot_started" "$work/boot_release"
   /bin/mkdir -p "$crashdir" "$work/home"
+  set_reading "$NORMAL_READING"
 }
 # start_tool [VAR=value...]: starts the tool in its own process group, behind a hard timeout. Its stdout and stderr go
 # to run.std and run.err. Defaults: a temp HOME, no CLAUDE_CONFIG_DIR, the crash dir in the run folder, a 1 s poll and
@@ -312,8 +325,11 @@ lease_not_held_at_xc() { ! lease_at_xc_holds; }
 # lease_released: the state after the run holds no lease of this tool. Exit 1 is the only pass, so a broken file fails.
 lease_released() { lease_holds "$lease_file" "$tool_pid"; [ $? -eq 1 ]; }
 no_lease_file() { [ ! -e "$lease_file" ]; }
-# set_load LINE: the load line the sysctl stub prints, as `sysctl -n vm.loadavg` prints it.
-set_load() { printf '%s\n' "$1" > "$work/loadavg"; }
+# set_reading JSON: the reading the fake guard_load returns: memory_pct, disk_free_gb and disk_total_gb. null is an unread
+# reading. Every case starts from NORMAL_READING (fresh sets it), so a case names only the reading it changes.
+NORMAL_READING='{"memory_pct": 40.0, "disk_free_gb": 500.0, "disk_total_gb": 926.0}'
+set_reading() { printf '%s\n' "$1" > "$work/reading"; }
+set_reading "$NORMAL_READING"
 # load_polls_at_least N: the sysctl stub logs each read, so a take that waits reads the load at least N times.
 load_polls_at_least() { [ "$(cat "$work/load_reads" 2>/dev/null | wc -l | tr -d ' ')" -ge "$1" ]; }
 # mkdir_lock_first: one mkdir of the lock folder (no -p) is in the call log, before the first simctl call.
@@ -718,13 +734,13 @@ need "lease held at the boot" lease_at_boot_holds
 need "lease released after the run" lease_released
 end_case "47 own boot: the lease is held while simctl boot runs, and released after the run"
 
-fresh; set_load "{ 0.50 100.00 0.50 }"; run SIM_LEASE_WAIT=2
+fresh; set_reading '{"memory_pct": 96.0, "disk_free_gb": 500.0, "disk_total_gb": 926.0}'; run SIM_LEASE_WAIT=2
+need "exit code is 1" rc_is 1
 need "no boot" test "$(grep -c '^simctl boot' "$calls")" -eq 0
 need "no xcodebuild call" test "$(grep -c ^xcodebuild "$calls")" -eq 0
 need "waited: the load was read at least twice" load_polls_at_least 2
-need "exit code is 1" rc_is 1
-need "stderr names the load" grep -Fq "5-min 100.00" "$work/run.err"
-end_case "48 own boot over a 5-minute load of 100: waits, exits 1, no boot, no xcodebuild"
+need "stderr names the memory reading" grep -Fq "96.0" "$work/run.err"
+end_case "48 own boot at full memory (96.0%): waits, exits 1, no boot, no xcodebuild"
 
 sig_case TERM
 need "lease held during xcodebuild" lease_at_xc_holds
@@ -947,10 +963,10 @@ need "the stop line says it shut down the Duo it booted" crash_line_has "shut do
 need "shutdown of the Duo it booted" has_call "simctl shutdown $DUO1"
 end_case "74 crash loop during a hold with no CMD: exits 1, shuts the Duo down"
 
-# lease_wait_term TARGET: a duo run queues behind a 5-minute load of 100, then TERM arrives. TARGET tool sends it to the
+# lease_wait_term TARGET: a duo run queues behind a full memory reading (96.0%), then TERM arrives. TARGET tool sends it to the
 # tool's pid alone, as a caller's own kill does; TARGET group sends it to the whole process group, as a terminal does.
 lease_wait_term() {
-  fresh; set_load "{ 0.50 100.00 0.50 }"
+  fresh; set_reading '{"memory_pct": 96.0, "disk_free_gb": 500.0, "disk_total_gb": 926.0}'
   ARGS=(-scheme X); start_tool SIM_LEASE_WAIT=60
   need "the duo run is queued behind the load" poll_for 20 in_lease_file
   if [[ $1 = group ]]; then kill -TERM -- "-$tool_pid" 2>/dev/null; else kill -TERM "$tool_pid" 2>/dev/null; fi
@@ -1009,6 +1025,23 @@ need "steps are boot run shutdown" steps_are "boot run shutdown "
 need "no sim-test.lock.dead.* folder is left" no_dead_folder
 need "no rmdir error on stderr" no_rmdir_error
 end_case "80 dead holder's lock folder with take.out: taken over, no dead folder left, no rmdir error"
+
+# Case 81: an unread memory reading (Linux always reads memory unread) holds an own boot. The refusal prints it as unknown.
+fresh; set_reading '{"memory_pct": null, "disk_free_gb": 500.0, "disk_total_gb": 926.0}'; run SIM_LEASE_WAIT=2
+need "exit code is 1" rc_is 1
+need "no boot" no_boot
+need "no xcodebuild call" no_xcodebuild
+need "stderr prints the unread memory as unknown" grep -Fqi unknown "$work/run.err"
+end_case "81 own boot with memory unread: the lease holds it, no boot, no xcodebuild, exit 1"
+
+# Case 82: control: a busy reading (memory over 85%) does not hold an own boot. Slot 1 boots its Duo, which is tested and
+# shut down, and sim-lease starts no sysctl (it reads the load through guard_load only).
+fresh; set_reading '{"memory_pct": 90.0, "disk_free_gb": 500.0, "disk_total_gb": 926.0}'; run
+need "exit code" rc_is 0
+need "boot of slot 1's UDID" has_call "simctl boot $DUO1"
+need "shutdown of slot 1's UDID" has_call "simctl shutdown $DUO1"
+need "no sysctl started" test ! -s "$work/sysctl_calls"
+end_case "82 control: busy memory (90.0%) does not hold an own boot: slot 1 boots, tests, shuts down, no sysctl"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
