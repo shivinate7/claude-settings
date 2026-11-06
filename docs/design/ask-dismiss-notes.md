@@ -18,7 +18,8 @@ press beside Reply writes `dismissed` on `asks/<id>` with `update`; the page hid
   part-failed dismiss, and a reply sent later (from another tab) lands undismissed in a dismissed thread anyway.
 - Restore writes `dismissed: null` with `update`. The runtime has no field-delete call. The page reads only a valid ISO time as dismissed.
 - Nothing is deleted. The record, its `text` and the session's `reply` stay in the store (ruling: a dismissed ask keeps its record).
-- Who reads it: the page only, at its hide filter. No session writes `dismissed`, and no session writes a record that has it.
+- Who reads it: the page, to hide the thread; the writer, to skip the record in "Route an ask". No session writes `dismissed`,
+  and no session writes a record that has it.
 - A thread shows again, whatever `dismissed` says, when a record in it waits, or has an `answered` later than `dismissed`.
   So an answer never lands hidden (a reply sent from another tab before this dismiss reached it).
 - Departs from: SKILL.md "The database", which says the page writes `id`, `text` and `at` once, at Send. `dismissed` is a second
@@ -61,6 +62,8 @@ press beside Reply writes `dismissed` on `asks/<id>` with `update`; the page hid
   list at the next load.", and shows Dismiss in place of Restore (ux-order-holds-still).
 - The `shown` filter of `renderAskList` reads dismissed threads once per load. A dismiss this visit keeps its row as the Dismissed
   line, so no row comes up from behind "Show N older asks" mid-visit. A dismiss from another tab also draws the Dismissed line here.
+- The dismissed count and list are read at load too. A thread dismissed this visit lives only as its Dismissed line until the
+  next load, so it never shows twice (drawn: "Show 2 dismissed asks" in `just-dismissed`).
 - State `all-dismissed`: nothing waits and every thread is dismissed. Today's "Nothing asked yet." would be false. New sentence:
   "No ask on the list. Type above, and a session answers here." The dismissed unfold stays.
   Departs from: today's empty sentence in `renderAskList`, only in this case. Not blocking.
@@ -108,7 +111,10 @@ press beside Reply writes `dismissed` on `asks/<id>` with `update`; the page hid
   `#pick-folded`, `open` `#pick-open`) and item "Taking a dismiss back" (`just-dismissed` `#pick-nocount`,
   `just-dismissed-count` `#pick-count`): exit 0, `problem: null` each. Red (exit 1) on an item with a focus the mockup lacks.
 - `label_once.py` on each state at 390: no hit.
-- impeccable critique: see the report.
+- impeccable critique, in one context (no tool to start an agent; `impeccable context` refused by guard rule impeccable-review-only):
+  the detector found nothing. Fixed: at 390, "Show answer" and the time overlapped on a folded row with Dismiss; the row now puts
+  the time on line 2 and keeps "Show answer" in the button's name (item 2, a named departure). Left, to match today: the store
+  code in the failure line ("permission-denied"), and the two dashed unfolds under the list, whose words differ.
 
 ## 10. Work outside this folder (for the builder)
 
