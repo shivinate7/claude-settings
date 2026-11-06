@@ -33,7 +33,7 @@ names it, never a crash.
     that failed, a timeout, or any other non-zero exit. "REPLY": a ReplyError, a call that ran and answered
     badly. An exit 0 with an envelope `is_error: true` is a failure, "AUTH" or "RUN" by the same text test,
     never "REPLY". auth_check gives the setup-token fix for "AUTH" only. "RUN" names the error and says the
-    check failed. Round 1 cases R1 to R3 stub hooks/_nowindow.run, the one start a model call makes.
+    check failed. The R1 to R3 cases stub hooks/_nowindow.run, the one start a model call makes.
 - settings.json: one SessionStart command runs decision_watch.py --auth-check. No Stop command names
   decision_watch.
 - The streak file lives under the config dir's state folder. These cases do not name it. They scan every
@@ -546,7 +546,7 @@ def C12_three_failed_reply_judge_calls_give_the_stop_line():
     return problems
 
 
-# --------------------------------------------------------------------------- round 1: the error text and the classifier
+# --------------------------------------------------------------------------- the error text, the error kind, is_error envelopes
 
 class NowindowRun:
     """Stands in for hooks/_nowindow.run, the one start a model call makes. Returns `result`, or raises `raises`."""
