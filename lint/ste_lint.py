@@ -2076,11 +2076,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def unknown_exit(config: dict, code: int) -> int:
     """Say UNKNOWN for a config that was not read. The run goes on with the defaults. Locally the exit is `code`. With
-    env CI set a config that was not read is red (decision ci-unknown-is-red)."""
+    env CI set a config that was not read is red (decision ci-unknown-is-red), unless `--fail-on never` opts out."""
     reason = config.get("_unknown")
     if not reason:
         return code
     sys.stderr.write("ste-lint: UNKNOWN, %s\n" % reason)
+    if config.get("fail_on") == "never":  # the caller's opt-out keeps the exit, as it does for a finding
+        return code
     return 1 if os.environ.get("CI") else code
 
 
