@@ -33,6 +33,7 @@ Window: the newest 30 completed runs of each job in `checks.yml`, from run 39969
 | checks-mutate-guard | ubuntu | 30 | 3.7 | 3.9 (old window; see the note below) | 10 | 25 | about 64 (16 projected for batch 7) | 1, run 41786084869, against the cap in force (10) | projected yes |
 | checks-windows | windows | 30 | 1.2 | 1.6 | 10 | 10 | 16 | 0 | yes |
 | checks-shoot | ubuntu | 30 | 0.8 | 1.0 | 10 | 10 | 10 | 0 | yes |
+| judge-replay (new) | ubuntu | 0 | none | none | none | 15 (provisional) | about 36 (5.4 min projected from one local run of 201 s, plus 2 min for the install) | 0 | projected yes |
 | scope, ci-done | ubuntu | 30, 19 | 0.1 | 0.1 | 5 | 5 | 3 | 0 | yes |
 
 - `checks-mutate-guard` (lane mutate-guard-cap, 2026-11-04): run 41786084869 ended at the 10 min cap with 482 of 486 mutants printed KILLED and no red step. Two slow kills were sped up, with no kill lost. A local run with 4 jobs then took 651 s, against 710 s before. The cap-cut step ran 580 s or more. Batch 7's lanes add mutants. The coordinator measured, on main, lane PR 1163 alone at 946 s locally and lane PR 1157 at 768 s. The sum 710 + 236 + 58 - 59 is 945 s, about 16 min, if the added mutants add up and the speed-ups carry over. That is 64% of a 25 min cap if CI runs as fast as the local machine. A cap-cut step has no upper bound; the next green run on main replaces the projection. Debt `mutate-guard-split` holds the split.

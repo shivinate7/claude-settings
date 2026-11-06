@@ -1,0 +1,173 @@
+[
+  {
+    "id": "ship-today-passes",
+    "expect": "allow",
+    "source": "hooks/test_call_judge.py good_box (the fixture box that meets the form)",
+    "input": {
+      "tool_input": {
+        "questions": [
+          {
+            "question": "Goal: ship the change today\nProblem (risk): the change touches the safety check, so it needs your word\nBased on (read): the diff changes one line of the safety check\nDeparts from: lint/stamp.py:run_stamp — the stamp check (the step that marks a build as checked) moves to the lint job (an earlier stage of the automatic checks).",
+            "header": "Pick",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "Ship it (Recommended)",
+                "description": "Gain: the change lands today. Lose: nobody reads it first."
+              },
+              {
+                "label": "Hold it",
+                "description": "Gain: a reviewer reads it first. Lose: the change lands a day later."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "header-colour-passes",
+    "expect": "allow",
+    "source": "hooks/test_call_judge.py good_box shape; hooks/call_judge.py JUDGE_ITEMS (a plain two-option question)",
+    "input": {
+      "tool_input": {
+        "questions": [
+          {
+            "question": "Goal: pick the colour of the page header\nProblem (risk): the header shows on every page, so its look needs your word\nBased on (read): both mockups pass the contrast check\nDeparts from: site/header.css:header — the header is grey today and one option makes it blue or green.",
+            "header": "Pick",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "Blue header (Recommended)",
+                "description": "Gain: the header reads clearly on every page. Lose: the page looks less like the old one."
+              },
+              {
+                "label": "Green header",
+                "description": "Gain: the page keeps a warm feel. Lose: the white title text is harder to read."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "cited-ruling-reask-passes",
+    "expect": "allow",
+    "source": "hooks/test_call_judge.py case_past_ruling_cited_passes; docs/decisions/github-apps-keep-access.md",
+    "input": {
+      "tool_input": {
+        "questions": [
+          {
+            "question": "Goal: decide whether Renovate keeps its access to claude-settings\nProblem (risk): Renovate now opens many PRs, so keeping or removing its access needs your word\nBased on (ruling): decisions/github-apps-keep-access says revisit if the apps get bloated; since then Renovate opened 40 PRs in a week and 25 are unmerged\nDeparts from: docs/decisions/github-apps-keep-access.md — Renovate would lose its access to the repo, which the record lets it have today.",
+            "header": "Pick",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "Remove Renovate's access (Recommended)",
+                "description": "Gain: the flood of update PRs stops. Lose: dependency updates stop arriving on their own."
+              },
+              {
+                "label": "Keep Renovate's access",
+                "description": "Gain: dependency updates keep arriving. Lose: the flood of update PRs goes on."
+              }
+            ]
+          }
+        ]
+      },
+      "rulings": {
+        "decisions/github-apps-keep-access": "Owner, 2026-10-28 14:40 CDT (waiting page item 9, roadmap step c153): keep the access that Renovate, Cloudflare and Render have to claude-settings as it is. The reason: it makes calling into a repo straightforward. Revisit if it gets bloated. No change is made."
+      }
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "apps-access-already-ruled",
+    "expect": "deny",
+    "source": "hooks/test_call_judge.py case_past_ruling_replay_item_145; docs/decisions/github-apps-keep-access.md (waiting item 145, withdrawn)",
+    "input": {
+      "tool_input": {
+        "questions": [
+          {
+            "question": "Goal: decide whether the GitHub apps keep access to claude-settings\nProblem (risk): the apps can reach the repo, so keeping or removing them needs your word\nBased on (read): the GitHub audit lists Cloudflare, Render and Renovate beside Claude\nDeparts from: docs/decisions/github-apps-keep-access.md — the apps would lose their access to the repo, which the record lets them have today.",
+            "header": "Pick",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "Keep the apps (Recommended)",
+                "description": "Gain: calls into the repo stay straightforward. Lose: an unused app keeps its access."
+              },
+              {
+                "label": "Remove the apps",
+                "description": "Gain: fewer apps can write to the repo. Lose: each call into the repo needs a manual step."
+              }
+            ]
+          }
+        ]
+      },
+      "rulings": {
+        "decisions/github-apps-keep-access": "Owner, 2026-10-28 14:40 CDT (waiting page item 9, roadmap step c153): keep the access that Renovate, Cloudflare and Render have to claude-settings as it is. The reason: it makes calling into a repo straightforward. Revisit if it gets bloated. No change is made."
+      }
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "job-cap-meaning-already-explained",
+    "expect": "deny",
+    "source": "hooks/test_call_judge.py case_past_ruling_explained_premise; docs/decisions/ci-job-caps.md",
+    "input": {
+      "tool_input": {
+        "questions": [
+          {
+            "question": "Goal: know whether the CI job cap rule means about 2x or under 80%\nProblem (rule): the cap decides when a full CI run goes red, so the rule needs your word\nBased on (measured): the slowest checks job ran at about 2x its cap in the last 30 runs\nDeparts from: .github/workflows/checks.yml — the cap line changes to the figure you pick.",
+            "header": "Pick",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "Set the cap to about 2x (Recommended)",
+                "description": "Gain: jobs keep their headroom. Lose: a slow job can still end at its cap."
+              },
+              {
+                "label": "Set the cap under 80%",
+                "description": "Gain: a slow job gets a tighter bar. Lose: a normal run ends at its cap more often."
+              }
+            ]
+          }
+        ]
+      },
+      "rulings": {
+        "decisions/ci-job-caps": "Owner, 2026-11-01 18:44 CST: each owner repo raises its job caps generously, as a stopgap, until its time-pinned tests are gone. Owner, 2026-10-27, roadmap step c95 (the cap rule): a full CI run is red only when something is broken, never because a job ran out of time. The target is a slowest run under 80% of the cap."
+      }
+    },
+    "agreement": "3/3"
+  },
+  {
+    "id": "options-carry-unexplained-ids",
+    "expect": "deny",
+    "source": "hooks/call_judge.py JUDGE_ITEMS items 4 and 5; hooks/test_call_judge.py good_box shape",
+    "input": {
+      "tool_input": {
+        "questions": [
+          {
+            "question": "Goal: ship the change today\nProblem (risk): the change touches the safety check, so it needs your word\nBased on (read): the diff changes one line of the safety check\nDeparts from: lint/stamp.py:run_stamp — the stamp check (the step that marks a build as checked) moves to the lint job (an earlier stage of the automatic checks).",
+            "header": "Pick",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "Take D12 (Recommended)",
+                "description": "Gain: reuses c95 and lands via sha 9a3f1c2. Lose: k_77 stays open."
+              },
+              {
+                "label": "Take D13",
+                "description": "Gain: closes k_77. Lose: c95 waits for lane 8."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "agreement": "3/3"
+  }
+]
