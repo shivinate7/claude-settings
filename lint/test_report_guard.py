@@ -4720,9 +4720,6 @@ class MistakeNamesGuardTests(unittest.TestCase):
     def test_mg_red_clobbered_notes_blocks(self):
         self.assert_blocked(mg_report("I clobbered the lane's notes file by mistake."))
 
-    def test_mg_red_corrupted_inbox_blocks(self):
-        self.assert_blocked(mg_report("I corrupted the inbox file."))
-
     def test_mg_red_outdated_record_blocks(self):
         self.assert_blocked(mg_report("I trusted an outdated record and skipped the check."))
 
@@ -4735,6 +4732,13 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     def test_mg_red_negator_in_another_clause_blocks(self):
         self.assert_blocked(mg_report("I did not test it, and I broke the build."))
+
+    # A negator clears only within 3 words before the fault word: four words between them still block.
+    def test_mg_red_negator_four_words_before_fault_blocks(self):
+        self.assert_blocked(mg_report("I did not run the check and broke the build."))
+
+    def test_mg_red_never_four_words_before_fault_blocks(self):
+        self.assert_blocked(mg_report("I never read the diff and clobbered the notes."))
 
     def test_mg_red_admission_in_second_bullet_blocks(self):
         self.assert_blocked(
@@ -4788,6 +4792,17 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     def test_mg_green_trusted_verdict_passes(self):
         self.assert_allowed(mg_report("I trusted the reviewer's verdict; it was correct."))
+
+    # A first-person word after the fault word in its clause is not the admission's subject.
+    def test_mg_green_i_after_fault_word_in_clause_passes(self):
+        self.assert_allowed(mg_report("The test was wrong so I re-pointed it."))
+
+    def test_mg_green_wrong_file_then_i_used_passes(self):
+        self.assert_allowed(mg_report("The brief named the wrong file and I used foo.py."))
+
+    # "corrupted" is not a fault word, so a regenerated corrupted fixture is not an admission.
+    def test_mg_green_regenerated_corrupted_fixture_passes(self):
+        self.assert_allowed(mg_report("I regenerated the corrupted fixture."))
 
 
 if __name__ == "__main__":
