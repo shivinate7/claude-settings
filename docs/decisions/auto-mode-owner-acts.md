@@ -39,8 +39,10 @@ An allow rule for `merge --role` waits on the tag check of #878 (merge role read
 Grant: owner, page items 239 a and 257 c, 2026-11-05 07:44-07:49 CST, in the owner's own PR #1307. The classifier refused a lane that tried to write this line, so a local session added it.
 
 - Incidents: the classifier refused a lease push to a lane's own branch as "Git Destructive". The notes in `docs/debts/notes.md` hold each one: `lane-force-push-refused`, `classifier-refuses-lease-push` and `auto-mode-force-push-lane`. One more, 2026-11-06 12:38 CST, coordinator-reported: lane c63's force push to its own branch `c63-stubs`.
+- Gap: the entry covers only `--force-with-lease=<branch>:<sha>`. Of the cited refusals, only the third `classifier-refuses-lease-push` note used that form. The rest used `--force-with-lease --force-if-includes` with no sha, which the entry does not cover. The classifier can still refuse those.
 - Undo: the old tip stays in the reflog, and the lease refuses a push that would drop newer remote work.
-- Guard that still covers the mistake form: decision `stale-safe-force-push`. It denies a bare `--force` and a lease with no sha, and asks at the default branch.
+- Guard that still covers the mistake form: decision `stale-safe-force-push`. It denies a lease that has no sha and no `--force-if-includes`, and a bare `--force`. It asks at the default branch, and for any forced `--all` or `--mirror`.
+- Note: the entry's Never covers does not name a lease push with `--all` or `--mirror`. The push guard asks for each of those.
 
 ### Own CI Run Cancel
 
@@ -55,6 +57,7 @@ Grant: owner, page item 278, pick c, 2026-11-06 12:41 CST.
 Grant: owner, page item 278, pick d, 2026-11-06 12:41 CST.
 
 - Incident: refused on 2026-11-04 05:10 CST. The claude-settings batch runner's `delete_trigger` on its own check-in.
+- Scope: a check-in that fires into this same session. That is a `send_later` id, or a `create_trigger` id made without `create_new_session_on_fire` and without `persistent_session_id`. Deleting a trigger also deletes every session it started, so a trigger made with either of those is not covered.
 - Undo: set the same check-in again with `create_trigger` or `send_later`. Only its run history is lost.
 - Guard that still covers the mistake form: none.
 
