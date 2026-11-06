@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-06T19:26:00Z",
+  "context": "Goal: each refuter runs the model its stakes need (your note on item 284).\nProblem (money): Opus costs more per call, and decision agent-model-cap lets only its named roles run Opus, so a refuter on Opus needs your word.\nBased on (measured): page decision items 6 to 51 a day (median 22); steps closed 4 to 33 a day; ruling skips unmeasured.\nBased on (ruling): item 279 d put the plan refuter on Opus; Sonnet is the ceiling for every other role.\nBased on (read): the Opus question reviewer already reads every page question.\nDeparts from: main agent-model-cap has no row for the three item-284 refuters \u2014 adds a row for each, on the model you pick.\nMeanwhile: the three lanes build on Sonnet, with the model as one named setting.",
+  "home": "plan record debate-model-tiers (PR #1323)",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "PR #1323",
+      "url": "https://github.com/shivinate7/claude-settings/pull/1323"
+    }
+  ],
+  "n": 289,
+  "options": [
+    {
+      "gain": "The two verdicts no one else sees get the strongest read.",
+      "how": "The ruling-skip check and the done-check read at step close run Opus. The case against the pick and the done-check read at brief time run Sonnet.",
+      "key": "a",
+      "label": "Opus where nobody else reads the verdict",
+      "lose": "About 4 to 43 Opus calls a day."
+    },
+    {
+      "gain": "The strongest read everywhere.",
+      "how": "Every refuter from item 284 runs Opus.",
+      "key": "b",
+      "label": "Opus for all three",
+      "lose": "The case against each page question (6 to 51 a day) and each lane brief (25 to 104 a day) also run Opus."
+    },
+    {
+      "gain": "Lowest cost.",
+      "how": "As item 284 was written.",
+      "key": "c",
+      "label": "Sonnet for all three",
+      "lose": "A stretched ruling or a weak done-check passes on one Sonnet read, with no other reader."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "item 284; PR #1323",
+  "short": "Refuter models",
+  "status": "open",
+  "title": "Which refuters run Opus?",
+  "why": "Recommended a: the two verdicts nobody else reads get the strongest read, at the lowest extra cost."
+}

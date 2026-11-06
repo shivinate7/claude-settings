@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-06T19:30:00Z",
+  "context": "Goal: the 3D copy of the Cockpit shows at a glance what waits on you (step 3d-browser-dummy, your item 277 a).\nProblem (goal): the scene can group items by status or by kind, and which you see first changes what the scene is for.\nBased on (read): lane notes docs/design/3d-browser-dummy-notes.md, section 1 (branch 3d-browser-dummy, 78a27bce): an item is a stack, one slab per option or step; rank sets the order on the floor, not the height.\nDeparts from: main \u2014 adds a 3D scene of the page's items, laid out as you pick.\nMeanwhile: the lane builds on a.",
+  "designs": [
+    {
+      "file": "docs/design/3d-browser-dummy/layout-a.html",
+      "focus": "#scene",
+      "label": "a: status floors",
+      "slug": "3d-layout-a"
+    },
+    {
+      "file": "docs/design/3d-browser-dummy/layout-b.html",
+      "focus": "#scene",
+      "label": "b: kind floors",
+      "slug": "3d-layout-b"
+    }
+  ],
+  "home": "docs/design/3d-browser-dummy-notes.md",
+  "kind": "decision",
+  "n": 291,
+  "options": [
+    {
+      "design": "3d-layout-a",
+      "gain": "What waits on you is in front.",
+      "how": "Open items stand on a raised floor in front. Closed items sit on a dashed shelf behind it, grey with a check.",
+      "key": "a",
+      "label": "Status floors",
+      "lose": "Decisions and tasks mix on one floor; kind shows only by shape."
+    },
+    {
+      "design": "3d-layout-b",
+      "gain": "Each kind is grouped.",
+      "how": "Decisions stand on one floor, tasks on another.",
+      "key": "b",
+      "label": "Kind floors",
+      "lose": "Open and closed mix on each floor, so what waits on you is harder to spot."
+    }
+  ],
+  "owner": "lane 3d-browser-dummy (session_013NEJL1q9hiKz6bhqxDi1ik)",
+  "pick": "a",
+  "rank": 4,
+  "ref": "step 3d-browser-dummy; item 277",
+  "short": "3D dummy layout",
+  "status": "open",
+  "title": "3D dummy: how should the scene lay out the page's items?",
+  "why": "Recommended a: what still needs you stands in front, and closed work steps back."
+}

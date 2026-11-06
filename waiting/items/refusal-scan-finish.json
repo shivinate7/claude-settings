@@ -3,7 +3,7 @@
   "context": "Goal: know every act cloud auto mode refuses, so the allow lines cover all that recur (your question on item 278).\nProblem (risk): the scan read about 131 of 360 sessions, so an act that recurs only in the unread sessions is still hidden.\nBased on (measured): coordinator scan 13:16 CST: 9 auto-mode refusals in about 2,623 judged acts; only the lane force-push recurs (4 times).\nDeparts from: main \u2014 adds a full count of auto-mode refusals since Nov 2, in step auto-mode-refusal-survey.\nMeanwhile: the lease fix in PR #1316 goes on; it does not wait on this.",
   "home": "step auto-mode-refusal-survey",
   "kind": "decision",
-  "lane": "coordinator runs the rest of the scan (routed 13:28 CST); the full count lands on item 278",
+  "lane": "a scan agent in the coordinator session reads the other ~230 sessions; the full count lands on item 278",
   "lastAnswer": {
     "at": "2026-11-06T19:19:23.661Z",
     "choice": "a",

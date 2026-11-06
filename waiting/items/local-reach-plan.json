@@ -4,6 +4,12 @@
   "holds": "Building the way cloud sessions reach your computer's sessions.",
   "home": "docs/decisions/session-messages.md",
   "kind": "decision",
+  "lane": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6): 12-message Mac test, then the build; routed 13:30 CST",
+  "lastAnswer": {
+    "at": "2026-11-06T19:21:14.149Z",
+    "choice": "a",
+    "note": "Owner: a. Routed 13:30 CST to the lane: the 12-message test on your Mac comes first."
+  },
   "links": [
     {
       "label": "Draft PR #1051",

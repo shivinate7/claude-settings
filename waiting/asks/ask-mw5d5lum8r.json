@@ -1,0 +1,6 @@
+{
+  "at": "2026-11-06T19:24:32.350Z",
+  "id": "ask-mw5d5lum8r",
+  "reply": "It had fallen off. You still press once per lane start on the Mac. The rule for lanes (decision lanes-start-as-agents) keeps that press until a session on your Mac tests two things: does the start card still show, and does it still drop the lane's branch. Nothing held that test, and step c107 had no lane since Oct 30. Now: c107 is back on the roadmap with the Mac test as its next step, and I asked the coordinator at 13:33 CST to start it as a lane on your Mac. Only a Mac session can see the card. The test result decides the fix.",
+  "text": "my local sessions coordinators still need me to hit a ubtton to spawn their sessions -- is that being fixed still or it's fallen of fhte to do list"
+}

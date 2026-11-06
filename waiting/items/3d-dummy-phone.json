@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-06T19:30:00Z",
+  "context": "Goal: on a phone, you can read an item's detail and still see where it sits in the scene.\nProblem (goal): a 390-wide screen fits the scene or the panel well, not both at full size.\nBased on (read): lane notes item 11 (branch 3d-browser-dummy, 78a27bce); both drawn at 390, light and dark checked.\nDeparts from: main \u2014 adds a phone detail panel for the 3D scene.\nMeanwhile: the lane builds on a.",
+  "designs": [
+    {
+      "file": "docs/design/3d-browser-dummy/phone-a.html",
+      "focus": "#pickview",
+      "label": "a: under the scene",
+      "slug": "3d-phone-a"
+    },
+    {
+      "file": "docs/design/3d-browser-dummy/phone-b.html",
+      "focus": "#pickview",
+      "label": "b: over the scene",
+      "slug": "3d-phone-b"
+    }
+  ],
+  "home": "docs/design/3d-browser-dummy-notes.md",
+  "kind": "decision",
+  "n": 292,
+  "options": [
+    {
+      "design": "3d-phone-a",
+      "gain": "The scene stays in view while you read.",
+      "how": "Tap an item; its detail opens below the scene.",
+      "key": "a",
+      "label": "Panel under the scene",
+      "lose": "You scroll to reach the detail."
+    },
+    {
+      "design": "3d-phone-b",
+      "gain": "The detail shows at once, with no scroll.",
+      "how": "Tap an item; its detail slides up over the scene.",
+      "key": "b",
+      "label": "Panel over the scene",
+      "lose": "It covers the scene until you close it."
+    }
+  ],
+  "owner": "lane 3d-browser-dummy (session_013NEJL1q9hiKz6bhqxDi1ik)",
+  "pick": "a",
+  "rank": 4,
+  "ref": "step 3d-browser-dummy",
+  "short": "3D dummy phone panel",
+  "status": "open",
+  "title": "3D dummy on a phone: where does an item's detail panel sit?",
+  "why": "Recommended a: the scene stays in view while you read."
+}

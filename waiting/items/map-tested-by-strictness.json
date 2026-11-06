@@ -4,7 +4,12 @@
   "home": "decision map-tested-by-line; roadmap step map-tested-by-line",
   "id": "map-tested-by-strictness",
   "kind": "decision",
-  "lastAnswer": "none (13:08 CST Nov 6): \"building this is most important wise to show simplicity and work overdone or accidentally repeated; with that in mind what do these options decide\". Answered 13:12 CST in the reply; asked again.",
+  "lane": "lane banchi-tested-by-repoint (session_013NEJL2eivFjt774VGHpnHx); decision map-tested-by-line is on main; closes when the banchi PR merges",
+  "lastAnswer": {
+    "at": "2026-11-06T19:21:14.149Z",
+    "choice": "a",
+    "note": "Owner: a. Routed 13:30 CST to the coordinator; banchi re-points its links."
+  },
   "n": 270,
   "options": [
     {

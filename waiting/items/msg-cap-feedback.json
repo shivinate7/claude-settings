@@ -10,6 +10,24 @@
     "choice": "b",
     "note": "Owner: b, and search the web, docs and program code for a way to set the limit, the way autocompact can be set. Relayed 13:12 CST to the lane."
   },
+  "links": [
+    {
+      "label": "Issue 94000: crossSessionSendLimit setting",
+      "url": "https://github.com/anthropics/claude-code/issues/94000"
+    },
+    {
+      "label": "Issue 106438: higher limit",
+      "url": "https://github.com/anthropics/claude-code/issues/106438"
+    },
+    {
+      "label": "Issue 100233: same refusal",
+      "url": "https://github.com/anthropics/claude-code/issues/100233"
+    },
+    {
+      "label": "Docs: message settings",
+      "url": "https://code.claude.com/docs/en/settings-reference.md#crosssessioninbound"
+    }
+  ],
   "n": 281,
   "options": [
     {
@@ -31,7 +49,7 @@
   "pick": "a",
   "rank": 4,
   "ref": "step session-messaging-plan; your ask on messaging",
-  "reply": "13:16 CST, from the lane: no, you cannot set this limit. The lane checked the code. The limit of 10 sends is fixed in Claude Code 2.1.319, and no setting, environment variable or flag changes it. The cloud sessions' limit comes from Anthropic's servers, and the public build turns off both local ways to change it. An agent is still checking the online docs and GitHub issues, and I will add its sources here. The answer is in record session-messages (commit dd796e69). Item 153's design that replaces messages between sessions (no 10-send limit, works both ways) is in progress. This item closes when that record merges.",
+  "reply": "13:16 CST, from the lane: no, you cannot set this limit. The limit of 10 sends is fixed in Claude Code 2.1.319, and no setting, environment variable or flag changes it. The cloud sessions' limit comes from Anthropic's servers, and the public build turns off both local ways to change it.\n\n13:22 CST, the docs and the web agree. The only message settings are crossSessionInbound, isolatePeerMachines and dialogExpiry, and none sets a limit. Autocompact has environment variables; messages have none. Open GitHub requests ask Anthropic for exactly this, with no staff reply yet. A thumbs-up there is the quickest way to push for it: issues 94000 (a crossSessionSendLimit setting), 106438 (a higher limit) and 100233 (the same refusal).\n\nItem 153's mailbox page (your pick a) removes the limit for these sessions. This item closes when record session-messages merges.",
   "short": "10-message stop: ask Anthropic?",
   "status": "open",
   "title": "The 10-message stop on your Mac is Claude Code's own limit. Ask Anthropic for a setting?",

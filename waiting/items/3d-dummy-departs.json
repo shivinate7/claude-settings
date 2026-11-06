@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-06T19:30:00Z",
+  "context": "Goal: the 3D copy matches the Cockpit where it matters, and differs only where you agree.\nProblem (goal): the lane made three choices the Cockpit does not share; each is yours to confirm.\nBased on (read): lane notes item 10 (branch 3d-browser-dummy, 78a27bce).\nDeparts from: main's Cockpit \u2014 the 3D copy (1) is read-only: you answer on the Cockpit, not in 3D; (2) groups items open and closed, not the Cockpit's three tiers; (3) shows a ring shape for \"open\".\nMeanwhile: the lane builds on a.",
+  "home": "docs/design/3d-browser-dummy-notes.md",
+  "kind": "decision",
+  "n": 293,
+  "options": [
+    {
+      "gain": "A simple copy that reads the same data and changes nothing.",
+      "how": "Keep all three differences.",
+      "key": "a",
+      "label": "Fine as drawn",
+      "lose": "You still answer on the Cockpit, and its tiers do not show in 3D."
+    },
+    {
+      "gain": "One way of reading items on both pages.",
+      "how": "Show the Cockpit's three tiers and its shapes, still read-only.",
+      "key": "b",
+      "label": "Match the Cockpit",
+      "lose": "More shapes in the scene, and more for the lane to build."
+    }
+  ],
+  "owner": "lane 3d-browser-dummy (session_013NEJL1q9hiKz6bhqxDi1ik)",
+  "pick": "a",
+  "rank": 4,
+  "ref": "step 3d-browser-dummy",
+  "short": "3D dummy differences",
+  "status": "open",
+  "title": "3D dummy: are these three differences from the Cockpit fine?",
+  "why": "Recommended a: a copy you look at, not one you answer on, stays small and cannot drift from the page."
+}
