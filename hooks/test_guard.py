@@ -27304,9 +27304,23 @@ add("reviewer-brief-blind: refused: a Workflow agent() reviewer whose prompt hol
            "{agentType: 'reviewer', model: 'haiku'}); return r")
 # The role set is the reviewer and the term for an agent that argues back, plus any plugin prefix on the reviewer.
 rbb_refuse("reviewer-brief-blind: refused: a refuter spawn whose brief pastes a builder report",
-           "Argue the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", role="refuter", model="sonnet")
+           "Argue the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", role=REFUTER, model="sonnet")
 rbb_refuse("reviewer-brief-blind: refused: a my-plugin:reviewer spawn whose brief pastes a builder report",
            "Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", role="my-plugin:reviewer", model="sonnet")
+# Markdown forms of a report label and of an item. The decoration around a label word is no reason to pass a pasted report.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with bold labels, **Done**: and **Deviations**:",
+           "Check the floor fix.\n**Done**: the floor fix is in.\n**Deviations**: none.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with bullet labels, - Done: and - Deviations:",
+           "Check the floor fix.\n- Done: the floor fix is in.\n- Deviations: none.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with heading labels, ## Done and ## Deviations",
+           "Check the floor fix.\n## Done\nThe floor fix is in.\n## Deviations\nnone.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a bullet item, - BUILT c1",
+           "Check the floor fix.\n- BUILT c1 the floor fix.\nFiles: hooks/guard.py.")
+# A verdict line needs no `Verdict:` or round label. A leading verdict word, or a `Prior round verdict:` line, is one too.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief whose leading verdict line is FAIL, round 1 of 3, haiku",
+           "Re-check the floor fix.\nFAIL, round 1 of 3, haiku.\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior round verdict: FAIL line",
+           "Re-check the floor fix.\nPrior round verdict: FAIL\nFiles: hooks/guard.py.")
 
 # Allowed. A later round gets the prior round's findings as a list, a fix check gets the one finding it checks, and
 # the task's own words name the rule without a shape at line start. A builder's brief may hold its report.
@@ -27333,6 +27347,12 @@ rbb_allow("reviewer-brief-blind: allowed: a findings line holding a lone quote a
 # One report label at line start is not a pasted report. A guard that refuses at one label, not two, fails this case.
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with exactly one report label at line start",
           "Check the floor fix.\nDone: when `verdict python3 hooks/test_guard.py` is green.\nFiles: hooks/guard.py.")
+# A verdict word not right after the colon is a quote, not a verdict line. A line that opens with BUILT-IN is no item.
+rbb_allow("reviewer-brief-blind: allowed: Round 2 of 3: check PASS or FAIL, the verdict word not right after the colon",
+          "Re-check the floor fix.\nRound 2 of 3: check PASS or FAIL on the floor fix.\nFiles: hooks/guard.py.",
+          model="sonnet")
+rbb_allow("reviewer-brief-blind: allowed: a brief line that opens with BUILT-IN check, not a BUILT item",
+          "Check the floor fix.\nBUILT-IN check: the floor reads the role before the model.\nFiles: hooks/guard.py.")
 # The empty state: a reviewer brief with no text holds no report, so it passes.
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with an empty prompt", "")
 add("reviewer-brief-blind: allowed: a Workflow agent() reviewer on Round 2 of 3 with a findings list",
