@@ -4,6 +4,6 @@
   "status": "todo",
   "order": 102.73,
   "why": "Owner, 13:58 CST Nov 6 (thread 53e2d6e5): the picture check flagged item 292 in his browser, but nothing stopped it at publish, so he had to push it back.",
-  "note": "Cause: pictureProblem and the other item checks live only in skills/waiting-page/page.html and run when the page draws. export_page.py and the publish path run none of them.\nFix: one home for the checks, run by the export or publish step, which refuses with the same message. Test: red on item 292's bad focus.\nSource: owner thread 53e2d6e5, 13:58 CST; asked the coordinator for a lane at 14:01 CST.",
-  "updatedAt": "2026-11-06T20:02:00Z"
+  "note": "Cause: pictureProblem and the other item checks live only in skills/waiting-page/page.html and run when the page draws. export_page.py and the publish path run none of them.\nFix: one home for the checks, run by the export or publish step, which refuses with the same message. Test: red on item 292's bad focus.\nSource: owner thread 53e2d6e5, 13:58 CST; asked the coordinator for a lane at 14:01 CST. Unknown check (triage 15:27 CST Nov 6, from item 276 a, owner 12:39 CST: one rule, a check that cannot read its input fails): export_page.py --check holds the republish on 'checks unknown' (option B). Not paged. Measured: the page's only writer, triage in the cloud, has node 22, Playwright and Chromium 1243, so the hold costs nothing there.",
+  "updatedAt": "2026-11-06T21:27:00Z"
 }
