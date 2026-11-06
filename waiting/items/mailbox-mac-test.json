@@ -1,20 +1,30 @@
 {
   "added": "2026-11-06T19:35:00Z",
+  "command": {
+    "mac": "Join the 12-message mailbox test for lane session-messaging-plan. Open https://claude.ai/artifact/2VcSrYmWjNkqsAAjiRnYKn with the Artifact tool (action read) and follow the section 'Mac session: what to do' exactly. First step: watch the page with ArtifactComments, then end your turn and wait. Do not message any session."
+  },
   "context": "Goal: prove the mailbox page wakes a session on your Mac 12 times, with no 10-message stop (your pick a on item 153).\nProblem (goal): a cloud session cannot be a desktop session on your Mac, and the cloud cannot reach your Mac right now (no Remote Control folder, 13:26 CST).\nThe lane runs the cloud half: it publishes the mailbox and sends the 12 messages. Your Mac session watches the mailbox and answers each wake.\nThe result comes back to item 153.",
   "home": "docs/decisions/session-messages.md",
   "id": "mailbox-mac-test",
   "kind": "task",
+  "links": [
+    {
+      "label": "Mailbox page",
+      "url": "https://claude.ai/artifact/2VcSrYmWjNkqsAAjiRnYKn"
+    }
+  ],
   "n": 294,
   "owner": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6)",
   "rank": 3,
   "ref": "item 153 a; record session-messages, commit a2bbba0a",
-  "reply": "Yes, nearly. Open Claude Code desktop in your local claude-settings folder (it has the branch the prompt reads), paste and press Enter. One gap first: the cloud cannot message your Mac, so the mailbox link cannot reach that session the way the prompt says. I've asked the lane (13:55 CST) to publish the mailbox now. I'll put its link into the paste text here, then you paste. Mark done once that session says it is watching the mailbox.",
+  "reply": "Ready now (13:58 CST). Yes: open Claude Code desktop in your local claude-settings folder, paste the text below, press Enter. The mailbox link is in it. When that session ends its first turn, it is watching; mark this done and the lane sends round 1.",
   "short": "Mac mailbox test",
   "status": "open",
   "steps": [
-    "Open Claude Desktop on your Mac and start a session in any folder.",
-    "Paste: Join the 12-message mailbox test for lane session-messaging-plan: read docs/decisions/session-messages.md on branch session-messaging-plan, section 'Test before any build', and run the Mac side. The mailbox URL comes from the lane.",
-    "Mark this done. The lane then publishes the mailbox and sends that session its URL."
+    "Open Claude Code desktop on your Mac in your local claude-settings folder.",
+    "Paste the text below and press Enter. No branch checkout or fetch is needed.",
+    "Wait until that session ends its first turn: it is then watching the mailbox.",
+    "Mark this done. The lane then sends round 1 of 12; the result comes back to item 153."
   ],
   "title": "Start one Claude Desktop session on your Mac for the 12-message mailbox test",
   "why": "Your pick a on item 153 builds nothing until this test passes, and only a session on your Mac can run its half."
