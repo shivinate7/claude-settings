@@ -1380,6 +1380,15 @@ def case_widening_rule_still_names_a_per_repo_exception_as_widening():
           rule[:300] or "WIDENING_RULE is not defined in call_judge.py")
 
 
+def case_widening_rule_scopes_widening_to_one_repos_sake():
+    # The scope must say the widening is for one repo's sake: a sentence with "one repo" alone passes after
+    # " for that repo's sake" is dropped. One sentence must hold both words; rule_sentences lower-cases them.
+    rule = widening_rule()
+    check("widening scope: one sentence of WIDENING_RULE holds both \"sake\" and \"one repo\"",
+          any("sake" in s and "one repo" in s for s in rule_sentences(rule)),
+          rule[:300] or "WIDENING_RULE is not defined in call_judge.py")
+
+
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
@@ -1728,6 +1737,7 @@ def main():
                  case_widening_fair_option_passes_code_path, case_widening_rule_names_the_mark,
                  case_widening_rule_says_a_same_change_for_every_repo_is_not_widening,
                  case_widening_rule_still_names_a_per_repo_exception_as_widening,
+                 case_widening_rule_scopes_widening_to_one_repos_sake,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
