@@ -12,10 +12,16 @@ coordinator runs its CLI:
 Files, under ${CLAUDE_CONFIG_DIR:-~/.claude}/session-tiers:
     grant-<first 16 hex digits of sha256(folder key)>.json   {"tier", "folder", "at"}   one per folder
     <session id>.json                                        {"tier", "folder", "at"}   one per bound session
+    revoked-<session id>.json                                {"revoked", "folder", "at"}  a tombstone
 
-Cost, per top-level guard call: one stat of the tier dir. A missing dir ends the work. With the dir, one rename of
-the grant path for the cwd's folder. No git spawn, no process, no timer. Standard library only, because the
-install copies this file beside the guard and the CLI runs without it.
+A grant for a folder revokes the sessions bound to that folder: each such bound file is removed and a tombstone
+takes its place, so that session id never binds again and never proves again.
+
+Cost, per top-level guard call: one stat of the tier dir. A missing dir ends the work. With the dir, one realpath
+of the cwd (one lstat per path component), one stat of the session's tombstone, and one rename of the grant path
+for the cwd's folder. No extra process, no timer. A push to the record branch adds one tombstone stat and one
+small file read. Standard library only, except on Windows, where norm_folder imports guard_core to read a Git
+Bash path; the CLI then needs the guard files beside it, as the install lays them out.
 """
 import hashlib
 import json
@@ -32,6 +38,8 @@ TIER_DIR_NAME = "session-tiers"
 # Same shape as guard_shared_tree.SESSION_ID_RE, repeated because that module imports guard_core and the CLI must
 # start without it. A session id names a file in the tier dir, so no separator or leading dot gets through.
 _SESSION_ID = re.compile(r"^[A-Za-z0-9._-]{8,200}$")
+# A session id may not start like a grant or a tombstone, so its bound file never shares their names.
+_RESERVED_PREFIXES = ("grant-", "revoked-")
 _CLOCK_SKEW_SECONDS = 300
 
 
@@ -43,7 +51,10 @@ def tier_dir() -> str:
 
 def norm_folder(path: str) -> str:
     """The folder key: the real path, case-folded where the platform folds case, no trailing separator. On
-    Windows a Git Bash `/c/Users/...` path reads as its drive path (guard_core._expanded, the one reader)."""
+    Windows a Git Bash `/c/Users/...` path reads as its drive path (guard_core._expanded, the one reader).
+    normcase is the identity on POSIX, so two spellings that differ only in case are two keys there: on a
+    case-insensitive macOS volume a cwd spelled with another case than the grant's folder binds nothing. That fails
+    closed, and the coordinator re-grants with the spelling the session's cwd carries."""
     text = str(path)
     if os.name == "nt":
         try:
@@ -65,11 +76,16 @@ def grant_path(folder: str) -> str:
 
 
 def _valid_session(session_id) -> bool:
-    return isinstance(session_id, str) and bool(_SESSION_ID.match(session_id)) and not session_id.startswith(".")
+    return (isinstance(session_id, str) and bool(_SESSION_ID.match(session_id))
+            and not session_id.startswith((".",) + _RESERVED_PREFIXES))
 
 
 def bound_path(session_id: str) -> str:
     return os.path.join(tier_dir(), session_id + ".json")
+
+
+def revoked_path(session_id: str) -> str:
+    return os.path.join(tier_dir(), "revoked-" + session_id + ".json")
 
 
 def _read_tier_file(path: str):
@@ -121,14 +137,17 @@ def bind_grant(session_id, agent_id, cwd) -> bool:
             return False
         if not os.path.isdir(tier_dir()):   # the one stat a call with no grants pays
             return False
-        grant = _grant_path_for(norm_folder(cwd))
+        key = norm_folder(cwd)
+        if os.path.exists(revoked_path(session_id)):   # a revoked session never binds again
+            return False
+        grant = _grant_path_for(key)
         claim = os.path.join(os.path.dirname(grant), ".claim-" + session_id + "-" + os.path.basename(grant))
         try:
             os.replace(grant, claim)
         except OSError:
             return False   # no grant for this folder, or another session claimed it first
         try:
-            body = _tier_body(_read_tier_file(claim), norm_folder(cwd))
+            body = _tier_body(_read_tier_file(claim), key)
             if body is None or body["tier"] not in TIERS or (
                     not -_CLOCK_SKEW_SECONDS <= time.time() - body["at"] <= GRANT_TTL_SECONDS):
                 return False   # corrupt, unknown tier or stale: consumed, so a re-grant is needed
@@ -148,12 +167,29 @@ def file_proved(session_id, agent_id, tier: str = TRIAGE_TIER) -> bool:
     """True when the session's bound file shows `tier`. Never for an agent call. Fails closed: a missing or
     malformed file, an invalid session id or any error is False."""
     try:
-        if agent_id or not _valid_session(session_id):
+        if agent_id or not _valid_session(session_id) or os.path.exists(revoked_path(session_id)):
             return False
         body = _tier_body(_read_tier_file(bound_path(session_id)))
         return body is not None and body["tier"] == tier
     except Exception:
         return False
+
+
+def _revoke_folder(key: str) -> None:
+    """Revoke every session bound to the folder `key`: write its tombstone, then remove its bound file. A bound file
+    for another folder, a grant and a tombstone are left alone. The tombstone comes first, so a failure part way
+    leaves the session refused, never proved."""
+    folder = tier_dir()
+    for name in os.listdir(folder):
+        if not name.endswith(".json") or name.startswith((".",) + _RESERVED_PREFIXES):
+            continue
+        session_id = name[:-len(".json")]
+        bound = os.path.join(folder, name)
+        body = _read_tier_file(bound)
+        if not _valid_session(session_id) or body is None or body.get("folder") != key:
+            continue
+        _write_atomic(revoked_path(session_id), {"revoked": True, "folder": key, "at": int(time.time())})
+        os.remove(bound)
 
 
 def _grant_cli(args) -> int:
@@ -169,6 +205,7 @@ def _grant_cli(args) -> int:
         return 2
     try:
         os.makedirs(tier_dir(), exist_ok=True)
+        _revoke_folder(key)   # a grant starts a new triage, so the sessions bound to the folder before it end
         path = _grant_path_for(key)
         _write_atomic(path, {"tier": args[0], "folder": key, "at": int(time.time())})
     except OSError as exc:

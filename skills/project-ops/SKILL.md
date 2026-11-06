@@ -55,8 +55,11 @@ that triage or the batch runner writes for its successor.
    in its own worktree, then commits and pushes the branch. The push needs no PR and runs no CI.
    For a local triage session (no cloud record), the coordinator first runs
    `python3 ~/.claude/hooks/session_tier.py grant triage --folder <triage folder>` (Windows: `python`),
-   right before it starts the session. The guard binds the grant to that session's first call from
-   exactly that folder, and it expires in an hour (decision `session-tiers`, local triage).
+   right before it starts the session. Run it from a folder other than triage's: the coordinator's own
+   `start_session` and `create_session` calls reach the guard, and from triage's folder they would bind the
+   grant to the coordinator. The guard binds the grant to the first call from exactly that folder, and it
+   expires in an hour. A new grant for the folder also revokes the sessions bound to it before
+   (decision `session-tiers`, local triage).
 6. **Protect the default branch.** Name the one check the repo's CI reports (the `all-jobs-passed` rollup). Preview, then set, once the
    owner confirms the act (it changes the live repo):
    `python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<name> --check all-jobs-passed [--branch main]`,
