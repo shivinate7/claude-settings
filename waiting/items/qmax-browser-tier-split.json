@@ -4,6 +4,12 @@
   "home": "q_max .github/workflows/browser.yml; D-542, the browser tier runs on your dispatch",
   "id": "qmax-browser-tier-split",
   "kind": "decision",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB), for q_max triage: find why the browser tier is slow",
+  "lastAnswer": {
+    "at": "2026-11-06T03:32:49Z",
+    "choice": "none",
+    "note": "im convinced the run can't be doing tihngs right if it needs that long. Routed 21:35 CST Nov 5 to the coordinator for q_max triage: neither a nor b. A lane finds why 672 checks take about 16 s each (10,587 s in all), fixes the cause, and reports the new run time. The item closes when that fix merges."
+  },
   "n": 258,
   "options": [
     {

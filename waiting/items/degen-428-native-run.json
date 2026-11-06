@@ -7,11 +7,11 @@
   "home": "degen rule tests-once-per-batch (native-check record line)",
   "id": "degen-428-native-run",
   "kind": "decision",
-  "lane": "batch runner 9: degen #428",
+  "lane": "owner: merges degen #428 on his Mac",
   "lastAnswer": {
-    "at": "2026-11-05T14:41:11Z",
-    "choice": "note",
-    "note": "skip the check, just merge. The merge tool refused at 09:07 CST (native-record red); asked again."
+    "at": "2026-11-06T03:31:31Z",
+    "choice": "none",
+    "note": "i can merge it on my mac. Routed 21:33 CST Nov 5 to batch runner 9: it stops waiting on #428 and does the after-merge steps when it sees the merge. The item closes when #428 merges."
   },
   "links": [
     {

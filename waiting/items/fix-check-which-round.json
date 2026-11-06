@@ -4,6 +4,12 @@
   "home": "decision hold-unsafe-after-round-3; agents/reviewer.md (Fix check paragraph)",
   "id": "fix-check-which-round",
   "kind": "decision",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB): roadmap step fix-check-any-round",
+  "lastAnswer": {
+    "at": "2026-11-06T03:31:31Z",
+    "choice": "b",
+    "note": "Routed 21:33 CST Nov 5 to the coordinator: it lifts the hold on lanes whose fix check followed a round-1 FAIL, and starts lane fix-check-any-round to make rule roles-review-cap-three and decision hold-unsafe-after-round-3 say a fix check may follow any round's FAIL. The item closes when that PR merges."
+  },
   "n": 271,
   "options": [
     {

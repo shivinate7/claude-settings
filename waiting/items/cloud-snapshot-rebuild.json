@@ -4,13 +4,18 @@
   "home": "decision cloud-start-hooks-run-fresh; roadmap step execpath-path-fallback",
   "id": "cloud-snapshot-rebuild",
   "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-06T03:31:31Z",
+    "choice": "done",
+    "note": "Done 21:31 CST Nov 5. New cloud sessions start from the rebuilt snapshot."
+  },
   "minutes": 2,
   "n": 269,
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 3,
   "ref": "#1116; lane execpath-path-fallback (12:01 CST Nov 5)",
   "short": "rebuild cloud env snapshot",
-  "status": "open",
+  "status": "closed",
   "steps": [
     "In any cloud session, open the environment menu in the session's title bar.",
     "Choose Edit, then Setup script.",

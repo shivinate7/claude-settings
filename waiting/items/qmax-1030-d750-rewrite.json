@@ -4,6 +4,12 @@
   "home": "q_max docs/decisions D-750 (map skill); claude-settings ruling map-skill-lives-here",
   "id": "qmax-1030-d750-rewrite",
   "kind": "decision",
+  "lane": "batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv): q_max #1030 with the #1029 batch",
+  "lastAnswer": {
+    "at": "2026-11-06T03:31:31Z",
+    "choice": "a",
+    "note": "Routed 21:33 CST Nov 5 to batch runner 9: merge #1030 with the #1029 batch once q_max main is green. The item closes when #1030 merges."
+  },
   "n": 266,
   "options": [
     {
