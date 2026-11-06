@@ -82,8 +82,8 @@ CAPABILITY_REASONS = ("I can't push from here", "I cannot push from here", "the 
 CAPABILITY_LINE = "Why yours: %s, since check_red_run showed the trailer needs the owner."
 CHOICE_LINES = ("Why yours: this needs your login.", "Why yours: this is your choice.",
                 "Why yours: the safety rules keep this for you.")
-# Round 2 (picks 1-4). Each choice probe holds a base capability verb, so it reads red on the base for the missing
-# exemption. One probe per phrase in the pick.
+# Each choice probe holds a base capability verb, so it reads red on a base that lacks the matching exemption.
+# One probe per choice phrase.
 CHOICE_PROBES = (
     "Why yours: it is your choice, and I can't make it for you.",
     "Why yours: it is your call, since the push is blocked here.",
@@ -119,7 +119,7 @@ UNREAD_REFUSALS = "Hand-off guard: UNKNOWN, this session's refusals file did not
 CATCH_NOTE = r"Hand-off guard: UNKNOWN, the check did not run \((ImportError|ModuleNotFoundError)\)\."  # a regex
 MEASURED_OK = "Why yours: I can't push from here (measured 2026-11-06, check_red_run exited 1)."
 MEASURED_NO_DATE = "Why yours: I can't push from here (measured, check_red_run exited 1)."
-# Round 1: the forms the waiting page already refuses, which the hand-off check must judge too.
+# The forms the waiting page already refuses, which the hand-off check must judge too.
 LIST_AND_BOLD_FORMS = {
     "bullet": "- " + CHECK_ONLY,
     "numbered": "1. " + CHECK_ONLY,
@@ -256,11 +256,11 @@ class HandOffTests(unittest.TestCase):
     def assert_passes(self, out, case):
         self.assertIsNone(out, "%s was refused: %s" % (case, out and out.get("reason")))
 
-    # ---- red: each fails on c31a8e77, where no hand-off check exists
+    # ---- red: each fails on a base where no hand-off check exists
 
     def test_hd_red_why_yours_with_a_check_name_only_is_refused(self):
-        # Catches: a "can't" reason that names a check, which is no cite, passing the Stop. The 2026-11-06 incident
-        # was a trailer hand-off whose reason named check_red_run.
+        # Catches: a "can't" reason that names a check, which is no cite, passing the Stop. A trailer hand-off
+        # whose reason names check_red_run is the form this stops.
         self.write_rows(ROWS)
         for shape, make in SHAPES.items():
             for landed in (False, True):
@@ -334,7 +334,7 @@ class HandOffTests(unittest.TestCase):
             _out, opened, _transcript = self.guard_opens(report(prose=(WITH_ROUTE,)))
         self.assertIn(self.rows, opened, "a Why yours line with a route cite did not read the rows file")
 
-    # ---- green: each passes on c31a8e77 and must stay green
+    # ---- green: each passes on the guard as shipped and must stay green
 
     def test_hd_green_a_valid_route_cite_on_the_why_yours_line_passes(self):
         # Catches: the cite on the same line as the reason refused, so the check never reads a route cite at all.
@@ -423,7 +423,7 @@ class HandOffTests(unittest.TestCase):
                     self.assertIn("UNKNOWN", (out or {}).get("systemMessage", ""),
                                   "a route cite to an unknown row was not reported as UNKNOWN")
 
-    # ---- round 1: the forms the waiting page refuses, the refusal's rule, the unread refusals file, the fast path
+    # ---- the forms the waiting page refuses, the refusal's rule, the unread refusals file, the fast path
 
     def test_hd_red_a_why_yours_in_a_list_or_bold_is_judged(self):
         # Catches: a Why yours line behind a bullet, a number or a bold label passing the Stop, though the waiting
@@ -528,8 +528,8 @@ class HandOffTests(unittest.TestCase):
                     self.assert_refused(out, "a measured premise with no date (%s, landed %s)" % (shape, landed))
                     self.assertIn(NO_DATE_REMEDY, out["reason"], "the refusal's remedy for a missing date is not the pinned text")
 
-    # ---- round 2 (picks 1-4): choice phrases, widened capability verbs, "until", the refusals file's unread states,
-    # and main's catch
+    # ---- choice phrases, widened capability verbs, "until", the refusals file's unread states, and the note for
+    # a check that did not run
 
     def write_binary_refusals(self, sid):
         path = self.refusals_file(sid)
