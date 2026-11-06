@@ -1414,7 +1414,7 @@ def _chat_question_hit(question, options):
     for o in options:
         label, desc = _option_text(o, "label"), _option_text(o, "description")
         if RECOMMENDED.search(label) and WIDENS_MARK.search(label + " " + desc):
-            return "uniform-pick", "recommended option widens a shared tool, which goes against the owner's ruling that a repo changes to fit the shared tool"
+            return "uniform-pick", "recommended option widens a shared tool"
     for o in options:
         label, desc = _option_text(o, "label"), _option_text(o, "description")
         links = [{"url": u} for u in CHAT_URL.findall(desc)]
