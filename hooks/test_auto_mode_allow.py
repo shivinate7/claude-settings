@@ -19,6 +19,11 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   coordinator's grant. Its Never covers names permissions, settings, override, a merge ask to any
   other session or from a session that is not a coordinator, and a request to approve a pull
   request (decision auto-mode-owner-acts).
+- One "Relayed Grant:" entry quotes page_grant.py's COMMAND and COUNTED_LINE, read from the
+  checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
+  relayed-grant-read-from-page).
+AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
+same cases run against a copy with a clause removed and show red there.
 """
 import json
 import os
@@ -31,6 +36,9 @@ REPO_ROOT = os.path.dirname(HOOKS)
 sys.path.insert(0, HOOKS)
 
 import guard_branch_worktree  # noqa: E402
+
+sys.path.insert(0, os.path.join(REPO_ROOT, "skills", "waiting-page"))
+import page_grant  # noqa: E402
 
 LISTS = ("environment", "allow", "soft_deny", "hard_deny")
 ARCHIVE = "Archived Branch Delete:"
@@ -62,12 +70,22 @@ MERGE_GO_SCOPE = (("sender tag cs-build:coordinator", "`cs-build:coordinator` ma
                   ("cs-repo:", "cs-repo:"), ("coordinator's own cs-repo:", "own `cs-repo:`"),
                   ("standing-merge-grant", "standing-merge-grant"), ("merge go", "merge go"),
                   ("named PR", "for a named PR"))
+# Each act the Relayed Grant entry's "Never covers" sentence must name (decision relayed-grant-read-from-page).
+RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page comment", "a page comment"),
+                   ("lastAnswer", "lastAnswer"), ("reply", "reply"),
+                   ("answer for another item", "an answer for another item"), ("choice none", "choice none"),
+                   ("task answer", "any task answer"), ("time with no zone", "time has no zone"),
+                   ("older than added", "an answer older than the item's added"),
+                   ("closed item", "a closed item"), ("arbiter overturn only", r"except an arbiter overturn"),
+                   ("permissions", "permissions"), ("settings", "settings"), ("overrides", "overrides"),
+                   ("no counted line", "no `counted` line in this session"))
 MERGE_GO_REFUSED = (("any other session", "any other session"),
                     ("not a coordinator", "not a coordinator"))
 
 
 def auto_mode():
-    with open(os.path.join(REPO_ROOT, "settings.json"), encoding="utf-8") as handle:
+    path = os.environ.get("AUTO_MODE_SETTINGS") or os.path.join(REPO_ROOT, "settings.json")
+    with open(path, encoding="utf-8") as handle:
         return json.load(handle).get("autoMode", {})
 
 
@@ -137,14 +155,15 @@ class RelayedGrantIsAllowed(unittest.TestCase):
                              "need exactly one '%s' entry in autoMode.allow" % RELAYED)
 
     def test_entry_quotes_the_page_grant_command_and_counted_line(self):
-        entry = allow_entry(RELAYED) or ""
-        self.assertIn("page_grant.py", entry, "entry must quote the page_grant.py command")
-        self.assertIn("`counted item=<id>`", entry, "entry must quote the counted line")
+        entry = bounds_text(allow_entry(RELAYED))
+        self.assertIn("`%s`" % page_grant.COMMAND, entry, "entry must quote page_grant.COMMAND in full")
+        self.assertIn("`%s`" % page_grant.COUNTED_LINE, entry, "entry must quote page_grant.COUNTED_LINE")
 
-    def test_entry_never_covers_peer_permissions_or_settings(self):
-        sentence = never_covers(allow_entry(RELAYED)) or ""
-        for needle in ("peer session", "permissions", "settings"):
-            self.assertIn(needle, sentence, "Never covers must name %r" % needle)
+    def test_never_covers_names_each_refused_act(self):
+        clause = never_covers(allow_entry(RELAYED))
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Grant entry")
+        missing = unnamed_terms(clause, RELAYED_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
 
 
 class OwnerPrHousekeepingIsAllowed(unittest.TestCase):

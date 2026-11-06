@@ -2,13 +2,16 @@
 """Say whether a page answer a session fetched is the owner's grant (skill waiting-page, "Read the answers" and "Route and close").
 
 A receiving session reads the owner's answer itself and never trusts a peer's relay text. A script cannot call
-ArtifactData, so the session fetches first, then runs this checker:
+ArtifactData, so the session makes a fetch folder, fetches into it, then runs this checker:
 
+    python3 ~/.claude/skills/waiting-page/page_grant.py --new-fetch PARENT   (prints `fetch DIR`)
     ArtifactData get collection=answers doc_id=ID out_dir=DIR   (an absent doc saves no file)
     ArtifactData get collection=items   doc_id=ID out_dir=DIR
     python3 ~/.claude/skills/waiting-page/page_grant.py --root REPO_ROOT --page-url URL --item ID --fetched DIR [--pick KEY]
 
-DIR holds `answers/ID.json` and `items/ID.json`, the data object of each doc. REPO_ROOT is the repo of the page; its
+DIR holds `answers/ID.json` and `items/ID.json`, the data object of each doc. `--new-fetch` makes DIR empty and writes
+the stamp `DIR.stamp` beside it, outside DIR. A check uses the stamp up (renames it `DIR.stamp.used`), so each fetch
+folder is checked once. REPO_ROOT is the repo of the page; its
 extras file holds the artifacts registry (lint/layout.py `artifacts()`). --pick is the pick the peer relayed: a key,
 or `a+c` for a multi item; the page's choice must equal it exactly. A decision is never counted without it.
 
@@ -19,7 +22,10 @@ Verdict, one line on stdout, then exit:
                                                  not one JSON object, or a crash.
 Counted only when all hold:
   1. --page-url is the same artifact (layout.artifact_id) as the registry's `waiting-page` entry.
-  2. answers/ID.json and items/ID.json exist. Relay text alone never counts.
+  2. DIR came from this fetch: `--new-fetch` made it (its stamp names DIR), no check used it before, it holds nothing
+     but answers/ID.json and items/ID.json, and no file in it is older than the stamp. A folder made by hand, a reused
+     folder (an answer the owner withdrew stays in it, as a re-fetch of an absent doc saves no file), or a copied file
+     is not counted. answers/ID.json and items/ID.json exist. Relay text alone never counts.
   3. The answer's `item` is --item and the item's `id`, and the answer's `n` is the item's `n`.
   4. The item is open: `status` is `open`, or absent (the page hides only `closed`, page.html `state.items`). A closed
      item takes no answer, except an arbiter ruling (`arbiter` true, written closed) answered `overturn`.
@@ -31,17 +37,26 @@ Counted only when all hold:
   7. --pick is given and the choice equals it.
 A task (`kind: task`) is never counted, with or without `done`: a task answer grants no act.
 
-Cost: one python process, reads the extras file and two fetched files, writes nothing. No git, no network, no timer.
+Cost: one python process per call. `--new-fetch` makes one folder and writes one stamp file. A check reads the extras
+file, the stamp and two fetched files, and renames the stamp once. No git, no network, no timer.
 """
 import argparse
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 
 COUNTED, NOT_COUNTED, UNKNOWN = 0, 1, 2
+
+# The command and the counted line as settings.json's "Relayed Grant" auto-mode entry quotes them
+# (hooks/test_auto_mode_allow.py pins the entry to these).
+COMMAND = ("python3 ~/.claude/skills/waiting-page/page_grant.py --root <repo> --page-url <url> --item <id>"
+           " --fetched <dir> --pick <key>")
+COUNTED_LINE = "counted item=<id>"
+STAMP, USED = ".stamp", ".stamp.used"
 
 
 class Verdict(Exception):
@@ -92,6 +107,44 @@ def read_doc(fetched, collection, item_id):
     if not isinstance(doc, dict):
         raise unknown("%s is not one JSON object" % path)
     return doc
+
+
+def new_fetch(parent):
+    """Make an empty fetch folder under parent, and its stamp beside it; return the folder."""
+    os.makedirs(parent, exist_ok=True)
+    folder = os.path.realpath(tempfile.mkdtemp(prefix="page-grant-", dir=parent))
+    with open(folder + STAMP, "x", encoding="utf-8") as handle:
+        json.dump({"folder": folder}, handle)
+    return folder
+
+
+def prove_fresh(fetched, item_id):
+    """Not counted unless `fetched` is a --new-fetch folder no check used, holding only this item's two docs, each no
+    older than the stamp. Uses the stamp up, so a second check of the folder is not counted."""
+    folder = os.path.realpath(fetched)
+    stamp = folder + STAMP
+    if not os.path.isfile(stamp):
+        if os.path.exists(folder + USED):
+            raise not_counted("fetch folder already checked once: make a new one with --new-fetch and fetch again")
+        raise not_counted("fetch folder has no stamp: make it with --new-fetch, then fetch into it")
+    try:
+        with open(stamp, encoding="utf-8") as handle:
+            named = json.load(handle).get("folder")
+    except (OSError, ValueError, AttributeError):
+        named = None
+    if named != folder:
+        raise not_counted("stamp names another folder: make this one with --new-fetch, then fetch into it")
+    made = os.stat(stamp).st_mtime_ns
+    allowed = {"answers", "items", os.path.join("answers", item_id + ".json"), os.path.join("items", item_id + ".json")}
+    for dirpath, dirnames, filenames in os.walk(folder):
+        for name in dirnames + filenames:
+            path = os.path.join(dirpath, name)
+            rel = os.path.relpath(path, folder)
+            if rel not in allowed or os.path.islink(path):
+                raise not_counted("fetch folder holds %s: it holds only this item's answer and item" % json.dumps(rel))
+            if name in filenames and os.stat(path).st_mtime_ns < made:
+                raise not_counted("%s is older than the fetch folder: it came from an earlier fetch" % rel)
+    os.replace(stamp, folder + USED)
 
 
 def option_keys(item):
@@ -149,6 +202,7 @@ def judge(args):
         raise not_counted("page URL is not the registered waiting page")
     if not args.item or os.sep in args.item or "/" in args.item or args.item in (".", ".."):
         raise not_counted("item id %r is not a plain id" % args.item)
+    prove_fresh(args.fetched, args.item)
 
     answer = read_doc(args.fetched, "answers", args.item)
     if answer is None:
@@ -183,12 +237,20 @@ def judge(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Say whether a fetched page answer is the owner's grant.")
-    parser.add_argument("--root", required=True, help="repo root of the page (holds the extras file)")
-    parser.add_argument("--page-url", required=True, help="the page URL the session was given")
-    parser.add_argument("--item", required=True, help="the item id")
-    parser.add_argument("--fetched", required=True, help="folder with answers/<id>.json and items/<id>.json")
+    parser.add_argument("--new-fetch", metavar="PARENT", help="make an empty fetch folder under PARENT and print it")
+    parser.add_argument("--root", help="repo root of the page (holds the extras file)")
+    parser.add_argument("--page-url", help="the page URL the session was given")
+    parser.add_argument("--item", help="the item id")
+    parser.add_argument("--fetched", help="the --new-fetch folder with answers/<id>.json and items/<id>.json")
     parser.add_argument("--pick", help="the pick a peer relayed: a key, or a+c for several")
     args = parser.parse_args(argv)
+    if args.new_fetch is not None:
+        print("fetch " + new_fetch(args.new_fetch))
+        return COUNTED
+    missing = [flag for flag, value in (("--root", args.root), ("--page-url", args.page_url), ("--item", args.item),
+                                        ("--fetched", args.fetched)) if value is None]
+    if missing:
+        parser.error("the check needs " + ", ".join(missing))
     try:
         line, code = judge(args), COUNTED
     except Verdict as verdict:
