@@ -19,7 +19,15 @@ Choices pinned here:
   contains the word UNKNOWN, exit 0, no traceback. It never refuses on that alone.
 - An empty rows file reads, holds no id, so a route cite in it is dead and is refused.
 - Scope: only a "Why yours" line is judged. An Input Needed item with no such label is not touched.
-- The refusal names itself "Hand-off guard" and its remedy line starts "Remedy:".
+- The refusal names itself "Hand-off guard" and its remedy line starts "Remedy:". It ends with the output rule
+  id, not the waiting-page rule.
+- A capability reason ("can't", "cannot", "refuses", "blocked", "not available") passes with a route cite whose row
+  is refused or asks, a refusal of this session, or "(measured <date>, <check and result>)". A measured premise with
+  no date is refused, and the refusal names the missing date.
+- A choice, login or safety-kept reason with no capability verb needs no cite.
+- A Why yours line behind "- ", "1. " or a bold label, or under Next, is judged.
+- An unreadable refusals file (a directory, or not JSON) reads UNKNOWN in the systemMessage. It never passes silently.
+- A reply with no Why yours line does not import route_match.
 - Every case runs on the local surface, so the rows' surface is "local" and the Stop env says so.
 
 Cost: a reply with no hand-off reads only the transcript. A hand-off line may read the rows file.
@@ -34,6 +42,7 @@ lint/test_report_guard.py and hooks/test_refusal_note.py, the one homes. This fi
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -63,6 +72,32 @@ ASKS_CITE = WHY % " (route r-asks)"
 # An Input Needed item with no Why yours label. Layer (a) does not judge it, even with a dead cite.
 UNLABELLED = "I can't push from here (route r-missing)."
 TOOL_CITE = "Why yours: I can't push from here, since `%s` was refused this session." % TOOL
+# Pick Q1 (b): a capability reason needs a cite (a route row that is refused or asks, a refusal of this session, or a
+# measured premise with a date). A reason with no capability verb needs none.
+CAPABILITY_REASONS = ("I can't push from here", "I cannot push from here", "the remote refuses the push",
+                      "the push is blocked here", "a push is not available here")
+CAPABILITY_LINE = "Why yours: %s, since check_red_run showed the trailer needs the owner."
+CHOICE_LINES = ("Why yours: this needs your login.", "Why yours: this is your choice.",
+                "Why yours: the safety rules keep this for you.")
+MEASURED_OK = "Why yours: I can't push from here (measured 2026-11-06, check_red_run exited 1)."
+MEASURED_NO_DATE = "Why yours: I can't push from here (measured, check_red_run exited 1)."
+# Round 1: the forms the waiting page already refuses, which the hand-off check must judge too.
+LIST_AND_BOLD_FORMS = {
+    "bullet": "- " + CHECK_ONLY,
+    "numbered": "1. " + CHECK_ONLY,
+    "bold label": "**Why yours:** I can't push from here, since check_red_run showed the trailer needs the owner.",
+}
+TAIL_RULE = "(rule output-never-hand-off-doable-step)"
+# Run report_guard in a fresh process and print whether the named module is in sys.modules when it returns.
+PROBE_CODE = (
+    "import json, runpy, sys\n"
+    "module = sys.argv[2]\n"
+    "try:\n"
+    "    runpy.run_path(sys.argv[1], run_name='__main__')\n"
+    "except SystemExit:\n"
+    "    pass\n"
+    "print('PROBE ' + json.dumps(module in sys.modules))\n"
+)
 
 
 def report(prose=(), item=("none",)):
@@ -142,7 +177,9 @@ class HandOffTests(unittest.TestCase):
 
     # ---- the Stop run and its verdict
 
-    def stop(self, reply, landed=False, sid=None):
+    def hook_and_env(self, reply, landed=False, sid=None):
+        """The Stop input and environment for one reply: the transcript holds the reply (a landed turn holds a git
+        commit first), and the rows and refusals files sit in this case's folder on the local surface."""
         records = [trg.human("ask the owner")]
         if landed:
             records += [trg.tool_use_msg("Bash", {"command": "git commit -m x"}), trg.tool_result_msg()]
@@ -153,7 +190,20 @@ class HandOffTests(unittest.TestCase):
             hook["session_id"] = sid
         env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, HOME=self.home)
         env[ROUTE_ROWS_ENV] = self.rows
-        env = hook_base.surface_env(env, "local")  # the surface a row's outcome is read on
+        return hook, hook_base.surface_env(env, "local")  # the surface a row's outcome is read on
+
+    def imported_after(self, reply, module):
+        """True when report_guard's process has `module` in sys.modules after the Stop runs on `reply`."""
+        hook, env = self.hook_and_env(reply)
+        run = subprocess.run([sys.executable, "-c", PROBE_CODE, trg.REPORT_GUARD, module],
+                             input=json.dumps(hook), capture_output=True, text=True, timeout=15, env=env)
+        self.assertEqual(run.returncode, 0, "the probe exited non-zero: " + run.stderr[-300:])
+        out, mark, tail = run.stdout.rpartition("PROBE ")
+        self.assertTrue(mark, "the probe did not finish: " + run.stderr[-300:])
+        return json.loads(tail)
+
+    def stop(self, reply, landed=False, sid=None):
+        hook, env = self.hook_and_env(reply, landed, sid)
         run = trg.run_guard(trg.REPORT_GUARD, hook, env=env)
         self.assertEqual(run.returncode, 0, "the Stop hook exited non-zero: " + run.stderr[-300:])
         self.assertNotIn("Traceback", run.stderr, "the Stop hook crashed: " + run.stderr[-300:])
@@ -334,6 +384,111 @@ class HandOffTests(unittest.TestCase):
                                         "a route cite to an unknown row was refused")
                     self.assertIn("UNKNOWN", (out or {}).get("systemMessage", ""),
                                   "a route cite to an unknown row was not reported as UNKNOWN")
+
+    # ---- round 1: the forms the waiting page refuses, the refusal's rule, the unread refusals file, the fast path
+
+    def test_hd_red_a_why_yours_in_a_list_or_bold_is_judged(self):
+        # Catches: a Why yours line behind a bullet, a number or a bold label passing the Stop, though the waiting
+        # page refuses the same forms.
+        self.write_rows(ROWS)
+        for form, line in LIST_AND_BOLD_FORMS.items():
+            for landed in (False, True):
+                with self.subTest(form=form, landed=landed):
+                    out = self.stop(report(prose=(line,), item=(ACT_ITEM,)), landed=landed)
+                    self.assert_refused(out, "a Why yours line in the %s form with no cite (landed %s)"
+                                        % (form, landed))
+
+    def test_hd_red_a_why_yours_under_next_is_judged(self):
+        # Catches: a Why yours line under the Next label passing, since the check reads only prose and Input Needed.
+        self.write_rows(ROWS)
+        text = "\n".join(["", DONE, "> **Deviations** none", "> **Input Needed** " + ACT_ITEM, "> **Next** wait",
+                          "> " + CHECK_ONLY])
+        for landed in (False, True):
+            with self.subTest(landed=landed):
+                out = self.stop(text, landed=landed)
+                self.assert_refused(out, "a Why yours line under Next with no cite (landed %s)" % landed)
+
+    def test_hd_red_the_refusal_ends_with_the_output_rule(self):
+        # Catches: a hand-off refusal tagged with the waiting-page rule, task-names-check, rather than the output rule
+        # it is a breach of. The refusal's own text is the span before the report's trailing rule label.
+        self.write_rows(ROWS)
+        for landed in (False, True):
+            with self.subTest(landed=landed):
+                out = self.stop(in_block(CHECK_ONLY), landed=landed)
+                self.assert_refused(out, "a check-only Why yours line (landed %s)" % landed)
+                segment = out["reason"].split(" (rule reports-order-of-labels)")[0]
+                self.assertTrue(segment.endswith(TAIL_RULE),
+                                "the hand-off refusal does not end with %s: %r" % (TAIL_RULE, segment[-120:]))
+                self.assertNotIn("task-names-check", out["reason"], "the refusal still carries the waiting-page rule")
+
+    def test_hd_red_an_unreadable_refusals_file_reads_unknown(self):
+        # Catches: a refusals file that did not read passing the Stop with no word, or refusing a cite it could not check.
+        for label in ("a directory at the refusals path", "a refusals file that is not JSON"):
+            with self.subTest(file=label):
+                path = self.refusals_file(self.SID)
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                elif os.path.exists(path):
+                    os.remove(path)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                if label.startswith("a directory"):
+                    os.makedirs(path)
+                else:
+                    with open(path, "w", encoding="utf-8") as handle:
+                        handle.write("not json\n")
+                self.assertTrue(os.path.exists(path), "scope: the unreadable refusals file is not in place")
+                out = self.stop(in_block(TOOL_CITE), sid=self.SID)
+                self.assertIsNotNone(out, "%s passed the Stop with no systemMessage" % label)
+                self.assertIn("UNKNOWN", out.get("systemMessage", ""), "%s was not reported as UNKNOWN" % label)
+                self.assertNotEqual(out.get("decision"), "block", "%s was refused on the file that did not read" % label)
+
+    def test_hd_cost_a_reply_with_no_why_yours_does_not_import_route_match(self):
+        # Catches: the fast path importing route_match, the rows reader, on every Stop. A Why yours line may import it.
+        reply = report(prose=("I can't run check_red_run here, so the trailer check is open.",))
+        self.assertFalse(self.imported_after(reply, "route_match"),
+                         "a reply with no Why yours line imported route_match")
+
+    # ---- pick Q1 (b): capability reasons need a cite, choice reasons need none, a measured premise needs a date
+
+    def test_hd_green_a_capability_reason_with_no_cite_is_refused(self):
+        # Catches: a capability reason, under any of its verbs, passing the Stop with none of the three cites.
+        self.write_rows(ROWS)
+        for phrase in CAPABILITY_REASONS:
+            for shape, make in SHAPES.items():
+                for landed in (False, True):
+                    with self.subTest(phrase=phrase, shape=shape, landed=landed):
+                        out = self.stop(make(CAPABILITY_LINE % phrase), landed=landed)
+                        self.assert_refused(out, "a capability reason with no cite (%r, %s, landed %s)"
+                                            % (phrase, shape, landed))
+
+    def test_hd_red_a_choice_reason_with_no_cite_passes(self):
+        # Catches: a choice, a login or a safety-kept reason, with no capability verb, refused for lacking a cite.
+        for line in CHOICE_LINES:
+            for shape, make in SHAPES.items():
+                for landed in (False, True):
+                    with self.subTest(line=line, shape=shape, landed=landed):
+                        out = self.stop(make(line), landed=landed)
+                        self.assert_passes(out, "a choice reason with no cite (%r, %s, landed %s)"
+                                           % (line, shape, landed))
+
+    def test_hd_red_a_measured_premise_with_a_date_passes(self):
+        # Catches: a capability reason backed by a dated measured premise refused for lacking a route row.
+        self.write_rows(ROWS)
+        for shape, make in SHAPES.items():
+            for landed in (False, True):
+                with self.subTest(shape=shape, landed=landed):
+                    out = self.stop(make(MEASURED_OK), landed=landed)
+                    self.assert_passes(out, "a measured premise with a date (%s, landed %s)" % (shape, landed))
+
+    def test_hd_red_a_measured_premise_with_no_date_is_refused(self):
+        # Catches: a measured premise with no date passing, and a refusal that does not say the date is what is missing.
+        self.write_rows(ROWS)
+        for shape, make in SHAPES.items():
+            for landed in (False, True):
+                with self.subTest(shape=shape, landed=landed):
+                    out = self.stop(make(MEASURED_NO_DATE), landed=landed)
+                    self.assert_refused(out, "a measured premise with no date (%s, landed %s)" % (shape, landed))
+                    self.assertRegex(out["reason"], r"\bdate\b", "the refusal does not say the date is missing")
 
     # ---- cost: no file read beyond today's, unless a hand-off line is present
 
