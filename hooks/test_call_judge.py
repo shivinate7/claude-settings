@@ -1198,6 +1198,29 @@ def case_widening_rule_names_the_mark():
     check("widening key: WIDENING_RULE contains WIDENS_KEY", bool(rule) and bool(key) and key in rule, cause)
 
 
+def rule_sentences(text):
+    """The rule's sentences, lower-cased; a sentence ends at a period or a line break."""
+    return [s.strip().lower() for s in re.split(r"[.\n]", text) if s.strip()]
+
+
+def case_widening_rule_says_a_same_change_for_every_repo_is_not_widening():
+    # Item 278 (owner ruling, 2026-11-06 12:41 CST): a change that applies the same way to every repo is not widening.
+    # The words are matched loosely, one sentence holding a repo-wide phrase and a "not widening" phrase.
+    rule = widening_rule()
+    check("widening scope: WIDENING_RULE says a change that applies the same way to every repo is not widening",
+          any(any(w in s for w in ("every repo", "all repos", "every repository"))
+              and any(w in s for w in ("not widening", "not a widening")) for s in rule_sentences(rule)),
+          rule[:300] or "WIDENING_RULE is not defined in call_judge.py")
+
+
+def case_widening_rule_still_names_a_per_repo_exception_as_widening():
+    # Control: an exception that fits one repo is still widening, so the scope sentence narrows nothing that stays.
+    rule = widening_rule()
+    check("widening scope: a sentence of WIDENING_RULE names a per-repo or one-repo exception as widening",
+          any("widen" in s and any(w in s for w in ("per-repo", "one repo")) for s in rule_sentences(rule)),
+          rule[:300] or "WIDENING_RULE is not defined in call_judge.py")
+
+
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
@@ -1543,6 +1566,8 @@ def main():
                  case_widening_set_holds_rule_once, case_widening_batch_holds_rule_once,
                  case_widening_absent_without_options, case_widening_refusal_names_the_option,
                  case_widening_fair_option_passes_code_path, case_widening_rule_names_the_mark,
+                 case_widening_rule_says_a_same_change_for_every_repo_is_not_widening,
+                 case_widening_rule_still_names_a_per_repo_exception_as_widening,
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
