@@ -1449,3 +1449,10 @@
 - state-files-unpruned: nothing prunes per-session files in `state/` (route-flags and others). Decision: claims-carry-backing (the claim-backing record).
 - layer-a-weak-check-passes: until the reply judge (`hooks/reply_judge.py`) part (v)(b) lands, a measured premise that names a weak check passes layer (a). Example: the 2026-11-06 trailer hand-off that cited check_red_run. Decision: claims-carry-backing (the claim-backing record, part (v)).
 - refusal-note-route-docstring: the docstring at hooks/test_refusal_note_route.py:22 still says key `note`. Decision: claims-carry-backing (the claim-backing record).
+- hand-off-dependency-phrases-read-as-capability: "blocked on", "blocked pending" and "unavailable until" read as capability (lint/report_guard.py:1282-1283). Decision: claims-carry-backing (the claim-backing record, part (v)).
+- measured-with-time-reads-undated: `(measured <date> <time>, …)` reads undated (lint/report_guard.py:1278). Decision: claims-carry-backing (the claim-backing record, part (v)).
+- refusal-cite-by-tool-not-act: a refusal cite counts by tool name, not act, and `403` matches "PR #403" (lint/report_guard.py:1070-1076, :1282, :1315-1331). Decision: claims-carry-backing (the claim-backing record, part (v)).
+- refusals-file-blank-line-untested: no test has a blank line in the refusals file (lint/report_guard.py:1142). Decision: claims-carry-backing (the claim-backing record, part (v)).
+- report-section-ends-at-labels-only: report_section ends an item only at a report label (lint/report_guard.py:641-660). Decision: claims-carry-backing (the claim-backing record).
+- stale-cites-p-diff-textconv-128: the stale_cites `-p` diff exits 128 when a textconv tool is missing, read as a wrong "base does not resolve" (lint/stale_cites.py:260; message at :1109). Decision: claims-carry-backing (the claim-backing record).
+- stale005-report-share-one-try: the try at lint/stale_cites.py:1020 wraps both STALE005 (:1021) and the report (:1022-1023); only the report's except at :1023 catches. Decision: claims-carry-backing (the claim-backing record).
