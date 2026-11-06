@@ -22,13 +22,16 @@ import os
 import re
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_report_guard as trg  # noqa: E402  the fixture, helpers, run folder and model stub (one home)
-import report_guard  # noqa: E402  RULING_REFUTER_MODEL, the one model setting
+import report_guard  # noqa: E402  RULING_REFUTER_MODEL, the one model setting, and the Stop deadline
+import decision_watch  # noqa: E402  the one model call, patched in the in-process cases
+import question_form  # noqa: E402  the roadmap reader, spied on in the in-process cases
 
 tcj = trg.tcj  # hooks/test_call_judge.py: the claude stub's answers and the repo builder with a roadmap branch
 
@@ -68,10 +71,11 @@ CONFIRM = json.dumps({"ok": True, "reason": "item 284 b keeps the apps' access, 
 REJECT = json.dumps({"ok": False, "reason": "the ruling keeps the apps' access; the Done item names a different pick"})
 ODD_ANSWERS = ("maybe", json.dumps({"ok": "true", "reason": "yes"}), json.dumps({"verdict": True}), json.dumps([True]))
 
+ITEM_TITLE = "Keep the apps' access to claude-settings?"  # a real waiting item keeps its question in `title`
 ITEMS = {
-    "w": {"id": "w", "n": 283, "question": "Keep the caps?", "options": OPTIONS},
-    "x": {"id": "x", "n": 284, "question": "Keep the apps' access to claude-settings?", "options": OPTIONS},
-    "y": {"id": "y", "n": 285, "question": "Keep the apps' access for a quarter?", "options": OPTIONS},
+    "w": {"id": "w", "n": 283, "title": "Keep the caps?", "options": OPTIONS},
+    "x": {"id": "x", "n": 284, "title": ITEM_TITLE, "options": OPTIONS},
+    "y": {"id": "y", "n": 285, "title": "Keep the apps' access for a quarter?", "options": OPTIONS},
 }
 ANSWERS = {"x": {"choice": "b", "note": ANSWER_NOTE}}  # w and y have no answer: the empty state
 RULING_REPO = tcj.make_repo("ruling", decisions={
@@ -81,8 +85,8 @@ NO_ROADMAP_REPO = tcj.make_repo("ruling-no-roadmap", decisions={DECISION_SLUG: D
 # The page closed item x: its answer file is gone, and the item keeps lastAnswer. Item s still has its answer file,
 # so the answers folder exists on the branch.
 FILED_ITEMS = {
-    "s": {"id": "s", "n": 280, "question": "Keep the caps?", "options": OPTIONS},
-    "x": {"id": "x", "n": 284, "question": "Keep the apps' access to claude-settings?", "options": OPTIONS,
+    "s": {"id": "s", "n": 280, "title": "Keep the caps?", "options": OPTIONS},
+    "x": {"id": "x", "n": 284, "title": ITEM_TITLE, "options": OPTIONS,
           "lastAnswer": {"choice": "b", "note": ANSWER_NOTE}},
 }
 FILED_ANSWERS = {"s": {"choice": "a", "note": "Remove the caps."}}
@@ -347,6 +351,83 @@ class RulingSkipTests(RulingSkipFixture):
                 calls = self.model_calls()
                 self.assertEqual(len(calls), 1, "%s: the record was not judged: %d calls" % (label, len(calls)))
                 self.assertNotIn(mark, calls[0]["prompt"], "%s: the bullet past byte 6000 went into the prompt" % label)
+
+    # Round 3: the item's title reaches the prompt, and a Done item that names a word but makes no pick claims nothing.
+
+    def test_r6_item_title_reaches_the_refuter_prompt(self):
+        self.stop(reply(done(cite(ITEM_REF))), answer=CONFIRM, repo=RULING_REPO)
+        calls = self.model_calls()
+        self.assertEqual(len(calls), 1, "the cited item did not reach the model: %d calls" % len(calls))
+        self.assertIn(ITEM_TITLE, calls[0]["prompt"], "the item's title is missing from the refuter prompt")
+
+    def test_r7_done_items_that_name_a_word_but_make_no_pick_claim_pass(self):
+        for label, line in (
+                ("pick-route compound", "> **Done** BUILT: re-pointed three pick-route cases to the owner's ruling (PR #9)"),
+                ("cherry-pick", "> **Done** OTHER: cherry-pick of the ruling census fix"),
+                ("took minutes", "> **Done** OTHER: round 2 took 4 min; the ruling table is regenerated")):
+            with self.subTest(claim=label):
+                self.assertTrue(CUE_RE.search(line), "%s: the scope has no ruling cue" % label)
+                out = self.stop(reply(line))
+                self.assertFalse(refused_by_rule(out), "%s: a Done item with no pick was refused by the check" % label)
+                self.assertEqual(self.model_calls(), [], "%s: the model ran on a Done item with no pick" % label)
+
+
+class SpentDeadlineTests(unittest.TestCase):
+    """The shared Stop deadline, checked in this process. report_guard's start time (`_STARTED`) is the seam: setting it
+    far back spends the deadline with no wait. The model call is patched here, because the check runs in this process.
+    `spend()` runs right after the chosen roadmap read, so one case can spend the deadline between its reads and its
+    refuter."""
+
+    def setUp(self):
+        for patch in (mock.patch.object(report_guard, "_STARTED", report_guard._STARTED),
+                      mock.patch.object(report_guard, "_granted", 0.0),
+                      mock.patch.object(decision_watch, "invoke_model", return_value=(json.loads(CONFIRM), ""))):
+            self.addCleanup(patch.stop)
+            patch.start()
+        self.invoke = decision_watch.invoke_model
+
+    def check(self, text, spent_at_start=False, spend_after=None):
+        """(refusal, reads) of ruling_skip_problem on `text`. `reads` names each roadmap folder read, in order."""
+        reads = []
+        real_read = question_form.read_json_folder
+
+        def spend():
+            report_guard._STARTED = time.monotonic() - report_guard.STOP_BUDGET - 1
+
+        def read(root, folder, refs, *rest):
+            reads.append(folder)
+            result = real_read(root, folder, refs, *rest)
+            if folder == spend_after:
+                spend()
+            return result
+
+        with mock.patch.object(question_form, "read_json_folder", read):
+            if spent_at_start:
+                spend()
+            refusal = report_guard.ruling_skip_problem(text, RULING_REPO)
+        return refusal, reads
+
+    def test_s0_unspent_deadline_passes_a_confirmed_item_cite(self):
+        refusal, _ = self.check(reply(done(cite(ITEM_REF))))
+        self.assertEqual(refusal, "", "an unspent deadline refused a confirmed cite: %s" % refusal)
+        self.assertEqual(self.invoke.call_count, 1, "the confirmed cite did not reach the model")
+
+    def test_s1_spent_deadline_refuses_the_item_read_with_no_read_and_no_model_call(self):
+        refusal, reads = self.check(reply(done(cite(ITEM_REF))), spent_at_start=True)
+        self.assertEqual(reads, [], "the roadmap was read after the Stop deadline was spent")
+        self.assertIn(RULE, refusal, "a spent deadline let the item cite pass")
+        self.assertEqual(self.invoke.call_count, 0, "the model ran after the Stop deadline was spent")
+
+    def test_s2_spent_deadline_after_the_reads_refuses_the_refuter_with_no_model_call(self):
+        refusal, reads = self.check(reply(done(cite(ITEM_REF))), spend_after="waiting/answers")
+        self.assertEqual(reads, ["waiting/items", "waiting/answers"], "the two roadmap reads did not both run")
+        self.assertIn(RULE, refusal, "a spent deadline before the refuter let the item cite pass")
+        self.assertEqual(self.invoke.call_count, 0, "the refuter ran after the Stop deadline was spent")
+
+    def test_s3_spent_deadline_refuses_a_decision_cite_with_no_model_call(self):
+        refusal, _ = self.check(reply(done(cite(DECISION_SLUG))), spent_at_start=True)
+        self.assertIn(RULE, refusal, "a spent deadline let the decision cite pass")
+        self.assertEqual(self.invoke.call_count, 0, "the refuter ran on a decision cite after the Stop deadline was spent")
 
 
 if __name__ == "__main__":
