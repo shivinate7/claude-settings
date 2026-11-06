@@ -21,6 +21,8 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   request (decision auto-mode-owner-acts).
   Its Covers text names the session that started this one as a target.
   Its Covers text lets a message that asks for no act (pull request number, batch heads) through.
+  Its Covers text names a report that relays a grant or hands off an act, and `next: merge`, and
+  limits the already granted act to messages that ask.
 - One "Relayed Grant:" entry quotes page_grant.py's COMMAND and COUNTED_LINE, read from the
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
   relayed-grant-read-from-page).
@@ -89,6 +91,8 @@ MESSAGE_REPORT = (("asks for no act", "asks for no act"), ("pull request number"
                   ("batch heads", "batch heads"))
 MESSAGE_QUESTION = (("a question about state", "a question about state"),)
 MESSAGE_REQUEST = (("ready to merge", "ready to merge"), ("however phrased", "however phrased"))
+MESSAGE_RELAY = (("relays a grant", "relays a grant"), ("hands off an act", "hands off an act"))
+MESSAGE_NEXT_MERGE = (("next: merge", "next: merge"),)
 MESSAGE_ONLY = (("only informs and asks for no act", "only informs and asks for no act"),)
 MESSAGE_OUTSIDE = (("never a session outside the owner's account", "never a session outside the owner's account"),)
 
@@ -247,9 +251,8 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
         covers = bounds_text(allow_entry(OWNER_MESSAGE))
         self.assertRegex(covers, r"(?i)already granted",
                          "Covers text must limit the message to acts already granted")
-        sentence = re.search(r"[^.]*already granted[^.]*", covers, re.I)
-        self.assertRegex(sentence.group(0) if sentence else "", r"(?i)\bask\b",
-                         "the sentence holding 'already granted' must say the message asks")
+        self.assertRegex(covers, r"(?i)the already granted limit applies to messages that ask",
+                         "Covers text must say the already granted limit applies to messages that ask")
 
     def test_never_covers_names_priority_now(self):
         self.assertRegex(never_covers(allow_entry(OWNER_MESSAGE)) or "", r"(?i)priority:\s*now",
@@ -280,6 +283,16 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
         missing = unnamed_terms(self.owner_message_part(), MESSAGE_TARGET)
         self.assertFalse(missing, "Covers text does not name the session that started this one: %r"
                          % missing)
+
+    def test_covers_names_a_report_that_relays_or_hands_off(self):
+        missing = unnamed_terms(self.owner_message_part(), MESSAGE_RELAY)
+        self.assertFalse(missing,
+                         "Covers text does not say a report that relays a grant or hands off an act asks: %r"
+                         % missing)
+
+    def test_covers_names_the_next_merge_report(self):
+        missing = unnamed_terms(self.owner_message_part(), MESSAGE_NEXT_MERGE)
+        self.assertFalse(missing, "Covers text does not name the 'next: merge' report: %r" % missing)
 
     def test_covers_names_the_no_act_report(self):
         missing = unnamed_terms(self.owner_message_part(), MESSAGE_REPORT)
