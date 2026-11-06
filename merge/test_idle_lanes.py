@@ -124,6 +124,21 @@ class IdleLanesCli(unittest.TestCase):
         self.assertEqual(code, 1, "every entry unknown exits %d, so an unread list reads as success" % code)
         self.assertNotRegex(out, SUMMARY_LINE)
 
+    def test_unreadable_main_exits_1_with_one_unknown_line_and_no_summary(self):
+        # The control is the same lane with main read: it is listed, the summary says 1, and the command exits 0. With
+        # main renamed away, no step can be read as landed, so the one unknown line carries the failure and the command
+        # exits 1 with no summary.
+        self.publish([lane("session_a", "c1")])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual((code, out.splitlines()[-1:]), (0, [SUMMARY_ONE]), "out: %r, err: %r" % (out, err))
+        roadmap.git(self.repo, "branch", "-m", "main", "trunk")
+        self.assertIsNone(roadmap.build.main_ref(self.repo, "main"), "the fixture must make main unreadable")
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertTrue(any(line.startswith("unknown (") for line in out.splitlines()),
+                        "an unreadable main prints no unknown line: out: %r, err: %r" % (out, err))
+        self.assertEqual(code, 1, "an unreadable main exits %d, so a caller reads the list as read" % code)
+        self.assertNotRegex(out, SUMMARY_LINE)
+
     def test_idle_lanes_needs_no_merge_role_in_a_cloud_session(self):
         self.publish([lane("session_a", "c1")])
         code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live),

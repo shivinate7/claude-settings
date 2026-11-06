@@ -2026,9 +2026,10 @@ class IdleLanes(UpkeepFixture):
         git(self.repo, "commit", "-q", "--allow-empty", "-m", "%s merged\n\nStep: %s" % (sid, sid))
         git(self.repo, "checkout", "-q", "roadmap")
 
-    def archive(self):
-        """(count, entries) of the lanes-to-archive row, from a build from main that reads the fixture's live file."""
-        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+    def archive(self, *extra):
+        """(count, entries) of the lanes-to-archive row, from a build from main that reads the fixture's live file.
+        `extra` adds build flags, such as --main-branch."""
+        _, out = self.build_from_main("--live", str(self.live), *extra, expect=(0, 1))
         count, detail = self.row(out, self.ROW)
         return count, self.entries(detail)
 
@@ -2360,6 +2361,71 @@ class IdleLanes(UpkeepFixture):
         count, entries = self.archive()
         self.assertEqual((count, self.ids(entries)), (1, ["session_a"]),
                          "a repo tag with outer whitespace is read as this repo, so its lane is listed")
+
+    def unread_main_lane(self):
+        """One lane on c1. c1 is doing, with a Step trailer on main, so the lane reads as landed while main reads."""
+        self.land({"c1": {"status": "doing", "order": 1}})
+        self.trailer_on_main("c1")
+        self.publish(sessions=[self.lane("session_a", "c1")])
+
+    def test_unreadable_main_reads_the_lanes_unknown_not_empty(self):
+        # The control is the same call with main read: the lane is listed. With main unreadable, no step can be shown
+        # landed, so the list reads one unknown entry. The old code returns [], which is the defect.
+        self.unread_main_lane()
+        self.assertEqual(self.ids(build.idle_lanes_report(self.repo, str(self.live))), ["session_a"])
+        self.assertIsNone(build.main_ref(self.repo, "nomain"), "the fixture must make main unreadable")
+        entries = build.idle_lanes_report(self.repo, str(self.live), main_branch="nomain")
+        self.assertEqual(len(entries), 1, "an unreadable main reads as %r, not one unknown entry" % (entries,))
+        self.assertTrue(entries[0].startswith("unknown ("), entries)
+
+    def test_unreadable_main_upkeep_row_reads_unknown_not_empty(self):
+        # The control is the same build from main with main read: the lane is listed. With --main-branch naming no
+        # branch, the upkeep row must read one unknown entry, never an empty row.
+        self.unread_main_lane()
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+        count, entries = self.archive("--main-branch", "nomain")
+        self.assertEqual(count, 1, "an unreadable main reads the lanes row as %r" % (entries,))
+        self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
+
+    def test_archived_rows_with_no_bucket_do_not_read_a_live_lane_unknown(self):
+        # Green on the old code: a live row with an enum bucket makes the no-bucket check false, so the archived row
+        # with no bucket changes nothing. The live lane is judged normally. session_a is the control.
+        self.land({"c1": {"status": "done", "order": 1}})
+        archived = session_row("session_old", "SESSION_STATUS_ARCHIVED", "cs-build:lane", "cs-step:c1", self.REPO)
+        self.publish(sessions=[archived, self.lane("session_a", "c1")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+
+    def test_live_lane_rows_with_no_bucket_read_unknown_when_an_archived_row_holds_a_bucket(self):
+        # The no-bucket check counts archived rows too. Here one archived row's bucket hides two live rows that carry
+        # none, so the old code lists nothing and reads no unknown, which is [] (the defect). The live rows must read
+        # unknown: the archived row is not counted.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        archived = self.lane("session_old", "c1", status="SESSION_STATUS_ARCHIVED")
+        self.publish(sessions=[archived,
+                               session_row("session_b", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c2", self.REPO)])
+        count, entries = self.archive()
+        self.assertEqual(count, 1, "live rows with no bucket read as %r, not one unknown entry" % (entries,))
+        self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
+
+    def test_live_lane_rows_with_only_wrong_form_buckets_read_unknown_not_empty(self):
+        # The control is one row in the enum form: its lane is listed and no unknown entry is made. Then every live row
+        # carries a wrong form (`completed`, `COMPLETED`), so no lane reads idle and the list reads one unknown entry,
+        # never [].
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "c3": {"status": "done", "order": 3}})
+        self.publish(sessions=[self.lane("session_a", "c1")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+        wrong = [session_row("session_lower", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c2", self.REPO,
+                             status_bucket="completed"),
+                 session_row("session_upper", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c3", self.REPO,
+                             status_bucket="COMPLETED")]
+        self.publish(sessions=wrong)
+        count, entries = self.archive()
+        self.assertEqual(count, 1, "wrong-form buckets read as %r, not one unknown entry" % (entries,))
+        self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
 
 
 class SharedTagNames(unittest.TestCase):
