@@ -2439,7 +2439,7 @@ function renderAskList() {
     const threads = askThreads();
     // The dismissed threads are read once per load. A dismiss this visit keeps its row as a Dismissed line, so no row comes up from behind "Show N older asks".
     if (s.hid === null) s.hid = new Set(threads.filter(askDismissed).map((t) => t.id));
-    const away = (t) => s.hid.has(t.id) && (askDismissed(t) || !!s.gone[t.id]), all = threads.filter((t) => !away(t)), set = threads.filter(away);
+    const away = (t) => s.hid.has(t.id) && (askDismissed(t) || (!!s.gone[t.id] && !askWaitsIn(t))), all = threads.filter((t) => !away(t)), set = threads.filter(away);
     if (!threads.length) root.replaceChildren(h("p", { class: "empty" }, "Nothing asked yet. Type above, and a session answers here."));
     else {
       // Each thread with a waiting ask or reply, and each new answer, shows whatever its age. Of the answers already seen, the newest ASK_SHOWN show. The rest wait behind one button. A reply never moves a row.
@@ -2537,8 +2537,8 @@ function askItem(t, dl) {
   const dropped = !dl && !restored && !askWaitsIn(t) && (g ? g.kind === "restore" || g.state === "done" : askDismissed(t));
   const press = () => { const op = restored || !isOpen(); if (restored) delete s.gone[k]; s.open[k] = op; renderAskList(); const c = $("askList").querySelector('[data-ask="' + CSS.escape(k) + '"]'); if (c) c.focus({ preventScroll: true }); };
   const answered = askReply(t), when = fmt(t.answered) || "", latest = askLatest(t);
-  if (dropped) return h("li", { class: "askc dropped", id: "row-" + k, tabindex: "-1", role: "status" },
-    h("p", { class: "sline" }, glyph("done"), h("span", {}, h("b", {}, "Dismissed."), " ", h("span", { class: "dt" }, t.text)), restoreBtn(t)), askRowLine(t));
+  if (dropped) return h("li", { class: "askc dropped", id: "row-" + k, tabindex: "-1" },
+    h("p", { class: "sline", role: "status" }, glyph("done"), h("span", {}, h("b", {}, "Dismissed."), " ", h("span", { class: "dt" }, t.text)), restoreBtn(t)), askRowLine(t));
   if (answered && (restored || !isOpen())) {
     // A fold changes only at a load or a press, so a thread with replies keeps the fold it first drew, and a new answer to a reply does not unfold it.
     if (t.reps.length && !(k in s.open) && !dl) s.open[k] = false;

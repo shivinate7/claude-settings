@@ -156,8 +156,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   also gets `re`, the id of the answered ask it follows, written once at Send. No session writes `re`. The page writes one more
   field later, at the owner's press: `dismissed` (ISO time), on a thread's root ask only, with `update` (Dismiss). Restore writes
   `dismissed: null` (the runtime has no field delete). It never deletes or replaces the owner's `text` or a `reply`. No session writes
-  `dismissed`, and no session writes a record that has it. The writer never rewrites `dismissed`, and reads it only to skip routing
-  nothing: `dismissed` does not stop routing or an answer, so a dismissed ask is still answered (see "Route an ask"). A reply goes through the same
+  `dismissed`. A session answering a dismissed record uses `update`, which keeps it (see "Route an ask"). A reply goes through the same
   Send, Undo and wake comment as an ask. Its comment reads "Replied on the waiting page. Writer: <writer>. Ask <id> re <re id>,
   answered by <owner of the ask `re` names>: <text>." The asks
   of one Send share one `at`, and their ids rise in the order the owner typed them, so the id breaks the tie: the highest
@@ -600,8 +599,8 @@ ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the wr
 An ask with `re` is a reply to an answer. The writer routes it to the `owner` of `asks/<re>`, the session that gave that answer.
 If that session has ended, the writer takes it. The reply ask is answered like any ask, with steps 1 and 2.
 
-The owner may Dismiss an answered thread. That sets `dismissed` on its root ask, and the page offers Dismiss only when every
-record of the thread has its `reply`. The writer never rewrites `dismissed`, and a record with it is routed and answered as any other.
+The owner may Dismiss an answered thread. That sets `dismissed` on its root ask. The page draws Dismiss off while a reply in the
+thread waits, and on only when every record of the thread has its `reply`. The writer never rewrites `dismissed`, and a record with it is routed and answered as any other, with `update`.
 
 ## Make a repo's page
 

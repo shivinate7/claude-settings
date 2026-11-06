@@ -18,8 +18,8 @@ press beside Reply writes `dismissed` on `asks/<id>` with `update`; the page hid
   part-failed dismiss, and a reply sent later (from another tab) lands undismissed in a dismissed thread anyway.
 - Restore writes `dismissed: null` with `update`. The runtime has no field-delete call. The page reads only a valid ISO time as dismissed.
 - Nothing is deleted. The record, its `text` and the session's `reply` stay in the store (ruling: a dismissed ask keeps its record).
-- Who reads it: the page, to hide the thread; the writer, to skip the record in "Route an ask". No session writes `dismissed`,
-  and no session writes a record that has it.
+- Who reads it: the page, to hide the thread. The writer routes and answers a dismissed record as any other, with `update`, which
+  keeps `dismissed`. No session writes `dismissed`.
 - A thread shows again, whatever `dismissed` says, when a record in it waits, or has an `answered` later than `dismissed`.
   So an answer never lands hidden (a reply sent from another tab before this dismiss reached it).
 - Departs from: SKILL.md "The database", which says the page writes `id`, `text` and `at` once, at Send. `dismissed` is a second
@@ -64,6 +64,8 @@ press beside Reply writes `dismissed` on `asks/<id>` with `update`; the page hid
   line, so no row comes up from behind "Show N older asks" mid-visit. A dismiss from another tab also draws the Dismissed line here.
 - The dismissed count and list are read at load too. A thread dismissed this visit lives only as its Dismissed line until the
   next load, so it never shows twice (drawn: "Show 2 dismissed asks" in `just-dismissed`).
+- A thread with a waiting record shows again at once, mid-visit: section 1's "an answer never lands hidden" wins over the
+  once-per-load set. A thread restored or dismissed this visit leaves the dismissed list or the Dismissed line when a reply waits.
 - State `all-dismissed`: nothing waits and every thread is dismissed. Today's "Nothing asked yet." would be false. New sentence:
   "No ask on the list. Type above, and a session answers here." The dismissed unfold stays.
   Departs from: today's empty sentence in `renderAskList`, only in this case. Not blocking.
@@ -125,9 +127,11 @@ press beside Reply writes `dismissed` on `asks/<id>` with `update`; the page hid
   - New `dismissAsk(k)` and `restoreAsk(k)`: `state.db.collection("asks").doc(k).update({ dismissed: <ISO now> | null })`, one
     write at a time per record; result lines in place. No wake comment: the writer has nothing to do.
   - `#askDismissed` and `ol#askDList`; the all-dismissed empty sentence.
+  - `paintLine` skips `.sline.dline`, the row's own result line, so a send-line repaint never erases a Dismiss or Restore line.
+  - The Dismissed line: `role="status"` sits on its inner `p.sline`, not on `li#row-<k>`, which keeps the id and `tabindex="-1"`.
   - CSS: this mockup's `#newcss` above the sample-label block.
 - SKILL.md, "The database" (`asks/<id>`): the page also writes `dismissed` (ISO time, or `null` at Restore) on a thread's root
   ask, with `update`, at the owner's press. No session writes `dismissed`, and no session writes a record that has it. The page
   hides a dismissed thread unless a record in it waits or has a later answer. "No session deletes or replaces an ask" stays.
-- SKILL.md, "Route an ask": the writer skips a record with `dismissed`; Dismiss is offered only when every record has its `reply`.
+- SKILL.md, "Route an ask": the writer routes and answers a record with `dismissed` as any other, with `update`; Dismiss is drawn off while a reply waits, and on only when every record has its `reply`.
 - Tests (`skills/waiting-page/tests/page.test.mjs`): dismiss, restore, the waiting override, the frozen `shown` count, and a failed update.
