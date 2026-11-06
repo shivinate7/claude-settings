@@ -798,12 +798,11 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .atext { margin: 0; max-width: 70ch; white-space: pre-line; overflow-wrap: anywhere; font-size: 16px; }
 .astate { margin: 0; font-size: 14.5px; color: var(--ink); font-weight: 600; }
 .astate .t { color: var(--muted); font-weight: 400; }
-/* The one "new since your baseline" mark: an ask's New answer, a card's New reply, a step's Updated. The accent ink on the accent-soft ground and a filled dot;
-   green stays the answered colour (.ans, .card.answered, .tag.landed). The dot and the edge are shapes, so the mark is never colour alone. */
-.newmark { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--acc); background: var(--acc-soft); color: var(--acc); font-weight: 600; font-size: 13.5px; line-height: 20px; white-space: nowrap; }
-.newmark::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-/* Each later mark on a screen: the dot in a pill wider than tall, so it never reads as a radio button beside the options. */
+/* The one "new since your baseline" mark: an ask's New answer, a card's New reply, a step's Updated. Green, the answered colour. */
+.newmark { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; white-space: nowrap; }
+/* Each later mark on a screen: a filled dot in a pill wider than tall, so it never reads as a radio button beside the options. */
 .newmark.dot { padding: 0; width: 34px; justify-content: center; }
+.newmark.dot::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 /* A count of updated steps, on the phase rail and the done fold. */
 .newmark.ct { padding: 0 7px; font: 600 12px/20px var(--mono); }
 .rrow .meta .newmark { font-size: 12.5px; line-height: 19px; min-height: 0; }
@@ -1083,13 +1082,13 @@ const tierOf = (it) => mates(it).map(rawTier).sort((a, b) => RANK[a] - RANK[b])[
 // One home for a viewer's time stamp in local storage (an ISO time): the asks' seen mark and the visit. A blocked store reads as no stamp and drops the write.
 const readStamp = (key) => { try { const t = Date.parse(localStorage.getItem(key)); return isNaN(t) ? null : t; } catch (e) { return null; } };
 const writeStamp = (key) => { try { localStorage.setItem(key, new Date().toISOString()); } catch (e) {} };
-// The owner's last visit, read once and kept, so a mark lasts the whole visit. With no stamp the owner never visited, so everything later than the last Send is new.
+// The owner's last visit, read once and kept, so a mark lasts the whole visit. With no stamp (a first visit, or a blocked store) no step is marked, and an item is new by the last Send alone.
 // The load's own time is written after the read, so the next load marks only what came later.
-const VISIT = readStamp("waiting.visit") ?? -Infinity;
+const VISIT = readStamp("waiting.visit");
 writeStamp("waiting.visit");
 // A reply is new when the writer's `replied` time is later than the last Send (state.sendAt, kept by freezeSeen) and than the last visit. It reads no set, so a reply
 // that arrives on the open page is new too, and a Send moves no mark (ux-order-holds-still).
-const newReply = (it) => state.sendAt !== null && !isRuling(it) && Date.parse(it.replied) > Math.max(state.sendAt, VISIT);
+const newReply = (it) => state.sendAt !== null && !isRuling(it) && Date.parse(it.replied) > Math.max(state.sendAt, VISIT ?? -Infinity);
 // A folded card of a new reply opens in place; a press on its fold wins for the rest of the visit.
 const foldOpen = (it) => (it.id in state.unfold ? !!state.unfold[it.id] : newReply(it));
 // Seen, worked out once (freezeSeen) and kept: an open item with no saved answer that was added before the owner's last Send. A later item is new,
@@ -3110,7 +3109,7 @@ function metaTiles(k) {
 
 /* ---------- steps ---------- */
 // A step is new when its updatedAt is later than the owner's last visit (VISIT, read once at load). The words show on the first marked row of a drawing; each later one is the dot.
-const stepNew = (s) => Date.parse(s.updatedAt) > VISIT;
+const stepNew = (s) => VISIT !== null && Date.parse(s.updatedAt) > VISIT;
 let stepWords = true;
 function stepMark(s) {
   const full = "Updated since your last visit", first = stepWords;

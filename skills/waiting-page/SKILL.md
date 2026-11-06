@@ -112,8 +112,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     A reply over 220 characters folds to three lines, with a "More of the reply" button.
   - `replied` (an ISO time) is when the writer last set `reply`, `lastAnswer` or `waits`. The writer sets it to now in the same update. Dropping `waits` or `lane` sets none. The page
     marks an item "New reply" when `replied` is later than both the owner's last Send (the same time that decides seen) and the owner's last visit
-    (`waiting.visit` in the browser, which the page writes on each load; with none, the owner never visited). The page reads both once at load, so a Send or a
-    visit on the open page moves no mark. An answered card with a new reply opens in place, and no card moves. Write no `replied` for any other change.
+    (`waiting.visit` in the browser, which the page writes on each load; with none, the last Send alone decides). The page reads both once at load, so a Send or a
+    visit on the open page moves no mark. A roadmap step is marked "Updated" the same way, when its `updatedAt` is later than the last visit; with no visit, no step is marked. An answered card with a new reply opens in place, and no card moves. Write no `replied` for any other change.
   - `lastAnswer` (`{choice, note, at}` on a decision, `{done, note, at}` on a task, `{act: "park", note, at}` on an item the owner parked and then unparked) is the owner's last answer to this item.
     The card shows it above the reply, as "Your last answer, <time>". The writer copies it from `answers/<id>` before it
     deletes that record (steps 2 to 4 of "Route and close"), and from a chat answer. When the writer rewrites `options`,
