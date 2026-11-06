@@ -119,8 +119,9 @@ def git(repo, *args):
                           capture_output=True, text=True, env=GIT_ENV, check=True)
 
 
-def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL):
+def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL, step_fields=None):
     """`page` is the repo's waiting-page url. None writes no page key: a repo with no page, which layout reads as unknown.
+    `step_fields` maps a step id to fields that replace its defaults; a field set to None is left out of the step file.
     A name is cached, so a second call must name the same page: a different one would silently get the first repo."""
     if name in REPOS:
         if REPO_PAGES[name] != page:
@@ -155,8 +156,10 @@ def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL):
         folder = os.path.join(repo, "roadmap", "data", "steps")
         os.makedirs(folder)
         for step_id, note in steps.items():
+            fields = {"title": "Step " + step_id, "phase": "test", "status": "done", "note": note, "why": ""}
+            fields.update((step_fields or {}).get(step_id, {}))
             with open(os.path.join(folder, step_id + ".json"), "w", encoding="utf-8") as f:
-                json.dump({"title": "Step " + step_id, "phase": "test", "status": "done", "note": note, "why": ""}, f)
+                json.dump({k: v for k, v in fields.items() if v is not None}, f)
         git(repo, "add", "roadmap")
         git(repo, "commit", "-q", "-m", "step notes")
         git(repo, "checkout", "-q", "-")
@@ -255,9 +258,9 @@ import sys
 
 
 class _WatchQuestionForm:
-    # Records each import request for question_form in the child, so a case reads whether the hook loaded it.
+    # Records each import request for question_form and check_refuter in the child, so a case reads whether the hook loaded it.
     def find_spec(self, name, path=None, target=None):
-        if name == "question_form":
+        if name in ("question_form", "check_refuter"):
             with open(os.path.join(os.environ["CJ_LOADED_DIR"], "imports.log"), "a", encoding="utf-8") as f:
                 f.write(name + "\n")
         return None
@@ -1374,6 +1377,13 @@ def case_fail_open():
     check("another tool: no model call, no output", r.code == 0 and r.out == "" and r.calls == [], detail(r))
 
 
+def call_judge_rows():
+    """The PreToolUse rows of settings.json that run call_judge.py, as (entry, hook) pairs. Read at test time."""
+    with open(SETTINGS, encoding="utf-8") as f:
+        pre = json.load(f)["hooks"]["PreToolUse"]
+    return [(e, h) for e in pre for h in e["hooks"] if "call_judge.py" in h.get("command", "")]
+
+
 def case_settings_row():
     with open(SETTINGS, encoding="utf-8") as f:
         pre = json.load(f)["hooks"]["PreToolUse"]
@@ -1381,14 +1391,15 @@ def case_settings_row():
             if h.get("type") in ("prompt", "agent")
             and re.search(r"\b(Agent|AskUserQuestion|ArtifactData)\b", e.get("matcher") or "")]
     check("settings: no prompt or agent hook is left on Agent, AskUserQuestion or ArtifactData", left == [], left)
-    rows = [(e, h) for e in pre for h in e["hooks"] if "call_judge.py" in h.get("command", "")]
+    rows = call_judge_rows()
     check("settings: one command hook runs call_judge.py", len(rows) == 1 and rows[0][1].get("type") == "command", rows)
     if len(rows) != 1:
         return
     entry, hook = rows[0]
     matcher = set((entry.get("matcher") or "").split("|"))
-    check("settings: its matcher is Agent, AskUserQuestion and ArtifactData",
-          matcher == {"Agent", "AskUserQuestion", "ArtifactData"}, entry.get("matcher"))
+    check("settings: its matcher is Agent, AskUserQuestion, ArtifactData and the send_message tool (the refuter's site)",
+          matcher == {"Agent", "AskUserQuestion", "ArtifactData", "mcp__claude-code-remote__send_message"},
+          entry.get("matcher"))
     check("settings: its timeout exceeds the longest model call (60 s)", hook.get("timeout", 0) > 60, hook)
     empty = os.path.join(ROOT, "empty-config")
     os.makedirs(empty, exist_ok=True)
