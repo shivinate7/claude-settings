@@ -711,15 +711,17 @@ def format_report(rows, gold=None) -> str:
 # Read on demand; no timer, no long-lived process, not a required CI job. The two counts of report
 # mode hold here: a crash is not a kill, and a suite red on the clean source is not a killer.
 # Cost per pull request: one control run per suite, one run per suite per mutant, one `git worktree`
-# per job, one install per lockfile hash. Written: a temp folder of checkouts and one deps folder
-# per lockfile hash, all removed at the end. The target repository is left as found. A profile with a `select`
+# per job, one install per lockfile hash, install and link. Written: a temp folder of checkouts and one deps folder
+# per lockfile hash, install and link, all removed at the end. The target repository is left as found. `--known-defects` runs the same
+# installs in its own deps folder, each up to INSTALL_TIMEOUT. In the action
+# that is a second install, because the `--changed` step removes its deps. A profile with a `select`
 # adds, per pull request, one git read for each script path in its argv that the commit lacks, and one folder
 # extract for a script that HEAD holds.
 #
 # A PROFILE says how one repository is read: {"code": regex of product files, "code_not": regex of
 # files to leave out (optional), "tests": regex of suite files, "argv": the command with {suite} (the
 # suite path from `cwd`) and {deps} (the install folder), "classify": a CLASSIFIERS name, "cwd": the folder
-# the command runs in (optional), "install": argv, or a list of argv, run once per lockfile hash with the
+# the command runs in (optional), "install": argv, or a list of argv, run once per lockfile hash, install and link, with the
 # lockfile beside it in the deps folder (None for no install), "lockfile": its path in the repository,
 # "link": the folder the install makes, linked into each checkout beside the lockfile (None for none),
 # "select": argv with {path}, run in a checkout at the pull request's commit, that prints the suites which
@@ -861,7 +863,8 @@ def _is_suite(repo: str, sha: str, profile: dict, path: str) -> bool:
 
 def _ensure_deps(repo: str, sha: str, profile: dict, deps_root: str):
     """The install folder for `sha`'s lockfile: (folder or None, why it is unusable). The install runs once
-    per lockfile hash under `deps_root`, with the lockfile (and its package.json) beside it."""
+    per lockfile hash, install argv and link under `deps_root`, with the lockfile (and its package.json) beside it.
+    Two parts with one lockfile and one install share a folder; a different install gets its own."""
     install = profile.get("install")
     if not install:
         return None, ""
@@ -870,7 +873,8 @@ def _ensure_deps(repo: str, sha: str, profile: dict, deps_root: str):
         data = _file_at(repo, sha, lock)
     except ValueError:
         return None, "no lockfile %s at this commit" % lock
-    folder = os.path.join(deps_root, hashlib.sha1(data).hexdigest()[:16])
+    key = hashlib.sha1(data + json.dumps([install, profile.get("link", "node_modules")]).encode("utf-8"))
+    folder = os.path.join(deps_root, key.hexdigest()[:16])
     failed, done_mark = os.path.join(folder, "FAILED"), os.path.join(folder, "DONE")
     if os.path.exists(done_mark):
         return folder, ""
@@ -892,7 +896,7 @@ def _ensure_deps(repo: str, sha: str, profile: dict, deps_root: str):
             if timed_out:
                 why = "install passed %d s and was killed" % INSTALL_TIMEOUT
             else:
-                why = "" if code == 0 else "install exited %d: %s" % (code, output.strip()[-300:])
+                why = "" if code == 0 else "install exited %d: %s" % (code, " ".join(output.split())[-300:])
         except OSError as error:
             why = "install did not run: %s" % error
         if why:
@@ -914,11 +918,23 @@ def _make_checkout(repo: str, sha: str, dest: str, skip, overrides: dict, deps, 
     _git(dest, "checkout-index", "-z", "--stdin", stdin="\0".join(keep).encode("utf-8") + b"\0")
     for path, text in overrides.items():
         _write(os.path.join(dest, path), text)
+    _link_deps(dest, deps, profile)
+
+
+def _link_deps(dest: str, deps, profile: dict) -> None:
+    """Link the install folder `deps` into checkout `dest` beside the profile's lockfile, as `link`. Nothing to link for no
+    folder or no `link`. A link already there to the same target stays: two parts with one lockfile and one install share one
+    folder. Any other path at the link name (a tracked file or folder, another target) raises OSError naming it."""
     link_name = profile.get("link", "node_modules")
     if deps and link_name:
         link = os.path.join(dest, os.path.dirname(profile.get("lockfile", "package-lock.json")), link_name)
+        target = os.path.join(deps, link_name)
+        if os.path.lexists(link):
+            if os.path.islink(link) and os.readlink(link) == target:
+                return
+            raise OSError("%s exists and is not a link to %s" % (link, target))
         os.makedirs(os.path.dirname(link), exist_ok=True)
-        os.symlink(os.path.join(deps, link_name), link)
+        os.symlink(target, link)
 
 
 def _drop_checkout(repo: str, dest: str) -> None:
@@ -1337,21 +1353,39 @@ def format_changed(rows) -> str:
     return "\n".join(lines)
 
 
-def run_known_defects(repo: str, defects, suite_timeout: float = 120) -> list:
+def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeout: float = 120) -> list:
     """Replay planted defects against a clone's HEAD. Each defect is {id, name, file, old, new, argv, classify}: `old` is the one
     text in `file` that the plant replaces with `new`, and `argv` is the catcher suite, read by the classifier `classify`.
     Returns [{id, name, verdict, reason}] with the verdict CAUGHT (the suite prints an assertion on the planted copy), MISS
-    (the suite passed, crashed or timed out on it) or UNKNOWN (the anchor is stale or ambiguous, the entry is malformed, or the
-    suite is not green on the clean copy). Only an assertion catches, as in a replay. The run is in a checkout of HEAD made like
-    a replay's, so the working tree and the repository are left as found."""
+    (the suite passed, crashed or timed out on it) or UNKNOWN (the anchor is stale or ambiguous, the entry is malformed, the
+    suite is not green on the clean copy, or the install or its link failed). Only an assertion catches, as in a replay. The run
+    is in a checkout of HEAD made like a replay's, so the working tree and the repository are left as found.
+    The checkout is prepared as `--changed` prepares its own. For each part of `profile` (the values of a `parts` profile, else
+    the profile itself) the install runs under `deps`, a folder the caller removes, and its folder is linked beside the
+    lockfile. Parts with one lockfile and one install share one install and one link; any other install runs once more. When an
+    install or a link fails, every defect reads UNKNOWN and its reason names the install and the cause."""
     if not defects:
         return []
     sha = _git(repo, "rev-parse", "HEAD").strip()
     own = tempfile.mkdtemp(prefix="mutate_defects_")
     dest = os.path.join(own, "w")
     results = []
+
+    def all_unknown(reason: str) -> list:
+        return [{"id": str(d.get("id", "?")) if isinstance(d, dict) else "?",
+                 "name": str(d.get("name", "")) if isinstance(d, dict) else "", "verdict": "UNKNOWN", "reason": reason}
+                for d in defects]
+
     try:
         _make_checkout(repo, sha, dest, set(), {}, None, {})
+        for part in (list(profile["parts"].values()) if "parts" in profile else [profile]):
+            folder, why = _ensure_deps(repo, sha, part, deps)
+            if why:
+                return all_unknown("the install of the profile failed: %s" % why)
+            try:
+                _link_deps(dest, folder, part)
+            except OSError as error:
+                return all_unknown("the install could not be linked into the checkout: %s" % error)
         for defect in defects:
             results.append(_known_defect(dest, defect, suite_timeout))
     finally:
