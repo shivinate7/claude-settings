@@ -23,7 +23,7 @@ Out of scope, with the reason:
 - `lint/compliance_probes.py` and `lint/find_copies.py`: no CI runs them.
 - A check the tool does not build is a limit, not an unread input. It prints a note and exits 0. Today: `skills/plain-english-map/scripts/map-check.mjs` `modelSeam` (the command binds no reader), and `lint/stale_cites.py` cites of JavaScript and shell names (`stale-cites-at-merge`).
 
-A caller's explicit opt-out still holds: ste-lint with `fail: false` (`--fail-on never`) prints UNKNOWN and exits 0.
+A caller's opt-out covers findings only. ste-lint with `fail: false` (`--fail-on never`) is still red in CI on an unread input (owner item 276 a, applied by the coordinator 2026-11-06 13:31 CST).
 
 Where CI runs a suite is in `test-strategy-reset` (tests prove outcomes, run where their subject lives).
 
