@@ -177,16 +177,25 @@ def case_regrant_replaces_the_grant():
 
 def case_regrant_revokes_the_bound_files_for_the_folder():
     """a re-grant of a folder revokes every session bound to that folder, so no revoked session proves the tier, and
-    keeps the bound file and the grant of a folder whose name only starts with it"""
+    leaves the bound sessions and grants of other folders as they are, one a folder whose name only starts with it"""
     config = fresh("regrant-revoke")
     folder = folder_of("regrant-revoke")
     sibling = folder_of("regrant-revoke-sibling")
+    other = folder_of("regrant-revoke-other")
     for session in ("tier-revoke-a", "tier-revoke-a2"):
         fx.write_bound(config, session, folder)
-    fx.write_bound(config, "tier-revoke-c", sibling)
     code, _out, err = run_cli(config, ["grant", "triage", "--folder", sibling])
     if code != 0:
         return ["grant triage --folder (the sibling): exit %d, want 0 (%s)" % (code, err.strip()[:120])]
+    with config_dir(config):
+        ok, bound = call("bind_grant", "tier-revoke-c", None, sibling)
+    if not ok:
+        return [bound]
+    if not bound:
+        return ["bind_grant did not bind the sibling's grant, so the sibling's bound session is not made"]
+    code, _out, err = run_cli(config, ["grant", "triage", "--folder", other])
+    if code != 0:
+        return ["grant triage --folder (the other folder): exit %d, want 0 (%s)" % (code, err.strip()[:120])]
     code, _out, err = run_cli(config, ["grant", "triage", "--folder", folder])
     if code != 0:
         return ["grant triage --folder (the re-grant): exit %d, want 0 (%s)" % (code, err.strip()[:120])]
@@ -198,9 +207,13 @@ def case_regrant_revokes_the_bound_files_for_the_folder():
             problems.append(proved)
         elif proved:
             problems.append("a re-grant left %s able to prove the triage tier, want it revoked" % session)
-    if not os.path.isfile(fx.bound_file(config, "tier-revoke-c")):
-        problems.append("a re-grant of one folder removed the bound file of a folder that only starts with its name")
-    if not os.path.isfile(fx.grant_file(config, sibling)):
+    with config_dir(config):
+        ok, proved = call("file_proved", "tier-revoke-c", None)
+    if not ok:
+        problems.append(proved)
+    elif not proved:
+        problems.append("a re-grant of one folder stopped the sibling's bound session from proving the tier")
+    if not os.path.isfile(fx.grant_file(config, other)):
         problems.append("a re-grant of one folder removed the grant of another folder")
     return problems
 
