@@ -1388,23 +1388,25 @@ class ReportTests(StaleCase):
 
 
     def test_route_claim_changed_code_file_lists_each_prose_line_its_backing_points_at(self):
-        notes = ("# Notes\n\n"
-                 "- the gate is read at (read hooks/guard.py:2)\n"  # line 3
-                 "- the case is checked at (test lint/test_x.py::keep)\n"  # line 4
-                 "- the other gate is read at (read hooks/other.py:1)\n")  # line 5: its file is not changed
+        # The prose is a decision record: the backing scan reads only what home_report already reads, the decisions.
+        record = "docs/decisions/route-backing.md"
+        decision = ("# Route backing\n\n"
+                    "- the gate is read at (read hooks/guard.py:2)\n"  # line 3
+                    "- the case is checked at (test lint/test_x.py::keep)\n"  # line 4
+                    "- the other gate is read at (read hooks/other.py:1)\n")  # line 5: its file is not changed
         base_test = "def keep():\n    return 1\n"
 
         def change(repo):
             write(repo, "hooks/guard.py", GUARD_EDIT)
             write(repo, "lint/test_x.py", "def keep():\n    return 2\n")
             commit(repo)
-        rng = self.make_range(base_files(notes, extra={"lint/test_x.py": base_test}), change)
+        rng = self.make_range(base_files(extra={"lint/test_x.py": base_test, record: decision}), change)
         self.assertTrue({"hooks/guard.py", "lint/test_x.py"} <= touched(rng))  # scope: both files changed
         rc, out = self.run_check(rng)
         self.assertEqual(rc, 0, out)
-        self.assertIn(NOTES + ":3", report_prose(out, "hooks/guard.py"), out)
-        self.assertIn(NOTES + ":4", report_prose(out, "lint/test_x.py"), out)
-        self.assertNotIn(NOTES + ":5", report_prose(out, "hooks/guard.py") | report_prose(out, "lint/test_x.py"), out)
+        self.assertIn(record + ":3", report_prose(out, "hooks/guard.py"), out)
+        self.assertIn(record + ":4", report_prose(out, "lint/test_x.py"), out)
+        self.assertNotIn(record + ":5", report_prose(out, "hooks/guard.py") | report_prose(out, "lint/test_x.py"), out)
 
 
 # A guard module whose refuse() call names the rule: rule_audit reads the rule id from the third argument.
@@ -1577,8 +1579,12 @@ LABELS = ("STALE", "PARTLY_STALE", "HALF", "TRUE", "HISTORY", "UNKNOWN")
 
 
 def route_rows_text(*ids):
-    """hooks/route_rows.json as a linted repo holds it: a JSON array with one row object per route id."""
-    return json.dumps([{"id": route} for route in ids], indent=2) + "\n"
+    """hooks/route_rows.json as a linted repo holds it: {"rows": [...]}, one row per route id, in the row shape the
+    route-claims lane uses (id, act, route, surface, outcome, measured, cc_version, evidence, by)."""
+    rows = [{"id": route, "act": "push", "route": "cloud", "surface": "cloud", "outcome": "refused",
+             "measured": "2026-11-06", "cc_version": "2.1.0", "evidence": "fixture", "by": "test-author"}
+            for route in ids]
+    return json.dumps({"rows": rows}, indent=2) + "\n"
 
 
 def read_repo_file(repo, path):
@@ -1710,6 +1716,15 @@ class RouteClaimTests(StaleCase):
         rng, flagged = self.route_range(rows)
         self.assert_route_claims(rng, flagged)
 
+    def test_route_claim_is_backed_by_a_test_node_id_and_stays_silent(self):
+        rows = [
+            ("- The cloud cannot push to main (test lint/test_x.py::keep).", False),  # backed by a test node id
+            ("- The cloud cannot push to main (test lint/test_x.py::keep) and merge.", False),
+            ("- The cloud cannot merge to main.", True),  # no backing at all
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
     def test_route_claim_cites_a_route_id_that_is_a_row_at_head_and_names_a_dead_one(self):
         rows = [
             ("- The cloud cannot push to main (route cloud-push).", False),
@@ -1723,7 +1738,7 @@ class RouteClaimTests(StaleCase):
     def test_route_claim_with_an_empty_rows_file_makes_every_route_cite_a_dead_route(self):
         rows = [("- The cloud cannot push to main (route cloud-push).", True)]
         rng, flagged = self.route_range(rows, extra={ROUTE_ROWS: route_rows_text()})
-        self.assertEqual(json.loads(read_repo_file(rng.repo, ROUTE_ROWS)), [])  # scope: the file holds no row
+        self.assertEqual(json.loads(read_repo_file(rng.repo, ROUTE_ROWS))["rows"], [])  # scope: the file holds no row
         out = self.assert_route_claims(rng, flagged)
         texts = [text for path, number, text in stale005_hits(out) if path == NOTES and number == flagged[0]]
         self.assertTrue(texts and "cloud-push" in texts[0] and "dead route" in texts[0], out)
@@ -1741,7 +1756,7 @@ class RouteClaimTests(StaleCase):
             write(repo, NOTES, text)
             commit(repo)
         rng = self.make_range(base_files(extra={ROUTE_ROWS: route_rows_text()}), change)
-        self.assertEqual([row["id"] for row in json.loads(read_repo_file(rng.repo, ROUTE_ROWS))], ["cloud-push"])
+        self.assertEqual([row["id"] for row in json.loads(read_repo_file(rng.repo, ROUTE_ROWS))["rows"]], ["cloud-push"])
         self.assertIn(ROUTE_ROWS, touched(rng))  # scope: the rows file changed in this range
         self.assert_route_claims(rng, flagged)
 
