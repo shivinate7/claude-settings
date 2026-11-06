@@ -1,0 +1,6 @@
+# The Windows guard and merge shards grow with their suites
+
+- **What.** Off pull_request, the guard suite runs in 2 Windows shards and the merge git-half suite in 5. From 2026-10-27 to 2026-11-06 the guard suite grew from 16800 to 28421 lines and the merge suite from 577 to 974 tests. A guard shard went from about 10 to about 16 min, and a merge shard from 5-9 to 11-14 min. Run 42282722326 ended checks-windows-merge-2 at its 15 min cap with no red test. The caps are now 30 (guard) and 22 (merge), with the slowest green run at 66% and 69%. Another 16% of merge growth puts checks-windows-merge-2 past 80% of its cap, and another 21% of guard growth does the same to checks-windows-guard-2. The suites grew 69% in those 10 days.
+- **Where.** Jobs `checks-windows-guard`, `checks-windows-guard-2` and `checks-windows-merge` to `-5` in `.github/workflows/checks.yml`; the shard switch `GUARD_SHARD` in `hooks/test_guard.py` and `MERGE_SHARD` in `merge/test_merge.py`.
+- **Decision.** `ci-job-caps` (each CI job's cap leaves its slowest run under 80%).
+- **Retire.** Add a third guard shard and a sixth merge shard, each a new job, so each shard's slowest green run is under 50% of its cap over 5 runs. Read the runs as "How to measure again" in decision `ci-job-caps` says.
