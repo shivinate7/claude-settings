@@ -330,8 +330,8 @@ jobs:
       - name: Red-run trailer fixture suite
         run: python3 lint/test_check_red_run.py
 
-      - name: Plan critic fixture suite
-        run: python3 lint/test_check_plan_critic.py
+      - name: Plan refuter fixture suite
+        run: python3 lint/test_check_plan_refuter.py
 
       - name: Copy finder fixture suite
         run: python3 lint/test_find_copies.py

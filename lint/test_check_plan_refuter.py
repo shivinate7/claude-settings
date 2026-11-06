@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Cases for lint/check_plan_critic.py. Standard library only.
+"""Cases for lint/check_plan_refuter.py. Standard library only.
 
-    python3 lint/test_check_plan_critic.py
+    python3 lint/test_check_plan_refuter.py
 
 A plan record is a file that the range adds directly in the plans home (lint/layout.json, kind "plans"),
-named <name>.md. Each such plan must carry a `Critic:` line at line start, optionally wrapped as
-`**Critic:**`, followed by non-space text, and outside a fenced code block. The check reads the file as it
-stands at HEAD. Plans that the range only modifies, plans in a subfolder of the plans home, and files that
+named <name>.md. Each such plan must carry a `Refuter:` line at line start, optionally wrapped as
+`**Refuter:**`, followed by a word after the colon (and any `**`), and outside a fenced code block. The check
+reads the file as it stands at HEAD. Plans that the range only modifies, plans in a subfolder of the plans home, and files that
 are not .md are not judged.
 
-    python3 lint/check_plan_critic.py --base <sha> [--root <dir>]
+    python3 lint/check_plan_refuter.py --base <sha> [--root <dir>]
         # the base is env BASE_SHA when no flag is given; the repo is the current directory unless --root names one
 
 Exit 0: clean. Exit 1: a judged plan lacks the line, and its path is named. Exit 2: UNKNOWN, because no
@@ -17,7 +17,7 @@ base was given or git could not read the range. Unknown is never 0.
 
 Each case builds a fixture repo under this run's folder (lint/_test_temp.py): a base commit that marks the
 repo rolled out to the layout, then change commits on top. The check runs as the copy at
-lint/check_plan_critic.py, by its absolute path, from the fixture. CHECK_PLAN_CRITIC_UNDER_TEST overrides
+lint/check_plan_refuter.py, by its absolute path, from the fixture. CHECK_PLAN_REFUTER_UNDER_TEST overrides
 the module path, which a mutant run uses.
 """
 import os
@@ -31,7 +31,7 @@ sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import layout  # noqa: E402  the one home of the plans kind: lint/layout.json, kinds.plans
-MODULE = os.path.abspath(os.environ.get("CHECK_PLAN_CRITIC_UNDER_TEST") or os.path.join(HERE, "check_plan_critic.py"))
+MODULE = os.path.abspath(os.environ.get("CHECK_PLAN_REFUTER_UNDER_TEST") or os.path.join(HERE, "check_plan_refuter.py"))
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  rm_tree clears read-only git objects (testing/tracked_tree.py)
 
@@ -39,8 +39,8 @@ PLANS = layout.layout()["kinds"]["plans"]["path"]  # the default plans home, rea
 EXTRAS_REL = ".claude/layout-extras.json"  # the layout's extras file; rolled out, so layout.path() reads PLANS
 EXTRAS_TEXT = '{"kinds": {}, "rolled-out": true}\n'
 TITLE = "# Plan: widget rollout\n\nWhat we build, and why.\n\n"
-CRITIC = "Critic: Plan opus, 2026-11-06, PASS with two changes"
-BOLD_CRITIC = "**Critic:** reviewer sonnet, 2026-11-06, PASS"
+REFUTER = "Refuter: Plan opus, 2026-11-06, PASS with two changes"
+BOLD_REFUTER = "**Refuter:** reviewer sonnet, 2026-11-06, PASS"
 OLD_PLAN = TITLE + "No review line. Written before the rule.\n"
 SRC = "def widget():\n    return 1\n"
 BIG_LINES = 3000  # a full-size plan: far more lines than a verdict needs
@@ -134,7 +134,7 @@ class Fixture(unittest.TestCase):
         return out
 
 
-class PlanCriticCase(Fixture):
+class PlanRefuterCase(Fixture):
 
     def test_control_fixture_resolves_the_default_plans_home(self):
         """Green on main, which has no check. The fixture's layout resolves PLANS, and git's range lists each
@@ -146,84 +146,109 @@ class PlanCriticCase(Fixture):
         self.assertStatus(PLANS + "/folder/x.md", "A")
         self.assertStatus(PLANS + "/old-plan.md", "M")
 
-    def test_added_plan_without_critic_line_is_flagged(self):
+    def test_added_plan_without_refuter_line_is_flagged(self):
         rel = PLANS + "/new-plan.md"
         self.commit("add widget plan", {rel: plan("Body only.")})
         self.assertStatus(rel, "A")
         self.assertNamed(rel)
 
-    def test_critic_with_nothing_after_it_is_flagged(self):
-        for index, line in enumerate(["Critic:", "Critic:   ", "**Critic:**", "**Critic:**   "]):
+    def test_refuter_with_nothing_after_it_is_flagged(self):
+        for index, line in enumerate(["Refuter:", "Refuter:   ", "**Refuter:**", "**Refuter:**   "]):
             with self.subTest(line=line):
                 self.rebase_here()
-                rel = PLANS + "/empty-critic-%d.md" % index
-                self.commit("add empty critic plan", {rel: plan(line)})
+                rel = PLANS + "/empty-refuter-%d.md" % index
+                self.commit("add empty refuter plan", {rel: plan(line)})
                 self.assertStatus(rel, "A")
                 self.assertNamed(rel)
 
-    def test_critic_only_inside_a_fenced_block_is_flagged(self):
-        for index, (fence, line) in enumerate([("```", CRITIC), ("```text", BOLD_CRITIC)]):
-            with self.subTest(fence=fence):
-                self.rebase_here()
-                rel = PLANS + "/fenced-%d.md" % index
-                self.commit("add fenced critic plan", {rel: plan(fence, line, "```")})
-                self.assertStatus(rel, "A")
-                self.assertNamed(rel)
-
-    def test_critic_mid_line_is_flagged(self):
-        for index, line in enumerate(["The critic: none", "See Critic: Plan opus, PASS",
-                                      "Review by Critic: Plan opus, PASS"]):
+    def test_refuter_with_no_word_after_it_is_flagged(self):
+        """A Refuter line needs a word character after the colon, and after any `**`. A bare `**`, and the
+        `<...>` placeholder of the template line, are not a verdict."""
+        for index, line in enumerate(["Refuter: **", "**Refuter:** **", "Refuter: <role and model>, <date>, <verdict>"]):
             with self.subTest(line=line):
                 self.rebase_here()
-                rel = PLANS + "/mid-line-%d.md" % index
-                self.commit("add mid-line critic plan", {rel: plan(line)})
+                rel = PLANS + "/no-word-refuter-%d.md" % index
+                self.commit("add no-word refuter plan", {rel: plan(line)})
                 self.assertStatus(rel, "A")
                 self.assertNamed(rel)
 
-    def test_critic_line_removed_before_merge_is_flagged(self):
-        """The check reads the file as it stands at HEAD. A line that the range removes again does not count."""
-        rel = PLANS + "/removed-critic.md"
-        self.commit("add plan with critic", {rel: plan(CRITIC)})
-        self.commit("drop the critic line", {rel: plan("Body only.")})
+    def test_refuter_with_a_word_after_it_passes(self):
+        """Control for the case above: a verdict with a word after the colon still passes."""
+        rel = PLANS + "/word-refuter.md"
+        self.commit("add plan", {rel: plan("Refuter: Plan opus, 2026-11-06, PASS")})
+        self.assertStatus(rel, "A")
+        self.assertClean()
+
+    def test_the_retired_word_is_no_refuter_line(self):
+        """The line is `Refuter:` now. The retired word, with a verdict after it, is no line, so the plan is named."""
+        rel = PLANS + "/retired-word.md"
+        self.commit("add plan with the retired word", {rel: plan("Critic: Plan opus, 2026-11-06, PASS")})
         self.assertStatus(rel, "A")
         self.assertNamed(rel)
 
-    def test_critic_line_added_later_in_range_passes(self):
+    def test_refuter_only_inside_a_fenced_block_is_flagged(self):
+        for index, (fence, line) in enumerate([("```", REFUTER), ("```text", BOLD_REFUTER)]):
+            with self.subTest(fence=fence):
+                self.rebase_here()
+                rel = PLANS + "/fenced-%d.md" % index
+                self.commit("add fenced refuter plan", {rel: plan(fence, line, "```")})
+                self.assertStatus(rel, "A")
+                self.assertNamed(rel)
+
+    def test_refuter_mid_line_is_flagged(self):
+        for index, line in enumerate(["The refuter: none", "See Refuter: Plan opus, PASS",
+                                      "Review by Refuter: Plan opus, PASS"]):
+            with self.subTest(line=line):
+                self.rebase_here()
+                rel = PLANS + "/mid-line-%d.md" % index
+                self.commit("add mid-line refuter plan", {rel: plan(line)})
+                self.assertStatus(rel, "A")
+                self.assertNamed(rel)
+
+    def test_refuter_line_removed_before_merge_is_flagged(self):
+        """The check reads the file as it stands at HEAD. A line that the range removes again does not count."""
+        rel = PLANS + "/removed-refuter.md"
+        self.commit("add plan with refuter", {rel: plan(REFUTER)})
+        self.commit("drop the refuter line", {rel: plan("Body only.")})
+        self.assertStatus(rel, "A")
+        self.assertNamed(rel)
+
+    def test_refuter_line_added_later_in_range_passes(self):
         """The same rule from the other side: the file as it stands at HEAD carries the line."""
-        rel = PLANS + "/later-critic.md"
+        rel = PLANS + "/later-refuter.md"
         self.commit("add plan", {rel: plan("Body only.")})
-        self.commit("add the critic line", {rel: plan(CRITIC)})
+        self.commit("add the refuter line", {rel: plan(REFUTER)})
         self.assertStatus(rel, "A")
         self.assertClean()
 
-    def test_plan_with_critic_line_passes(self):
-        rel = PLANS + "/critic-plan.md"
-        self.commit("add plan", {rel: plan(CRITIC)})
+    def test_plan_with_refuter_line_passes(self):
+        rel = PLANS + "/refuter-plan.md"
+        self.commit("add plan", {rel: plan(REFUTER)})
         self.assertStatus(rel, "A")
         self.assertClean()
 
-    def test_plan_with_bold_critic_line_passes(self):
-        rel = PLANS + "/bold-critic-plan.md"
-        self.commit("add plan", {rel: plan(BOLD_CRITIC)})
+    def test_plan_with_bold_refuter_line_passes(self):
+        rel = PLANS + "/bold-refuter-plan.md"
+        self.commit("add plan", {rel: plan(BOLD_REFUTER)})
         self.assertStatus(rel, "A")
         self.assertClean()
 
-    def test_critic_after_a_closed_fence_passes(self):
+    def test_refuter_after_a_closed_fence_passes(self):
         """The fence closes, and a real line after it counts. The quote and the # inside the fence are plain text to it."""
-        rel = PLANS + "/fence-then-critic.md"
+        rel = PLANS + "/fence-then-refuter.md"
         self.commit("add plan", {rel: plan("Don't skip the review.", "```", "# not a heading",
-                                           "Critic: example only", "```", "", CRITIC)})
+                                           "Refuter: example only", "```", "", REFUTER)})
         self.assertStatus(rel, "A")
         self.assertClean()
 
-    def test_full_size_plan_with_critic_at_its_end_passes(self):
+    def test_full_size_plan_with_refuter_at_its_end_passes(self):
         rel = PLANS + "/long-plan.md"
         body = "".join("Step %d of the plan.\n" % number for number in range(BIG_LINES))
-        self.commit("add long plan", {rel: plan(body, CRITIC)})
+        self.commit("add long plan", {rel: plan(body, REFUTER)})
         self.assertStatus(rel, "A")
         self.assertClean()
 
-    def test_full_size_plan_without_critic_is_flagged(self):
+    def test_full_size_plan_without_refuter_is_flagged(self):
         rel = PLANS + "/long-plan.md"
         body = "".join("Step %d of the plan.\n" % number for number in range(BIG_LINES))
         self.commit("add long plan", {rel: plan(body)})
@@ -277,11 +302,11 @@ class PlanCriticCase(Fixture):
 
     def test_good_plan_beside_a_bad_plan_is_not_named(self):
         good, bad = PLANS + "/good.md", PLANS + "/bad.md"
-        self.commit("add two plans", {good: plan(CRITIC), bad: plan("Body only.")})
+        self.commit("add two plans", {good: plan(REFUTER), bad: plan("Body only.")})
         self.assertStatus(good, "A")
         self.assertStatus(bad, "A")
         out = self.assertNamed(bad)
-        self.assertNotIn(good, out, "a plan with a Critic line is named:\n" + out)
+        self.assertNotIn(good, out, "a plan with a Refuter line is named:\n" + out)
 
     def test_no_base_exits_two_as_unknown(self):
         rel = PLANS + "/new-plan.md"
@@ -318,6 +343,18 @@ class PlanCriticCase(Fixture):
         self.addCleanup(tracked_tree.rm_tree, cwd)
         out = self.assertNamed(rel, args=["--root", self.tree, "--base", self.base_sha], cwd=cwd)
         self.assertNotIn("usage", out, out)
+
+    def test_root_that_does_not_exist_exits_two_as_unknown(self):
+        """A --root that names no folder is UNKNOWN: exit 2 and a line that says so, never a traceback with exit 1."""
+        rel = PLANS + "/new-plan.md"
+        self.commit("add widget plan", {rel: plan("Body only.")})  # a real finding, so 0 would be wrong
+        self.assertStatus(rel, "A")
+        missing = os.path.join(RUN_FOLDER, "no-such-repo")
+        self.assertFalse(os.path.exists(missing), "scope: the --root path exists")
+        rc, out = self.lint(["--root", missing, "--base", self.base_sha])
+        self.assertEqual(rc, 2, "a --root that names no folder exits %d, not 2:\n%s" % (rc, out))
+        self.assertIn("unknown", out.lower(), out)
+        self.assertNotIn("Traceback", out, out)
 
 
 if __name__ == "__main__":
