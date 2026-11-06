@@ -38,7 +38,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { HERE, SKILL, run, scratchRepo } from './helpers.mjs';
+import { HERE, SKILL, run, scratchRepo, setSubLine, subLineIds, tail } from './helpers.mjs';
 import { loadMapConfig } from '../scripts/lib/map-config.mjs';
 import { blankComments, blankShell } from '../scripts/lib/source-text.mjs';
 
@@ -60,30 +60,12 @@ const configFile = (dir) => join(dir, CONFIG);
 const runCheck = (dir) => run([CHECK], dir);
 // The MAP10 verdict line of a run, or '' when the run prints none.
 const ten = (out) => out.split('\n').find((l) => /^\[(PASS|FAIL|SKIP)\] MAP10\b/.test(l)) ?? '';
-const tail = (out) => out.slice(0, 1500);
 
-// ---- The map page: a decisions line is the line right under the map line of its file.
-const DECISION_RE = /^ {2}- Decisions: /;
-const mapIndexOf = (lines, file) => {
-  const found = lines.flatMap((l, i) => (l.startsWith(`- \`${file}\` `) ? [i] : []));
-  assert.equal(found.length, 1, `${MAP} must hold exactly one map line for ${file}`);
-  return found[0];
-};
+// ---- The map page: a decisions line is a sub-line of its map line (helpers.mjs holds the one reader and the one setter).
 /** The ids on the decisions line of `file`, or [] when it has none. */
-const decisionIds = (dir, file) => {
-  const lines = read(dir, MAP).split('\n');
-  const i = mapIndexOf(lines, file);
-  const next = lines[i + 1] ?? '';
-  return DECISION_RE.test(next) ? [...next.matchAll(/`([^`]+)`/g)].map((m) => m[1]) : [];
-};
+const decisionIds = (dir, file) => subLineIds(dir, MAP, file, 'Decisions');
 /** Sets the decisions line of `file` to `ids`, or removes it when `ids` is null. Edits the map page only. */
-const setDecisions = (dir, file, ids) => {
-  const lines = read(dir, MAP).split('\n');
-  const i = mapIndexOf(lines, file);
-  if (DECISION_RE.test(lines[i + 1] ?? '')) lines.splice(i + 1, 1);
-  if (ids) lines.splice(i + 1, 0, `  - Decisions: ${ids.map((d) => `\`${d}\``).join(', ')}`);
-  write(dir, MAP, lines.join('\n'));
-};
+const setDecisions = (dir, file, ids) => setSubLine(dir, MAP, file, 'Decisions', ids);
 
 // ---- Config: both keys or neither.
 test('C1. decisionsDir alone is a config error, and the error names decisionIdPattern', () => {
