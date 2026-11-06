@@ -13,7 +13,8 @@ that pass on the base commit, and why each stays.
 - bin/mail send --to <addr> --kind request|inform|reply [--re <id>] --body-file F
   The sender's address is cloud/<CLAUDE_CODE_REMOTE_SESSION_ID>. It writes mail/<addr>/<id>.md on
   refs/heads/mail with plumbing only, never a working tree.
-- bin/mail read [<id>]  prints the open messages, or one message with its body.
+- bin/mail read [<id>]  prints the open messages, or one message with its body. With no --addr, the open
+  messages of the session's own folder (CLAUDE_CODE_SESSION_ID locally) are listed too.
 - bin/mail take <id>    one commit moves mail/<addr>/<id>.md to done/<addr>/<id>.md with a
   Taken-by: line. A taker that finds the path gone prints "taken by another" and exits non-zero.
 - hooks/mail.py turn_start_lines(payload, env) -> list[str]. payload carries session_id and cwd;
@@ -24,9 +25,8 @@ that pass on the base commit, and why each stays.
 
 Pinned choices (each one a departure or an open point, not settled by the spec):
 1. Retry trigger. A push is retried only after a non-fast-forward, at most 5 retries, so 6 pushes
-   in all. Any other refused push prints "not sent: <reason>" at once and exits 1. The ruling is
-   page item 153 (the git mailbox), owner pick a, 2026-11-06 15:24 CST: push retry on non-fast-forward
-   only, at most 5 retries.
+   in all. Any other refused push prints "not sent: <reason>" at once and exits 1. Item 153 on the git
+   mailbox page sets this: push retry on non-fast-forward only, at most 5 retries.
 2. A non-fast-forward on every try. Git forbids ref updates inside a pre-receive hook, and a
    server refusal reads "[remote rejected]", so the case pushes to a second store whose tip the
    sender never fetched. The client refuses each push itself, as "[rejected]", before it sends
@@ -51,17 +51,22 @@ Pinned choices (each one a departure or an open point, not settled by the spec):
    a real bound raises, so no case waits out a bound.
 10. Cloud ids: CLAUDE_CODE_REMOTE_SESSION_ID cse_<x> is the address cloud/session_<x>. The older cases keep
    plain ids such as sess-b, which the cse_ mapping must not change.
-11. Cases that pass on the base commit 7e79b56d. Each is a regression guard for its named claim, and each
-   has a mutant check (the mutant is a copy of the built code with one line changed; it is not in the repo):
-   PushRefusedRetry (retries set to 1: "not sent", exit 1) and TakeBothFromOneTip (a lost push read as a win:
-   the second taker prints taken). The race cases give their two machines distinct git identities. With one
-   identity and one address, two takers can build the same take commit in the same second, and the second
-   push then succeeds as a no-op and prints "taken". That is a product finding. It depends on the second, so
-   no case pins it.
+11. Cases that pass on the base commit. Each is a regression guard for its named claim, and each has a
+   mutant check (the mutant is a copy of the built code with one change; it is not in the repo):
+   PushRefusedRetry (retries set to 1: "not sent", exit 1), TakeBothFromOneTip (a lost push read as a win:
+   the second taker prints taken), TakeSameSecond (the nonce removed from the Taken-by line: both takers
+   print taken), SshBatchDefault (the default removed: its two default cases go red) and AgeUnknown (the
+   fallback removed: the message is not listed). TakeBothFromOneTip gives its two machines distinct git
+   identities. TakeSameSecond keeps one identity and one address, and pins the clock, so two takers build
+   the same commit unless the Taken-by line carries a nonce.
+12. Local read. `bin/mail read` with no --addr takes its session folder from CLAUDE_CODE_SESSION_ID.
+   LocalSessionRead runs bin/mail's main in this process with the host set to PC_HOST, since the CLI
+   subprocess sees the real host.
 
 Every machine gets a git identity, as a configured Mac does. A machine with no identity is not covered.
 """
 import contextlib
+import importlib.machinery
 import importlib.util
 import io
 import json
@@ -85,9 +90,9 @@ ROOT = _test_temp.run_folder()
 MAIL_CLI = os.path.join(REPO, "bin", "mail")
 MAIL_HOOK = os.path.join(REPO, "hooks", "mail.py")
 REFUSED = "refs/heads/mail"
-SCRUBBED = ("CLAUDE_CODE_REMOTE_SESSION_ID", "MAILBOX_REPO", "MAILBOX_CACHE", "GIT_DIR",
-            "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
-            "GIT_ALTERNATE_OBJECT_DIRECTORIES", "CLAUDE_CODE_EXECPATH", "AI_AGENT")
+SCRUBBED = ("CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "MAILBOX_REPO", "MAILBOX_CACHE",
+            "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_SSH", "GIT_SSH_COMMAND", "CLAUDE_CODE_EXECPATH", "AI_AGENT")
 IDENTITY = {"GIT_AUTHOR_NAME": "Mail Test", "GIT_AUTHOR_EMAIL": "mail-test@example.invalid",
             "GIT_COMMITTER_NAME": "Mail Test", "GIT_COMMITTER_EMAIL": "mail-test@example.invalid"}
 # A second machine's identity. Two takers with one identity and one address can build byte-identical
@@ -95,6 +100,9 @@ IDENTITY = {"GIT_AUTHOR_NAME": "Mail Test", "GIT_AUTHOR_EMAIL": "mail-test@examp
 OTHER_IDENTITY = {"GIT_AUTHOR_NAME": "Mail Other", "GIT_AUTHOR_EMAIL": "mail-other@example.invalid",
                   "GIT_COMMITTER_NAME": "Mail Other", "GIT_COMMITTER_EMAIL": "mail-other@example.invalid"}
 UNKNOWN = "mail unknown: "
+# Git's author and committer dates and the Taken-by stamp are pinned, so two takers in one case build one commit.
+SAME_SECOND = {"GIT_AUTHOR_DATE": "1800000000 +0000", "GIT_COMMITTER_DATE": "1800000000 +0000"}
+PINNED_STAMP = "2026-01-01T00:00:00Z"
 REAL_GIT = shutil.which("git")  # resolved before any case edits PATH: the stand-in execs this
 ORIGIN = "https://github.com/acme/widgets.git"  # the pc slug is acme-widgets
 PC_HOST = "box-one"
@@ -405,6 +413,37 @@ def turn(machine, session_id=None):
 
 def listed_with(lines, mid):
     return [line for line in lines if mid in line]
+
+
+def cli_module():
+    """bin/mail loaded once per run as a module, so a case can patch its clock and its push in this process."""
+    name = "mail_cli_under_test"
+    if name not in sys.modules:
+        loader = importlib.machinery.SourceFileLoader(name, MAIL_CLI)
+        module = importlib.util.module_from_spec(importlib.util.spec_from_loader(name, loader))
+        sys.modules[name] = module
+        loader.exec_module(module)
+    return sys.modules[name]
+
+
+@contextlib.contextmanager
+def in_folder(path):
+    here = os.getcwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(here)
+
+
+def cli_in_process(machine, *args):
+    """bin/mail's main as one machine: its env, its checkout as the cwd, and PC_HOST as the host. The CLI
+    subprocess sees the real host, so a case that addresses a fixed host runs here."""
+    out, err = io.StringIO(), io.StringIO()
+    with mock.patch.dict(os.environ, machine.env, clear=True), mock.patch("socket.gethostname", return_value=PC_HOST), \
+            in_folder(machine.checkout), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = cli_module().main(list(args))
+    return code, out.getvalue(), err.getvalue()
 
 
 class MailCase(unittest.TestCase):
@@ -837,6 +876,118 @@ class PromptEnv(MailCase):
                          "git starts ran without GIT_TERMINAL_PROMPT=0")
         self.assertEqual([s["sub"] for s in starts if s["env"].get("GCM_INTERACTIVE") != "never"], [],
                          "git starts ran without GCM_INTERACTIVE=never")
+
+
+class LocalSessionRead(MailCase):
+    def test_read_without_addr_lists_the_local_sessions_own_folder(self):
+        store = self.store()
+        box = self.machine("pc", store, origin=ORIGIN)
+        box.env["CLAUDE_CODE_SESSION_ID"] = "sessA"
+        mid = "0a1b2c3d4e98"
+        store.seed(PC_BASE + "/sessA", mid, "request", PC_BASE + "/sessB", "Body marker: local-read\n")
+        self.assertEqual(len(store.files("mail/" + PC_BASE + "/sessA/")), 1,
+                         "control: the message did not land in the session folder")
+        named = cli_in_process(box, "read", "--addr", PC_BASE + "/sessA")
+        self.assertIn(mid, named[1], "control: mail read --addr does not list the session folder's message: %r"
+                      % named[1])
+        code, out, err = cli_in_process(box, "read")
+        self.assertEqual(code, 0, "mail read with no --addr exited %d: %r" % (code, err))
+        self.assertIn(mid, out, "mail read with no --addr did not list the open message in the local session's "
+                      "own folder: %r" % out)
+
+
+class TakeSameSecond(MailCase):
+    def test_two_caches_taking_one_message_in_one_second_print_taken_once(self):
+        store = self.store()
+        mid = "0a1b2c3d4e61"
+        store.seed("cloud/sess-b", mid, "request", "cloud/sess-a", "Body marker: same-second\n")
+        first = self.machine("t1", store, session="sess-b")
+        second = self.machine("t2", store, session="sess-b")
+        first.env.update(SAME_SECOND)
+        second.env.update(SAME_SECOND)
+        self.assertEqual(len(store.files("mail/cloud/sess-b/")), 1, "control: the message did not land")
+        cli = cli_module()
+        results, interleaved = {}, []
+        real_push = cli.mail.push
+
+        def take_as(name, machine):
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = cli.take(machine.env, ["cloud/sess-b"], mid)
+            results[name] = (code, out.getvalue(), err.getvalue())
+
+        def push_after_the_second_take(env, commit):
+            # The second taker syncs and pushes between the first taker's build and its push, so both build on one tip.
+            if env is first.env and not interleaved:
+                interleaved.append(True)
+                take_as("second", second)
+            return real_push(env, commit)
+
+        with mock.patch.object(cli, "stamp", return_value=PINNED_STAMP), \
+                mock.patch.object(cli.mail, "push", new=push_after_the_second_take):
+            take_as("first", first)
+        self.assertTrue(interleaved, "control: the second taker never ran inside the first taker's take: %r" % results)
+        printed = [name for name in ("first", "second") if "taken %s" % mid in results[name][1].splitlines()]
+        self.assertEqual(len(printed), 1, "two takers of one message in one second both printed taken: %r" % results)
+        self.assertEqual(len(store.files("done/cloud/sess-b/")), 1, "the take race left %r done files, expected one"
+                         % store.files("done/cloud/sess-b/"))
+
+
+class SshBatchDefault(MailCase):
+    def git_ssh_command(self, extra=None):
+        """The GIT_SSH_COMMAND that one git start of the hook carries, read from the env it is started with."""
+        env = fixture_env(self.case, extra)
+        done = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch.object(MAIL_MODULE._nowindow, "run", return_value=done) as run:
+            MAIL_MODULE.git(["ls-remote", self.case, REFUSED], env)
+        return run.call_args.kwargs["env"].get("GIT_SSH_COMMAND")
+
+    def test_default_ssh_command_runs_in_batch_mode(self):
+        command = self.git_ssh_command()
+        self.assertIn("BatchMode=yes", command or "", "the default ssh command is not batch mode: %r" % command)
+
+    def test_default_ssh_command_bounds_the_connect_time(self):
+        command = self.git_ssh_command()
+        self.assertIn("ConnectTimeout=3", command or "", "the default ssh command has no 3 s connect bound: %r"
+                      % command)
+
+    def test_caller_set_ssh_command_is_kept(self):
+        command = self.git_ssh_command({"GIT_SSH_COMMAND": "my-ssh -i key"})
+        self.assertEqual(command, "my-ssh -i key", "git's ssh command was replaced although the caller set one: %r"
+                         % command)
+
+
+class AgeUnknown(MailCase):
+    def healthy_line(self, store, mid):
+        """The turn-start line of a machine whose git log works, so each failing case has a line to compare."""
+        lines = listed_with(turn(self.machine("c", store, session="sess-b")), mid)
+        self.assertEqual(len(lines), 1, "control: a healthy turn does not list the message: %r" % lines)
+        self.assertNotIn("age unknown", lines[0], "control: a healthy turn says age unknown: %r" % lines[0])
+        return lines[0]
+
+    def test_failing_git_log_still_lists_the_message_as_age_unknown(self):
+        store = self.store()
+        mid = "0a1b2c3d4e99"
+        store.seed("cloud/sess-b", mid, "request", "cloud/sess-a", "Body marker: age-fail\n")
+        self.healthy_line(store, mid)
+        reader = self.machine("b", store, session="sess-b", stub=True)
+        reader.stub_actions({"log": {"kind": "fail", "stderr": "fatal: bad revision"}})
+        lines = turn(reader)
+        listed = listed_with(lines, mid)
+        self.assertEqual(len(listed), 1, "a failing git log hid the message from the turn start: %r" % lines)
+        self.assertIn("age unknown", listed[0], "a failing git log did not print age unknown: %r" % listed[0])
+
+    def test_timed_out_git_log_still_lists_the_message_as_age_unknown(self):
+        store = self.store()
+        mid = "0a1b2c3d4e9a"
+        store.seed("cloud/sess-b", mid, "request", "cloud/sess-a", "Body marker: age-timeout\n")
+        self.healthy_line(store, mid)
+        reader = self.machine("b", store, session="sess-b")
+        with Starts(expire=("log",)):
+            lines = turn(reader)
+        listed = listed_with(lines, mid)
+        self.assertEqual(len(listed), 1, "a timed-out git log hid the message from the turn start: %r" % lines)
+        self.assertIn("age unknown", listed[0], "a timed-out git log did not print age unknown: %r" % listed[0])
 
 
 if __name__ == "__main__":
