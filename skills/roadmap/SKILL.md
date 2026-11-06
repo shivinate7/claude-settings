@@ -140,9 +140,9 @@ unknown (<why>)`, and build.py exits 0; the page's stalled block then reads not 
 open item row with no `lane` key reads the items unknown, so a publisher that does not send `lane` never
 passes for zero stalled items.
 
-build.py also prints `ready not started: <id> (<age>h)` for each step with status `todo` or `ready`, phase
-`now`, no live lane (the same test as above), no valid `paused` field, and no open item homed on it that
-has no lane. The age is whole hours from `updatedAt` to the live read, or `(age unknown)` when `updatedAt`
+build.py also prints `ready not started: <id> (<age>h)` for each step with status `todo` or `ready` and
+phase `now`. The step needs no live lane (the same test as above) and no valid `paused` field. No open
+item homed on it may lack a lane. The age is whole hours from `updatedAt` to the live read, or `(age unknown)` when `updatedAt`
 is missing or has no zone. The page's ready block lists the same steps. With no usable live read, one line
 reads `ready not started: unknown (<why>)`, never zero. These lines never change the exit code.
 
