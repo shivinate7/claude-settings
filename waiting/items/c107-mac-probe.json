@@ -1,0 +1,23 @@
+{
+  "added": "2026-11-06T19:42:00Z",
+  "command": {
+    "mac": "Probe c107. Measure, do not fix. 1) Run `claude --version` and record it. 2) Run `git branch probe-c107 HEAD` in this repo. 3) On this turn, which I typed, call start_session twice with kind user_asked: title \"probe c107 A\" and \"probe c107 B\", source branch probe-c107, prompt \"Run git branch --show-current and reply with the branch, then stop.\" 4) Then call start_session once with kind offer, title \"probe c107 C\", same branch and prompt. 5) For each of A, B and C record: card shown yes/no (ask me in one line; I answer yes or no), started yes/no, branch the new session reports. 6) Clean up: archive sessions A, B and C, then run `git branch -D probe-c107`. 7) Send the result as one message: the version, then one line per start (kind, card, started, branch kept yes/no). Send it with send_message to session_013NEJL2hB1pLZPDpzas7VgB if that tool exists here; else print it so I can paste it to the coordinator."
+  },
+  "context": "Goal: your local coordinators start their lanes without a press from you (your ask, 13:24 CST).\nProblem (goal): the card is the desktop app's own and shows even in Bypass mode, so no setting of ours removes it. One possible fix: starts on a turn you typed may show no card. Only a Mac session can test that, and the cloud cannot reach your Mac right now.\nThe probe starts three throwaway sessions, records whether each showed a card and kept its branch, then archives them and deletes its test branch.\nThe result goes to the coordinator, which then brings you the pick.",
+  "home": "roadmap step c107",
+  "kind": "task",
+  "n": 296,
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 3,
+  "ref": "step c107; ask ask-mw5d5lum8r; lane local-lane-start-no-click",
+  "short": "Mac start-card probe",
+  "status": "open",
+  "steps": [
+    "Open a new Claude Code desktop chat in any git repo folder on your Mac.",
+    "Paste the text below.",
+    "When it asks whether a card showed, answer yes or no.",
+    "Mark this done when it has sent its result."
+  ],
+  "title": "Paste the c107 probe into a Claude Code session on your Mac",
+  "why": "Only a Mac session sees the start card. The result picks the fix for pressing a button per lane."
+}
