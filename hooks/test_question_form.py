@@ -87,10 +87,10 @@ MISSING = ("MISSING", "hooks/question_form.py has no such function yet")
 # words once; every other case takes WIDE from the module.
 WIDENS_WORDS = ("Goes against your ruling: a repo should change to fit the shared tool, rather than the tool change "
                 "to fit a repo")
-# Older sessions still write these words in chat. The mark keeps refusing them (question_form.LEGACY_WIDENS_TEXT).
+# Older sessions still write these words in chat. The mark keeps refusing them (question_form.LEGACY_WIDENS_TEXTS).
 LEGACY_WORDS = "Goes against your uniform ruling (t18)"
-# Today's WIDENS_TEXT, as a literal. After the build it moves to LEGACY_WIDENS_TEXT, and WIDE no longer carries it.
-CURRENT_WORDS = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
+# The prior ruling's words, as a literal. question_form.LEGACY_WIDENS_TEXTS holds them; WIDE is WIDENS_TEXT only.
+PRIOR_WORDS = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
 WIDE = getattr(question_form, "WIDENS_TEXT", None) or "<WIDENS_TEXT missing from hooks/question_form.py>"
 # The reply judge's prompt is read from its module constant in case_widens_words_in_the_reply_judge_prompt.
 WIDENS_HOMES = ("skills/waiting-page/page.html", "skills/waiting-page/SKILL.md", "output-styles/shiv-stylisms.md",
@@ -1258,9 +1258,9 @@ def case_widens_chat_new_words_mark_a_recommended_option():
 
 
 def case_widens_chat_legacy_words_still_mark():
-    # Controls: the t18 words older sessions write, and today's words, still mark a Recommended option. After the
-    # build, today's words live in LEGACY_WIDENS_TEXT, so the mark keeps refusing them.
-    for words, label in ((LEGACY_WORDS, "t18"), (CURRENT_WORDS, "today's")):
+    # Controls: the t18 words older sessions write, and the prior ruling's words, still mark a Recommended option.
+    # Both live in LEGACY_WIDENS_TEXTS, so the mark keeps refusing them.
+    for words, label in ((LEGACY_WORDS, "t18"), (PRIOR_WORDS, "prior ruling")):
         options = tcj.good_options()
         options[0] = {"label": "Allow the second form (Recommended)",
                       "description": "Gain: it lands today. Lose: two forms stay. " + words + "."}
