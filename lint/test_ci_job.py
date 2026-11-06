@@ -1301,9 +1301,10 @@ class WindowsShell(unittest.TestCase):
         git_bin = os.path.join(self.root, "Git", "bin")
         os.makedirs(git_cmd)
         os.makedirs(git_bin)
-        with open(os.path.join(git_cmd, "git"), "w") as f:
-            f.write("#!/bin/sh\n")
-        os.chmod(os.path.join(git_cmd, "git"), 0o755)
+        for name in ("git", "git.exe"):  # which() finds `git` on POSIX and only a PATHEXT name on Windows
+            with open(os.path.join(git_cmd, name), "w") as f:
+                f.write("#!/bin/sh\n")
+            os.chmod(os.path.join(git_cmd, name), 0o755)
         open(os.path.join(git_bin, "bash.exe"), "w").close()
         environ = dict(self.environ, PATH=git_cmd)  # one folder: the host's which() splits PATH its own way
         self.assertEqual(self.ci_job.find_git_bash(nt=True, environ=environ), os.path.join(git_bin, "bash.exe"))

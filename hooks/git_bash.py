@@ -24,7 +24,7 @@ def find_git_bash(nt=None, environ=None, isfile=os.path.isfile):
             if isfile(candidate):
                 return candidate
     # Git installed elsewhere: bin\bash.exe beside the folder that holds git (Git\cmd\git.exe), then a PATH scan.
-    git = shutil.which("git", path=environ.get("PATH"))
+    git = shutil.which("git", path=environ.get("PATH", ""))
     if git:
         candidate = os.path.join(os.path.dirname(os.path.dirname(git)), "bin", "bash.exe")
         if isfile(candidate):
