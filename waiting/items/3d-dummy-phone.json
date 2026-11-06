@@ -41,6 +41,7 @@
   "pick": "a",
   "rank": 4,
   "ref": "step 3d-browser-dummy",
+  "reply": "Picture check flagged option A (its focus #pickview finds nothing in its mockup). Sent to lane 3d-browser-dummy to fix at 14:01 CST. Separately, a step makes this check refuse at publish, so it reaches the session, not you.",
   "short": "3D dummy phone panel",
   "status": "open",
   "title": "3D dummy on a phone: where does an item's detail panel sit?",

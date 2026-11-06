@@ -4,6 +4,12 @@
   "home": "plan record debate-model-tiers (PR #1323)",
   "id": "debate-model-tiers",
   "kind": "decision",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB): writes Sonnet for all three refuters into record debate-model-tiers (PR #1323); routed 14:01 CST",
+  "lastAnswer": {
+    "at": "2026-11-06T19:59:40.189Z",
+    "choice": "none",
+    "note": "for now let's do sonnet for all"
+  },
   "links": [
     {
       "label": "PR #1323",
@@ -38,6 +44,7 @@
   "pick": "a",
   "rank": 3,
   "ref": "item 284; PR #1323",
+  "reply": "Sonnet for all three refuters, for now (your note, 13:59 CST). Sent to the coordinator to write into record debate-model-tiers, PR #1323. Closes when that merges.",
   "short": "Refuter models",
   "status": "open",
   "title": "Which refuters run Opus?",
