@@ -322,7 +322,7 @@ class RulingSkipTests(RulingSkipFixture):
 
     def test_r4_one_deadline_caps_both_model_calls(self):
         # The past-ruling check and the refuter share the Stop hook's time, which the guard's own work also spends.
-        out = self.stop(pick_and_question(), answer=tcj.ALLOW, repo=RULING_REPO)
+        self.stop(pick_and_question(), answer=tcj.ALLOW, repo=RULING_REPO)
         calls = self.model_calls()
         self.assertEqual(len(calls), 2, "the past-ruling check and the refuter made %d model calls, not two" % len(calls))
         timeouts = [call.get("timeout") for call in calls]
