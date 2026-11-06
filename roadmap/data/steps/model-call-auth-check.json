@@ -1,0 +1,9 @@
+{
+  "title": "The claude -p model-call setup works on every account and device, or asks once",
+  "phase": "now",
+  "status": "doing",
+  "order": 103.34,
+  "why": "Owner, 11:43 CST Nov 6: the claude -p model-call setup must work on every account and device, or prompt him for its one-time setup there. It never fails quietly. An API key is an option, not the first route.",
+  "note": "Nov 6 11:44 CST (coordinator): lane started, session_013NEJL3uzxpVTQAsNhcR9t9. Measured Nov 6 11:12 CST (triage): decision_watch.invoke_model gave a verdict in 2.7 s in a cloud session.",
+  "updatedAt": "2026-11-06T17:45:00Z"
+}
