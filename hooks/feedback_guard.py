@@ -95,7 +95,20 @@ a turn end in these cases:
   - an open standing item has an id that is not a whole token in the handoff;
   - the inbox cannot be read. The block names the file: a Stop hook's stderr never reaches the owner,
     so a silent pass would drop feedback. This stays advisory, per decision guard-hooks-fail-closed:
-    `stop_hook_active` true exits with no output, so the block costs one turn at most.
+    `stop_hook_active` true exits with no output, so the block costs one turn at most;
+  - waiting-export-check (export_check, roadmap step waiting-export-check; runs before the inbox read, so it
+    needs no inbox file). It blocks a stop when the whole transcript holds a non-sidechain ArtifactData set,
+    update or batch call to the waiting page (layout.is_waiting_page_url) whose tool_result is no error, and
+    the newest such write is newer than the newest commit on origin/<record branch> that touches the waiting
+    copy folder (waiting_copy), unless a later Bash run of export_page.py ended with the line `same`. No
+    commit on the folder at all counts as older. Incident: the waiting/ copy of the roadmap went stale from
+    06:41 to 19:04 CST on Nov 5 while the page took items 261 to 271. Harm: a lost or moved page then loses
+    those items (decision waiting-data-in-repo). The reason names export_page.py and the waiting-page skill
+    section "Keep a copy in the repo". A transcript that cannot be read passes. A failed read of the layout
+    or of the ref passes with the systemMessage "Feedback guard: waiting copy export not checked". With
+    stop_hook_active the reason goes to systemMessage and nothing blocks. Cost: zero git calls unless an
+    ArtifactData write is found, then one rev-parse, and one git log when it is to the waiting page, inside
+    the Stop process; no process or file of its own (rule outcomes-mechanize-rules). Test S6 proves it.
 Repeats (decision owner-feedback-inbox, "Repeats"): on every Stop, `stop_hook_active` or not, the
 guard judges the well-formed, open items whose ids the turn state's `judged` list does not hold. A
 state file that predates the key counts every item there as judged. One model call per Stop covers
@@ -176,6 +189,15 @@ FAIL_OPEN = "Feedback guard: ruling and task homes not checked (%s)."
 FAIL_OPEN_SENDS = "Feedback guard: %s sends not checked (%s)."  # label: page or repo
 FAIL_OPEN_CLOSED = "Feedback guard: closed note homes not checked (%s)."
 FAIL_OPEN_FILING = "Feedback guard: page filing not checked (%s)."
+FAIL_OPEN_EXPORT = "Feedback guard: waiting copy export not checked (%s)."
+EXPORT_SCRIPT = "export_page.py"
+EXPORT_SAME = "same"  # the last line export_page.py prints when nothing differs
+EXPORT_REASON = (
+    "Waiting copy not exported: this session wrote to the waiting page, and no commit on origin/%s has"
+    " touched %s/ since. Run skills/waiting-page/export_page.py as the waiting-page skill section"
+    " \"Keep a copy in the repo\" says, commit and push the record branch, then stop. An export run whose"
+    " verdict is `same` also clears this.")
+EXPORT_CITE = " (decision waiting-data-in-repo, roadmap step waiting-export-check)"
 GRANT_HOMES = ("a [ruling] item whose home is a tracked file, a [page] item `page:<n>` with its send, or a"
                " [note] item `-> %s` when the words are no grant" % NOT_A_GRANT)
 BULLET = re.compile(r"[ \t]*(?:[-*+\u2022]|\d+[.)])[ \t]+\S")
@@ -311,6 +333,15 @@ def step_home(rest):
     """The STEP_HOME match of the item's home, read as home_path reads a path (unwrapped, no trailing
     punctuation), so a wrapped or punctuated `step:<slug>` is the step home it names; else None."""
     return STEP_HOME.fullmatch(home_path(rest)) if home_word(rest) else None
+
+
+def waiting_copy(layout, root):
+    """(record branch, copy folder) of the waiting copy of `root`: the folder is the export of the waiting-page
+    registry entry, else layout.path "waiting-data". The one home of that resolution, for the filing check
+    (Homes.filed_numbers) and the export check (export_check). Raises layout.LayoutError."""
+    branch = layout.record_branch(root)
+    waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
+    return branch, (waiting[0]["export"] if waiting else layout.path(root, "waiting-data")).strip("/")
 
 
 class Homes:
@@ -466,9 +497,7 @@ class Homes:
             root = self._cwd_root()
             if root is None or layout.waiting_page(root) == "unknown":
                 return self._filed
-            branch = layout.record_branch(root)
-            waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
-            folder = (waiting[0]["export"] if waiting else layout.path(root, "waiting-data")).strip("/")
+            branch, folder = waiting_copy(layout, root)
             ref = "refs/remotes/origin/" + branch
             run = ruling_home._run_git(root, ["grep", "-I", "-e", ".", ref, "--", folder + "/items/"])
         except (layout.LayoutError, ruling_home._GitFailure) as e:
@@ -1070,12 +1099,102 @@ def judge_stop(homes, inbox, blocks, judged):
     return [flag_text(*h, h[0] in placed) for h in hits], (None if why is None else not_checked(why))
 
 
+def _ts(rec):
+    return _transcript.parse_utc_timestamp(rec.get("timestamp"))
+
+
+def _scan_transcript(records):
+    """(writes, exports, results) of the non-sidechain records. `writes` is [(epoch, id, url)] for each
+    ArtifactData set, update or batch call; `exports` is [(epoch, id)] for each Bash call naming
+    export_page.py; `results` maps a tool_use id to (is_error, last non-blank line of its tool_result)."""
+    writes, exports, results = [], [], {}
+    for rec in records:
+        if rec.get("isSidechain"):
+            continue
+        when = _ts(rec)
+        for use in _transcript.tool_uses(rec):
+            inp, name = use.get("input"), str(use.get("name", ""))
+            if not isinstance(inp, dict) or when is None:
+                continue
+            if name.startswith(ARTIFACT_DATA):
+                if _transcript.is_write(inp) and isinstance(inp.get("url"), str):
+                    writes.append((when, use.get("id"), inp["url"]))
+            elif name == "Bash" and EXPORT_SCRIPT in str(inp.get("command", "")):
+                exports.append((when, use.get("id")))
+        for block in _transcript.tool_results(rec):
+            lines = [ln.strip() for ln in _transcript.result_text(block).splitlines() if ln.strip()]
+            results[block.get("tool_use_id")] = (bool(block.get("is_error")), lines[-1] if lines else "")
+    return writes, exports, results
+
+
+def export_check(cwd, transcript_path):
+    """(reason, note) of the export check (roadmap step waiting-export-check). `reason` is the block text
+    when the transcript holds a successful ArtifactData write to the repo's waiting page that is newer than the
+    newest commit on origin/<record branch> touching the waiting copy folder, and no later Bash run of
+    export_page.py ended with the verdict `same`. `note` is the systemMessage text when the check could not
+    run: a failure of git or the layout is never a block. A transcript that cannot be read gives neither. The whole transcript is read and
+    timestamps decide, so a write in an earlier turn still counts."""
+    try:
+        records = _transcript.read_transcript(transcript_path)
+    except (OSError, TypeError, ValueError):
+        return None, None  # no transcript to read (a hook run with none is normal); the inbox checks say so themselves
+    writes, exports, results = _scan_transcript(records)
+    writes = [w for w in writes if w[1] in results and not results[w[1]][0]]
+    if not writes:
+        return None, None  # no git call before a write is found
+    try:
+        import layout
+    except ImportError as e:
+        return None, FAIL_OPEN_EXPORT % (" ".join(str(e).split()) or "ImportError")
+    try:
+        root = Homes(cwd)._cwd_root()
+        if root is None:
+            return None, FAIL_OPEN_EXPORT % "the session's folder is in no git repo"
+        wrote = [w[0] for w in writes if layout.is_waiting_page_url(root, w[2])]
+        if not wrote:
+            return None, None
+        newest = max(wrote)
+        if any(when > newest and results.get(uid) == (False, EXPORT_SAME) for when, uid in exports):
+            return None, None
+        branch, folder = waiting_copy(layout, root)
+        run = ruling_home._run_git(root, ["log", "-1", "--format=%ct", "refs/remotes/origin/" + branch,
+                                          "--", folder + "/"])
+    except (layout.LayoutError, ruling_home._GitFailure) as e:
+        return None, FAIL_OPEN_EXPORT % (" ".join(str(e).split()) or type(e).__name__)
+    out = run.stdout.strip()
+    if run.returncode != 0 or (out and not out.isdigit()):
+        return None, FAIL_OPEN_EXPORT % ("origin/%s cannot be read" % branch)
+    return (None, None) if int(out or 0) >= newest else (EXPORT_REASON % (branch, folder), None)
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
+        try:  # before the inbox read, so a session with no inbox file is checked too
+            ex_reason, ex_note = export_check(hook.get("cwd"), hook.get("transcript_path"))
+        except Exception as e:  # advisory: a crash passes, and says so
+            ex_reason, ex_note = None, FAIL_OPEN_EXPORT % (" ".join(str(e).split()) or type(e).__name__)
+        out = inbox_stop(hook)
+        if ex_reason and hook.get("stop_hook_active"):
+            ex_note = " ".join(filter(None, [ex_note, ex_reason]))  # no second block; the owner still reads it
+        elif ex_reason:
+            prior = out.get("reason")
+            out.update(decision="block", reason=(prior + " " if prior else "") + ex_reason + EXPORT_CITE)
+        if ex_note:
+            out["systemMessage"] = " ".join(filter(None, [out.get("systemMessage"), ex_note]))
+        if out:
+            print(json.dumps(out))
+    except Exception as e:  # advisory: a crash passes, and says so on stderr
+        print("feedback_guard: %s" % e, file=sys.stderr)
+    return 0
+
+
+def inbox_stop(hook):
+    """The inbox check of one Stop: the output dict, empty for a pass. A crash goes to stderr and passes."""
+    try:
         paths = local_time.inbox_paths(hook.get("session_id"))
         if paths is None:
-            return 0
+            return {}
         inbox, turns = paths
         inbox = os.path.abspath(inbox)  # CLAUDE_CONFIG_DIR may be relative; the reason promises an absolute path
         out = {}
@@ -1083,7 +1202,7 @@ def main():
             with open(inbox, encoding="utf-8") as f:
                 blocks = parse(f.read())
         except FileNotFoundError:
-            return 0
+            return {}
         except (OSError, UnicodeDecodeError):
             blocks = None
         homes, flags, note = Homes(hook.get("cwd")), [], None
@@ -1095,9 +1214,7 @@ def main():
             write_state(turns, len(blocks), burst, list(dict.fromkeys((judged or []) + ids)))
         if hook.get("stop_hook_active"):
             msg = " ".join(flags + ([note] if note else []))
-            if msg:
-                print(json.dumps({"systemMessage": msg}))
-            return 0
+            return {"systemMessage": msg} if msg else {}
         if blocks is None:
             reasons = found = ["the inbox file %s cannot be read" % os.path.basename(inbox)]
         else:
@@ -1126,11 +1243,10 @@ def main():
                           " and no new heading is needed. Send each page ruling to the page writer, each repo item's"
                           " message to that repo's triage session, and put open standing ids in the handoff."
                           if found else "."))
-        if out:
-            print(json.dumps(out))
+        return out
     except Exception as e:  # advisory: a crash passes, and says so on stderr
         print("feedback_guard: %s" % e, file=sys.stderr)
-    return 0
+    return {}
 
 
 if __name__ == "__main__":
