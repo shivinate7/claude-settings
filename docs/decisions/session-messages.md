@@ -44,6 +44,8 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
   `Msg <id> from <role> to <role> kind request|inform|reply re <id or -> try <n>`.
   Id: `msg-` plus the page's `askId` stamp form (page.html `askId`). Role: `cs-repo` plus
   `cs-build:<tier>` or `cs-step:<slug>`, or `owner`.
+- A resend keeps the request id and raises `try` by one, so the peer guard's 30 s same-text check does not drop it,
+  and the receiver acts on the id once.
 - The reply is the ack. An `inform` needs no reply. No separate ack message, because each message
   spends the peer guard and the desktop cap.
 - Fit the caps: one request and one reply per exchange. A session that needs more than 10 sends before
