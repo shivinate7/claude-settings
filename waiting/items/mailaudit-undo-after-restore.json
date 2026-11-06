@@ -6,6 +6,11 @@
   "id": "mailaudit-undo-after-restore",
   "kind": "decision",
   "lane": "mailaudit-recent-log: builds a meanwhile (session_013NEJL44PzZ5EQbqb3wHYuB)",
+  "lastAnswer": {
+    "at": "2026-11-06T21:27:22Z",
+    "choice": "none",
+    "note": "isnt storing the restore time better"
+  },
   "n": 305,
   "options": [
     {
@@ -27,8 +32,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "lane mailaudit-recent-log; item 288",
+  "reply": "b is the exact one. Its known cost is one new saved field. I asked the lane at 15:33 CST for anything more: whether a restore or sync from an old-build device breaks b too, and whether a has anything b lacks. If b costs nothing more, the lane builds b, and this item comes back to confirm.",
   "short": "Undo after a restore",
-  "status": "open",
+  "status": "deferred",
   "title": "mailaudit: after a restore, an undo can remove a check-in the restore brought back. Which test decides a Recent row is still live?",
   "why": "An undo that removes restored data loses a check-in you meant to keep."
 }
