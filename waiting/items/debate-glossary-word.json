@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-06T18:56:00Z",
+  "context": "Goal: one name for an agent whose job is to argue against another agent's verdict (your note on item 279).\nProblem (rule): rule speak-one-name-per-thing asks for one term for one thing, and GLOSSARY.md has no term for this yet.\nBased on (ruling): item 279 a, b and d (12:43 CST): three lanes now build these agents.\nDeparts from: main GLOSSARY.md \u2014 adds the term you pick.\nMeanwhile: the lanes write \"challenger\" in one constant, so any pick is a one-line rename.",
+  "home": "GLOSSARY.md",
+  "id": "debate-glossary-word",
+  "kind": "decision",
+  "n": 282,
+  "options": [
+    {
+      "gain": "Plain, and no word on main means that yet.",
+      "how": "GLOSSARY.md gets \"challenger\".",
+      "key": "a",
+      "label": "challenger",
+      "lose": "None known."
+    },
+    {
+      "gain": "Exact: its job is to refute.",
+      "how": "GLOSSARY.md gets \"refuter\".",
+      "key": "b",
+      "label": "refuter",
+      "lose": "Less plain."
+    },
+    {
+      "gain": "Well known.",
+      "how": "GLOSSARY.md gets \"devil's advocate\".",
+      "key": "c",
+      "label": "devil's advocate",
+      "lose": "Three words, and it suggests arguing just for show."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 4,
+  "ref": "item 279; step debate-glossary-word",
+  "short": "Word for the agent that argues back",
+  "status": "open",
+  "title": "What should we call an agent whose job is to argue against another agent's verdict?",
+  "why": "Plain, and the lanes already use it, so it changes nothing."
+}

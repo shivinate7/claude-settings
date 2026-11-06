@@ -1,9 +1,9 @@
 {
   "title": "Port a page to three.js as a 3D test copy, at a new URL",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.359,
   "why": "Item 130 pick a: browser 3D is the first target, because a cloud session can build it and check it by eye.",
-  "note": "Owner picked a on item 277, 12:43 CST: port this Cockpit page. Coordinator 12:35 CST. Which page to port is item 277; the coordinator recommends the Cockpit as a separate test copy, never the live page.",
-  "updatedAt": "2026-11-06T18:58:00Z"
+  "note": "Nov 6 12:53 CST (coordinator): lane session_013NEJL1q9hiKz6bhqxDi1ik, at a new URL; it never touches the live page.\nOwner picked a on item 277, 12:43 CST: port this Cockpit page. Coordinator 12:35 CST. Which page to port is item 277; the coordinator recommends the Cockpit as a separate test copy, never the live page.",
+  "updatedAt": "2026-11-06T18:56:00Z"
 }

@@ -1,9 +1,9 @@
 {
   "title": "Replay known allow and deny cases in CI when a judge changes",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 103.3655,
   "why": "A judge that drifts toward allowing is caught before merge.",
-  "note": "Owner picked b on item 279, 12:43 CST. Debate audit 12:40 CST. feedback_guard leaves items unjudged on a model error. Cost: calls only in CI. Waits on owner item 279.",
-  "updatedAt": "2026-11-06T18:58:00Z"
+  "note": "Nov 6 12:53 CST (coordinator): lane session_013NEJL3zaJYqXCK4XMrELwY. Agents write \"challenger\" in one constant until item 282 picks the word.\nOwner picked b on item 279, 12:43 CST. Debate audit 12:40 CST. feedback_guard leaves items unjudged on a model error. Cost: calls only in CI. Waits on owner item 279.",
+  "updatedAt": "2026-11-06T18:56:00Z"
 }
