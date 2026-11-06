@@ -1435,9 +1435,10 @@ export const mapChecks = ({ cfg, root, read, files = () => gitLsFiles(root) }) =
 // ---- The command: `node <skill>/scripts/map-check.mjs`, run from a repository root. ----
 // One line per check: `[PASS] MAPn`, `[FAIL] MAPn <message>` or `[SKIP] MAPn <reason>`. The exit code is 1 when a line says FAIL.
 // A bad config makes every check FAIL with the validator's message. A SKIP is a FAIL when the config sets `requireAllKeys`.
+// A read the command cannot make prints `UNKNOWN: <what>`. Locally the exit stays 0. With env CI set it is 1 (decision ci-unknown-is-red).
 // The check list is the keys of `mapChecks`: one list, so a check added there runs here. Building the bodies runs none.
 
-/** Runs every check of `mapChecks` in `root`. Returns the lines to print and whether any check failed. */
+/** Runs every check of `mapChecks` in `root`. Returns the lines to print, whether any check failed, and whether a read was unknown. */
 export const runMapChecks = (root) => {
   let cfg, bad = null;
   try { cfg = loadMapConfig(path.join(root, 'map.config.json'), root); } catch (e) { bad = e; }
@@ -1446,9 +1447,12 @@ export const runMapChecks = (root) => {
   let listed = null;
   const bodies = mapChecks({ cfg: cfg ?? {}, root, read, files: () => (listed ??= gitLsFiles(root)) });
   const lines = [];
-  let failed = false;
-  // A note is no verdict: it carries no check id.
-  if (cfg?.modelSeam && !boundSeamReader()) lines.push('[NOTE] no model-call reader is bound here, so the check that a file calls a model through "modelSeam.file" did not run');
+  let failed = false, unknown = false;
+  // An UNKNOWN line is no verdict: it carries no check id.
+  if (cfg?.modelSeam && !boundSeamReader()) {
+    unknown = true;
+    lines.push('UNKNOWN: no model-call reader is bound here, so the check that a file calls a model through "modelSeam.file" did not run');
+  }
   for (const id of Object.keys(bodies)) {
     let verdict = 'PASS', text = '';
     try {
@@ -1466,7 +1470,7 @@ export const runMapChecks = (root) => {
     if (verdict === 'FAIL') failed = true;
     lines.push(`[${verdict}] ${id}${text ? ` ${text.replace(/\s*\n\s*/g, ' ')}` : ''}`);
   }
-  return { lines, failed };
+  return { lines, failed, unknown };
 };
 
 // `realpathSync` on both sides: a run through a junction or symlink to the skill folder must still match.
@@ -1475,7 +1479,7 @@ const isMain = () => {
   try { return !!process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(path.resolve(process.argv[1])); } catch (e) { if (e.code === 'ENOENT') return false; throw e; }
 };
 if (isMain()) {
-  const { lines, failed } = runMapChecks(process.cwd());
+  const { lines, failed, unknown } = runMapChecks(process.cwd());
   console.log(lines.join('\n'));
-  process.exitCode = failed ? 1 : 0;
+  process.exitCode = failed || (unknown && process.env.CI) ? 1 : 0;
 }
