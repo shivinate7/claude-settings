@@ -72,7 +72,7 @@ COUNT_OPENS_CODE = (
     "sys.argv = sys.argv[1:2]\n"
     "runpy.run_path(sys.argv[0], run_name='__main__')\n"
 )
-BASE_OPENS = 3  # the transcript opens one plain Stop makes on the base commit d23c7bc94, measured with COUNT_OPENS_CODE
+BASE_OPENS = 3  # a plain Stop opens the transcript three times: the main record load, and one in each of the two last_reply calls, since the hook carries no reply text
 _IDS = itertools.count(1)
 
 
@@ -398,10 +398,10 @@ class TriageHoldTests(StalledFixture, unittest.TestCase):
 
     def test_st_red_a_non_triage_stop_opens_the_transcript_no_more_than_the_base(self):
         # Catches: the hold adds a transcript open to every Stop, even in a session with no triage record and no build
-        # run. The base commit opens the transcript BASE_OPENS times on this Stop, so the hold may add none.
+        # run. A plain Stop opens the transcript BASE_OPENS times, so the hold may add none.
         records = [human("wake"), assistant_text("Build read.")]
         opens = self.transcript_opens(records, env_id=None)
-        self.assertLessEqual(opens, BASE_OPENS, "the Stop opened its transcript %d times; the base commit opens it "
+        self.assertLessEqual(opens, BASE_OPENS, "the Stop opened its transcript %d times; a plain Stop opens it "
                                                 "%d times, and a non-triage Stop may add none" % (opens, BASE_OPENS))
 
 
