@@ -29,6 +29,7 @@ TEMP FILES. One run folder per run (lint/_test_temp.py, the one home of the stan
 folders sit under it, and it is removed at exit.
 """
 import atexit
+import importlib.util
 import json
 import os
 import shlex
@@ -36,6 +37,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tracemalloc
 import unittest
 import uuid
 
@@ -125,6 +127,14 @@ def json_error(t, text):
     except json.JSONDecodeError as error:
         return error.lineno, error.colno
     t.fail("scope: the text is valid JSON, so it has no error position")
+
+
+def load_hook():
+    """The hook module under test, loaded in this process (STATE_PARSE_CHECK_UNDER_TEST names another copy)."""
+    spec = importlib.util.spec_from_file_location("state_parse_check_under_test", HOOK)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def edit_on_disk(t, path, old, new):
@@ -341,6 +351,67 @@ class EmptyNewString(unittest.TestCase):
                      line=line, column=column, home=home)
 
 
+class RepeatedNewString(unittest.TestCase):
+    """Case 2, an Edit whose new_string occurs more than once. Each occurrence gives one candidate
+    before-state, and the fault is the call's only when every candidate was fine before it (decision
+    state-file-parse-check: silent only when every candidate was already broken)."""
+
+    def test_edit_whose_new_string_repeats_is_named_when_one_place_was_valid(self):
+        home = Home()
+        path = os.path.join(home.work, "state.json")
+        before = '{\n  "first": {"enabled": true},\n  "second": {"enabled": true}\n}\n'
+        write(path, before)
+        json.loads(before)
+        old, new = '"enabled": true}\n}', '"enabled": true'
+        self.assertEqual(before.count(new), 2, "scope: new_string must repeat in the file")
+        edit_on_disk(self, path, old, new)
+        line, column = json_error(self, read_text(path))
+        rc, ctx = home.hook("Edit", {"file_path": path, "old_string": old, "new_string": new})
+        assert_named(self, rc, ctx, "an Edit whose new_string repeats, where one place was valid",
+                     "state.json", line=line, column=column, home=home)
+
+    def test_edit_whose_new_string_repeats_is_silent_when_every_place_was_broken(self):
+        home = Home()
+        path = os.path.join(home.work, "state.json")
+        before = '{\n  "version": 1,,\n  "first": {"enabled": true},\n  "second": {"enabled": true}\n}\n'
+        write(path, before)
+        json_error(self, before)  # scope: broken in a place no candidate touches
+        old, new = '"enabled": true}\n}', '"enabled": true'
+        self.assertEqual(before.count(new), 2, "scope: new_string must repeat in the file")
+        edit_on_disk(self, path, old, new)
+        after = read_text(path)
+        json_error(self, after)  # scope: still broken after the edit
+        rc, ctx = home.hook("Edit", {"file_path": path, "old_string": old, "new_string": new})
+        assert_silent(self, ctx, "an Edit whose new_string repeats, on a file broken where no candidate fixes")
+        line, column = json_error(self, after)
+        rc, ctx = home.write_hook(path, after)
+        assert_named(self, rc, ctx, "the same broken file written in a Write", "state.json",
+                     line=line, column=column, home=home)
+
+
+class CandidateCap(unittest.TestCase):
+    """The cap comes before the build: the record says the check caps the work (places times file size)
+    before it builds any candidate. An Edit that only removed text, on a 1 MB file past the work cap,
+    must build no candidate. tracemalloc counts allocations on every platform, so no timer is read."""
+
+    def test_removal_past_the_work_cap_builds_no_candidate(self):
+        hook = load_hook()
+        lines = ["line %05d %s" % (i, "x" * 9990) for i in range(100)]
+        after = "\n".join(lines) + "\n"
+        cap = getattr(hook, "MAX_WORK", 60_000_000)
+        self.assertGreater(after.count("\n") * len(after), cap, "scope: the file is past the work cap")
+        edit = {"file_path": "state.json", "old_string": "line 00050 ", "new_string": ""}
+        tracemalloc.start()
+        try:
+            states, _ = hook.before_states("Edit", edit, after)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(states, [], "the rebuild returned %d candidates past the cap" % len(states))
+        self.assertLess(peak, 8 * 1024 * 1024,
+                        "the rebuild allocated %d bytes of candidates before the cap stopped it" % peak)
+
+
 class WriteAndDeleted(unittest.TestCase):
     """Case 3: a Write judged as written, and a state file that was deleted."""
 
@@ -420,14 +491,31 @@ class BashWrites(unittest.TestCase):
         assert_named(self, rc, ctx, "sed -i in a write position", "bad.json", home=home)
 
     @SHELL_ONLY
-    def test_read_of_a_broken_state_file_is_named(self):
-        # Spec reading: a state-file path counts in any position, so a cat of settings.json counts.
+    def test_read_of_a_broken_state_file_is_silent_and_a_write_to_it_is_named(self):
+        # A read changes nothing, so a read is not judged: an alarm on each read would repeat until the file
+        # is fixed (decision state-file-parse-check, Bash judges write positions only). The write twins keep
+        # the named side for the same files.
         home = Home()
         settings = os.path.join(home.cfg, "settings.json")
         write(settings, '{"a": 1,}\n')
+        json_error(self, read_text(settings))  # scope: broken
         self.assertEqual(home.sh("cat " + shlex.quote(settings)), 0, "scope: the cat must run")
         rc, ctx = home.hook("Bash", {"command": "cat " + shlex.quote(settings)})
-        assert_named(self, rc, ctx, "a cat of a broken settings.json", "settings.json", home=home)
+        assert_silent(self, ctx, "a cat of a broken settings.json")
+        self.assertEqual(home.sh("printf 'x' >> " + shlex.quote(settings)), 0, "scope: the append must run")
+        rc, ctx = home.hook("Bash", {"command": "printf 'x' >> " + shlex.quote(settings)})
+        assert_named(self, rc, ctx, "an append to the same settings.json", "settings.json", home=home)
+
+    @SHELL_ONLY
+    def test_read_of_an_inbox_with_a_fence_open_is_silent_and_a_write_to_it_is_named(self):
+        home = Home()
+        write(home.inbox, HEAD_1 + "\n````\nowner text, the fence is still open\n")
+        self.assertEqual(home.sh("cat " + shlex.quote(home.inbox)), 0, "scope: the cat must run")
+        rc, ctx = home.hook("Bash", {"command": "cat " + shlex.quote(home.inbox)})
+        assert_silent(self, ctx, "a cat of an inbox with a fence left open")
+        self.assertEqual(home.sh("printf 'x\\n' >> " + shlex.quote(home.inbox)), 0, "scope: the append must run")
+        rc, ctx = home.hook("Bash", {"command": "printf 'x\\n' >> " + shlex.quote(home.inbox)})
+        assert_named(self, rc, ctx, "an append to the same inbox", SID + ".inbox.md", line=2, home=home)
 
 
 class ScannerTraps(unittest.TestCase):
@@ -587,6 +675,49 @@ class RunFolderSweep(unittest.TestCase):
         self.assertFalse(os.path.exists(old), "the sweep kept a sibling run folder over a day old")
         self.assertTrue(os.path.isdir(fresh), "the sweep removed a sibling run folder under a day old")
         self.assertTrue(os.path.isdir(own), "the sweep removed the run's own folder")
+
+
+class FenceFunctions(unittest.TestCase):
+    """feedback_guard.unfenced() and is_grant() keep their main results. The handoff rule of this check
+    shares the fence loop with them (decision state-file-parse-check), so the pins sit beside the check's
+    cases. Main reads a fence at any indent, a tab included, so the text inside it is hidden."""
+
+    @staticmethod
+    def fg():
+        import feedback_guard  # the one home of the fence loops, loaded from hooks/
+        return feedback_guard
+
+    def test_unfenced_hides_the_text_of_a_four_space_indented_fence(self):
+        text = "kept before\n    ```\nhidden grant text\n    ```\nkept after"
+        self.assertEqual(self.fg().unfenced(text), "kept before\nkept after",
+                         "unfenced() kept the text of a four-space-indented fence")
+
+    def test_unfenced_hides_the_text_of_a_tab_indented_fence(self):
+        text = "kept before\n\t```\nhidden grant text\n\t```\nkept after"
+        self.assertEqual(self.fg().unfenced(text), "kept before\nkept after",
+                         "unfenced() kept the text of a tab-indented fence")
+
+    def test_unfenced_hides_the_text_of_a_fence_indented_three_spaces(self):
+        text = "kept before\n   ```\nhidden grant text\n   ```\nkept after"
+        self.assertEqual(self.fg().unfenced(text), "kept before\nkept after",
+                         "unfenced() kept the text of a three-space-indented fence")
+
+    def test_unfenced_runs_an_unclosed_fence_to_the_end(self):
+        self.assertEqual(self.fg().unfenced("kept\n```\nhidden"), "kept",
+                         "unfenced() kept text after an unclosed fence")
+
+    def test_is_grant_ignores_grant_words_inside_a_four_space_fence(self):
+        text = "    ```\nI approved the merge\n    ```"
+        self.assertFalse(self.fg().is_grant(text), "is_grant() read a grant inside a four-space fence")
+
+    def test_is_grant_ignores_grant_words_inside_a_tab_fence(self):
+        text = "\t```\nI approved the merge\n\t```"
+        self.assertFalse(self.fg().is_grant(text), "is_grant() read a grant inside a tab-indented fence")
+
+    def test_is_grant_still_reads_a_grant_in_plain_text_and_ignores_a_fenced_one(self):
+        self.assertTrue(self.fg().is_grant("I approved the merge"), "is_grant() missed a plain grant")
+        self.assertFalse(self.fg().is_grant("```\nI approved the merge\n```"),
+                         "is_grant() read a grant inside a plain fence")
 
 
 if __name__ == "__main__":
