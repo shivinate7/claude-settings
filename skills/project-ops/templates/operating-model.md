@@ -116,7 +116,7 @@ parent, or miss a message while busy.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.
   A turn that ends waiting on a named event sets a one-time check-in for that event. A check-in's own turn sets none unless a new event arrived.
-- A check-in's message names the home of each list it tracks (a page collection, a roadmap ref, a git
+- A check-in's message names the home of each list it reads (a page collection, a roadmap ref, a git
   ref or a GitHub query), never a copy.
 
 ## Filing
