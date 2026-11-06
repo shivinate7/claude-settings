@@ -12579,11 +12579,10 @@ add("test-author: Edit of janitor/mutate_sweep.py is allowed", "allow", tool="Ed
 add("test-author: Edit of HOOKS/mutate_guard.py is allowed (case folds)", "allow", tool="Edit",
     file_path="HOOKS/mutate_guard.py", **A)
 
-# ---- workflow test-run steps (incident: PR #1287, the waiting-export Stop check, commit fbcc93c: a
-# test-author could not add its test step to checks.yml). A test-author changes a workflow only by adding,
-# removing or moving whole test-run steps. A builder changes any workflow line, except one that disables
-# tests in a test-runner line. Each author row and its builder row share one old and one new text, so the
-# two roles judge the same edit. An Edit is judged by old_string against new_string, never by new_string alone.
+# ---- workflow test-run steps. A test-author may add or remove a whole test-run step in a workflow; nothing else there.
+# A builder may change any workflow line, except one that disables tests in a test-runner line. Each author row and
+# its builder row share one old and one new text, so the two roles judge the same edit. An Edit is judged by
+# old_string against new_string, never by new_string alone.
 WF = ".github/workflows/checks.yml"
 WF_YAML = ".github/workflows/checks.yaml"
 LINT = "      - name: Lint\n        run: python3 lint/ste_lint.py\n"
