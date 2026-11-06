@@ -201,21 +201,29 @@ After each build the roadmap build script prints the upkeep list for the triage 
   `<id> (<date as written>)`. Triage asks for a
   re-check of that claim on main before a lane starts. The row reads the notes only, so it needs no
   `--live` file;
-- lanes to archive, in the row `lanes to archive`. A session is listed only when all of these hold: its
-  tags hold `cs-build:lane` and this repo's `cs-repo:` tag, its status is not archived, its
-  `status_bucket` is `completed` or `review_ready` (blocked, failed, working or missing is never listed),
-  and it has at least one `cs-step:` tag with every one of them landed (a `Step:` trailer on main, or
-  status `done`). A step id not on the record branch reads the lane `unknown (step <id> not on the record
-  branch; lane <session id>)`. An open pull whose `branch` is the step slug or `lane/<slug>` holds the
-  lane, unless the pull is a draft whose `head` sha is already in the default branch
-  (`git merge-base --is-ancestor`; a failed git read counts as not landed). A ready pull always holds
-  it. An item whose `status` is not `answered` or `closed` and whose `lane` is one of the lane's steps
-  holds it. A live file with no `items` list holds no lane, and a wrong-shaped `items` row makes the row
-  unknown. Each entry reads `<session id> (<steps>; topic <cs-topic or ->)`, sorted. The row reads one
-  `unknown (<why>)` entry, never an empty list, when `--live` is missing or unreadable, `readAt` is bad,
-  over 60 minutes old or in the future, there is no `sessions` list, a session or pull row has the wrong
-  shape, or the repo's GitHub name cannot be read. `merge --idle-lanes --live FILE` prints the same list
-  for the batch runner, one line per lane and then a summary line;
+- lanes to archive, in the row `lanes to archive`. A session is listed when all of these hold:
+  - its tags hold `cs-build:lane` and this repo's `cs-repo:` tag, and its status is not archived;
+  - its `status_bucket` is `completed` or `review_ready`. A lane that is blocked, failed, working or
+    has no bucket is never listed;
+  - it has at least one `cs-step:` tag, and each step it names has landed. A step has landed when a
+    `Step:` trailer is on main, or its status is `done`;
+  - no open pull holds it. A pull holds a lane when its `branch` is a step slug or `lane/<slug>`. A
+    draft pull whose `head` sha is already in the default branch (`git merge-base --is-ancestor`)
+    releases the lane. A ready pull always holds it. A failed git read reads as not landed;
+  - no open page item holds it. An item holds a lane when its `lane` is one of the lane's steps and
+    its `status` is neither `answered` nor `closed`.
+
+  A step id that is not on the record branch reads the lane `unknown (step <id> not on the record
+  branch; lane <session id>)`. A live file with no `items` list holds no lane. An `items` row with the
+  wrong shape makes the row unknown. Each entry reads `<session id> (<steps>; topic <cs-topic or ->)`,
+  sorted. The row reads one `unknown (<why>)` entry, never an empty list, when:
+  - `--live` is missing or unreadable;
+  - `readAt` is bad, over 60 minutes old or in the future;
+  - there is no `sessions` list, or a session or pull row has the wrong shape;
+  - the repo's GitHub name cannot be read.
+
+  `merge --idle-lanes --live FILE` prints the same list for the batch runner: one line per lane, then
+  a summary line;
 - `Step:` trailers that name no step.
 
 ## Cost
