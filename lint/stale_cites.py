@@ -501,6 +501,7 @@ MENTION = re.compile(r'"[^"]*"|\u201c[^\u201d]*\u201d|(?<![\w./@+~-])(?:[\w.@+~-
 HEADING_OR_QUOTE = re.compile(r"^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>)")
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
 PAREN_GROUP = re.compile(r"\(([^()]*)\)")
+TABLE_ROW = re.compile(r"^[ \t]{0,3}\|")
 LIST_ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
 # A sentence ends at . ! or ? before a space or the end. "e.g.", "i.e.", "vs." and "cf." end none, so a paren group
 # such as "(e.g. read hooks/x.py:2)" stays in one sentence.
@@ -623,10 +624,15 @@ def blanked(text):
 
 def paragraphs(rows, fenced):
     """[(first row number, [rows])]: the runs of prose rows. A blank row, a heading, a quote row, a fenced row and a
-    list item each end a run; a list item also starts the next, so a code span never pairs across two items."""
+    list item each end a run; a list item also starts the next, so a code span never pairs across two items.
+    A table row (a line starting with `|`) is a run of its own, so no quote or sentence runs across rows."""
     found, current = [], None
     for number, row in enumerate(rows, 1):
         if number in fenced or not row.strip() or HEADING_OR_QUOTE.match(row):
+            current = None
+            continue
+        if TABLE_ROW.match(row):
+            found.append((number, [row]))
             current = None
             continue
         if current is None or LIST_ITEM.match(row):
