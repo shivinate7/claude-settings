@@ -1613,7 +1613,6 @@ BUILDER_ROLE = "builder"
 AUTHOR_ROLE = "test-author"
 WRITER_ROLE = "record-writer"
 DESIGNER_ROLE = "designer"
-REFUTER_ROLE = "refuter"   # the agent that argues back (decision plan-refuter)
 
 
 def agent_role(payload) -> str:
