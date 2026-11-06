@@ -1,4 +1,4 @@
-# A plan gets a challenger
+# A plan gets a refuter
 
 ## The ruling
 
@@ -6,8 +6,8 @@ Owner, 2026-11-06 12:43 CST, waiting-page item 279, pick d. Audit finding: the r
 "against the brief you were given" (`agents/reviewer.md`), so a wrong plan passes every review round.
 Nothing argued back against a Plan agent.
 
-- After a Plan agent returns, the orchestrator spawns one challenger (`agents/challenger.md`). The
-  challenger is a read-only agent on Opus.
+- After a Plan agent returns, the orchestrator spawns one refuter (`agents/refuter.md`). The
+  refuter is a read-only agent on Opus.
 - Its brief holds the task brief the planner got and the plan the planner returned, word for word,
   and nothing else. It never holds the planner's reasoning or the orchestrator's view.
 - It tries to refute the plan's premises (`premise-format`) and to find a simpler route. It gives one
@@ -20,30 +20,29 @@ Nothing argued back against a Plan agent.
 
 ## Mechanism
 
-- Role file: `agents/challenger.md`.
-- Rule line: `roles-plan-gets-challenger` in `CLAUDE.md`. The role is also in the role list of
+- Role file: `agents/refuter.md`.
+- Rule line: `roles-plan-gets-refuter` in `CLAUDE.md`. The role is also in the role list of
   `roles-one-role-per-agent` and the Opus list of `roles-sonnet-is-the-ceiling`.
-- Model: the challenger row of decision `agent-model-cap`, the model-per-role table.
-- Guard: the Opus spawn guard (`hooks/guard.py`, the standing Opus roles) lets a challenger spawn on Opus.
-  The role name has one home in code, `CHALLENGER_ROLE` in `hooks/guard_core.py`.
+- Model: the refuter row of decision `agent-model-cap`, the model-per-role table.
+- Guard: the Opus spawn guard (`hooks/guard.py`, the standing Opus roles) lets a refuter spawn on Opus.
+  The role name has one home in code, `REFUTER_ROLE` in `hooks/guard_core.py`.
 - Check: `lint/check_plan_critic.py` (decision `plan-needs-critic`) fails a plan record with no
   `Critic:` line.
 
 ## Term
 
-"Challenger" holds the place of the word the owner picks in step `debate-glossary-word` (one word for
-the agent that argues back). The pick is a rename of each site this record names, plus its
-`GLOSSARY.md` row.
+Owner, 2026-11-06, waiting-page item 282, pick b (step `debate-glossary-word`, one word for the agent
+that argues back): the word is "refuter".
 
 ## Known gaps
 
 - The check sees only plan records added in the plans home. Most Plan agent output never becomes a
   record. The rule line covers those, by instruction only.
-- Blindness is by instruction only: the agent file and the rule line. No hook reads the challenger's
+- Blindness is by instruction only: the agent file and the rule line. No hook reads the refuter's
   brief. Unmeasured.
 - The `Critic:` line accepts any role today, so an orchestrator's own read passes the check.
   Coordinator, 2026-11-06 12:56 CST, pick a: lane step-done-needs-check lands after this one and makes
-  the check require the role in `CHALLENGER_ROLE`.
+  the check require the role in `REFUTER_ROLE`.
 
 ## Why
 
@@ -56,9 +55,9 @@ One Opus call per plan, at high effort. No file, timer, process or log.
 
 ## Done check
 
-`hooks/test_guard.py` and `hooks/test_agent_brief.py` hold the challenger cases, red on the old code.
-A challenger on Opus is allowed. A reviewer on Opus is still refused. The agent brief treats the
-challenger as read-only.
+`hooks/test_guard.py` and `hooks/test_agent_brief.py` hold the refuter cases, red on the old code.
+A refuter on Opus is allowed. A reviewer on Opus is still refused. The agent brief treats the
+refuter as read-only.
 
 Kind: process
-Home: rule:roles-plan-gets-challenger
+Home: rule:roles-plan-gets-refuter

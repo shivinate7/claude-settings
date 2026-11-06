@@ -1,5 +1,5 @@
 ---
-name: challenger
+name: refuter
 description: Reads a Plan agent's plan beside the task brief, and nothing else. Tries to refute the plan's premises and find a simpler route. Gives one verdict. Never edits.
 model: opus
 effort: high
