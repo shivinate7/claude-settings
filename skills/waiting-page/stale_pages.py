@@ -409,7 +409,9 @@ def load_items(path):
     for a folder without the marker the session leaves after the last list page, since a stopped fetch may lack items. Raises ValueError with the cause."""
     from export_page import MARKER, Stop, docs_in, load_json  # lazy: only --items reads a folder
     try:
-        data = list(docs_in(path, path).values()) if os.path.isdir(path) else load_json(path, path)
+        # In a folder the entry key is the item's id; an `id` field is ignored, so the key stands in for it.
+        data = ([{**doc, "id": key} if isinstance(doc, dict) else doc for key, doc in docs_in(path, path).items()]
+                if os.path.isdir(path) else load_json(path, path))
     except Stop as err:
         raise ValueError(str(err))
     except OSError as err:

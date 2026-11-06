@@ -3821,7 +3821,7 @@ def page_design_hit(writes, tool_input, cwd):
                        % (PAGE_ITEM_DESIGN_BATCH_SECONDS, len(pictured) - done))
                 return None
             try:
-                code, text = _run_check_designs(page_file, dict(data, id=data.get("id") or doc_id or "item"))
+                code, text = _run_check_designs(page_file, dict(data, id=doc_id or data.get("id") or "item"))
             except Exception as err:
                 code, text = 3, type(err).__name__ + ": " + str(err)
             if code == 1:
