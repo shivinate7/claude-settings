@@ -1605,7 +1605,7 @@ class TreeTests(StaleCase):
 
 ROUTE_ROWS = "hooks/route_rows.json"  # a route id is a row of this file at head
 PREMISE_HOME = os.path.join(ROOT, "hooks", "precompact_handoff.py")  # PREMISE_KINDS is read here, never copied
-FIXTURE = os.path.join(HERE, "testdata", "route_claims_labelled.json")
+FIXTURE = os.path.join(HERE, "route_claims_labelled.json")
 LABELS = ("STALE", "PARTLY_STALE", "HALF", "TRUE", "HISTORY", "UNKNOWN")
 
 
