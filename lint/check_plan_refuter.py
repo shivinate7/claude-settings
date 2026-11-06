@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""Fails when a plan record that a range adds carries no `Critic:` line. Stdlib and git only.
+"""Fails when a plan record that a range adds carries no `Refuter:` line. Stdlib and git only.
 
-    python3 lint/check_plan_critic.py --base <sha> [--root <dir>]
+    python3 lint/check_plan_refuter.py --base <sha> [--root <dir>]
         # the base is env BASE_SHA when no flag is given; the repo is the current directory unless --root names one
 
-A plan is critiqued before a lane builds it. The critic records its verdict on one line of the plan:
+A plan is refuted before a lane builds it. The refuter records its verdict on one line of the plan:
 
-    Critic: <role and model>, <date>, <verdict>         or the same line wrapped as **Critic:** <text>
+    Refuter: <role and model>, <date>, <verdict>         or the same line wrapped as **Refuter:** <text>
 
 The check lists the files that base...HEAD adds, and judges each one that sits directly in the plans home and is
 named <name>.md. The plans home is the "plans" kind that lint/layout.py gives for the repo it reads (the one home:
 a rolled-out repo reads lint/layout.json, an unrolled repo its legacy path). A plan in a subfolder of the home, a
 file that is not .md, and a plan that the range only modifies are not judged. The check reads each plan as it stands
 at HEAD, so a line added later in the range counts, and a line removed again does not. The line must start at column
-one, hold text after the colon on the same line, and sit outside a fenced code block (``` or ~~~, closed by a fence
-of the same mark that is as long as the opener).
+one, hold a word character after the colon (and any `**`) on the same line, with a <...> placeholder not counted as
+text, and sit outside a fenced code block (``` or ~~~, closed by a fence of the same mark that is as long as the
+opener). A line that starts with the retired word does not count.
 
 Cost: two git processes to read the range, one more per judged plan. No file, timer or log is written.
 
@@ -30,7 +31,9 @@ sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import layout  # noqa: E402  the one home of the plans kind (lint/layout.py)
 
-CRITIC = re.compile(r"(?:\*\*Critic:\*\*|Critic:)[ \t]*\S")
+REFUTER = re.compile(r"(?:\*\*Refuter:\*\*|Refuter:)(.*)")
+PLACEHOLDER = re.compile(r"<[^<>]*>")
+WORD = re.compile(r"\w")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 
@@ -39,14 +42,17 @@ class Unknown(Exception):
 
 
 def git(root, *args):
-    r = _nowindow.run(["git", *args], cwd=root, capture_output=True, encoding="utf-8", errors="replace")
+    try:
+        r = _nowindow.run(["git", *args], cwd=root, capture_output=True, encoding="utf-8", errors="replace")
+    except OSError as err:  # a --root that names no folder
+        raise Unknown("git %s could not start in %s: %s" % (args[0], root, err)) from err
     if r.returncode:
         raise Unknown("git %s failed: %s" % (args[0], r.stderr.strip()))
     return r.stdout
 
 
-def has_critic(text):
-    """True when a line outside every fenced block is a Critic line with text after the colon."""
+def has_refuter(text):
+    """True when a line outside every fenced block is a Refuter line with a word after the colon."""
     fence = None  # the opening run of the fence we are inside, or None
     for line in text.splitlines():
         mark = FENCE.match(line)
@@ -54,7 +60,8 @@ def has_critic(text):
             if mark:
                 fence = mark.group(1)
                 continue
-            if CRITIC.match(line):
+            found = REFUTER.match(line)
+            if found and WORD.search(PLACEHOLDER.sub("", found.group(1))):
                 return True
         elif mark and mark.group(1)[0] == fence[0] and len(mark.group(1)) >= len(fence) and not line.strip().strip(fence[0]):
             fence = None
@@ -75,9 +82,9 @@ def added_plans(root, base):
 
 
 def gaps(root, base):
-    """One line per added plan with no Critic line. Raises Unknown when a read fails."""
-    return ["check_plan_critic: FAIL: %s adds a plan with no `Critic:` line" % path
-            for path in added_plans(root, base) if not has_critic(git(root, "show", "HEAD:" + path))]
+    """One line per added plan with no Refuter line. Raises Unknown when a read fails."""
+    return ["check_plan_refuter: FAIL: %s adds a plan with no `Refuter:` line" % path
+            for path in added_plans(root, base) if not has_refuter(git(root, "show", "HEAD:" + path))]
 
 
 def main(args):
@@ -86,24 +93,24 @@ def main(args):
     while rest:
         flag = rest.pop(0)
         if flag not in ("--base", "--root") or not rest:
-            print("check_plan_critic: FAIL: usage: check_plan_critic.py --base <sha> [--root <dir>]")
+            print("check_plan_refuter: FAIL: usage: check_plan_refuter.py --base <sha> [--root <dir>]")
             return 1
         if flag == "--base":
             base = rest.pop(0)
         else:
             root = rest.pop(0)
     if not base:
-        print("check_plan_critic: UNKNOWN, no base: pass --base <sha> or set BASE_SHA")
+        print("check_plan_refuter: UNKNOWN, no base: pass --base <sha> or set BASE_SHA")
         return 2
     try:
         bad = gaps(root, base)
     except Unknown as err:
-        print("check_plan_critic: UNKNOWN, " + str(err))
+        print("check_plan_refuter: UNKNOWN, " + str(err))
         return 2
     for line in bad:
         print(line)
     if bad:
-        print("check_plan_critic: have a critic read each plan above, then add a line `Critic: <role and model>, "
+        print("check_plan_refuter: have a refuter read each plan above, then add a line `Refuter: <role and model>, "
               "<date>, <verdict>` at line start, outside any code block, and push.")
     return 1 if bad else 0
 
