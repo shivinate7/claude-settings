@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""The ruling-skip check: a Done item that says it acted under a ruling must cite that ruling.
+"""The ruling-skip check: a Done item that says it picked under a ruling must cite that ruling.
 
-A Done item claims a ruling skip when it reads "under ruling" or "under the owner's ruling". Its cite is
-`under ruling <ref> (<stamp>)`. The ref is `item <N> <key>`, an answer on the owner's waiting page, read from the
-roadmap branch, or a decision id, read from docs/decisions/<id>.md. The stamp is `YYYY-MM-DD HH:MM CST|CDT` or
-`HH:MM CST|CDT`.
+A Done item makes a pick claim when it has a pick word (took, picked, chose, pick, skipped asking, did not ask)
+and a ruling cue (the word ruling or rulings). Its cite is `under ruling <ref> (<stamp>)`. The ref is
+`item <N> <key>`, an answer on the owner's waiting page, read from the roadmap branch, or a decision id, read from
+docs/decisions/<id>.md. The stamp is `YYYY-MM-DD HH:MM CST|CDT` or `HH:MM CST|CDT`.
 
 A claim with no ref or no stamp, or a ref that does not resolve, refuses with no model call. A resolved cite costs
 one model call. The call sees only the ruling texts and the Done acts, and the claims pass only when the model says
-every ruling names its act. A model error or an odd answer refuses. A reply with no such Done item makes no model
-call and no git read. The refusing rule is `ruling-skip-check`.
+every ruling names its act. A model error, a timeout or an odd answer refuses. The two model calls of one Stop share
+the Stop hook's time. A reply with no pick claim makes no model call and no git read. The refusing rule is
+`ruling-skip-check`.
 
 The fixture, the transcript helpers, the run folder and the model stub come from lint/test_report_guard.py and
 hooks/test_call_judge.py, the one homes. Run with:
@@ -54,6 +55,14 @@ LONG_SLUG = "long-record"
 LONG_HEAD = "Ruling (owner, 2026-10-28): the record runs long. "
 LONG_TAIL = "TAILMARK-9c1e"
 LONG_RULING = LONG_HEAD + "Filler about the ruling. " * 700 + LONG_TAIL  # about 17,500 characters
+# A record whose ruling bullet sits past byte 6000 but within 6000 characters: the cap is in bytes.
+LONG_MB_SLUG = "long-multibyte"
+LONG_MB_MARK = "BYTEMARK-2b8c"
+LONG_MB_RULING = "Ruling (owner, 2026-10-28): the bullets follow.\n" + "é" * 3500 + "\n- " + LONG_MB_MARK + ": keep the apps' access as is.\n"
+# An ASCII record whose bullet sits past byte 6000 and past 6000 characters: the head cap already leaves it out.
+LONG_ASCII_SLUG = "long-ascii"
+LONG_ASCII_MARK = "ASCIIMARK-5e9d"
+LONG_ASCII_RULING = "Ruling (owner, 2026-10-28): the bullets follow.\n" + "x" * 6100 + "\n- " + LONG_ASCII_MARK + ": keep the apps' access as is.\n"
 
 CONFIRM = json.dumps({"ok": True, "reason": "item 284 b keeps the apps' access, which the Done item says it skipped"})
 REJECT = json.dumps({"ok": False, "reason": "the ruling keeps the apps' access; the Done item names a different pick"})
@@ -65,13 +74,43 @@ ITEMS = {
     "y": {"id": "y", "n": 285, "question": "Keep the apps' access for a quarter?", "options": OPTIONS},
 }
 ANSWERS = {"x": {"choice": "b", "note": ANSWER_NOTE}}  # w and y have no answer: the empty state
-RULING_REPO = tcj.make_repo("ruling", decisions={DECISION_SLUG: DECISION_RULING, LONG_SLUG: LONG_RULING},
-                            waiting={"items": ITEMS, "answers": ANSWERS})
+RULING_REPO = tcj.make_repo("ruling", decisions={
+    DECISION_SLUG: DECISION_RULING, LONG_SLUG: LONG_RULING, LONG_MB_SLUG: LONG_MB_RULING,
+    LONG_ASCII_SLUG: LONG_ASCII_RULING, tcj.APPS_SLUG: tcj.APPS_RULING}, waiting={"items": ITEMS, "answers": ANSWERS})
 NO_ROADMAP_REPO = tcj.make_repo("ruling-no-roadmap", decisions={DECISION_SLUG: DECISION_RULING})
+# The page closed item x: its answer file is gone, and the item keeps lastAnswer. Item s still has its answer file,
+# so the answers folder exists on the branch.
+FILED_ITEMS = {
+    "s": {"id": "s", "n": 280, "question": "Keep the caps?", "options": OPTIONS},
+    "x": {"id": "x", "n": 284, "question": "Keep the apps' access to claude-settings?", "options": OPTIONS,
+          "lastAnswer": {"choice": "b", "note": ANSWER_NOTE}},
+}
+FILED_ANSWERS = {"s": {"choice": "a", "note": "Remove the caps."}}
+FILED_REPO = tcj.make_repo("ruling-filed", waiting={"items": FILED_ITEMS, "answers": FILED_ANSWERS})
 
 TRIGGER_RE = re.compile(r"\bunder (?:the )?(?:owner'?s? )?ruling\b", re.I)
 STAMP_RE = re.compile(r"\b\d{1,2}:\d{2} (?:CST|CDT)\b")
 REMEDY_RE = re.compile(r"owner|waiting page|Input Needed|cite a ruling", re.I)
+PICK_WORD_RE = re.compile(r"\b(?:took|picked|chose|pick|skipped asking|did not ask)\b", re.I)
+CUE_RE = re.compile(r"\bruling", re.I)
+
+
+def stop_timeout():
+    """The Stop hook's timeout for report_guard, read from settings.json: the time all of the guard's work shares."""
+    with open(os.path.join(HERE, "..", "settings.json"), encoding="utf-8") as handle:
+        settings = json.load(handle)
+    for entry in settings["hooks"]["Stop"]:
+        for hook in entry.get("hooks", []):
+            if "report_guard.py" in hook.get("command", ""):
+                return hook["timeout"]
+    raise ValueError("settings.json has no Stop hook that runs report_guard.py")
+
+
+STOP_TIMEOUT = stop_timeout()
+
+
+def is_pick_claim(text):
+    return bool(PICK_WORD_RE.search(text) and CUE_RE.search(text))
 
 
 def cite(ref=ITEM_REF, stamp=STAMP):
@@ -87,6 +126,11 @@ def reply(*done_lines):
     return "\n".join([*done_lines, "> **Next** wait %s" % NEXT_MARK])
 
 
+def pick_and_question():
+    """A pick claim with a cite, and an Input Needed question the past-ruling check reads: two model calls in one Stop."""
+    return "\n".join([done(cite(ITEM_REF)), trg.RELAY, "> **Next** wait %s" % NEXT_MARK])
+
+
 def refused_by_rule(out):
     return out.get("decision") == "block" and RULE in out.get("reason", "")
 
@@ -100,8 +144,9 @@ def tearDownModule():
 
 
 class RulingSkipFixture(unittest.TestCase):
-    """Stop runs on a reply. The stub answers with CJ_ANSWER, fails with CJ_MODEL_FAIL, and records each model call
-    and each git process the guard starts. The stub's recording and reading are borrowed from PastRulingRelay."""
+    """Stop runs on a reply. The stub answers with CJ_ANSWER, fails with CJ_MODEL_FAIL, raises a timeout with
+    CJ_TIMEOUT_HIT, and records each model call (its prompt and timeout) and each git process the guard starts. The
+    stub's recording and reading are borrowed from PastRulingRelay."""
 
     model_calls = trg.PastRulingRelay.model_calls
     git_starts = trg.PastRulingRelay.git_starts
@@ -111,7 +156,7 @@ class RulingSkipFixture(unittest.TestCase):
         self.run_dir = tempfile.mkdtemp(dir=trg.RUN_FOLDER)  # the run folder, never the system temp dir
         self.record = os.path.join(trg._ISOLATION["stub"], "calls.jsonl")
 
-    def stop(self, reply_text, answer=tcj.ALLOW, model_fail=False, repo=None):
+    def stop(self, reply_text, answer=tcj.ALLOW, model_fail=False, repo=None, timeout_hit=False):
         self.reset_calls()
         path = trg.write_transcript([trg.human("decide"), trg.assistant_text(reply_text)], self.run_dir)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
@@ -119,6 +164,8 @@ class RulingSkipFixture(unittest.TestCase):
         overrides = {"CJ_ANSWER": answer}
         if model_fail:
             overrides["CJ_MODEL_FAIL"] = "1"
+        if timeout_hit:
+            overrides["CJ_TIMEOUT_HIT"] = "1"
         with mock.patch.dict(os.environ, overrides):
             run = trg.run_guard(trg.REPORT_GUARD, hook)
         self.assertEqual(run.returncode, 0, run.stderr)
@@ -206,20 +253,21 @@ class RulingSkipTests(RulingSkipFixture):
                 self.assert_refused(out, "%s: a ref that does not resolve passed" % label)
                 self.assertEqual(self.model_calls(), [], "%s: the model ran on a ref that does not resolve" % label)
 
-    def test_6_reply_without_a_ruling_claim_makes_no_call_and_no_git_read(self):
+    def test_6_reply_without_a_pick_claim_makes_no_call_and_no_git_read(self):
         for label, text in (
                 ("plain Done", "> **Done** BUILT abc123\n> **Next** wait %s" % NEXT_MARK),
                 ("cite only in Next", "> **Done** BUILT abc123\n> **Next** check under ruling %s (%s)" % (ITEM_REF, STAMP)),
-                ("under review", reply(done("read the apps' access under review"))),
-                ("per the ruling", reply(done(cite(ITEM_REF).replace("under ruling", "per the ruling")))),
-                ("rulings elsewhere", reply(done("read the rulings log")))):
+                ("under review", "> **Done** OTHER read the apps' access under review\n> **Next** wait %s" % NEXT_MARK),
+                ("per the ruling, no pick", "> **Done** OTHER read the apps' access per the ruling item 284 b (%s)\n"
+                                            "> **Next** wait %s" % (STAMP, NEXT_MARK)),
+                ("rulings elsewhere", "> **Done** OTHER read the rulings log\n> **Next** wait %s" % NEXT_MARK)):
             with self.subTest(claim=label):
                 done_lines = "\n".join(line for line in text.splitlines() if line.startswith("> **Done**"))
-                self.assertIsNone(TRIGGER_RE.search(done_lines), "%s: the scope is not a ruling-free Done item" % label)
+                self.assertFalse(is_pick_claim(done_lines), "%s: the scope is a pick claim" % label)
                 out = self.stop(text)
-                self.assertFalse(refused_by_rule(out), "%s: a reply with no ruling claim was refused by the check" % label)
-                self.assertEqual(self.model_calls(), [], "%s: the model ran with no ruling claim" % label)
-                self.assertEqual(self.git_starts(), 0, "%s: git was read with no ruling claim" % label)
+                self.assertFalse(refused_by_rule(out), "%s: a reply with no pick claim was refused by the check" % label)
+                self.assertEqual(self.model_calls(), [], "%s: the model ran with no pick claim" % label)
+                self.assertEqual(self.git_starts(), 0, "%s: git was read with no pick claim" % label)
 
     def test_7_refusal_text_names_no_marker_or_passing_line(self):
         scenarios = (
@@ -236,6 +284,69 @@ class RulingSkipTests(RulingSkipFixture):
                 self.assertIsNone(TRIGGER_RE.search(reason), "%s: the refusal names the trigger phrase" % label)
                 self.assertIsNone(STAMP_RE.search(reason), "%s: the refusal names a stamp, which would pass a cite" % label)
                 self.assertRegex(reason, REMEDY_RE, "%s: the refusal names no remedy" % label)
+
+    # Round 1 review: a filed ruling, false alarms, bypasses, one deadline, and the byte cap.
+
+    def test_r1_filed_ruling_resolves_from_its_last_answer(self):
+        # The page's Route-and-close deletes the answer file and keeps lastAnswer on the item.
+        out = self.stop(reply(done(cite(ITEM_REF))), answer=CONFIRM, repo=FILED_REPO)
+        self.assertNotEqual(out.get("decision"), "block", "a filed ruling with its lastAnswer was refused")
+        calls = self.model_calls()
+        self.assertEqual(len(calls), 1, "the filed ruling never reached the model: %d calls" % len(calls))
+        self.assertIn(PICKED_LABEL, calls[0]["prompt"], "the filed ruling's picked label is missing from the prompt")
+        self.assertIn(ANSWER_NOTE, calls[0]["prompt"], "the filed ruling's note is missing from the prompt")
+
+    def test_r1_key_outside_the_last_answer_is_refused_with_no_model_call(self):
+        out = self.stop(reply(done(cite("item 284 c"))), answer=CONFIRM, repo=FILED_REPO)
+        self.assert_refused(out, "a key not in the filed lastAnswer passed")
+        self.assertEqual(self.model_calls(), [], "the model ran on a key the filed answer does not name")
+
+    def test_r2_done_items_with_no_pick_make_no_call(self):
+        for label, line in (
+                ("a rewrite under the owner's ruling", "> **Done** RECORDED: rewrote X under the owner's ruling (PR #611)"),
+                ("a lane named for the rule", "> **Done** BUILT: under ruling-skip-check lane (PR #9)")):
+            with self.subTest(claim=label):
+                self.assertFalse(is_pick_claim(line), "%s: the scope is a pick claim" % label)
+                out = self.stop(reply(line))
+                self.assertFalse(refused_by_rule(out), "%s: a Done item with no pick was refused by the check" % label)
+                self.assertEqual(self.model_calls(), [], "%s: the model ran on a Done item with no pick" % label)
+
+    def test_r3_pick_claims_with_no_cite_are_refused_with_no_model_call(self):
+        for act in ("took pick a per the owner's ruling", "picked b under a ruling", "chose c per ruling",
+                    "took a under the owner's rulings", "skipped asking: the owner's ruling covers it"):
+            with self.subTest(claim=act):
+                self.assertTrue(is_pick_claim(act), "%s: the scope is not a pick claim" % act)
+                out = self.stop(reply("> **Done** OTHER " + act))
+                self.assert_refused(out, "%r: a pick claim with no cite passed" % act)
+                self.assertEqual(self.model_calls(), [], "%r: the model ran on a pick claim with no cite" % act)
+
+    def test_r4_one_deadline_caps_both_model_calls(self):
+        # The past-ruling check and the refuter share the Stop hook's time, which the guard's own work also spends.
+        out = self.stop(pick_and_question(), answer=tcj.ALLOW, repo=RULING_REPO)
+        calls = self.model_calls()
+        self.assertEqual(len(calls), 2, "the past-ruling check and the refuter made %d model calls, not two" % len(calls))
+        timeouts = [call.get("timeout") for call in calls]
+        self.assertTrue(all(isinstance(t, (int, float)) for t in timeouts), "a model call had no timeout: %r" % timeouts)
+        self.assertLess(sum(timeouts), STOP_TIMEOUT,
+                        "the two model calls may spend %s s, but the Stop hook has %s s for all its work"
+                        % (sum(timeouts), STOP_TIMEOUT))
+
+    def test_r4_a_deadline_hit_refuses_and_does_not_pass(self):
+        out = self.stop(pick_and_question(), answer=tcj.ALLOW, repo=RULING_REPO, timeout_hit=True)
+        self.assert_refused(out, "a model call that hit its deadline let the claim pass")
+
+    def test_r5_long_decision_record_is_capped_in_bytes(self):
+        for label, slug, record, mark in (
+                ("multibyte, mark past byte 6000", LONG_MB_SLUG, LONG_MB_RULING, LONG_MB_MARK),
+                ("ascii, mark past byte 6000", LONG_ASCII_SLUG, LONG_ASCII_RULING, LONG_ASCII_MARK)):
+            with self.subTest(record=label):
+                self.assertGreater(len(record.encode("utf-8")), 6000, "%s: the record is not over 6000 bytes" % label)
+                self.assertGreater(record.encode("utf-8").index(mark.encode("utf-8")), 6000,
+                                   "%s: the mark is not past byte 6000" % label)
+                self.stop(reply(done(cite(slug))), answer=CONFIRM, repo=RULING_REPO)
+                calls = self.model_calls()
+                self.assertEqual(len(calls), 1, "%s: the record was not judged: %d calls" % (label, len(calls)))
+                self.assertNotIn(mark, calls[0]["prompt"], "%s: the bullet past byte 6000 went into the prompt" % label)
 
 
 if __name__ == "__main__":
