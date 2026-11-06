@@ -430,7 +430,7 @@ def case_s8_stop_hook_active_does_not_block():
 
 
 def case_s9_sidechain_write_is_ignored():
-    """S1 with one change: the write is in a sidechain (a subagent's record)."""
+    """S1 with one change: the write is in a sidechain (an agent's record, not the main session's)."""
     records = [owner(at(18, 50))] + page_write(at(19), sidechain=True)
     expect_pass("S9", run_stop("s9", base_repo("s9"), records))
 
