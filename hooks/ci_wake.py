@@ -188,7 +188,6 @@ def lock_pr(pr, lock_dir):
     key = re.sub(r"[^A-Za-z0-9._-]+", "_", str(pr.get("url") or pr["number"]))
     os.makedirs(lock_dir, exist_ok=True)
     fd = os.open(os.path.join(lock_dir, key + ".lock"), os.O_CREAT | os.O_RDWR)
-    open(os.path.join(lock_dir, key + ".pid"), "w").close()  # SEED S1a: a second file per watch
     try:
         if os.name == "nt":
             import msvcrt
@@ -197,6 +196,7 @@ def lock_pr(pr, lock_dir):
             import fcntl
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
+        open(os.path.join(lock_dir, key + ".busy"), "w").close()  # SEED S1b: a file per refused watch
         os.close(fd)
         return False
     HELD.append(fd)
