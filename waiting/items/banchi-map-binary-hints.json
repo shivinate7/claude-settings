@@ -4,7 +4,7 @@
   "home": "banchi docs/debts notes; claude-settings skill plain-english-map",
   "id": "banchi-map-binary-hints",
   "kind": "decision",
-  "lane": "coordinator: shared map lists every file a decision or debt names; routed 13:12 CST",
+  "lane": "coordinator",
   "lastAnswer": {
     "at": "2026-11-06T19:08:48.782Z",
     "choice": "a",

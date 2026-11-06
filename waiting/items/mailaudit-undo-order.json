@@ -5,7 +5,7 @@
   "home": "mailaudit decision recent-checks-can-be-undone",
   "id": "mailaudit-undo-order",
   "kind": "decision",
-  "lane": "mailaudit-recent-log: builds a meanwhile (session_013NEJL44PzZ5EQbqb3wHYuB)",
+  "lane": "mailaudit-recent-log",
   "lastAnswer": {
     "at": "2026-11-06T21:24:48Z",
     "choice": "none",

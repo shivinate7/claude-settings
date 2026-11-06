@@ -4,7 +4,7 @@
   "home": "q_max .github/workflows/browser.yml; D-542, the browser tier runs on your dispatch",
   "id": "qmax-browser-tier-split",
   "kind": "decision",
-  "lane": "coordinator: q_max lanes qmax-browser-slow-checks (#1032) and qmax-browser-prod-build run in q_max; closes when q_max #1033 and #1032 merge",
+  "lane": "coordinator",
   "lastAnswer": {
     "at": "2026-11-06T05:18:48Z",
     "choice": "a",

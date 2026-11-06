@@ -5,7 +5,7 @@
   "home": "decision action-pins-follow-sessions",
   "id": "zizmor-pin-move",
   "kind": "decision",
-  "lane": "zizmor-pin-bump: the lane builds now; its merge waits on this answer",
+  "lane": "zizmor-pin-bump",
   "lastAnswer": {
     "at": "2026-11-06T21:24:48Z",
     "choice": "b",

@@ -5,7 +5,7 @@
   "home": "plan align-watchers Q6",
   "id": "watchers-load-definition",
   "kind": "decision",
-  "lane": "one-load-definition: the coordinator starts it",
+  "lane": "one-load-definition",
   "lastAnswer": {
     "at": "2026-11-06T21:24:48Z",
     "choice": "a",

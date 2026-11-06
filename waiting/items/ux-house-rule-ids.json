@@ -4,7 +4,7 @@
   "home": "ux-house-rules",
   "id": "ux-house-rule-ids",
   "kind": "decision",
-  "lane": "coordinator: add a, c, e, f, h, j, k, l to the house rules; b waits on your reply below; routed 13:16 CST",
+  "lane": "coordinator",
   "lastAnswer": {
     "at": "2026-11-06T19:11:33.356Z",
     "choice": [

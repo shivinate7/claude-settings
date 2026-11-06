@@ -5,7 +5,7 @@
   "home": "docs/decisions/session-messages.md",
   "id": "local-reach-plan",
   "kind": "decision",
-  "lane": "session-messaging-plan: builds a (session_013NEJL2btGMLKqHs4cDQSZ6)",
+  "lane": "session-messaging-plan",
   "lastAnswer": {
     "at": "2026-11-06T21:24:48Z",
     "choice": "a",

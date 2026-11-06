@@ -4,7 +4,7 @@
   "home": "roadmap steps challenger-page-against, ruling-skip-check, check-line-reader",
   "id": "challenger-more-places",
   "kind": "decision",
-  "lane": "coordinator: steps challenger-page-against, ruling-skip-check, check-line-reader; routed 13:12 CST",
+  "lane": "coordinator",
   "lastAnswer": {
     "at": "2026-11-06T19:08:48.782Z",
     "choice": [

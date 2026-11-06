@@ -4,7 +4,7 @@
   "home": "docs/decisions/session-messages.md",
   "id": "msg-wait-checkin",
   "kind": "decision",
-  "lane": "lane timer-rules-conflict (session_013NEJKzMfgoe3c6cfDdjaS4): makes the two rules agree; started by the coordinator 14:02 CST",
+  "lane": "timer-rules-conflict",
   "lastAnswer": {
     "at": "2026-11-06T20:07:03.508Z",
     "choice": "none",

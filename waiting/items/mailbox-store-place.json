@@ -5,7 +5,7 @@
   "home": "step session-messaging-plan",
   "id": "mailbox-store-place",
   "kind": "decision",
-  "lane": "session-messaging-plan: designs the mailbox meanwhile (session_013NEJL2btGMLKqHs4cDQSZ6)",
+  "lane": "session-messaging-plan",
   "links": [
     {
       "label": "New repository on GitHub",

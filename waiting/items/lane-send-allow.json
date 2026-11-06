@@ -5,7 +5,7 @@
   "home": "decision auto-mode-allow",
   "id": "lane-send-allow",
   "kind": "decision",
-  "lane": "coordinator: a Mac session adds the allow line (item 307); step judge-send-message-refusals holds the judge fix",
+  "lane": "coordinator",
   "lastAnswer": {
     "at": "2026-11-06T21:24:48Z",
     "choice": "a",

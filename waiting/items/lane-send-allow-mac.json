@@ -5,7 +5,7 @@
   "home": "decision auto-mode-allow",
   "id": "lane-send-allow-mac",
   "kind": "task",
-  "lane": "coordinator: a Mac session opens the PR; the batch runner merges it",
+  "lane": "coordinator",
   "n": 307,
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 3,

@@ -4,7 +4,7 @@
   "home": "decision hold-unsafe-after-round-3; agents/reviewer.md (Fix check paragraph)",
   "id": "fix-check-which-round",
   "kind": "decision",
-  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB): roadmap step fix-check-any-round",
+  "lane": "coordinator",
   "lastAnswer": {
     "at": "2026-11-06T03:31:31Z",
     "choice": "b",

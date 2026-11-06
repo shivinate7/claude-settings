@@ -5,7 +5,7 @@
   "home": "step page-check-at-publish",
   "id": "export-item-checks",
   "kind": "decision",
-  "lane": "lane page-check-at-publish (session_013NEJKzQzNgKVLCQZtWj18k): builds a meanwhile",
+  "lane": "page-check-at-publish",
   "lastAnswer": {
     "at": "2026-11-06T20:17:22.777Z",
     "choice": "a",

@@ -4,7 +4,7 @@
   "home": "decision silent-undo-check-design",
   "id": "no-undo-net-loss-dial",
   "kind": "decision",
-  "lane": "lane-undo-check (PR #1099)",
+  "lane": "lane-undo-check",
   "lastAnswer": {
     "at": "2026-11-04T23:44:40Z",
     "choice": "b",

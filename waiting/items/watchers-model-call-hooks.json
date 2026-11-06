@@ -5,7 +5,7 @@
   "home": "claude-settings rule outcomes-mechanize-rules; docs/plans/align-watchers.md",
   "id": "watchers-model-call-hooks",
   "kind": "decision",
-  "lane": "coordinator: to start",
+  "lane": "coordinator",
   "lastAnswer": {
     "at": "2026-11-06T18:19:25.015Z",
     "choice": "b",

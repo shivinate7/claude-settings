@@ -5,7 +5,7 @@
   "home": "coordinator",
   "id": "qmax-1036-base-red",
   "kind": "task",
-  "lane": "coordinator: runner 9 merges #1036 on your line in its chat",
+  "lane": "coordinator",
   "lastAnswer": {
     "at": "2026-11-06T21:16:29.376Z",
     "choice": "none",

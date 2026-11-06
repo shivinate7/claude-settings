@@ -5,7 +5,7 @@
   "home": "git-never-merge-failing-ci",
   "id": "qmax-1011-batch",
   "kind": "decision",
-  "lane": "coordinator: waits on q_max #1029 (item 260), then a lane merges main into #1011, then a green browser run",
+  "lane": "coordinator",
   "lastAnswer": {
     "at": "2026-11-04T12:22:11Z",
     "choice": "a",
@@ -58,5 +58,9 @@
   "short": "q_max #1011 batch",
   "status": "open",
   "title": "q_max #1011: run main's browser tests once first, or merge now past the unknown result?",
+  "waits": {
+    "pr": 1029,
+    "repo": "shivinate7/q_max"
+  },
   "why": "You picked a (06:22 CST). Batch runner 9 took it: browser run 41828932078 on q_max main 5bbf10e1 started 06:23 CST; on green it merges #1024, then #1011."
 }

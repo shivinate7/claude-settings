@@ -4,7 +4,7 @@
   "home": "PR #1316",
   "id": "lease-push-no-sha",
   "kind": "decision",
-  "lane": "coordinator: step lease-sha-form-hint (brief and refusal show the sha form); routed 13:12 CST",
+  "lane": "coordinator",
   "lastAnswer": {
     "at": "2026-11-06T19:08:48.782Z",
     "choice": "b",

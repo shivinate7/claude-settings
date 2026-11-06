@@ -4,7 +4,7 @@
   "home": "decision auto-mode-owner-acts; settings.json autoMode.allow",
   "id": "auto-mode-allow-lines",
   "kind": "decision",
-  "lane": "own-branch-lease-push-tests: draft PR #1316 (lane auto-mode-middle-ground), with the coordinator's batch; closes when #1316 merges",
+  "lane": "own-branch-lease-push-tests",
   "lastAnswer": {
     "at": "2026-11-06T18:58:16.910Z",
     "choice": [

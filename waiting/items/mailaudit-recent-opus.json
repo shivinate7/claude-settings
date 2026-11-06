@@ -4,7 +4,7 @@
   "home": "mailaudit debt recent-log-unbuilt",
   "id": "mailaudit-recent-opus",
   "kind": "decision",
-  "lane": "lane mailaudit-recent-log (session_013NEJL44PzZ5EQbqb3wHYuB), Opus; closes when the Recent log merges",
+  "lane": "mailaudit-recent-log",
   "lastAnswer": {
     "at": "2026-11-06T19:19:23.661Z",
     "choice": "a",

@@ -4,7 +4,7 @@
   "home": "plan PR #1049",
   "id": "grant-spawn-act",
   "kind": "decision",
-  "lane": "lane grant-reaches-lanes-build (session_013NEJKzxRE91RXP3PNdpC7J) builds `grant <lane> spawn <n>m`; relayed 13:12 CST",
+  "lane": "grant-reaches-lanes-build",
   "lastAnswer": {
     "at": "2026-11-06T19:08:48.782Z",
     "choice": "a",

@@ -5,7 +5,7 @@
   "home": "decision reviewer-brief-blind",
   "id": "reviewer-brief-unread",
   "kind": "decision",
-  "lane": "reviewer-brief-blind: the lane builds b meanwhile (session_013NEJL3HcTDWvQyBwmisvYG)",
+  "lane": "reviewer-brief-blind",
   "lastAnswer": {
     "at": "2026-11-06T21:24:48Z",
     "choice": "none",

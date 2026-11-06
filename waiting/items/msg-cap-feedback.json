@@ -4,7 +4,7 @@
   "home": "docs/decisions/session-messages.md",
   "id": "msg-cap-feedback",
   "kind": "decision",
-  "lane": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6): the code says no setting; its docs and web sources come next. Closes when the record merges.",
+  "lane": "session-messaging-plan",
   "lastAnswer": {
     "at": "2026-11-06T19:08:48.782Z",
     "choice": "b",

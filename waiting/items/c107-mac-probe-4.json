@@ -7,17 +7,18 @@
   "home": "roadmap step c107",
   "id": "c107-mac-probe-4",
   "kind": "task",
-  "lane": "local-lane-start-no-click: waits on this probe (session_013NEJL2TLonvddw6ByF5XGE)",
+  "lane": "local-lane-start-no-click",
   "lastAnswer": {
-    "at": "2026-11-06T21:24:48Z",
+    "at": "2026-11-06T21:33:00Z",
     "choice": "note",
-    "note": "Not done: claude 2.1.296; no create_session tool (start_session listed); step 2 refused by guard hand-made-worktree; owner stopped."
+    "done": true,
+    "note": "Probe 4 ran 15:30 CST. 1 EnterWorktree yes. 2 claude -p failed twice: 'Failed to refresh OAuth token: another Claude Code process is refreshing it or exited mid-refresh'. 3 --resume ran with no login error and answered. 5 ExitWorktree removed the tree. Open: did a card show (2); does probe-c107d show in the desktop list (4)."
   },
   "n": 300,
   "owner": "lane local-lane-start-no-click (session_013NEJL2TLonvddw6ByF5XGE)",
   "rank": 3,
   "ref": "step c107; item 297",
-  "reply": "Rewritten 15:35 CST to make its tree with EnterWorktree, which the guard allows. Paste the text below into a Claude Code desktop session on your Mac, in the claude-settings folder, on a turn you type. Then paste its result block here.\n\nProbe c107 #4. Measure, do not fix. Record each answer as yes/no plus any error text.\n1) Call EnterWorktree with name probe-c107d and no path. Record the worktree path and branch it reports.\n2) In that worktree run: claude -p \"Reply with the output of git branch --show-current, then stop.\" --output-format json. Record: did any card or prompt show (ask me in one line), did it finish, any login error, the reply, and the session_id in the JSON.\n3) Run: claude -p \"Reply SECOND.\" --resume <that session_id> --output-format json. Record whether it answered SECOND.\n4) Ask me in one line: does a session for probe-c107d show in the desktop app's session list?\n5) Clean up: call ExitWorktree with action remove (the worktree and its branch hold no work).\n6) Print one block: the version and one line per step, for me to paste on the page.\n\nAlready measured: Claude Code 2.1.296, and a Mac desktop session has no create_session tool, so cloud lanes start only from a cloud coordinator.",
+  "reply": "Your OAuth question (15:33 CST), answered by the c107 lane at 15:45 CST: there is no link to the GitHub token. The error is Claude's own login refresh, and --resume worked, so your Mac's login is fine. But a lane started by claude -p would always race a running coordinator, so the lane needs the failure rate while the desktop app runs. Lane model-call-auth-check adds (15:36 CST): two Claude processes on one login refreshed the same short-lived token at once, and one lost. A GitHub secret never reaches the Mac. A one-year token from claude setup-token never refreshes, so it cannot race, and the hooks will use one. Your own claude -p runs would avoid the race only with CLAUDE_CODE_OAUTH_TOKEN set in your shell, which is not tested.\n\nStill yours from probe 4: did any card or prompt show on your screen in step 2, and does a probe-c107d session show in the desktop app's session list?\n\nThen paste probe 5 into a Claude Code desktop session on your Mac, in the claude-settings folder, on a turn you type:\n\nProbe c107 #5. Measure, do not fix. 1) Call EnterWorktree with name probe-c107e and no path. 2) Run this three times, 60 s apart: claude -p \"Reply OK.\" --output-format json. Record per run: is_error yes/no and any error text. 3) Run once: claude -p \"Write the word probe into the file probe.txt in this folder, then stop.\" --permission-mode auto --output-format json. Record: is_error, any permission refusal text, and whether probe.txt exists after. 4) Ask me in one line: did any card show, and does a probe-c107e or probe-c107d session show in the desktop app's session list? 5) Delete probe.txt with rm \"$PWD/probe.txt\", then call ExitWorktree with action remove. 6) Print one block: the version and one line per step, for me to paste on the page.\n\nItem 297 comes back after this, with options that need no button press.",
   "short": "Mac press-free start probe",
   "status": "open",
   "steps": [
@@ -26,6 +27,6 @@
     "Answer each one-line question it asks.",
     "Paste the block it prints into a note on this item, and mark it done."
   ],
-  "title": "Paste c107 probe 4 into a Claude Code session on your Mac",
+  "title": "On your Mac: two answers on probe 4, then paste probe 5",
   "why": "It tests the two lane starts that need no press, so item 297 can come back with only press-free options."
 }

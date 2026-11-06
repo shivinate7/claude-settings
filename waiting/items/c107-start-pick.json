@@ -5,7 +5,7 @@
   "home": "decision lanes-start-as-agents",
   "id": "c107-start-pick",
   "kind": "decision",
-  "lane": "lane local-lane-start-no-click (session_013NEJL2TLonvddw6ByF5XGE): builds the pick after PR #1339 lands",
+  "lane": "local-lane-start-no-click",
   "lastAnswer": {
     "at": "2026-11-06T21:24:48Z",
     "choice": "none",
