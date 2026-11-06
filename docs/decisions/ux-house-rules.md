@@ -37,7 +37,8 @@ WCAG level, is not taken on by choice (owner, 2026-11-01 12:23 CST, by triage).
   reviewer judges each other hit.
 - `ux-order-holds-still` lets an act move the row it acted on out of an open list. The next open
   row then takes its slot, and the other rows keep their order (owner, 2026-11-06 16:47 CST, item
-  313 a). The owner found that the stricter rule worked against the outcome (item 311, 15:51 CST).
+  313 a). The owner on item 311 (15:51 CST): the rule was "applied too strictly and is taking me away from the
+  outcome I want".
 - Not house rules: behaviour defaults (dropped); spend shows cost, work-screen head, real photos only and
   phone-first (per repo); letter case (Vercel).
 
