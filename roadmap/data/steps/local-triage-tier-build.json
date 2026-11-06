@@ -1,0 +1,10 @@
+{
+  "title": "Local triage proves its tier on Mac and Windows",
+  "phase": "now",
+  "status": "ready",
+  "order": 1,
+  "why": "Home triage on the owner's Mac needs his override for each roadmap push, because the guard reads cloud tags only.",
+  "note": "Owner, 2026-11-06 15:45 CST (chat, item 310 a): build it now and merge it fast. Reverses item 213 (2026-11-05 07:44 CST, build nothing yet), within its condition: works on Mac and Windows. Done when the lane's PR merges and debt local-triage-tier-proof retires.",
+  "owner": "coordinator",
+  "updatedAt": "2026-11-06T21:46:00Z"
+}
