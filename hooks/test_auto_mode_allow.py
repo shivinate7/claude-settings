@@ -37,7 +37,9 @@ same cases run against a copy with a clause removed and show red there.
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import unittest
 
 HOOKS = os.path.dirname(os.path.abspath(__file__))
@@ -332,12 +334,13 @@ class OwnBranchLeasePushIsAllowed(unittest.TestCase):
 
     def test_guard_lets_the_filled_form_through(self):
         self.assertTrue(LEASE_FORM, "guard_push_delete must define LEASE_PUSH_FORM")
-        filled = LEASE_FORM.replace("<branch>", "feat").replace("<expected sha>", "0" * 40)
-        # (force, mirror, every, includes, unpinned, leased): a lease that names its own sha is pinned.
-        parsed = guard_push_delete._push_parse(filled.split()[2:] + ["origin", "feat"])[:6]
-        self.assertEqual(parsed, (False, False, False, False, False, True))
-        bare = guard_push_delete._push_parse(["--force-with-lease", "origin", "feat"])[:6]
-        self.assertEqual(bare, (False, False, False, False, True, True))
+        filled = LEASE_FORM.replace("<branch>", "feat").replace("<expected sha>", "0" * 40).split()[2:]
+        with tempfile.TemporaryDirectory() as repo:
+            subprocess.run(["git", "init", "-q", "-b", "feat", repo], check=True)
+            # The form as printed (no remote, the checkout's branch), and with the branch named.
+            self.assertEqual(guard_push_delete.push_verdict(filled, repo), "")
+            self.assertEqual(guard_push_delete.push_verdict(filled + ["origin", "feat"], repo), "")
+            self.assertEqual(guard_push_delete.push_verdict(["--force-with-lease", "origin", "feat"], repo), "deny")
 
 
 class OwnCiRunCancelIsAllowed(unittest.TestCase):
