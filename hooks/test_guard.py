@@ -10033,9 +10033,7 @@ def tier_regrant_check():
     problems += tier_regrant_run(config, other)
     tier_judge("tier-regrant-c", other, "echo ready", config)       # C binds the other folder's grant
     problems += tier_regrant_run(config, granted)                   # the re-grant of the granted folder
-    if os.path.exists(tier_bound_file(config, "tier-regrant-a")):
-        problems.append("a re-grant left the bound file of a session bound to the folder, want it revoked")
-    # B binds the new grant before A's push, so the grant is consumed and A can only be refused by its revoked file.
+    # B binds the new grant before A's push, so the grant is consumed and A can only be refused by its revoked id.
     tier_judge("tier-regrant-b", granted, "echo ready", config)
     if not os.path.isfile(tier_bound_file(config, "tier-regrant-b")):
         problems.append("a session that started after the re-grant bound no file")
@@ -10049,6 +10047,28 @@ def tier_regrant_check():
         problems.append("a re-grant of one folder removed the bound file of another folder")
     problems += tier_control("regrant")
     return tier_result(problems, "a re-grant revokes the folder's bound files and leaves the others")
+
+
+def tier_regrant_window_check():
+    """roadmap-one-writer: a session revoked by a re-grant of its folder is refused its push, even when it calls in that
+    folder before any other session. Its revoked id stops it binding the new grant, so the next session binds it."""
+    config = os.path.join(ROOT, "tier", "regrant-window")
+    granted = PUSHFEAT
+    problems = tier_regrant_run(config, granted)
+    tier_judge("tier-window-a", granted, "echo ready", config)      # A binds the granted folder's grant
+    problems += tier_regrant_run(config, granted)                    # the re-grant of the granted folder
+    tier_judge("tier-window-a", granted, "echo ready", config)      # A calls in the folder before any other session
+    got, reason = tier_judge("tier-window-a", granted, TIER_PUSH, config)
+    if not tier_refused_by_record(got, reason):
+        problems.append("the revoked session's push after its own call: %s, want a roadmap-one-writer deny" % got)
+    tier_judge("tier-window-b", granted, "echo ready", config)      # B is the first session after A to call in it
+    if not os.path.isfile(tier_bound_file(config, "tier-window-b")):
+        problems.append("the session after the revoked one bound no file for the new grant")
+    got, reason = tier_judge("tier-window-b", granted, TIER_PUSH, config)
+    if got != "allow":
+        problems.append("the session bound to the new grant: its push %s, want allow (%s)" % (got, reason[:80]))
+    problems += tier_control("regrant-window")
+    return tier_result(problems, "a revoked session cannot rebind the re-grant, and the next session binds it")
 
 
 def spawn_counts_of(config, command, cwd, log, path, session):
@@ -10133,6 +10153,8 @@ TIER_LOG_CHECKS = (
      "push spawns what a lane's push spawns", tier_cost_check),
     ("roadmap-one-writer: a re-grant of a folder revokes the bound files for that folder, and leaves the others",
      tier_regrant_check),
+    ("roadmap-one-writer: a session revoked by a re-grant is refused its push, even when it calls in the folder first",
+     tier_regrant_window_check),
 )
 
 # A local push with no bound file is refused, and the refusal names the coordinator's re-grant as its remedy. It never
@@ -27631,7 +27653,8 @@ WINDOWS_CHECKERS.update({tier_bind_allow_check, tier_bind_crlf_check, tier_bind_
                          tier_agent_call_check, tier_consumed_check, tier_outside_check, tier_stale_check,
                          tier_subfolder_check,
                          tier_bound_lane_check, tier_bound_corrupt_check, tier_bound_crlf_check,
-                         tier_bound_agent_check, tier_cost_check, tier_regrant_check})
+                         tier_bound_agent_check, tier_cost_check, tier_regrant_check,
+                         tier_regrant_window_check})
 
 
 # --------------------------------------------------------------------------- the simulator boot rules

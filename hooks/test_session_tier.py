@@ -176,8 +176,8 @@ def case_regrant_replaces_the_grant():
 
 
 def case_regrant_revokes_the_bound_files_for_the_folder():
-    """a re-grant of a folder removes every bound file for that folder, and keeps the bound file and the grant of a
-    folder whose name only starts with it"""
+    """a re-grant of a folder revokes every session bound to that folder, so no revoked session proves the tier, and
+    keeps the bound file and the grant of a folder whose name only starts with it"""
     config = fresh("regrant-revoke")
     folder = folder_of("regrant-revoke")
     sibling = folder_of("regrant-revoke-sibling")
@@ -192,8 +192,12 @@ def case_regrant_revokes_the_bound_files_for_the_folder():
         return ["grant triage --folder (the re-grant): exit %d, want 0 (%s)" % (code, err.strip()[:120])]
     problems = []
     for session in ("tier-revoke-a", "tier-revoke-a2"):
-        if os.path.exists(fx.bound_file(config, session)):
-            problems.append("a re-grant left the bound file of %s, want it revoked" % session)
+        with config_dir(config):
+            ok, proved = call("file_proved", session, None)
+        if not ok:
+            problems.append(proved)
+        elif proved:
+            problems.append("a re-grant left %s able to prove the triage tier, want it revoked" % session)
     if not os.path.isfile(fx.bound_file(config, "tier-revoke-c")):
         problems.append("a re-grant of one folder removed the bound file of a folder that only starts with its name")
     if not os.path.isfile(fx.grant_file(config, sibling)):
