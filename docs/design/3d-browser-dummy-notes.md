@@ -31,8 +31,11 @@ Focus element for an option pick: `#scene`.
 - The three `:root` blocks as written: `--surface`, `--ink`, `--muted`, `--line`, `--chip`, `--ground`,
   `--calm`, `--good`, `--acc`, `--acc-soft`, `--gold-soft`, `--gold-ink`, `--hdr`, `--on-hdr`, `--r`,
   `--body`, `--mono`. The `--r-*` repo-colour hooks stay, so a repo colour reaches the scene too.
-- Looks as written: `.hdr` and `.mark` (repo bar), `.g` state shapes, `.card`, `.top`, `.title`,
-  `.opt`, `.key`, `.pick` with the sparkle, `ol.steps`, `.views`.
+- Looks as written: `.hdr` and `.mark` (repo bar), `.g.calm` and `.g.done`, `.card`, `.title`, `.key`,
+  `.pick` with the sparkle, `ol.steps`.
+- Looks changed: `.views` has 3 columns, and its pressed button shows by a border, not a shadow (forced
+  colours drop shadows). `.opt` has no pointer, because nothing is picked here. `.top` adds `.st`, the
+  status word with its shape. `.g.doing` and `.g.todo` are new shapes.
 - New tokens, made only by `color-mix` of the tokens above: `--o-*` (open item, doing step faces),
   `--c-*` (closed item faces), `--d-*` (done step faces), `--p-*` (floor), `--edge`. No new hue. Dark
   sets keep the top face lightest, so light still reads as coming from above.
@@ -138,6 +141,18 @@ has rank 30 and every other item has 1 to 4; height by rank would flatten the re
   not only by a shadow.
 - The detail column keeps its own position under the sample labels (harness CSS sets position on
   labelled elements).
+
+## 10. Departures from the Cockpit (a port, per page item 277); none blocking
+
+- Departs from: the Cockpit's answer flow (`buildCard` in `skills/waiting-page/page.html` draws options as
+  inputs, with a note box and the send bar). The test copy only shows; each card says to answer on the
+  Cockpit. Why: item 277 makes it a separate test copy, never the live page, so an answer here would
+  have no reader.
+- Departs from: the Cockpit's tiers (holds, due, calm, stands; page.html sorts items into the
+  buckets `by.holds`, `by.due`, `by.calm`). The scene groups by open and closed. Why: the sample data carries no `holds`, `by` or `stands`
+  fields. With real fields, the builder keeps the tiers as floors in tier order.
+- Departs from: the meaning of the ring shape. On the Cockpit `.g.calm` marks the calm tier; here it
+  marks "open". The builder keeps the Cockpit's tier shape once real tier fields exist.
 
 ## Not drawn
 
