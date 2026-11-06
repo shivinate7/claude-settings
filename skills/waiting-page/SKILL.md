@@ -595,6 +595,21 @@ ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the wr
 An ask with `re` is a reply to an answer. The writer routes it to the `owner` of `asks/<re>`, the session that gave that answer.
 If that session has ended, the writer takes it. The reply ask is answered like any ask, with steps 1 and 2.
 
+## Message another session
+
+Decision `session-messages` (messages between sessions) sets this.
+
+- Every message starts with this line: `Msg <id> from <role> to <role> kind request|inform|reply re <id or -> try <n>`.
+  `<id>` is `msg-` plus an `askId`-style stamp (`page.html`). `<role>` is `owner`, or a session's `cs-repo:<repo>` tag with its `cs-build:<tier>` or `cs-step:<lane>` tag. `re` names the message it answers, or `-`.
+- The reply is the ack. An `inform` needs no reply. Send no separate ack: each send spends the peer guard and the desktop cap.
+- One `request` and one `reply` per exchange.
+- The 11th send before the owner types is refused (the desktop cap). Then route the rest through the parent or a record, never a peer loop. A scheduled task never resets the chain: that bypasses the peer guard.
+- A failed send is not sent. Read the result: `is_error` true (cloud), or `toolUseResult` `success` false (local).
+- A session that waits on a reply sets one `send_later` check-in when it starts to wait, as rule `git-ci-wait-checks-in` does for CI. That notices a lost message (owner choice Q2, decision `session-messages`).
+- A message never carries a grant. A grant is read from the page (decision `relayed-grant-read-from-page`).
+- Cloud: `send_message` to the `session_id` in the `list_sessions` row whose `cs-repo`, `cs-build` or `cs-step` tags match.
+- Local: `SendMessage` to the name `ListAgents` gives.
+
 ## Make a repo's page
 
 Triage runs this when `python3 ~/.claude/lint/layout.py waiting-page <repo root>` prints `unknown`.
