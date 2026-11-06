@@ -735,7 +735,7 @@ class Scripts(Case):
 @unittest.skipIf(os.name == "nt", "a dangling symlink needs the symlink privilege on Windows")
 class UnreadScripts(Case):
     """An extensionless file whose shebang cannot be read has no language, so it is never scanned: its read must say UNKNOWN.
-    Locally it exits 0. With env CI set it exits non-zero."""
+    The check exits 2 on any unread file, locally and in CI, as it does for every other unread file."""
 
     def changed_paths(self):
         return subprocess.run(["git", "-C", self.tree, "diff", "--name-only", "origin/main"], capture_output=True,
@@ -752,17 +752,19 @@ class UnreadScripts(Case):
         self.assertTrue(os.path.islink(os.path.join(self.tree, "bin", "tool")), "scope: bin/tool is not a link")
         self.assertFalse(os.path.exists(os.path.join(self.tree, "bin", "tool")), "scope: bin/tool is not dangling")
 
-    def test_an_extensionless_file_whose_shebang_cannot_be_read_prints_unknown_locally(self):
+    def test_an_extensionless_file_whose_shebang_cannot_be_read_exits_2_and_prints_unknown_locally(self):
         self.dangling_script()
         rc, out = self.lint()
         self.assertNotIn("Traceback", out)
-        self.assertEqual(rc, 0, out)
-        self.assertIn("UNKNOWN", out, "an extensionless file whose shebang cannot be read was skipped with no UNKNOWN line:\n" + out)
+        self.assertEqual(rc, 2, "an extensionless file whose shebang cannot be read must exit 2:\n" + out)
+        self.assertIn("UNKNOWN", out, "an extensionless file whose shebang cannot be read printed no UNKNOWN line:\n" + out)
 
-    def test_an_extensionless_file_whose_shebang_cannot_be_read_is_red_in_ci(self):
+    def test_an_extensionless_file_whose_shebang_cannot_be_read_exits_2_and_prints_unknown_in_ci(self):
         self.dangling_script()
         rc, out = self.lint(ci=True)
-        self.assertNotEqual(rc, 0, "an extensionless file whose shebang cannot be read passed in CI:\n" + out)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(rc, 2, "an extensionless file whose shebang cannot be read must exit 2 in CI:\n" + out)
+        self.assertIn("UNKNOWN", out, "an extensionless file whose shebang cannot be read printed no UNKNOWN line in CI:\n" + out)
 
     def test_a_readable_extensionless_script_is_green_in_ci_with_no_unknown(self):
         # Green control: the same shape, readable, passes in CI and prints no UNKNOWN.
