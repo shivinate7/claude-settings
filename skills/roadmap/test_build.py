@@ -100,9 +100,13 @@ def iso_ago(minutes):
     return when.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def session_row(sid, status, *tags):
-    """One sessions row, as triage copies it from list_sessions."""
-    return {"id": sid, "session_status": status, "tags": list(tags)}
+def session_row(sid, status, *tags, status_bucket=None):
+    """One sessions row, as triage copies it from list_sessions. The status_bucket key (get_session's bucket) is
+    added only when given, so a row without it reads as the live file's rows did before the key existed."""
+    row = {"id": sid, "session_status": status, "tags": list(tags)}
+    if status_bucket is not None:
+        row["status_bucket"] = status_bucket
+    return row
 
 
 def make_repo(root, steps=None, meta=None):
@@ -1984,9 +1988,248 @@ class MockupFiles(UpkeepFixture):
         self.assertIn("Plain step", page, "the build did not write the page")
 
 
+class IdleLanes(UpkeepFixture):
+    """The lanes-to-archive upkeep row and build.idle_lanes (spec section 3). A lane is listed only when its session
+    is completed or review ready, every cs-step it names is landed (a Step trailer on main, or status done), and no
+    open pull request or open page item still holds it. A read the build cannot make is one `unknown (...)` entry,
+    never an empty list. Each negative case shares its live file with a listed control, so an empty row cannot pass."""
+
+    ROW = "lanes to archive"
+
+    def lane(self, sid, step, bucket="completed", status="SESSION_STATUS_IDLE"):
+        """A sessions row for a lane of this repo that names `step`, with its get_session bucket."""
+        return session_row(sid, status, "cs-build:lane", "cs-step:" + step, self.REPO, status_bucket=bucket)
+
+    def land(self, steps):
+        """Write {step id: fields} on the record branch in one commit. Each step is written whole, from STEP."""
+        for sid, fields in steps.items():
+            self.write_step(sid, dict(STEP, **fields))
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "steps " + ", ".join(sorted(steps)))
+
+    def trailer_on_main(self, sid):
+        """A commit on main whose last paragraph is `Step: <sid>`, so the step reads as merged there. Leaves HEAD on
+        the record branch."""
+        git(self.repo, "checkout", "-q", "main")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "%s merged\n\nStep: %s" % (sid, sid))
+        git(self.repo, "checkout", "-q", "roadmap")
+
+    def archive(self):
+        """(count, entries) of the lanes-to-archive row, from a build from main that reads the fixture's live file."""
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        count, detail = self.row(out, self.ROW)
+        return count, self.entries(detail)
+
+    def idle_direct(self):
+        """build.idle_lanes on the fixture's live file, with the steps, marks and repo name the build reads."""
+        fn = getattr(build, "idle_lanes", None)
+        if fn is None:
+            self.fail("build.idle_lanes is absent: no function names the lanes to archive")
+        source, why = build.record_source(self.repo, "roadmap")
+        self.assertIsNotNone(source, why)
+        steps = build.load(source)["steps"]
+        marks, _strays, _why = build.landed_marks(self.repo, build.main_ref(self.repo, "main"), "main", steps)
+        work = build.live_work(str(self.live), steps, self.SLUG)
+        return fn(work, steps, marks, self.SLUG, self.repo)
+
+    @staticmethod
+    def ids(entries):
+        """The first word of each entry: a session id, or `unknown` for an unknown entry."""
+        return sorted(entry.split(" ", 1)[0] for entry in entries)
+
+    @staticmethod
+    def named(entries, sid):
+        return any(sid in entry for entry in entries)
+
+    def test_control_the_live_file_builds_and_an_existing_upkeep_row_reads(self):
+        # Green on the old code too: the fixture builds with a live file, and a row that exists now reads. So the red
+        # cases in this class fail on the new row, not on the fixture.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_a", "c1")])
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.row(out, "notes over %d words" % build.NOTE_WORDS), (0, ""))
+
+    def test_core_four_lanes_only_the_one_whose_step_merged_is_listed(self):
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "c3": {"status": "done", "order": 3}, "c4": {"status": "done", "order": 4}})
+        self.trailer_on_main("c1")
+        self.publish(sessions=[self.lane("session_a", "c1"),
+                               self.lane("session_b", "c2"),
+                               self.lane("session_c", "c3", bucket="working", status="SESSION_STATUS_RUNNING"),
+                               self.lane("session_d", "c4")],
+                     pulls=[{"number": 21, "title": "c2 lane", "branch": "c2"}],
+                     items=[{"n": 4, "status": "open", "home": "step c4", "lane": "c4"}])
+        self.assertEqual(self.ids(self.idle_direct()), ["session_a"])
+
+    def test_open_pull_on_the_lane_head_form_blocks_its_lane(self):
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     pulls=[{"number": 31, "title": "lane c1", "branch": "lane/c1"}])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
+    def test_open_pull_on_the_bare_step_head_blocks_its_lane(self):
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     pulls=[{"number": 32, "title": "lane c2", "branch": "c2"}])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+
+    def test_open_draft_whose_head_is_an_ancestor_of_main_does_not_block(self):
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "c3": {"status": "done", "order": 3}})
+        git(self.repo, "checkout", "-q", "main")
+        ancestor = git(self.repo, "rev-parse", "HEAD").strip()
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "later work on main")  # `ancestor` is now strictly behind
+        git(self.repo, "checkout", "-q", "roadmap")
+        off_main = git(self.repo, "rev-parse", "roadmap").strip()  # a commit main never reaches
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2"), self.lane("session_c", "c3")],
+                     pulls=[dict(self.draft(41, "c1"), head=ancestor), dict(self.draft(42, "c2"), head=off_main)])
+        count, entries = self.archive()
+        # session_a: the draft's head is in main, so it does not block. session_b: not in main, so it blocks.
+        # session_c is the control: no pull, so it is listed.
+        self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_c"]))
+
+    def test_blocked_failed_working_and_unbucketed_lanes_are_never_listed(self):
+        self.land({"c%d" % n: {"status": "done", "order": n} for n in range(1, 6)})
+        self.publish(sessions=[self.lane("session_blocked", "c1", bucket="blocked"),
+                               self.lane("session_failed", "c2", bucket="failed"),
+                               self.lane("session_working", "c3", bucket="working", status="SESSION_STATUS_RUNNING"),
+                               session_row("session_unbucketed", "SESSION_STATUS_IDLE", "cs-build:lane",
+                                           "cs-step:c4", self.REPO),
+                               self.lane("session_ok", "c5")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_ok"]))
+
+    def test_completed_and_review_ready_lanes_are_listed(self):
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1", bucket="completed"),
+                               self.lane("session_b", "c2", bucket="review_ready")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_b"]))
+
+    def test_step_merged_by_a_step_trailer_on_main_is_landed_and_one_still_open_is_not(self):
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "doing", "order": 2}})
+        self.trailer_on_main("c1")
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+
+    def test_other_repos_lane_is_ignored_not_listed_and_not_unknown(self):
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        other = session_row("session_other", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1",
+                            "cs-repo:other/repo", status_bucket="completed")
+        self.publish(sessions=[other, self.lane("session_a", "c2")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+
+    def test_lane_with_no_cs_step_is_never_listed(self):
+        self.land({"c1": {"status": "done", "order": 1}})
+        no_step = session_row("session_nostep", "SESSION_STATUS_IDLE", "cs-build:lane", self.REPO,
+                              status_bucket="completed")
+        self.publish(sessions=[no_step, self.lane("session_a", "c1")])
+        count, entries = self.archive()
+        self.assertFalse(self.named(entries, "session_nostep"), entries)
+        self.assertTrue(self.named(entries, "session_a"), "the control lane is not listed: %r" % (entries,))
+
+    def test_session_without_the_lane_tag_is_ignored(self):
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        triage = session_row("session_triage", "SESSION_STATUS_IDLE", "cs-build:triage", "cs-step:c1",
+                             self.REPO, status_bucket="completed")
+        self.publish(sessions=[triage, self.lane("session_a", "c2")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+
+    def test_archived_session_is_ignored(self):
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_archived", "c1", status="SESSION_STATUS_ARCHIVED"),
+                               self.lane("session_a", "c2")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+
+    def test_step_id_not_on_the_record_branch_reads_the_lane_unknown(self):
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_ghost", "ghost"), self.lane("session_a", "c1")])
+        count, entries = self.archive()
+        unknown = [entry for entry in entries if "unknown (" in entry]
+        self.assertEqual(count, 2, entries)
+        self.assertEqual(len(unknown), 1, entries)
+        self.assertIn("step ghost not on the record branch", unknown[0])
+        self.assertTrue(self.named(entries, "session_a"), "the control lane is not listed: %r" % (entries,))
+
+    def test_stale_live_read_is_one_unknown_entry_and_no_lane_is_listed(self):
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_a", "c1")], read_at=iso_ago(build.STALE_LIVE_MINUTES + 30))
+        count, entries = self.archive()
+        self.assertEqual(count, 1, entries)
+        self.assertEqual(len(entries), 1, entries)
+        self.assertTrue(entries[0].startswith("unknown ("), entries)
+
+    def test_bad_read_at_is_one_unknown_entry(self):
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_a", "c1")], read_at="not a time")
+        count, entries = self.archive()
+        self.assertEqual(count, 1, entries)
+        self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
+
+    def test_skipped_session_or_pull_row_reads_the_whole_list_unknown(self):
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        broken_session = {"id": 7, "session_status": "SESSION_STATUS_IDLE", "tags": []}
+        broken_pull = {"number": "twelve", "title": "lane c2", "branch": "c2"}
+        cases = (("session", [broken_session, self.lane("session_a", "c1")], ()),
+                 ("pull", [self.lane("session_a", "c1")], [broken_pull]))
+        for label, sessions, pulls in cases:
+            with self.subTest(row=label):
+                self.publish(sessions=sessions, pulls=pulls)
+                count, entries = self.archive()
+                self.assertEqual(count, 1, entries)
+                self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
+
+    def test_missing_sessions_list_is_one_unknown_entry(self):
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=None)
+        count, entries = self.archive()
+        self.assertEqual(count, 1, entries)
+        self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
+
+    def test_no_live_file_is_one_unknown_entry(self):
+        self.land({"c1": {"status": "done", "order": 1}})
+        _, out = self.build_from_main(expect=(0, 1))
+        count, detail = self.row(out, self.ROW)
+        self.assertEqual(count, 1, out)
+        self.assertTrue(detail.startswith("unknown ("), out)
+
+    def test_empty_sessions_list_is_an_empty_row_not_an_unknown_one(self):
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[])
+        self.assertEqual(self.archive(), (0, []))
+
+    def test_thirty_two_idle_lanes_are_all_listed_in_sorted_order(self):
+        self.land({"L%02d" % n: {"status": "done", "order": n} for n in range(1, 33)})
+        self.publish(sessions=[self.lane("session_%02d" % n, "L%02d" % n) for n in range(1, 33)])
+        count, entries = self.archive()
+        self.assertEqual(count, 32)
+        self.assertEqual(self.ids(entries), sorted("session_%02d" % n for n in range(1, 33)))
+
+    def test_open_page_item_holds_its_lane_only_while_it_is_open(self):
+        self.land({"c%d" % n: {"status": "done", "order": n} for n in range(1, 5)})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2"),
+                               self.lane("session_c", "c3"), self.lane("session_d", "c4")],
+                     items=[{"n": 1, "status": "answered", "home": "step c2", "lane": "c2"},
+                            {"n": 2, "status": "closed", "home": "step c3", "lane": "c3"},
+                            {"n": 3, "status": "open", "home": "step c4", "lane": "c4"}])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (3, ["session_a", "session_b", "session_c"]))
+
+
 class SharedTagNames(unittest.TestCase):
     """The roadmap's tag names have one home, hooks/shared_names.py. build reads the very objects, so a
     copied literal cannot drift from the guard's check. Identity, not equality: an equal copy fails."""
+
+    def test_lane_head_refs_is_the_shared_function(self):
+        self.assertTrue(hasattr(shared_names, "lane_head_refs"), "hooks/shared_names.py has no lane_head_refs")
+        self.assertTrue(hasattr(build, "lane_head_refs"), "build has no lane_head_refs")
+        self.assertIs(build.lane_head_refs, shared_names.lane_head_refs)
 
     def test_repo_and_step_tags_are_the_shared_objects(self):
         for name in ("REPO_TAG", "STEP_TAG"):
