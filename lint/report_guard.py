@@ -844,10 +844,12 @@ def departs_problem(text):
 MISTAKE_FIRST_PERSON_RE = re.compile(r"\bI\b|\b[Mm]y\b")
 MISTAKE_FAULT_RE = re.compile(
     r"\b(?:wrong(?:ly)?|mistaken(?:ly)?|mistakes?|by accident|accidental(?:ly)?|broke|clobbered|overwrote|"
-    r"wiped|misread|forgot|trusted|lost|instead of checking)\b", re.I)
+    r"corrupted|misread|forgot|trusted (?:a stale|an old|an outdated)|"
+    r"instead of checking)\b", re.I)
 MISTAKE_NEGATOR_RE = re.compile(r"\bnot\b|n't\b|\bnever\b|\bno\b|\bnothing\b", re.I)
 MISTAKE_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n")
-MISTAKE_CLAUSE_SPLIT_RE = re.compile(r"[,:;\u2014\u2013]|\s-{1,2}\s")
+MISTAKE_CLAUSE_SPLIT_RE = re.compile(
+    r"[,:;\u2014\u2013]|\s-{1,2}\s|\b(?:because|since|but|while|although)\b", re.I)
 MISTAKE_URL_RE = re.compile(r"https?://\S+")
 MISTAKE_STEP_RE = re.compile(r"\bstep:[a-z0-9][a-z0-9-]*")
 MISTAKE_DEBT_RE = re.compile(r"\bdebts?\b")
@@ -861,14 +863,17 @@ MISTAKE_REASON = (
 def _admitted_clause(deviations):
     """The first clause of the Deviations text that admits a mistake the writer made, else ''."""
     plain = QUOTED_RE.sub(" ", MISTAKE_URL_RE.sub(" ", FENCE_RE.sub(" ", deviations)))
-    for sentence in MISTAKE_SENTENCE_SPLIT_RE.split(plain):
-        sentence = BULLET_RE.sub("", sentence.strip())
+    for sentence in _sentences(plain):
         for clause in MISTAKE_CLAUSE_SPLIT_RE.split(sentence):
             fault = MISTAKE_FAULT_RE.search(clause)
             if (fault and MISTAKE_FIRST_PERSON_RE.search(clause)
                     and not MISTAKE_NEGATOR_RE.search(clause[:fault.start()])):
                 return clause.strip()
     return ""
+
+
+def _sentences(text):
+    return [BULLET_RE.sub("", s.strip()) for s in MISTAKE_SENTENCE_SPLIT_RE.split(text)]
 
 
 def mistake_problem(text):
@@ -878,8 +883,9 @@ def mistake_problem(text):
     clause = _admitted_clause(deviations)
     if not clause:
         return ""
+    # A guard word and its ref must share a sentence, so a stray ref elsewhere does not clear the admission.
     if (MISTAKE_STEP_RE.search(deviations) or MISTAKE_DEBT_RE.search(deviations)
-            or (MISTAKE_GUARD_WORD_RE.search(deviations) and DONE_REF_RE.search(deviations))):
+            or any(MISTAKE_GUARD_WORD_RE.search(s) and DONE_REF_RE.search(s) for s in _sentences(deviations))):
         return ""
     return MISTAKE_REASON % repr(clause[:80])
 
@@ -1604,8 +1610,8 @@ def main():
             mistake = mistake_problem(text)
             if mistake:
                 reasons.append(mistake)
-        except Exception:
-            pass
+        except Exception as exc:
+            print("mistake check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
     reasons += [r for r in relay if r]
     try:
         rewrite = rewrite_stamp_problem(text, records[last_human_idx].get("timestamp"), hook.get("cwd"))
