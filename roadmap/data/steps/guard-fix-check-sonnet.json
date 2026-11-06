@@ -1,0 +1,9 @@
+{
+  "title": "The fix check on a guard or check PR runs on sonnet",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.366,
+  "why": "A stronger read on the riskiest fixes.",
+  "note": "Debate audit 12:40 CST. Main runs haiku for the round-1 fix check. Waits on owner item 279.",
+  "updatedAt": "2026-11-06T18:43:00Z"
+}

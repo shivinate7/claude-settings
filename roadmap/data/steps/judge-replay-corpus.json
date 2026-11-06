@@ -1,0 +1,9 @@
+{
+  "title": "Replay known allow and deny cases in CI when a judge changes",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.3655,
+  "why": "A judge that drifts toward allowing is caught before merge.",
+  "note": "Debate audit 12:40 CST. feedback_guard leaves items unjudged on a model error. Cost: calls only in CI. Waits on owner item 279.",
+  "updatedAt": "2026-11-06T18:43:00Z"
+}

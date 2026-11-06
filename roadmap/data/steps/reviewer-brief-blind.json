@@ -1,0 +1,9 @@
+{
+  "title": "A reviewer's brief holds only the task, the diff and the rulings",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.365,
+  "why": "The reviewer judges the code, not the builder's story.",
+  "note": "Debate audit 12:40 CST. A check holds it. Cost: 0 calls. Waits on owner item 279.",
+  "updatedAt": "2026-11-06T18:43:00Z"
+}
