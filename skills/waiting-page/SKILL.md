@@ -605,6 +605,7 @@ Decision `session-messages` (messages between sessions) sets this.
   `<id>` is `msg-` plus an `askId`-style stamp (`page.html`). `<role>` is `owner`, or a session's tags: `cs-repo:<owner>/<name>` with `cs-build:<tier>` or `cs-step:<step id>`. `re` names the message it answers, or `-`.
 - The reply is the ack. An `inform` needs no reply. Send no separate ack: each local `SendMessage` spends the peer guard and the desktop cap.
 - One `request` and one `reply` per exchange.
+- A resend keeps the request id and raises `try` by one, so the peer guard's 30 s same-text check does not drop it; the receiver acts on an id once.
 - The 10-send cap (the desktop cap) refuses the 11th `SendMessage` to a Claude Desktop session on this computer since the owner last typed. Cloud `send_message` arrives as a task notification and is not counted (measured 2026-11-06, Claude Code 2.1.319; decision `session-messages`, item 153 section). Past 10, route the rest through the parent or a record, never a peer loop. Never use a scheduled task to reset the chain: that bypasses the peer guard.
 - A failed send is not sent. Read the result: `is_error` true (cloud), or `toolUseResult` `success` false (local).
 - A cloud session that waits on a reply sets one `send_later` check-in when it starts to wait, as rule `git-ci-wait-checks-in` does for CI. A local session checks at its next turn start. Either way a lost message is noticed (owner choice Q2, decision `session-messages`).
