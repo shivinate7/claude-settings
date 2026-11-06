@@ -330,6 +330,9 @@ jobs:
       - name: Red-run trailer fixture suite
         run: python3 lint/test_check_red_run.py
 
+      - name: Plan critic fixture suite
+        run: python3 lint/test_check_plan_critic.py
+
       - name: Copy finder fixture suite
         run: python3 lint/test_find_copies.py
 
@@ -357,6 +360,12 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: python3 lint/check_red_run.py --base "origin/$BASE_REF"
+
+      - name: Plan critic line
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 lint/check_plan_critic.py --base "origin/$BASE_REF"
 
       # No `if:`: ci-scope.sh turns no flag on for a docs/map/*.md path, and a map page changed alone must still be read.
       # The script says why it runs `npm ci` first.

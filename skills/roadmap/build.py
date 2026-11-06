@@ -85,6 +85,15 @@ date with no year takes the build year, or the year before if it would be in the
 not exist is skipped. When the newest claim in a note is STALE_DAYS or more days old, the entry reads
 `<step id> (<date as written>)`. The row reads the notes only, so it needs no live file.
 
+The last upkeep row, "done without check", names each done step that closed without showing its Done check green on
+main (step done-needs-check). Only a done step whose updatedAt is on or after DONE_CHECK_SINCE (an ISO UTC time) is read.
+Its note, why and ask are searched for the whole phrase `Done check` (any case; `Done checks` does not count). With no
+such phrase the entry is `<step id>`. With the phrase, one sentence of the three texts (a sentence ends at ". " or at
+the end of a text) must hold the whole phrase `green on main` or `met on main` (any case) and a source: `#<digits>` or a
+hex commit hash of 7 to 40 characters. With none the entry is `<step id> (not shown green on main)`. A missing or
+unparsable updatedAt gives `<step id> (updatedAt unreadable)`. The row reads the step files only, so it needs no live
+file. It adds no process, file, timer or log: it reads the notes already loaded.
+
 Before it builds, it refuses a record branch with git conflict markers (step c72) in any file under
 SCANNED, and writes no page.
 
@@ -133,6 +142,10 @@ ARCHIVED_SESSION = "SESSION_STATUS_ARCHIVED"
 FUTURE_MINUTES = 5
 KNOWN_STATUS = ("todo", "doing", "active", "done")
 TOP = 5
+DONE_CHECK_SINCE = "2026-11-07T00:00:00Z"  # ISO UTC: a done step updated before this time is not read for a Done check
+DONE_CHECK = re.compile(r"(?<![\w-])done check(?![\w-])", re.I)
+GREEN_ON_MAIN = re.compile(r"(?<![\w-])(?:green|met) on main(?![\w-])", re.I)
+SOURCE_REF = re.compile(r"#\d+|(?<![0-9a-f])[0-9a-f]{7,40}(?![0-9a-f])")
 DATA = "roadmap/data"
 # roadmap.html is left out: this script rewrites it, so a conflict there is resolved by building.
 SCANNED = ("roadmap", "briefs", "plans", "handoffs")
@@ -1095,6 +1108,33 @@ def unfiled(steps, work):
     return out
 
 
+def done_without_check(steps):
+    """Entries for each done step updated on or after DONE_CHECK_SINCE that does not show its Done check green on main."""
+    since = datetime.datetime.fromisoformat(DONE_CHECK_SINCE.replace("Z", "+00:00"))
+    out = []
+    for k, d in sorted(steps.items()):
+        if d.get("status") != "done":
+            continue
+        try:
+            at = datetime.datetime.fromisoformat(d["updatedAt"].replace("Z", "+00:00"))
+        except (KeyError, AttributeError, ValueError):
+            out.append("%s (updatedAt unreadable)" % k)
+            continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=datetime.timezone.utc)
+        if at < since:
+            continue
+        texts = [v for v in (d.get(key) for key in MOCKUP_TEXT) if isinstance(v, str)]
+        if not any(DONE_CHECK.search(t) for t in texts):
+            out.append(k)
+            continue
+        # Each text splits on its own, so a sentence never runs from one field into the next.
+        sentences = [part for t in texts for part in re.split(r"\.\s", t)]
+        if not any(GREEN_ON_MAIN.search(x) and SOURCE_REF.search(x) for x in sentences):
+            out.append("%s (not shown green on main)" % k)
+    return out
+
+
 def upkeep(steps, added, marks, strays, work=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = sorted(((k, d) for k, d in steps.items() if d.get("status") != "done"),
@@ -1142,7 +1182,8 @@ def upkeep(steps, added, marks, strays, work=None):
             ("landed, waiting for triage to close", closing),
             ("Step trailers naming no step", strays),
             ("live threads naming no open step", (work or {}).get("strays", [])),
-            ("live file entries skipped", (work or {}).get("skipped", []))]
+            ("live file entries skipped", (work or {}).get("skipped", [])),
+            ("done without check", done_without_check(steps))]
     print("upkeep: " + "; ".join(f"{label}: {len(v)}" for label, v in rows))
     for label, v in rows:
         if v:
