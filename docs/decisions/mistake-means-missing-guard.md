@@ -27,7 +27,7 @@ More incidents, 2026-11-06, from the batch of PR #1034 (a batch of lanes), each 
 - The check reads only landing turns, as the rest of the report guard does. An admission in a turn that landed nothing is not checked.
 - The report guard blocks once per turn. A correction after the block is not checked again, as for every other report check.
 
-False-alarm measure, 2026-11-06: 41 real reports with a Deviations item, from 28 cloud sessions. The check fired on 2. Both were real mistakes (a wrong commit SHA sent to the batch runner) with no guard named. It had no false alarms. A wider set that read bare "wrong", "mistake" and verbs such as "I ran" or "I pushed" fired on 8, of which 3 were false alarms.
+False-alarm measure, 2026-11-06, on head d96d8821a: 41 real reports with a Deviations item, from 28 cloud sessions. The check refused 2. Both were real mistakes (a wrong commit SHA sent to the batch runner) with no guard named. It had no false alarms. An early draft that matched any first-person verb such as "I ran" or "I pushed", or a bare fault word, fired on 8, of which 3 were false alarms.
 
 ## Proposed: an inbox fence check at the edit
 
