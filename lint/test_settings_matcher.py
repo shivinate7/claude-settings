@@ -3,7 +3,8 @@
 Run: python3 lint/test_settings_matcher.py. Without Workflow and start_session in the matcher,
 the guard's agent-model-floor never sees those calls.
 """
-import ast, json, os, re, subprocess, sys, unittest
+import ast, json, os, re, shutil, subprocess, sys, unittest
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "settings.json")
 
@@ -58,16 +59,36 @@ def mcp_names_in(tree):
             if isinstance(node, ast.Constant) and isinstance(node.value, str) and MCP_NAME.fullmatch(node.value)}
 
 
-def guard_mcp_names():
-    """The mcp__ names the guard emits: the literals of hooks/guard.py and of each hooks/guard_*.py module it
-    imports. Read from the code, so a name the guard adds is judged with no edit to this file."""
-    with open(os.path.join(HOOKS_DIR, "guard.py"), encoding="utf-8") as f:
-        guard = ast.parse(f.read())
-    names = mcp_names_in(guard)
-    for module in guard_module_names(guard):
-        with open(os.path.join(HOOKS_DIR, module + ".py"), encoding="utf-8") as f:
-            names |= mcp_names_in(ast.parse(f.read()))
+def guard_mcp_names(hooks_dir=None):
+    """The mcp__ names the guard emits: the literals of hooks/guard.py and of every hooks/guard_*.py module it
+    reaches through its imports, at any depth. Each module is read once from hooks_dir/<module>.py (the real
+    hooks folder when none is given), and a visited set ends an import cycle. Read from the code, so a name the
+    guard adds is judged with no edit to this file."""
+    hooks_dir = hooks_dir or HOOKS_DIR
+    names, seen, todo = set(), set(), ["guard"]
+    while todo:
+        module = todo.pop()
+        if module in seen:
+            continue
+        seen.add(module)
+        with open(os.path.join(hooks_dir, module + ".py"), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        names |= mcp_names_in(tree)
+        todo.extend(guard_module_names(tree))
     return sorted(names)
+
+
+RUN_FOLDER = None
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+
+
+def tearDownModule():
+    if RUN_FOLDER and os.path.isdir(RUN_FOLDER):
+        shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
 class Matcher(unittest.TestCase):
@@ -138,6 +159,22 @@ class Matcher(unittest.TestCase):
         source = 'e = "#"; f = "mcp__fixture__after"\ng = "//"; h = "mcp__fixture__slashes"\n'
         self.assertEqual(mcp_names_in(ast.parse(source)), {"mcp__fixture__after", "mcp__fixture__slashes"})
         self.assertEqual(mcp_names_in(ast.parse("")), set())
+
+    def test_mcp_scan_follows_guard_imports_to_any_depth(self):
+        # guard.py imports guard_a, guard_a imports guard_zz, and guard_zz holds the name. guard_zz also imports
+        # guard_a, so the walk meets a cycle. The fixture folder stands in for hooks/, so the real modules decide nothing.
+        folder = os.path.join(RUN_FOLDER, "closure")
+        os.makedirs(folder, exist_ok=True)
+        files = {
+            "guard.py": "import guard_a\n",
+            "guard_a.py": "import guard_zz\n",
+            "guard_zz.py": 'import guard_a\nX = "mcp__github__x"\n',
+        }
+        for name, text in files.items():
+            with open(os.path.join(folder, name), "w", encoding="utf-8") as f:
+                f.write(text)
+        self.assertIn("mcp__github__x", guard_mcp_names(folder),
+                      "the scan does not reach guard_zz through guard_a: it reads only the direct imports")
 
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
