@@ -763,7 +763,7 @@ def parse_verdict(text, shape=VERDICT_SHAPE):
 # A model call that cannot authenticate must not be quiet: every hook judge fails open on an error,
 # so a lost login turns them all off with no sign. Two readers, no timer and no new process:
 #   `auth_check`, the SessionStart entry (`--auth-check`). One file read per session start. At most
-#     one probe call (about 2-3 s, measured 2026-11-06) and only when no token file exists. The probe
+#     one probe call (about 2-3 s, measured) and only when no token file exists. The probe
 #     goes through `invoke_model`, the path real calls take, so it does not depend on the credential
 #     it checks. A token file means no probe. No token file is not a failure by itself: a cloud
 #     session called the model with no token file and no credentials file, so only the probe knows.
