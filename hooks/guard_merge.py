@@ -768,14 +768,10 @@ def archive_hit(tool: str, tool_input, transcript: str):
 
 
 # ---- send_message: a lane brief goes to a lane of its own topic (rule lane-one-topic)
-BRIEF_TOOL = "mcp__claude-code-remote__send_message"
-LANE_BRIEF_MARKER = "Lane brief:"  # the first non-blank line of a brief starts `Lane brief: <step>. Topic: <topic>.`
+# The brief's names live in shared_names (stdlib only), so hooks/call_judge.py reads them without this module.
+from shared_names import BRIEF_TOOL, LANE_BRIEF_MARKER  # noqa: E402,F401
+from shared_names import BRIEF_LINE as _BRIEF_LINE, BRIEF_MARKER_LINE as _BRIEF_MARKER_LINE  # noqa: E402
 TOPIC_TAG_PREFIX = "cs-topic:"
-_MARKDOWN_LEAD = r"[#*_>\s]*"  # a brief may open with markdown: a heading, bold, a quote
-_BRIEF_MARKER_LINE = re.compile(_MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER), re.IGNORECASE)
-_BRIEF_LINE = re.compile(
-    _MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER) + r"[\s*_]*(?P<step>[A-Za-z0-9_-]+)\s*\.(?:\s*Topic:\s*(?P<topic>[A-Za-z0-9_-]+))?",
-    re.IGNORECASE)
 BRIEF_NO_RECORD_REASON = (
     "this session's transcript holds no get_session or create_session record of the target, so the guard "
     "cannot tell which topic the lane holds. Run get_session on the target alone, in its own turn, then retry. "

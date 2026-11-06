@@ -92,3 +92,15 @@ def refusals_path(session_id: object) -> Optional[str]:
     if not isinstance(session_id, str) or not re.fullmatch(r"[\w.-]+", session_id) or session_id.startswith("."):
         return None
     return os.path.join(config_dir(), STATE_DIR_NAME, "refusals", session_id + ".jsonl")
+
+
+# The lane brief (guard_merge.brief_hit, call_judge's check refuter): a send_message whose first non-blank line starts
+# `Lane brief: <step>. Topic: <topic>.`. BRIEF_MARKER_LINE matches the marker; BRIEF_LINE also names the step and topic.
+BRIEF_TOOL = "mcp__claude-code-remote__send_message"
+LANE_BRIEF_MARKER = "Lane brief:"
+_MARKDOWN_LEAD = r"[#*_>\s]*"  # a brief may open with markdown: a heading, bold, a quote
+BRIEF_MARKER_LINE = re.compile(_MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER), re.IGNORECASE)
+BRIEF_LINE = re.compile(
+    _MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER)
+    + r"[\s*_]*(?P<step>[A-Za-z0-9_-]+)\s*\.(?:\s*Topic:\s*(?P<topic>[A-Za-z0-9_-]+))?",
+    re.IGNORECASE)

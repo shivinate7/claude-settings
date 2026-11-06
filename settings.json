@@ -251,7 +251,7 @@
         ]
       },
       {
-        "matcher": "Agent|AskUserQuestion|ArtifactData",
+        "matcher": "Agent|AskUserQuestion|ArtifactData|mcp__claude-code-remote__send_message",
         "hooks": [
           {
             "type": "command",
