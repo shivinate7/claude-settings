@@ -250,9 +250,12 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    `lane` and `lastAnswer` and no `waits`. The exit code stays the page's.
 3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
    republish, so the copy holds the page as it was.
-4. Before any republish, check the pictures of the open items: `python3 ~/.claude/skills/waiting-page/export_page.py --check --fetched <folder> --page <out>`
-   (`<folder>` is the fetch of "Keep a copy in the repo", step 2). It writes nothing. `held item <n>: ...` (exit 4): fix that item, check again,
-   and do not republish. `checks pass`: go on. `checks unknown: ...` (exit 3): say the line in the reply, and go on.
+4. Before any republish, check the pictures of the open items, against the file about to be published (`<out>`, the `--write` output of
+   step 2), never the live page: `python3 ~/.claude/skills/waiting-page/export_page.py --check --fetched <folder> --page <out>`
+   (`<folder>` is the fetch of "Keep a copy in the repo", step 2). It writes nothing. Hold the republish on any exit but 0.
+   `held item <n>: ...` (exit 4): fix that item, check again. `checks unknown: ...` (exit 3), or no page file (exit 2):
+   a check that cannot read its input fails, never passes (owner ruling, item 276 a): say the line in the reply,
+   and republish nothing until a check passes. `checks pass` (exit 0): go on.
    `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
    `<out>` is main's page with the live `designData` and roadmap blocks kept, byte for byte
    (`--write` calls `splice.carry`). A live page with no roadmap block keeps the template's empty one.

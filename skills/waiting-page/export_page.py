@@ -27,8 +27,9 @@ Picture check, with --page: after the copy is written, each fetched item that ca
 open decision (not closed, not a ruling, not answered) is run through check_designs.mjs, the page's own `pictureProblem` in
 Chromium (page_check.py is the one home). A miss prints `held item <n>: <the page's sentence>` after the verdict line, one
 per item, and the run exits 4: fix the item, export again, and do not republish while one is held. A check that cannot run
-(no node, no Playwright or Chromium) prints one `checks unknown: <why>` line before the verdict; the copy is written and the
-exit code is as without checks.
+(no node, no Playwright or Chromium), or an open pictured item with no page file, prints one `checks unknown: <why>` line
+before the verdict; the copy is written and the exit code is as without checks. The checker gets the fetched answers
+(`--answers`) and skips an item the page's own `isAnswered` draws as answered. No time budget spans the items.
 Every doc is scanned, as parsed JSON, before the first write: each string value, each key, each doc id and each
 10 or 11 digit number (a phone). The page text and each supporting text file are scanned as text with the same
 shapes, except that a version pin such as `react@18.3.1` and a retina name such as `logo@2x.png` are not emails.
@@ -44,7 +45,8 @@ Check, before a republish, writes nothing:
 
     python3 ~/.claude/skills/waiting-page/export_page.py --check --fetched DIR --page FILE
 
-The same item checks. A miss prints its `held item` line, exit 4. Else `checks pass`, exit 0. Unknown: `checks unknown: <why>`, exit 3.
+The same item checks. A miss prints its `held item` line, exit 4. Else `checks pass`, exit 0. Unknown: `checks unknown: <why>`,
+exit 3. The writer holds the republish on any exit but 0: a check that cannot read its input fails, never passes.
 
 Rebuild, the recovery path. It reads only the repo copy, never the live page:
 
@@ -69,8 +71,8 @@ also exports its designData block. A supporting file no longer fetched stays in 
 An entry with `"export": false` prints `<id>: skipped - no export`, needs no folder in DIR, writes nothing and
 counts as exit 0. Each other artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
 unknown leaves its own folder as it was and holds back no other. Exit: 0 when every artifact is changed or same; else
-the worst of 1 (refused), 2 (unknown: also a registry that is missing, empty or unreadable), 3 (a crash) and 4 (a held
-item). The waiting-page entry prints each `held item` line after its verdict, prefixed `<id>: `.
+the worst of 1 (refused), 2 (unknown: also a registry that is missing, empty or unreadable) and 3 (a crash); 4 (a held
+item) only when none of those happened. The waiting-page entry prints each `held item` line after its verdict, prefixed `<id>: `.
 
 Cost: one python process, one read of each file, writes only for a changed doc. No git, no network, no timer.
 """
@@ -451,8 +453,11 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
             os.remove(os.path.join(out, *label.split("/")))
             changed += 1
     unknown, held = None, []
-    if page and design and "items" in collections:
-        held, unknown = picture_checks(page, docs)
+    if design and "items" in collections:
+        if page:
+            held, unknown = picture_checks(page, docs)
+        elif page_check.pictured_items(docs["items"])[0]:  # a pictured item and no page: the check cannot run
+            unknown = "checks unknown: no page file"
     return ("changed %d" % changed if changed else "same"), unknown, held
 
 
@@ -467,7 +472,7 @@ def export_all(root, fetched, worktree, allow_empty):
         raise Stop("unknown - the artifacts registry cannot be read: %s" % err, UNKNOWN)
     if not entries:
         raise Stop("unknown - %s has no artifacts registry entry to export" % root, UNKNOWN)
-    worst = 0
+    worst, held_any = 0, False
     for entry in entries:
         name = entry["id"]
         if entry["export"] is False:  # held in the registry, never exported: no folder needed, nothing written
@@ -482,7 +487,7 @@ def export_all(root, fetched, worktree, allow_empty):
             verdict, unknown, held = export(folder, os.path.join(worktree, *entry["export"].split("/")),
                              page if os.path.isfile(page) else None, allow_empty, tuple(entry["collections"]), "%s: " % name,
                              entry["role"] == layout.WAITING_ROLE, supporting_files(files) if os.path.isdir(files) else None)
-            code = HELD if held else 0
+            code = 0
         except Stop as stop:
             verdict, unknown, held, code = str(stop), None, [], stop.code
         except Exception as err:  # one artifact's crash must not hide the verdict of the others
@@ -492,8 +497,9 @@ def export_all(root, fetched, worktree, allow_empty):
         print("%s: %s" % (name, verdict))
         for line in held:
             print("%s: %s" % (name, line))
+        held_any = held_any or bool(held)
         worst = max(worst, code)
-    return worst
+    return worst or (HELD if held_any else 0)  # a held item is 4 only when nothing worse (1, 2 or 3) happened
 
 
 def check_only(fetched, page):
