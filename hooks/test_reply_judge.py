@@ -1279,11 +1279,11 @@ def case_port_finding_is_a_note_with_its_rule():
 
 
 # --------------------------------------------------------------------------- c139
-# Uniform ruling (topic t18): a repo that differs from a shared format changes to match, and the
-# shared tool never grows a second form. An option that widens what a shared tool accepts carries
-# "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo" and is never
-# the recommended option. Rule
-# `style-question-form` holds that text (the one question form, hooks/question_form.py).
+# Owner ruling, item 278 (2026-11-06 12:41 CST): a repo should change to fit a shared tool, rather than the tool
+# change to fit a repo. Widening is judged by scope: a change that applies the same way to every repo is not
+# widening. An option that widens carries "Goes against your ruling: a repo should change to fit the shared tool,
+# rather than the tool change to fit a repo" and is never the recommended option. Rule `style-question-form` holds
+# that text (the one question form, hooks/question_form.py).
 
 WIDENS_RULE = "style-question-form"
 WIDENS_ASK = (
@@ -1327,7 +1327,8 @@ def case_prompt_flags_a_recommended_option_that_widens():
           has_pin(sentences, ("flag",), ("recommend",), ("widen",), ("shared tool",)), sentences)
     check("prompt: a sentence flags such an option offered without its label",
           has_pin(sentences, ("flag",), ("widen",),
-                  ("goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo",)),
+                  ("goes against your ruling: a repo should change to fit the shared tool, rather than the tool change "
+                   "to fit a repo",)),
           sentences)
     check("prompt: a sentence spares an option where the repo changes to match",
           has_pin(sentences, ("never flag",), ("repo",), ("match",)), sentences)
@@ -1335,6 +1336,24 @@ def case_prompt_flags_a_recommended_option_that_widens():
           has_pin(sentences, ("judge only",), ("options",), ("offers",)), sentences)
     check("prompt: a sentence never flags a reply that describes the rule itself",
           has_pin(sentences, ("never flag",), ("describes the rule",)), sentences)
+
+
+def case_prompt_says_a_same_change_for_every_repo_is_not_widening():
+    # Item 278: a change that applies the same way to every repo is not widening. One sentence says so; the words
+    # are matched loosely, so a reworded sentence still passes.
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    sentences = rule_sentences(run, WIDENS_ASK)
+    check("prompt: a sentence says a change that applies the same way to every repo is not widening",
+          has_pin(sentences, ("every repo", "all repos", "every repository"), ("not widening", "not a widening")),
+          sentences)
+
+
+def case_prompt_names_a_per_repo_exception_as_widening():
+    # Control: the scope sentence still names a per-repo or one-repo exception as widening.
+    run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
+    sentences = rule_sentences(run, WIDENS_ASK)
+    check("prompt: a sentence names a per-repo or one-repo exception as widening",
+          has_pin(sentences, ("flag",), ("widen",), ("per-repo", "one repo")), sentences)
 
 
 # Roadmap c135, item 31's shape: options that can all be done together, asked as pick-one. The prompt
@@ -1730,6 +1749,8 @@ CASES = (
     case_port_finding_is_a_note_with_its_rule,
     case_prompt_count_matches_judged_rules,
     case_prompt_flags_a_recommended_option_that_widens,
+    case_prompt_says_a_same_change_for_every_repo_is_not_widening,
+    case_prompt_names_a_per_repo_exception_as_widening,
     case_widens_finding_logs_its_rule,
     case_prompt_flags_a_pick_one_question_whose_options_could_combine,
     case_route_cite_carries_cited_same_act_and_alternate_rows,
