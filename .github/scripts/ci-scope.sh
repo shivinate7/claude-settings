@@ -89,9 +89,12 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       *) on="$on $ALL " ;;
     esac
   done <<< "$files"
-  # judge_replay: a readable diff narrows it to the judges the runner names. A runner that cannot run reads as true.
+  # judge_replay: a readable diff narrows it to the judges the runner names. A tree with no runner has no judge to replay, so
+  # it reads false (the merge tool runs this script on a tree of its own). A runner that exists and cannot run reads as true.
+  runner="$(dirname "$0")/../../hooks/judge_replay.py"
   if [ "$jr_all" = 1 ]; then jr=true
-  elif judges=$(printf '%s\n' "$files" | python3 "$(dirname "$0")/../../hooks/judge_replay.py" --paths 2>/dev/null); then
+  elif [ ! -f "$runner" ]; then jr=false
+  elif judges=$(printf '%s\n' "$files" | python3 "$runner" --paths 2>/dev/null); then
     if [ -n "$judges" ]; then jr=true; else jr=false; fi
   else jr=true; fi
   # A new file under a landed dir (landed-dirs.txt, the one list) changes what test_install_src and
