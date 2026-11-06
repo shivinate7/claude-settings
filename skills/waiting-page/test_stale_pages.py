@@ -125,11 +125,12 @@ class Stale(unittest.TestCase):
         with open(os.path.join(self.fetched, page_id + ext), "w", encoding="utf-8") as f:
             f.write(text or "")
 
-    def run_script(self, *args, script=None, home=None):
-        """Every script run goes through here, so the timeout bounds each one."""
+    def run_script(self, *args, script=None, home=None, extra_env=None):
+        """Every script run goes through here, so the timeout bounds each one. `extra_env` adds variables to the run."""
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
         if home is not None:
             env["HOME"] = home
+        env.update(extra_env or {})
         return subprocess.run([sys.executable, script or CMD, *args], capture_output=True, text=True,
                               timeout=30, env=env)
 
@@ -460,8 +461,8 @@ class Stale(unittest.TestCase):
 
     # Single-page mode: stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]
 
-    def page_run(self, page, *extra, home=None, script=None):
-        return self.run_script("--page", page, *extra, home=home, script=script)
+    def page_run(self, page, *extra, home=None, script=None, env=None):
+        return self.run_script("--page", page, *extra, home=home, script=script, extra_env=env)
 
     def verdict(self, r):
         """(word, line) for the one stdout line that names a verdict."""
@@ -751,6 +752,404 @@ class Stale(unittest.TestCase):
         self.assertEqual(spy.call_count, 3)
         self.assertEqual({c.kwargs.get("timeout") for c in spy.call_args_list}, {30})
 
+    # Single-page mode with --items <file or folder>: one wait line per open item with a `waits` field, after the verdict line.
+
+    def gh_env(self, answers):
+        """The environment of one run: WAITING_PAGE_GH names a gh stand-in that answers `answers` ({full argv: [exit, stdout]}),
+        and PATH starts with a gh that only logs, so no run reaches GitHub. Returns (env, the folder whose calls.txt logs both)."""
+        folder = tempfile.mkdtemp(dir=self.tmp.name, prefix="gh-")
+        write_text(os.path.join(folder, "answers.json"), json.dumps(answers))
+        stub = self.executable(os.path.join(folder, "gh"), GH_STUB)
+        path_dir = tempfile.mkdtemp(dir=self.tmp.name, prefix="path-")
+        self.executable(os.path.join(path_dir, "gh"), GH_LOG.replace("@LOG@", repr(os.path.join(folder, "calls.txt"))))
+        return {"WAITING_PAGE_GH": stub, "PATH": path_dir + os.pathsep + os.environ.get("PATH", "")}, folder
+
+    def executable(self, path, text):
+        write_text(path, text.replace("@PYTHON@", sys.executable))
+        os.chmod(path, 0o755)
+        return path
+
+    def gh_calls(self, folder):
+        """Each argv that reached the gh stand-in or the logging gh, in order. Empty when none did."""
+        path = os.path.join(folder, "calls.txt")
+        if not os.path.exists(path):
+            return []
+        with open(path, encoding="utf-8") as f:
+            return f.read().splitlines()
+
+    def items_file(self, items):
+        """The items as a JSON list: the first shape --items takes."""
+        path = os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix="items-"), "items.json")
+        return write_text(path, json.dumps(items))
+
+    def items_folder(self, items):
+        """The items as the folder `ArtifactData list` saves: one <id>.json per item, and the .complete marker it leaves."""
+        folder = tempfile.mkdtemp(dir=self.tmp.name, prefix="items-")
+        for item in items:
+            write_text(os.path.join(folder, item["id"] + ".json"), json.dumps(item))
+        write_text(os.path.join(folder, ".complete"), "")
+        return folder
+
+    def current_and_behind(self):
+        """The two fetched pages the --items cases run on: page.html as it is, and the stale page the behind cases use."""
+        return (write_text(os.path.join(self.fetched, "current.html"), PAGE),
+                write_text(os.path.join(self.fetched, "behind.html"), set_body(ALTERED, STALE_BODY)))
+
+    def items_run(self, page, items, env):
+        return self.page_run(page, "--main", TEMPLATE, "--items", items, env=env)
+
+    def page_line(self, r):
+        """The page's verdict line: the first stdout line."""
+        return (r.stdout.splitlines() or [""])[0]
+
+    def assert_page_word(self, r, word, code):
+        """Exit `code`, and the verdict line first on stdout reads `word`."""
+        self.assertTrue(self.page_line(r).startswith(word + ":"), "the first stdout line is not the page verdict %r:\n%s" % (word, r.stdout + r.stderr))
+        self.assertEqual(r.returncode, code, "the exit code is not the page verdict's:\n" + r.stdout + r.stderr)
+
+    def wait_lines(self, r, n):
+        """The stdout lines after the verdict line that name item `n` as a whole number."""
+        return [line for line in r.stdout.splitlines()[1:] if re.search(r"(?<!\d)%d(?!\d)" % n, line)]
+
+    def assert_wait_line(self, r, n, target, word):
+        """Exactly one line after the verdict line names item `n` and `target`, and it reads `word` and no other wait word."""
+        lines = self.wait_lines(r, n)
+        self.assertEqual(len(lines), 1, "item %d: want one wait line after the verdict line, got %d:\n%s" % (n, len(lines), r.stdout + r.stderr))
+        line = lines[0]
+        self.assertRegex(line, r"(?<!\d)%s(?!\d)" % re.escape(str(target)), "item %d: its wait line does not name %s" % (n, target))
+        self.assertRegex(line, r"\b%s\b" % word, "item %d: its wait line does not read %s" % (n, word))
+        for other in WAIT_WORDS - {word}:
+            self.assertNotRegex(line, r"\b%s\b" % other, "item %d: its wait line reads %s as well as %s" % (n, other, word))
+
+    def assert_wait(self, waits, argv, answer, target, word, n=154, as_folder=False):
+        """Item `n` waiting on `waits`, gh answering `answer` to `argv`: the page stays current at exit 0, its wait line
+        names `target` and reads `word`, and gh was called once, with argv."""
+        current, _ = self.current_and_behind()
+        env, folder = self.gh_env({argv: answer})
+        item = [wait_item(n, waits)]
+        items = self.items_folder(item) if as_folder else self.items_file(item)
+        r = self.items_run(current, items, env)
+        self.assert_page_word(r, "current", 0)
+        self.assert_wait_line(r, n, target, word)
+        self.assertEqual(self.gh_calls(folder), [argv], "gh calls for item %d" % n)
+
+    def test_a_run_that_completed_with_a_failure_names_its_item_ended(self):
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                self.assert_wait({"repo": REPO, "run": RUN}, RUN_ARGV, RUN_DONE, RUN, "ended", as_folder=as_folder)
+
+    def test_an_open_pr_or_a_run_in_progress_names_its_item_waiting(self):
+        with self.subTest("open pr"):
+            self.assert_wait({"repo": REPO, "pr": PR}, PR_ARGV, PR_OPEN, PR, "waiting")
+        with self.subTest("run in progress"):
+            self.assert_wait({"repo": REPO, "run": RUN}, RUN_ARGV, RUN_IN_PROGRESS, RUN, "waiting")
+
+    def test_a_pr_closed_without_a_merge_names_its_item_ended(self):
+        self.assert_wait({"repo": REPO, "pr": PR}, PR_ARGV, PR_CLOSED, PR, "ended")
+
+    def test_a_merged_pr_names_its_item_ended(self):
+        self.assert_wait({"repo": REPO, "pr": PR}, PR_ARGV, PR_MERGED, PR, "ended")
+
+    def test_a_gh_that_fails_is_missing_or_answers_non_json_names_its_item_unknown(self):
+        current, behind = self.current_and_behind()
+        base, _ = self.gh_env({RUN_ARGV: [1, ""]})
+        envs = {
+            "exits non-zero": base,
+            "missing": dict(base, WAITING_PAGE_GH=os.path.join(self.tmp.name, "no-such-gh")),
+            "answers non-json": self.gh_env({RUN_ARGV: [0, "not json"]})[0],
+        }
+        for label, env in envs.items():
+            for word, page, code in (("current", current, 0), ("behind", behind, 1)):
+                with self.subTest(gh=label, page=word):
+                    items = self.items_file([wait_item(154, {"repo": REPO, "run": RUN})])
+                    r = self.items_run(page, items, env)
+                    self.assert_page_word(r, word, code)
+                    self.assert_wait_line(r, 154, RUN, "unknown")
+
+    def test_without_items_gh_is_never_called(self):
+        current, _ = self.current_and_behind()
+        env, folder = self.gh_env({RUN_ARGV: RUN_DONE})
+        r = self.page_run(current, "--main", TEMPLATE, env=env)
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(len(r.stdout.splitlines()), 1, "a run without --items printed lines past the verdict:\n" + r.stdout)
+        self.assertEqual(self.gh_calls(folder), [], "a run without --items called gh")
+
+    def test_one_open_waits_item_makes_exactly_one_gh_call(self):
+        current, _ = self.current_and_behind()
+        env, folder = self.gh_env({RUN_ARGV: RUN_DONE})
+        r = self.items_run(current, self.items_file([wait_item(154, {"repo": REPO, "run": RUN})]), env)
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(self.gh_calls(folder), [RUN_ARGV], "gh calls for one open waits item")
+
+    def test_a_closed_waits_item_makes_no_gh_call_and_prints_no_line(self):
+        current, _ = self.current_and_behind()
+        env, folder = self.gh_env({RUN_ARGV: RUN_DONE, PR_ARGV: PR_MERGED})
+        items = [wait_item(155, {"repo": REPO, "pr": PR}, status="closed"), wait_item(154, {"repo": REPO, "run": RUN})]
+        r = self.items_run(current, self.items_file(items), env)
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(self.wait_lines(r, 155), [], "the closed item printed a wait line")
+        self.assertEqual(self.gh_calls(folder), [RUN_ARGV], "gh calls: the closed item must not be asked, the open one must")
+
+    def test_an_empty_list_or_an_open_item_with_no_waits_makes_no_gh_call(self):
+        current, _ = self.current_and_behind()
+        cases = {
+            "empty list": self.items_file([]),
+            "folder with only the marker": self.items_folder([]),
+            "open item with no waits": self.items_file([wait_item(3, None)]),
+        }
+        for label, items in cases.items():
+            with self.subTest(label):
+                env, folder = self.gh_env({RUN_ARGV: RUN_DONE})
+                r = self.items_run(current, items, env)
+                self.assert_page_word(r, "current", 0)
+                self.assertEqual(len(r.stdout.splitlines()), 1, "printed lines past the verdict:\n" + r.stdout)
+                self.assertEqual(self.gh_calls(folder), [], "gh calls")
+
+    def test_full_size_items_make_one_call_per_open_waits_item_and_no_more(self):
+        current, _ = self.current_and_behind()
+        items, answers, want = [], {}, []
+        for i in range(40):  # open, waits on a PR: asked
+            pr = 3001 + i
+            items.append(wait_item(501 + i, {"repo": REPO, "pr": pr}))
+            answers[pr_argv(pr)] = PR_OPEN
+            want.append(pr_argv(pr))
+        for i in range(40):  # closed, waits on a run: not asked
+            items.append(wait_item(601 + i, {"repo": REPO, "run": "8%08d" % i}, status="closed"))
+        for i in range(40):  # open, no waits: not asked
+            items.append(wait_item(701 + i, None))
+        self.assertEqual(len(items), 120)
+        env, folder = self.gh_env(answers)
+        r = self.items_run(current, self.items_file(items), env)
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(sorted(self.gh_calls(folder)), sorted(want), "gh calls for 120 items")
+        self.assertEqual(len(r.stdout.splitlines()) - 1, 40, "want one wait line per open waits item:\n" + r.stdout)
+        for i in range(40):
+            self.assert_wait_line(r, 501 + i, 3001 + i, "waiting")
+
+    def test_the_exit_code_stays_the_verdicts_with_an_ended_wait(self):
+        current, behind = self.current_and_behind()
+        env, _ = self.gh_env({RUN_ARGV: RUN_DONE})
+        items = self.items_file([wait_item(154, {"repo": REPO, "run": RUN})])
+        for word, page, code in (("current", current, 0), ("behind", behind, 1)):
+            with self.subTest(page=word):
+                r = self.items_run(page, items, env)
+                self.assert_page_word(r, word, code)
+                self.assert_wait_line(r, 154, RUN, "ended")
+
+    def test_a_run_completed_with_failure_names_the_conclusion_in_its_line(self):
+        current, _ = self.current_and_behind()
+        env, _ = self.gh_env({RUN_ARGV: RUN_DONE})
+        r = self.items_run(current, self.items_file([wait_item(154, {"repo": REPO, "run": RUN})]), env)
+        self.assert_page_word(r, "current", 0)
+        lines = self.wait_lines(r, 154)
+        self.assertEqual(len(lines), 1, "want one wait line for item 154:\n" + r.stdout + r.stderr)
+        self.assertIn("failure", lines[0], "the wait line does not name the run's conclusion:\n" + lines[0])
+
+    def test_a_run_or_pr_number_is_valid_only_as_a_whole_number_or_digits_without_a_leading_zero(self):
+        current, _ = self.current_and_behind()
+        valid = [("run", int(RUN), RUN, RUN_ARGV, RUN_DONE, "ended"), ("run", RUN, RUN, RUN_ARGV, RUN_DONE, "ended"),
+                 ("pr", PR, PR, PR_ARGV, PR_OPEN, "waiting"), ("pr", str(PR), PR, PR_ARGV, PR_OPEN, "waiting")]
+        for kind, value, target, argv, answer, word in valid:
+            with self.subTest(valid=(kind, value)):
+                env, folder = self.gh_env({argv: answer})
+                r = self.items_run(current, self.items_file([wait_item(154, {"repo": REPO, kind: value})]), env)
+                self.assert_page_word(r, "current", 0)
+                self.assert_wait_line(r, 154, target, word)
+                self.assertEqual(self.gh_calls(folder), [argv], "gh calls for a valid %s of %r" % (kind, value))
+        for kind in ("run", "pr"):
+            for value in ("0", "012", 0, -5, "abc"):
+                with self.subTest(malformed=(kind, value)):
+                    env, folder = self.gh_env({RUN_ARGV: RUN_DONE, PR_ARGV: PR_OPEN})
+                    r = self.items_run(current, self.items_file([wait_item(154, {"repo": REPO, kind: value})]), env)
+                    self.assert_page_word(r, "current", 0)
+                    lines = self.wait_lines(r, 154)
+                    self.assertEqual(len(lines), 1, "want one wait line for item 154:\n" + r.stdout + r.stderr)
+                    self.assertRegex(lines[0], r"\bunknown\b", "a malformed %s reads as something other than unknown: %s" % (kind, lines[0]))
+                    self.assertEqual(self.gh_calls(folder), [], "gh was called for a malformed %s of %r" % (kind, value))
+
+    def test_an_items_folder_with_no_complete_marker_reads_every_wait_unknown_and_calls_no_gh(self):
+        current, behind = self.current_and_behind()
+        folder = self.items_folder([wait_item(154, {"repo": REPO, "run": RUN}), wait_item(155, {"repo": REPO, "pr": PR})])
+        os.remove(os.path.join(folder, ".complete"))
+        for word, page, code in (("current", current, 0), ("behind", behind, 1)):
+            with self.subTest(page=word):
+                env, calls_folder = self.gh_env({RUN_ARGV: RUN_DONE, PR_ARGV: PR_MERGED})
+                r = self.items_run(page, folder, env)
+                self.assert_page_word(r, word, code)
+                self.assert_wait_line(r, 154, RUN, "unknown")
+                self.assert_wait_line(r, 155, PR, "unknown")
+                self.assertEqual(self.gh_calls(calls_folder), [], "gh was called for an items folder with no .complete marker")
+
+    def test_fifty_one_open_waits_items_make_exactly_the_cap_of_gh_calls_and_the_last_line_is_unknown(self):
+        cap = load_stale_pages().WAIT_CAP
+        current, _ = self.current_and_behind()
+        items, answers, want = [], {}, []
+        for i in range(cap + 1):  # every item waits on an open PR, and gh would answer each one
+            pr = 3001 + i
+            items.append(wait_item(501 + i, {"repo": REPO, "pr": pr}))
+            answers[pr_argv(pr)] = PR_OPEN
+            if i < cap:
+                want.append(pr_argv(pr))
+        env, folder = self.gh_env(answers)
+        r = self.items_run(current, self.items_file(items), env)
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(self.gh_calls(folder), want, "gh calls for %d open waits items" % (cap + 1))
+        self.assert_wait_line(r, 501 + cap - 1, 3001 + cap - 1, "waiting")
+        self.assert_wait_line(r, 501 + cap, 3001 + cap, "unknown")
+
+    # An item on a lane (`lane` set): an open one with `lastAnswer` and no `waits` prints one lane line, built from the item
+    # alone, so the writer sees a wait that never ends. An item with `waits` keeps its one gh line. A closed item, and one
+    # with `lane` but no `lastAnswer` (a question still open on a busy lane), prints nothing.
+
+    def lane_item(self, n, status="open", last_answer=True, waits=None):
+        """An item on lane LANE: `lane` set, and `lastAnswer` set unless `last_answer` is False."""
+        item = wait_item(n, waits, status=status)
+        item["lane"] = LANE
+        if last_answer:
+            item["lastAnswer"] = {"choice": "a", "note": "", "at": ANSWERED}
+        return item
+
+    def lane_item_with(self, n, answer):
+        """An open item on lane LANE whose `lastAnswer` is `answer`, as given."""
+        item = self.lane_item(n, last_answer=False)
+        item["lastAnswer"] = answer
+        return item
+
+    def test_an_open_lane_item_with_a_last_answer_and_no_waits_prints_one_lane_line(self):
+        current, _ = self.current_and_behind()
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                env, _ = self.gh_env({})
+                items = self.items_folder([self.lane_item(154)]) if as_folder else self.items_file([self.lane_item(154)])
+                r = self.items_run(current, items, env)
+                self.assert_page_word(r, "current", 0)
+                self.assertEqual(r.stdout.splitlines()[1:], [lane_line(154)],
+                                 "the lane line for item 154 is missing or differs:\n" + r.stdout + r.stderr)
+
+    def test_the_lane_line_starts_no_gh_process(self):
+        current, _ = self.current_and_behind()
+        env, folder = self.gh_env({RUN_ARGV: RUN_DONE})
+        r = self.items_run(current, self.items_file([self.lane_item(154)]), env)
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(r.stdout.splitlines()[1:], [lane_line(154)],
+                         "the lane line for item 154 is missing or differs:\n" + r.stdout + r.stderr)
+        self.assertEqual(self.gh_calls(folder), [], "gh was called for an item with lane and lastAnswer and no waits")
+
+    def test_an_item_with_lane_and_waits_keeps_its_one_gh_line_and_adds_no_lane_line(self):
+        current, _ = self.current_and_behind()
+        env, folder = self.gh_env({RUN_ARGV: RUN_DONE})
+        r = self.items_run(current, self.items_file([self.lane_item(154, waits={"repo": REPO, "run": RUN})]), env)
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(len(r.stdout.splitlines()) - 1, 1,
+                         "want one wait line after the verdict line, not a lane line as well:\n" + r.stdout + r.stderr)
+        self.assert_wait_line(r, 154, RUN, "ended")
+        self.assertEqual(self.gh_calls(folder), [RUN_ARGV], "gh calls for an item with lane and waits")
+
+    def test_a_closed_lane_item_prints_no_line_and_calls_no_gh(self):
+        current, _ = self.current_and_behind()
+        env, folder = self.gh_env({RUN_ARGV: RUN_DONE})
+        r = self.items_run(current, self.items_file([self.lane_item(154, status="closed")]), env)
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(len(r.stdout.splitlines()), 1, "a closed lane item printed a line past the verdict:\n" + r.stdout)
+        self.assertEqual(self.gh_calls(folder), [], "gh was called for a closed lane item")
+
+    def test_a_lane_item_with_no_last_answer_prints_no_line_and_calls_no_gh(self):
+        current, _ = self.current_and_behind()
+        env, folder = self.gh_env({RUN_ARGV: RUN_DONE})
+        r = self.items_run(current, self.items_file([self.lane_item(154, last_answer=False)]), env)
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(len(r.stdout.splitlines()), 1, "a lane item with no lastAnswer printed a line past the verdict:\n" + r.stdout)
+        self.assertEqual(self.gh_calls(folder), [], "gh was called for a lane item with no lastAnswer")
+
+    def test_full_size_lane_items_print_a_line_only_for_the_open_ones_with_a_last_answer(self):
+        current, _ = self.current_and_behind()
+        items = [self.lane_item(801 + i) for i in range(40)]  # open, lastAnswer: one line each
+        items += [self.lane_item(901 + i, status="closed") for i in range(40)]  # closed: none
+        items += [self.lane_item(951 + i, last_answer=False) for i in range(40)]  # open, no lastAnswer: none
+        self.assertEqual(len(items), 120)
+        env, folder = self.gh_env({})
+        r = self.items_run(current, self.items_file(items), env)
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(r.stdout.splitlines()[1:], [lane_line(801 + i) for i in range(40)],
+                         "the lane lines for 120 items differ from the 40 open items with a lastAnswer:\n" + r.stdout)
+        self.assertEqual(self.gh_calls(folder), [], "gh was called for lane items with no waits")
+
+    def test_a_lane_line_whose_answer_has_no_usable_at_reads_answered_at_unknown_and_never_none_or_a_number(self):
+        current, _ = self.current_and_behind()
+        cases = (("no at key", {"choice": "a", "note": ""}),
+                 ("at null", {"choice": "a", "note": "", "at": None}),
+                 ("at a whole number", {"choice": "a", "note": "", "at": 1762264589}),
+                 ("at a float", {"choice": "a", "note": "", "at": 1762264589.5}))
+        for label, answer in cases:
+            with self.subTest(case=label):
+                env, folder = self.gh_env({})
+                r = self.items_run(current, self.items_file([self.lane_item_with(154, answer)]), env)
+                self.assert_page_word(r, "current", 0)
+                self.assertEqual(r.stdout.splitlines()[1:], [lane_line_unknown(154)],
+                                 "the lane line for item 154 with %s is not the unknown line:\n%s" % (label, r.stdout + r.stderr))
+                self.assertEqual(self.gh_calls(folder), [], "gh was called for a lane item with %s" % label)
+
+
+# Fixtures for the --items cases: a repo, a run that ended completed/failure, and the PR that run gated.
+REPO, RUN, PR = "shivinate7/q_max", "41861801325", 1011
+RUN_ARGV = "run view %s --repo %s --json status,conclusion" % (RUN, REPO)
+
+
+def pr_argv(pr):
+    return "pr view %d --repo %s --json state,mergedAt" % (pr, REPO)
+
+
+PR_ARGV = pr_argv(PR)
+RUN_DONE = [0, '{"status":"completed","conclusion":"failure"}']
+RUN_IN_PROGRESS = [0, '{"status":"in_progress","conclusion":""}']
+PR_OPEN = [0, '{"state":"OPEN","mergedAt":null}']
+PR_CLOSED = [0, '{"state":"CLOSED","mergedAt":null}']
+PR_MERGED = [0, '{"state":"MERGED","mergedAt":"2026-11-04T21:10:00Z"}']
+WAIT_WORDS = {"ended", "waiting", "unknown"}
+# The gh stand-in: answers by its full argv, logs each argv to calls.txt beside itself, and fails on any argv it does not know.
+GH_STUB = '''#!@PYTHON@
+import json, os, sys
+HERE = os.path.dirname(os.path.abspath(__file__))
+argv = " ".join(sys.argv[1:])
+with open(os.path.join(HERE, "calls.txt"), "a", encoding="utf-8") as f:
+    f.write(argv + "\\n")
+with open(os.path.join(HERE, "answers.json"), encoding="utf-8") as f:
+    answers = json.load(f)
+if argv not in answers:
+    sys.stderr.write("UNEXPECTED gh call: %s\\n" % argv)
+    sys.exit(3)
+code, out = answers[argv]
+sys.stdout.write(out)
+sys.exit(code)
+'''
+# The gh on PATH: logs its call with a PATH prefix, so a run that ignores WAITING_PAGE_GH shows in the calls.
+GH_LOG = '''#!@PYTHON@
+import sys
+open(@LOG@, "a", encoding="utf-8").write("PATH " + " ".join(sys.argv[1:]) + "\\n")
+sys.exit(3)
+'''
+
+
+def wait_item(n, waits, status="open"):
+    """An item record as the page holds it. `waits` is its waits field, or None for an item with none."""
+    item = {"id": "item-%d" % n, "n": n, "kind": "task", "status": status, "title": "CI fix"}
+    if waits is not None:
+        item["waits"] = waits
+    return item
+
+
+LANE, ANSWERED = "owner-word-relay", "2026-11-04T13:56:29.078Z"  # a lane's slug, and the lastAnswer.at of an item on it
+
+
+def lane_line(n):
+    """The line an open item on a lane with a lastAnswer prints: `wait: item <n> (lane <slug>): waiting (answered <at>)`."""
+    return "wait: item %d (lane %s): waiting (answered %s)" % (n, LANE, ANSWERED)
+
+
+def lane_line_unknown(n):
+    """The line an open item on a lane prints when its lastAnswer has no usable `at`: the same line, `answered at unknown`."""
+    return "wait: item %d (lane %s): waiting (answered at unknown)" % (n, LANE)
+
 
 def load_stale_pages():
     """stale_pages.py as a module, loaded from CMD, so the unit checks run the function the script runs."""
@@ -776,6 +1175,203 @@ class CarriesData(unittest.TestCase):
 
     def test_a_changed_mockup_carries_data(self):
         self.assertTrue(load_stale_pages().carries_data(PAGE, set_body(PAGE, MOCK_BODY)), "a live mockup is not counted as data")
+
+
+# --parked: the on-demand pass over the parked block (waiting-page SKILL.md, the parked branch). It reads three saved
+# files in one folder and writes none. Each list file holds [{"id", "data"}] entries, the shape an ArtifactData list
+# returns for a collection (one entry per doc). meta.json holds the data of meta/page alone, not an entry:
+#   meta.json     {"writer": ..., "parked": [{"id", "ref", "note"}, ...]}
+#   items.json    [{"id": "<item id>", "data": {"status": "open" | "closed", ...}}, ...]
+#   answers.json  [{"id": "park.<item id>", "data": {"parked", "id", "act", "ref", "note", "at"}}, ...]   a parked line's answer
+#                 [{"id": "<item id>", "data": {"item", "n", "at", "act": "park", "note"}}, ...]          a Park press on a card
+# One line per stale thing, then exit 1: `parked-open <id>` for a parked entry whose item is open, and
+# `park-answer-old <key>` for a park answer (either key form) whose `at` is more than 10 minutes before --now. With none,
+# `parked: clean` and exit 0. An answer whose act is not park is never read. A file of the wrong shape (items or answers
+# not a list, meta not a dict), or a park answer with no readable `at`, prints `unknown: <what>` and exits 2: the mode
+# never calls such a thing clean or stale. Times are ISO strings with a Z, as the store writes them.
+NOW = "2026-11-05T13:10:00Z"
+PARKED_W = {"id": "windows-live-checks", "ref": "Step windows-live-checks, the Windows live checks", "note": "Triage removes this line."}
+PARKED_GONE = {"id": "no-such-item", "ref": "Step no-such-item, a line whose item is gone", "note": "Gone."}
+
+
+def item_entry(item_id, status):
+    return {"id": item_id, "data": {"id": item_id, "kind": "decision", "status": status, "n": 10, "title": "Windows live checks"}}
+
+
+def park_answer_entry(item_id, at):
+    return {"id": "park." + item_id, "data": {"parked": True, "id": item_id, "act": "unpark", "ref": "Step " + item_id, "note": "Wait.", "at": at}}
+
+
+def item_answer_entry(item_id, at):
+    """An item's answer under its own key, as a Park press on its card writes it: {item, n, at, act: "park", note}."""
+    return {"id": item_id, "data": {"item": item_id, "n": 27, "at": at, "act": "park", "note": "Later."}}
+
+
+def pick_answer_entry(item_id, at):
+    """An item's answer to a pick under its own key: {item, n, at, choice, note}, with no act."""
+    return {"id": item_id, "data": {"item": item_id, "n": 27, "at": at, "choice": "a", "note": ""}}
+
+
+def without_at(entry):
+    """The same entry with no `at` field."""
+    del entry["data"]["at"]
+    return entry
+
+
+def output_lines(out):
+    return [line for line in out.splitlines() if line.strip()]
+
+
+class ParkedStale(unittest.TestCase):
+    """The --parked mode. Each case writes its own three files, then runs the script on them."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: never the system temp dir
+        self.addCleanup(self.tmp.cleanup)
+        self.folder = os.path.join(self.tmp.name, "parked")
+        os.mkdir(self.folder)
+
+    def store(self, meta=None, items=(), answers=()):
+        """Writes the three files the mode reads, each from its entries."""
+        self.store_raw(meta, list(items), list(answers))
+
+    def store_raw(self, meta=None, items=None, answers=None):
+        """Writes the three files exactly as given (a file left out is empty), so a case can hand the mode a value of the wrong shape."""
+        meta = {"writer": "triage", "parked": []} if meta is None else meta
+        items = [] if items is None else items
+        answers = [] if answers is None else answers
+        write_text(os.path.join(self.folder, "meta.json"), json.dumps(meta))
+        write_text(os.path.join(self.folder, "items.json"), json.dumps(items))
+        write_text(os.path.join(self.folder, "answers.json"), json.dumps(answers))
+
+    def run_parked(self, now=NOW, codes=(0, 1)):
+        """Runs the mode on the folder. Stale.run_script is the one runner of CMD in this file; it reads no state of its case.
+        Without the mode, the script runs its batch mode on the folder, so that output is named as the cause."""
+        r = Stale.run_script(self, "--parked", self.folder, "--now", now)
+        self.assertNotIn("waiting pages:", r.stdout + r.stderr, "the --parked mode did not run: stale_pages.py ran its batch mode")
+        self.assertIn(r.returncode, codes, "the --parked mode exited %d, want one of %s: %s" % (r.returncode, codes, r.stdout + r.stderr))
+        return r.returncode, r.stdout
+
+    def assert_unknown(self, rc, out, *names):
+        """The run exits 2 and prints an unknown line naming each of `names`: never a clean or a stale line for the same cause."""
+        lines = output_lines(out)
+        self.assertEqual(rc, 2, "exit %d, want 2 for an unknown read: %s" % (rc, out))
+        unknown = [line for line in lines if line.startswith("unknown:")]
+        self.assertTrue(unknown, "no unknown: line was printed: %r" % out)
+        for name in names:
+            self.assertTrue(any(name in line for line in unknown), "the unknown line does not name %s: %r" % (name, unknown))
+
+    def assert_unknown_key(self, entry, key):
+        """A park answer with no readable `at` is unknown and names its key. It is not named old."""
+        self.store(answers=[entry])
+        rc, out = self.run_parked(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, key)
+        self.assertEqual([line for line in output_lines(out) if line.startswith("park-answer-old")], [],
+                         "a park answer with no readable at was named old, not unknown: " + out)
+
+    def tree(self):
+        """Every file under the test folder, as {relative path: bytes}."""
+        out = {}
+        for root, _, files in os.walk(self.tmp.name):
+            for name in files:
+                path = os.path.join(root, name)
+                with open(path, "rb") as f:
+                    out[os.path.relpath(path, self.tmp.name)] = f.read()
+        return out
+
+    def test_an_open_item_under_a_parked_entry_is_named_and_the_mode_exits_1(self):
+        self.store(meta={"writer": "triage", "parked": [PARKED_W]}, items=[item_entry("windows-live-checks", "open")])
+        rc, out = self.run_parked()
+        self.assertEqual(rc, 1, "a parked entry whose item is open did not exit 1:\n" + out)
+        self.assertEqual(output_lines(out), ["parked-open windows-live-checks"], "the parked entry whose item is open was not the one line named")
+
+    def test_a_park_answer_more_than_ten_minutes_old_is_named_by_its_key(self):
+        self.store(answers=[park_answer_entry("ci-cap-raise", "2026-11-05T12:59:59Z")])
+        rc, out = self.run_parked()
+        self.assertEqual(rc, 1, "a park answer 10 minutes and 1 second old did not exit 1:\n" + out)
+        self.assertEqual(output_lines(out), ["park-answer-old park.ci-cap-raise"], "the old park answer was not the one line named")
+
+    def test_a_park_answer_exactly_ten_minutes_old_is_not_named(self):
+        self.store(answers=[park_answer_entry("ci-cap-raise", "2026-11-05T13:00:00Z")])
+        rc, out = self.run_parked()
+        self.assertEqual((rc, output_lines(out)), (0, ["parked: clean"]), "a park answer exactly 10 minutes old was named: " + out)
+
+    def test_a_parked_entry_whose_item_is_closed_or_missing_is_not_named(self):
+        self.store(meta={"writer": "triage", "parked": [PARKED_W, PARKED_GONE]}, items=[item_entry("windows-live-checks", "closed")])
+        rc, out = self.run_parked()
+        self.assertEqual((rc, output_lines(out)), (0, ["parked: clean"]), "a parked entry with no open item was named: " + out)
+
+    def test_a_fresh_park_answer_and_a_closed_item_leave_nothing_stale(self):
+        self.store(meta={"writer": "triage", "parked": [PARKED_W]}, items=[item_entry("windows-live-checks", "closed")],
+                   answers=[park_answer_entry("windows-live-checks", "2026-11-05T13:05:00Z")])
+        rc, out = self.run_parked()
+        self.assertEqual((rc, output_lines(out)), (0, ["parked: clean"]), "a fresh park answer under a closed item was named: " + out)
+
+    def test_each_stale_thing_gets_one_line_and_the_mode_exits_1(self):
+        self.store(meta={"writer": "triage", "parked": [PARKED_W]}, items=[item_entry("windows-live-checks", "open")],
+                   answers=[park_answer_entry("ci-cap-raise", "2026-11-05T12:00:00Z")])
+        rc, out = self.run_parked()
+        self.assertEqual(rc, 1, "two stale things did not exit 1:\n" + out)
+        self.assertEqual(sorted(output_lines(out)), ["park-answer-old park.ci-cap-raise", "parked-open windows-live-checks"],
+                         "the two stale things were not named one line each")
+
+    def test_an_item_park_answer_more_than_ten_minutes_old_is_named_by_its_item_id(self):
+        self.store(answers=[item_answer_entry("pick-a-colour", "2026-11-05T12:59:59Z")])
+        rc, out = self.run_parked()
+        self.assertEqual(rc, 1, "an item's park answer 10 minutes and 1 second old did not exit 1: " + out)
+        self.assertEqual(output_lines(out), ["park-answer-old pick-a-colour"], "the old item park answer was not the one line named: " + out)
+
+    # Control: passes on the code as it stands. A fresh item park answer is not named, so the old-answer check cannot name every answer.
+    def test_a_fresh_item_park_answer_is_not_named(self):
+        self.store(answers=[item_answer_entry("pick-a-colour", "2026-11-05T13:05:00Z")])
+        rc, out = self.run_parked()
+        self.assertEqual((rc, output_lines(out)), (0, ["parked: clean"]), "a fresh item park answer was named: " + out)
+
+    # Control: passes on the code as it stands. An item answer with no act park is never read, however old or however it is stamped.
+    def test_an_item_answer_without_act_park_is_never_named(self):
+        self.store(answers=[pick_answer_entry("pick-a-colour", "2026-11-05T12:00:00Z"), without_at(pick_answer_entry("ci-cap-raise", "2026-11-05T12:00:00Z"))])
+        rc, out = self.run_parked()
+        self.assertEqual((rc, output_lines(out)), (0, ["parked: clean"]), "an item answer with no act park was named: " + out)
+
+    def test_items_not_a_list_is_unknown_and_exits_2(self):
+        self.store_raw(items={})
+        rc, out = self.run_parked(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, "items.json")
+
+    def test_answers_not_a_list_is_unknown_and_exits_2(self):
+        self.store_raw(answers={})
+        rc, out = self.run_parked(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, "answers.json")
+
+    def test_meta_not_a_dict_is_unknown_and_exits_2(self):
+        self.store_raw(meta=[PARKED_W], items=[item_entry("windows-live-checks", "open")])
+        rc, out = self.run_parked(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, "meta.json")
+
+    def test_a_parked_line_answer_with_no_at_is_unknown_and_names_its_key(self):
+        self.assert_unknown_key(without_at(park_answer_entry("ci-cap-raise", "2026-11-05T12:00:00Z")), "park.ci-cap-raise")
+
+    def test_an_item_park_answer_with_no_at_is_unknown_and_names_its_key(self):
+        self.assert_unknown_key(without_at(item_answer_entry("pick-a-colour", "2026-11-05T12:00:00Z")), "pick-a-colour")
+
+    def test_a_parked_line_answer_with_an_unparseable_at_is_unknown_and_names_its_key(self):
+        self.assert_unknown_key(park_answer_entry("ci-cap-raise", "not-a-time"), "park.ci-cap-raise")
+
+    def test_an_item_park_answer_with_an_unparseable_at_is_unknown_and_names_its_key(self):
+        self.assert_unknown_key(item_answer_entry("pick-a-colour", "not-a-time"), "pick-a-colour")
+
+    def test_the_mode_reads_its_three_files_writes_none_and_starts_no_git(self):
+        self.store(meta={"writer": "triage", "parked": [PARKED_W]}, items=[item_entry("windows-live-checks", "open")])
+        write_text(os.path.join(self.folder, "other.json"), "{ not json")  # a file the mode never reads
+        before = self.tree()
+        # No PATH: a git start would fail, so a clean run shows the mode starts no git process.
+        r = subprocess.run([sys.executable, CMD, "--parked", self.folder, "--now", NOW], capture_output=True, text=True,
+                           timeout=30, env={"PATH": "", "PYTHONDONTWRITEBYTECODE": "1", "HOME": self.tmp.name})
+        self.assertNotIn("waiting pages:", r.stdout, "the --parked mode did not run: stale_pages.py ran its batch mode")
+        self.assertIn(r.returncode, (0, 1), "the --parked mode did not run with no PATH (exit %d): %s" % (r.returncode, r.stderr))
+        self.assertEqual(r.stderr, "", "the --parked mode wrote to stderr, so it needs a process it does not own: " + r.stderr)
+        self.assertEqual(output_lines(r.stdout), ["parked-open windows-live-checks"], "the mode did not read its three files")
+        self.assertEqual(self.tree(), before, "the --parked mode wrote or removed a file")
 
 
 if __name__ == "__main__":

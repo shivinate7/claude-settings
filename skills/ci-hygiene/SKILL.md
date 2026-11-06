@@ -1,6 +1,6 @@
 ---
 name: ci-hygiene
-description: Use when a session creates or edits CI config (GitHub Actions, workflow files, .github/workflows, other CI files), or when the user says CI is slow, queued, or flaky, or says "ci-hygiene". Not for ordinary code edits. Keeps CI fast, cheap, and trusted.
+description: Use when a session creates or edits CI config (GitHub Actions, workflow files, .github/workflows, other CI files), or when the user says CI is slow, queued, or flaky, or says "ci-hygiene", or when a session batches lane PRs into one integration branch, or a batch's integration run is red. Not for ordinary code edits. Keeps CI fast, cheap, and trusted.
 ---
 
 Written for GitHub Actions. The same ideas apply to other CI systems. Commands and YAML are in
@@ -51,10 +51,10 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `verification-newest-that-passes`, take the newest version that passes). zizmor 1.30.0 added the
    `self-repository` audit. It flags each local `uses: ./...` call, an action such as `./actions/a`
    too, not only a workflow. A floating version once turned a PR red.
-   Pins of claude-settings' `ste-lint` action follow the session's tools (decision
-   `action-pins-follow-sessions`). `bin/ste-changed` reads that pin. It prints drift and exits 3. The
+   Pins of claude-settings' `ste-lint` and `zizmor` actions follow the session's tools (decision
+   `action-pins-follow-sessions`). `bin/ste-changed` reads those pins. It prints drift and exits 3. The
    session then moves the pin in a lane of its own. No bot and no schedule moves it. That tool reads
-   only the `ste-lint` pin. Other claude-settings pins can drift unseen.
+   only the `ste-lint` and `zizmor` pins. Other claude-settings pins can drift unseen.
    Other pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.
 8. **Batch lanes.** Batch lanes into one integration branch and one integration PR. A batch runs one
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
@@ -62,6 +62,26 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
    each lane head before the join. A red lane does not join. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
+   Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
+   Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
+   the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
+   each lane PR closes as replaced.
+   When the integration run is red, read the failing job. Find the lane whose files it touches. Drop
+   that lane and any lane that depends on it. Rebuild the branch from main without them. Never
+   revert. A lane dropped by a revert re-applies its diff after it merges main, and checks that each
+   file is there. A job that ends at its cap with no red CI step is re-capped or split. That is not a
+   reason to drop the lane.
+   A lane that is red on form (record format, version bump, lint), not on a behaviour test, is fixed
+   and re-merged instead. Do that for a fix of a few lines in its own files, and only for its
+   first such fix in this batch. A second red drops the lane.
+   A lint red that `bin/ste-changed` passes, while it blames an old `ste-lint` pin, is not a strike
+   (decision `action-pins-follow-sessions`, CI pins follow the session's tools). The session moves
+   that pin to claude-settings main in a lane of its own, with no question. That lane's reviewer
+   checks only that it changes pin lines alone, to a main commit that descends from the old pin.
+   Put the fix on the lane branch, never on the integration branch. Run CI again, once, and merge the
+   rest. Fix the dropped lane in its own lane. It joins the next batch after its fix. A held lane
+   (rule `roles-review-cap-three`, three review rounds) is the exception. Drop it and park it. It
+   gets no fix lane until the owner decides.
    No merge to main while a batch's run is in progress. The owner is included. Decision
    `no-merge-during-batch-ci` (no merge while a batch runs) holds the rule. A merge needs a green
    run on the current base (decision `merge-needs-current-base`). A head that lacks the base tip is

@@ -37,8 +37,9 @@ def git(cwd, *a):
     return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def run(paths, event="pull_request", base="auto", existing=(), landed=None):
-    """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit."""
+def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref=""):
+    """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `head_ref` is HEAD_REF,
+    empty when not given, so no HEAD_REF of the caller's environment reaches the script."""
     with tempfile.TemporaryDirectory() as d:
         git(d, "init", "-q")
         git(d, "config", "user.email", "t@t")
@@ -65,7 +66,7 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None):
         git(d, "add", "-A")
         git(d, "commit", "-qm", "head", "--allow-empty")
         out = os.path.join(d, "..", f"out-{os.getpid()}.txt")
-        env = dict(os.environ, EVENT=event, GITHUB_OUTPUT=out,
+        env = dict(os.environ, EVENT=event, GITHUB_OUTPUT=out, HEAD_REF=head_ref,
                    BASE_SHA=sha if base == "auto" else base)
         r = subprocess.run([BASH, os.path.abspath(SCRIPT)], cwd=d, env=env, capture_output=True, text=True)
         assert r.returncode == 0, r.stdout + r.stderr
@@ -353,9 +354,10 @@ class Scope(unittest.TestCase):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
 
-    # bin/sim-test and its suite run in the shell-macos job only, like bin/ios-ship.
+    # bin/sim-test and its suite run in the shell-macos job only, like bin/ios-ship. The suite runs the real bin/sim-lease
+    # beside the script, so an edit to bin/sim-lease turns the same job on.
     def test_sim_test_edit_turns_on_only_the_macos_shell_job(self):
-        for p in ("bin/sim-test", "lint/test_sim_test.sh"):
+        for p in ("bin/sim-test", "lint/test_sim_test.sh", "bin/sim-lease"):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
 
@@ -413,6 +415,22 @@ class Scope(unittest.TestCase):
         self.assertFlags(got, want_false=["code", "shoot"])
         self.assertIn("checks_guard", got, got)
         self.assertEqual(got["checks_guard"], "false", f"checks_guard: {got}")
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class MutationReport(unittest.TestCase):
+    """The mutation_report output: on a pull request only from a `batch-` branch, and on every other event."""
+
+    # Named failure: the mutation-report job starts on every pull request, or on none, not only the batch ones.
+    def test_only_a_batch_pull_request_turns_it_on_and_a_push_always_does(self):
+        feature = run(["README.md"], head_ref="feature-x")
+        self.assertIn("mutation_report", feature, feature)
+        self.assertEqual(feature["mutation_report"], "false", f"a pull request from feature-x: {feature}")
+        batch = run(["README.md"], head_ref="batch-11")
+        self.assertEqual(batch["mutation_report"], "true", f"a pull request from batch-11: {batch}")
+        push = run(["README.md"], event="push")
+        self.assertEqual(push["mutation_report"], "true", f"a push: {push}")
+
 
 if __name__ == "__main__":
     unittest.main()

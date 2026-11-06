@@ -1,4 +1,4 @@
-"""Fixture suite for the roadmap builder. Run: python3 skills/roadmap/test_build.py
+"""Fixture suite for the roadmap build.py. Run: python3 skills/roadmap/test_build.py
 
 Each case builds a throwaway git repo: `main` holds the record homes, `roadmap` holds roadmap/data/.
 """
@@ -24,6 +24,7 @@ sys.path.insert(1, str(HERE.parent.parent / "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 import build  # noqa: E402
+import layout  # noqa: E402  the waiting page and record branch readers (lint/layout.py)
 import shared_names  # noqa: E402  the one home of the tag names (hooks/shared_names.py), on the path build set
 
 # Made in setUpModule, not at import, so a helper that imports make_repo leaks no folder.
@@ -34,7 +35,7 @@ CONFLICT = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> 1234567 (other)\n"
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
 
 # The page script the roadmap branch's build.py put in front of the viewer. The
-# builder's stub must stay byte for byte this, so the viewer reads the data as it did.
+# script's stub must stay byte for byte this, so the viewer reads the data as it did.
 TODAY_STUB = """<script>
 (() => {
   const DATA = %s;
@@ -55,7 +56,7 @@ TODAY_STUB = """<script>
 })();
 </script>
 """
-# sha256 of the roadmap branch's roadmap/page/index.html, the page the old builder used.
+# sha256 of the roadmap branch's roadmap/page/index.html, the page the old script used.
 TODAY_TEMPLATE_SHA256 = "b6451344f00bcc1ce27fe378de2cf5b3aaa610954d6ecb1dd8050677627160c6"
 BLOCK = re.compile(r"<!-- build:([a-z-]+) -->.*?<!-- /build:\1 -->\n?", re.S)
 
@@ -590,7 +591,7 @@ class UpkeepFixture(Fixture):
         return counts[label], (detail.group(1) if detail else "")
 
     def entries(self, detail):
-        """The entries of a row's detail, sorted. The builder orders them by step id, which no case relies on."""
+        """The entries of a row's detail, sorted. The script orders them by step id, which no case relies on."""
         return sorted(detail.split(", ")) if detail else []
 
     # The Nov 1 replay (spec "Red first"): a todo step, `Ready.` in its note, with a draft PR on its branch,
@@ -623,7 +624,7 @@ class StaleInProgress(UpkeepFixture):
     ROW = "in progress with no live lane or open PR"
 
     def session_in_repo(self, sid, status, *tags):
-        """A sessions row for this fixture repo, carrying the cs-repo tag the builder checks."""
+        """A sessions row for this fixture repo, carrying the cs-repo tag the script checks."""
         return session_row(sid, status, self.REPO, *tags)
 
     def stale(self, out):
@@ -952,7 +953,7 @@ class PageRulings(UpkeepFixture):
 
     def test_an_item_row_of_the_wrong_shape_reads_the_row_unknown_once(self):
         self.commit_step("c154", note="Waiting.")
-        good = self.item(10, home="c154")  # a builder that skips the bad row and lists this one fails here
+        good = self.item(10, home="c154")  # a script that skips the bad row and lists this one fails here
         bad_rows = [
             "c153 (page item 9)",
             {"n": "9", "status": "closed", "home": "c153"},
@@ -1439,7 +1440,7 @@ def baked(text, key):
 
 
 class BlockOnly(Fixture):
-    """--block writes only the roadmap data block, for the waiting-page writer to splice in
+    """--block writes only the roadmap data block, for the page writer to splice in
     (one-page notes, "Build constraints": the build never publishes and never writes ROADMAP_DB)."""
 
     def block_from_main(self):
@@ -1554,6 +1555,10 @@ class ForkRecord(Fixture):
         page = self.page_from(self.fork, "--record-branch", "roadmap")
         self.assertIn(self.MAIN_TITLE, page)
         self.assertNotIn(self.FORK_TITLE, page)
+
+    def test_waiting_page_is_the_forks_in_its_worktree_and_mains_on_the_checkout(self):
+        self.assertEqual(layout.waiting_page(str(self.fork)), self.FORK_URL)
+        self.assertEqual(layout.waiting_page(str(self.repo)), self.MAIN_URL)
 
     def broken_extras(self, text):
         """Put `text` in the fork's extras file, uncommitted, where the build reads it."""

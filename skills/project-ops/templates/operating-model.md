@@ -22,7 +22,7 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   and `--live`. The `--live` file carries a `sessions` key: each `list_sessions` row (every page) with
   `id`, `session_status` and `tags`. The roadmap build script reads it to list steps in progress with no live lane.
   Each pull row carries `createdAt`, so the roadmap build script can list a stale draft.
-  Triage, as the waiting-page writer, splices it into the repo's one page and
+  Triage, as the page writer, splices it into the repo's one page and
   publishes it (skill `roadmap`). Triage reviews the whole roadmap at each batch merge and when the owner
   asks. At each review, triage reads standing sessions' `Recovered:` lines, counts their `Handoff gave:` lines, and brings the no-limit
   rotation ruling (claude-settings decision `session-tiers`) back to the owner if losses repeat.
@@ -39,9 +39,9 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   N's. If N goes red, the batch runner rebuilds N+1 from the base without N, and N's lane is
   fixed in its own lane.
   When the repo holds a standing merge grant (claude-settings record `standing-merge-grant`), it
-  runs the merge tool on the coordinator's merge go, and asks the owner for no merge. Each merge it
-  runs names `frozen at <sha>`. It prints the merge output on the terminal, never
-  to a log only. It dispatches no deferred step.
+  batches each PR whose review record is done, as `merge --reviewed` finds it at its wake, and merges the
+  integration PR on green. It asks the owner for no merge. It prints the merge output on the
+  terminal, never to a log only. It dispatches no deferred step.
 - **Lane session.** Runs one lane as an orchestrator, with its own builder and reviewer agents.
   It reports up to the coordinator. Work that needs a local machine is a lane session whose brief
   names the machine. It may drive a Remote Control session on the owner's machine.
@@ -58,18 +58,18 @@ If none is active, it proceeds. It does not wait for a reply.
 
 ## Rotation of standing sessions
 
-Count the use of triage and the batch runner. Never wait for the owner to notice.
+Read the use of each standing session: triage, the batch runner and the arbiter. Never wait for the owner to notice.
 
 The coordinator does not rotate. It writes its own handoffs and compacts in place. The coordinator
 never hands its own sessions to a successor: a session may refuse a new coordinator as not its
 parent, or miss a message while busy.
 
-- At each wake, the coordinator reads triage's and the batch runner's use from `get_session`:
+- At each wake, the coordinator reads each standing session's use from `get_session`:
   `external_metadata.context_usage` (`used_tokens` of `max_tokens`). A reading of 0, or none,
   is no reading, and the use is unknown. No session reports its own tally (owner, 2026-11-02 15:40 CST).
-- The limits are `<triage limit>` and `<batch runner limit>`.
-- Rotate a session at its limit, at a phase change, or at once after a slip. A slip is a
-  re-asked question, a reply that contradicts the roadmap, or a missed ruling.
+- A standing session runs until autocompact. The coordinator rotates one only when it goes stale
+  or breaks. A session breaks when it slips: a re-asked question, a reply that contradicts the
+  roadmap, or a missed ruling (claude-settings decision `session-tiers`, owner, 2026-11-01 17:56 CST).
 - On a rotation, in this order. The coordinator tells the session to rotate.
   1. The old session stops watching each page its role owns (the repo's one page, the project's
      waiting page): `ArtifactComments` action `watch` with `on: false` and the page URL. It notes
@@ -95,20 +95,23 @@ parent, or miss a message while busy.
      (`ArtifactData`). For each ask with no `reply` whose `owner` is the old writer, it reads the
      ask, then updates `owner` to itself, pinned with `if_version`. Only the incoming writer writes
      `writer`, since the outgoing one is archived at step 4.
-- The owner may exempt a session from a limit. Write the exemption, with its date, in the roster.
 
 ## Autopilot
 
 - Never wait on the owner. A step that needs the owner's answer gets a note line
   `Deferred (owner, <date>): <why>`, and waits. All other work runs, in roadmap order.
 - A lane that hits a question for the owner parks that part, and goes on.
-- A lane sends its green, reviewed head to the coordinator, which passes it to the batch runner.
-  The lane first runs `merge --lane-lint <pr>`. The batch runner runs it again on each lane head
-  before the join, and refuses a red lane (claude-settings record `lanes-run-no-full-ci-job`).
-  A lane never rebases onto main and never merges.
-- Nobody pushes to a branch frozen for a merge go until the result is back. When the repo holds a
-  standing merge grant, the coordinator gives each merge go under its grant, and the batch runner
-  runs the merge tool on it. The owner is not asked.
+- A lane posts its review record on its PR after each round (claude-settings record
+  `pr-review-record`). The batch runner finds it. The lane first runs `merge --lane-lint <pr>`. The batch
+  runner runs it again on each lane head before the join, and refuses a red lane (claude-settings record
+  `lanes-run-no-full-ci-job`). A lane never rebases onto main and never merges.
+- A record that files an owner ruling gets a round 1 review before it merges. Round 1 checks two things only (claude-settings decision `docs-only-prs-skip-review`).
+- Nobody pushes to a PR's head once a done review record is posted for that head, until the merge
+  result is back. The exception is the fix that a FAIL round calls for, such as the round-1 fix on a
+  `delete-only` change with Guard or check `no`, which reads done (claude-settings record
+  `pr-review-record`). That push makes the record stale, so the lane posts a new review record for the
+  new head. When the repo holds a standing merge grant, the batch runner merges under it. The owner is
+  not asked.
 - A session that waits on CI sets a timed check-in on each wait, and again after each red job.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.

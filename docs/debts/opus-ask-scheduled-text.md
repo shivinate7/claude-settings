@@ -1,11 +1,9 @@
-# A seed prompt or a timed check-in may reach the plain Opus ask judge
+# A check-in or seed with no source field may reach the plain Opus ask judge
 
-**What.** The seed check in `grant_opus_ask` skips a prompt with no earlier owner turn in a cloud session. Two points are unmeasured. The first: whether the transcript already holds the current prompt when UserPromptSubmit fires. The second: whether an untagged `create_session` prompt is stored with `isMeta` or a non-human `origin`. If the transcript holds the seed as a plain record, the seed counts as its own owner turn, and a Claude-written Opus ask in it reaches the judge. The haiku judge granted on 3 of 10 Claude-written texts (review round 3). Measured: a seed sent by `send_message` is `isMeta` with `origin.kind` peer, and a fired scheduled task carries a `<system-reminder>This task fired at` block. Both grant nothing.
+**What.** A plain Opus ask is refused when the UserPromptSubmit payload's `source` names a non-owner origin, such as `loop_wakeup`. Claude Code 2.1.308 sent no `source` on a typed prompt in one hook dump (review, 2026-11-04). 2.1.318 declares the field optional, and is unmeasured. So the normal path is the transcript fallback. That fallback catches a check-in or seed only if its record is in the transcript at hook time, and that is unmeasured. A Claude-written Opus ask in such text then reaches the judge. The haiku judge granted on 3 of 10 such asks, and a grant gives every role Opus for 2h.
 
-A local session runs no seed check, and the isMeta and origin skips read only earlier records. So a timed check-in that Claude sets (CronCreate or ScheduleWakeup), if it fires as an untagged prompt, reaches the judge too. Its record shape is unmeasured (final review, 2026-11-03).
-
-**Where.** `hooks/override.py` `_owner_turn_in` and `grant_opus_ask`.
+**Where.** `hooks/override.py` `grant_opus_ask`, `_system_prompt_last` and `_seed_record`.
 
 **Decision.** `owner-override` (the owner override and its Opus form).
 
-**Retire.** The fix needs no measurement: skip the transcript record whose text equals the prompt, and refuse when the current record's `promptSource` is `system`. Add a test for each in `hooks/test_local_time.py`. Or measure first: start one cloud session with an untagged `create_session` prompt. Read its first user record's `isMeta` and `origin`, and whether that record is in the transcript when UserPromptSubmit fires. If the record counts as an owner turn, change the seed check to skip it, with a test in `hooks/test_local_time.py`. Else close this debt.
+**Retire.** Close it when the installed Claude Code sends `source` on every UserPromptSubmit: check one typed prompt and one check-in with a hook dump. In a cloud session, also check that the owner's typed prompt does not carry `sdk`, which the schema names for the Agent SDK. If it does, the plain ask fails closed there, and `OPUS_ASK_SOURCES` must change. Or measure, from inside the hook, that a check-in's and a seed's records are in the transcript when it fires. Refusing an absent `source` is not a fix: it refuses every typed plain ask.

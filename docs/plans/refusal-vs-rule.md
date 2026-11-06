@@ -31,7 +31,7 @@ batch ahead of it) holds that fix. This sweep cites it and does not redo it.
 - **uncited:** no rule or decision holds the refusal. Most are fail-closed stops on a failed read.
 - **unverified:** no rule sentence could be quoted.
 
-140 rows: exact 87, looser 9, stricter 11, uncited 32, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
+142 rows: exact 88, looser 10, stricter 11, uncited 32, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
 exact has a gap.
 
 
@@ -44,7 +44,7 @@ exact has a gap.
 | `subject-unread` | verification-report-unknown-reads | "Report a read that could not run as unknown, never as clear or broken." | exact | exact | when git cannot answer, `git reset --hard` passes with one note; cite-by-id also logs this id for an unread record folder | - |
 | `pointer-head` | recovery-independent-of-state | "The rule refuses a command that moves HEAD off `main` in the pointer checkout." | stricter | exact | `git switch -C main origin/main` is refused, though HEAD stays on main | tool fix: pass -C and -B when the target branch is main |
 | `silent-write` | git-never-discard-output | "Never silence a git write's output. Discarded output hides failures from the reader." | looser | exact | `git branch -D x >/dev/null` and `git update-ref -d refs/heads/x >/dev/null` pass. The guard reads seven git subcommands (commit, push, merge, tag, rebase, cherry-pick, pull), a `fetch` with a `src:dst` refspec to a branch, `gh pr merge` and `make merge`; a bare `fetch` is a read. A silenced non-git command passes, as the rule allows (owner, item 177 a, 2026-11-03 22:31 CST: "Narrow the rule to git writes") | tool fix: read every git write that moves a ref, such as `branch -D` |
-| `hand-made-worktree` | lanes-start-in-tool-worktrees | "A lane tree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool." | exact | exact | `git worktree add ../x` is denied; `.claude/worktrees/x` passes | - |
+| `hand-made-worktree` | lanes-start-in-tool-worktrees | "A worktree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool." | exact | exact | `git worktree add ../x` is denied; `.claude/worktrees/x` passes | - |
 | `force-push` | stale-safe-force-push | "Any forced push whose destination is the default branch: ask" | exact | exact | `--force` is denied; a lease with --force-if-includes passes | - |
 | `rm-var-unguarded` | rm-on-a-variable-needs-a-guard | "refuses a recursive `rm` only in the shape Claude Code prompts on" | exact | exact | a recursive delete of `"$D"/*` is denied; `"$ROOT/dist"` passes | rule rewrite: the CLAUDE.md line still says "quoted-variable path"; say "a guarded variable path" |
 | `rm-after-cd` | shared-trees-delete-names-absolute-path | "A delete names its target as an absolute or quoted-variable path, never after a cd." | exact | exact | a cd, then a recursive delete of a relative folder, is denied | - |
@@ -74,14 +74,16 @@ Notes: the shared-tree gaps `git update-ref -d`, `git rm -rf .` and `git read-tr
 | `playwright-install` | playwright-install-once | "An agent never runs a Playwright browser install, in any form." | exact | exact | `npx playwright install` is denied | - |
 | `simulator-boot-cap` | sweep-shuts-down-idle-simulators | "refuses a session's boot when 2 devices are already booted, and names them" | exact | exact | a third boot is denied | - |
 | `simulator-boot-twin` | sweep-shuts-down-idle-simulators | "refuses a boot when an idle booted device of the same type and runtime exists" | exact | exact | a twin boot is denied, with the idle device named | - |
+| `simulator-boot-route` | sim-test-is-the-one-boot-path | "An `xcodebuild -destination` that names a shut-down device still boots outside the lock." | looser | exact | a test of a shut-down device is denied, with `sim-test` as the remedy; a destination held in a variable (`-destination "$D"`) passes, because the rule reads command text only | - |
+| `simulator-boot-lease` | sim-test-is-the-one-boot-path | "refuses an MCP `launch` that names a shut-down device, unless the held-lease allow applies." | exact | exact | a launch of a shut-down device is denied, lock or no lock, whatever its case or outer spaces, with `sim-test` as the remedy; it passes only when the session's live lease holds that device; a launch of a booted device passes | - |
 | `impeccable-review-only` | design-skills | "the Skill tool loads impeccable only for `audit` or `critique`" | stricter | exact | Skill args "audit the page; focus on a11y" are denied for the `;` | tool fix: apply the chain check to the shell form only |
 | `cite-by-id` | git-cite-by-id | "Ids, not paths. A path breaks when its file moves." | exact | exact | a commit message "see docs/decisions/foo.md" is denied | - |
 | `lane-by-slug` | lane-by-slug | "the guard refuses a session number that names a lane, such as `N20` or `(N16)`" | exact | exact | `N20` in a commit message is denied | - |
 | `draft-pr` | draft-until-reviewed | "refuses `gh pr create` without `--draft` or `-d`." | exact | exact | `gh pr create --fill` is denied | - |
-| `load-brake` | machine-load-brake | "a lane-start call reads the machine's load, and a busy or full machine refuses new lanes" | exact | exact | a busy machine refuses a background Agent | - |
+| `load-brake` | machine-load-brake | "a call that starts a lane or an agent reads the machine's load. A busy or full machine refuses new lanes and agents" | exact | exact | a busy machine refuses a background Agent | - |
 | `guard-crash` | guard-hooks-fail-closed | "a guard that times out or crashes does not ... except a missing guard module, which refuses" | exact | exact | a raise is allowed and logged; a missing module is denied | rule rewrite: the guard index line says only "allowed"; add the missing-module deny |
 
-Notes: create_session is not a lane-start tool for load-brake, so a lane session starts on a full machine; the decision names start_session only (owner question). `narrated-tail` logs as live-stream with no index line.
+Notes: create_session is not a start tool for load-brake, so a lane session starts on a full machine; the decision names start_session only (owner question). `narrated-tail` logs as live-stream with no index line.
 
 ## C. Agents, models, roles and worktrees
 
@@ -182,7 +184,7 @@ Notes: batch_running (726-753) computes the blockers; area F rows its refusal. T
 | `merge-role-proof` | session-tiers | "allows `merge --role T` only when the session's own newest `get_session` result ... lists the tag `cs-build:T`" | exact | exact | a lane runs `merge --role coordinator`: denied | - |
 | `trust-card-in-build` | session-tiers | "allows the calls only when the session's own newest `get_session` record shows no `cs-build:` tag" | exact | exact | a cs-build session opens the trust card: denied | - |
 | `merge:dropped-lane-unread` | silent-undo-check-design | "`merge.py` refuses on unknown, because its merge cannot be taken back." | exact | exact | git log fails; --undo-check-unknown-ok lifts it (1761) | - |
-| `merge:dropped-lane-reverted` | git-integration-branch-merge | "rebuild the branch from main without them, never revert" | exact | exact | a batch holds a net-reverted lane (1764) | - |
+| `merge:dropped-lane-reverted` | `ci-hygiene` step 8 | "Rebuild the branch from main without them. Never revert." | exact | exact | a batch holds a net-reverted lane (1764) | - |
 | `merge:default-branch-unread` | verification-report-unknown-reads | "Report a read that could not run as unknown, never as clear or broken." | exact | exact | the repo read fails (1921, 1924) | - |
 | `merge:base-workflows-unread` | none | - | uncited | exact | the base workflow files cannot be read (1970, 1979) | - |
 | `merge:config-unread` | none | - | uncited | exact | the base stamp.json cannot be read or is not an object (1989-2005) | - |
