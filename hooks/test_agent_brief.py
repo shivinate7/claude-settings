@@ -10,11 +10,11 @@ Contract (the hook's own docstring). On each agent start
 the hook prints one JSON object on stdout and exits 0:
     {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": "<text>"}}
 - additionalContext holds the standing rules: a scope line that follows `agent_type` from the hook
-  input (builder, test-author, reviewer, Explore, record-writer, designer, design-reviewer), the general scope line for any
-  other or missing type, and fewer than 20 lines in all. Each scope line is pinned in full.
+  input (builder, test-author, reviewer, Explore, record-writer, designer, design-reviewer, refuter), the general scope
+  line for any other or missing type, and fewer than 20 lines in all. Each scope line is pinned in full.
 - The push line, the commit-trailer line and the record-path line appear for builder,
   test-author, record-writer, designer and any other type; never for reviewer, Explore, Plan,
-  claude-code-guide or design-reviewer, which only read.
+  claude-code-guide, design-reviewer or refuter, which only read.
 - The staged-diff line holds `git diff --cached --stat`. It appears once for each type that
   commits (builder, test-author, record-writer, designer and any other type) and never for a
   read-only type. Decision lanes-start-in-tool-worktrees.
@@ -42,11 +42,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.environ.get("AGENT_BRIEF_UNDER_TEST") or os.path.join(HERE, "agent_brief.py")
 sys.path.insert(0, HERE)
 import guard  # noqa: E402  the one reader of agent frontmatter keys (guard.frontmatter_keys), not a copy of it here
+import guard_core  # noqa: E402  the one home of the refuter role's name (REFUTER_ROLE), read below and never typed here
 from tool_lists_test import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/tool_lists_test.py)
 
 CWD = "/tmp/agent-brief-test"
 MISSING = object()  # payload() leaves agent_type out of the JSON when this is passed
-TYPES = ["builder", "test-author", "reviewer", "Explore", "record-writer", "designer", "design-reviewer"]
+# A guard_core with no REFUTER_ROLE reads as REFUTER_MISSING: each case that names the role then fails on the missing
+# name, and refuter_name_check says so in words, never by a crash at import.
+REFUTER_MISSING = "<no REFUTER_ROLE in guard_core>"
+REFUTER = getattr(guard_core, "REFUTER_ROLE", REFUTER_MISSING)
+TYPES = ["builder", "test-author", "reviewer", "Explore", "record-writer", "designer", "design-reviewer", REFUTER]
 
 # Full scope line per type, pinned verbatim. Edit here only when the hook's text changes on purpose.
 SCOPE_LINE = {
@@ -59,6 +64,7 @@ SCOPE_LINE = {
                 "Your brief names your designer kind: blind, informed or directed. In a blind designer, never read "
                 "the current screen, its code, its screenshots, its mockups, or the repo's design spec and tokens.",
     "design-reviewer": "- Scope: design-reviewer. Never edit, write, stage, commit, or push. Read and render only.",
+    REFUTER: "- Scope: %s. Never edit, write, stage, commit, or push. Read only." % REFUTER,
 }
 GENERAL_LINE = ("- Scope: do only what your brief names. A builder never edits tests; "
                 "a test-author never edits product code; a reviewer and Explore never edit; "
@@ -308,6 +314,9 @@ add("line set: a missing agent type gets the writer set", "context", payload(),
 for _t in ["reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer"]:
     add("line set: %s gets the five-line set" % _t, "context", payload(_t),
         line_set_check(READER_RULES))
+# The refuter is read-only: the five-line set, with no push, trailer, record-path or staged-diff line (owner ruling,
+# page item 279, pick d, 2026-11-06 12:43 CST). Failure class: a read-only role given the writer set.
+add("line set: refuter gets the five-line set", "context", payload(REFUTER), line_set_check(READER_RULES))
 # Plugin-prefixed read-only types take the reader set too (the prefix split must reach them).
 for _t in ["my-plugin:reviewer", "ns:Explore"]:
     add("line set: plugin-prefixed %s gets the five-line set" % _t, "context", payload(_t),
@@ -342,7 +351,7 @@ def length_check():
 
 add("length: the context stays under 20 lines for every agent type", "custom", fn=length_check)
 
-# SCOPE: each of the five types gets its own full scope line, and only that one.
+# SCOPE: each type gets its own full scope line, and only that one.
 for _t in TYPES:
     add("scope: %s gets its own full scope line" % _t, "context", payload(_t), scope_check(_t))
 
@@ -422,6 +431,75 @@ def internal_error_check():
 
 add("error: an internal error gives no stdout, one agent_brief: stderr line, exit 0", "custom",
     fn=internal_error_check)
+
+# GUARD_CORE FAILS ON IMPORT: the hook imports guard_core at module top, so this case runs the hook in a child whose
+# guard_core raises on every attribute read, as a guard_core that fails at import does. `prelude` runs before the hook
+# file, so the same child runner serves the red case (a broken guard_core) and its control (no prelude).
+BROKEN_GUARD_CORE = (
+    "import sys, types\n"
+    "class _Broken(types.ModuleType):\n"
+    "    def __getattr__(self, name):\n"
+    "        raise RuntimeError('guard_core is broken')\n"
+    "sys.modules['guard_core'] = _Broken('guard_core')\n"
+)
+HOOK_RUNNER = (
+    "import runpy, sys\n"
+    "sys.argv = sys.argv[1:]\n"
+    "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+)
+
+
+def run_hook_after(prelude, stdin_text):
+    """Run the hook in a child that runs `prelude` first, then the hook file as __main__."""
+    return subprocess.run([sys.executable, "-c", prelude + HOOK_RUNNER, HOOK], input=stdin_text,
+                          capture_output=True, encoding="utf-8", timeout=30)
+
+
+def last_stderr_line(result):
+    lines = result.stderr.strip().splitlines()
+    return lines[-1][:120] if lines else "no stderr"
+
+
+def guard_core_fails_check():
+    """A guard_core that fails on import: the hook fails open, as its docstring says. Exit 0, no traceback,
+    no stdout, and one stderr line that starts `agent_brief:`."""
+    if not os.path.exists(HOOK):
+        return "the hook file is missing: %s" % HOOK
+    result = run_hook_after(BROKEN_GUARD_CORE, payload("builder"))
+    if result.returncode != 0:
+        return "exit %d when guard_core fails on import, want 0: %s" % (result.returncode, last_stderr_line(result))
+    if "Traceback" in result.stderr:
+        return "stderr holds a traceback when guard_core fails on import, want one agent_brief: line"
+    if result.stdout.strip():
+        return "expected no stdout, got %s" % result.stdout.strip()[:120]
+    err = result.stderr.strip().split("\n") if result.stderr.strip() else []
+    if len(err) != 1:
+        return "want one stderr line, got %d" % len(err)
+    if not err[0].startswith("agent_brief:"):
+        return "stderr line is %r, want it to start 'agent_brief:'" % err[0][:120]
+    return None
+
+
+add("error: a guard_core that fails on import gives no stdout, one agent_brief: stderr line, exit 0", "custom",
+    fn=guard_core_fails_check)
+
+
+def guard_core_control_check():
+    """The control for the case above: with guard_core working, the same child runner gives the refuter the
+    five-line read-only set. Green here and red above means the broken import is the cause, not the runner."""
+    if not os.path.exists(HOOK):
+        return "the hook file is missing: %s" % HOOK
+    result = run_hook_after("", payload(REFUTER))
+    if result.returncode != 0:
+        return "exit %d with guard_core working, want 0: %s" % (result.returncode, last_stderr_line(result))
+    text, problem = context_of(result.stdout)
+    if problem:
+        return problem
+    return line_set_check(READER_RULES)(text)
+
+
+add("control: with guard_core working, the refuter gets the five-line set through the same runner", "custom",
+    fn=guard_core_control_check)
 
 # SILENT: junk or empty stdin gives no stdout, exit 0, and at most one stderr line that starts
 # `agent_brief:`.
@@ -706,6 +784,32 @@ def read_only_set_check():
 
 add("staged-diff step: agent_brief's READ_ONLY set names exactly the agents whose frontmatter cannot write",
     "custom", fn=read_only_set_check)
+
+
+def refuter_name_check():
+    """guard_core names the refuter role in REFUTER_ROLE, a non-empty string. Every refuter case here reads that
+    name from guard_core, so a guard_core without it fails this case and says so."""
+    if REFUTER == REFUTER_MISSING:
+        return "guard_core has no REFUTER_ROLE, the one home of the refuter role's name"
+    if not isinstance(REFUTER, str) or not REFUTER.strip():
+        return "guard_core.REFUTER_ROLE is %r, want a non-empty name" % (REFUTER,)
+    return None
+
+
+def refuter_read_only_check():
+    """agent_brief's READ_ONLY set holds the refuter role, so the hook treats it as a read-only type."""
+    if READ_ONLY_PROBLEM:
+        return READ_ONLY_PROBLEM
+    if REFUTER == REFUTER_MISSING:
+        return "guard_core has no REFUTER_ROLE, so agent_brief's READ_ONLY set cannot name the refuter"
+    if REFUTER.lower() not in READ_ONLY:
+        return "agent_brief's READ_ONLY set does not hold %s, so the hook gives it the writer set" % REFUTER
+    return None
+
+
+add("refuter: guard_core.REFUTER_ROLE names the role, the one home the refuter cases read",
+    "custom", fn=refuter_name_check)
+add("refuter: agent_brief's READ_ONLY set holds the refuter role", "custom", fn=refuter_read_only_check)
 
 
 def main():

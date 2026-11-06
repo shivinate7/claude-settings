@@ -78,6 +78,7 @@ The owner may use any word for a thing (`speak-one-name-per-thing`); the glossar
 | command | One command in a shell chain. One shell call holds one or more commands. | `docs/decisions/ask-commands-run-alone.md` | `command step` |
 | designer | An agent that draws an HTML mockup of each changed screen before the builder starts, except on a text-only change (decision `design-agents`). It writes only in the design folder. | `agents/designer.md` | — |
 | design reviewer | An agent that judges built screens against the mockup (or, for a text-only change, main's screenshots) and the repo's design rules, with a verdict per screen. It is not blind, and it never edits. | `agents/design-reviewer.md` | — |
+| refuter | An agent that reads a Plan agent's plan beside the task brief, and nothing else, and tries to refute its premises and find a simpler route. It never edits. | `agents/refuter.md` | — |
 | mockup | One HTML page in the design folder that draws a screen at every size and theme, with a notes file beside it. | `agents/designer.md` | — |
 | blind designer | A designer whose brief names only the screen's job, users, data shapes and the house UX rules. Its brief withholds the current screen and the repo's design spec, and it is told not to read them. | `skills/design-explore/SKILL.md` | `blind lane` |
 | informed designer | A designer whose brief gives the current screen, its mockups, spec and tokens. | `skills/design-explore/SKILL.md` | `informed lane` |
