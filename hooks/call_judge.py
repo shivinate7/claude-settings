@@ -75,7 +75,7 @@ SPAWN_RULE, QUESTION_RULE, REFUTER_RULE = "spawn-judge", "question-judge", "chec
 # The record each refusal cites. The spawn judge has its own; every other rule here (the model's question verdict
 # and the code rules question_form.chat_hit names) is the question reviewer's.
 SPAWN_CITE = "(decision haiku-prompt-hooks, the spawn judge refuses a brief that breaks the spawn rules)"
-REFUTER_CITE = "(a lane brief's Done check line is read blind against the step's ask before the brief is sent)"
+REFUTER_CITE = "(decision check-refuter, the check refuter: a lane brief's Done check line is read blind against the step's ask)"
 QUESTION_CITE = "(decision question-reviewer-agent-hook, a question is reviewed before it reaches the owner)"
 # THE TIME BUDGET. One model call per hook run, so the longest path is the question call's 60 s plus
 # start-up. The settings.json PreToolUse entry for this hook carries "timeout": 70.
