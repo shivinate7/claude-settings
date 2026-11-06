@@ -1,0 +1,10 @@
+{
+  "title": "A check holds the watcher rules 4 to 8 in the records",
+  "phase": "next",
+  "status": "todo",
+  "order": 103.382,
+  "why": "Watchers plan align-watchers: one rule for watches, wakes, sweeps, reaps and logs.",
+  "note": "Coordinator 14:56 CST, from lane watchers-one-rule (PR #1349), plan docs/plans/align-watchers.md on that branch. Plan lane 8 (Record lint). Size M. A check change: it batches alone.",
+  "owner": "coordinator",
+  "updatedAt": "2026-11-06T20:58:00Z"
+}

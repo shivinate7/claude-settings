@@ -1,0 +1,10 @@
+{
+  "title": "Each watch, wake, sweep and log mechanism states its cost and a test proves it",
+  "phase": "next",
+  "status": "todo",
+  "order": 103.381,
+  "why": "Watchers plan align-watchers: one rule for watches, wakes, sweeps, reaps and logs.",
+  "note": "Coordinator 14:56 CST, from lane watchers-one-rule (PR #1349), plan docs/plans/align-watchers.md on that branch. Plan lane 2 for the cheap mechanisms, through one shared helper hooks/test_support/cost_probe.py, then cost lines and cost tests for the other ~25 mechanisms. Size S, then more.",
+  "owner": "coordinator",
+  "updatedAt": "2026-11-06T20:58:00Z"
+}

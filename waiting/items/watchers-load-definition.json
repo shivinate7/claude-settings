@@ -1,0 +1,40 @@
+{
+  "added": "2026-11-06T20:59:00Z",
+  "context": "Goal: one direction for watches, wakes, sweeps, reaps and logs (plan align-watchers, Q6).\nProblem (rule): your rule gives each capability one home. Load has two definitions, so only your word picks one home or a stated reason for two.\nBased on (read): the guard reads memory and disk. sim-lease reads vm.loadavg, and it already states its own definition (plan align-watchers, section 3, lane watchers-one-rule).\nDeparts from: main, with two load definitions and no record of why \u2014 adds one record that says why (b), or one shared definition (a).\nMeanwhile: the watchers lanes go on; none waits on this.",
+  "holds": "Where the machine-load definition lives.",
+  "home": "plan align-watchers Q6",
+  "id": "watchers-load-definition",
+  "kind": "decision",
+  "lane": "coordinator: the watchers lanes run from plan align-watchers",
+  "links": [
+    {
+      "label": "PR #1349",
+      "url": "https://github.com/shivinate7/claude-settings/pull/1349"
+    }
+  ],
+  "n": 304,
+  "options": [
+    {
+      "gain": "One home for load, so the two never disagree.",
+      "how": "The guard and sim-lease read load from one shared place.",
+      "key": "a",
+      "label": "One shared definition",
+      "lose": "A lane rewrites both readers, for low value."
+    },
+    {
+      "gain": "No code change, and the reason is written down.",
+      "how": "Keep both definitions, and one record says why each one reads what it reads.",
+      "key": "b",
+      "label": "Keep two, record why",
+      "lose": "Two definitions can still drift apart."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "b",
+  "rank": 4,
+  "ref": "PR #1349 (lane watchers-one-rule), docs/plans/align-watchers.md",
+  "short": "One load definition?",
+  "status": "open",
+  "title": "The guard and sim-lease each define \"the machine is loaded\" their own way. Merge them into one?",
+  "why": "Low value: two definitions of load can disagree, but each one states its own today."
+}
