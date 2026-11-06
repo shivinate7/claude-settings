@@ -83,6 +83,15 @@ does not name in its Input Needed section blocks. A built-in tool counts only in
 tool counts by its full name. Each tool the reply names is cleared, on a
 stop_hook_active rewrite too, which never blocks on a refusal (decision refusals-reach-the-owner).
 Cost: one stat per Stop when the session had no refusal.
+
+Route-row flags (hooks/route_match.py holds the rows, the surface and the match): a refused call that a "works" row
+matches gets a `route_flag` in its refusals row (hooks/refusal_note.py), and a successful call of the turn that a
+"refused" row matches gets one here. Each flag rides in the systemMessage of the line this Stop prints and never
+changes its decision. The dedupe file <config dir>/state/route-flags/<session_id>.json holds the keys already
+shown. Cost: one small file per session, written only when a flag shows, read at Stop; its one reader and writer is
+_shown_flags, and a turn with no flag and no successful call reads no rows file. Cleanup: none. Nothing prunes
+state/ per session (janitor/session_end_sweep.py runs the branch and worktree sweep only), and a file holds a few
+short keys, so it stays as the refusals and reply-judge counter files do.
 """
 import json
 import os
@@ -1150,16 +1159,16 @@ def pending_refusals(hook, text):
         return []
 
 
-def _shown_notes(hook, notes):
-    """The texts of `notes`, (key, text) pairs, that this session's Stop has not shown yet. It records their keys
-    in <config dir>/state/route-notes/<session_id>.json, so each shows once per session. [] when the session has
-    no plain id or the record cannot be written: a note that cannot be counted would repeat on every Stop."""
-    if not notes:
+def _shown_flags(hook, flags):
+    """The texts of `flags`, (key, text) pairs, that this session's Stop has not shown yet. It records their keys
+    in <config dir>/state/route-flags/<session_id>.json, so each shows once per session. [] when the session has
+    no plain id or the record cannot be written: a flag that cannot be counted would repeat on every Stop."""
+    if not flags:
         return []
     try:
         sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
         import shared_names
-        path = shared_names.route_notes_path(hook.get("session_id"))
+        path = shared_names.route_flags_path(hook.get("session_id"))
         if path is None:
             return []
         try:
@@ -1169,7 +1178,7 @@ def _shown_notes(hook, notes):
         except (OSError, ValueError):
             seen = []
         fresh = []
-        for key, text in notes:
+        for key, text in flags:
             if key not in seen:
                 seen.append(key)
                 fresh.append(text)
@@ -1182,32 +1191,32 @@ def _shown_notes(hook, notes):
         return []
 
 
-def refusal_route_notes(hook):
-    """The `note` of each row in the session's refusals file that hooks/refusal_note.py wrote for a refusal a
+def refusal_route_flags(hook):
+    """The `route_flag` of each row in the session's refusals file that hooks/refusal_note.py wrote for a refusal a
     route row contradicts, once each per session. Read before pending_refusals settles the file. This is the
-    named reader of those notes (owner ruling, process-only): it shows them and never refuses on one."""
+    named reader of those flags (owner ruling, process-only): it shows them and never refuses on one."""
     try:
         sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
         import shared_names
         path = shared_names.refusals_path(hook.get("session_id"))
         if path is None or not os.path.exists(path):
             return []
-        notes = []
+        flags = []
         with open(path, encoding="utf-8") as f:
             for line in f:
                 try:
                     row = json.loads(line)
                 except Exception:
                     continue
-                if isinstance(row, dict) and isinstance(row.get("note"), str) and row["note"]:
-                    notes.append(("refused:" + row["note"], row["note"]))
-        return _shown_notes(hook, notes)
+                if isinstance(row, dict) and isinstance(row.get("route_flag"), str) and row["route_flag"]:
+                    flags.append(("refused:" + row["route_flag"], row["route_flag"]))
+        return _shown_flags(hook, flags)
     except Exception:
         return []
 
 
-def success_route_notes(hook, after):
-    """One note per route row that says an act is refused, and that a call of the turn `after` matched and
+def success_route_flags(hook, after):
+    """One flag per route row that says an act is refused, and that a call of the turn `after` matched and
     succeeded in (a tool_result without is_error), once per row per session. The match and the surface are
     hooks/route_match.py. Fails open: [] on any error."""
     try:
@@ -1219,13 +1228,13 @@ def success_route_notes(hook, after):
         if not calls:  # a turn with no successful call reads no rows file
             return []
         import route_match
-        notes = []
+        flags = []
         for row in route_match.matching_rows(route_match.load_rows(), "refused", calls):
             key = "succeeded:%s" % row.get("id")
-            if all(key != k for k, _ in notes):
-                notes.append((key, "route row %s contradicted: it says this call is refused on %s, and it succeeded."
+            if all(key != k for k, _ in flags):
+                flags.append((key, "route row %s contradicted: it says this call is refused on %s, and it succeeded."
                               % (row.get("id"), row.get("surface"))))
-        return _shown_notes(hook, notes)
+        return _shown_flags(hook, flags)
     except Exception:
         return []
 
@@ -1523,9 +1532,9 @@ def main():
     except Exception:
         pass
 
-    # Route-row notes ride in the systemMessage of whichever line this Stop prints, and never change its decision.
+    # Route-row flags ride in the systemMessage of whichever line this Stop prints, and never change its decision.
     # The refusals file is read for them before pending_refusals settles it.
-    route = refusal_route_notes(hook)
+    route = refusal_route_flags(hook)
 
     def finish(payload):
         if route:
@@ -1573,7 +1582,7 @@ def main():
     incoming = last_incoming_index(records)
     turn = records if incoming is None else records[incoming + 1:]
     after = [] if last_human_idx is None else records[last_human_idx + 1:]
-    route += success_route_notes(hook, after)
+    route += success_route_flags(hook, after)
     note = ""
     pick_reason = ""
     try:
