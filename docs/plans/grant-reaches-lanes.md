@@ -2,7 +2,7 @@
 
 Owner, 2026-11-01 22:37 CST, in the coordinator's chat: "a grant here should allow for a grant there."
 
-Status: signed off as written (owner, Cockpit item 152, pick a, 2026-11-03 18:21 CST). Ruling: decision grant-reaches-lanes. Revalidated 2026-11-06 (owner, page item 221, 12:36 CST: 'is this still valid? A is ok to do'). Question 3 answered (owner, page item 285, pick a, 2026-11-06 13:08 CST). Built: the `spawn` act, by Design A (see Built, at the end).
+Status: built, the owner's test (page item 221, web and phone) pending. Ruling: decision grant-reaches-lanes. Question 3 answered (owner, page item 285, pick a, 2026-11-06 13:08 CST). Built: the `spawn` act, by Design A (see Built, at the end).
 
 ## The problem
 
@@ -86,7 +86,7 @@ and `opus builders 2h`:
 
 `grant <lane slug> spawn <n>[m|h]`, or `grant off <lane slug>`
 
-- The whole prompt, in any case, with surrounding whitespace ignored. Any other text grants nothing, as for
+- The whole prompt, with surrounding whitespace ignored. The slug is lower case only; the rest of the word is case-free. Any other text grants nothing, as for
   `override`.
 - `<lane slug>` names one target: `[a-z0-9][a-z0-9_-]{0,31}`. A branch slug changes on a checkout, so the gate compares it to
   the session's tag, set when the session was made: `cs-step:<slug>` for a lane. The coordinator writes the tags, so a
@@ -118,7 +118,7 @@ gates exist:
 
 | Gate | Skips the classifier | Per session, expires | Cloud | Gold standard |
 |---|---|---|---|---|
-| `PreToolUse` hook returns `allow` | Yes, measured 2026-11-06 (section 1) | Yes | Yes | Documented skip |
+| `PreToolUse` hook returns `allow` | Yes for an allowed act, measured 2026-11-06 (section 1); a refused act is unmeasured | Yes | Yes | Documented skip |
 | Mod `tool.check` approves | Documented | Yes | Unknown whether mods load in cloud sessions | Documented and loads everywhere |
 | Static `permissions.allow` rule | Documented | No | Yes | Scoped and expiring |
 
@@ -136,7 +136,7 @@ classifier still refused, the refused-act half of the step 1 probe reads whether
 A `merge <pr>` act would be narrower than that rule, so it adds nothing while the rule stands: it is out of
 the catalogue. Question 7 records the rule's status (section 6).
 
-Build step 1 of any design is a probe in one session. The skip is measured (section 1, 2026-11-06): a hook `allow` skips the classifier. That probe used an act the classifier allowed, so it did not test a refused act. A hook returns `allow` on one act the
+Build step 1 of any design is a probe in one session. The skip is measured for an allowed act only (section 1, 2026-11-06): a hook `allow` skips the classifier for it. That probe used an act the classifier allowed, so it did not test a refused act. A hook returns `allow` on one act the
 classifier refuses today. The transcript's `permission_decision` shows the result. If the
 hook gate does not lift a refused act, the mod gate is next, with its own cloud probe. Step 1 also
 probes: an event a lane sends into the coordinator, an owner event from the web and the phone
@@ -247,10 +247,11 @@ The copy-line design is cut: page answers now count through `page_grant.py` and 
 ## 5. Costs
 
 Design A, per grant: one prompt-hook parse in the hook already running, one `send_message`, one
-`list_events` and one `get_event`. Per tool call in the target: one bounded tail read of the
+`list_events` and one `get_event`. Per `Agent` or `Task` call from a lead session: one bounded tail read (4 MiB at most) of the
 transcript inside the guard hook already running, with the tail readers of `lint/_transcript.py`.
-The read runs on every gated tool call, to learn whether a grant result exists. No new process,
-timer or file (rule outcomes-mechanize-rules). A test proves the read stays bounded.
+Other tool calls skip the read. The read runs only to learn whether a grant result exists. No new
+process, timer or file (rule outcomes-mechanize-rules). `test_grant_past_the_tail_read_grants_nothing`
+in `hooks/test_grant_guard.py` pins the bound.
 
 Design B: one file write per grant, one file read per tool call while the file exists.
 
@@ -269,7 +270,7 @@ Design B: one file write per grant, one file read per tool call while the file e
 The `spawn` act is built (owner, page item 285, pick a, 2026-11-06 13:08 CST), by Design A.
 
 - `hooks/grant_word.py` holds the word's form (`parse`) and the catalogue constant `ACTS`.
-- `hooks/local_time.py` prints the grant and the relay line for a grant prompt. It writes no file.
+- `hooks/local_time.py` prints the grant and the relay line for a grant prompt. The prompt hook's existing capture saves the prompt, and nothing more.
 - The gate is `spawn_grant_hit` in `hooks/guard.py`. It runs after every other check of the guard, on the lead session's
   `Agent` or `Task` call. It reads one bounded tail (4 MiB) of the lane's transcript with the readers of
   `lint/_transcript.py`. It approves with `permissionDecision: allow` only when the lane's own `get_session` result holds
