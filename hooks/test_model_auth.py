@@ -33,13 +33,11 @@ names it, never a crash.
 - The streak file lives under the config dir's state folder. These cases do not name it. They scan every
   file there except the token file.
 """
-import atexit
 import contextlib
 import importlib.util
 import inspect
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -47,21 +45,18 @@ import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
-import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
-from case_runner_test import run_cases  # noqa: E402
+import _test_temp  # noqa: E402  test-temp-standard: sweeps and makes run folders (lint/_test_temp.py)
+from case_runner_test import Skip, run_cases  # noqa: E402
 import test_stall_watch_stop as tss  # noqa: E402  the Stop harness and its stale-job case: called, not copied
 
 # Loaded the way hooks/test_decision_watch.py loads it. Not imported from there: that module makes a
 # scratch folder in the system temp dir when it is imported, outside this run's folder.
-_spec = importlib.util.spec_from_file_location(
-    "decision_watch_under_test",
-    os.environ.get("DECISION_WATCH_UNDER_TEST") or os.path.join(HERE, "decision_watch.py"),
-)
+DW_PATH = os.environ.get("DECISION_WATCH_UNDER_TEST") or os.path.join(HERE, "decision_watch.py")
+_spec = importlib.util.spec_from_file_location("decision_watch_under_test", DW_PATH)
 dw = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dw)
 
-SCRATCH = _test_temp.run_folder()
-atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
+SCRATCH = tss.SCRATCH  # one run folder per run: the Stop harness makes it and removes it at exit
 
 FAKE_TOKEN = "sk-ant-oat01-FAKE"
 UNREADABLE_MARK = b"BYTES-MARKER"
@@ -328,7 +323,7 @@ def C9_entry_flag_is_in_settings_once_and_no_stop_command_is_added():
 
 @case
 def C5_three_failures_show_count_fix_and_last_error_and_a_success_clears_the_line():
-    """C5. three failures in a row: the Stop line says 3, with the last error and the fix; 12 says 12; success clears it"""
+    """C5. three failures in a row: the Stop line says 3 with the last error and fix; 12 says 12; success clears it"""
     sid = "model-auth-c5"
     with scratch_config("c5") as cfg:
         problems = scoped(cfg) + takes_session_id_problems()
@@ -428,6 +423,58 @@ def C8_fake_token_reaches_no_stdout_and_no_written_file_but_the_token_file():
             with open(os.path.join(cfg, rel), "rb") as f:
                 if FAKE_TOKEN.encode("utf-8") in f.read():
                     problems.append("the fake token is in the written file %s" % rel)
+    return problems
+
+
+FAKE_CLAUDE = (
+    "#!/bin/sh\n"
+    ": > \"$FAKE_CLAUDE_MARK\"\n"  # the marker records that a probe started claude
+    "echo 'not logged in' >&2\n"
+    "exit 1\n"
+)
+
+
+def entry_run(name, with_token):
+    """Run `decision_watch.py --auth-check` the way the SessionStart hook does. A fake `claude` is the only
+    one on PATH, and it writes a marker when started. Return (returncode, stdout, marker written)."""
+    cfg = os.path.join(SCRATCH, "config-" + name)
+    fake_dir = os.path.join(SCRATCH, "fake-bin-" + name)
+    os.makedirs(cfg, exist_ok=True)
+    os.makedirs(fake_dir, exist_ok=True)
+    fake = os.path.join(fake_dir, "claude")
+    with open(fake, "w", encoding="utf-8") as f:
+        f.write(FAKE_CLAUDE)
+    os.chmod(fake, 0o755)
+    marker = os.path.join(fake_dir, "probe-ran")
+    if with_token:
+        token_file(cfg, FAKE_TOKEN + "\n")
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=cfg, PATH=fake_dir, FAKE_CLAUDE_MARK=marker)
+    env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+    payload = {"session_id": "model-auth-entry-" + name, "hook_event_name": "SessionStart",
+               "cwd": SCRATCH, "source": "startup"}
+    proc = subprocess.run([sys.executable, DW_PATH, "--auth-check"], input=json.dumps(payload).encode("utf-8"),
+                          capture_output=True, env=env, timeout=30)
+    return proc.returncode, proc.stdout.decode("utf-8", "replace"), os.path.exists(marker)
+
+
+@case
+def C10_session_start_entry_prints_one_system_message_line_only_when_the_fix_is_needed():
+    """C10. the SessionStart entry: a token file means no output and no claude start. No token file means one
+    systemMessage line that names the fix, after one claude start"""
+    if os.name == "nt":
+        raise Skip("the fake claude is a POSIX shell script")
+    rc, out, started = entry_run("c10-token", with_token=True)
+    problems = expect(rc == 0, "token file present: the entry exited %d, want 0" % rc)
+    problems += expect(out.strip() == "", "token file present: the entry printed %r, want nothing" % out)
+    problems += expect(not started, "token file present: claude was started, want no probe")
+    rc, out, started = entry_run("c10-absent", with_token=False)
+    problems += expect(rc == 0, "no token file: the entry exited %d, want 0" % rc)
+    problems += expect(started, "no token file: claude was not started, so no probe ran")
+    probe_problems = []
+    msg = tss.system_message(out, probe_problems)
+    problems += probe_problems
+    problems += expect(SETUP in msg, "no token file: the entry's systemMessage does not name %r: %r" % (SETUP, msg))
+    problems += expect(STDERR in msg, "no token file: the entry's systemMessage lacks the probe error: %r" % msg)
     return problems
 
 
