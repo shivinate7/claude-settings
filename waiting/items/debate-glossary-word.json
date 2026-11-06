@@ -4,6 +4,12 @@
   "home": "GLOSSARY.md",
   "id": "debate-glossary-word",
   "kind": "decision",
+  "lane": "coordinator: GLOSSARY.md gets \"refuter\"; lanes rename their one constant; routed 13:12 CST",
+  "lastAnswer": {
+    "at": "2026-11-06T19:08:48.782Z",
+    "choice": "b",
+    "note": "Routed 13:12 CST to the coordinator."
+  },
   "n": 282,
   "options": [
     {

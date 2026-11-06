@@ -4,7 +4,7 @@
   "home": "grant-reaches-lanes",
   "id": "grant-client-fields-test",
   "kind": "decision",
-  "lane": "waits on item 285: on a, the test line becomes `grant grant-reaches-lanes spawn 15m`, typed in the coordinator from web and phone; on b, 221 closes",
+  "lane": "item 285 picked a (13:08 CST): once the lane builds it, this becomes your test: type `grant grant-reaches-lanes spawn 15m` in the coordinator once from claude.ai on the web and once from the phone app",
   "lastAnswer": {
     "at": "2026-11-06T18:36:55.244Z",
     "choice": "a",

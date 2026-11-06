@@ -4,6 +4,16 @@
   "home": "roadmap steps challenger-page-against, ruling-skip-check, check-line-reader",
   "id": "challenger-more-places",
   "kind": "decision",
+  "lane": "coordinator: steps challenger-page-against, ruling-skip-check, check-line-reader; routed 13:12 CST",
+  "lastAnswer": {
+    "at": "2026-11-06T19:08:48.782Z",
+    "choice": [
+      "a",
+      "b",
+      "c"
+    ],
+    "note": "Owner: some challengers should run Opus, not all Sonnet, and there are probably more places to use them. Routed 13:12 CST to the coordinator."
+  },
   "multi": true,
   "n": 284,
   "options": [

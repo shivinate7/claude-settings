@@ -4,6 +4,11 @@
   "home": "mailaudit docs/decisions/recent-checks-can-be-undone.md",
   "id": "recent-reset-undo",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-06T19:08:48.782Z",
+    "choice": "b",
+    "note": "Owner: \"do whichever is already built and leave deferred\". Read as b: Reset stays out of Recent, and History undoes it, as built today. Relayed 13:12 CST to the lane."
+  },
   "n": 280,
   "options": [
     {
@@ -26,7 +31,7 @@
   "rank": 3,
   "ref": "item 193; debt recent-log-unbuilt",
   "short": "mailaudit: undo a Reset from Recent?",
-  "status": "open",
+  "status": "deferred",
   "title": "mailaudit: can a Reset be undone from the Recent list?",
   "why": "a keeps pick c's promise: the undo is there right after a Reset."
 }

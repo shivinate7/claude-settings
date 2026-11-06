@@ -5,9 +5,11 @@
   "home": "local-session-reach",
   "id": "local-reach-plan",
   "kind": "decision",
+  "lane": "folded into lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6), which designs one way for sessions to reach each other that replaces plain messages; routed 13:12 CST",
   "lastAnswer": {
-    "at": "2026-11-02T06:56:26.205Z",
-    "note": ""
+    "at": "2026-11-06T18:58:16.910Z",
+    "choice": "none",
+    "note": "Owner: are these the only four options? With the 10-message limit this gets complicated; find something better that replaces normal messaging. Routed 13:12 CST to the session-messaging lane."
   },
   "links": [
     {
@@ -50,6 +52,7 @@
   "pick": "a",
   "rank": 2,
   "ref": "draft PR #1051, docs/plans/local-session-reach.md, section 4; roadmap step local-session-reach",
+  "reply": "No, they aren't the only ones. Your ask from this morning (a plan for messages between sessions that would work in any harness) is now a lane, and it's the right place to answer this too. I've sent it this question with your note: design one way to reach sessions that doesn't depend on Claude Code's message limit. It comes back here with new options.",
   "short": "local reach plan",
   "status": "open",
   "title": "Which way should cloud sessions reach the sessions on your computer?",

@@ -4,7 +4,12 @@
   "home": "banchi docs/debts notes; claude-settings skill plain-english-map",
   "id": "banchi-map-binary-hints",
   "kind": "decision",
-  "lastAnswer": "none (12:52 CST Nov 6): \"'icon, a model, a licence or a config file' why is it specifically only these items?\". Answered 13:00 CST in the reply; asked again.",
+  "lane": "coordinator: shared map lists every file a decision or debt names; routed 13:12 CST",
+  "lastAnswer": {
+    "at": "2026-11-06T19:08:48.782Z",
+    "choice": "a",
+    "note": "Routed 13:12 CST to the coordinator."
+  },
   "n": 268,
   "options": [
     {

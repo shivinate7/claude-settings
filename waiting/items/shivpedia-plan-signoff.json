@@ -5,10 +5,11 @@
   "home": "craft-book",
   "id": "shivpedia-plan-signoff",
   "kind": "decision",
+  "lane": "coordinator: build the small proof (one practices record, one read line in agents/plan.md and the brief template); routed 13:12 CST",
   "lastAnswer": {
-    "at": "2026-11-04T12:45:08Z",
-    "choice": "none",
-    "note": "send a critic opus agent on this plan"
+    "at": "2026-11-06T18:58:16.910Z",
+    "choice": "a",
+    "note": "Routed 13:12 CST to the coordinator."
   },
   "links": [
     {

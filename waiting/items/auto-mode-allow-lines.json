@@ -6,12 +6,12 @@
   "kind": "decision",
   "lane": "draft PR #1316 (lane auto-mode-middle-ground), with the coordinator's batch; d narrowed to check-ins that fire into the same session; closes when #1316 merges",
   "lastAnswer": {
-    "at": "2026-11-06T18:41:54.478Z",
+    "at": "2026-11-06T18:58:16.910Z",
     "choice": [
       "c",
       "d"
     ],
-    "note": "Owner picked c and d, and asked why they were marked as going against the ruling, and said \"never\" is too firm: it should be a guideline. Routed 12:46 CST: c and d to the lane; the wording change to the coordinator (step widening-rule-guideline)."
+    "note": "Owner added: were these all the acts that needed allow lines, has nothing else been refused? And: there was no way to reply to my response, so he edited his answer. Routed 13:12 CST: the refusal survey to the coordinator; the reply box to step item-reply-back."
   },
   "multi": true,
   "n": 278,
@@ -36,7 +36,7 @@
   "owner": "auto-mode-middle-ground lane (session_013NEJL1Cejen3sLS5Yn3sA6)",
   "rank": 3,
   "ref": "step auto-mode-middle-ground; your ask ask-mw5av97rcg",
-  "reply": "You're right, they don't. That ruling is about one repo getting an exception from a shared tool. These two lines apply the same way to every repo, so the mark was wrong. I've filed step widening-rule-guideline to (1) tag only per-repo exceptions and (2) reword the line as a guideline: \"a repo should change to fit the shared tool, rather than the tool change to fit a repo\". It changes the output style, so the coordinator sends it to a lane. Your c and d picks went to the lane.",
+  "reply": "You're right, they don't go against it: that ruling is about one repo getting an exception, and these lines work the same in every repo. The mark was wrong, and step widening-rule-guideline (in a lane now) narrows it and softens \"never\".\n\nAre these all? Not proven. They're the acts refused so far in the cloud. I've asked the coordinator to scan the refusal log for every other act auto mode refused, and to bring back any that recur.\n\nReplying: you're right that a question's reply has no reply box (asks have one since #1248). Filed as step item-reply-back. Until then, editing your answer works: I read the newest version.",
   "short": "Auto-mode allow lines",
   "status": "open",
   "title": "Which auto-mode allow lines should land?",

@@ -1,9 +1,9 @@
 {
   "title": "A pick skipped under a ruling cites it, and a Sonnet confirms the ruling names the act",
   "phase": "now",
-  "status": "todo",
+  "status": "ready",
   "order": 103.3689,
   "why": "A ruling can't be stretched to an act the owner never ruled on.",
-  "note": "Audit build 4, coordinator 12:57 CST. 1 Sonnet call per skip. Waits on owner item 284 b.",
-  "updatedAt": "2026-11-06T19:05:00Z"
+  "note": "Owner picked b on item 284, 13:08 CST, and noted: some challengers should run Opus, not all Sonnet. Glossary word is \"refuter\" (item 282 b).\nAudit build 4, coordinator 12:57 CST. 1 Sonnet call per skip. Waits on owner item 284 b.",
+  "updatedAt": "2026-11-06T19:13:00Z"
 }

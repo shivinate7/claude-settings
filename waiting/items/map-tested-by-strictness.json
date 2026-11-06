@@ -4,7 +4,7 @@
   "home": "decision map-tested-by-line; roadmap step map-tested-by-line",
   "id": "map-tested-by-strictness",
   "kind": "decision",
-  "lastAnswer": "none (11:22 CST Nov 6): \"tell me\". Re-asked 11:30 CST with a plain explanation of each option.",
+  "lastAnswer": "none (13:08 CST Nov 6): \"building this is most important wise to show simplicity and work overdone or accidentally repeated; with that in mind what do these options decide\". Answered 13:12 CST in the reply; asked again.",
   "n": 270,
   "options": [
     {
@@ -33,6 +33,7 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 3,
   "ref": "item 209 a; banchi ad0139873^:docs/map.py",
+  "reply": "With simplicity and no repeated work in mind, the options decide one thing: how much work banchi redoes, against how much a \"Tested by\" line can be trusted.\n\na (built now): nothing more to build in the shared tool. banchi re-points about 42 old links to the right test helper. Each line then really means \"this test loads this file\".\nb: the same work for banchi, plus a small change to the tool. Slightly stricter.\nc: no re-pointing for banchi, but the tool must be widened for banchi's old way, so one test can vouch for a whole folder. A line can then say a file is tested when it isn't.\n\nSimplest with no repeated work: a. It's already built, and the re-pointing is done once.",
   "short": "map: how strict is tested-by",
   "status": "open",
   "title": "How strict is the new tested-by check in the shared map?",

@@ -4,7 +4,21 @@
   "home": "ux-house-rules",
   "id": "ux-house-rule-ids",
   "kind": "decision",
-  "lastAnswer": "none (11:22 CST Nov 6), with a per-rule note. Settled parts are in the context; re-asked 11:30 CST on the 12 rules the note left open.",
+  "lane": "coordinator: add a, c, e, f, h, j, k, l to the house rules; b waits on your reply below; routed 13:16 CST",
+  "lastAnswer": {
+    "at": "2026-11-06T19:11:33.356Z",
+    "choice": [
+      "a",
+      "c",
+      "e",
+      "f",
+      "h",
+      "j",
+      "k",
+      "l"
+    ],
+    "note": "Owner asked what is lost without b (a press moves nothing). Routed the picks 13:16 CST to the coordinator; b answered in the reply."
+  },
   "multi": true,
   "n": 183,
   "options": [
@@ -89,6 +103,7 @@
   ],
   "rank": 7,
   "ref": "deep audit 1102, report docs/plans/deep-audit/report.md on audit/deep-1102 (6b6a41f3), table 'claude-settings: homes', row ux-house-rule-ids",
+  "reply": "What b protects: when you press something, nothing else on the screen moves or resizes. For example, a \"Copy\" button that turns into \"Copied\" keeps its width, and text that loads late doesn't push a button out from under your finger.\n\nIf b isn't a house rule: nothing built today breaks, because the page's Copy button and other screens already follow it. What goes is the check. Reviewers would no longer have to catch a screen where a press shifts things, so a later change could bring back jumps and mis-taps without anyone flagging it.\n\nIf you want b too, add it to your picks; otherwise the eight you picked go ahead.",
   "short": "UX house rules: the last 12",
   "status": "open",
   "title": "Which of these 12 UX rules should also be house rules?",

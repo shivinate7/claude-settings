@@ -4,7 +4,11 @@
   "home": "claude-settings decision owner-override; lane opus-plain-ask-scope record",
   "id": "opus-ask-later-messages",
   "kind": "decision",
-  "lastAnswer": "none (12:51 CST Nov 6): \"can i get this re explained?\". Re-explained 12:58 CST in the reply below.",
+  "lastAnswer": {
+    "at": "2026-11-06T19:08:48.782Z",
+    "choice": "a",
+    "note": "a: no change, main already does this since #1244."
+  },
   "n": 256,
   "options": [
     {
@@ -26,9 +30,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "item 226 b; coordinator message 2026-11-04 08:07 CST",
-  "reply": "Plainly: when you type just \"use opus\", without saying for what, a model reads your messages to work out which job you mean. Opus is then allowed for that job only.\n\na: it reads only the messages you sent BEFORE \"use opus\", once. This is what runs today.\nb: it also keeps reading every message you send AFTER, for as long as the Opus grant lasts. So a later \"only the tests\" would shrink what Opus covers. The cost is one extra model call on each of your messages, even ones that have nothing to do with Opus.\n\nIf you don't mind either way, pick a: nothing changes.",
+  "reply": "Closed 13:12 CST: a is what main does today, so nothing to build. Relayed to lane opus-plain-ask-scope.",
   "short": "Opus ask: read later messages too?",
-  "status": "open",
+  "status": "closed",
   "title": "Should a plain Opus ask also read your messages after the ask?",
   "why": "It keeps the cost to one call per ask, and the part both options need is already being built."
 }
