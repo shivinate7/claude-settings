@@ -240,7 +240,9 @@ class StaleCase(unittest.TestCase):
 
     def run_check(self, rng, base=None, extra_env=None):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/stale_cites.py")
-        env = dict(os.environ, TMPDIR=rng.case, **(extra_env or {}))
+        env = dict(os.environ)
+        env.pop("CI", None)  # CI turns an unknown read red; these cases state the local rule, CI cases pass CI=1
+        env.update(TMPDIR=rng.case, **(extra_env or {}))
         spec = "%s...%s" % (rng.base if base is None else base, rng.head)
         done = subprocess.run([sys.executable, MODULE, "--range", spec],
                               cwd=rng.repo, env=env, capture_output=True, text=True,
@@ -999,6 +1001,19 @@ class UnknownFileTests(StaleCase):
                 self.assertEqual(rc, 0, out)
                 self.assertTrue(unknown, out)
                 self.assertIn("hooks/guard.py", unknown[0], out)
+
+    def test_a_touched_py_that_does_not_parse_under_ci_is_red(self):
+        """The same unread file, with env CI set: the unknown line names it, and the exit is non-zero (decision
+        ci-unknown-is-red). The local exit 0 is the test above, which runs with CI unset."""
+        def change(repo):
+            write(repo, "hooks/guard.py", "def keep(:\n    return 1\n")
+            commit(repo)
+        rng = self.make_range(base_files(extra={"hooks/guard.py": GUARD}), change)
+        rc, out = self.run_check(rng, extra_env={"CI": "1"})
+        unknown = [line for line in out.splitlines() if line.startswith("stale-cites: unknown")]
+        self.assertTrue(unknown, out)
+        self.assertIn("hooks/guard.py", unknown[0], out)
+        self.assertNotEqual(rc, 0, out)
 
 
 class ExcludeFolderTests(StaleCase):
