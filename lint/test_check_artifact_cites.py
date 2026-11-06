@@ -35,6 +35,8 @@ URL = "https://claude.ai/artifact/" + REGISTERED
 CODE_URL = "https://claude.ai/code/artifact/" + REGISTERED
 REGISTRY = {"kinds": {}, "rolled-out": True,
             "artifacts": [{"id": REGISTERED, "url": URL, "role": "waiting-page", "account": "work"}]}
+CLEAN = "# Record\n\nNo link here.\n"
+MISSING_BLOB = "0123456789abcdef0123456789abcdef01234567"  # a well-formed object name the test repo never stores
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
 
@@ -94,8 +96,13 @@ class CiteTests(unittest.TestCase):
     def ref_exists(self, ref):
         return subprocess.run(["git", "-C", self.root, "rev-parse", "--verify", "-q", ref], capture_output=True).returncode == 0
 
-    def run_check(self):
-        done = subprocess.run([sys.executable, SCRIPT, "--root", self.root], capture_output=True, text=True, timeout=60)
+    def run_check(self, args=(), ci=False):
+        """The script's exit code and output. Env CI is off unless `ci` sets it, so a runner's own CI setting never leaks in."""
+        env = {k: v for k, v in os.environ.items() if k != "CI"}
+        if ci:
+            env["CI"] = "1"
+        done = subprocess.run([sys.executable, SCRIPT, "--root", self.root, *args], capture_output=True, text=True,
+                              timeout=60, env=env)
         return done.returncode, done.stdout + done.stderr
 
     def flagged(self, out):
@@ -190,6 +197,114 @@ class CiteTests(unittest.TestCase):
         code, out = self.run_check()
         self.assertEqual(code, 1, "an unreadable registry passed. Output:\n" + out)
         self.assertTrue(self.flagged(out), "an unreadable registry printed no FAIL line. Output:\n" + out)
+
+    # A read that cannot run prints UNKNOWN. Locally it exits 0. With env CI set it exits non-zero.
+    # Each case breaks one input and keeps the others clean, so the one UNKNOWN has one cause.
+
+    def readable_debt_and_steps(self):
+        self.put("docs/debts/y.md", CLEAN)
+        self.steps({"c1.json": json.dumps({"title": "Step"})})
+
+    # Lane ruling R1: a record folder that is absent holds zero records. That is an answer, not an unread input,
+    # so it exits 0 with no UNKNOWN line, CI set or not. A path that exists but is no folder stays UNKNOWN (below).
+
+    def test_an_absent_decisions_folder_is_zero_records_locally(self):
+        self.readable_debt_and_steps()
+        self.assertFalse(os.path.exists(os.path.join(self.root, "docs", "decisions")), "scope: the decisions folder is there")
+        code, out = self.run_check()
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("UNKNOWN", out, "an absent decisions folder is zero records, not an unread input:\n" + out)
+
+    def test_an_absent_decisions_folder_is_zero_records_in_ci(self):
+        self.readable_debt_and_steps()
+        self.assertFalse(os.path.exists(os.path.join(self.root, "docs", "decisions")), "scope: the decisions folder is there")
+        code, out = self.run_check(ci=True)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(code, 0, "an absent decisions folder must exit 0 in CI:\n" + out)
+        self.assertNotIn("UNKNOWN", out, "an absent decisions folder is zero records, not an unread input:\n" + out)
+
+    def test_an_absent_debts_folder_is_zero_records_in_ci(self):
+        self.decision(CLEAN)
+        self.steps({"c1.json": json.dumps({"title": "Step"})})
+        self.assertFalse(os.path.exists(os.path.join(self.root, "docs", "debts")), "scope: the debts folder is there")
+        code, out = self.run_check(ci=True)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(code, 0, "an absent debts folder must exit 0 in CI:\n" + out)
+        self.assertNotIn("UNKNOWN", out, "an absent debts folder is zero records, not an unread input:\n" + out)
+
+    def test_a_decisions_path_that_is_no_folder_prints_unknown_locally(self):
+        # os.walk yields nothing for a path that is no folder, and it raises no error: the read must still say UNKNOWN.
+        self.readable_debt_and_steps()
+        self.put("docs/decisions", "not a folder\n")
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "docs", "decisions")), "scope: the decisions path is not a file")
+        code, out = self.run_check()
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(code, 0, out)
+        self.assertIn("UNKNOWN", out, "a decisions path that is no folder was read as clean, with no UNKNOWN line:\n" + out)
+
+    def test_a_decisions_path_that_is_no_folder_is_red_in_ci(self):
+        self.readable_debt_and_steps()
+        self.put("docs/decisions", "not a folder\n")
+        code, out = self.run_check(ci=True)
+        self.assertNotEqual(code, 0, "a decisions path that is no folder passed in CI:\n" + out)
+
+    def test_no_record_branch_prints_unknown_for_the_steps_locally(self):
+        self.decision(CLEAN)
+        self.put("docs/debts/y.md", CLEAN)
+        self.assertFalse(self.ref_exists("refs/heads/roadmap") or self.ref_exists("refs/remotes/origin/roadmap"),
+                         "scope: a record branch exists, so the steps were read")
+        code, out = self.run_check(("--steps", "refuse"))
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(code, 0, out)
+        self.assertIn("UNKNOWN", out, "a record branch that is not there was read as no steps, with no UNKNOWN line:\n" + out)
+
+    def test_no_record_branch_is_red_in_ci_for_the_steps(self):
+        self.decision(CLEAN)
+        self.put("docs/debts/y.md", CLEAN)
+        code, out = self.run_check(("--steps", "refuse"), ci=True)
+        self.assertNotEqual(code, 0, "a record branch that is not there passed in CI:\n" + out)
+
+    def steps_with_a_missing_blob(self):
+        """The record branch is there, and its one step names a blob the object store does not hold: the branch is read,
+        the step is not."""
+        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(self.root, ".git", "record-index"))
+        self.git("read-tree", "--empty", env=env)
+        self.git("update-index", "--add", "--info-only", "--cacheinfo",
+                 "100644,%s,roadmap/data/steps/c1.json" % MISSING_BLOB, env=env)
+        tree = self.git("write-tree", "--missing-ok", env=env).strip()
+        commit = self.git("commit-tree", tree, "-m", "record", env=env).strip()
+        self.git("update-ref", "refs/heads/roadmap", commit)
+        self.assertFalse(self.blob_exists(MISSING_BLOB), "scope: the blob is in the object store")
+
+    def blob_exists(self, sha):
+        return subprocess.run(["git", "-C", self.root, "cat-file", "-e", sha], capture_output=True).returncode == 0
+
+    # A read that fails in the middle of a run must not drop the finds the run already made.
+
+    def test_an_unreadable_step_keeps_the_fail_line_for_a_bare_link_locally(self):
+        self.decision("# Record\n\nSee " + URL + ".\n")
+        self.steps_with_a_missing_blob()
+        code, out = self.run_check()
+        self.assertTrue(any("docs/decisions/x.md" in line for line in self.flagged(out)),
+                        "the unread step dropped the FAIL line for a bare link. Output:\n" + out)
+        self.assertNotEqual(code, 0, "a bare link passed because a step could not be read. Output:\n" + out)
+
+    def test_an_unreadable_step_keeps_the_fail_line_for_a_bare_link_in_ci(self):
+        self.decision("# Record\n\nSee " + URL + ".\n")
+        self.steps_with_a_missing_blob()
+        code, out = self.run_check(ci=True)
+        self.assertTrue(any("docs/decisions/x.md" in line for line in self.flagged(out)),
+                        "the unread step dropped the FAIL line for a bare link in CI. Output:\n" + out)
+        self.assertNotEqual(code, 0, "a bare link passed in CI because a step could not be read. Output:\n" + out)
+
+    def test_a_readable_record_with_its_steps_is_green_in_ci_with_no_unknown(self):
+        # Green control: the same folders with every input read passes in CI and prints no UNKNOWN.
+        self.decision(CLEAN)
+        self.readable_debt_and_steps()
+        code, out = self.run_check(ci=True)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("UNKNOWN", out)
 
 
 if __name__ == "__main__":
