@@ -1627,8 +1627,8 @@ class DoneWithoutCheck(UpkeepFixture):
                          "a source that is not a PR number or a 6-40 character hash with a digit is not accepted")
 
     def test_a_negated_green_on_main_sentence_is_listed_as_not_shown(self):
-        # Miss class: a negator (not, never, no, isn't, yet) in the same sentence, before `green on main` or
-        # `met on main`, says the check is not shown green, even with a source after it.
+        # Miss class: a negator (not, never, no, isn't, yet) in the same clause, before `green on main` or
+        # `met on main`, says the check is not shown green, even with a source after it. A clause breaks at `,` `;` `:`.
         self.commit_steps({
             "bad-control": self.done_step(note="Shipped."),
             "not-met": self.done_step(note="Done check not met on main, see #1312."),
@@ -1636,13 +1636,31 @@ class DoneWithoutCheck(UpkeepFixture):
             "never-met": self.done_step(note="Done check: X. Never met on main: #1312."),
             "no-green": self.done_step(note="Done check: X. No green on main: #1312."),
             "isnt-green": self.done_step(note="Done check: X. Isn't green on main: #1312."),
+            "after-break-not": self.done_step(note="Done check: X, not green on main #6."),
         })
         _, entries = self.listed()
         self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
         self.assertEqual(entries, sorted(["bad-control"] + [sid + self.NOT_SHOWN for sid in
                                                             ("not-met", "not-green-yet", "never-met", "no-green",
-                                                             "isnt-green")]),
+                                                             "isnt-green", "after-break-not")]),
                          "a green-on-main sentence with a negator before the phrase is listed as shown green")
+
+    def test_a_negator_in_an_earlier_clause_does_not_negate_green_on_main(self):
+        # Miss class: a negator counts only in the clause of `green on main` or `met on main`. A clause breaks at
+        # `,` `;` `:` (lint/report_guard.py ANSWERED_CLAUSE_BREAK_RE), so `no`, `never` or `can't` before a break
+        # says nothing about the phrase after it.
+        self.commit_steps({
+            "bad-control": self.done_step(note="Shipped."),
+            "comma-no": self.done_step(note="Done check no longer red, green on main: #1"),
+            "comma-never": self.done_step(note="Done check was never red, met on main #5"),
+            "semicolon-no": self.done_step(note="No failures; Done check green on main: #12"),
+            "semicolon-cant": self.done_step(note="Done check can't fail; green on main #3"),
+            "colon-never": self.done_step(note="Done check never failed: green on main #2"),
+        })
+        _, entries = self.listed()
+        self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
+        self.assertEqual(entries, ["bad-control"],
+                         "a negator in an earlier clause is read as negating green on main")
 
     def test_a_pr_word_or_pull_url_ref_shows_green_on_main(self):
         # The ref forms lint/report_guard.py DONE_REF_RE accepts: `PR <n>` and a /pull/<n> URL.
