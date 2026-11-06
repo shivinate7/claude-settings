@@ -145,6 +145,7 @@ FAMILIES = {
     "page-item-design": "the page writer: a design picture that misses its focus, its state or its height is refused at write, and an allowed publish of the waiting page records the published file",
     "rule9": "rule 9, the agent model floor",
     "role-model": "agent-role-model: a spawn's model against its role's row in the decision table, the missing-model default, and the fail-open read",
+    "reviewer-brief-blind": "a reviewer's brief holds no builder report and no verdict line: the refused reviewer spawns and Workflow calls, the briefs that pass, and the owner override that lifts the refusal",
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
     "rm-var": "every case named rm-var, wherever it sits",
