@@ -4,6 +4,12 @@
   "home": "decision relayed-grant-read-from-page",
   "id": "relayed-grant-allow-entry",
   "kind": "task",
+  "lane": "draft PR #1293 (Relayed Grant entry + 3 pin tests), head 4f23f188; batch runner merges",
+  "lastAnswer": {
+    "at": "2026-11-06T17:04:21Z",
+    "choice": "done",
+    "note": "Done 11:04 CST Nov 6 by a session on your PC, on your grant: draft PR #1293 adds the entry and its three pin tests (red 3 failed on main, green 29). The item closes when #1293 merges."
+  },
   "links": [
     {
       "label": "Edit settings.json on GitHub",
