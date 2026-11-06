@@ -4469,6 +4469,85 @@ test("answered-sink: a sent card last in its tier, with scroll anchoring on: not
   await sinkSendLastInTier(t, { width: 390, anchored: true });
 });
 
+// Scroll anchoring stays on in the cases below: they test what a reader's browser does with the page's own compensation. A card in view
+// is one whose box overlaps the band the owner reads, from the header's bottom edge to the top of the bar.
+const inViewIds = (pre, band) => Object.keys(pre).filter((id) => pre[id].top < band.bottom && pre[id].bottom > band.top);
+const answeredRow = (page) => page.locator('#rail a.ov-head[href="#tier-answered"]').count();
+const SENT_TALL = LONG.repeat(3);
+
+// The first sink Send adds the rail's Answered row, which on a narrow screen sits above the list. The cards in view above the sent card keep
+// their viewport tops, and the open card below takes the sent card's top. A card below that one moves up by the sent card's leaving.
+async function sinkRailRowHolds(t, { width }) {
+  const sent = mk("rail-sent", 4, { context: LONG }), below = mk("rail-below", 5, { context: LONG });
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width, height: 800, scheme: "light", anchored: true, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", 60);
+  const rd = await sendAndRead(page, [sent]);
+  const S = "item-rail-sent", B = "item-rail-below";
+  assert.ok(rd.pre[S].top >= rd.band.top && rd.pre[S].top < rd.band.bottom, `fixture: the sent card is not in view before Send at ${rd.pre[S].top}`);
+  assert.equal(await answeredRow(page), 1, "the Send did not add the Answered row to the rail");
+  const shift = rd.pre[B].top - rd.pre[S].top;
+  for (const [when, post] of reads(rd)) {
+    for (const id of inViewIds(rd.pre, rd.band)) {
+      if (id === S || id === B) continue;
+      const want = rd.pre[id].top < rd.pre[S].top ? rd.pre[id].top : rd.pre[id].top - shift;
+      assert.ok(Math.abs(post[id].top - want) <= 2, `${when}: ${id} moved on screen on Send: ${rd.pre[id].top} to ${post[id].top}`);
+    }
+    assert.ok(Math.abs(post[B].top - rd.pre[S].top) <= 2, `${when}: the open card below did not take the sent card's top ${rd.pre[S].top}: ${post[B].top}`);
+  }
+}
+
+// A card sent with its top above the screen's top edge, at a desktop width. The sent card leaves above the cards in view, so they keep their viewport tops.
+async function sinkSendPartlyAbove(t) {
+  const sent = mk("part-sent", 4, { context: SENT_TALL }), below = mk("part-below", 5, { context: LONG });
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width: 1280, height: 800, scheme: "light", anchored: true, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", -300);
+  const rd = await sendAndRead(page, [sent]);
+  const S = "item-part-sent";
+  assert.ok(rd.pre[S].top < rd.band.top && rd.pre[S].bottom > rd.band.top + 100, `fixture: the sent card is not partly above the screen: top ${rd.pre[S].top}, bottom ${rd.pre[S].bottom}`);
+  for (const [when, post] of reads(rd)) for (const id of inViewIds(rd.pre, rd.band)) {
+    if (id === S) continue;
+    assert.ok(Math.abs(post[id].top - rd.pre[id].top) <= 2, `${when}: ${id} moved on screen on Send: ${rd.pre[id].top} to ${post[id].top}`);
+  }
+}
+
+// Undo of the Send that added the Answered row, on a phone. Once the row is gone, every card in view is back at its pre-Send viewport top.
+async function sinkUndoRailRow(t) {
+  const sent = mk("undo-sent", 4, { context: LONG }), below = mk("undo-below", 5, { context: LONG });
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width: 390, height: 800, scheme: "light", anchored: true, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", 60);
+  const pre = await cardMap(page), band = await bandOf(page);
+  await send(page);
+  await card(page, sent).locator(".receipt").waitFor();
+  await page.locator("#sent .stamp").waitFor();
+  await frameWait(page, 2);
+  assert.equal(await answeredRow(page), 1, "the Send did not add the Answered row to the rail");
+  await page.locator("#undoBtn").click();
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 0);
+  await frameWait(page, 2);
+  assert.equal(await answeredRow(page), 0, "the Answered row stayed on the rail after Undo");
+  const back = await cardMap(page);
+  // The returning card goes back to its own slot, so only the cards it did not pass are checked.
+  const S = "item-undo-sent";
+  for (const id of inViewIds(pre, band)) {
+    if (id === S) continue;
+    assert.ok(Math.abs(back[id].top - pre[id].top) <= 2, `${id} moved on screen on Undo: ${pre[id].top} to ${back[id].top}`);
+  }
+}
+for (const width of [390, 800]) {
+  test(`answered-sink: the first Send that adds the rail's Answered row keeps the cards in view, with scroll anchoring on, at ${width} wide (SENT_MOVE sink)`, async (t) => {
+    await sinkRailRowHolds(t, { width });
+  });
+}
+test("answered-sink: a card sent with its top above the screen keeps the cards in view, with scroll anchoring on, at 1280 wide (SENT_MOVE sink)", async (t) => {
+  await sinkSendPartlyAbove(t);
+});
+test("answered-sink: Undo of the Send that added the Answered row moves no card in view, with scroll anchoring on, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await sinkUndoRailRow(t);
+});
+
 // An answer that arrives without a Send, on a card in view: the card keeps its height while in view, and drops once wholly off the screen.
 async function answerWithoutSend(t, { width, scheme }) {
   const inView = mk("in-view", 4, { context: LONG }), below = mk("below", 5);
