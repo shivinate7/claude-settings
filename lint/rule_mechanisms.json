@@ -119,6 +119,7 @@
         "kind": "guard",
         "ref": "reviewer-brief-blind"
       },
+      "note": "Partly checked: hooks/guard.py refuses a reviewer spawn whose brief holds a report or a verdict line, the fresh-reviewer half. Resuming a dead agent by name, never fresh, is judged only by the rule's words and agents/reviewer.md.",
       "test": "hooks/test_guard.py::reviewer-brief-blind: refused: a reviewer brief that pastes a builder report, Done: and Deviations: lines"
     },
     "parallelism-each-own-checkout": {
