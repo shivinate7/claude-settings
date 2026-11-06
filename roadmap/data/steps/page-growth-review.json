@@ -1,9 +1,9 @@
 {
   "title": "Review how the Cockpit page has grown, and rank improvements",
   "phase": "now",
-  "status": "todo",
+  "status": "done",
   "order": 103.357,
   "why": "The page has grown item by item. The owner wants a look at the whole.",
-  "note": "Owner ask ask-mw5ax2zb2j (12:21 CST).",
-  "updatedAt": "2026-11-06T18:37:00Z"
+  "note": "Nov 6 12:37 CST (coordinator): DONE. Gave 7 ranked steps (page-usage-counters, page-ask-box-one-send, page-status-cut-unread, page-one-receipt, skill-text-once, page-design-prune, page-dup-helpers). The wake thread is covered by #1301, and never folding an owed item went into page-reply-uncollapse. Later owner question (after the counters): (a) one versioned page loader plus per-repo data, in place of a 287 KB copy per repo; (b) split page.html (3,337 lines) into source modules built into one file. Recommended b first.\nOwner ask ask-mw5ax2zb2j (12:21 CST).",
+  "updatedAt": "2026-11-06T18:39:00Z"
 }

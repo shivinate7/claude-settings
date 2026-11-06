@@ -1,0 +1,9 @@
+{
+  "title": "Count what the owner uses on the page, before anything is cut",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.3605,
+  "why": "Owner ask ask-mw5ax2zb2j: improve the page as it grew.",
+  "note": "Coordinator 12:37 CST, from page-growth-review (Sonnet Explore audit): S. Count opens of the Ask box, the Status tab parts and Copy answers, each with a named reader. Steps page-ask-box-one-send and page-status-cut-unread wait on it.",
+  "updatedAt": "2026-11-06T18:39:00Z"
+}
