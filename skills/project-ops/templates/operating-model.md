@@ -115,7 +115,7 @@ parent, or miss a message while busy.
 - A session that waits on CI sets a one-time check-in on each wait, and again after each red job.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.
-  It ends each turn that leaves work in flight with a one-time check-in, so a lost wake costs one gap.
+  A turn that ends waiting on a named event sets one one-time check-in for that event. A check-in's own turn sets none unless a new event arrived.
 - A check-in's message names the home of each list it tracks (a page collection, a roadmap ref, a git
   ref or a GitHub query), never a copy.
 
