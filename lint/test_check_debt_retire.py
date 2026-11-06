@@ -142,14 +142,16 @@ class Closes(Case):
     def test_1_a_deleted_debt_whose_retire_names_a_passing_test_runs_it_and_passes(self):
         self.repo(debts={"d-pass": PASS})
         self.change(rm=["docs/debts/d-pass.md"])
+        found = self.findings()
         self.assertEqual(self.ran(), [("test_pass.py", self.dir)], "the close's Retire check did not run in the head folder")
-        self.assertEqual(pairs(self.findings()), [], "a passing Retire check gave a finding")
+        self.assertEqual(pairs(found), [], "a passing Retire check gave a finding")
 
     def test_2_a_deleted_debt_whose_retire_names_a_failing_test_is_red(self):
         self.repo(debts={"d-fail": FAIL})
         self.change(rm=["docs/debts/d-fail.md"])
+        found = self.findings()
         self.assertEqual(self.ran(), [("test_fail.py", self.dir)], "the failing Retire check did not run in the head folder")
-        self.assertEqual(pairs(self.findings()), [("d-fail", "red")], "a failing Retire check gave no red finding")
+        self.assertEqual(pairs(found), [("d-fail", "red")], "a failing Retire check gave no red finding")
 
     def test_3_a_retire_check_whose_interpreter_is_not_on_path_is_unknown_not_red(self):
         self.repo(debts={"d-mjs": "Delete the old helper. Check: `tests/test_pass.mjs`."})
@@ -173,64 +175,74 @@ class Closes(Case):
     def test_4b_a_retire_naming_a_path_that_is_not_a_test_is_prose(self):
         self.repo(debts={"d-config": "Delete the old helper. Check: `.claude/layout-extras.json`."})
         self.change(rm=["docs/debts/d-config.md"])
+        found = self.findings()
         self.assertEqual(self.ran(), [], "a non-test path ran")
-        self.assertEqual(pairs(self.findings()), [("d-config", "prose")])
+        self.assertEqual(pairs(found), [("d-config", "prose")])
 
     def test_4c_a_retire_naming_a_test_the_pr_deletes_is_prose(self):
         self.repo(debts={"d-gone": PASS})
         self.change(rm=["docs/debts/d-gone.md", "tests/test_pass.py"])
+        found = self.findings()
         self.assertEqual(self.ran(), [], "a test the head no longer tracks ran")
-        self.assertEqual(pairs(self.findings()), [("d-gone", "prose")])
+        self.assertEqual(pairs(found), [("d-gone", "prose")])
 
     def test_4d_a_lone_backtick_in_retire_prose_does_not_swallow_the_real_span(self):
         self.repo(debts={"d-tick": "Mind the lone ` mark. Check: `tests/test_pass.py`."})
         self.change(rm=["docs/debts/d-tick.md"])
+        found = self.findings()
         self.assertEqual(self.ran(), [("test_pass.py", self.dir)], "the real span after a lone backtick did not run")
-        self.assertEqual(pairs(self.findings()), [], "a lone backtick made the Retire read as prose")
+        self.assertEqual(pairs(found), [], "a lone backtick made the Retire read as prose")
 
     def test_5_a_rename_inside_the_debts_folder_runs_nothing(self):
         self.repo(debts={"d-fail": FAIL})
         self.change(mv=[("docs/debts/d-fail.md", "docs/debts/d-fail-renamed.md")])
+        found = self.findings()
         self.assertEqual(self.ran(), [], "a rename inside the folder ran a Retire check")
-        self.assertEqual(pairs(self.findings()), [])
+        self.assertEqual(pairs(found), [])
 
     def test_6_a_rename_out_of_the_debts_folder_runs_the_check(self):
         self.repo(debts={"d-fail": FAIL})
         self.change(mv=[("docs/debts/d-fail.md", "docs/archive/d-fail.md")])
+        found = self.findings()
         self.assertEqual(self.ran(), [("test_fail.py", self.dir)], "a rename out of the folder did not run its Retire check")
-        self.assertEqual(pairs(self.findings()), [("d-fail", "red")])
+        self.assertEqual(pairs(found), [("d-fail", "red")])
 
     def test_6b_a_rename_out_reads_the_retire_text_of_the_base(self):
         self.repo(debts={"d-fail": FAIL})
         self.change(write={"docs/archive/d-fail.md": debt(PASS)}, rm=["docs/debts/d-fail.md"])  # the head rewrites Retire to a passing test
+        found = self.findings()
         self.assertEqual(self.ran(), [("test_fail.py", self.dir)], "the head's Retire text ran, not the base's")
-        self.assertEqual(pairs(self.findings()), [("d-fail", "red")])
+        self.assertEqual(pairs(found), [("d-fail", "red")])
 
     def test_7_two_debts_deleted_in_one_diff_both_run_and_one_red_is_enough(self):
         self.repo(debts={"d-ok": PASS, "d-bad": FAIL})
         self.change(rm=["docs/debts/d-ok.md", "docs/debts/d-bad.md"])
+        found = self.findings()
         self.assertEqual(sorted(self.ran()), [("test_fail.py", self.dir), ("test_pass.py", self.dir)], "not both Retire checks ran")
-        self.assertEqual(pairs(self.findings()), [("d-bad", "red")])
+        self.assertEqual(pairs(found), [("d-bad", "red")])
 
     def test_8a_the_debts_folder_is_the_one_the_layout_names(self):
         self.layout_elsewhere()
         self.repo(debts={"d-fail": FAIL}, folder="records/debts", extras={"kinds": {"debts": {"path": "records/debts"}}, "rolled-out": True})
         self.change(rm=["records/debts/d-fail.md"])
+        found = self.findings()
         self.assertEqual(self.ran(), [("test_fail.py", self.dir)], "a debt in the layout's debts folder did not run its check")
-        self.assertEqual(pairs(self.findings()), [("d-fail", "red")])
+        self.assertEqual(pairs(found), [("d-fail", "red")])
 
     def test_8b_the_default_debts_folder_is_not_read_where_the_layout_moves_it(self):
         self.layout_elsewhere()
         self.repo(debts={"decoy": FAIL}, folder="docs/debts", extras={"kinds": {"debts": {"path": "records/debts"}}, "rolled-out": True})
         self.change(rm=["docs/debts/decoy.md"])
+        found = self.findings()
         self.assertEqual(self.ran(), [], "a file in the default folder ran a check though the layout moves debts")
-        self.assertEqual(pairs(self.findings()), [])
+        self.assertEqual(pairs(found), [])
 
     def test_9_readme_and_notes_are_not_debts(self):
         self.repo()
         self.change(rm=["docs/debts/README.md", "docs/debts/notes.md"])
+        found = self.findings()
         self.assertEqual(self.ran(), [], "deleting README or notes ran a Retire check")
-        self.assertEqual(pairs(self.findings()), [])
+        self.assertEqual(pairs(found), [])
 
     def test_10_the_cli_exits_1_on_a_finding_and_0_otherwise(self):
         self.repo(debts={"d-fail": FAIL})
@@ -246,14 +258,16 @@ class Closes(Case):
     def test_11_a_pr_that_closes_no_debt_has_no_finding_and_runs_nothing(self):
         self.repo(debts={"d-fail": FAIL})
         self.change(write={"tests/test_pass.py": MARKED % 0 + "# touched\n"})
+        found = self.findings()
         self.assertEqual(self.ran(), [], "a PR with no debt change ran a check")
-        self.assertEqual(pairs(self.findings()), [])
+        self.assertEqual(pairs(found), [])
 
     def test_12_a_debt_edited_in_place_is_not_a_close(self):
         self.repo(debts={"d-fail": FAIL})
         self.change(write={"docs/debts/d-fail.md": debt(PASS)})
+        found = self.findings()
         self.assertEqual(self.ran(), [], "an edited debt ran a Retire check")
-        self.assertEqual(pairs(self.findings()), [])
+        self.assertEqual(pairs(found), [])
 
 
 class RetireRun(Case):
@@ -320,6 +334,28 @@ class RetireRun(Case):
         found = self.findings(pr_body="Summary.\n\nretire-run: d-prose -- %s\n" % RUN_URL, run_state=runs)
         self.assertEqual(runs.urls, [RUN_URL], "a lower-case Retire-run key was not read")
         self.assertEqual(pairs(found), [], "a lower-case Retire-run key did not clear the prose debt")
+
+    def test_r8_a_green_cited_run_clears_a_check_the_machine_cannot_run(self):
+        self.repo(debts={"d-mjs": "Delete the old helper. Check: `tests/test_pass.mjs`."})
+        bindir = os.path.join(self.folder, "bin")  # git alone: node is not on this PATH
+        os.makedirs(bindir)
+        os.symlink(shutil.which("git"), os.path.join(bindir, "git"))
+        patch = unittest.mock.patch.dict(os.environ, {"PATH": bindir})
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.change(rm=["docs/debts/d-mjs.md"])
+        runs = Runs(("success", self.head))
+        found = self.findings(pr_body="Retire-run: d-mjs -- %s\n" % RUN_URL, run_state=runs)
+        self.assertEqual(runs.urls, [RUN_URL], "the cited run was not read")
+        self.assertEqual(pairs(found), [], "a green cited run did not clear a check the machine cannot run")
+
+    def test_r9_a_green_cited_run_does_not_clear_a_red_check(self):
+        self.repo(debts={"d-fail": FAIL})
+        self.change(rm=["docs/debts/d-fail.md"])
+        runs = Runs(("success", self.head))
+        found = self.findings(pr_body="Retire-run: d-fail -- %s\n" % RUN_URL, run_state=runs)
+        self.assertEqual(self.ran(), [("test_fail.py", self.dir)], "the red check did not run in the head folder")
+        self.assertEqual(pairs(found), [("d-fail", "red")], "a green cited run cleared a red check")
 
 
 if __name__ == "__main__":
