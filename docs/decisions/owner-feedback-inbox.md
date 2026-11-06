@@ -141,9 +141,12 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   at most one candidate per item. A hit appends ` repeats <ref>` to the item line (one inbox rewrite
   through a temp file) and the block reason names it, or systemMessage does when `stop_hook_active`.
   A line that cannot be found is reported as not marked. The session merges the work or drops the
-  mark. A dropped mark is not judged again. A model error or odd answer marks nothing and adds one
-  systemMessage line. The items count as judged, so there is no retry loop. Cost: a Stop with no new
+  mark. A dropped mark is not judged again. A model error or odd answer gives no verdict. It marks
+  nothing, adds one systemMessage line, and leaves the new items out of `judged`, so the next Stop
+  judges them again (owner ruling, waiting-page item 279, 2026-11-06 12:43 CST, pick b). An exception
+  while marking keeps the items judged. Cost: a Stop with no new
   item or no candidate makes no call. Otherwise it makes one call, one `git grep` and one rev-parse.
+  While the model keeps failing, each Stop makes that call again until one gives a verdict.
   It lists the handoffs folder and reads one sidecar per inbox there. It writes the turn state, and
   on a hit the inbox. Capture adds one small file per session and no process. Risk kind: named
   incident. On 2026-11-01 17:44 CST the owner said "carousel" in a repo whose code said "wheel", and
