@@ -9,10 +9,14 @@ Owner, 2026-11-04 07:56 CST, waiting-page item 168 (what a lane is), pick a: a l
 - **An agent is not a lane.** A solo, one-lane or lane session fans its own work out to agents, each in its own worktree (`parallelism-each-own-checkout`, each agent in its own checkout). That work is part of the session's lane, or of its solo task. An agent ends with the session that started it.
 - **A keep-going follow-up.** A follow-up that `parallelism-keep-going` (keep going) lets a session start with no question is an agent when it is part of the session's own topic. A follow-up on a new topic is a new lane, so it goes to the coordinator. A solo session has no coordinator: it starts the follow-up as an agent and names it under Done.
 - **A session starts another only on the owner's words.** Outside a coordinator, a session calls `start_session` only when the owner's own message, on the current turn, asked for a separate session in words. Then the kind is `user_asked`. It never uses `user_asked` for work the owner did not ask for. The app refuses a start on a turn that another session's message started.
-- **A Mac start, until the probe answers.** On the Mac, one session that starts another has shown the owner a card to press, and the card has dropped the lane's branch (incidents below). Until a probe answers, each Mac lane start is one press, and the lane brief makes the lane set its own branch first thing.
-- **The probe.** A session on the owner's Mac measures two facts on that day's Claude version: whether the card still shows, and whether it still drops the branch. A cloud session cannot see the Mac card. The coordinator starts the probe as a lane of its own, because only the coordinator starts sessions (record `session-tiers`, Who starts which session). Its result rewrites the bullet above.
+- **A Mac start.** The card is the desktop app's own. No setting, allow rule or hook removes it: it showed in Bypass permissions mode, where allow rules have no effect. Probe of 2026-11-06 13:55 CST (owner, waiting-page item 296, Claude 2.1.296 desktop):
+  - Kind `user_asked`, on a turn the owner typed: no card, and the session starts. Two of two starts.
+  - Kind `offer`: a card, and the session does not start until the owner presses. `offer` takes no `source_branch`.
+  - The source branch name is not kept. Each `user_asked` start gets a new worktree branch, such as `claude/nervous-panini-ef0139`. Whether that branch is cut from the source branch is unmeasured: the source branch equalled main.
+  - So each Mac lane start on any other turn is one press, and the lane brief makes the lane set its own branch first thing.
+- **The second probe.** A session on the owner's Mac repeats the `user_asked` start with a source branch one commit ahead of main. It records whether the new worktree branch holds that commit. Its result rewrites the third probe line above.
 
-Why: one name, one meaning. Two meanings of "lane" made the records disagree (debt `page-answer-second-click`, a page answer needs a second approval). In the cloud a coordinator starts lane sessions with no card. The card is the one difference seen so far, and the probe measures it.
+Why: one name, one meaning. Two meanings of "lane" made the records disagree (debt `page-answer-second-click`, a page answer needs a second approval). In the cloud a coordinator starts lane sessions with no card. On the Mac, a start shows no card only on a turn the owner typed.
 
 Incidents:
 
