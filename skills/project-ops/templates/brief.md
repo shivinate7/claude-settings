@@ -28,6 +28,9 @@ For a test or merge change, name claude-settings decisions `test-practices` and 
 
 <The checks that prove the task done, and who reviews the diff.>
 
+Done check: <the one check that proves the ask met>
+The `Done check:` line is required. The guard refuses a brief without it (rule `check-refuter`). The check refuter reads it against the step before the send.
+
 Before it works, the lane re-runs on main the check behind each dated Finding or Checked claim in its
 step note. If a claim no longer holds, it stops and reports.
 Its report gives each re-run as "Checked <Mon D> on main <commit>: <result>", for triage to copy into the note.
