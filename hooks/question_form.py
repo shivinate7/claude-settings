@@ -105,8 +105,9 @@ FORM_REASON = ("A question to the owner states the form, in this order: a line \
 PAGE_FORM_REASON = FORM_REASON + (" On the waiting page the lines go in `context`, and each option has a "
                                   "non-empty `gain` and `lose`. If no stake fits, take your own pick and set "
                                   "stands: true. An open decision with a `pick` also carries `against`, the best "
-                                  "case against the pick: run `python3 skills/waiting-page/refute_item.py "
-                                  "<item.json>` first, then write the item with the `against` it adds.")
+                                  "case against the pick: run refute_item.py from the waiting-page skill "
+                                  "folder on the item's JSON file first, then write the item with the `against` "
+                                  "it adds.")
 CHAT_FORM_REASON = FORM_REASON + (" In the question box the lines go in the question text, and each "
                                   "option's description holds \"Gain: <text>\" and \"Lose: <text>\".")
 STAKE_REASON = ("A decision is the owner's only when he can judge it. Write the Problem line as "
@@ -821,16 +822,15 @@ def task_str_replace_hit(entry) -> str:
 
 
 def decision_form_hit(op: str, data):
-    """(rule, matched) when this write of a waiting-page decision breaks the form. A closed item and a
-    record that is not a decision pass. An update is judged for the fields it carries, and only with kind
-    decision: the guard cannot see the stored kind."""
+    """(rule, matched) when this write of a waiting-page item breaks the form. A closed item passes. The form
+    lines are judged on a decision only; an update is judged for the fields it carries, and only with kind
+    decision, because the guard cannot see the stored kind. The best case against the pick is judged on any
+    kind, since a pick with no kind can still be an open decision."""
     if not isinstance(data, dict) or data.get("status") == "closed":
         return PASS
-    if op == "set":
-        if data.get("kind") not in (None, "decision"):
-            return PASS
-    elif data.get("kind") != "decision":
-        return PASS
+    is_decision = (data.get("kind") in (None, "decision")) if op == "set" else data.get("kind") == "decision"
+    if not is_decision:
+        return _against_hit(data)
     judged_context = op == "set" or "context" in data
     if judged_context:
         hit = _lines_hit(str(data.get("context") or ""), data.get("stands") is True)
@@ -846,11 +846,17 @@ def decision_form_hit(op: str, data):
         miss = departs_hit(str(data.get("context") or ""))
         if miss:
             return DEPARTS_RULE, miss
-    # The best case against the pick comes last, so the older form checks keep their order. A set judges the
-    # item whole; an update judges `against` only when it carries a pick (the stored item is unseen).
+    # The best case against the pick comes last, so the older form checks keep their order.
+    return _against_hit(data)
+
+
+def _against_hit(data):
+    """(rule, matched) when an open write carries a pick and no `against`. An update judges it only when it
+    carries a pick (the stored item is unseen)."""
     pick = data.get("pick")
     if (pick if isinstance(pick, list) else _filled(pick)) and not _filled(data.get("against")):
-        return FORM_RULE, "pick with no against: run refute_item.py on the item, then write it with its against"
+        return FORM_RULE, ("pick with no against: run refute_item.py from the waiting-page skill folder on the "
+                           "item's JSON file, then write the item with its against")
     return PASS
 
 

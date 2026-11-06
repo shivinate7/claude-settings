@@ -190,6 +190,10 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .opt .pick { align-self: end; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
 .opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
 .opt .pickrow { align-self: end; display: flex; flex-direction: column; gap: 8px; }
+/* The case widens one option's pick row, so every pick line on a card with a case starts at the row top, and a pick inside the row keeps the full width. */
+.opts:has(.against) .opt .pick { align-self: start; }
+.opts:has(.against) .opt .pickrow { align-self: start; }
+.opts .opt .pickrow .pick { align-self: stretch; }
 .opt .against { padding: 0 10px; font-size: 14px; color: var(--ink); }
 .opt .against b { display: block; font-size: 12px; font-weight: 600; }
 .opt .nopick { align-self: end; }
