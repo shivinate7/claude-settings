@@ -1,0 +1,10 @@
+{
+  "title": "A merge with conflicts in both test and product files has a role that can land it",
+  "phase": "next",
+  "status": "todo",
+  "order": 20,
+  "owner": "lane (guards)",
+  "why": "Lane doing-needs-live-lane (#1340, F3) merged main and hit conflicts in test and product files. A builder may not commit a merge that touches a test file, and a test-author may not commit product files, so no role could land it; the lane orchestrator committed it itself (head 36c08a00e). Source: coordinator 17:50 CST Nov 6.",
+  "note": "Give mixed-conflict merges a route that keeps red then green, e.g. the test-author commits the test side, then the builder commits the merge.",
+  "updatedAt": "2026-11-06T23:51:00Z"
+}
