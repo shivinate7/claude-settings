@@ -35,6 +35,7 @@ import guard_branch_worktree  # noqa: E402
 LISTS = ("environment", "allow", "soft_deny", "hard_deny")
 ARCHIVE = "Archived Branch Delete:"
 OWNER_PR = "Owner PR Housekeeping:"
+RELAYED = "Relayed Grant:"
 OWNER_MESSAGE = "Owner Session Message:"
 PR_CLOSE = "gh api -X PATCH repos/shivinate7/joyous/pulls/54 -f state=closed"
 SEND_MESSAGE = "mcp__claude-code-remote__send_message"
@@ -128,6 +129,22 @@ class ArchivedBranchDeleteIsAllowed(unittest.TestCase):
     def test_entry_never_covers_an_archive_ref(self):
         entry = allow_entry(ARCHIVE) or ""
         self.assertRegex(entry, r"Never covers[^.]*`archive/`")
+
+
+class RelayedGrantIsAllowed(unittest.TestCase):
+    def test_one_entry_names_the_relayed_grant(self):
+        self.assertIsNotNone(allow_entry(RELAYED),
+                             "need exactly one '%s' entry in autoMode.allow" % RELAYED)
+
+    def test_entry_quotes_the_page_grant_command_and_counted_line(self):
+        entry = allow_entry(RELAYED) or ""
+        self.assertIn("page_grant.py", entry, "entry must quote the page_grant.py command")
+        self.assertIn("`counted item=<id>`", entry, "entry must quote the counted line")
+
+    def test_entry_never_covers_peer_permissions_or_settings(self):
+        sentence = never_covers(allow_entry(RELAYED)) or ""
+        for needle in ("peer session", "permissions", "settings"):
+            self.assertIn(needle, sentence, "Never covers must name %r" % needle)
 
 
 class OwnerPrHousekeepingIsAllowed(unittest.TestCase):
