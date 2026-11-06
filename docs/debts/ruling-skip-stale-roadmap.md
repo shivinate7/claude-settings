@@ -6,4 +6,4 @@
 
 **Decision.** `questions-go-to-owner`, questions go to the owner (its ruling-skip bullet: an item is read from the roadmap branch).
 
-**Retire.** Closed when a case in `lint/test_report_guard_ruling_skip.py` cites an item that a stale local roadmap ref lacks, and passes. The case goes red first. The fix is a fetch, which adds a network read to the Stop run and changes the decision's cost line, or a remedy that names the fetch.
+**Retire.** Closed when a case in `lint/test_report_guard_ruling_skip.py` cites an item that a stale local roadmap ref lacks, and either passes or refuses with a remedy that names the fetch. The case goes red first. A fetch adds a network read to the Stop run and changes the decision's cost line.
