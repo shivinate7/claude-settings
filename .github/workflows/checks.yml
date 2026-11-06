@@ -278,6 +278,9 @@ jobs:
       - name: Stop-hook review-record fixture suite
         run: python3 lint/test_report_guard_review.py
 
+      - name: Stop-hook ruling-skip fixture suite
+        run: python3 lint/test_report_guard_ruling_skip.py
+
       - name: STE auto-fix fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 lint/test_ste_autofix.py
@@ -1149,6 +1152,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_report_guard_remedy.py
 
+      - name: Stop-hook ruling-skip fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_report_guard_ruling_skip.py
+
       - name: Ruling home fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_ruling_home.py
@@ -1869,6 +1876,10 @@ jobs:
       - name: Stop-hook owner-safe reason suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python lint/test_report_guard_remedy.py
+
+      - name: Stop-hook ruling-skip fixture suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python lint/test_report_guard_ruling_skip.py
 
       - name: Ruling home fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
