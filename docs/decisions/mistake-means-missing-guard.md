@@ -9,6 +9,11 @@ Owner, 2026-11-06 11:38 CST: AI sometimes assumes it broke something by accident
 
 Incident, 2026-11-06: the coordinator ran `sed -i '$d'` on its feedback inbox to drop the last item. The command deleted the closing code fence instead. Only the Stop check in `hooks/feedback_guard.py` caught it, one turn later. The same day, the coordinator trusted a stale decision line and called a lane idle while the lane's PR was open.
 
+More incidents, 2026-11-06, from the batch of PR #1034 (a batch of lanes), each with the guard it lacked. Neither guard is built.
+
+- A suggested fix, a `.gitkeep` exclude, was pushed without a run of the repo's own code check, which then refused it. Missing guard: run the repo's own checks on a suggested fix before the push.
+- A lane's new CI job was proven only locally, where its tools resolve. In CI the job could not load a dependency. Missing guard: a new CI job gets one CI run of its own before it joins a batch.
+
 ## The check
 
 `lint/report_guard.py` refuses a report on a landing turn whose Deviations item admits a mistake you made and names no guard for it.
