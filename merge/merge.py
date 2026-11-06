@@ -12,7 +12,9 @@
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V]
                           print the review record for the head SHA that was reviewed. Stops (exit 1) when the PR's live head is another
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
-                          the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA.
+                          the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
+                          unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
+                          PR's issue comments since the PR opened.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
@@ -2818,15 +2820,16 @@ def review_state(rec, head):
         if rec["net"] in ("zero", "positive"):
             return "done", f"round 3 is done, net value {rec['net']}" + note
         return "open", "round 3 is done on a guard or check change, and its net value is owed"
-    passed = top and (fix or all(v == "PASS" for i, _, _, v in rounds if i == top))  # a fix PASS, read here, counts as round `top` passing
+    top_pass = all(v == "PASS" for i, _, _, v in rounds if i == top)
+    passed = top and (fix or top_pass)  # a fix PASS, read here, counts as round `top` passing
+    # the why keeps a failed round in view, so a fix PASS never reads as a passed round
+    lead = f"round {top} is FAIL, and the fix check passed" if fix and not top_pass else f"round {top} passed"
     if passed and not bad:
-        if fix and not all(v == "PASS" for i, _, _, v in rounds if i == top):
-            return "done", f"round {top} is FAIL, and the fix check passed"
-        return "done", f"round {top} passed"
+        return "done", lead
     if rec["kind"] == "delete-only" and rec["guard"] == "no" and top >= 1:  # before the design hold: the first review closes a delete-only change with no guard or check
         return "done", "delete-only change, round 1 is done" + note
     if passed:
-        return "open", f"round {top} passed, but the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}"
+        return "open", f"{lead}, but the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}"
     if rec["kind"] == "delete-only" and top == 1:
         return "open", "round 1 failed on a guard or check change, so rounds 2 and 3 are owed"
     if rec["kind"] == "docs-only" and not rounds:
