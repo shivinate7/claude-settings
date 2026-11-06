@@ -1952,14 +1952,16 @@ class CostTests(unittest.TestCase):
         self.assert_one_claude_and_clean(stub)
 
     def test_a_timeout_starts_one_claude_child_and_leaves_no_temp_folder(self):
-        stub = cost_probe.StubRun(error=subprocess.TimeoutExpired(["claude"], dw.MODEL_TIMEOUT))
+        stub = cost_probe.StubRun(error=subprocess.TimeoutExpired(["claude"], dw.MODEL_TIMEOUT),
+                                  fails=lambda argv: "-p" in argv)
         verdict, error = self.call(stub)
         self.assertIsNone(verdict)
         self.assertTrue(error, "a timeout is an error, not a verdict")
         self.assert_one_claude_and_clean(stub)
 
     def test_a_start_failure_starts_one_claude_attempt_and_leaves_no_temp_folder(self):
-        stub = cost_probe.StubRun(error=FileNotFoundError(2, "No such file or directory", "claude"))
+        stub = cost_probe.StubRun(error=FileNotFoundError(2, "No such file or directory", "claude"),
+                                  fails=lambda argv: "-p" in argv)
         verdict, error = self.call(stub)
         self.assertIsNone(verdict)
         self.assertTrue(error, "a start failure is an error, not a verdict")
