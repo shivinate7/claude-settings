@@ -32,6 +32,7 @@ find_reader looks for mods/ beside that copy, so a copy needs a mods/ folder bes
 """
 import atexit
 import importlib.util
+import inspect
 import json
 import os
 import shutil
@@ -533,8 +534,8 @@ def case_model_row_names_the_call():
     spec = importlib.util.spec_from_file_location("decision_watch", os.path.join(HERE, "decision_watch.py"))
     dw = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dw)
-    with open(os.path.join(HERE, "decision_watch.py"), encoding="utf-8") as f:
-        effort_arg = 'effort="xhigh"):' in f.read()
+    # The signature's default, not its source text: a new keyword after effort moves the closing paren.
+    effort_arg = inspect.signature(dw.invoke_model).parameters["effort"].default == "xhigh"
     if len(rows) == 1:
         cells = [c.strip() for c in rows[0].strip().strip("|").split("|")]
         check("model table: busy row model is the call's model (haiku)",
@@ -627,6 +628,19 @@ def case_deny_ends_with_the_override_line():
     check("a deny for an agent's call names `override 15m`", "override 15m" in reason, detail(r))
 
 
+def case_model_failure_leaves_a_record_for_the_hook_session():
+    """A failed judge call records its failure for the hook's session, in the config dir. The record exists only
+    when the session id reaches invoke_model, so the check reads the config folder, not the argv of a call."""
+    r = run_hook(hook_input(session=SID_A), model_fail=True, reader_mode="idle")
+    check("record: the wording call ran", len(r.wording_calls) == 1, detail(r))
+    found = []
+    for root, _dirs, names in os.walk(os.path.join(r.base, "config")):
+        for name in names:
+            if "stub model failure" in read_text(os.path.join(root, name)):
+                found.append(name)
+    check("record: the failed call left a record for the session", bool(found), detail(r))
+
+
 def case_hook_runs():
     for case in (case_model_row_names_the_call,
                  case_wording_call_carries_its_model_and_no_effort,
@@ -640,6 +654,7 @@ def case_hook_runs():
                  case_advisor_named_receiver_is_a_peer,
                  case_malformed_input_fails_open_with_no_deny,
                  case_model_failures_fail_open_with_no_deny,
+                 case_model_failure_leaves_a_record_for_the_hook_session,
                  case_reader_timeout_allows_with_one_plain_line,
                  case_reader_that_holds_the_pipe_returns_before_the_child_ends):
         try:
