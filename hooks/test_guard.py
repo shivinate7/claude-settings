@@ -12673,6 +12673,43 @@ add("builder-test: a test step's if: changed to another condition is allowed", "
     file_path=WF, old_string=TEST_IF,
     new_string=TEST_IF.replace("runner.os == 'Linux'", "github.event_name == 'push'"), **B)
 
+# A test run keeps its test when its interpreter flag (-u, -X utf8), its ./ path or its shell flag (bash -x)
+# changes, and when its step moves to another job. Removing a test run drops its test, and a flag that
+# hides the test path from the run does not change that.
+R3_UNIT = "      - name: Unit\n        run: python3 tests/test_a.py\n"
+R3_UNIT_U = "      - name: Unit\n        run: python3 -u tests/test_a.py\n"
+R3_JOBS_BEFORE = (
+    "jobs:\n  lint:\n    steps:\n      - name: Lint\n        run: python3 lint/ste_lint.py\n"
+    "  unit:\n    steps:\n      - name: Install\n        run: pip install -r requirements.txt\n"
+    "      - name: Guard tests\n        run: python3 hooks/test_guard.py\n")
+R3_JOBS_AFTER = (
+    "jobs:\n  lint:\n    steps:\n      - name: Lint\n        run: python3 lint/ste_lint.py\n"
+    "      - name: Guard tests\n        run: python3 hooks/test_guard.py\n"
+    "  unit:\n    steps:\n      - name: Install\n        run: pip install -r requirements.txt\n")
+add("builder-test: python3 -u in place of python3 on a test run is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=R3_UNIT, new_string=R3_UNIT_U, **B)
+add("builder-test: python -X utf8 in place of python3 on a test run is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=R3_UNIT,
+    new_string="      - name: Unit\n        run: python -X utf8 tests/test_a.py\n", **B)
+add("builder-test: a ./ path in place of a test path on a test run is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=R3_UNIT,
+    new_string="      - name: Unit\n        run: python3 ./tests/test_a.py\n", **B)
+add("builder-test: bash -x in place of bash on a test run is allowed", "allow", tool="Edit",
+    file_path=WF, old_string="      - name: Unit\n        run: bash tests/run.sh\n",
+    new_string="      - name: Unit\n        run: bash -x tests/run.sh\n", **B)
+add("builder-test: a test step moved to another job is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=R3_JOBS_BEFORE, new_string=R3_JOBS_AFTER, **B)
+add("builder-test: a -u test run deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + R3_UNIT_U, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: an added run of a test path with --deselect is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT,
+    new_string=LINT + "      - name: X\n        run: python3 hooks/x_test.py --deselect a\n",
+    carries=("test-author", "Report"), **B)
+add("test-author: a whole new test step with if: false is refused", "deny", rule=TA, tool="Edit",
+    file_path=WF, old_string=LINT,
+    new_string=LINT + "      - name: Guard tests\n        if: false\n        run: python3 hooks/test_guard.py\n",
+    carries=("builder", "Report"), **A)
+
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with
 # the incident that named each: self-test files (Banchi, 2026-10-02: `*-selftest.*`, `*_selftest.*`,
