@@ -7,11 +7,12 @@ also read [`layout.md`](layout.md).
 
 ## ux-press-moves-nothing
 
-A press, a load or a change of state moves no other content. A row that leaves an open list under
-ux-order-holds-still, and the rows that close its gap, are not a move under this rule (owner,
-2026-11-06 16:47 CST, item 313 a).
-Check: press each control and load each state. Pass when no other element moves or resizes. A
-loading area keeps its loaded size, and a control keeps the box of its widest label or icon.
+A press, a load or a change of state moves no other content. A row may leave an open list under
+ux-order-holds-still. That row, the rows that close its gap, and the rows that make room where it
+lands are not a move under this rule (owner, 2026-11-06 16:47 CST, item 313 a).
+Check: press each control and load each state. Pass when no other element moves or resizes,
+except the rows that ux-order-holds-still lets move. A loading area keeps its loaded size, and a
+control keeps the box of its widest label or icon.
 Source: banchi D118 (a press never moves other content) and D313 (nothing moves unless moved);
 home `SPEC.md` "Look and feel" (owner, 2026-10-11); q_max D-684 (a pick moves nothing beside
 it); ios-adblock `ios/App/AdBlockApp.swift` (the state icon has a fixed frame).
