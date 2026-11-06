@@ -4,11 +4,11 @@
   "home": "q_max .github/workflows/browser.yml; D-542, the browser tier runs on your dispatch",
   "id": "qmax-browser-tier-split",
   "kind": "decision",
-  "lane": "qmax-browser-slow-checks (session_013NEJL3xPq2aimXrBZLnDUP), started by the coordinator 21:37 CST",
+  "lane": "q_max lanes qmax-browser-slow-checks (#1032, session_013NEJL3xPq2aimXrBZLnDUP) and qmax-browser-prod-build (session_013NEJKz1ffTUVVA7P9EQnBt)",
   "lastAnswer": {
-    "at": "2026-11-06T03:32:49Z",
-    "choice": "none",
-    "note": "im convinced the run can't be doing tihngs right if it needs that long. Lane qmax-browser-slow-checks (q_max #1032) found the causes; asked again 23:18 CST Nov 5 for the fix of the two left."
+    "at": "2026-11-06T05:18:48Z",
+    "choice": "a",
+    "note": "Question withdrawn 23:20 CST Nov 5. The coordinator took a itself under your 21:32 ask (find the cause), since it can be undone: lane qmax-browser-prod-build runs the browser checks on a production build. b, the 5 s wait, is dropped as a bandaid. The item closes when both q_max lanes merge."
   },
   "n": 258,
   "options": [
