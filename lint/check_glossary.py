@@ -772,6 +772,8 @@ def main(args):
     for rel, lines in sorted(scope.items()):
         if rel.startswith(SKIP_CODE):
             continue
+        if os.path.isdir(os.path.join(ROOT, *rel.split("/"))):  # a submodule pointer is no file to read
+            continue
         text = read(rel)
         if text is None:
             # A binary file (an image, bytecode) is not text to judge. Any other file that cannot be read is
