@@ -26290,11 +26290,10 @@ lb_add("a lane session's transcript is not opened at a normal reading, and the r
        lb_transcript_read_check(LB_NORMAL, False))
 
 
-# THE SHARED ROWS (decision one-load-definition). Each row of hooks/test_support/load_rows.py is a reading, and its level is
+# THE SHARED ROWS (decision one-load-definition). Each row of hooks/load_rows_test.py is a reading, and its level is
 # written there by hand. The guard refuses a background Agent or Task call and every Workflow at busy or full, and a
 # foreground Agent or Task call at full only. An unread reading counts as normal for the guard.
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_support"))
-import load_rows as test_load_rows  # noqa: E402  the shared readings, in hooks/test_support/
+import load_rows_test as test_load_rows  # noqa: E402  the shared readings, beside this file in hooks/
 
 
 def shared_row_want(level, tool, background):

@@ -82,10 +82,10 @@ stubs=$work/stubs; mkdir -p "$stubs" "$work/home"
 calls=$work/calls; booted_file=$work/booted
 export RUN=$work PATH="$stubs:$PATH"
 # The tool under test runs from a tree of this run: a copy of sim-test and sim-lease, beside a copy of hooks/ whose
-# guard_load.py is the fake (lint/test_support/guard_load_fake.py). The readings a case sets are the ones the lease judges
+# guard_load.py is the fake (lint/guard_load_fake_test.py). The readings a case sets are the ones the lease judges
 # (decision one-load-definition). sim-lease finds hooks/ from its own realpath, so it finds the fake.
 tree=$work/tree; mkdir -p "$tree/bin" "$tree/hooks"
-cp "$root"/hooks/*.py "$tree/hooks/" && cp "$root/lint/test_support/guard_load_fake.py" "$tree/hooks/guard_load.py" || exit 1
+cp "$root"/hooks/*.py "$tree/hooks/" && cp "$root/lint/guard_load_fake_test.py" "$tree/hooks/guard_load.py" || exit 1
 cp "$sim_lease" "$tree/bin/sim-lease" && cp "$script" "$tree/bin/sim-test" || exit 1
 script=$tree/bin/sim-test; sim_lease=$tree/bin/sim-lease
 export FAKE_LOAD_REAL=$root/hooks/guard_load.py FAKE_LOAD_READING=$work/reading FAKE_LOAD_LOG=$work/load_reads
@@ -703,6 +703,7 @@ end_case "52 reuse path: the Duo it reuses gets no sim-boots.jsonl line"
 fresh; ps_stub; devices_json "$DUO1"
 /bin/mkdir -p "$work/nohooks/bin"; cp "$script" "$work/nohooks/bin/sim-test"; cp "$sim_lease" "$work/nohooks/bin/sim-lease"; chmod +x "$work/nohooks/bin/sim-test" "$work/nohooks/bin/sim-lease"
 /bin/mkdir -p "$work/nohooks/hooks"; cp "$root/hooks/_nowindow.py" "$work/nohooks/hooks/"
+cp "$root/lint/guard_load_fake_test.py" "$work/nohooks/hooks/guard_load.py"  # sim-lease imports guard_load too (the fake, as in the tree)
 saved_script=$script; script=$work/nohooks/bin/sim-test
 run PATH="$work/psbin:$PATH"
 script=$saved_script
