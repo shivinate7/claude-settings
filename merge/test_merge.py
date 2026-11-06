@@ -5813,7 +5813,7 @@ class DebtRetire(Env):
     """A PR that closes a debt (deletes the debt file) runs that debt's Retire check on the PR head before preview or confirm
     lets it through. The fixture debt names tests/test_retire_target.py, which exits with the code each case gives it."""
 
-    def pr_on_debt(self, test_exit, closes=True, retire=RETIRE_TEST):
+    def pr_on_debt(self, test_exit, closes=True, retire=RETIRE_TEST, test_text=None):
         """main gains a debt file. feat is cut from that main, adds the pending record and the test, and then either deletes
         the debt (closes) or edits it in place. feat is cut from main after the debt lands, so no main commit is a reversal of it."""
         o = self.other
@@ -5826,7 +5826,7 @@ class DebtRetire(Env):
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: moves on"); sh(o, "git", "push", "-q", "origin", "main")
         sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main")
         put(os.path.join(o, "docs/decisions/second.md"), record("pending", "second"))
-        put(os.path.join(o, "tests/test_retire_target.py"), "import sys\nsys.exit(%d)\n" % test_exit)
+        put(os.path.join(o, "tests/test_retire_target.py"), test_text or "import sys\nsys.exit(%d)\n" % test_exit)
         if closes:
             sh(o, "git", "rm", "-q", "docs/debts/retire-target.md")
         else:
@@ -5882,6 +5882,15 @@ class DebtRetire(Env):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.claims(), 1, out)
         self.assertTrue(getattr(self.host, "merged", False), out)
+
+    def test_confirm_claim_does_not_carry_a_file_the_retire_test_wrote(self):
+        """The Retire test runs in the merge worktree, before the claim's `git add -A`. A file the test leaves there is no part of the claim."""
+        self.pr_on_debt(0, test_text="import sys\nopen('junk-from-test.txt', 'w').write('x')\nsys.exit(0)\n")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.claims(), 1, out)
+        names = sh(self.co, "git", "log", "origin/main", "--format=", "--name-only")  # the claim is a parent of the merge: its files are in the log
+        self.assertNotIn("junk-from-test.txt", names, "the claim commit holds a file the Retire test wrote into the merge folder")
 
 
 class DraftPreview(Env):
