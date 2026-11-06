@@ -4,7 +4,7 @@
   "home": "docs/decisions/session-messages.md",
   "id": "msg-cap-feedback",
   "kind": "decision",
-  "lane": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6) checks the docs, the web and the program for a setting, as with autocompact; relayed 13:12 CST",
+  "lane": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6): the code says no setting; its docs and web sources come next. Closes when the record merges.",
   "lastAnswer": {
     "at": "2026-11-06T19:08:48.782Z",
     "choice": "b",
@@ -31,6 +31,7 @@
   "pick": "a",
   "rank": 4,
   "ref": "step session-messaging-plan; your ask on messaging",
+  "reply": "13:16 CST, from the lane: no, you cannot set this limit. The lane checked the code. The limit of 10 sends is fixed in Claude Code 2.1.319, and no setting, environment variable or flag changes it. The cloud sessions' limit comes from Anthropic's servers, and the public build turns off both local ways to change it. An agent is still checking the online docs and GitHub issues, and I will add its sources here. The answer is in record session-messages (commit dd796e69). Item 153's design that replaces messages between sessions (no 10-send limit, works both ways) is in progress. This item closes when that record merges.",
   "short": "10-message stop: ask Anthropic?",
   "status": "open",
   "title": "The 10-message stop on your Mac is Claude Code's own limit. Ask Anthropic for a setting?",

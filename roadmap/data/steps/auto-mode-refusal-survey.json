@@ -1,9 +1,9 @@
 {
   "title": "Survey every act auto mode refused, beyond the three allow lines",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.3693,
   "why": "The owner asks whether the allow lines cover everything that gets refused.",
-  "note": "Owner on item 278, 12:58 CST Nov 6: \"were these also all that we needed to add permissions for, we haven't found anything else that gets refused atm?\". Routed to the coordinator 13:13 CST: scan the refusal log and bring back recurring acts.",
-  "updatedAt": "2026-11-06T19:13:00Z"
+  "note": "Coordinator 13:16 CST Nov 6, PARTIAL (about 131 of 360 cloud sessions since Nov 2): 9 auto-mode refusals in about 2,623 judged acts; only the lane force-push recurs (4), lease with sha and --force-if-includes included. Once each: remote branch delete by refspec, .claude/CLAUDE.md edit, send_message with batch heads, archive probe push brief, rev-parse beside a refused push. No new allow line proposed. Item 287 asks the owner: finish the scan (a, recommended) or close.\nOwner on item 278, 12:58 CST Nov 6: \"were these also all that we needed to add permissions for, we haven't found anything else that gets refused atm?\". Routed to the coordinator 13:13 CST: scan the refusal log and bring back recurring acts.",
+  "updatedAt": "2026-11-06T19:20:00Z"
 }

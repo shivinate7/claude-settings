@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-06T19:20:00Z",
+  "context": "Goal: know every act cloud auto mode refuses, so the allow lines cover all that recur (your question on item 278).\nProblem (risk): the scan read about 131 of 360 sessions, so an act that recurs only in the unread sessions is still hidden.\nBased on (measured): coordinator scan 13:16 CST: 9 auto-mode refusals in about 2,623 judged acts; only the lane force-push recurs (4 times).\nDeparts from: main \u2014 adds a full count of auto-mode refusals since Nov 2, in step auto-mode-refusal-survey.\nMeanwhile: the lease fix in PR #1316 goes on; it does not wait on this.",
+  "home": "step auto-mode-refusal-survey",
+  "kind": "decision",
+  "n": 287,
+  "options": [
+    {
+      "gain": "The answer to 'is this all?' is complete.",
+      "how": "One more agent run reads the other ~230 sessions and adds any act that recurs to item 278's answer.",
+      "key": "a",
+      "label": "Finish the scan",
+      "lose": "One agent run's cost."
+    },
+    {
+      "gain": "No more cost.",
+      "how": "Step auto-mode-refusal-survey closes on the partial count.",
+      "key": "b",
+      "label": "Close it as is",
+      "lose": "An act that recurs only in the unread sessions stays unknown until it is refused again."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "rank": 4,
+  "ref": "item 278; step auto-mode-refusal-survey",
+  "short": "Finish refusal scan?",
+  "status": "open",
+  "title": "Finish the auto-mode refusal scan of the other ~230 sessions?",
+  "why": "One more agent run turns a partial count into a whole one, and only then is 'nothing else recurs' proven."
+}
