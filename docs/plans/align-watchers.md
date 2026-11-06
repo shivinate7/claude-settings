@@ -112,8 +112,9 @@ Nothing here is deleted before its owner question is ruled. Each delete names it
 
 - **`STOP seen` line in `shadow.log`.** `mods/decision-watch/hooks/register.mjs` line 81 writes it. Line 358
   counts it for `/dw`. It is the only live evidence that the mod fires, and the record says no live read
-  has happened. Not deleted: Q5 names a reader for it.
-- **`janitor-runs.jsonl`.** `janitor/sweep.py` line 2238 writes it. Not deleted: Q5 names a reader for it.
+  has happened. Kept: its reader is `/dw` (line 358).
+- **`janitor-runs.jsonl`.** `janitor/sweep.py` line 2238 writes it. Kept: the sweep preview reads it
+  (`read_last_runs`, PR #1239).
 - **Loose-process tier in the hook run.** The SessionEnd run skips it, because it has no reader there
   (decision `the-janitor-is-one-machine-wide-sweep`).
 - **`lint/md_sweep.py` and `lint/ste_gate.py`.** Both are exit-0 stubs. Each stays until
@@ -127,7 +128,7 @@ Nothing here is deleted before its owner question is ruled. Each delete names it
 2. **Cost tests for the cheap mechanisms.** One shared helper, `hooks/test_support/cost_probe.py`. Size S.
 3. **Stall defects.** Remove the temp files on every exit path. Dedupe the Stop message. Size S. The
    watcher stays until Q1 is ruled.
-4. **Log readers.** Name a reader for each log in its record (Q5). Size S.
+4. **Log readers.** Landed in PR #1239 (Q5). Size S.
 5. **SessionEnd scope.** Landed in PR #1240 (Q4). Size M.
 6. **Decision watch log.** Append-only. Any skip on a quiet turn uses the same protected-path set as
    `--emit-prompt`, so a protected change is still judged. Size M.
@@ -159,14 +160,15 @@ command hooks, each with its cost stated, and the move to a prompt hook is re-ch
 `ci-wait-reads-run-status`.
 
 **Q4. SessionEnd scope and the daily timer. Decided.** The daily timer is a named exception, with its cost
-stated (item 180, pick a). The SessionEnd run: item 250, pick a (owner, 2026-11-04 07:53 CST), with the note
-"daily job needs to have parts enter the session end too many remnant processes linger too long". So more
-of the daily job runs at session end: this repository's orphaned listeners, dead-rooted servers anywhere,
-and the simulator and temp-folder tiers. Landed in PR #1240. Home: decision
+stated (item 180, pick a). The SessionEnd run: item 250, pick a, "One repo at SessionEnd; machine-wide only
+in the daily job" (owner, 2026-11-04 07:53 CST), with the note "daily job needs to have parts enter the
+session end too many remnant processes linger too long". The coordinator's reading of that note (09:47 CST)
+sets the tiers the SessionEnd run keeps. Landed in PR #1240. Home: decision
 `the-janitor-is-one-machine-wide-sweep`.
 
-**Q5. Logs with no reader. Decided:** name a reader for each log (item 249, pick b, owner, 2026-11-04
-07:53 CST). No log is deleted for want of a reader.
+**Q5. Logs with no reader. Decided:** item 249, pick b, "Name a reader for each" (owner, 2026-11-04 07:53
+CST). Each of the four logs gets a named reader in its record: the agent-end payload log,
+`janitor-runs.jsonl`, `launchd-sweep.log` and `launchd-sweep.err.log`. Landed in PR #1239.
 
 **Q6. Load definition. Open:** Cockpit item 304. Options: (a) one shared definition; (b) keep the two
 definitions, and one record that says why. Recommendation: (b). `sim-lease` already states its own
