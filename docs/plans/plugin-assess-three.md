@@ -8,9 +8,9 @@ installed and no setting changed. "Unknown" marks a fact no read confirmed.
 
 | Plugin | Verdict | Gold standard: one home per capability, no load on every task | Gap |
 | --- | --- | --- | --- |
-| iceberg | Skip (lane pick, 2026-11-01) | Prose has one home: `lint/ste_lint.py` and the fresh-prose skill | A second prose rulebook that tells Claude to rewrite every plan and doc |
+| iceberg | Skip (coordinator pick, 2026-11-01, process-only) | Prose has one home: `lint/ste_lint.py` and the fresh-prose skill | A second prose rulebook that tells Claude to rewrite every plan and doc |
 | Ambition Lenses | Trial, owner 2026-11-01 22:43 CST | Working rules have one home: the root `CLAUDE.md` | A second rulebook of about 2,000 words that a SessionStart hook loads into each task |
-| Hypotize | Skip (lane pick, 2026-11-01) | A plugin serves work that this repo's sessions do | Growth-experiment tracking on an outside service. No session here does that work |
+| Hypotize | Skip (coordinator pick, 2026-11-01, process-only) | A plugin serves work that this repo's sessions do | Growth-experiment tracking on an outside service. No session here does that work |
 
 ## Where each plugin was found
 
@@ -128,8 +128,8 @@ for each doc over 500 words.
 
 ### Outcomes compared on real cases
 
-The owner asked (2026-11-01 22:27 CST) which gives the better outcome: our rule and guard, or the
-plugin's prose. These are the cases the evidence holds.
+The owner asked (2026-11-01 22:27 CST, per the lane's handoff): "we need to see which is better,
+we can't just assume I'm right". The cases compare our rule and guard with the plugin's prose. These are the cases the evidence holds.
 
 What the evidence lacks:
 
@@ -211,14 +211,15 @@ experiments is unknown.
 
 ## Ruling
 
-- **Ambition Lenses: trial.** The owner answered on 2026-11-01 at 22:43 CST: run the trial (see
-  Trial). The verdict waits on its result.
-- **iceberg and Hypotize: skip.** No install is the state on `main`. Under that ruling, the lane
-  takes "skip both" as its pick. Adding either one later needs the owner's grant.
+- **Ambition Lenses: trial.** Owner, chat, 2026-11-01 22:43 CST: "b, run the Ambition Lenses A/B
+  trial" (see Trial). This replaces the coordinator's skip-all pick for Ambition Lenses.
+- **iceberg and Hypotize: skip.** This is the coordinator's process-only pick: skip all three, as
+  `main` installs none. The owner's 22:43 answer changed only Ambition Lenses. Source: the
+  roadmap step `plugin-assess-three`, its note.
 
 ## Trial
 
-The owner picked the trial on 2026-11-01 22:44 CST. This section is the design only. No run has
+The owner picked the trial on 2026-11-01 22:43 CST. This section is the design only. No run has
 started. The coordinator starts each run, because a lane does not call `create_session`. A fresh
 Sonnet audit read the first draft for bias and found it tilted toward arm A and toward a null
 result. This design applies its fixes.
