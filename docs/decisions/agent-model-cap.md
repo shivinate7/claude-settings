@@ -68,7 +68,8 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | SendMessage busy judge (`hooks/sendmessage_state.py`, PreToolUse; a model call only when the receiver is busy on the session board) | haiku, through `decision_watch.invoke_model` | xhigh |
 | SendMessage wording judge (the same script, one call on every send, so an override can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
 | plain-diff mod note (`mods/plain-diff/hooks/register.mjs`, `$.model.complete`, one call per file with no note) | haiku, set in the call | none set: the call passes no effort field |
-| decision watch (`hooks/decision_watch.py`, run by SessionStart as `--auth-check`: one probe call only with no token file; cost about $0.02 per probe, 1 cloud sample; the Stop path of this script runs xhigh) | haiku | model default: the probe passes no effort |
+| decision watch session-start probe (`hooks/decision_watch.py`, run by SessionStart as `--auth-check`: one probe call only with no token file; cost about $0.02 per probe, 1 cloud sample) | haiku | model default: the probe passes no effort |
+| decision watch Stop path (the same script, Stop; the catalog lists only its SessionStart registration, so the row above is the one it reads) | haiku, through `decision_watch.invoke_model` | xhigh |
 | decision watch mod (`mods/decision-watch`, the Stop-time judge) | haiku, through `$.model.complete`, the app login; the python path above stays xhigh | session default: the call passes no effort field |
 | every other hook and guard | no model; plain code | n/a |
 

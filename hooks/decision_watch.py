@@ -691,7 +691,7 @@ class ReplyError(ModelError):
 
 
 # What the CLI prints when the login is lost. Matched on the text of a failed start only, never on a reply.
-AUTH_TEXT = re.compile(r"\b401\b|invalid api key|/login|authentication|unauthorized|not logged in|setup-token",
+AUTH_TEXT = re.compile(r"\b401\b|invalid api key|/login|authenticat\w*|unauthorized|not logged in|setup-token",
                        re.IGNORECASE)
 
 
@@ -837,7 +837,7 @@ def auth_check(model_call=invoke_model):
     if token:
         return ""
     _verdict, error = model_call(PROBE_PROMPT, model=MODEL, timeout=PROBE_TIMEOUT, shape=PROBE_SHAPE, effort=None)
-    kind = getattr(error, "kind", "AUTH")  # an error with no kind came from a caller's own call: give the fix
+    kind = getattr(error, "kind", "RUN")  # an error with no kind reads as RUN, as record_model_outcome does
     if error is None or kind == "REPLY":
         return ""
     if kind == "RUN":
