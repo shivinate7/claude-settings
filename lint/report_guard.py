@@ -88,6 +88,15 @@ does not name in its Input Needed section blocks. A built-in tool counts only in
 tool counts by its full name. Each tool the reply names is cleared, on a
 stop_hook_active rewrite too, which never blocks on a refusal (decision refusals-reach-the-owner).
 Cost: one stat per Stop when the session had no refusal.
+
+Route-row flags (hooks/route_match.py holds the rows, the surface and the match): a refused call that a "works" row
+matches gets a `route_flag` in its refusals row (hooks/refusal_note.py), and a successful call of the turn that a
+"refused" row matches gets one here. Each flag rides in the systemMessage of the line this Stop prints and never
+changes its decision. The dedupe file <config dir>/state/route-flags/<session_id>.json holds the keys already
+shown. Cost: one small file per session, written only when a flag shows, read at Stop; its one reader and writer is
+_shown_flags, and a turn with no flag and no successful call reads no rows file. Cleanup: none. Nothing prunes
+state/ per session (janitor/session_end_sweep.py runs the branch and worktree sweep only), and a file holds a few
+short keys, so it stays as the refusals and reply-judge counter files do.
 """
 import json
 import os
@@ -98,7 +107,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
     ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
-    read_transcript, records_after_last_human, send_targets, tool_uses)
+    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
@@ -1218,6 +1227,86 @@ def pending_refusals(hook, text):
         return []
 
 
+def _shown_flags(hook, flags):
+    """The texts of `flags`, (key, text) pairs, that this session's Stop has not shown yet. It records their keys
+    in <config dir>/state/route-flags/<session_id>.json, so each shows once per session. [] when the session has
+    no plain id or the record cannot be written: a flag that cannot be counted would repeat on every Stop."""
+    if not flags:
+        return []
+    try:
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        import shared_names
+        path = shared_names.route_flags_path(hook.get("session_id"))
+        if path is None:
+            return []
+        try:
+            with open(path, encoding="utf-8") as f:
+                seen = json.load(f)
+            seen = [k for k in seen if isinstance(k, str)] if isinstance(seen, list) else []
+        except (OSError, ValueError):
+            seen = []
+        fresh = []
+        for key, text in flags:
+            if key not in seen:
+                seen.append(key)
+                fresh.append(text)
+        if fresh:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(seen, f)
+        return fresh
+    except Exception:
+        return []
+
+
+def refusal_route_flags(hook):
+    """The `route_flag` of each row in the session's refusals file that hooks/refusal_note.py wrote for a refusal a
+    route row contradicts, once each per session. Read before pending_refusals settles the file. This is the
+    named reader of those flags (owner ruling, process-only): it shows them and never refuses on one."""
+    try:
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        import shared_names
+        path = shared_names.refusals_path(hook.get("session_id"))
+        if path is None or not os.path.exists(path):
+            return []
+        flags = []
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    row = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(row, dict) and isinstance(row.get("route_flag"), str) and row["route_flag"]:
+                    flags.append(("refused:" + row["route_flag"], row["route_flag"]))
+        return _shown_flags(hook, flags)
+    except Exception:
+        return []
+
+
+def success_route_flags(hook, after):
+    """One flag per route row that says an act is refused, and that a call of the turn `after` matched and
+    succeeded in (a tool_result without is_error), once per row per session. The match and the surface are
+    hooks/route_match.py. Fails open: [] on any error."""
+    try:
+        failed = {b.get("tool_use_id") for r in after for b in tool_results(r) if b.get("is_error")}
+        answered = {b.get("tool_use_id") for r in after for b in tool_results(r)}
+        calls = [(u.get("name"), u.get("input")) for r in after for u in tool_uses(r)
+                 if u.get("id") in answered and u.get("id") not in failed]
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        if not calls:  # a turn with no successful call reads no rows file
+            return []
+        import route_match
+        flags = []
+        for row in route_match.matching_rows(route_match.load_rows(), "refused", calls):
+            key = "succeeded:%s" % row.get("id")
+            if all(key != k for k, _ in flags):
+                flags.append((key, "route row %s contradicted: it says this call is refused on %s, and it succeeded."
+                              % (row.get("id"), row.get("surface"))))
+        return _shown_flags(hook, flags)
+    except Exception:
+        return []
+
+
 def refusal_reason(tools):
     """The block reason for refused tools the reply has not raised, or ''."""
     if not tools:
@@ -1511,13 +1600,23 @@ def main():
     except Exception:
         pass
 
+    # Route-row flags ride in the systemMessage of whichever line this Stop prints, and never change its decision.
+    # The refusals file is read for them before pending_refusals settles it.
+    route = refusal_route_flags(hook)
+
+    def finish(payload):
+        if route:
+            payload = dict(payload or {})
+            payload["systemMessage"] = " ".join(filter(None, [payload.get("systemMessage"), *route]))
+        if payload:
+            print(json.dumps(payload))
+
     # Every Stop, landed or not, settles the refusals file; the reason joins whichever block follows.
     pending = pending_refusals(hook, last_reply(hook))
     refusal = refusal_reason(pending)
 
     def stop_for_refusal():
-        if refusal:
-            print(json.dumps({"decision": "block", "reason": refusal_reason(pending)}))
+        finish({"decision": "block", "reason": refusal_reason(pending)} if refusal else None)
 
     path = hook.get("transcript_path")
     if not path or not os.path.exists(path):
@@ -1551,6 +1650,7 @@ def main():
     incoming = last_incoming_index(records)
     turn = records if incoming is None else records[incoming + 1:]
     after = [] if last_human_idx is None else records[last_human_idx + 1:]
+    route += success_route_flags(hook, after)
     note = ""
     pick_reason = ""
     try:
@@ -1583,9 +1683,9 @@ def main():
             pick = [r for r in pick if r]
             if pick:
                 reason = " ".join(pick) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if report_shape_ok(text) else "")
-                print(json.dumps({"decision": "block", "reason": reason}))
-            elif note:
-                print(json.dumps({"systemMessage": note}))
+                finish({"decision": "block", "reason": reason})
+            else:
+                finish({"systemMessage": note} if note else None)
         except Exception:
             pass
         return
@@ -1642,9 +1742,9 @@ def main():
         reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok else "")
         if not shape_ok:
             write_marker(hook, last_human_idx)
-        print(json.dumps({"decision": "block", "reason": reason}))
-    elif note:
-        print(json.dumps({"systemMessage": note}))
+        finish({"decision": "block", "reason": reason})
+    else:
+        finish({"systemMessage": note} if note else None)
 
 
 if __name__ == "__main__":
