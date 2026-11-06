@@ -616,6 +616,40 @@ class UpkeepFixture(Fixture):
         """An ISO createdAt `minutes` before the live read, when that read was read_ago minutes before now."""
         return iso_ago(read_ago + minutes)
 
+    def session_in_repo(self, sid, status, *tags):
+        """A sessions row for this fixture repo, carrying the cs-repo tag the script checks."""
+        return session_row(sid, status, self.REPO, *tags)
+
+    def listed_ids(self, entries):
+        return re.findall(r"([^,()\s]+) \(set to ", entries)
+
+    def item(self, n, home="c153", status="closed", lane=None):
+        """One row of the --live file's items list, as the publisher copies it from the waiting page. A lane key
+        appears only when given."""
+        row = {"n": n, "status": status, "home": home}
+        if lane is not None:
+            row["lane"] = lane
+        return row
+
+    def land(self, sid, pr, **fields):
+        """Write the step on the record branch, then land it on main as a merged PR's commit with a Step: trailer.
+        The step is doing unless the case says otherwise."""
+        fields.setdefault("status", "doing")
+        git(self.repo, "checkout", "-q", "roadmap")
+        self.commit_step(sid, **fields)
+        self.on_main()
+        (self.repo / ("landed-%s-%d.txt" % (sid, pr))).write_text("x", encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "landed (#%d)\n\nStep: %s" % (pr, sid))
+
+    def land_all(self, specs, first_pr):
+        """Land each step in specs ({step id: fields}), one PR each from first_pr. Returns {step id: PR number}."""
+        prs = {}
+        for pr, (sid, fields) in enumerate(specs.items(), start=first_pr):
+            self.land(sid, pr, **fields)
+            prs[sid] = pr
+        return prs
+
 
 class StaleInProgress(UpkeepFixture):
     """The upkeep row for each doing or active step with no live lane and no open PR. Its entries read
@@ -623,16 +657,9 @@ class StaleInProgress(UpkeepFixture):
 
     ROW = "in progress with no live lane or open PR"
 
-    def session_in_repo(self, sid, status, *tags):
-        """A sessions row for this fixture repo, carrying the cs-repo tag the script checks."""
-        return session_row(sid, status, self.REPO, *tags)
-
     def stale(self, out):
         """(count, entries) of the stale row. Fails when the output holds no such row."""
         return self.row(out, self.ROW)
-
-    def listed_ids(self, entries):
-        return re.findall(r"([^,()\s]+) \(set to ", entries)
 
     def test_doing_step_with_a_live_session_is_not_listed(self):
         self.commit_step("c1", status="doing")
@@ -832,10 +859,6 @@ class PageRulings(UpkeepFixture):
     ROW = "page rulings not on their step"
     CITE = "Ruling (page item 9): keep"
     UNKNOWN = r"unknown \((?:[^()]|\([^()]*\))*\)"  # one entry, with at most one level of parentheses inside
-
-    def item(self, n, home="c153", status="closed"):
-        """One row of the --live file's items list, as the publisher copies it from the waiting page."""
-        return {"n": n, "status": status, "home": home}
 
     def rulings(self, out):
         return self.row(out, self.ROW)
@@ -1188,25 +1211,6 @@ class FeelRows(UpkeepFixture):
         "text": "simulator",
         "list": ["simulator", "2026-11-01T11:44:00-06:00"],
     }
-
-    def land(self, sid, pr, **fields):
-        """Write the step on the record branch, then land it on main as a merged PR's commit with a Step: trailer.
-        The step is doing unless the case says otherwise."""
-        fields.setdefault("status", "doing")
-        git(self.repo, "checkout", "-q", "roadmap")
-        self.commit_step(sid, **fields)
-        self.on_main()
-        (self.repo / ("landed-%s-%d.txt" % (sid, pr))).write_text("x", encoding="utf-8")
-        git(self.repo, "add", "-A")
-        git(self.repo, "commit", "-q", "-m", "landed (#%d)\n\nStep: %s" % (pr, sid))
-
-    def land_all(self, specs, first_pr):
-        """Land each step in specs ({step id: fields}), one PR each from first_pr. Returns {step id: PR number}."""
-        prs = {}
-        for pr, (sid, fields) in enumerate(specs.items(), start=first_pr):
-            self.land(sid, pr, **fields)
-            prs[sid] = pr
-        return prs
 
     def build_live(self):
         """(page, out) of a build from main, with a live file that lists no sessions."""
