@@ -34,6 +34,8 @@
 //   N12      full size: two records name one .png, and its map line must hold both ids.
 //   N13      mapPaths filters a named .png out: under src/ only, MAP1 passes.                           [green]
 //   N14      mapPaths includes assets/: the named .png needs a map line.
+//   N15      a README.md in decisionsDir is no record: a file only it names needs no map line.
+//   N16      map-show <decision-id> lists a non-code file whose Decisions line carries that id.
 //   DB1      a .svg a debt record names needs a map line: MAP1 fails and names it.
 //   DB2      its map line needs a Debts line with the slug: the failure names the file and the slug.
 //   DB3      control: a map line with `  - Debts: ` naming the slug: no check fails.                     [green]
@@ -247,6 +249,29 @@ test('N14. mapPaths includes assets/: the .png that a record names needs a map l
   assert.deepEqual(JSON.parse(readIn(dir, CONFIG)).mapPaths, ['assets/'], 'scope: mapPaths is assets/');
   const out = run([CHECK], dir).out;
   assert.ok(failed(out, 'MAP1', PNG_PATH), `MAP1 must fail on a .png under mapPaths that D021 names\n${tail(out)}`);
+});
+
+test('N15. a README.md directly in decisionsDir is no record: a file only it names needs no map line, and a file a real record names still does', () => {
+  const dir = scratch();
+  addFile(dir, PNG_PATH, PNG);
+  addFile(dir, DECISION, record('D021 Logo art', [PNG_PATH]));
+  addFile(dir, 'assets/notes-only.png', PNG);
+  addFile(dir, `${RECORDS}/README.md`, record('Readme', ['assets/notes-only.png']));
+  assert.match(readIn(dir, `${RECORDS}/README.md`), /notes-only\.png/, 'scope: the README in the decisions folder names the .png');
+  const out = run([CHECK], dir).out;
+  assert.ok(failed(out, 'MAP1', PNG_PATH), `MAP1 must fail on the .png that the record D021 names\n${tail(out)}`);
+  assert.ok(failLines(out).every((l) => !l.includes('notes-only')), `no check may name the file that only README.md names\n${tail(out)}`);
+});
+
+test('N16. map-show <decision-id> lists a non-code file whose Decisions line carries that id, with its map line', () => {
+  const dir = scratch();
+  addFile(dir, PNG_PATH, PNG);
+  addFile(dir, DECISION, record('D021 Logo art', [PNG_PATH]));
+  addMapLines(dir, [mapLine(PNG_PATH, 'Holds the logo art.'), '  - Decisions: `D021`']);
+  assert.deepEqual(subLineIds(dir, MAP, PNG_PATH, 'Decisions'), ['D021'], 'scope: the map page holds the Decisions line of the .png');
+  const r = run([SHOW, 'D021'], dir);
+  assert.equal(r.status, 0, `map-show D021 must list the .png, which carries D021\n${tail(r.out)}`);
+  assert.ok(r.stdout.includes(`${PNG_PATH} — Holds the logo art.`), `map-show D021 must print the map line of the .png\n${tail(r.out)}`);
 });
 
 // ---- Debt records: a non-code file that a debt record names needs a map line, and the debt's slug on a Debts line.

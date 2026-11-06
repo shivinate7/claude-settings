@@ -329,6 +329,11 @@ test('F2. map-fix --write creates the decisions line right under the map line of
   setDecisions(dir, 'src/retry.ts', null);
   run([MAPFIX, '--write'], dir);
   assert.deepEqual(decisionIds(dir, 'src/retry.ts'), ['D7'], '--write must add a decisions line with D7 right under the map line');
+  // The position, asserted again: the line directly under the map line of src/retry.ts is the decisions line.
+  const lines = read(dir, MAP).split('\n');
+  const at = lines.findIndex((l) => l.startsWith('- `src/retry.ts` '));
+  assert.ok(at >= 0, `scope: the map page holds the map line of src/retry.ts\n${tail(read(dir, MAP))}`);
+  assert.match(lines[at + 1] ?? '', /^ {2}- Decisions: `D7`$/, '--write must put the decisions line directly under the map line of src/retry.ts');
   assert.match(ten(runCheck(dir).out), /^\[PASS\] MAP10$/, 'MAP10 must pass after --write');
 });
 
