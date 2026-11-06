@@ -4421,23 +4421,20 @@ async function sendOverUnderBar(t, { scheme }) {
   for (const [when, post] of reads(rd)) checkRise(rd.pre, post, when, sent, sent, below);
 }
 
-// Under SENT_MOVE "sink" a Send takes the card out of its tier, so the viewport must not jump. The open card below the sent card takes its
-// top, or, when the sent card is last in its tier, nothing above it moves. Both hold with the scroll left where it was.
-// The top of the open list. The rail sits above it on a phone, so a rail row added by a Send moves the list.
-const listTop = (page) => page.evaluate(() => Math.round(document.getElementById("list").getBoundingClientRect().top));
+// Under SENT_MOVE "sink" a Send takes the card out of its tier, so nothing on screen may jump. Positions are viewport tops: the page may
+// scroll to keep its rail growth out of view, so the scroll position is not asserted. A card above the sent card keeps its viewport top,
+// and the open card below takes the sent card's top, or, when the sent card is last in its tier, the cards above it hold still.
 async function sinkSendInView(t, { width }) {
   const sent = mk("sink-sent", 4, { context: LONG }), below = mk("sink-below", 5, { context: LONG });
   const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width, height: 800, scheme: "light", anchored: false, sentMove: "sink" }); if (!page) return;
   await choose(page, sent, "a");
   await settleAt(page, sent, "top", 60);
-  const y0 = await page.evaluate(() => window.scrollY), list0 = await listTop(page);
   const rd = await sendAndRead(page, [sent]);
   const S = "item-sink-sent", B = "item-sink-below";
   assert.ok(rd.pre[S].top >= rd.band.top && rd.pre[S].top < rd.band.bottom, `fixture: the sent card is not in view before Send at ${rd.pre[S].top}`);
-  const y1 = await page.evaluate(() => window.scrollY);
-  assert.ok(Math.abs(y1 - y0) <= 0.5, `the scroll moved on Send: ${y0} to ${y1}`);
-  const list1 = await listTop(page);
-  assert.ok(Math.abs(list1 - list0) <= 0.5, `the open list moved on Send, from ${list0} to ${list1}`);
+  const above = Object.keys(rd.pre).filter((id) => id !== S && rd.pre[id].top < rd.pre[S].top - 1);
+  assert.ok(above.length >= 3, `fixture: ${above.length} cards sit above the sent card`);
+  for (const [when, post] of reads(rd)) for (const id of above) assert.ok(Math.abs(post[id].top - rd.pre[id].top) <= 1, `${when}: ${id} moved on screen on Send: ${rd.pre[id].top} to ${post[id].top}`);
   const took = reads(rd).map(([when, post]) => `${when} ${post[B].top}`).join(", ");
   assert.ok(reads(rd).every(([, post]) => Math.abs(post[B].top - rd.pre[S].top) <= 2), `the open card below did not take the sent card's top ${rd.pre[S].top}: ${took}`);
 }
@@ -4448,22 +4445,19 @@ async function sinkSendLastInTier(t, { width }) {
   await choose(page, sent, "a");
   await settleAt(page, sent, "top", 60);
   assert.equal(await sectionOf(page, sent), "tier-calm", "fixture: the sent card is not in the open tier");
-  const y0 = await page.evaluate(() => window.scrollY);
   const rd = await sendAndRead(page, [sent]);
   const S = "item-sink-last";
   assert.ok(rd.pre[S].top >= rd.band.top && rd.pre[S].top < rd.band.bottom, `fixture: the sent card is not in view before Send at ${rd.pre[S].top}`);
   assert.equal(await sectionOf(page, sent), "tier-answered", `No. ${sent.n} did not move to the Answered section after its Send`);
-  const y1 = await page.evaluate(() => window.scrollY);
-  assert.ok(Math.abs(y1 - y0) <= 0.5, `the scroll moved on Send: ${y0} to ${y1}`);
   const above = Object.keys(rd.pre).filter((id) => id !== S && rd.pre[id].top < rd.pre[S].top - 1);
   assert.ok(above.length >= 3, `fixture: ${above.length} cards sit above the sent card`);
   for (const [when, post] of reads(rd)) for (const id of above) assert.ok(Math.abs(post[id].top - rd.pre[id].top) <= 1, `${when}: ${id} moved on Send: ${rd.pre[id].top} to ${post[id].top}`);
 }
 for (const width of [1280, 390]) {
-  test(`answered-sink: a sent card in view: the open card below takes its top, and the scroll does not move, at ${width} wide (SENT_MOVE sink)`, async (t) => {
+  test(`answered-sink: a sent card in view: the open card below takes its top, and nothing above it moves on screen, at ${width} wide (SENT_MOVE sink)`, async (t) => {
     await sinkSendInView(t, { width });
   });
-  test(`answered-sink: a sent card last in its tier: nothing above it moves, and the scroll does not move, at ${width} wide (SENT_MOVE sink)`, async (t) => {
+  test(`answered-sink: a sent card last in its tier: nothing above it moves on screen, at ${width} wide (SENT_MOVE sink)`, async (t) => {
     await sinkSendLastInTier(t, { width });
   });
 }
