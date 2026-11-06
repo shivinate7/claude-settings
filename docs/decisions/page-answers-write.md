@@ -18,6 +18,8 @@ Owner, 2026-11-06 11:38 CST: a mistake Claude made means that a guard is missing
   - A call that writes `answers` reads the layout and extras file once, as the item rules already do. No process, no file written, no log line.
   - An unreadable layout allows the call and logs one `noted` line under `page-answers-write`.
 - Known limit: a session whose cwd is another repo is not judged. The rule asks the cwd repo's page, so a call from there names a page it does not hold.
+- Known limit: the page match (`lint/layout.py`, `is_waiting_page_url`) compares the url's last path segment. A link in another form, such as a `/code/artifact/<uuid>` link whose id differs from the registered one, is not judged.
+- Known limit: a checkout whose extras file predates the page's registration reads the page as unknown, and the write is allowed.
 - Known limit: a delete of an answer while its item is open with a lane is not judged. The hook sees no live item state. Roadmap step `page-answer-delete-guard` stays open.
 
 Kind: process
