@@ -1,0 +1,9 @@
+{
+  "title": "code-check mjs-imports: cover tsx roots, bare packages and the .ts graph depth",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.3594,
+  "why": "The shared check must cover q_max's harness/load-files.mjs before q_max can delete its copy.",
+  "note": "Coordinator 12:39 CST: extend claude-settings actions/code-check mjs-imports for three gaps: tsx roots, bare packages, and .ts graph depth. The coordinator starts the lane. Step qmax-load-files-dedupe waits on it.",
+  "updatedAt": "2026-11-06T18:40:00Z"
+}

@@ -4,6 +4,6 @@
   "status": "todo",
   "order": 103.3595,
   "why": "The shared loader merged in claude-settings #1135, so q_max's copy is a duplicate (rule building-one-home-per-capability).",
-  "note": "Coordinator 12:37 CST: from lane mjs-load-files, whose ask is now this step. It can be undone, so the coordinator starts the lane.",
-  "updatedAt": "2026-11-06T18:38:00Z"
+  "note": "Nov 6 12:39 CST (coordinator): WAITS on step code-check-mjs-ts-graph. The lane stopped before any delete: the shared mjs-imports check does not yet cover q_max's harness/load-files.mjs, and q_max pins code-check at 17492e5, which has no mjs-imports step. Order (docs/plans/child-guard-promotion.md section 11, row 18): first the claude-settings lane, then q_max moves its pin, then q_max deletes its copy.\nCoordinator 12:37 CST: from lane mjs-load-files, whose ask is now this step. It can be undone, so the coordinator starts the lane.",
+  "updatedAt": "2026-11-06T18:40:00Z"
 }
