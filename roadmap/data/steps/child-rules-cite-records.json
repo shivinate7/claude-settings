@@ -1,9 +1,9 @@
 {
- "title": "A child repo's CLAUDE.md names records, never copies them",
- "phase": "now",
- "status": "doing",
- "order": 484.100001,
- "why": "Owner ruling in chat, Nov 2 10:41 CST (inbox fb-1041-2): a child CLAUDE.md names records and never copies them; rulings on the same question are held 30 minutes, then written in one rewrite (follow now); a lint check enforces it.",
- "note": "Lane child-rules-cite-records (session_013NEJL3FwFMSE67d4pu8Sz4), started 10:43 CST by the coordinator. It sends three hand-off briefs (home, degen, ios-adblock) for the roadmap outbox, for the owner to send. Port: yes, to each child repo.",
- "updatedAt": "2026-11-02T16:46:00Z"
+  "title": "A child repo's CLAUDE.md names records, never copies them",
+  "phase": "now",
+  "status": "done",
+  "order": 484.100001,
+  "why": "Owner ruling in chat, Nov 2 10:41 CST (inbox fb-1041-2): a child CLAUDE.md names records and never copies them; rulings on the same question are held 30 minutes, then written in one rewrite (follow now); a lint check enforces it.",
+  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #1098 on main.\nLane child-rules-cite-records (session_013NEJL3FwFMSE67d4pu8Sz4), started 10:43 CST by the coordinator. It sends three hand-off briefs (home, degen, ios-adblock) for the roadmap outbox, for the owner to send. Port: yes, to each child repo.",
+  "updatedAt": "2026-11-06T17:53:00Z"
 }

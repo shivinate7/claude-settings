@@ -1,9 +1,9 @@
 {
- "title": "Guard other-checkout stops refusing a session's own scratchpad worktree",
- "phase": "now",
- "status": "doing",
- "order": 481,
- "why": "Incidents: the guard refused writes in a session's own scratchpad worktree after a cd, though its record exempts that path: lane cc-update-behavior-diff at 22:00 CST, the coordinator at 23:28 CST (a commit in scratchpad/wt-notes; git -C passed), and triage 5 earlier on Nov 1 (a cd into its roadmap worktree plus a heredoc).",
- "note": "A guard verdict change: red first on the cd-then-commit form in a session's own scratchpad worktree; the reviewer checks no other checkout opens. Lane session_013NEJL2XzN3fofCB4rio3Qo, started Nov 1 23:46 CST. Ready. Port: yes.",
- "updatedAt": "2026-11-02T05:48:00Z"
+  "title": "Guard other-checkout stops refusing a session's own scratchpad worktree",
+  "phase": "now",
+  "status": "done",
+  "order": 481,
+  "why": "Incidents: the guard refused writes in a session's own scratchpad worktree after a cd, though its record exempts that path: lane cc-update-behavior-diff at 22:00 CST, the coordinator at 23:28 CST (a commit in scratchpad/wt-notes; git -C passed), and triage 5 earlier on Nov 1 (a cd into its roadmap worktree plus a heredoc).",
+  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, done check met on main.\nA guard verdict change: red first on the cd-then-commit form in a session's own scratchpad worktree; the reviewer checks no other checkout opens. Lane session_013NEJL2XzN3fofCB4rio3Qo, started Nov 1 23:46 CST. Ready. Port: yes.",
+  "updatedAt": "2026-11-06T17:53:00Z"
 }

@@ -1,9 +1,9 @@
 {
- "title": "Guard builder-test-edit also stops a heredoc write to a test file",
- "phase": "now",
- "status": "doing",
- "order": 482,
- "why": "Incident, Nov 1: lane refusal-cite-reach saw a builder change lint/test_rule_audit.py through a python heredoc before the guard refused its Edit tool call; the builder disclosed and restored it. The guard checks the Edit tool only.",
- "note": "A guard verdict change: red first on a builder's shell write to a test file; the lane's note gives the exact form. Lane session_013NEJL17erdzF8YwUpCNQ6F, started Nov 1 23:46 CST. Ready. Port: yes. Two more forms (lane refusal-cite-reach, 00:15 CST): a python heredoc open(p, w) write, and a git show redirect into a test file.",
- "updatedAt": "2026-11-02T06:17:00Z"
+  "title": "Guard builder-test-edit also stops a heredoc write to a test file",
+  "phase": "now",
+  "status": "done",
+  "order": 482,
+  "why": "Incident, Nov 1: lane refusal-cite-reach saw a builder change lint/test_rule_audit.py through a python heredoc before the guard refused its Edit tool call; the builder disclosed and restored it. The guard checks the Edit tool only.",
+  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #1073 on main.\nA guard verdict change: red first on a builder's shell write to a test file; the lane's note gives the exact form. Lane session_013NEJL17erdzF8YwUpCNQ6F, started Nov 1 23:46 CST. Ready. Port: yes. Two more forms (lane refusal-cite-reach, 00:15 CST): a python heredoc open(p, w) write, and a git show redirect into a test file.",
+  "updatedAt": "2026-11-06T17:53:00Z"
 }

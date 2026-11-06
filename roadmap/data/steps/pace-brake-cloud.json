@@ -1,9 +1,9 @@
 {
- "title": "In a cloud session, the brake pace number reads \"n/a (cloud)\", never 0",
- "phase": "cleanup",
- "status": "doing",
- "order": 103.21037,
- "why": "Owner, Nov 1 21:34 CST: \"why would there be brake refusals when you are running on the cloud? that's specific to local sesions.\" Rule reports-batch-pace-numbers' fourth number reads only the local guard.log, and the load brake applies to local sessions only.",
- "note": "Fix: the pace-number reader prints \"n/a (cloud)\" for the brake number in a cloud session, and the rule text says so. Red first: a cloud fixture reports n/a (cloud), not 0; a local fixture with load-brake lines reports their count. Port: yes, the rule loads everywhere. Ready. Lane session_013NEJL2AGekTknkhALngUue, started Nov 1 21:49 CST. Same PR also rewrites decision session-tiers in place with the owner's Nov 1 21:34 CST roster ruling: batch runner 8 runs every child-repo merge (q_max, banchi, degen, joyous, mailaudit), runner 7 keeps claude-settings, the coordinator no longer merges. Owner's words: \"cant you have batch mergers running these so you stay focused on being coordinator? why are you doing all the merges again\". The merge grant stays in decision standing-merge-grant. Draft PR #1038, head ddfa2471, handed to batch runner 7. Decision session-tiers \"Batch runner\" bullet holds the owner 21:34 CST roster ruling: the coordinator never merges; a batch runner runs every merge.",
- "updatedAt": "2026-11-02T03:56:00Z"
+  "title": "In a cloud session, the brake pace number reads \"n/a (cloud)\", never 0",
+  "phase": "cleanup",
+  "status": "done",
+  "order": 103.21037,
+  "why": "Owner, Nov 1 21:34 CST: \"why would there be brake refusals when you are running on the cloud? that's specific to local sesions.\" Rule reports-batch-pace-numbers' fourth number reads only the local guard.log, and the load brake applies to local sessions only.",
+  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #1038 on main.\nFix: the pace-number reader prints \"n/a (cloud)\" for the brake number in a cloud session, and the rule text says so. Red first: a cloud fixture reports n/a (cloud), not 0; a local fixture with load-brake lines reports their count. Port: yes, the rule loads everywhere. Ready. Lane session_013NEJL2AGekTknkhALngUue, started Nov 1 21:49 CST. Same PR also rewrites decision session-tiers in place with the owner's Nov 1 21:34 CST roster ruling: batch runner 8 runs every child-repo merge (q_max, banchi, degen, joyous, mailaudit), runner 7 keeps claude-settings, the coordinator no longer merges. Owner's words: \"cant you have batch mergers running these so you stay focused on being coordinator? why are you doing all the merges again\". The merge grant stays in decision standing-merge-grant. Draft PR #1038, head ddfa2471, handed to batch runner 7. Decision session-tiers \"Batch runner\" bullet holds the owner 21:34 CST roster ruling: the coordinator never merges; a batch runner runs every merge.",
+  "updatedAt": "2026-11-06T17:53:00Z"
 }

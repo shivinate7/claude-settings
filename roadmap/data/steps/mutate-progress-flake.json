@@ -1,9 +1,9 @@
 {
- "title": "Fix the flaky ProgressTests replay-progress test",
- "phase": "now",
- "status": "doing",
- "order": 103.31,
- "why": "Concurrent progress prints merged two lines into one, so the replay-progress test in ProgressTests failed 4 of 30 runs.",
- "note": "Nov 5 15:15 CST (lane session_013NEJL3hSREz9XFemDGUhzw): draft PR #1277 at head f846efec, handed to batch runner 8. Fix: a lock around the progress call. Measured: 0 of 30 runs failed after.",
- "updatedAt": "2026-11-05T21:15:00Z"
+  "title": "Fix the flaky ProgressTests replay-progress test",
+  "phase": "now",
+  "status": "done",
+  "order": 103.31,
+  "why": "Concurrent progress prints merged two lines into one, so the replay-progress test in ProgressTests failed 4 of 30 runs.",
+  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #1277 on main.\nNov 5 15:15 CST (lane session_013NEJL3hSREz9XFemDGUhzw): draft PR #1277 at head f846efec, handed to batch runner 8. Fix: a lock around the progress call. Measured: 0 of 30 runs failed after.",
+  "updatedAt": "2026-11-06T17:53:00Z"
 }

@@ -1,9 +1,9 @@
 {
- "title": "sim-test boots a Duo and can keep it up for screenshots",
- "phase": "now",
- "status": "doing",
- "order": 103.2104,
- "why": "Commit f6109e51 (plan sim-standard, Nov 3 16:44 CST): no allowed route keeps a Duo booted for manual design shots, and sim-test boots only the iPhone 18 Pro. Owner asked for a lane Nov 4 15:04 CST.",
- "note": "The default device becomes the Duo (owner Nov 2 13:17 and 15:03 CST), by role through sim-lease; the 18 Pro stays an explicit choice. A hold step keeps the Duo up for shots, then shuts it down and releases the lease. The sim_ok fix is out of scope (owner Nov 2 20:39 CST). Builds after #1145, #1178, #1225. Lane session_013NEJL3Rrnu98z6Ck5gcGJQ, started by the coordinator Nov 4 15:06 CST.",
- "updatedAt": "2026-11-04T21:25:00Z"
+  "title": "sim-test boots a Duo and can keep it up for screenshots",
+  "phase": "now",
+  "status": "done",
+  "order": 103.2104,
+  "why": "Commit f6109e51 (plan sim-standard, Nov 3 16:44 CST): no allowed route keeps a Duo booted for manual design shots, and sim-test boots only the iPhone 18 Pro. Owner asked for a lane Nov 4 15:04 CST.",
+  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #1225 on main.\nThe default device becomes the Duo (owner Nov 2 13:17 and 15:03 CST), by role through sim-lease; the 18 Pro stays an explicit choice. A hold step keeps the Duo up for shots, then shuts it down and releases the lease. The sim_ok fix is out of scope (owner Nov 2 20:39 CST). Builds after #1145, #1178, #1225. Lane session_013NEJL3Rrnu98z6Ck5gcGJQ, started by the coordinator Nov 4 15:06 CST.",
+  "updatedAt": "2026-11-06T17:53:00Z"
 }

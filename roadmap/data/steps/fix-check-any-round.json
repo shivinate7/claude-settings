@@ -1,9 +1,9 @@
 {
   "title": "A fix check may follow a FAIL in any review round",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 103.36,
   "why": "Your item 271 b, 21:31 CST Nov 5: a short fix check may follow any round's FAIL, not only round 3. agents/reviewer.md already says so; rule roles-review-cap-three and decision hold-unsafe-after-round-3 say only the last round.",
-  "note": "Nov 5 21:35 CST (coordinator): lane started, session_013NEJL27AsGaCvdLfiN78Tu; hold on round-1 fix-check lanes lifted.\nNov 5 21:33 CST (triage): the lane rewrites rule roles-review-cap-three and decision hold-unsafe-after-round-3 to match agents/reviewer.md's Fix check paragraph, and the coordinator lifts its hold on lanes whose fix check followed a round-1 FAIL. The coordinator starts the lane.",
-  "updatedAt": "2026-11-06T03:37:00Z"
+  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #1289 on main.\nNov 5 21:35 CST (coordinator): lane started, session_013NEJL27AsGaCvdLfiN78Tu; hold on round-1 fix-check lanes lifted.\nNov 5 21:33 CST (triage): the lane rewrites rule roles-review-cap-three and decision hold-unsafe-after-round-3 to match agents/reviewer.md's Fix check paragraph, and the coordinator lifts its hold on lanes whose fix check followed a round-1 FAIL. The coordinator starts the lane.",
+  "updatedAt": "2026-11-06T17:53:00Z"
 }

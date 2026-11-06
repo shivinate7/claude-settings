@@ -1,9 +1,9 @@
 {
- "title": "New feedback is matched against old feedback, and a repeat is flagged",
- "phase": "cleanup",
- "status": "doing",
- "order": 103.337582,
- "why": "Owner, Nov 1 17:44 CST, forwarding a home repo session's finding: the gap is in every repo, not only home.",
- "note": "Shape (owner, Nov 1 17:57 CST: a model's meaning match, not a fixed word list): logging a feedback item has a model compare it by meaning against the repo's old inboxes, roadmap and backlog, so the owner's words match the code's names (carousel matches wheel) with no glossary to keep up; a match is flagged on the item as a repeat. Today nothing is matched. Ready: no open question. Port: yes, every repo. Incident, Nov 1 19:04 CST: a home iOS lane said its gap 6 (no machine-wide simulator lock) was sent on; neither triage nor the coordinator ever received it (coordinator transcript since Oct 31 has no mention). A report said to be sent on had no home. Now filed as sim-machine-lock. Built as PR #999, open at Nov 1 19:32 CST. Incident, Nov 1 20:58 CST: the coordinator asked for a new step (records-rebuild-before-ci) that repeated the owner's Oct 31 ask on step records-page-before-ready; caught four minutes later and retargeted.",
- "updatedAt": "2026-11-02T03:03:00Z"
+  "title": "New feedback is matched against old feedback, and a repeat is flagged",
+  "phase": "cleanup",
+  "status": "done",
+  "order": 103.337582,
+  "why": "Owner, Nov 1 17:44 CST, forwarding a home repo session's finding: the gap is in every repo, not only home.",
+  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #999 on main.\nShape (owner, Nov 1 17:57 CST: a model's meaning match, not a fixed word list): logging a feedback item has a model compare it by meaning against the repo's old inboxes, roadmap and backlog, so the owner's words match the code's names (carousel matches wheel) with no glossary to keep up; a match is flagged on the item as a repeat. Today nothing is matched. Ready: no open question. Port: yes, every repo. Incident, Nov 1 19:04 CST: a home iOS lane said its gap 6 (no machine-wide simulator lock) was sent on; neither triage nor the coordinator ever received it (coordinator transcript since Oct 31 has no mention). A report said to be sent on had no home. Now filed as sim-machine-lock. Built as PR #999, open at Nov 1 19:32 CST. Incident, Nov 1 20:58 CST: the coordinator asked for a new step (records-rebuild-before-ci) that repeated the owner's Oct 31 ask on step records-page-before-ready; caught four minutes later and retargeted.",
+  "updatedAt": "2026-11-06T17:53:00Z"
 }

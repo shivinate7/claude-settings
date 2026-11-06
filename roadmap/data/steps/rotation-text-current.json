@@ -1,9 +1,9 @@
 {
- "title": "Standing sessions run until autocompact, in every template and skill",
- "phase": "now",
- "status": "doing",
- "order": 484.100006,
- "why": "Owner asked at 12:29 CST Nov 2 why standing sessions (triage, batch runners) still wind down and restart. His ruling (page item 109, pick b, Nov 1 17:56 CST, decision session-tiers) says run through autocompact with no rotation limit, but skill project-ops and its operating-model template still say rotate at a limit or a phase change.",
- "note": "Lane rotation-text-current (session_013NEJL29orzrmWAKpvEAjyn), started by the coordinator 12:30 CST: fixes the template text and writes hand-off briefs for child repos (for the roadmap outbox). Related step compaction-carry-watch. Port: yes, every repo using project-ops. Back to todo Nov 2 13:10 CST: its lane wound down at the owner's 12:31 CST instruction; no live lane (roadmap build upkeep). The lane's branch and handoff carry its state. Part of lane rule-text-fixes session_013NEJKyoqmsBXmgtzrZiZgd, started by the coordinator Nov 3 17:26 CST.",
- "updatedAt": "2026-11-03T23:28:00Z"
+  "title": "Standing sessions run until autocompact, in every template and skill",
+  "phase": "now",
+  "status": "done",
+  "order": 484.100006,
+  "why": "Owner asked at 12:29 CST Nov 2 why standing sessions (triage, batch runners) still wind down and restart. His ruling (page item 109, pick b, Nov 1 17:56 CST, decision session-tiers) says run through autocompact with no rotation limit, but skill project-ops and its operating-model template still say rotate at a limit or a phase change.",
+  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, done check met on main.\nLane rotation-text-current (session_013NEJL29orzrmWAKpvEAjyn), started by the coordinator 12:30 CST: fixes the template text and writes hand-off briefs for child repos (for the roadmap outbox). Related step compaction-carry-watch. Port: yes, every repo using project-ops. Back to todo Nov 2 13:10 CST: its lane wound down at the owner's 12:31 CST instruction; no live lane (roadmap build upkeep). The lane's branch and handoff carry its state. Part of lane rule-text-fixes session_013NEJKyoqmsBXmgtzrZiZgd, started by the coordinator Nov 3 17:26 CST.",
+  "updatedAt": "2026-11-06T17:53:00Z"
 }

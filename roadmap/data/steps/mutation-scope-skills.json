@@ -1,9 +1,9 @@
 {
- "title": "The mutation CI report counts product .py files under skills/",
- "phase": "now",
- "status": "doing",
- "order": 103.3,
- "why": "Incident in batch 20 (#1272): skills/waiting-page/stale_pages.py made 0 mutants, because REPLAY_PROFILES[\"claude_settings\"] in hooks/mutate_guard.py left skills/ out of scope.",
- "note": "Nov 5 14:45 CST (lane session_013NEJKyv1qyR4SNXecZrKvg): draft PR #1275 at head e16e655f, reviewed and handed to batch runner 8.",
- "updatedAt": "2026-11-05T20:45:00Z"
+  "title": "The mutation CI report counts product .py files under skills/",
+  "phase": "now",
+  "status": "done",
+  "order": 103.3,
+  "why": "Incident in batch 20 (#1272): skills/waiting-page/stale_pages.py made 0 mutants, because REPLAY_PROFILES[\"claude_settings\"] in hooks/mutate_guard.py left skills/ out of scope.",
+  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #1275 on main.\nNov 5 14:45 CST (lane session_013NEJKyv1qyR4SNXecZrKvg): draft PR #1275 at head e16e655f, reviewed and handed to batch runner 8.",
+  "updatedAt": "2026-11-06T17:53:00Z"
 }

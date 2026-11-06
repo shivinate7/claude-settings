@@ -1,9 +1,9 @@
 {
- "title": "Tools follow the 21:34 roster ruling",
- "phase": "now",
- "status": "doing",
- "order": 471,
- "why": "Owner 21:34 CST: the coordinator never merges; a batch runner runs every merge (decision session-tiers, PR #1038). Owner on the load brake: \"that's specific to local sesions\". The tools still let a coordinator merge, and the brake runs in cloud containers.",
- "note": "(1) Drop coordinator from merge/merge.py MERGE_ROLES, hooks/guard_merge.py ROLE_TIERS, the cloud allow rule `merge --role coordinator`, and the hooks/session_start.sh tier line; fix the session-tiers Tags wording to match the hook. (2) The load brake (hooks/guard.py load_hit) runs only in local sessions; a cloud container is not the owner's machine. After PR #1038 merges, delete the stray origin branch batch-runner-merges. Lane session_013NEJL1FUQHDyz9kqw93qpY, started Nov 1 22:39 CST; it stacks on PR #1038 and joins a batch after #1038. Found by lane pace-brake-cloud. Ready. Port: yes. Also (lane pace-brake-cloud, review round 2): skills/project-ops/templates/operating-model.md lines 12-13 say the load brake decides how many lanes run at once; since PR #1038 that holds on a local session only, so the line says so. Done in PR #1054, head 49994665, with batch runner 7 (Nov 2 00:03 CST).",
- "updatedAt": "2026-11-02T06:08:00Z"
+  "title": "Tools follow the 21:34 roster ruling",
+  "phase": "now",
+  "status": "done",
+  "order": 471,
+  "why": "Owner 21:34 CST: the coordinator never merges; a batch runner runs every merge (decision session-tiers, PR #1038). Owner on the load brake: \"that's specific to local sesions\". The tools still let a coordinator merge, and the brake runs in cloud containers.",
+  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #1054 on main.\n(1) Drop coordinator from merge/merge.py MERGE_ROLES, hooks/guard_merge.py ROLE_TIERS, the cloud allow rule `merge --role coordinator`, and the hooks/session_start.sh tier line; fix the session-tiers Tags wording to match the hook. (2) The load brake (hooks/guard.py load_hit) runs only in local sessions; a cloud container is not the owner's machine. After PR #1038 merges, delete the stray origin branch batch-runner-merges. Lane session_013NEJL1FUQHDyz9kqw93qpY, started Nov 1 22:39 CST; it stacks on PR #1038 and joins a batch after #1038. Found by lane pace-brake-cloud. Ready. Port: yes. Also (lane pace-brake-cloud, review round 2): skills/project-ops/templates/operating-model.md lines 12-13 say the load brake decides how many lanes run at once; since PR #1038 that holds on a local session only, so the line says so. Done in PR #1054, head 49994665, with batch runner 7 (Nov 2 00:03 CST).",
+  "updatedAt": "2026-11-06T17:53:00Z"
 }

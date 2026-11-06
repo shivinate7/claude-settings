@@ -1,9 +1,9 @@
 {
- "title": "`--known-defects` installs and links the profile's packages before it runs a catcher",
- "phase": "now",
- "status": "doing",
- "order": 103.34,
- "why": "The known-defects replay runs each catcher test; without the profile's packages installed and linked, a catcher cannot run.",
- "note": "Nov 5 18:40 CST (lane session_013NEJL4RLpU6hqdC9xaBkzf, at the coordinator's request): draft PR #1284.",
- "updatedAt": "2026-11-06T00:40:00Z"
+  "title": "`--known-defects` installs and links the profile's packages before it runs a catcher",
+  "phase": "now",
+  "status": "done",
+  "order": 103.34,
+  "why": "The known-defects replay runs each catcher test; without the profile's packages installed and linked, a catcher cannot run.",
+  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #1284, landed in batch 26 #1285 on main.\nNov 5 18:40 CST (lane session_013NEJL4RLpU6hqdC9xaBkzf, at the coordinator's request): draft PR #1284.",
+  "updatedAt": "2026-11-06T17:53:00Z"
 }

@@ -1,9 +1,9 @@
 {
- "title": "Rule text fixes: rotation text, retired names, the building-guard gloss, auto-mode text, Sonnet default",
- "phase": "now",
- "status": "doing",
- "order": 520,
- "why": "Batch 2 lane named by the coordinator, Nov 3 17:26 CST.",
- "note": "Lane session_013NEJKyoqmsBXmgtzrZiZgd, started by the coordinator Nov 3 17:26 CST. Takes step rotation-text-current.",
- "updatedAt": "2026-11-03T23:28:00Z"
+  "title": "Rule text fixes: rotation text, retired names, the building-guard gloss, auto-mode text, Sonnet default",
+  "phase": "now",
+  "status": "done",
+  "order": 520,
+  "why": "Batch 2 lane named by the coordinator, Nov 3 17:26 CST.",
+  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #1149 on main.\nLane session_013NEJKyoqmsBXmgtzrZiZgd, started by the coordinator Nov 3 17:26 CST. Takes step rotation-text-current.",
+  "updatedAt": "2026-11-06T17:53:00Z"
 }

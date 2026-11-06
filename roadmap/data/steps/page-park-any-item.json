@@ -1,9 +1,9 @@
 {
- "title": "The owner can park any open question or task on the waiting page",
- "phase": "now",
- "status": "doing",
- "order": 103.2108,
- "why": "Owner ask ask-mw3lh382c9, Nov 5 07:41 CST: \"i should be able to add park to any question\". Today only the writer can park an item, through meta/page.parked; the owner can only unpark or drop a parked line (step page-parked-actions).",
- "note": "Nov 5 09:26 CST (lane): draft PR #1260 (park any item; unpark completes), handed to batch runner 8. Five notes and debt alts-dash-edge-contrast filed in docs/debts. Lane session_013NEJKz8PjcPMADEhbh6uh9, started Nov 5 07:43 CST (coordinator). Fix, one lane, waiting-page only, designer first: each open decision and task card gets a Park press beside None of these. Pressing it and Send saves answers/<id> with act park; the writer moves the item into meta/page.parked (with its ref and the owner's note) and the card leaves the list; Unpark brings it back as today. Reuse the parked-line code (one home). Interim until it lands: the owner writes \"park <n>\" in a note or an ask, and triage parks it by hand. Needs no answer.",
- "updatedAt": "2026-11-05T15:26:00Z"
+  "title": "The owner can park any open question or task on the waiting page",
+  "phase": "now",
+  "status": "done",
+  "order": 103.2108,
+  "why": "Owner ask ask-mw3lh382c9, Nov 5 07:41 CST: \"i should be able to add park to any question\". Today only the writer can park an item, through meta/page.parked; the owner can only unpark or drop a parked line (step page-parked-actions).",
+  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #1260 on main.\nNov 5 09:26 CST (lane): draft PR #1260 (park any item; unpark completes), handed to batch runner 8. Five notes and debt alts-dash-edge-contrast filed in docs/debts. Lane session_013NEJKz8PjcPMADEhbh6uh9, started Nov 5 07:43 CST (coordinator). Fix, one lane, waiting-page only, designer first: each open decision and task card gets a Park press beside None of these. Pressing it and Send saves answers/<id> with act park; the writer moves the item into meta/page.parked (with its ref and the owner's note) and the card leaves the list; Unpark brings it back as today. Reuse the parked-line code (one home). Interim until it lands: the owner writes \"park <n>\" in a note or an ask, and triage parks it by hand. Needs no answer.",
+  "updatedAt": "2026-11-06T17:53:00Z"
 }
