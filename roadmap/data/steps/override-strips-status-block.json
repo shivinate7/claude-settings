@@ -1,10 +1,10 @@
 {
   "title": "A typed override takes even when the app puts a status block before it",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 6,
   "owner": "lane (hooks/override.py)",
   "why": "Owner page note ask-mw5m8up8g8, 17:38 CST Nov 6: 'override 12h' did not take in a local session, because the app put a 'Linked sessions now' status block in front of the words. Owner asked: does this work.",
-  "note": "override.grant checks only the start of the prompt and does not strip machine blocks; the Opus ask path does (BLOCKS in hooks/override.py, line 105). Fix: grant strips the same blocks first, with a red test using a 'Linked sessions now' block, and adds that block to NOTICE_TAGS if missing. Side note from the same paste: feedback_guard prints 'page filing not checked (no waiting copy at origin/roadmap under waiting/items)' when the checkout has never fetched origin/roadmap; `git fetch origin roadmap` there clears it (claude-settings origin/roadmap holds 312 waiting/items files, 17:40 CST).",
-  "updatedAt": "2026-11-06T23:41:00Z"
+  "note": "Doing: lane override-strips-status-block (session_013NEJL34RSeYaFjiSJz4Lk5), started 17:43 CST.\noverride.grant checks only the start of the prompt and does not strip machine blocks; the Opus ask path does (BLOCKS in hooks/override.py, line 105). Fix: grant strips the same blocks first, with a red test using a 'Linked sessions now' block, and adds that block to NOTICE_TAGS if missing. Side note from the same paste: feedback_guard prints 'page filing not checked (no waiting copy at origin/roadmap under waiting/items)' when the checkout has never fetched origin/roadmap; `git fetch origin roadmap` there clears it (claude-settings origin/roadmap holds 312 waiting/items files, 17:40 CST).",
+  "updatedAt": "2026-11-06T23:43:00Z"
 }
