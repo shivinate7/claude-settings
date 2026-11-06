@@ -138,7 +138,8 @@ ARCHIVED_SESSION = "SESSION_STATUS_ARCHIVED"
 # A readAt this far past the build time is clock skew; further than that is a bad stamp.
 FUTURE_MINUTES = 5
 # `ready` reads as todo.
-KNOWN_STATUS = ("todo", "ready", "doing", "active", "done")
+TODO_STATUS = ("todo", "ready")
+KNOWN_STATUS = TODO_STATUS + ("doing", "active", "done")
 TOP = 5
 DATA = "roadmap/data"
 # roadmap.html is left out: this script rewrites it, so a conflict there is resolved by building.
@@ -1014,17 +1015,22 @@ def todo_pairs(steps, work):
     """(id, pull number) for each todo step that an open pull names, or None when the pulls read is unknown."""
     if pair_why(work):
         return None
-    return [(k, p["number"]) for k, d in sorted(steps.items()) if d.get("status") == "todo"
+    return [(k, p["number"]) for k, d in sorted(steps.items()) if d.get("status") in TODO_STATUS
             for p in work["pulls"] if names_step(p, k)]
+
+
+def zoned_time(value):
+    """`value` as an aware datetime, or None when it is not a string or not ISO with a zone. The one home of this parse."""
+    try:
+        at = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return None
+    return at if at.tzinfo else None
 
 
 def created_at(pull):
     """The pull's createdAt as an aware datetime, or None when missing, not a string, or not ISO with a zone."""
-    try:
-        at = datetime.datetime.fromisoformat(pull["createdAt"].replace("Z", "+00:00"))
-    except (KeyError, AttributeError, ValueError):
-        return None
-    return at if at.tzinfo else None
+    return zoned_time(pull.get("createdAt"))
 
 
 def stale_drafts(work):
@@ -1106,11 +1112,7 @@ def pause_why(step):
         return "paused has no why"
     if p.get("decides") not in PAUSE_DECIDES:
         return "paused.decides is not one of %s" % ", ".join(PAUSE_DECIDES)
-    try:
-        at = datetime.datetime.fromisoformat(p["at"].replace("Z", "+00:00"))
-    except (KeyError, AttributeError, ValueError):
-        at = None
-    if at is None or at.tzinfo is None:
+    if zoned_time(p.get("at")) is None:
         return "paused.at is not an ISO time with a zone"
     if p.get("by") != "triage":
         return "paused.by is not triage"
@@ -1168,11 +1170,8 @@ def stalled_lines(block):
 
 def step_age(step, read):
     """Whole hours from the step's updatedAt to `read`, at least 0, or None when updatedAt is missing or not ISO with a zone."""
-    try:
-        at = datetime.datetime.fromisoformat(step["updatedAt"].replace("Z", "+00:00"))
-    except (KeyError, AttributeError, ValueError):
-        return None
-    return max(0, int((read - at).total_seconds() // 3600)) if at.tzinfo else None
+    at = zoned_time(step.get("updatedAt"))
+    return None if at is None else max(0, int((read - at).total_seconds() // 3600))
 
 
 def ready_steps(steps, work):
@@ -1186,7 +1185,7 @@ def ready_steps(steps, work):
     read = datetime.datetime.fromisoformat(work["read"].replace("Z", "+00:00"))
     out = []
     for k, d in open_steps(steps):
-        if (d.get("status") in ("todo", "ready") and d.get("phase") == "now" and not lane_live(work, k)
+        if (d.get("status") in TODO_STATUS and d.get("phase") == "now" and not lane_live(work, k)
                 and pause_why(d) is not None and k not in unanswered):
             out.append({"id": k, "age": step_age(d, read)})
     return {"why": None, "steps": out}
@@ -1278,10 +1277,7 @@ def upkeep(steps, added, marks, strays, work=None):
             continue
         if not note.strip():
             empty.append(k)
-        try:
-            at = datetime.datetime.fromisoformat(d.get("updatedAt", "").replace("Z", "+00:00"))
-        except ValueError:
-            at = None
+        at = zoned_time(d.get("updatedAt"))
         if at is None or (now - at).days >= STALE_DAYS:
             stale.append(k)
     jumped = [k for k, d in open_[:TOP]
@@ -1298,7 +1294,7 @@ def upkeep(steps, added, marks, strays, work=None):
             closing.append("%s (%s; open a try-it item)" % (k, got))
         else:
             waiting.append("%s (%s%s)" % (k, got, "; device trial unreadable" if device_check(d) == "bad" else ""))
-    ready = [k for k, d in open_ if d.get("status") == "todo" and READY_SENTENCE.search(d.get("note") or "")]
+    ready = [k for k, d in open_ if d.get("status") in TODO_STATUS and READY_SENTENCE.search(d.get("note") or "")]
     rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days in a live phase" % STALE_DAYS, stale),
             ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
             ("in progress with no live lane or open PR", unlaned(open_, marks, work)),

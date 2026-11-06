@@ -114,7 +114,8 @@ closes it, from the upkeep list. A trailer that names no step is listed there to
 
 ## The red line
 
-build.py exits 1 when a `todo` step is named by an open pull request. It prints
+build.py exits 1 when a `todo` step is named by an open pull request. A `ready` step reads as `todo`
+here and in the ready todo steps row. It prints
 `todo step with an open PR: <id> (#N)` for each pair, writes the page, then exits 1. A pull names a
 step when its branch is exactly the step id, or its title holds the id as a whole word, in any case. The
 fix is to set the step to `doing`, or to close the pull. With no usable `--live` read of `readAt` and
@@ -143,7 +144,7 @@ passes for zero stalled items.
 build.py also prints `ready not started: <id> (<age>h)` for each step with status `todo` or `ready` and
 phase `now`. The step needs no live lane (the same test as above) and no valid `paused` field. No open
 item homed on it may lack a lane. The age is whole hours from `updatedAt` to the live read, or `(age unknown)` when `updatedAt`
-is missing or has no zone. The page's ready block lists the same steps. With no usable live read, one line
+is missing or has no zone. The same list rides in the build info (`window.ROADMAP_BUILD.ready`). No page draws it yet. With no usable live read, one line
 reads `ready not started: unknown (<why>)`, never zero. These lines never change the exit code.
 
 Triage disposes each stalled step by writing, on the record branch, one of three things. It sets the step
