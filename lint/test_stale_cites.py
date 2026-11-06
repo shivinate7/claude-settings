@@ -1897,6 +1897,22 @@ class RouteClaimTests(StaleCase):
         texts = [text for path, number, text in stale005_hits(out) if path == NOTES and number == flagged[0]]
         self.assertTrue(texts and "cloud-push" in texts[0] and "dead route" in texts[0], out)
 
+    def test_route_claim_with_no_rows_file_at_head_reads_unknown_once_and_names_no_dead_route(self):
+        rows = [
+            ("- The cloud cannot push to main (route cloud-push).", True),
+            ("- The cloud cannot merge to main (route cloud-other).", True),
+        ]
+        rng, flagged = self.route_range(rows)  # no rows file in the fixture
+        tracked = git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split()
+        self.assertNotIn(ROUTE_ROWS, tracked, "scope: the rows file is absent at head")
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+        self.assertFalse([line for line in out.splitlines() if "dead route" in line], out)  # an absent file is not dead
+        named = [line for line in out.splitlines() if ROUTE_ROWS in line]
+        self.assertEqual(len(named), 1, out)  # one report line for the absent file, however many claims cite a route
+        self.assertIn("absent", named[0], out)
+
     def test_route_claim_reads_the_route_rows_at_head_not_at_base(self):
         text, flagged = rows_text([
             ("# Notes", False),
