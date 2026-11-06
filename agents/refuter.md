@@ -33,7 +33,7 @@ Give one verdict:
 - `revise`: a premise fails, or a gap or a simpler route changes the acts. Name each.
 - `refuted`: the plan does not reach the task's outcome.
 
-The orchestrator records your verdict on the plan record.
+The orchestrator records your verdict on the plan record's `Refuter:` line.
 
 You cannot spawn agents. Before the final report, stop every Monitor and background task you started
 with `TaskStop`, and start none after it.
