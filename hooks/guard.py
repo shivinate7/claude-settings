@@ -3780,6 +3780,34 @@ def mockup_home_hit(writes, tool_input, cwd):
     return "design " + cap_safe(slug, 40) + ": " + problem + MOCKUP_HOME_FIX, "item " + cap_safe(str(doc_id or "?"), 40)
 
 
+# Rule `page-answers-write` (decision page-answers-write). An ArtifactData set, update or str_replace of the `answers`
+# collection is denied when its url is this repo's registered waiting page, as one call or as any entry of a batch's
+# writes. ArtifactData writes as the owner, so only this guard tells a session's write from the owner's Send. A delete,
+# a read, another collection and an answers write to another url pass; the last is the rebuild path, which registers the
+# new page only after its batches land. It reads the layout and the extras file the page check already reads, starts no
+# process and writes no file. An unreadable layout allows and logs one `noted` line.
+PAGE_ANSWERS_REASON = ("only the owner's Send writes the waiting page's answers collection, so a session's write there forges "
+                       "the owner's grant. An owner answer given in chat goes to the item's `lastAnswer` and `reply` fields "
+                       "(skill waiting-page, \"Route and close\"). "
+                       "(decision page-answers-write, the owner's grant is written only by the owner)")
+
+
+def page_answers_hit(tool_input, cwd):
+    """(reason, matched) for the first answers write of a call to this repo's waiting page, else None. Fails open
+    on any unread state."""
+    import question_form
+    writes = question_form.answers_writes(tool_input)
+    if not writes:
+        return None
+    try:
+        if not question_form.is_waiting_page(tool_input, cwd):
+            return None
+    except Exception as err:
+        record(DATA_TOOL, "noted", "page-answers-write", "unknown: " + cap_safe(type(err).__name__ + ": " + str(err), 100))
+        return None
+    return PAGE_ANSWERS_REASON, "answers/" + cap_safe(str(writes[0][1].get("doc_id") or "?"), 40)
+
+
 def page_design_hit(writes, tool_input, cwd):
     """(reason, matched) for the first write in `writes` whose picture the page would refuse, else None. A write
     with no picture leaves before the record is read. A set is judged whole. An update is judged only when it
@@ -4876,6 +4904,10 @@ def judge(payload) -> None:
         return
 
     if tool == DATA_TOOL:
+        # Before data_tool_judge, which returns early on a write that holds no item.
+        forged = page_answers_hit(tool_input, cwd)
+        if forged:
+            refuse(tool, "deny", "page-answers-write", forged[0], forged[1])
         (rule, matched), item_writes = data_tool_judge(tool_input, cwd)
         if rule:
             import question_form

@@ -466,8 +466,9 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   overturns that ruling. Take it as step 5 of "Route and close" says. On any other item it is not clear.
 - A decision answer is clear only when `skills/waiting-page/page_grant.py` would print `counted` for it (its docstring holds the rules). A task answer with `done: true` is a done mark: it takes steps 1 and 2, and it is never a grant, so the checker never counts it. The checker never counts `none`, so for `none` the routing session judges the note. A clear direction is a note that names an act a session can take with no further pick from the owner. A note that asks for other choices (cheaper, different, more) is not a direction: that `none` answer takes step 3.
 - Never write `answers/`. Only the owner's Send, Undo or Withdraw changes it. A session that writes it forges the
-  owner's grant. This sentence is the only guard: ArtifactData writes as the owner, so nothing can
-  tell a session's write from the owner's Send.
+  owner's grant. Guard rule `page-answers-write` refuses a session's write of `answers` on the registered page
+  (decision `page-answers-write`): ArtifactData writes as the owner, so only the hook tells a session's write from the owner's Send.
+  The rebuild's batches go to the new page, which is registered after they land.
 - The writer also reads `asks/` at each wake and turn start (`ArtifactData list asks`), and routes each ask as "Route an ask" says.
 
 ## Route and close
