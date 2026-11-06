@@ -23,6 +23,11 @@ Interface the module must match (the builder's contract):
   check line refuses with no model call. Otherwise one refute call per brief: gap and unknown refuse, met allows.
   Any other send_message makes no model call and no import of check_refuter.
 - settings.json: the call_judge row's matcher includes mcp__claude-code-remote__send_message.
+- Fix round 1: refute passes effort=REFUTER_EFFORT (None, the model's default) and its prompt asks for a realistic
+  case. done_check_line accepts the brief template's Done check forms, skips lines inside ``` or ~~~ fences, and reads
+  the line after a `## Done check` heading. A check that is only a <...> placeholder is refused with no model call.
+  An unknown ask names the fetch command for the record branch. REFUTER_TIMEOUT + GIT_TIMEOUT is under the call_judge
+  hook timeout, and the git read is bounded by GIT_TIMEOUT.
 
 The hook cases reuse hooks/test_call_judge.py: its run_hook, its claude stub and its make_repo (the one home of the
 harness and the step fixture). The refute cases replace decision_watch.invoke_model in this process. A missing module
@@ -38,6 +43,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import _nowindow  # noqa: E402  the one home of a no-window git read; one case wraps its run to read the timeout
 import decision_watch  # noqa: E402  the one model caller; a case replaces its invoke_model
 import guard_merge  # noqa: E402  BRIEF_TOOL and LANE_BRIEF_MARKER, the one home of the brief's names
 import test_call_judge as tcj  # noqa: E402  the call_judge harness: run_hook, make_repo, git, check, detail
@@ -144,6 +150,27 @@ def send_input(message, cwd):
 def done_text(got):
     """The Done check text with its bold stars and spaces removed; "" for None."""
     return "" if got is None else str(got).strip().strip("*").strip()
+
+
+def set_record_branch(repo, branch):
+    """Point the repo's record branch at `branch`: the record-branch key of its layout-extras.json."""
+    extras = os.path.join(repo, ".claude", "layout-extras.json")
+    with open(extras, encoding="utf-8") as f:
+        data = json.load(f)
+    data["record-branch"] = branch
+    with open(extras, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+
+def stale_repo():
+    """A repo whose origin roadmap ref exists but holds no step file: the step was never fetched into it."""
+    repo = tcj.make_repo("refuter-stale")
+    tcj.git(repo, "update-ref", "refs/remotes/origin/roadmap", "HEAD")
+    return repo
+
+
+FETCH = "git fetch origin +refs/heads/%s:refs/remotes/origin/%s"  # the fetch command an unknown ask names
+PLACEHOLDER_LINE = "Done check: <the check that proves the ask>"  # the template's unfilled line
 
 
 # ------------------------------------------------------------------ module contract
@@ -302,12 +329,7 @@ def case_ask_for_step_record_branch_key():
         check("ask_for_step: record-branch names the ref read", False, err or "check_refuter defines no ask_for_step()")
         return
     repo = ask_repo("refuter-records")
-    extras = os.path.join(repo, ".claude", "layout-extras.json")
-    with open(extras, encoding="utf-8") as f:
-        data = json.load(f)
-    data["record-branch"] = "records"
-    with open(extras, "w", encoding="utf-8") as f:
-        json.dump(data, f)
+    set_record_branch(repo, "records")
     got, error = read_step(mod, repo)
     check("ask_for_step: with record-branch set to records and no records ref, it is unknown, not the roadmap's step",
           is_unknown(got, error), error or repr(got))
@@ -416,6 +438,166 @@ def case_non_brief_send_is_not_judged():
     check("empty send: no model call and allowed", r.calls == [] and r.deny() is None, detail(r))
 
 
+# ------------------------------------------------------------------ fix round 1: effort, the realistic bar, the forms
+
+def case_refute_passes_the_effort_setting():
+    mod, err = load_refuter()
+    if mod is None or missing(mod, "refute"):
+        check("refute: REFUTER_EFFORT is None, the model's default", False, err or "check_refuter defines no refute()")
+        return
+    got, calls, error = refute_with(mod, ({"verdict": "ALLOW"}, None))
+    kwargs = calls[0][1] if calls else {}
+    effort = getattr(mod, "REFUTER_EFFORT", "ABSENT")
+    check("refute: REFUTER_EFFORT is None, the model's default, as call_judge's judges pass",
+          effort is None, "REFUTER_EFFORT=%r" % (effort,))
+    check("refute: the invoke_model call passes effort=REFUTER_EFFORT",
+          "effort" in kwargs and kwargs["effort"] == effort, error or "call kwargs=%r" % (sorted(kwargs),))
+
+
+def case_refute_prompt_asks_for_a_realistic_case():
+    mod, err = load_refuter()
+    if mod is None or missing(mod, "refute"):
+        check("refute prompt: it asks for a realistic case", False, err or "check_refuter defines no refute()")
+        return
+    got, calls, error = refute_with(mod, ({"verdict": "ALLOW"}, None))
+    prompt = calls[0][0] if calls else ""
+    check("refute prompt: it asks for a realistic case, the bar a worker following the brief could meet",
+          "realistic" in prompt.lower(), error or "no 'realistic' in the prompt")
+
+
+DONE_FORMS = (  # the brief template's forms of the Done check line, each at a line start
+    ("plain", "Done check: " + CHECK),
+    ("lower case", "done check: " + CHECK),
+    ("bold, colon inside", "**Done check:** " + CHECK),
+    ("bold, colon outside", "**Done check**: " + CHECK),
+    ("dash bullet", "- Done check: " + CHECK),
+    ("dash bullet with bold", "- **Done check:** " + CHECK),
+    ("proof label", "Done check (proof): " + CHECK),
+)
+FENCE_EXAMPLE = "Done check: fenced example, not the brief's own check"
+
+
+def case_done_check_line_accepts_every_line_start_form():
+    mod, err = load_refuter()
+    if mod is None or missing(mod, "done_check_line"):
+        check("done_check_line: accepts every line-start form", False, err or "check_refuter defines no done_check_line()")
+        return
+    for label, line in DONE_FORMS:
+        got = mod.done_check_line("Brief.\n" + line + "\n")
+        check("done_check_line: the %s form gives its check" % label, done_text(got) == CHECK, repr(got))
+    heading = mod.done_check_line("Brief.\n## Done check\n\n" + CHECK + "\n")
+    check("done_check_line: a Done check heading gives the next non-blank line", done_text(heading) == CHECK,
+          repr(heading))
+
+
+def case_done_check_line_skips_fenced_lines():
+    mod, err = load_refuter()
+    if mod is None or missing(mod, "done_check_line"):
+        check("done_check_line: a backtick-fenced Done check line does not count", False,
+              err or "check_refuter defines no done_check_line()")
+        return
+    got = mod.done_check_line("```\n" + FENCE_EXAMPLE + "\n```\n" + DONE_LINE + "\n")
+    check("done_check_line: a backtick-fenced Done check line does not count", done_text(got) == CHECK, repr(got))
+    got = mod.done_check_line("~~~\n" + FENCE_EXAMPLE + "\n~~~\n" + DONE_LINE + "\n")
+    check("done_check_line: a tilde-fenced Done check line does not count", done_text(got) == CHECK, repr(got))
+    got = mod.done_check_line("```\n" + DONE_LINE + "\n```\n")
+    check("done_check_line: a brief whose only Done check line is fenced gives None", got is None, repr(got))
+    got = mod.done_check_line(DONE_LINE + "\n```\n" + FENCE_EXAMPLE + "\n```\n")
+    check("done_check_line: the first Done check line outside fences wins", done_text(got) == CHECK, repr(got))
+
+
+def case_placeholder_check_is_refused_with_no_call():
+    repo = ask_repo("refuter-origin")
+    r = tcj.run_hook(send_input(brief_text(done=PLACEHOLDER_LINE), repo), answer=ALLOW_ANSWER)
+    check("placeholder check: refused under check-refuter with no model call",
+          r.deny() is not None and r.reason().startswith("check-refuter") and r.calls == [], detail(r))
+    bullet = brief_text(done="- **Done check:** <the check that proves the ask>")
+    mod, err = load_refuter()
+    read = None if mod is None or missing(mod, "done_check_line") else mod.done_check_line(bullet)
+    check("placeholder bullet: the dash-bullet Done check line is read, so the refusal is for the placeholder",
+          done_text(read) == "<the check that proves the ask>", "read=%r %s" % (read, err))
+    r = tcj.run_hook(send_input(bullet, repo), answer=ALLOW_ANSWER)
+    check("placeholder check in a bullet: refused under check-refuter with no model call",
+          r.deny() is not None and r.reason().startswith("check-refuter") and r.calls == [], detail(r))
+
+
+def case_partly_filled_check_is_judged():
+    repo = ask_repo("refuter-origin")
+    r = tcj.run_hook(send_input(brief_text(done="Done check: <bin/verdict> run, tests and lint green"), repo),
+                     answer=ALLOW_ANSWER)
+    check("partly filled check: exactly one model call, since only a whole placeholder is refused",
+          len(r.calls) == 1, detail(r))
+    check("partly filled check: allowed after that one call", len(r.calls) == 1 and r.deny() is None, detail(r))
+
+
+def case_unknown_ask_reason_names_the_fetch_command():
+    repo = ask_repo("refuter-no-ref", origin=False)
+    r = tcj.run_hook(send_input(brief_text(), repo), answer=ALLOW_ANSWER)
+    check("unknown ask with no ref: the refusal names the fetch command for the record branch",
+          (FETCH % ("roadmap", "roadmap")) in r.reason(), detail(r))
+
+
+def case_stale_ref_is_unknown_and_names_the_fetch_command():
+    r = tcj.run_hook(send_input(brief_text(), stale_repo()), answer=ALLOW_ANSWER)
+    check("stale ref: refused under check-refuter", r.deny() is not None and r.reason().startswith("check-refuter"),
+          detail(r))
+    check("stale ref: the refusal says unknown", "unknown" in r.reason().lower(), detail(r))
+    check("stale ref: the refusal names the fetch command for the record branch",
+          (FETCH % ("roadmap", "roadmap")) in r.reason(), detail(r))
+
+
+def case_ask_for_step_stale_ref_is_unknown():
+    mod, err = load_refuter()
+    if mod is None or missing(mod, "ask_for_step"):
+        check("ask_for_step: a ref with no step file is unknown", False, err or "check_refuter defines no ask_for_step()")
+        return
+    got, error = read_step(mod, stale_repo())
+    check("ask_for_step: a ref with no step file is unknown", is_unknown(got, error), error or repr(got))
+
+
+def case_fetch_command_names_the_record_branch():
+    repo = ask_repo("refuter-records-hook")
+    set_record_branch(repo, "records")
+    r = tcj.run_hook(send_input(brief_text(), repo), answer=ALLOW_ANSWER)
+    check("record branch records with no records ref: the refusal names the fetch command for records",
+          (FETCH % ("records", "records")) in r.reason(), detail(r))
+
+
+def case_refuter_timing_fits_the_hook():
+    mod, err = load_refuter()
+    if mod is None:
+        check("GIT_TIMEOUT is an int number of seconds", False, "hooks/check_refuter.py does not load: " + err)
+        return
+    git_timeout = getattr(mod, "GIT_TIMEOUT", None)
+    check("GIT_TIMEOUT is an int number of seconds",
+          isinstance(git_timeout, int) and not isinstance(git_timeout, bool), repr(git_timeout))
+    refuter_timeout = getattr(mod, "REFUTER_TIMEOUT", None)
+    rows = tcj.call_judge_rows()
+    hook_timeout = rows[0][1].get("timeout") if len(rows) == 1 else None
+    fits = all(isinstance(v, int) for v in (refuter_timeout, git_timeout, hook_timeout)) and \
+        refuter_timeout + git_timeout < hook_timeout
+    check("REFUTER_TIMEOUT + GIT_TIMEOUT is under the call_judge hook timeout in settings.json", fits,
+          "REFUTER_TIMEOUT=%r GIT_TIMEOUT=%r hook timeout=%r" % (refuter_timeout, git_timeout, hook_timeout))
+    if missing(mod, "ask_for_step"):
+        check("ask_for_step's git read is bounded by GIT_TIMEOUT", False, "check_refuter defines no ask_for_step()")
+        return
+    recorded = []
+    real_run = _nowindow.run
+
+    def probe(*args, **kwargs):
+        recorded.append(kwargs.get("timeout"))
+        return real_run(*args, **kwargs)
+
+    _nowindow.run = probe
+    try:
+        read_step(mod, ask_repo("refuter-origin"))
+    finally:
+        _nowindow.run = real_run
+    check("ask_for_step's git read is bounded by GIT_TIMEOUT",
+          isinstance(git_timeout, int) and bool(recorded) and all(t == git_timeout for t in recorded),
+          "git read timeouts=%r, GIT_TIMEOUT=%r" % (recorded, git_timeout))
+
+
 def main():
     for case in (case_refuter_module_defines_the_contract, case_refuter_timeout_is_under_call_judge_timeout,
                  case_settings_matcher_includes_send_message,
@@ -428,7 +610,13 @@ def main():
                  case_brief_gap_is_refused_and_names_the_case, case_brief_matching_check_is_allowed_with_one_call,
                  case_brief_model_error_is_refused_as_unknown, case_brief_without_done_check_is_refused_with_no_call,
                  case_brief_missing_ask_is_refused_as_unknown, case_brief_prompt_is_blind,
-                 case_non_brief_send_is_not_judged):
+                 case_non_brief_send_is_not_judged,
+                 case_refute_passes_the_effort_setting, case_refute_prompt_asks_for_a_realistic_case,
+                 case_done_check_line_accepts_every_line_start_form, case_done_check_line_skips_fenced_lines,
+                 case_placeholder_check_is_refused_with_no_call, case_partly_filled_check_is_judged,
+                 case_unknown_ask_reason_names_the_fetch_command, case_stale_ref_is_unknown_and_names_the_fetch_command,
+                 case_ask_for_step_stale_ref_is_unknown, case_fetch_command_names_the_record_branch,
+                 case_refuter_timing_fits_the_hook):
         try:
             case()
         except Exception as exc:
