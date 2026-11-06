@@ -166,7 +166,7 @@ gh run list --commit <merge-sha> --json name,conclusion
 ```
 
 Same-repo action: `uses: $/path` (GitHub changelog 2026-07-30). This repo's `checks.yml` uses
-`$/actions/<name>`, and zizmor 1.30.1 passes it. zizmor 1.30.0 or later flags each local
+`$/actions/<name>`, and zizmor 1.31.1 passes it. zizmor 1.30.0 or later flags each local
 `uses: ./...` call, an action or a workflow. For a reusable workflow call, the replacement is
 unknown; read zizmor's docs for self-repository.
 
