@@ -3,7 +3,8 @@
 
 Modes:
 - PreToolUse: Before each matched tool call, runs the owner's global rules in a fixed
-  order and refuses or asks on the first match. Bad input allows the call.
+  order and refuses or asks on the first match. Bad input allows the call. A live owner
+  spawn grant makes an Agent or Task call allowed, once every other check has passed.
 - SubagentStop: When a builder, test-author or record-writer stops, judges its whole diff
   against its role, for example a builder that changed a test path. A builder's offence
   is refused at its first stop; any other role's offence is logged for the reviewer.
