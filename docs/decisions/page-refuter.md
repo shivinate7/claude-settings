@@ -10,9 +10,8 @@ word is "refuter".
 - Blind: the refuter sees the item's `context`, its options and the pick keys. It never sees `why`.
 - A failed call writes `against: "unknown (<reason>)"`, never a blank or a pass (decision
   `ci-unknown-is-red`, an unknown read is red in CI).
-- The model is one setting, `REFUTER_MODEL` in `skills/waiting-page/refute_item.py`, now Sonnet. Owner
-  note on item 284: some refuters should run Opus. Lane `debate-model-tiers` (which debaters run Opus)
-  sets it.
+- The model is one setting, `REFUTER_MODEL` in `skills/waiting-page/refute_item.py`: Sonnet. Owner,
+  item 289, 2026-11-06 13:59 CST: "for now let's do sonnet for all".
 
 ## Mechanism
 
