@@ -1,9 +1,9 @@
 {
   "title": "code-check covers .mjs imports",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 510,
   "why": "Child-guard survey verdict: promote. Plan docs/plans/child-guard-promotion.md, section 'Promotion lanes', on branch child-guard-promotion (PR #1119, head ea66d8e), lane 11.",
-  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): lane started now (resume-now, no foundation files).\nPromotion lane 11 of 11 (rank = work order). Child removal: q_max harness/load-files.mjs. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Lane session_013NEJKzdA7BsX3TCijcYQsd, started by the coordinator Nov 3. Lane done Nov 3 18:04 CST: PR #1135, queued for batch 3. Child removal q_max row 18 (harness/load-files.mjs): keep, partly. The shared check does not cover bare packages missing from node_modules, or q_max's .ts CLIs run through tsx; a removal needs q_max's own tsc to cover those first.",
-  "updatedAt": "2026-11-06T18:03:00Z"
+  "note": "Nov 6 12:02 CST (coordinator): DONE: PR #1135, head 29816b9f on main. ff55c444 keeps the q_max half. Removing the child copy waits on the owner's ask.\nNov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): lane started now (resume-now, no foundation files).\nPromotion lane 11 of 11 (rank = work order). Child removal: q_max harness/load-files.mjs. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Lane session_013NEJKzdA7BsX3TCijcYQsd, started by the coordinator Nov 3. Lane done Nov 3 18:04 CST: PR #1135, queued for batch 3. Child removal q_max row 18 (harness/load-files.mjs): keep, partly. The shared check does not cover bare packages missing from node_modules, or q_max's .ts CLIs run through tsx; a removal needs q_max's own tsc to cover those first.",
+  "updatedAt": "2026-11-06T18:04:00Z"
 }
