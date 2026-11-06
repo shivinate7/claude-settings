@@ -4,7 +4,7 @@
   "home": "mailaudit docs/decisions/recent-checks-can-be-undone.md",
   "id": "recent-cell-gate",
   "kind": "decision",
-  "lane": "mailaudit-recent-while-undoable (session_013NEJL41qSWn7KQR5AgaUf9)",
+  "lane": "mailaudit-recent-while-undoable (session_013NEJL41qSWn7KQR5AgaUf9); record PR mailaudit #201 is with batch runner 9",
   "lastAnswer": {
     "at": "2026-11-06T18:36:55.244Z",
     "choice": "c",

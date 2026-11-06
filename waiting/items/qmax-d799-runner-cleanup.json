@@ -33,8 +33,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "coordinator message 2026-11-04 17:05 CST; q_max PR #1029 (head f1706d3b)",
+  "reply": "Closed 12:58 CST: q_max #1035 merged at 12:53 CST (8fe20cc9), with the D-799 rewrite (coordinator 12:55 CST).",
   "short": "q_max: browser clean-up in the runner?",
-  "status": "open",
+  "status": "closed",
   "title": "q_max: should the shared browser runner clean up each check's jobs, instead of each check?",
   "why": "Recommended: a. One home for clean-up, so the next new check cannot leak."
 }

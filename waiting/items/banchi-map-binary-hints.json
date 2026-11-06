@@ -4,7 +4,7 @@
   "home": "banchi docs/debts notes; claude-settings skill plain-english-map",
   "id": "banchi-map-binary-hints",
   "kind": "decision",
-  "lastAnswer": "none (11:22 CST Nov 6), note: fix the shared map so it shows files under a decision or debt. Re-asked 11:30 CST to settle the scope.",
+  "lastAnswer": "none (12:52 CST Nov 6): \"'icon, a model, a licence or a config file' why is it specifically only these items?\". Answered 13:00 CST in the reply; asked again.",
   "n": 268,
   "options": [
     {
@@ -31,6 +31,7 @@
   "pick": "a",
   "rank": 3,
   "ref": "item 209 a; banchi #1063, #1064",
+  "reply": "It isn't limited to those. They were only examples: they're the kinds of file banchi's 8 lost hints point at (icons, the web manifest, an onnx model, the STE licence). Option a covers every file a decision or debt names, whatever its type: images, data, models, licences, config, anything. b would fix only banchi's 8. c leaves the gap.",
   "short": "map: files a record names",
   "status": "open",
   "title": "Should the shared map list every file a decision or debt names, not only code files?",

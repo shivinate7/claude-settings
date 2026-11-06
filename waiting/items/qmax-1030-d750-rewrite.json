@@ -36,8 +36,9 @@
   "owner": "batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
   "rank": 2,
   "ref": "q_max #1030; q_max #1029 batch",
+  "reply": "Closed 12:58 CST: q_max #1035 merged at 12:53 CST (8fe20cc9) and carried #1030 (coordinator 12:55 CST).",
   "short": "q_max: merge D-750 rewrite",
-  "status": "open",
+  "status": "closed",
   "title": "Merge q_max #1030, which rewrites D-750 (the map skill entry)?",
   "why": "Recommended: a. It applies your ruling that the map skill lives in one place."
 }
