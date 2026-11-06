@@ -103,8 +103,8 @@ small, M medium, L large).
   decides where the scan runs.
 - **Agent-end reap.** One record for the reap and its payload log. The process tiers keep their own record,
   `unattended-sweep-stops-proven-orphans`.
-- **Load definitions.** The guard reads memory and disk. `sim-lease` reads `vm.loadavg`. Q6: both read load from
-  one shared place.
+- **Load definitions.** The guard and `sim-lease` read memory and disk from one shared place (Q6, items
+  304 a and 309 a).
 
 ## 4. Deletes
 
@@ -171,9 +171,9 @@ CST). Each of the four logs gets a named reader in its record: the agent-end pay
 `janitor-runs.jsonl`, `launchd-sweep.log` and `launchd-sweep.err.log`. Landed in PR #1239.
 
 **Q6. Load definition. Decided:** item 304, pick a, "One shared definition": "The guard and sim-lease read
-load from one shared place" (owner, 2026-11-06 15:24 CST). Lane `one-load-definition` builds it. The ruling
-names one place, not one measure. The older measures stand until that lane says otherwise: decision
-`sim-lease-tool` rule 3 (`vm.loadavg` only) and decision `machine-load-brake` (memory and disk).
+load from one shared place" (owner, 2026-11-06 15:24 CST). Item 309, pick a, "Memory and disk only": the
+shared definition reads memory and disk, and the sim gatekeeper drops its load-average bars (owner,
+2026-11-06 15:45 CST). Built in lane `one-load-definition`, PR #1369.
 
 **Q7. Repo reaper. Decided and done.** The rule says the sweep never runs code a repository supplies.
 Decision uniform-over-variants (a shared tool never grows a per-repo exception; owner, 2026-10-27 12:51
