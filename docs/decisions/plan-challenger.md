@@ -41,9 +41,9 @@ the agent that argues back). The pick is a rename of each site this record names
   record. The rule line covers those, by instruction only.
 - Blindness is by instruction only: the agent file and the rule line. No hook reads the challenger's
   brief. Unmeasured.
-- The `Critic:` line accepts any role today, so an orchestrator's own read passes the check. Lane
-  step-done-needs-check owns that check. The coordinator decides whether the line must name the
-  challenger.
+- The `Critic:` line accepts any role today, so an orchestrator's own read passes the check.
+  Coordinator, 2026-11-06 12:56 CST, pick a: lane step-done-needs-check lands after this one and makes
+  the check require the role in `CHALLENGER_ROLE`.
 
 ## Why
 
