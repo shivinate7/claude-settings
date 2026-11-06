@@ -35,6 +35,7 @@ URL = "https://claude.ai/artifact/" + REGISTERED
 CODE_URL = "https://claude.ai/code/artifact/" + REGISTERED
 REGISTRY = {"kinds": {}, "rolled-out": True,
             "artifacts": [{"id": REGISTERED, "url": URL, "role": "waiting-page", "account": "work"}]}
+CLEAN = "# Record\n\nNo link here.\n"
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
 
@@ -94,8 +95,13 @@ class CiteTests(unittest.TestCase):
     def ref_exists(self, ref):
         return subprocess.run(["git", "-C", self.root, "rev-parse", "--verify", "-q", ref], capture_output=True).returncode == 0
 
-    def run_check(self):
-        done = subprocess.run([sys.executable, SCRIPT, "--root", self.root], capture_output=True, text=True, timeout=60)
+    def run_check(self, args=(), ci=False):
+        """The script's exit code and output. Env CI is off unless `ci` sets it, so a runner's own CI setting never leaks in."""
+        env = {k: v for k, v in os.environ.items() if k != "CI"}
+        if ci:
+            env["CI"] = "1"
+        done = subprocess.run([sys.executable, SCRIPT, "--root", self.root, *args], capture_output=True, text=True,
+                              timeout=60, env=env)
         return done.returncode, done.stdout + done.stderr
 
     def flagged(self, out):
@@ -190,6 +196,66 @@ class CiteTests(unittest.TestCase):
         code, out = self.run_check()
         self.assertEqual(code, 1, "an unreadable registry passed. Output:\n" + out)
         self.assertTrue(self.flagged(out), "an unreadable registry printed no FAIL line. Output:\n" + out)
+
+    # A read that cannot run prints UNKNOWN. Locally it exits 0. With env CI set it exits non-zero.
+    # Each case breaks one input and keeps the others clean, so the one UNKNOWN has one cause.
+
+    def readable_debt_and_steps(self):
+        self.put("docs/debts/y.md", CLEAN)
+        self.steps({"c1.json": json.dumps({"title": "Step"})})
+
+    def test_a_missing_decisions_folder_prints_unknown_locally(self):
+        self.readable_debt_and_steps()
+        self.assertFalse(os.path.exists(os.path.join(self.root, "docs", "decisions")), "scope: the decisions folder is there")
+        code, out = self.run_check()
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(code, 0, out)
+        self.assertIn("UNKNOWN", out, "a missing decisions folder was read as clean, with no UNKNOWN line:\n" + out)
+
+    def test_a_missing_decisions_folder_is_red_in_ci(self):
+        self.readable_debt_and_steps()
+        code, out = self.run_check(ci=True)
+        self.assertNotEqual(code, 0, "a missing decisions folder passed in CI:\n" + out)
+
+    def test_a_decisions_path_that_is_no_folder_prints_unknown_locally(self):
+        # os.walk yields nothing for a path that is no folder, and it raises no error: the read must still say UNKNOWN.
+        self.readable_debt_and_steps()
+        self.put("docs/decisions", "not a folder\n")
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "docs", "decisions")), "scope: the decisions path is not a file")
+        code, out = self.run_check()
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(code, 0, out)
+        self.assertIn("UNKNOWN", out, "a decisions path that is no folder was read as clean, with no UNKNOWN line:\n" + out)
+
+    def test_a_decisions_path_that_is_no_folder_is_red_in_ci(self):
+        self.readable_debt_and_steps()
+        self.put("docs/decisions", "not a folder\n")
+        code, out = self.run_check(ci=True)
+        self.assertNotEqual(code, 0, "a decisions path that is no folder passed in CI:\n" + out)
+
+    def test_no_record_branch_prints_unknown_for_the_steps_locally(self):
+        self.decision(CLEAN)
+        self.put("docs/debts/y.md", CLEAN)
+        self.assertFalse(self.ref_exists("refs/heads/roadmap") or self.ref_exists("refs/remotes/origin/roadmap"),
+                         "scope: a record branch exists, so the steps were read")
+        code, out = self.run_check(("--steps", "refuse"))
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(code, 0, out)
+        self.assertIn("UNKNOWN", out, "a record branch that is not there was read as no steps, with no UNKNOWN line:\n" + out)
+
+    def test_no_record_branch_is_red_in_ci_for_the_steps(self):
+        self.decision(CLEAN)
+        self.put("docs/debts/y.md", CLEAN)
+        code, out = self.run_check(("--steps", "refuse"), ci=True)
+        self.assertNotEqual(code, 0, "a record branch that is not there passed in CI:\n" + out)
+
+    def test_a_readable_record_with_its_steps_is_green_in_ci_with_no_unknown(self):
+        # Green control: the same folders with every input read passes in CI and prints no UNKNOWN.
+        self.decision(CLEAN)
+        self.readable_debt_and_steps()
+        code, out = self.run_check(ci=True)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("UNKNOWN", out)
 
 
 if __name__ == "__main__":
