@@ -36,6 +36,7 @@ names it, never a crash.
 import contextlib
 import importlib.util
 import inspect
+import io
 import json
 import os
 import subprocess
@@ -475,6 +476,66 @@ def C10_session_start_entry_prints_one_system_message_line_only_when_the_fix_is_
     problems += probe_problems
     problems += expect(SETUP in msg, "no token file: the entry's systemMessage does not name %r: %r" % (SETUP, msg))
     problems += expect(STDERR in msg, "no token file: the entry's systemMessage lacks the probe error: %r" % msg)
+    return problems
+
+
+@case
+def C11_an_off_shape_reply_is_silent_at_session_start_and_adds_no_stop_line():
+    """C11. the model ran and answered off-shape: that login works, so auth_check is silent and three such
+    replies give no Stop line. Three plain failures after them give the line (the positive control)"""
+    sid = "model-auth-c11"
+    with scratch_config("c11") as cfg:
+        problems = scoped(cfg)
+        fn, miss = interface("auth_check")
+        if miss:
+            return problems + miss
+        problems += takes_session_id_problems()
+        if problems:
+            return problems
+
+        def off_shape_probe(*args, **kwargs):
+            with model_run(FakeRun(stdout=json.dumps({"result": "no verdict"}))):
+                return dw.invoke_model(*args, **kwargs)
+
+        text = fn(model_call=off_shape_probe)
+        problems += expect(text == "", "an off-shape reply: auth_check printed %r, want nothing" % text)
+        for _ in range(3):
+            with model_run(FakeRun(stdout=json.dumps({"result": "no verdict"}))):
+                _verdict, error = dw.invoke_model("judge this", session_id=sid)
+        problems += expect(bool(error), "three off-shape replies: invoke_model gave no error text to check")
+        p, msg, _out = stop_message(sid)
+        problems += p
+        problems += expect("Model calls:" not in msg, "three off-shape replies: the Stop line is %r, want none" % msg)
+        for _ in range(3):
+            invoke_failing(session_id=sid)
+        p, msg, _out = stop_message(sid)
+        problems += p
+        problems += expect("Model calls: 3 failed in a row" in msg,
+                           "control: three plain failures after the off-shape replies: the Stop line is %r" % msg)
+    return problems
+
+
+@case
+def C12_three_failed_reply_judge_calls_give_the_stop_line():
+    """C12. the reply judge's model call fails three times in one session: the Stop line says 3 failed in a row"""
+    import reply_judge  # noqa: E402  hooks/reply_judge.py, a Stop hook that passes its session id to invoke_model
+    sid = "model-auth-c12"
+    payload = json.dumps({"session_id": sid, "last_assistant_message": "| a | b |\n|---|---|\n| 1 | 2 |",
+                          "stop_hook_active": False})
+    with scratch_config("c12") as cfg:
+        problems = scoped(cfg)
+        prior_in, prior_err = sys.stdin, sys.stderr
+        try:
+            for _ in range(3):
+                sys.stdin, sys.stderr = io.StringIO(payload), io.StringIO()
+                with model_run(FakeRun(returncode=1, stderr=STDERR)):
+                    reply_judge.main()
+        finally:
+            sys.stdin, sys.stderr = prior_in, prior_err
+        p, msg, _out = stop_message(sid)
+        problems += p
+        problems += expect("Model calls: 3 failed in a row" in msg,
+                           "three failed reply judge calls: the Stop line is %r" % msg)
     return problems
 
 
