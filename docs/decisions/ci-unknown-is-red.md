@@ -21,7 +21,7 @@ Out of scope, with the reason:
 - `lint/check_claude_md_size.py`: warn-only. An unread file hides a warning, never a red.
 - `lint/layout.py` `has_extras()`: a missing `.claude/layout-extras.json` means "none declared". That is an answer, not an unread input.
 - `lint/compliance_probes.py` and `lint/find_copies.py`: no CI runs them.
-- `skills/plain-english-map/scripts/map-check.mjs` `modelSeam`: the command binds no reader, so that check is not built. It prints a note. A limit is not an unread input.
+- A check the tool does not build is a limit, not an unread input. It prints a note and exits 0. Today: `skills/plain-english-map/scripts/map-check.mjs` `modelSeam` (the command binds no reader), and `lint/stale_cites.py` cites of JavaScript and shell names (`stale-cites-at-merge`).
 
 A caller's explicit opt-out still holds: ste-lint with `fail: false` (`--fail-on never`) prints UNKNOWN and exits 0.
 
