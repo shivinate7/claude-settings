@@ -1155,10 +1155,9 @@ def case_page_sendmessage_proof_passes():
     expect_silent("page: a SendMessage naming 98 after the owner record passes", p)
 
 
-CLOUD_UNVERIFIED = "target session could not be verified; retry send_message shortly"  # measured 2026-11-06, cloud
-# A failed local SendMessage (unknown name), measured 2026-11-06 13:04 CST, Claude Code 2.1.319: no is_error flag,
-# the text is this JSON, and the user record's toolUseResult carries success false. The message is elided in the
-# measurement, so the name here is a fixture.
+CLOUD_UNVERIFIED = "target session could not be verified; retry send_message shortly"  # a cloud send_message failure
+# A failed local SendMessage (unknown name) has no is_error flag: the text is this JSON, and the user record's
+# toolUseResult carries success false. The name here is a fixture, since the real message is not fixed.
 LOCAL_UNKNOWN_NAME = '{"success":false,"message":"No agent named page-writer is reachable"}'
 LOCAL_UNKNOWN_NAME_RESULT = {"success": False, "message": "No agent named page-writer is reachable",
                              "display": "No agent named page-writer is reachable"}
