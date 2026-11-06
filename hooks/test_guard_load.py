@@ -15,8 +15,7 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, "test_support"))
-import load_rows as test_load_rows  # noqa: E402  the shared rows and their levels (decision one-load-definition)
+import load_rows_test as test_load_rows  # noqa: E402  the shared rows and their levels (decision one-load-definition)
 import guard_load  # noqa: E402  the module under test
 
 

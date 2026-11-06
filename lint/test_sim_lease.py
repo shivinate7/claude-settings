@@ -3,7 +3,7 @@
 
 Run: python3 lint/test_sim_lease.py. SIM_LEASE=PATH picks the tool; the default is bin/sim-lease in this repo.
 No case reads this machine's memory, disk, load or OS. Each case runs a copy of the tool in its own tree, beside a
-copy of hooks/_nowindow.py and lint/test_support/guard_load_fake.py as hooks/guard_load.py. The fake returns the
+copy of hooks/_nowindow.py and lint/guard_load_fake_test.py as hooks/guard_load.py. The fake returns the
 reading the case set (set_reading) and keeps the real verdict (decision one-load-definition). The uname shim says
 Darwin. The sysctl shim is a tripwire: sim-lease reads no vm.loadavg, so a case fails when sysctl runs. The ps shim
 passes through to the real ps except for a start time that a case sets. CI and GITHUB_ACTIONS are unset for each run.
@@ -26,12 +26,12 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SIM_LEASE = os.environ.get("SIM_LEASE") or os.path.join(HERE, "..", "bin", "sim-lease")
-FAKE_GUARD_LOAD = os.path.join(HERE, "test_support", "guard_load_fake.py")
-ROWS_PATH = os.path.join(HERE, "..", "hooks", "test_support", "load_rows.py")
+FAKE_GUARD_LOAD = os.path.join(HERE, "guard_load_fake_test.py")
+ROWS_PATH = os.path.join(HERE, "..", "hooks", "load_rows_test.py")
 REAL_PS = shutil.which("ps") or "/bin/ps"
 RUN_FOLDER = None
 SLOT_UDID = None  # read from the tool under test in setUpModule: the one home of the device IDs
-ROWS_MODULE = None  # hooks/test_support/load_rows.py: the shared readings and their levels
+ROWS_MODULE = None  # hooks/load_rows_test.py: the shared readings and their levels
 NORMAL = {"memory_pct": 40.0, "disk_free_gb": 500.0, "disk_total_gb": 926.0}
 
 UNAME_SH = '#!/bin/sh\necho "${SIM_LEASE_TEST_UNAME:-Darwin}"\n'
@@ -332,7 +332,7 @@ class Readings(LeaseCase):
 
 
 class SharedRows(LeaseCase):
-    """Each row of hooks/test_support/load_rows.py, as sim-lease grants it: slot 1, then slot 2 with slot 1 held, then pro
+    """Each row of hooks/load_rows_test.py, as sim-lease grants it: slot 1, then slot 2 with slot 1 held, then pro
     alone. The expected grant is written from the row's level and unread readings (decision one-load-definition)."""
 
     def test_each_row_grants_as_its_level_and_its_unread_readings_say(self):
