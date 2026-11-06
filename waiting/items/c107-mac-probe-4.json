@@ -7,12 +7,19 @@
   "home": "roadmap step c107",
   "id": "c107-mac-probe-4",
   "kind": "task",
+  "lane": "local-lane-start-no-click: rewrites the probe with EnterWorktree (session_013NEJL2TLonvddw6ByF5XGE)",
+  "lastAnswer": {
+    "at": "2026-11-06T21:24:48Z",
+    "choice": "note",
+    "note": "Not done: claude 2.1.296; no create_session tool (start_session listed); step 2 refused by guard hand-made-worktree; owner stopped."
+  },
   "n": 300,
   "owner": "lane local-lane-start-no-click (session_013NEJL2TLonvddw6ByF5XGE)",
   "rank": 3,
   "ref": "step c107; item 297",
+  "reply": "Our own guard refused the probe's step 2. It allows a worktree only through EnterWorktree or an agent's isolation, never git worktree add. The lane rewrites probe 4 to use EnterWorktree, and this item comes back with the new text. Measured so far: Claude Code 2.1.296, and no create_session tool on the Mac (start_session is listed).",
   "short": "Mac press-free start probe",
-  "status": "open",
+  "status": "deferred",
   "steps": [
     "Open a new Claude Code desktop chat on your Mac, in your local claude-settings folder (not over Remote Control).",
     "Paste the text below and press Enter.",

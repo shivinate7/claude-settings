@@ -5,7 +5,12 @@
   "home": "docs/decisions/session-messages.md",
   "id": "local-reach-plan",
   "kind": "decision",
-  "lane": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6): re-asked 13:59 CST after the Mac test",
+  "lane": "session-messaging-plan: builds a (session_013NEJL2btGMLKqHs4cDQSZ6)",
+  "lastAnswer": {
+    "at": "2026-11-06T21:24:48Z",
+    "choice": "a",
+    "note": "i think B and C can still work too though probably"
+  },
   "links": [
     {
       "label": "Draft PR #1051",
@@ -47,6 +52,7 @@
   "pick": "a",
   "rank": 2,
   "ref": "record session-messages, section \"Reach between the cloud and the owner's computer\" (commit ddc0f83c); step session-messaging-plan; draft PR #1051",
+  "reply": "Routed 15:30 CST to lane session-messaging-plan: build the git mailbox, read at turn start. b (Mac doorbell) and c (local relay) stay possible later additions. Closes when the lane's PR merges.",
   "short": "Replace session messages",
   "status": "open",
   "title": "Item 153's mailbox page cannot reach your Mac. Which path should replace it?",

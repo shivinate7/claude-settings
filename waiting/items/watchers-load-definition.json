@@ -5,7 +5,12 @@
   "home": "plan align-watchers Q6",
   "id": "watchers-load-definition",
   "kind": "decision",
-  "lane": "coordinator: the watchers lanes run from plan align-watchers",
+  "lane": "one-load-definition: the coordinator starts it",
+  "lastAnswer": {
+    "at": "2026-11-06T21:24:48Z",
+    "choice": "a",
+    "note": ""
+  },
   "links": [
     {
       "label": "PR #1349",
@@ -33,6 +38,7 @@
   "pick": "b",
   "rank": 4,
   "ref": "PR #1349 (lane watchers-one-rule), docs/plans/align-watchers.md",
+  "reply": "Routed 15:31 CST to the coordinator: one shared load definition, filed as roadmap step one-load-definition. Closes when it merges.",
   "short": "One load definition?",
   "status": "open",
   "title": "The guard and sim-lease each define \"the machine is loaded\" their own way. Merge them into one?",

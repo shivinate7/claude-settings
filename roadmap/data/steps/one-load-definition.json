@@ -1,0 +1,10 @@
+{
+  "title": "The guard and sim-lease read machine load from one shared definition",
+  "phase": "next",
+  "status": "todo",
+  "order": 103.394,
+  "why": "Owner page answer.",
+  "note": "Owner picked a on item 304 (15:24 CST Nov 6), against the recommended b: one shared load definition. Plan align-watchers Q6. The guard reads memory and disk; sim-lease reads vm.loadavg.",
+  "owner": "coordinator",
+  "updatedAt": "2026-11-06T21:31:00Z"
+}

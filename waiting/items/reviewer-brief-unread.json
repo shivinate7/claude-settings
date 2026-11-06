@@ -6,6 +6,11 @@
   "id": "reviewer-brief-unread",
   "kind": "decision",
   "lane": "reviewer-brief-blind: the lane builds b meanwhile (session_013NEJL3HcTDWvQyBwmisvYG)",
+  "lastAnswer": {
+    "at": "2026-11-06T21:24:48Z",
+    "choice": "none",
+    "note": "should we run a version of B but also improve the reviewer agent so that way erviewr agents already start building things the rigth way"
+  },
   "n": 299,
   "options": [
     {
@@ -28,8 +33,9 @@
   "pick": "b",
   "rank": 3,
   "ref": "lane reviewer-brief-blind; item 127",
+  "reply": "Sent 15:30 CST to lane reviewer-brief-blind: B, plus a fix at the source, so that what starts a reviewer (workflow scripts, the workflow guidance, briefs) writes literal, file-pointing prompts from the start, and the refusal seldom fires. The lane names the exact files, and this comes back as one option.",
   "short": "Unread reviewer prompt",
-  "status": "open",
+  "status": "deferred",
   "title": "When the guard cannot read a reviewer's prompt, should it let it through?",
   "why": "A reviewer that sees the builder's report judges the report, not the code."
 }

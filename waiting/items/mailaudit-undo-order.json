@@ -6,6 +6,11 @@
   "id": "mailaudit-undo-order",
   "kind": "decision",
   "lane": "mailaudit-recent-log: builds a meanwhile (session_013NEJL44PzZ5EQbqb3wHYuB)",
+  "lastAnswer": {
+    "at": "2026-11-06T21:24:48Z",
+    "choice": "none",
+    "note": "confirm that's true first"
+  },
   "n": 306,
   "options": [
     {
@@ -27,8 +32,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "lane mailaudit-recent-log; item 288",
+  "reply": "Sent 15:30 CST to lane mailaudit-recent-log: prove the double count on today's code (a red test or a recorded run) before you pick. This comes back with the measured counts.",
   "short": "Undo in any order",
-  "status": "open",
+  "status": "deferred",
   "title": "mailaudit: undoing Recent rows in any order can count a copy twice. Limit which rows can be undone?",
   "why": "A double count shows a copy as checked in when it is not."
 }

@@ -6,6 +6,11 @@
   "id": "zizmor-pin-move",
   "kind": "decision",
   "lane": "zizmor-pin-bump: the lane builds now; its merge waits on this answer",
+  "lastAnswer": {
+    "at": "2026-11-06T21:24:48Z",
+    "choice": "b",
+    "note": ""
+  },
   "n": 302,
   "options": [
     {
@@ -34,6 +39,7 @@
   "pick": "a",
   "rank": 3,
   "ref": "lane zizmor-pin-bump (session_013NEJKzVtYoetutgUL9DkfZ)",
+  "reply": "Routed 15:30 CST to lane zizmor-pin-bump: pin zizmor==1.31.1. Closes when its PR merges.",
   "short": "zizmor pin move",
   "status": "open",
   "title": "Move the shared workflow scanner's zizmor pin from 1.30.1 to a newer release?",
