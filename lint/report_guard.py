@@ -83,6 +83,14 @@ does not name in its Input Needed section blocks. A built-in tool counts only in
 tool counts by its full name. Each tool the reply names is cleared, on a
 stop_hook_active rewrite too, which never blocks on a refusal (decision refusals-reach-the-owner).
 Cost: one stat per Stop when the session had no refusal.
+
+The ruling-skip check (rule `ruling-skip-check`, decision questions-go-to-owner): a Done item that says it acted
+"under ruling" must cite the ruling as `under ruling <ref> (<stamp>)`, where <ref> is `item <N> <key>` (a waiting-page
+answer on the roadmap branch) or a decision id. A claim with no ref or stamp, or a ref that does not resolve, refuses
+with no model call. A resolved cite goes to the refuter (RULING_REFUTER_MODEL), one call for all the claims of a
+reply, which sees only each ruling text and each Done act; a model error, a timeout or an odd answer refuses. It
+runs on every Stop, landed or not, and again on a rewrite. Cost: no call and no git read on a reply with no claim;
+one Sonnet call (20 s) and at most two git processes on a reply with a claim.
 """
 import json
 import os
@@ -1386,6 +1394,183 @@ def question_keys_problem(after, text):
     return KEYS_REASON % clash if clash else ""
 
 
+# The ruling-skip check (rule `ruling-skip-check`, decision questions-go-to-owner, owner item 284 b, 2026-11-06
+# 13:08 CST): a Done item that says it acted "under ruling" cites that ruling as `under ruling <ref> (<stamp>)`.
+# <ref> is `item <N> <key>` (a waiting-page answer, read from the roadmap branch) or a decision id (a record in
+# docs/decisions). A claim with no ref or stamp, or a ref that does not resolve, refuses with no model call: an
+# unknown read is red (decision ci-unknown-is-red). A resolved cite goes to the refuter, one model call for all
+# the claims of the reply, which sees only each ruling text and each Done act and says whether the ruling names
+# that act. A model error, a timeout or an odd answer refuses. Cost: no call and no git read on a reply with no
+# claim; on a reply with a claim, one Sonnet call and at most two git processes (the items, then one answer).
+RULING_REFUTER_MODEL = "claude-sonnet-5-5"  # the one setting: lane debate-model-tiers may change it here
+RULING_REFUTER_TIMEOUT = 20
+RULING_TEXT_MAX = 6000
+RULING_ROADMAP_REFS = ("origin/roadmap", "roadmap")
+RULING_CLAIM_RE = re.compile(r"\bunder (?:the )?(?:owner'?s? )?ruling\b", re.I)
+RULING_REF_RE = re.compile(
+    r"\s*(?:(?P<item>item\s+(?P<n>\d+)\s+(?P<key>[a-f]))\b|`?(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)`?(?![\w-]))"
+    r"\s*\(\s*(?P<stamp>[^()\n]{1,40}?)\s*\)")
+RULING_REASON = (
+    "Ruling-skip guard (rule ruling-skip-check): %s Remedy: ask the owner (the waiting page, or Input Needed), or "
+    "cite a ruling that names this act: an owner item number with its option key, or a decision id, then its time "
+    "in parentheses.")
+
+
+def _ruling_stamp_ok(stamp):
+    m = STAMP_FULL_RE.fullmatch(stamp) or STAMP_CLOCK_RE.fullmatch(stamp)
+    return bool(m) and m.groups()[-1] in ("CST", "CDT")
+
+
+def _done_texts(block):
+    """Every Done item of the report block. A repeated Done label counts too: each starts its own read."""
+    lines = block.splitlines()
+    starts = [i for i, line in enumerate(lines)
+              if (m := LABEL_RE.match(line)) and m.group(1).strip().rstrip(":").strip() == "Done"]
+    items = []
+    for a, b in zip(starts, starts[1:] + [len(lines)]):
+        items += done_items("\n".join(lines[a:b]))
+    return items
+
+
+def ruling_claims(text):
+    """([(act, ref, why_bad)], ...) one per ruling claim in the Done items of `text`. `ref` is ("item", n, key) or
+    ("decision", slug), or None when `why_bad` says the claim has no usable ref or stamp."""
+    claims = []
+    for act in _done_texts(block_text(text, keep_indent=True)):
+        for m in RULING_CLAIM_RE.finditer(act):
+            cite = RULING_REF_RE.match(act, m.end())
+            if not cite:
+                claims.append((act, None, "a Done item claims a ruling skip but cites no item or decision with a time."))
+            elif not _ruling_stamp_ok(cite.group("stamp")):
+                claims.append((act, None, "a Done item cites a ruling with no valid time (a date and clock, or a clock, with CST or CDT)."))
+            elif cite.group("item"):
+                claims.append((act, ("item", int(cite.group("n")), cite.group("key")), ""))
+            else:
+                claims.append((act, ("decision", cite.group("slug")), ""))
+    return claims
+
+
+def _ruling_of_decision(slug, cwd):
+    """(ruling text, '') of docs/decisions/<slug>.md in the repo, else in the claude-settings checkout, or ('',
+    why it does not resolve)."""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    roots = [repo_root(cwd) or cwd or os.getcwd()]
+    try:
+        import guard_pointer  # the claude-settings checkout, as question_form.past_rulings reads it
+        other = guard_pointer.pointer_checkout()
+        if other:
+            roots.append(other)
+    except Exception:
+        pass
+    for root in roots:
+        path = os.path.join(root, "docs", "decisions", slug + ".md")
+        if os.path.isfile(path):
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    return handle.read(RULING_TEXT_MAX), ""
+            except (OSError, UnicodeDecodeError):
+                return "", "decision %s could not be read." % slug
+    return "", "decision %s has no record." % slug
+
+
+def _picked(answer, key):
+    choice = answer.get("choice")
+    return key in choice if isinstance(choice, list) else choice == key
+
+
+def _ruling_of_item(n, key, roadmap):
+    """(ruling text, '') of the waiting-page answer to item `n` that picked `key`, or ('', why it does not
+    resolve). `roadmap` is the one read for the reply: {"items": ..., "answers": ...} or {"error": why}."""
+    if roadmap.get("error"):
+        return "", "item %d could not be read (%s)." % (n, roadmap["error"])
+    found = [(i, rec) for i, rec in roadmap["items"].items() if isinstance(rec, dict) and rec.get("n") == n]
+    if len(found) != 1:
+        return "", "item %d is not on the roadmap branch." % n
+    item_id, item = found[0]
+    answer = roadmap["answers"].get(item_id)
+    if not isinstance(answer, dict):
+        return "", "item %d has no answer." % n
+    if not _picked(answer, key):
+        return "", "item %d was not answered %s." % (n, key)
+    label = next((o.get("label") for o in item.get("options") or []
+                  if isinstance(o, dict) and o.get("key") == key and isinstance(o.get("label"), str)), None)
+    if not label:
+        return "", "item %d has no option %s." % (n, key)
+    note = answer.get("note")
+    return ("Owner's answer to: %s\nPicked %s: %s%s" % (item.get("question") or "(no question)", key, label,
+            "\nOwner's note: %s" % note if isinstance(note, str) and note.strip() else "")), ""
+
+
+def _read_roadmap_answers(cwd):
+    """The items, and the answer of each item the claims cite, from the roadmap branch: {"items", "answers"} or
+    {"error": why}. Two git processes at most: question_form.read_json_folder for the items, then for the answers."""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import question_form
+    root = repo_root(cwd) or cwd or os.getcwd()
+    items, state, ref = question_form.read_json_folder(root, "waiting/items", RULING_ROADMAP_REFS)
+    if state != "ok":
+        return {"error": "no roadmap branch" if state == "absent" else state}
+    answers, state, _ = question_form.read_json_folder(root, "waiting/answers", (ref,))
+    if state != "ok":
+        return {"error": "no answers on the roadmap branch" if state == "absent" else state}
+    return {"items": items, "answers": answers}
+
+
+def _scrub_reason(reason):
+    """The refuter's reason with any trigger phrase or time replaced, so a refusal never carries a line that passes."""
+    text = " ".join(str(reason).split())[:240]
+    for pattern in (RULING_CLAIM_RE, STAMP_FULL_RE, STAMP_CLOCK_RE):
+        text = pattern.sub("[cite]", text)
+    return text
+
+
+def ruling_skip_problem(text, cwd):
+    """The refusal text when a Done item claims a ruling skip and cites no ruling that names its act, else ''."""
+    if not RULING_CLAIM_RE.search(text):
+        return ""
+    claims = ruling_claims(text)
+    if not claims:
+        return ""
+    for act, ref, bad in claims:
+        if ref is None:
+            return RULING_REASON % bad
+    roadmap = _read_roadmap_answers(cwd) if any(ref[0] == "item" for _, ref, _ in claims) else {}
+    pairs, seen = [], set()
+    for act, ref, _ in claims:
+        if ref[0] == "item":
+            ruling, bad = _ruling_of_item(ref[1], ref[2], roadmap)
+            name = "item %d %s" % ref[1:]
+        else:
+            ruling, bad = _ruling_of_decision(ref[1], cwd)
+            name = "decision " + ref[1]
+        if bad:
+            return RULING_REASON % ("ruling %s does not resolve: %s Unknown is refused." % (name, bad))
+        if (name, act) not in seen:
+            seen.add((name, act))
+            pairs.append((name, ruling, act))
+    prompt = (
+        "Each pair below is an owner's ruling and a Done item from a session's report, which says it acted under "
+        "that ruling. Judge only this: does each ruling name the act its Done item describes, either that act or "
+        "a rule that covers exactly it? A ruling on a nearby, wider or different act does not.\n\n"
+        + "\n\n".join("Pair %d, ruling %s:\n<<<\n%s\n>>>\nDone item:\n<<<\n%s\n>>>" % (i, name, ruling, act)
+                      for i, (name, ruling, act) in enumerate(pairs, 1))
+        + "\n\nReply JSON only: {\"ok\": true} when every ruling names its act, else {\"ok\": false, \"reason\": "
+        "\"<which pair fails, and why, one line>\"}.")
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import call_judge
+    import decision_watch  # the one home of the model call
+    verdict, error = decision_watch.invoke_model(prompt, model=RULING_REFUTER_MODEL, timeout=RULING_REFUTER_TIMEOUT,
+                                                 shape=call_judge.OK_SHAPE, effort=None)
+    names = ", ".join(sorted({name for name, _, _ in pairs}))
+    if error or not isinstance(verdict, dict) or not isinstance(verdict.get("ok"), bool):
+        return RULING_REASON % ("the refuter could not judge the cite of %s, so the claim is refused." % names)
+    if verdict["ok"]:
+        return ""
+    reason = verdict.get("reason")
+    reason = _scrub_reason(reason) if isinstance(reason, str) and reason.strip() else "the ruling does not name the act."
+    return RULING_REASON % ("the refuter finds that %s does not name the act the Done item claims: %s" % (names, reason))
+
+
 def relay_reasons(after, text, cwd):
     """Refusals for the questions the reply relays to the owner, read from every assistant text since the last
     human message. An error in the option-key check allows, with one stderr line. An error in the past-ruling check
@@ -1405,6 +1590,12 @@ def relay_reasons(after, text, cwd):
                 reasons.append(cannot_run(asked, "the check failed with " + type(exc).__name__))
     except Exception as exc:
         print("past-ruling check could not start: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+    try:
+        reasons.append(ruling_skip_problem(text, cwd))
+    except Exception as exc:  # an unknown read is red (ci-unknown-is-red): a claim that could not be checked refuses
+        print("ruling-skip check failed: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+        if RULING_CLAIM_RE.search(text):
+            reasons.append(RULING_REASON % "the check of the ruling cited in a Done item failed, so the claim is refused.")
     return [r for r in reasons if r]
 
 

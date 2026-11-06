@@ -1433,61 +1433,62 @@ def _tree_names(body, hash_size):
     return out
 
 
-def _read_steps(root):
-    """({step id: (note, why)}, state) from roadmap/data/steps of the local ref `roadmap`, else `origin/roadmap`,
-    through ONE `git cat-file --batch` process. state is "ok", "absent" (no repo, no ref or no folder) or
-    "unreadable: <why>" (git failed, odd answer, bad JSON). Never fetches."""
+def read_json_folder(root, folder, refs):
+    """({file stem: JSON object}, state, ref) for each `.json` file of `folder` on the first of `refs` that holds the
+    folder, through ONE `git cat-file --batch` process. state is "ok", "absent" (no repo, no ref or no folder) or
+    "unreadable: <why>" (git failed, odd answer, bad JSON). `ref` is the ref read, else "". Never fetches."""
     if _git_root_of(root) is None:
-        return {}, "absent"
+        return {}, "absent", ""
     import subprocess
     import _nowindow  # the one home of a no-window child start
     try:
         proc = _nowindow.Popen(["git", "-C", root, "cat-file", "--batch"], stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except OSError:
-        return {}, UNREADABLE + ": git did not start"
+        return {}, UNREADABLE + ": git did not start", ""
     try:
         entries = None
-        for ref in ("roadmap", "origin/roadmap"):
+        for ref in refs:
             try:
-                proc.stdin.write(("%s:roadmap/data/steps\n" % ref).encode())
+                proc.stdin.write(("%s:%s\n" % (ref, folder)).encode())
                 proc.stdin.flush()
             except BrokenPipeError:
                 # git exited before it read the request; its stderr says why. The wait is bounded, and the
                 # `finally` below kills and reaps the process on every path.
                 proc.wait(timeout=STEP_GIT_TIMEOUT)
                 if b"not a git repository" in proc.stderr.read(4096):
-                    return {}, "absent"
-                return {}, UNREADABLE + ": git exited early"
+                    return {}, "absent", ""
+                return {}, UNREADABLE + ": git exited early", ""
             head = proc.stdout.readline().split()
             if len(head) == 2 and head[1] == b"missing":
                 continue
             if not head and b"not a git repository" in proc.stderr.read():
-                return {}, "absent"  # a folder with a .git entry that is no repository holds no roadmap
+                return {}, "absent", ""  # a folder with a .git entry that is no repository holds no roadmap
             if len(head) != 3 or head[1] != b"tree":
-                return {}, UNREADABLE + ": git gave no tree"
+                return {}, UNREADABLE + ": git gave no tree", ""
             body = proc.stdout.read(int(head[2]))
             proc.stdout.read(1)
             entries = [(n, s) for n, s in _tree_names(body, len(head[0]) // 2) if n.endswith(".json")]
+            used = ref
             break
         if entries is None:
-            return {}, "absent"
+            return {}, "absent", ""
         out, _ = proc.communicate("".join(s + "\n" for _, s in entries).encode(), timeout=STEP_GIT_TIMEOUT)
-        steps, pos = {}, 0
+        records, pos = {}, 0
         for name, _sha in entries:
             nl = out.index(b"\n", pos)
             head = out[pos:nl].split()
             if len(head) != 3 or head[1] != b"blob":
-                return {}, UNREADABLE + ": git gave no blob for " + name
+                return {}, UNREADABLE + ": git gave no blob for " + name, ""
             size = int(head[2])
             data = json.loads(out[nl + 1:nl + 1 + size].decode("utf-8"))
             pos = nl + 1 + size + 1
             if not isinstance(data, dict):
-                return {}, UNREADABLE + ": bad JSON in " + name
-            steps[name[:-5]] = (data.get("note"), data.get("why"))
-        return steps, "ok"
+                return {}, UNREADABLE + ": bad JSON in " + name, ""
+            records[name[:-5]] = data
+        return records, "ok", used
     except Exception as exc:
-        return {}, "%s: %s" % (UNREADABLE, type(exc).__name__)
+        return {}, "%s: %s" % (UNREADABLE, type(exc).__name__), ""
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -1497,6 +1498,13 @@ def _read_steps(root):
                 pipe.close()
             except Exception:
                 pass
+
+
+def _read_steps(root):
+    """({step id: (note, why)}, state) from roadmap/data/steps of the local ref `roadmap`, else `origin/roadmap`
+    (read_json_folder, the one home of the roadmap-ref read)."""
+    records, state, _ = read_json_folder(root, "roadmap/data/steps", ("roadmap", "origin/roadmap"))
+    return {k: (v.get("note"), v.get("why")) for k, v in records.items()}, state
 
 
 def _step_rulings(steps, words):
