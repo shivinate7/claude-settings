@@ -39,7 +39,9 @@ Contract the page cases assume (the builder builds to it):
     `checks pass` and exits 0; a check that cannot run prints `checks unknown: <why>` and exits 3.
 """
 import collections
+import contextlib
 import glob
+import io
 import json
 import os
 import re
@@ -48,12 +50,15 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CMD = os.environ.get("EXPORT_PAGE_UNDER_TEST") or os.path.join(HERE, "export_page.py")
 LINT = os.path.realpath(os.path.join(HERE, "..", "..", "lint"))
 sys.path.insert(0, LINT)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+import export_page  # noqa: E402  the in-process budget cases stub page_check's per-run seam
+import page_check  # noqa: E402
 
 COLLECTIONS = ("items", "answers", "groups", "asks", "meta")
 MARKER = ".complete"  # the session touches it in each collection folder after the last list page
@@ -1701,6 +1706,190 @@ class CheckModeUnknown(Copied):
         unknown = [line for line in verdict_lines(r) if line.startswith("checks unknown: ")]
         self.assertEqual(len(unknown), 1, "--check printed no `checks unknown: <why>` line. Output:\n" + shown(r))
         self.assertEqual(r.returncode, 3, "an unknown --check must exit 3. Output:\n" + shown(r))
+
+
+# ------------------------------------------------------- no page file, the exit rank, answers on the page, the budget
+
+
+class NoPageFile(Copied):
+    """No page file, so no check can run: one `checks unknown: no page file` line, the copy written, exit 0 as today.
+    Not gated: no check runs."""
+
+    def test_a_single_export_without_a_page_names_the_missing_page(self):
+        fetched = self.fetch(items={ITEM_292["id"]: ITEM_292}, meta={"page": META})
+        out = self.out()
+        r = self.run_cmd("--fetched", fetched, "--out", out)
+        self.assertCopied(r, out, "items/3d-dummy-phone.json")  # scope: the copy is written with no page
+        self.assertTrue(any(line.endswith("checks unknown: no page file") for line in verdict_lines(r)),
+                        "a single export with no page printed no `checks unknown: no page file` line. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 0, "a missing page must leave the exit code as without checks, 0. Output:\n" + shown(r))
+
+    def test_an_all_entry_without_its_page_names_the_missing_page(self):
+        root = os.path.join(self.tmp.name, "repo")
+        registry = {"kinds": {}, "artifacts": [{"id": "page01", "url": "https://claude.ai/artifact/page01",
+                                                "role": "waiting-page", "account": "work"}]}
+        write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps(registry))
+        folder = self.fetch(items={ITEM_292["id"]: ITEM_292}, meta={"page": META})  # no page.html in this folder
+        fetched = os.path.join(self.tmp.name, "fetched-no-page")
+        os.makedirs(fetched)
+        os.rename(folder, os.path.join(fetched, "page01"))
+        worktree = self.out("worktree")
+        r = self.run_cmd("--all", root, "--fetched", fetched, "--worktree", worktree)
+        self.assertTrue(os.path.isfile(os.path.join(worktree, "waiting", "items", "3d-dummy-phone.json")),
+                        "item 292 is not in the waiting copy. Output:\n" + shown(r))  # scope
+        self.assertTrue(any(line.endswith("checks unknown: no page file") for line in verdict_lines(r)),
+                        "--all printed no `checks unknown: no page file` line for the entry with no page. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 0, "--all with no page must leave the exit code as without checks, 0. Output:\n" + shown(r))
+
+    def test_a_plain_export_without_a_page_prints_no_check_line(self):
+        """Control: plain items and no page, so no picture is checked and no check line is printed. Exit 0, as today.
+        It holds on main as well."""
+        fetched = self.fetch(items={"plain": item(1)}, meta={"page": META})
+        out = self.out()
+        r = self.run_cmd("--fetched", fetched, "--out", out)
+        self.assertCopied(r, out, "items/plain.json")  # scope: the plain item is in the copy
+        self.assertFalse(any("checks" in line for line in verdict_lines(r)),
+                         "a check line was printed for an export with no picture. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 0, "an export with no picture must exit 0. Output:\n" + shown(r))
+
+
+class ExitRank(PictureChecks):
+    """--all with one artifact held and another refused or unknown: the exit is that code, not 4. Held is 4 only when
+    nothing worse happened."""
+
+    def repo(self):
+        root = os.path.join(self.tmp.name, "repo")
+        registry = {"kinds": {}, "artifacts": [
+            {"id": "page01", "url": "https://claude.ai/artifact/page01", "role": "waiting-page", "account": "work"},
+            {"id": "queue02", "url": "https://claude.ai/artifact/queue02", "role": "queue-page", "account": "work",
+             "collections": ["items"]}]}
+        write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps(registry))
+        return root
+
+    def fetched(self, queue_page, queue_marker=True, queue_extra=()):
+        """page01 holds item 292 with its mockup page, so it is held. queue02 holds one plain item and `queue_page`."""
+        root = os.path.join(self.tmp.name, "fetched-rank")
+        os.makedirs(root)
+        waiting = self.fetch(items={ITEM_292["id"]: ITEM_292}, meta={"page": META})
+        write_bytes(os.path.join(waiting, "page.html"), page_with_mockups(MOCKS_292).encode("utf-8"))
+        os.rename(waiting, os.path.join(root, "page01"))
+        queue = self.fetch(items={"q1": item(2)})
+        write_bytes(os.path.join(queue, "page.html"), queue_page)
+        for rel, data in queue_extra:
+            write_text(os.path.join(queue, *rel.split("/")), data)
+        if not queue_marker:
+            os.remove(os.path.join(queue, "items", MARKER))
+        os.rename(queue, os.path.join(root, "queue02"))
+        return root
+
+    def test_a_refused_artifact_outranks_a_held_item_in_the_exit(self):
+        fetched = self.fetched(("<p>Token: %s</p>" % TOKEN).encode("utf-8"))
+        r = self.run_cmd("--all", self.repo(), "--fetched", fetched, "--worktree", self.out("worktree"))
+        self.assertIn((292, HELD_SENTENCE), held_lines(r),
+                      "scope: item 292 is not held, so the held artifact did not run its check. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 1, "a refused artifact beside a held one must exit 1, not 4. Output:\n"
+                         + shown(r, (TOKEN,)))
+
+    def test_a_crash_beside_a_held_item_exits_3_not_4(self):
+        """The queue's item file nests past the interpreter's limit, so its export crashes: a verdict of 3. A held
+        item beside it must not hide the crash."""
+        fetched = self.fetched(b"<p>plain queue page</p>", queue_extra=(("items/deep.json", DEEP),))
+        r = self.run_cmd("--all", self.repo(), "--fetched", fetched, "--worktree", self.out("worktree"))
+        self.assertIn((292, HELD_SENTENCE), held_lines(r),
+                      "scope: item 292 is not held, so the held artifact did not run its check. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 3, "a crashed artifact beside a held one must exit 3, not 4. Output:\n" + shown(r))
+
+    def test_an_unknown_artifact_outranks_a_held_item_in_the_exit(self):
+        fetched = self.fetched(b"<p>plain queue page</p>", queue_marker=False)
+        r = self.run_cmd("--all", self.repo(), "--fetched", fetched, "--worktree", self.out("worktree"))
+        self.assertIn((292, HELD_SENTENCE), held_lines(r),
+                      "scope: item 292 is not held, so the held artifact did not run its check. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 2, "an unknown artifact beside a held one must exit 2, not 4. Output:\n" + shown(r))
+
+
+class AnsweredOnPage(PictureChecks):
+    """An item the page draws as answered is not judged. The page's `waitsOf` decides, so the exporter's reading of a wait
+    must agree with it on the run id and on the repo name."""
+
+    def run_with(self, extra_item):
+        fetched = self.fetch(items={ITEM_292["id"]: ITEM_292, extra_item["id"]: extra_item})
+        out = self.out()
+        r = self.export(fetched, out, page=write_text(os.path.join(self.tmp.name, "page-answers.html"),
+                                                      page_with_mockups(MOCKS_292)))
+        self.assertCopied(r, out, "items/%s.json" % extra_item["id"])  # scope: the item is in the copy
+        self.assertIn((292, HELD_SENTENCE), held_lines(r),
+                      "scope: item 292 is not held, so the check did not run on this export. Output:\n" + shown(r))
+        return r
+
+    def test_a_whole_number_run_id_read_as_a_float_is_answered_by_its_wait(self):
+        """The page takes a run id that is a whole number, and 12.0 is one in JavaScript, so the page draws the item as
+        answered. The exporter reads 12.0 as a float and holds the item."""
+        wait = picture_item(302, "wait-float-run", waits={"repo": "owner/repo", "run": 12.0},
+                            lastAnswer={"at": "2026-10-02T10:00:00Z", "note": "Synthetic wait"})
+        r = self.run_with(wait)
+        self.assertEqual([n for n, _ in held_lines(r) if n != 292], [],
+                         "an item the page draws as answered by its wait was held. Output:\n" + shown(r))
+
+    def test_a_wait_repo_with_a_letter_the_page_refuses_is_checked_as_open(self):
+        """The page's repo pattern takes ASCII letters only, so `owner/répo` is no wait: the page draws the item as open and
+        checks its picture. The exporter takes any letter, reads the item as answered, and skips the check."""
+        accented = picture_item(303, "wait-accent-repo", waits={"repo": "owner/répo", "run": 12},
+                                lastAnswer={"at": "2026-10-02T10:00:00Z", "note": "Synthetic wait"})
+        r = self.run_with(accented)
+        self.assertIn((303, HELD_SENTENCE), held_lines(r),
+                      "an item the page draws as open was not checked: the exporter read its wait as answered. Output:\n"
+                      + shown(r))
+        self.assertEqual(r.returncode, 4, "a held item must exit 4. Output:\n" + shown(r))
+
+    def test_control_a_whole_number_run_id_is_answered_by_its_wait(self):
+        """Control: an integer run id is answered on both sides, so the item is not held. It holds on main as well."""
+        wait = picture_item(304, "wait-int-run", waits={"repo": "owner/repo", "run": 12},
+                            lastAnswer={"at": "2026-10-02T10:00:00Z", "note": "Synthetic wait"})
+        r = self.run_with(wait)
+        self.assertEqual([n for n, _ in held_lines(r) if n != 292], [],
+                         "an item answered by its wait was held. Output:\n" + shown(r))
+
+
+class CheckBudget(Copied):
+    """No overall time budget: every pictured item is checked however slow each run is. The per-run seam is stubbed in
+    process, and the clock is fake: it moves only when a stubbed run ends, so no wall clock is read. Not gated: no node runs."""
+
+    class Clock:
+        def __init__(self):
+            self.now = 0.0
+
+        def monotonic(self):
+            return self.now
+
+    def slow_runs(self, clock, calls):
+        def run(page_file, item, *args, **kwargs):
+            calls.append(item["id"])
+            clock.now += 60.0  # each run takes 60 s on the fake clock, past the 100 s budget after two runs
+            return 1, HELD_SENTENCE
+        return run
+
+    def pictured(self):
+        return {"budget-%d" % k: picture_item(300 + k, "budget-%d" % k) for k in range(1, 4)}
+
+    def test_export_checks_every_pictured_item_when_each_run_is_slow(self):
+        clock, calls = self.Clock(), []
+        with mock.patch.object(page_check, "run_check_designs", self.slow_runs(clock, calls)), \
+                mock.patch.object(page_check, "time", clock, create=True):
+            held, unknown = export_page.picture_checks(PAGE_FILE, {"items": self.pictured(), "answers": {}})
+        self.assertEqual(len(calls), 3, "the export checked %d of 3 pictured items: an overall budget stopped the rest" % len(calls))
+        self.assertIsNone(unknown, "the export printed an unknown for a budget it should not have: %s" % unknown)
+        self.assertEqual(len(held), 3, "the export held %d of 3 items" % len(held))
+
+    def test_check_mode_checks_every_pictured_item_when_each_run_is_slow(self):
+        clock, calls = self.Clock(), []
+        fetched = self.fetch(items=self.pictured())
+        page = write_text(os.path.join(self.tmp.name, "page-budget.html"), page_with_mockups(MOCKS_292))
+        printed = io.StringIO()
+        with mock.patch.object(page_check, "run_check_designs", self.slow_runs(clock, calls)), \
+                mock.patch.object(page_check, "time", clock, create=True), contextlib.redirect_stdout(printed):
+            code = export_page.check_only(fetched, page)
+        self.assertEqual(len(calls), 3, "--check checked %d of 3 pictured items: an overall budget stopped the rest" % len(calls))
+        self.assertEqual(code, 4, "--check with three held items must exit 4. Output:\n" + printed.getvalue())
 
 
 if __name__ == "__main__":
