@@ -6,6 +6,11 @@
   "id": "export-item-checks",
   "kind": "decision",
   "lane": "lane page-check-at-publish (session_013NEJKzQzNgKVLCQZtWj18k): builds a meanwhile",
+  "lastAnswer": {
+    "at": "2026-11-06T20:17:22.777Z",
+    "choice": "a",
+    "note": "shouldn't both A and B occur"
+  },
   "n": 298,
   "options": [
     {
@@ -27,6 +32,7 @@
   "pick": "a",
   "rank": 3,
   "ref": "step page-check-at-publish; item 292",
+  "reply": "Yes, both (14:20 CST). Export always saves the copy, prints each bad item, and blocks the republish. A --check mode runs the same checks before any republish. Sent to lane page-check-at-publish; closes when it merges.",
   "short": "Item checks at export",
   "status": "open",
   "title": "When the page backup finds a bad item, should it still save the copy?",

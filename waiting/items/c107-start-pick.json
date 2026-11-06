@@ -6,6 +6,11 @@
   "id": "c107-start-pick",
   "kind": "decision",
   "lane": "lane local-lane-start-no-click (session_013NEJL2TLonvddw6ByF5XGE): builds the pick after PR #1339 lands",
+  "lastAnswer": {
+    "at": "2026-11-06T20:17:22.777Z",
+    "choice": "none",
+    "note": "how's this correct options?"
+  },
   "n": 297,
   "options": [
     {
@@ -34,9 +39,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "step c107; lane local-lane-start-no-click (session_013NEJL2TLonvddw6ByF5XGE)",
-  "reply": "Asked again 14:18 CST, built on all three Mac probes (lane PR #1339).",
+  "reply": "They were not the right options (14:20 CST). All three accept that the desktop start tool is the only way to start a lane, and it starts only on a turn you type. Two ways round that were never weighed: (1) the coordinator starts each Mac lane by running the claude command itself, in that lane's own worktree, which shows no desktop card; (2) lanes that do not need your Mac run as cloud sessions, which start with no card today. Options withdrawn. The c107 lane tests both on your Mac before it asks you again.",
   "short": "Mac lane start, no click",
-  "status": "open",
+  "status": "deferred",
   "title": "How should your Mac coordinator start lanes with no click?",
   "why": "Your ask (13:24 CST): local coordinators still need your press to start each lane."
 }
