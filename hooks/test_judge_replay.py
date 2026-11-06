@@ -6,7 +6,7 @@ Standard library only, and no test runner.
 
 The runner, as the builder writes it. This file is its interface.
 
-- JUDGES: name -> {"corpus": "hooks/judge_corpus/<name>.json", "scope": [repo-relative paths], "answers":
+- JUDGES: name -> {"corpus": ".github/judge-replay/corpus/<name>.json", "scope": [repo-relative paths], "answers":
   {"allow": ..., "deny": ...}}, for each name in NAMES. Each scope holds hooks/decision_watch.py, the one model seam, and
   the judge's own module file. Each answer is one model answer, in the judge's own shape, that reads every case as allow
   or as deny.
@@ -77,7 +77,7 @@ TOUCH = (
     (["hooks/decision_watch.py"], "all"),
     (["hooks/judge_replay.py"], "all"),
     (["hooks/prose_judge.py"], ["prose_judge"]),
-    (["hooks/judge_corpus/reply_judge.json"], ["reply_judge"]),
+    ([".github/judge-replay/corpus/reply_judge.json"], ["reply_judge"]),
     (["hooks/shared_names.py"], "all"),
     (["hooks/guard.py"], "all"),
 )
@@ -85,6 +85,7 @@ NO_AUTH = (None, "no auth")
 # lint/test_ci_scope.py pins the CI scope's judge_replay flag, so it names the runner by that flag. It wires nothing.
 SELF_FILES = ("hooks/judge_replay.py", "hooks/test_judge_replay.py", "lint/test_ci_scope.py")
 NAMED = re.compile(rb"judge[_-]replay")
+CORPUS_DIR = ".github/judge-replay/corpus"  # out of hooks/: the installer lands hooks/ but not its subfolders
 RUN = None  # this run's folder, made in main()
 WINDOW = 27  # the adapter's copy of the wording prompt, "Judge this SendMessage call", is this long
 PIN_BEFORE = "steps:\n  - run: npm install --global @anthropic-ai/claude-code@2.1.319\n  - run: echo lint\n"
@@ -222,8 +223,8 @@ def changed_run(repo, base):
 
 
 def load_corpus(name):
-    """(cases, "") for hooks/judge_corpus/<name>.json, or (None, reason) when it is missing or does not parse."""
-    rel = "hooks/judge_corpus/%s.json" % name
+    """(cases, "") for CORPUS_DIR/<name>.json, or (None, reason) when it is missing or does not parse."""
+    rel = "%s/%s.json" % (CORPUS_DIR, name)
     try:
         with open(os.path.join(REPO, rel), encoding="utf-8") as f:
             return json.load(f), ""
@@ -282,7 +283,7 @@ def case_corpora():
         if name not in judges:
             continue
         entry = judges[name] if isinstance(judges[name], dict) else {}
-        rel = "hooks/judge_corpus/%s.json" % name
+        rel = "%s/%s.json" % (CORPUS_DIR, name)
         check("corpus path is %s: %s" % (rel, name), entry.get("corpus") == rel,
               "corpus is %r" % (entry.get("corpus"),))
         cases, problem = load_corpus(name)
@@ -297,6 +298,34 @@ def case_corpora():
         expects = [case.get("expect") for case in cases if isinstance(case, dict)]
         check("corpus has an allow case: %s" % name, "allow" in expects, "no case expects allow")
         check("corpus has a deny case: %s" % name, "deny" in expects, "no case expects deny")
+
+
+def tracked_under(repo, prefix):
+    """The tracked paths of `repo` that start with `prefix`, or None when git cannot list them."""
+    try:
+        listed = subprocess.run(["git", "-C", repo, "ls-files", "-z"], capture_output=True)
+    except OSError:
+        return None
+    if listed.returncode != 0:
+        return None
+    return [p for p in listed.stdout.decode("utf-8", "replace").split("\0") if p.startswith(prefix)]
+
+
+def case_corpus_not_under_hooks():
+    """The installer lands hooks/ but not its subfolders, so no tracked file may sit under hooks/judge_corpus/.
+    The scope control: git lists the runner at this commit, so an empty listing below is a real empty listing."""
+    label = "corpus: no tracked file under hooks/judge_corpus/"
+    runner = tracked_under(REPO, "hooks/judge_replay.py")
+    if runner is None or "hooks/judge_replay.py" not in runner:
+        check("%s (scope control: git lists hooks/judge_replay.py)" % label, False,
+              "git ls-files gave %r" % (runner,))
+        return
+    check("%s (scope control: git lists hooks/judge_replay.py)" % label, True)
+    stray = tracked_under(REPO, "hooks/judge_corpus/")
+    if stray is None:
+        check(label, False, "git ls-files failed in %s" % REPO)
+        return
+    check(label, not stray, "%d tracked under hooks/judge_corpus/, first %s" % (len(stray), stray[0] if stray else ""))
 
 
 def case_scopes():
@@ -634,7 +663,7 @@ def case_each_judge_answer_reads_as_its_own_verdict():
             check(exit_label, code == 1, "exit %r" % (code,))
 
 
-CASES = (case_seam_control, case_corpora, case_scopes, case_touched, case_no_auth_rows,
+CASES = (case_seam_control, case_corpora, case_corpus_not_under_hooks, case_scopes, case_touched, case_no_auth_rows,
          case_cli_exit_follows_ci, case_cli_changed_head, case_runner_named_nowhere_else,
          case_feedback_bad_entry_reads_unknown, case_feedback_clean_answer_reads_no_unknown,
          case_sendmessage_errored_call_reads_unknown, case_sendmessage_one_seam_call_per_case_whatever_the_wording,
