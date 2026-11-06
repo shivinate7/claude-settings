@@ -1402,7 +1402,7 @@ class ReadyNotStarted(UpkeepFixture):
         self.assertEqual(self.ready_ids(self.ready_block(page)), ["c3", "c1"], "listed by step order")
 
     def test_age_floors_to_whole_hours(self):
-        self.ready_step("c2", order=2, updatedAt=self.before(220))  # 3 h 40 min: floor 3, round 4
+        self.ready_step("c2", order=2, updatedAt=self.before(220))  # 3 h 40 min floors to 3; rounding would give 4
         self.known_read()
         page, _ = self.build_from_main("--live", str(self.live))
         ready = self.ready_block(page)
