@@ -735,8 +735,9 @@ def names_word(out, word):
 
 
 class LinkConfig(unittest.TestCase):
-    """A malformed "link" value is red, and the failure names its key. A roots glob that matches no tracked file is
-    red, and the failure names the glob. An npm_scripts prefix that matches nothing is not an error."""
+    """A malformed "link" value is red, and the failure names its key. A roots glob that matches no tracked file, or
+    only files the link step cannot load, is red, and the failure names the glob. An unknown key in "link" is red. An
+    npm_scripts prefix that matches nothing is not an error. A file dropped by skip is printed, and the verdict stays green."""
     CLEAN = {"app.mjs": "export const a = 1;\n"}
 
     def assertMalformed(self, link, key, files=CLEAN):
@@ -794,6 +795,31 @@ class LinkConfig(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertIn("code-check: FAIL", out, out)
         self.assertIn("harness/*.mjs", out, out)
+
+    @NEEDS_LINK
+    def test_empty_roots_entry_is_red_and_names_roots(self):
+        self.assertMalformed({"roots": [""], "skip": [], "npm_scripts": []}, "roots")
+
+    @NEEDS_LINK
+    def test_roots_glob_matching_only_unlinkable_files_is_red_and_names_the_glob(self):
+        rc, out = link_check({"harness/a.js": "export const a = 1;\n"}, roots=["harness/*.js"])
+        self.assertNotIn("Traceback", out, out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("code-check: FAIL", out, out)
+        self.assertIn("harness/*.js", out, out)
+
+    @NEEDS_LINK
+    def test_unknown_key_in_link_is_red_and_names_the_key(self):
+        self.assertMalformed({"roots": ["app.mjs"], "skip": [], "npm_scripts": [], "root": ["app.mjs"]}, "root")
+
+    @NEEDS_LINK
+    def test_file_dropped_by_skip_is_printed_and_stays_green(self):
+        rc, out = link_check({"app.ts": "export const n: number = 1;\n",
+                              "legacy/old.ts": 'import "./gone.ts";\nexport const o = 1;\n'},
+                             roots=["*.ts"], skip=["legacy/"])
+        self.assertIn(LINK_PASS, out, out)
+        self.assertTrue(one_line_with(out, "skip drops legacy/old.ts"), out)
+        self.assertEqual(rc, 0, out)
 
     @NEEDS_LINK
     def test_npm_scripts_prefix_matching_no_tracked_file_stays_green(self):
