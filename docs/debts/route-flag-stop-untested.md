@@ -6,4 +6,4 @@
 
 **Decision.** `claims-carry-backing` (the claim-backing record, its falsifiers section).
 
-**Retire.** A test writes a refusal row with `route_flag` and runs the Stop read, and checks that the flag is read. Closed when that case is in the suite and green.
+**Retire.** A test writes a refusal row with `route_flag` and runs the Stop read, and checks that the flag is read. When that case is in the suite and green, the finding is closed.
