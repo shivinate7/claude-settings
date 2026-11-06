@@ -125,6 +125,9 @@ Design:
    session push the mail ref through the proxy? Does `ls-remote` work with Mac and Windows auth? Does
    the hostname match `list_computer_folders` `computer_name`? Can a Mac session call cloud
    `send_message`?
+   Already measured: cloud UserPromptSubmit fires on task-notification turns. This lane's session,
+   Claude Code 2.1.319, 2026-11-06 15:31 CST: the local_time hook line prints on each notification turn.
+   Cloud: a lane session pushes branches to claude-settings through the proxy (same session).
 3. Test-author: red cases against a `file://` bare `MAILBOX_REPO`: round trip, push race, take race,
    inform close, offline, cost counts.
 4. Builder: `hooks/mail.py`, `bin/mail` and `bin/mail.cmd`, the `hooks/local_time.py` call, and the
@@ -145,4 +148,4 @@ Design:
   reply set one `send_later` check-in? Rule `outcomes-mechanize-rules` bars tracking on a timer, and rule
   `git-ci-wait-checks-in` allows a timed check-in. Cost: one one-shot scheduled task per waiting request;
   it starts no process and writes no file. Recommended: allow it.
-- Q3, scope: the debt fix (done, commit 7059961a) and build steps 1 and 2 only. A parser for the message format was dropped 2026-11-06 13:15 CST: with no new hook, nothing would call it (rule building-land-design-or-abandon). Coordinator pick, 2026-11-06 12:48 CST; it can be undone.
+- Q3, scope: the debt fix (done, commit 7059961a) and the git-mailbox build steps 1 to 5. The parser for the message format was dropped 2026-11-06 13:15 CST and stays dropped (rule building-land-design-or-abandon). Coordinator pick, 2026-11-06 12:48 CST; it can be undone.
