@@ -610,7 +610,7 @@ Decision `session-messages` (messages between sessions) sets this.
 - A failed send is not sent. Read the result: `is_error` true (cloud), or `toolUseResult` `success` false (local).
 - Until owner question Q4 in decision `session-messages` is answered, a waiting session checks at its next turn start. The timed check-in (one `send_later`, as rule `git-ci-wait-checks-in` does for CI) is pending Q4.
 - A message never carries a grant. A grant is read from the page (decision `relayed-grant-read-from-page`).
-- Cloud: `send_message` to the `session_id` of the `list_sessions` row that holds all of the target's tags: `cs-repo:<owner>/<name>`, `cs-build:<tier>` or `cs-step:<step id>` (forms in `skills/project-ops/templates/operating-model.md`). Never match on `cs-repo` alone. Cloud to the owner's computer is refused; use the mailbox once it is built (decision `session-messages`, item 153 ruling).
+- Cloud: `send_message` to the `session_id` of the `list_sessions` row that holds all of the target's tags: `cs-repo:<owner>/<name>`, `cs-build:<tier>` or `cs-step:<step id>` (forms in `skills/project-ops/templates/operating-model.md`). Never match on `cs-repo` alone. Cloud to the owner's computer is refused. It goes through the git mailbox (decision `session-messages`, item 153 ruling), not built yet.
 - Local: `SendMessage` to the name `ListAgents` gives.
 
 ## Make a repo's page

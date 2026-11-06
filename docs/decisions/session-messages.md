@@ -56,8 +56,8 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
 - A send whose result is an error counts as not sent (`failed_tool_use_ids` in `lint/_transcript.py`).
 - A message never carries a grant (decision relayed-grant-read-from-page).
 - Homes: this record; the convention and adapters in skill `waiting-page` beside the page's own
-  routing; transcript reads in `lint/_transcript.py`. No new hook until an incident names one
-  (`building-guard-needs-incident`).
+  routing; transcript reads in `lint/_transcript.py`; the mailbox in `hooks/mail.py` (called from
+  `hooks/local_time.py`) and `bin/mail`.
 
 ## Reach between the cloud and the owner's computer (page item 153)
 
@@ -70,33 +70,67 @@ sessions on one computer. Cloud to the owner's computer by `send_message` was re
 `elevated_session_untrusted_device` (PR #1051, plan for local-session reach; decision auto-mode-owner-acts).
 
 Read from the binary, unmeasured live: an artifact republish wakes each session that watches it, and
-that wake is not a `peer` turn. A plain comment or an `ArtifactData` write wakes nothing. Whether a
-desktop session's watch wakes it is unmeasured.
+that wake is not a `peer` turn. A plain comment or an `ArtifactData` write wakes nothing. The Mac test
+below covers desktop sessions.
 
-Ruling: mailbox artifact (owner, page item 153, pick a, 2026-11-06 13:21 CST, relayed by triage).
-One private mailbox artifact per receiver. A message is one `ArtifactData` doc; the sender republishes
-the receiver's mailbox to wake it; the receiver reads unanswered mail at each wake and turn start. Cost
-per send: one write and one publish. No process, no timer. Not picked: a git mailbox, a local relay
-program, keeping peer messages as they are.
+Mac test (task 294), 2026-11-06 13:57 CST, in the owner's Mac session: the Mac uses another Claude
+account, so it cannot read a cloud account's artifact. So an artifact mailbox cannot reach the Mac.
+Desktop sessions have no `ArtifactComments` tool. An artifact watch wakes only cloud sessions.
 
-Test before any build (12 messages, cloud to Mac):
+Ruling: git mailbox, read at turn start (owner, page item 153, pick a, 2026-11-06 15:24 CST). Cloud to
+cloud keeps `send_message`. The mailbox serves a sender or receiver on the owner's computers.
+Later additions, not built: a Mac doorbell (option B) and a local relay (option C). Owner note: "i think
+B and C can still work too though probably."
+Store: open with the owner (MAILBOX_REPO).
 
-1. A cloud session publishes a private artifact, the mailbox, and gives its URL.
-2. A desktop session on the Mac watches it with `ArtifactComments`, then ends its turn.
-3. The cloud session writes `mail/<n>` with `ArtifactData`, then republishes the mailbox. It waits for
-   the Mac session to write `reply/<n>`, then sends the next. It does this 12 times.
-4. The Mac session counts its wakes and reads `origin.kind` on each wake in its transcript.
+Design:
 
-Pass: 12 wakes, no `peer` stamp, no `[peer-guard]` line. A fail falls back to the next pick the owner
-makes, not to a build.
+- Format and path. One file per message, `mail/<addr>/<id>.md`. Line 1: `Msg <id> from <tags> to <tags>
+  kind request|inform|reply re <id or -> try <n>`. Line 2: `Reply-to: <addr>`. The body follows.
+  Addresses: `cloud/<session_id>`; `pc/<host-slug>/<owner>-<repo>` for first contact with a local
+  session; `pc/<host-slug>/<owner>-<repo>/<session_id>` once the id is known from a Reply-to. A hook
+  cannot read session tags (`hooks/session_start.sh`). So the address uses what the receiver's hook can
+  compute: session id and cwd from the payload, `CLAUDE_CODE_REMOTE_SESSION_ID` in cloud, hostname, and
+  the repo slug from `.git/config`, found by walking up.
+- Send. `bin/mail send`, with `bin/mail.cmd` beside it, as `bin/verdict.cmd` is. It uses a bare cache
+  clone, `~/.claude/mail.git`, and plumbing only (hash-object, mktree, commit-tree, push to
+  refs/heads/mail). It never uses a working tree. Push race: file names are unique. On a
+  non-fast-forward push, it fetches again, rebuilds on the new tip, and retries at most 5 times. Then it
+  prints "not sent" and exits 1.
+- Turn-start read. Module `hooks/mail.py`, called from `hooks/local_time.py` `main` (UserPromptSubmit).
+  It starts no process of its own. It runs `git ls-remote <repo> refs/heads/mail` (3 s bound,
+  GIT_TERMINAL_PROMPT=0) and compares the ref with the cache ref. Only when the ref moved does it fetch,
+  run `ls-tree mail/<own addrs>/`, and `cat-file --batch`. Unread = a file still under `mail/<addr>/`.
+  It keeps no log. It prints one line per open message (id, from, kind, age) and points to
+  `mail read <id>`. A failure prints "mail unknown: <reason>", never "no mail". Cost per turn: one git
+  start and one network call when the ref is unchanged. When it moved, at most four git starts. Files
+  are written only in the cache clone, and only on a move. Test: a process-start stand-in and a
+  files-written snapshot, as in `hooks/test_daily_note.py`.
+- Take and reply. `mail take <id>` makes one commit that moves the file to `done/<addr>/<id>.md`, with
+  `Taken-by: <addr> <time>`. A session acts only after that push succeeds. In a take race, the loser
+  finds the path gone, prints "taken by another", and does not act. A request gets a reply file, sent to
+  its Reply-to, with `re <id>`. An inform closes by the take alone.
+- Failure classes: push race (retry); offline Mac (mail waits; "mail unknown"); stale clone (`ls-remote`
+  each turn); auth on the Mac ("mail unknown: auth", no prompt); dead session (exact-address mail stays;
+  repo-address mail goes to the next session in that repo; age shown); a turn with no UserPromptSubmit
+  (the skill says to run `mail read` on any peer or task wake); `done/` grows (a note).
+- Risks: how `janitor/sweep.py` treats a `mail` branch that never merges is unknown. The
+  UserPromptSubmit time budget is shared with `local_time`.
 
 ## Build in work order
 
-1. Measure, no code: 11 round trips in cloud and on the Mac, with replies on; does a `send_later` turn
-   reset the chain; does UserPromptSubmit fire on a peer turn. Check: each result in this record with
-   its version and time.
-2. Write the convention and the cloud and local adapters into the skill. Check: a two-session trial of
-   20 messages, none lost, none acted on twice.
+1. Rewrite the record and skill text for this ruling. Add the GLOSSARY row "mailbox". Never "inbox":
+   the owner feedback inbox uses that word.
+2. Measure: does UserPromptSubmit fire on task-notification and peer turns, cloud and Mac? Can a cloud
+   session push the mail ref through the proxy? Does `ls-remote` work with Mac and Windows auth? Does
+   the hostname match `list_computer_folders` `computer_name`? Can a Mac session call cloud
+   `send_message`?
+3. Test-author: red cases against a `file://` bare `MAILBOX_REPO`: round trip, push race, take race,
+   inform close, offline, cost counts.
+4. Builder: `hooks/mail.py`, `bin/mail` and `bin/mail.cmd`, the `hooks/local_time.py` call, and the
+   `settings.json` env default.
+5. Skill section rewrite. Check: a two-session trial of 20 messages, cloud to Mac, none lost, none acted
+   on twice.
 
 ## Owner choices
 
