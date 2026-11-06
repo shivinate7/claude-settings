@@ -103,7 +103,9 @@ Scratch files live in one temp directory, removed at exit.
 """
 
 import atexit
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -114,11 +116,14 @@ import sys
 import tempfile
 import time
 import types
+import unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+sys.path.insert(0, os.path.join(HERE, "test_support"))
+import cost_probe  # noqa: E402  the shared cost counters (hooks/test_support/cost_probe.py)
 # Absolute: each case runs the hook with its own temp folder as cwd, so a relative path breaks there.
 MODULE = os.path.abspath(os.environ.get("CI_WAKE_MODULE") or os.path.join(HERE, "ci_wake.py"))
 PY = sys.executable
@@ -1759,8 +1764,63 @@ def main():
     case_read_pr_maps_rest_fields()
 
     print()
+    if not cost_probe.run_class(CostTests):
+        FAILS.append("CostTests")
     print("%d checks, %d failed" % (COUNT[0], len(FAILS)))
     return 1 if FAILS else 0
+
+
+class CostTests(unittest.TestCase):
+    """What one CI wake costs (rule outcomes-mechanize-rules; decision ci-wait-reads-run-status). main() runs in
+    process with the watch stubbed, so cost_probe.children() counts each child it starts. The status reads run
+    on the fake clock of watch_run_on_fakes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.folder = cost_probe.run_folder()
+        cls.mod = load_module()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.folder, ignore_errors=True)
+
+    def test_each_gh_pr_ready_gets_one_watch_and_the_hook_starts_no_child(self):
+        watched = []
+
+        def fake_watch(selector, repo, cwd, deadline, lock_dir):
+            watched.append(selector)
+            return None
+
+        payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "gh pr ready 12 && gh pr ready 13"},
+                              "cwd": self.folder})
+        out = io.StringIO()
+        with cost_probe.children() as log, mock.patch.object(sys, "stdin", io.StringIO(payload)), \
+                mock.patch.object(self.mod, "watch_pr", fake_watch), contextlib.redirect_stdout(out):
+            code = self.mod.main()
+        self.assertEqual(code, 0)
+        self.assertEqual(len(watched), 2, "one watch per gh pr ready in the command; got %r" % watched)
+        self.assertEqual(log.argvs, [], "the watches run in this process and start no child; got %r" % log.argvs)
+
+    def test_a_never_completing_run_reads_its_status_35_times_to_the_default_budget(self):
+        budget = self.mod.DEFAULT_DEADLINE
+        mod, raised, clock, calls, direct = watch_run_on_fakes([status_reply("in_progress")], budget)
+        reads = read_times(calls)
+        walk, t, gaps = 0, 0.0, mod.pauses()
+        while t < budget:  # the schedule: a read at each pause point before the deadline
+            walk += 1
+            t += next(gaps)
+        self.assertEqual(len(reads), walk,
+                         "one read at each pause point before the deadline: %d reads, schedule says %d"
+                         % (len(reads), walk))
+        self.assertEqual(len(reads), 35, "a %d s watch that never completes reads 35 times; got %d"
+                         % (budget, len(reads)))
+        self.assertAlmostEqual(clock.now - T0, budget, places=6, msg="the watch ends at its deadline")
+
+    def test_the_default_budget_ends_before_the_hook_is_killed(self):
+        row = cost_probe.settings_timeout("ci_wake.py")
+        self.assertIsNotNone(row, "settings.json has a hook row for ci_wake.py")
+        self.assertLess(self.mod.DEFAULT_DEADLINE, row,
+                        "the watch budget %s s ends before the row timeout %s s" % (self.mod.DEFAULT_DEADLINE, row))
 
 
 if __name__ == "__main__":

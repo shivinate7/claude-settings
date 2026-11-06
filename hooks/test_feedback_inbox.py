@@ -215,6 +215,9 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+sys.path.insert(0, os.path.join(HERE, "test_support"))
+import cost_probe  # noqa: E402  the shared cost counters (hooks/test_support/cost_probe.py)
+import unittest  # noqa: E402  CostTests is a TestCase, so pytest collects it
 LT_PATH =os.environ.get("LOCAL_TIME_UNDER_TEST") or os.path.join(HERE, "local_time.py")
 GUARD_PATH = os.environ.get("FEEDBACK_GUARD_UNDER_TEST") or os.path.join(HERE, "feedback_guard.py")
 PRECOMPACT_PATH = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
@@ -3784,12 +3787,51 @@ def run_case(case):
         RED_CASES.append(case.__name__)
 
 
+# The cost of one judging Stop (plan align-watchers, section 2, the model-call judges row). The case
+# case_repeat_cost_one_call_one_grep_and_two_files pins its counts. These cases pin what it leaves out:
+# the one git start that is not the grep, and a quiet Stop that starts no git at all.
+
+class CostTests(unittest.TestCase):
+    def judging_stop(self, name):
+        root = repeat_repo(name, step=True, debt=True)
+        cfg, sid = new_cfg(), name
+        env = git_counter(cfg)
+        capture(cfg, sid, MSG_ONE, cwd=root)
+        add_item(cfg, sid, ITEM_LINE)
+        start = len(git_lines(env))
+        _, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
+        return calls, git_lines(env, start)
+
+    def test_the_judging_stop_starts_one_grep_and_one_other_git_process(self):
+        calls, lines = self.judging_stop("cost-argv")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(grep_starts(lines), 1, "the judging Stop starts one git grep; got %r" % lines)
+        others = [ln for ln in lines if "grep" not in ln.split()]
+        self.assertEqual(len(others), 1, "one other git start; got %r" % others)
+        self.assertIn("rev-parse", others[0].split(), "the other start reads the repo root: %r" % others)
+        self.assertIn("--show-toplevel", others[0].split(), "the other start reads the repo root: %r" % others)
+
+    def test_a_quiet_stop_starts_no_git_process(self):
+        root = repeat_repo("cost-quiet", step=True, debt=True)
+        cfg, sid = new_cfg(), "cost-quiet"
+        env = git_counter(cfg)
+        capture(cfg, sid, MSG_ONE, cwd=root)
+        add_item(cfg, sid, ITEM_LINE)
+        stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
+        start = len(git_lines(env))
+        _, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
+        self.assertEqual(calls, [], "a Stop with nothing new makes no model call")
+        self.assertEqual(git_lines(env, start), [], "a Stop with nothing new starts no git process")
+
+
 def main():
     try:
         for case in CASES:
             run_case(case)
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
+    if not cost_probe.run_class(CostTests):
+        RED_CASES.append("CostTests")
     if RED_CASES:
         print("test_feedback_inbox FAIL: %d of %d cases red" % (len(RED_CASES), len(CASES)))
         return 1

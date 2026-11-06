@@ -40,8 +40,12 @@ import sys
 import tempfile
 import time
 import types
+import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "test_support"))
+import cost_probe  # noqa: E402  the shared cost counters (hooks/test_support/cost_probe.py)
 HOOK = os.environ.get("SENDMESSAGE_STATE_UNDER_TEST") or os.path.join(HERE, "sendmessage_state.py")
 ROOT = tempfile.mkdtemp(prefix="sendmessage_state_cases_")
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)  # a pass, a failed case or a crash leaves no folder
@@ -627,6 +631,107 @@ def case_deny_ends_with_the_override_line():
     check("a deny for an agent's call names `override 15m`", "override 15m" in reason, detail(r))
 
 
+# The cost of one SendMessage (plan align-watchers, section 2, the sendmessage_state row). Every call
+# makes the wording call. A plain message to a named receiver also reads the board through one node
+# child, and makes the busy call when the board says busy. A malformed call starts nothing. The reader
+# child is killed with its process group at READER_TIMEOUT, and nothing in that group outlives the hook.
+
+POSIX_ONLY = unittest.skipIf(os.name == "nt", "the fake reader is a POSIX shell script and a process group")
+
+
+class CostTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.run_folder = cost_probe.run_folder()
+        spec = importlib.util.spec_from_file_location("sendmessage_state_cost", HOOK)
+        cls.sm = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.sm)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.run_folder, ignore_errors=True)
+
+    def folder(self):
+        return tempfile.mkdtemp(dir=self.run_folder)
+
+    @staticmethod
+    def fake_node(folder, state):
+        """A `node` on PATH that prints `state`: the reader's answer, with no board read."""
+        bin_dir = os.path.join(folder, "bin")
+        os.makedirs(bin_dir)
+        path = os.path.join(bin_dir, "node")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("#!/bin/sh\necho %s\n" % state)
+        os.chmod(path, 0o755)
+        return bin_dir
+
+    def hook(self, stdin, state=None, folder=None):
+        folder = folder or self.folder()
+        env = {}
+        if state is not None:
+            env["PATH"] = self.fake_node(folder, state) + os.pathsep + os.environ.get("PATH", "")
+        return cost_probe.run_hook(HOOK, stdin, folder, [[{"ok": True}, None]], env=env)
+
+    @staticmethod
+    def send(to, message):
+        return json.dumps({"session_id": "cost-send", "tool_name": "SendMessage",
+                           "tool_input": {"to": to, "message": message}})
+
+    def test_a_malformed_call_starts_nothing(self):
+        run = self.hook("not json")
+        self.assertEqual((run["code"], run["models"], run["children"], run["files"], run["out"]), (0, [], [], [], ""))
+
+    @POSIX_ONLY
+    def test_a_plain_message_to_a_busy_receiver_costs_two_model_calls_and_one_reader_child(self):
+        run = self.hook(self.send("peer", "Done"), state="busy")
+        self.assertEqual(len(run["models"]), 2, "the wording call and the busy call; got %r" % run["models"])
+        self.assertEqual(sorted(m["timeout"] for m in run["models"]),
+                         sorted([self.sm.WORDING_TIMEOUT, self.sm.MODEL_TIMEOUT]))
+        self.assertEqual(cost_probe.names(run["children"]), ["node"],
+                         "one reader child and no other; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "the reader writes no file under the config dir")
+
+    @POSIX_ONLY
+    def test_a_plain_message_to_an_idle_receiver_costs_one_model_call_and_one_reader_child(self):
+        run = self.hook(self.send("peer", "Done"), state="idle")
+        self.assertEqual(len(run["models"]), 1, "only the wording call; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["node"])
+
+    def test_a_structured_message_costs_one_wording_call_and_no_reader(self):
+        run = self.hook(json.dumps({"session_id": "cost-send", "tool_name": "SendMessage",
+                                    "tool_input": {"to": ["peer"], "message": {"text": "Done"}}}))
+        self.assertEqual(len(run["models"]), 1, "the wording call only; got %r" % run["models"])
+        self.assertEqual(run["children"], [], "a structured message reads no board")
+
+    @POSIX_ONLY
+    def test_a_reader_that_hangs_is_killed_with_its_group_at_the_timeout(self):
+        folder = self.folder()
+        marker = os.path.join(folder, "spawned")
+        reader = os.path.join(folder, "reader.py")
+        with open(reader, "w", encoding="utf-8") as f:
+            f.write("import subprocess, sys, time\n"
+                    "subprocess.Popen([sys.executable, '-c', 'import time\\nwhile True: time.sleep(1)'])\n"
+                    "open(%r, 'w').close()\n"
+                    "time.sleep(600)\n" % marker)
+        with mock.patch.object(self.sm, "READER_TIMEOUT", 2), \
+                mock.patch.object(self.sm, "find_reader", lambda: reader), \
+                mock.patch.object(self.sm, "shutil", types.SimpleNamespace(which=lambda name: sys.executable)):
+            with cost_probe.children() as log:
+                state = self.sm.receiver_state("peer")
+        if log.procs:  # a failing case must not leave the reader running
+            self.addCleanup(cost_probe.stop_group, log.procs[0])
+        self.assertEqual(state, "unseen", "a reader that times out reads as unseen")
+        self.assertEqual(len(log.argvs), 1, "the hook starts one reader child; got %r" % log.argvs)
+        self.assertTrue(os.path.exists(marker), "the reader started its own child before the timeout, so the case is not vacuous")
+        leader = log.procs[0].pid
+        deadline = time.monotonic() + 5  # a bounded wait for the kill to land; a kill that never lands fails
+        left = cost_probe.group_members(leader)
+        while left and time.monotonic() < deadline:
+            time.sleep(0.05)
+            left = cost_probe.group_members(leader)
+        self.assertEqual(left, [], "nothing in the reader's group outlives the hook; still alive: %r" % left)
+
+
 def case_hook_runs():
     for case in (case_model_row_names_the_call,
                  case_wording_call_carries_its_model_and_no_effort,
@@ -652,6 +757,8 @@ if __name__ == "__main__":
     write_launchers()
     case_find_reader()
     case_hook_runs()
+    if not cost_probe.run_class(CostTests):
+        FAILED.append("CostTests")
     if FAILED:
         print("%d check(s) failed" % len(FAILED))
     elif SKIPPED:
