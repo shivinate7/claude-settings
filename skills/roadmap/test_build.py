@@ -1524,6 +1524,7 @@ class DoneWithoutCheck(UpkeepFixture):
         self.commit_steps({
             "on-the-line": self.done_step(updated=self.since(), note="Shipped."),
             "one-second-early": self.done_step(updated=self.just_before(), note="Shipped."),
+            "early-named": self.done_step(updated=self.just_before(), note="Done check: X."),
         })
         _, entries = self.listed()
         self.assertIn("on-the-line", entries)  # scope first: the step on the constant is in scope and listed
