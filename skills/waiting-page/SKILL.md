@@ -597,17 +597,20 @@ If that session has ended, the writer takes it. The reply ask is answered like a
 
 ## Message another session
 
+Draft: decision `session-messages` is open; build step 1 (measure) has not run.
+
 Decision `session-messages` (messages between sessions) sets this.
 
 - Every message starts with this line: `Msg <id> from <role> to <role> kind request|inform|reply re <id or -> try <n>`.
-  `<id>` is `msg-` plus an `askId`-style stamp (`page.html`). `<role>` is `owner`, or a session's `cs-repo:<repo>` tag with its `cs-build:<tier>` or `cs-step:<lane>` tag. `re` names the message it answers, or `-`.
-- The reply is the ack. An `inform` needs no reply. Send no separate ack: each send spends the peer guard and the desktop cap.
+  `<id>` is `msg-` plus an `askId`-style stamp (`page.html`). `<role>` is `owner`, or a session's tags: `cs-repo:<owner>/<name>` with `cs-build:<tier>` or `cs-step:<step id>`. `re` names the message it answers, or `-`.
+- The reply is the ack. An `inform` needs no reply. Send no separate ack: each local `SendMessage` spends the peer guard and the desktop cap.
 - One `request` and one `reply` per exchange.
-- The 11th send before the owner types is refused (the desktop cap). Then route the rest through the parent or a record, never a peer loop. A scheduled task never resets the chain: that bypasses the peer guard.
+- A resend keeps the request id and raises `try` by one, so the peer guard's 30 s same-text check does not drop it; the receiver acts on an id once.
+- The 10-send cap (the desktop cap) refuses the 11th `SendMessage` to a Claude Desktop session on this computer since the owner last typed. Cloud `send_message` arrives as a task notification and is not counted (measured 2026-11-06, Claude Code 2.1.319; decision `session-messages`, item 153 section). Past 10, route the rest through the parent or a record, never a peer loop. Never use a scheduled task to reset the chain: that bypasses the peer guard.
 - A failed send is not sent. Read the result: `is_error` true (cloud), or `toolUseResult` `success` false (local).
-- A session that waits on a reply sets one `send_later` check-in when it starts to wait, as rule `git-ci-wait-checks-in` does for CI. That notices a lost message (owner choice Q2, decision `session-messages`).
+- A cloud session that waits on a reply sets one `send_later` check-in when it starts to wait, as rule `git-ci-wait-checks-in` does for CI. A local session checks at its next turn start. Either way a lost message is noticed (owner choice Q2, decision `session-messages`).
 - A message never carries a grant. A grant is read from the page (decision `relayed-grant-read-from-page`).
-- Cloud: `send_message` to the `session_id` in the `list_sessions` row whose `cs-repo`, `cs-build` or `cs-step` tags match.
+- Cloud: `send_message` to the `session_id` of the `list_sessions` row that holds all of the target's tags: `cs-repo:<owner>/<name>`, `cs-build:<tier>` or `cs-step:<step id>` (forms in `skills/project-ops/templates/operating-model.md`). Never match on `cs-repo` alone.
 - Local: `SendMessage` to the name `ListAgents` gives.
 
 ## Make a repo's page
