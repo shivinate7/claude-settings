@@ -84,14 +84,33 @@ def link_roots(root, link, files):
     return sorted(n for n in names if n.endswith(LINK_EXTENSIONS) and not (skip and n.startswith(skip)))
 
 
+def link_config_problems(link, files):
+    """Each way the link key is malformed, naming its key. A roots glob that matches no tracked file is one too:
+    it would check nothing and stay green. An npm_scripts prefix that matches nothing is not, as a script may go."""
+    if not isinstance(link, dict):
+        return ["link in %s must be an object" % CONFIG]
+    out = []
+    for key in ("roots", "skip", "npm_scripts"):
+        value = link.get(key, [])
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            out.append("link.%s in %s must be a list of strings" % (key, CONFIG))
+        elif key != "roots" and any(not v.strip().strip("/") for v in value):
+            out.append("link.%s in %s has an empty entry, which matches every file" % (key, CONFIG))
+    if not out:
+        out = ["link.roots glob %s in %s matches no tracked file" % (g, CONFIG)
+               for g in link.get("roots", []) if g and not any(fnmatch.fnmatchcase(n, g) for n in files)]
+    return out
+
+
 def link_step(root, cfg, files):
     """Failures from the opt-in link step. No "link" key is no step. Typescript missing from the repo is unknown:
     it fails only under CI (decision ci-unknown-is-red)."""
     link = cfg.get("link")
     if link is None:
         return []
-    if not isinstance(link, dict):
-        return ["%s: the link key in %s must be an object" % (CONFIG, CONFIG)]
+    bad = link_config_problems(link, files)
+    if bad:
+        return bad
     try:
         roots = link_roots(root, link, files)
     except (OSError, ValueError, AttributeError, TypeError) as e:
