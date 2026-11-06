@@ -1,0 +1,24 @@
+{
+  "added": "2026-11-06T20:21:00Z",
+  "command": {
+    "mac": "Probe c107 #4. Measure, do not fix. Record each answer as yes/no plus any error text.\n1) Run `claude --version` and `which claude`.\n2) Make a throwaway worktree: `git worktree add ../probe-c107d -b probe-c107d origin/main`.\n3) Run in the background, from that folder: `cd ../probe-c107d && claude -p \"Reply with the output of git branch --show-current, then stop.\" --output-format json > /tmp/probe-c107d.json 2>&1`. Record: did any card or prompt show (ask me in one line), did it finish, is it logged in (no login error), and the session_id in the JSON.\n4) Run `cd ../probe-c107d && claude -p \"Reply SECOND.\" --resume <that session_id> --output-format json`. Record whether it answered SECOND.\n5) Ask me in one line: does a session for probe-c107d show in the desktop app's session list?\n6) Use ToolSearch for \"create_session\". Record whether a create_session tool exists here. If it does, call it once with title \"probe c107 F\", prompt \"Reply OK, then stop.\", and the claude-settings GitHub repo as source; record card yes/no and started yes/no, then archive F.\n7) Clean up: `git worktree remove ../probe-c107d`, `git branch -D probe-c107d` (if the guard refuses, push it to archive/probe-c107d on origin first), delete /tmp/probe-c107d.json.\n8) Print one block: the version and one line per step, for me to paste on this item."
+  },
+  "context": "Goal: your Mac coordinator starts lanes with no press from you.\nProblem (goal): the desktop start tool works only on a turn you type. Two other starts were never tested: the coordinator running the claude command itself, and a cloud session start from your Mac.\nOnly a session on your Mac can test them. The probe makes one throwaway worktree, one command-line session, and at most one cloud session, then removes them.",
+  "home": "roadmap step c107",
+  "id": "c107-mac-probe-4",
+  "kind": "task",
+  "n": 300,
+  "owner": "lane local-lane-start-no-click (session_013NEJL2TLonvddw6ByF5XGE)",
+  "rank": 3,
+  "ref": "step c107; item 297",
+  "short": "Mac press-free start probe",
+  "status": "open",
+  "steps": [
+    "Open a new Claude Code desktop chat on your Mac, in your local claude-settings folder (not over Remote Control).",
+    "Paste the text below and press Enter.",
+    "Answer each one-line question it asks.",
+    "Paste the block it prints into a note on this item, and mark it done."
+  ],
+  "title": "Paste c107 probe 4 into a Claude Code session on your Mac",
+  "why": "It tests the two lane starts that need no press, so item 297 can come back with only press-free options."
+}
