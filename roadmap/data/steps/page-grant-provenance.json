@@ -1,9 +1,9 @@
 {
   "title": "page_grant.py proves where each fetched answer came from",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 103.344,
   "why": "page_grant.py proves where each fetched answer came from.",
-  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): PR #1299 in batch 31 #1300; fixes review round 1 findings F1 to F3 on #1293 (first as #1295).",
-  "updatedAt": "2026-11-06T18:03:00Z"
+  "note": "Nov 6 12:29 CST (coordinator): DONE. Batch 31 merged (#1300, sha 21d20281c) with #1299. Item 267 closed.\nNov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): PR #1299 in batch 31 #1300; fixes review round 1 findings F1 to F3 on #1293 (first as #1295).",
+  "updatedAt": "2026-11-06T18:30:00Z"
 }
