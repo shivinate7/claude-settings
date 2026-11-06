@@ -711,9 +711,9 @@ def format_report(rows, gold=None) -> str:
 # Read on demand; no timer, no long-lived process, not a required CI job. The two counts of report
 # mode hold here: a crash is not a kill, and a suite red on the clean source is not a killer.
 # Cost per pull request: one control run per suite, one run per suite per mutant, one `git worktree`
-# per job, one install per lockfile hash. Written: a temp folder of checkouts and one deps folder
-# per lockfile hash, all removed at the end. The target repository is left as found. `--known-defects` runs the same
-# installs in its own deps folder: one per lockfile hash, install and link, each up to INSTALL_TIMEOUT. In the action
+# per job, one install per lockfile hash, install and link. Written: a temp folder of checkouts and one deps folder
+# per lockfile hash, install and link, all removed at the end. The target repository is left as found. `--known-defects` runs the same
+# installs in its own deps folder, each up to INSTALL_TIMEOUT. In the action
 # that is a second install, because the `--changed` step removes its deps. A profile with a `select`
 # adds, per pull request, one git read for each script path in its argv that the commit lacks, and one folder
 # extract for a script that HEAD holds.
@@ -721,7 +721,7 @@ def format_report(rows, gold=None) -> str:
 # A PROFILE says how one repository is read: {"code": regex of product files, "code_not": regex of
 # files to leave out (optional), "tests": regex of suite files, "argv": the command with {suite} (the
 # suite path from `cwd`) and {deps} (the install folder), "classify": a CLASSIFIERS name, "cwd": the folder
-# the command runs in (optional), "install": argv, or a list of argv, run once per lockfile hash with the
+# the command runs in (optional), "install": argv, or a list of argv, run once per lockfile hash, install and link, with the
 # lockfile beside it in the deps folder (None for no install), "lockfile": its path in the repository,
 # "link": the folder the install makes, linked into each checkout beside the lockfile (None for none),
 # "select": argv with {path}, run in a checkout at the pull request's commit, that prints the suites which
