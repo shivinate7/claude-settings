@@ -4,6 +4,7 @@ A capability has one home. Read this page before you build a helper, and extend 
 
 ## Homes
 
+- reading the machine load and judging it normal, busy or full — `hooks/guard_load.py:load_verdict`
 - starting a child process with no console window — `hooks/_nowindow.py:run`
 - the model call of a judge hook — `hooks/decision_watch.py:invoke_model`
 - reading a JSON value by a dotted path, with a fan-out over a list — `lint/rule_audit.py:_walk`

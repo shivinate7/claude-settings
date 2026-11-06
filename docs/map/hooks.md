@@ -1,6 +1,6 @@
 # Hooks
 
-The hooks under `hooks/`. The pilot map covers four files here. What each hook does is in `docs/catalog.md`.
+The hooks under `hooks/`. The pilot map covers five files here. What each hook does is in `docs/catalog.md`.
 
 ## Code files
 
@@ -13,3 +13,6 @@ The hooks under `hooks/`. The pilot map covers four files here. What each hook d
 - `hooks/guard.py` — The guard that runs before each matched tool call, and it loads its rule modules first. A load that meets a half-installed set waits and tries again.
   - The load keeps trying for 5.0 seconds, and then it fails closed. — `_LOAD_WAIT_SECONDS = 5.0`
   - The load waits 0.25 seconds between two tries. — `_LOAD_STEP_SECONDS = 0.25`
+- `hooks/guard_load.py` — The one definition of a loaded machine: it reads memory in use and the disk's free space, and says whether the machine is normal, busy or full. The guard and `bin/sim-lease` both call it.
+  - Memory in use over 85.0 percent makes the machine busy. — `BUSY_MEMORY = 85.0`
+  - Memory in use over 95.0 percent makes the machine full. — `FULL_MEMORY = 95.0`

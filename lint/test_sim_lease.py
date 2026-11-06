@@ -2,13 +2,17 @@
 """Tests for bin/sim-lease, the Mac-wide lease that bin/sim-test takes before its own boot.
 
 Run: python3 lint/test_sim_lease.py. SIM_LEASE=PATH picks the tool; the default is bin/sim-lease in this repo.
-No case reads this machine's load or OS: PATH shims for uname and sysctl read files in the case's own folder, and the
-ps shim passes through to the real ps except for a start time that a case sets. CI and GITHUB_ACTIONS are unset for
-each run. A holder is a live `sleep` child or a child already reaped, so no case depends on a pid being free.
+No case reads this machine's memory, disk, load or OS. Each case runs a copy of the tool in its own tree, beside a
+copy of hooks/_nowindow.py and lint/guard_load_fake_test.py as hooks/guard_load.py. The fake returns the
+reading the case set (set_reading) and keeps the real verdict (decision one-load-definition). The uname shim says
+Darwin. The sysctl shim is a tripwire: sim-lease reads no vm.loadavg, so a case fails when sysctl runs. The ps shim
+passes through to the real ps except for a start time that a case sets. CI and GITHUB_ACTIONS are unset for each run.
+A holder is a live `sleep` child or a child already reaped, so no case depends on a pid being free.
 Temp files follow decisions/test-temp-standard.md: one run folder from lint/_test_temp.py per run, removed at the end.
 """
 import importlib.machinery
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -22,12 +26,19 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SIM_LEASE = os.environ.get("SIM_LEASE") or os.path.join(HERE, "..", "bin", "sim-lease")
+FAKE_GUARD_LOAD = os.path.join(HERE, "guard_load_fake_test.py")
+ROWS_PATH = os.path.join(HERE, "..", "hooks", "load_rows_test.py")
 REAL_PS = shutil.which("ps") or "/bin/ps"
 RUN_FOLDER = None
 SLOT_UDID = None  # read from the tool under test in setUpModule: the one home of the device IDs
+ROWS_MODULE = None  # hooks/load_rows_test.py: the shared readings and their levels
+NORMAL = {"memory_pct": 40.0, "disk_free_gb": 500.0, "disk_total_gb": 926.0}
 
 UNAME_SH = '#!/bin/sh\necho "${SIM_LEASE_TEST_UNAME:-Darwin}"\n'
-SYSCTL_SH = '#!/bin/sh\necho read >> "$SIM_LEASE_TEST_LOADLOG"\ncat "$SIM_LEASE_TEST_LOAD"\n'
+# The tripwire: sim-lease reads the load through guard_load, never through sysctl. Each run is logged twice, once to
+# the load-read log that every reading shares and once to the sysctl log that only a sysctl run writes.
+SYSCTL_SH = ('#!/bin/sh\necho sysctl >> "$SIM_LEASE_TEST_SYSCTLLOG"\necho read >> "$SIM_LEASE_TEST_LOADLOG"\n'
+             'cat "$SIM_LEASE_TEST_LOADAVG"\n')
 # A start time that a case wrote for pid P wins for `ps -o lstart= -p P`. Every other ps call is the real one.
 PS_SH = """#!/bin/sh
 pid= prev= lstart=
@@ -44,18 +55,19 @@ exec "$SIM_LEASE_TEST_REAL_PS" "$@"
 """
 
 
-def load_slot_udid(path):
-    """SLOT_UDID as the tool at PATH defines it. It is read from that file, never copied into this one."""
-    loader = importlib.machinery.SourceFileLoader("sim_lease_under_test", path)
+def load_module(path, name):
+    """The module at PATH, run from that file. It is read from the file, never copied into this one."""
+    loader = importlib.machinery.SourceFileLoader(name, path)
     module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
     loader.exec_module(module)
-    return module.SLOT_UDID
+    return module
 
 
 def setUpModule():
-    global RUN_FOLDER, SLOT_UDID
+    global RUN_FOLDER, SLOT_UDID, ROWS_MODULE
     RUN_FOLDER = _test_temp.run_folder()
-    SLOT_UDID = load_slot_udid(SIM_LEASE)
+    SLOT_UDID = load_module(SIM_LEASE, "sim_lease_under_test").SLOT_UDID
+    ROWS_MODULE = load_module(ROWS_PATH, "load_rows")
 
 
 def tearDownModule():
@@ -82,50 +94,83 @@ def stop(p):
     p.wait()
 
 
+def count_lines(path):
+    try:
+        with open(path) as f:
+            return len(f.read().splitlines())
+    except FileNotFoundError:
+        return 0
+
+
 class LeaseCase(unittest.TestCase):
-    """One case: its own config dir, home, shims and load file, and holders stopped after it."""
+    """One case: its own config dir, home, tree, shims and reading, and holders stopped after it."""
 
     def setUp(self):
-        base = tempfile.mkdtemp(dir=RUN_FOLDER)
-        self.addCleanup(shutil.rmtree, base, True)
-        self.cfg = os.path.join(base, "cfg")
-        self.home = os.path.join(base, "home")
-        self.shims = os.path.join(base, "shims")
-        self.ps_dir = os.path.join(base, "ps")
-        self.load_file = os.path.join(base, "loadavg")
-        self.load_log = os.path.join(base, "load_reads")
-        for d in (self.cfg, self.home, self.shims, self.ps_dir):
+        self.base = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.cfg = os.path.join(self.base, "cfg")
+        self.home = os.path.join(self.base, "home")
+        self.shims = os.path.join(self.base, "shims")
+        self.ps_dir = os.path.join(self.base, "ps")
+        self.tree = os.path.join(self.base, "tree")
+        self.reading_file = os.path.join(self.base, "reading.json")
+        self.load_log = os.path.join(self.base, "load_reads")
+        self.sysctl_log = os.path.join(self.base, "sysctl_calls")
+        self.loadavg_file = os.path.join(self.base, "loadavg")
+        for d in (self.cfg, self.home, self.shims, self.ps_dir, os.path.join(self.tree, "bin"),
+                  os.path.join(self.tree, "hooks")):
             os.makedirs(d)
+        self.tool, self.real_guard_load = self.copy_tree()
         for name, text in (("uname", UNAME_SH), ("sysctl", SYSCTL_SH), ("ps", PS_SH)):
             path = os.path.join(self.shims, name)
             with open(path, "w") as f:
                 f.write(text)
             os.chmod(path, 0o755)
-        self.set_load("0.50", "0.50", "0.50")
+        self.set_loadavg("0.50", "0.50", "0.50")
+        self.set_reading()
 
-    def set_load(self, one, five, fifteen):
-        with open(self.load_file, "w") as f:
+    def copy_tree(self):
+        """A copy of the tool under test, beside hooks/_nowindow.py and the fake guard_load. sim-lease resolves hooks/
+        from its own realpath, so the copy finds the fake and never the repo's guard_load. Returns the copy's path and
+        the path of the real guard_load the fake delegates to."""
+        tool_hooks = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(SIM_LEASE))), "hooks")
+        tool = os.path.join(self.tree, "bin", "sim-lease")
+        shutil.copy(SIM_LEASE, tool)
+        shutil.copy(os.path.join(tool_hooks, "_nowindow.py"), os.path.join(self.tree, "hooks", "_nowindow.py"))
+        shutil.copy(FAKE_GUARD_LOAD, os.path.join(self.tree, "hooks", "guard_load.py"))
+        return tool, os.path.join(tool_hooks, "guard_load.py")
+
+    def set_reading(self, **changes):
+        """The reading the fake guard_load returns: NORMAL with the keys given. None is an unread reading."""
+        with open(self.reading_file, "w") as f:
+            json.dump(dict(NORMAL, **changes), f)
+
+    def set_loadavg(self, one, five, fifteen):
+        """The line the sysctl shim prints. sim-lease must never read it, so no grant may depend on it."""
+        with open(self.loadavg_file, "w") as f:
             f.write("{ %s %s %s }\n" % (one, five, fifteen))
 
     def load_reads(self):
-        try:
-            with open(self.load_log) as f:
-                return len(f.read().splitlines())
-        except FileNotFoundError:
-            return 0
+        return count_lines(self.load_log)
+
+    def sysctl_calls(self):
+        return count_lines(self.sysctl_log)
 
     def env(self, **extra):
         env = {k: v for k, v in os.environ.items() if k not in (
             "CI", "GITHUB_ACTIONS", "CLAUDE_CONFIG_DIR", "SIM_LEASE_WAIT", "SIM_LEASE_POLL", "SIM_LEASE_TEST_UNAME")}
         env.update(HOME=self.home, CLAUDE_CONFIG_DIR=self.cfg,
                    PATH=self.shims + os.pathsep + os.environ.get("PATH", ""), SIM_LEASE_POLL="1",
-                   SIM_LEASE_TEST_LOAD=self.load_file, SIM_LEASE_TEST_LOADLOG=self.load_log,
-                   SIM_LEASE_TEST_PS=self.ps_dir, SIM_LEASE_TEST_REAL_PS=REAL_PS)
+                   SIM_LEASE_TEST_LOADAVG=self.loadavg_file, SIM_LEASE_TEST_LOADLOG=self.load_log,
+                   SIM_LEASE_TEST_SYSCTLLOG=self.sysctl_log,
+                   SIM_LEASE_TEST_PS=self.ps_dir, SIM_LEASE_TEST_REAL_PS=REAL_PS,
+                   FAKE_LOAD_REAL=self.real_guard_load, FAKE_LOAD_READING=self.reading_file,
+                   FAKE_LOAD_LOG=self.load_log)
         env.update(extra)
         return env
 
     def run_tool(self, *args, env=None):
-        return subprocess.run([sys.executable, SIM_LEASE, *args], env=self.env(**(env or {})),
+        return subprocess.run([sys.executable, self.tool, *args], env=self.env(**(env or {})),
                               capture_output=True, text=True, timeout=60)
 
     def take(self, device, pid, wait=1, env=None, udid=False):
@@ -147,7 +192,7 @@ class LeaseCase(unittest.TestCase):
 
     def queue_waiter(self, device, pid):
         """Starts a take that waits in the background. Returns once status lists its pid: a condition, not a delay."""
-        p = subprocess.Popen([sys.executable, SIM_LEASE, "take", "--device", device, "--pid", str(pid), "--wait", "30"],
+        p = subprocess.Popen([sys.executable, self.tool, "take", "--device", device, "--pid", str(pid), "--wait", "30"],
                              env=self.env(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL)
         self.addCleanup(stop, p)
@@ -164,20 +209,20 @@ class Slots(LeaseCase):
         self.assertEqual(grant(self.take("duo", first.pid)), (0, "1"), "the first duo take is not granted slot 1")
         self.assertEqual(grant(self.take("duo", second.pid)), (0, "2"), "the second duo take is not granted slot 2")
 
-    def test_slot_2_is_refused_at_a_5_minute_load_of_60(self):
+    def test_slot_2_is_refused_at_busy_memory(self):
         first, second = self.spawn(), self.spawn()
         self.assertEqual(grant(self.take("duo", first.pid)), (0, "1"), "the first duo take is not granted slot 1")
-        self.set_load("0.50", "60.00", "0.50")
+        self.set_reading(memory_pct=90.0)
         r = self.take("duo", second.pid)
-        self.assertEqual(r.returncode, 1, "slot 2 is not refused at a 5-minute load of 60")
+        self.assertEqual(r.returncode, 1, "slot 2 is granted at busy memory (90.0%)")
         self.assertEqual(r.stdout.strip(), "", "a refused duo take prints a slot")
 
-    def test_slot_2_is_granted_just_under_a_5_minute_load_of_60(self):
+    def test_slot_2_is_granted_just_under_the_busy_line(self):
         first, second = self.spawn(), self.spawn()
-        self.set_load("0.50", "59.99", "0.50")
+        self.set_reading(memory_pct=84.9)
         self.assertEqual(grant(self.take("duo", first.pid)), (0, "1"), "the first duo take is not granted slot 1")
         self.assertEqual(grant(self.take("duo", second.pid)), (0, "2"),
-                         "slot 2 is refused at a 5-minute load of 59.99")
+                         "slot 2 is refused at memory 84.9%, under the busy line")
 
     def test_a_third_duo_is_not_granted_while_slots_1_and_2_are_held(self):
         first, second, third = self.spawn(), self.spawn(), self.spawn()
@@ -192,40 +237,134 @@ class Slots(LeaseCase):
     def assert_waits_then_refused(self, device, needle):
         before = self.load_reads()
         r = self.take(device, os.getpid(), wait=2)
-        self.assertEqual(r.returncode, 1, "a %s take at this load is not refused with exit 1" % device)
+        self.assertEqual(r.returncode, 1, "a %s take at this reading is not refused with exit 1" % device)
         self.assertGreaterEqual(self.load_reads() - before, 2,
                                 "a %s take does not wait: it reads the load once" % device)
         lines = [line for line in r.stderr.splitlines() if line.strip()]
         self.assertEqual(len(lines), 1, "the refusal of a %s take is not one stderr line" % device)
-        self.assertIn(needle, lines[0], "the refusal of a %s take does not name the load" % device)
+        self.assertIn(needle, lines[0], "the refusal of a %s take does not name the reading" % device)
 
-    def test_a_take_waits_then_exits_1_at_a_5_minute_load_of_100(self):
-        self.set_load("0.50", "100.00", "0.50")
+    def test_a_take_waits_then_exits_1_at_full_memory(self):
+        self.set_reading(memory_pct=96.0)
         for device in ("duo", "pro"):
             with self.subTest(device=device):
-                self.assert_waits_then_refused(device, "100")
+                self.assert_waits_then_refused(device, "96.0")
 
-    def test_a_take_waits_then_exits_1_at_a_1_minute_load_of_60(self):
-        self.set_load("60.00", "0.50", "0.50")
+    def test_a_take_waits_then_exits_1_at_full_disk(self):
+        self.set_reading(disk_free_gb=4.0)
         for device in ("duo", "pro"):
             with self.subTest(device=device):
-                self.assert_waits_then_refused(device, "60")
+                self.assert_waits_then_refused(device, "4.0")
 
     def test_a_refusal_names_the_holder(self):
         first, second = self.spawn(), self.spawn()
         self.assertEqual(grant(self.take("duo", first.pid)), (0, "1"), "the first duo take is not granted slot 1")
-        self.set_load("0.50", "100.00", "0.50")
+        self.set_reading(memory_pct=96.0)
         r = self.take("duo", second.pid)
-        self.assertEqual(r.returncode, 1, "a duo take at a 5-minute load of 100 is not refused")
+        self.assertEqual(r.returncode, 1, "a duo take at full memory (96.0%) is not refused")
         self.assertTrue(mentions(r.stderr, first.pid), "the refusal does not name the holder's pid")
 
     def test_sim_lease_wait_sets_the_wait_when_wait_is_not_passed(self):
-        self.set_load("0.50", "100.00", "0.50")
+        self.set_reading(memory_pct=96.0)
         before = self.load_reads()
         r = self.run_tool("take", "--device", "duo", "--pid", str(os.getpid()), env={"SIM_LEASE_WAIT": "2"})
         self.assertEqual(r.returncode, 1, "a take without --wait is not refused with exit 1")
         self.assertGreaterEqual(self.load_reads() - before, 2,
                                 "SIM_LEASE_WAIT does not set the wait: the take does not poll")
+
+
+class Readings(LeaseCase):
+    """A reading decides a grant by its own level: busy refuses slot 2 only, full refuses every take, and an unread
+    reading holds every take, since sim-lease does not count it as normal."""
+
+    def test_a_busy_reading_grants_slot_1_and_refuses_slot_2(self):
+        first, second = self.spawn(), self.spawn()
+        self.set_reading(memory_pct=90.0)
+        self.assertEqual(grant(self.take("duo", first.pid)), (0, "1"), "a busy reading refuses slot 1")
+        self.assertEqual(self.take("duo", second.pid).returncode, 1, "slot 2 is granted at busy memory (90.0%)")
+
+    def test_a_busy_reading_grants_the_pro_pool(self):
+        pid = self.spawn().pid
+        self.set_reading(memory_pct=90.0)
+        self.assertEqual(grant(self.take("pro", pid)), (0, "pro"),
+                         "a busy reading refuses the pro pool: busy must not block a grant")
+
+    def test_an_unread_memory_reading_holds_every_take(self):
+        self.set_reading(memory_pct=None)
+        for device in ("duo", "pro"):
+            with self.subTest(device=device):
+                r = self.take(device, os.getpid(), wait=0)
+                self.assertEqual(r.returncode, 1, "a %s take with memory unread is granted" % device)
+                self.assertEqual(r.stdout.strip(), "", "a %s take with memory unread prints a slot" % device)
+                self.assertIn("unknown", r.stderr.lower(), "the refusal does not print memory as unknown")
+
+    def test_an_unread_disk_reading_holds_every_take(self):
+        self.set_reading(disk_free_gb=None, disk_total_gb=None)
+        for device in ("duo", "pro"):
+            with self.subTest(device=device):
+                r = self.take(device, os.getpid(), wait=0)
+                self.assertEqual(r.returncode, 1, "a %s take with the disk unread is granted" % device)
+                self.assertEqual(r.stdout.strip(), "", "a %s take with the disk unread prints a slot" % device)
+                self.assertIn("unknown", r.stderr.lower(), "the refusal does not print the disk as unknown")
+
+    def test_status_prints_an_unread_reading_as_unknown(self):
+        self.set_reading(memory_pct=None)
+        r = self.status()
+        self.assertEqual(r.returncode, 0, "status exits non-zero with memory unread")
+        self.assertIn("unknown", r.stdout.lower(), "status does not print the unread memory as unknown")
+
+    def test_a_high_load_average_does_not_hold_a_grant(self):
+        self.set_loadavg("99.00", "99.00", "99.00")
+        pid = self.spawn().pid
+        self.assertEqual(grant(self.take("duo", pid, wait=0)), (0, "1"),
+                         "a load average of 99 holds slot 1 with free memory and disk")
+
+    def test_take_and_status_start_no_sysctl(self):
+        pid = self.spawn().pid
+        self.assertEqual(grant(self.take("duo", pid)), (0, "1"), "the duo take is not granted slot 1")
+        self.assertEqual(self.status().returncode, 0, "status exits non-zero")
+        self.assertEqual(self.sysctl_calls(), 0,
+                         "sim-lease starts sysctl: the load is read through guard_load, not vm.loadavg")
+
+
+class SharedRows(LeaseCase):
+    """Each row of hooks/load_rows_test.py, as sim-lease grants it: slot 1, then slot 2 with slot 1 held, then pro
+    alone. The expected grant is written from the row's level and unread readings (decision one-load-definition)."""
+
+    def test_each_row_grants_as_its_level_and_its_unread_readings_say(self):
+        for row in ROWS_MODULE.ROWS:
+            with self.subTest(row=row["name"]):
+                self.check_row(row)
+
+    def check_row(self, row):
+        self.set_reading(**row["reading"])
+        unread = ROWS_MODULE.unread(row)
+        slot_1 = row["level"] != "full" and not unread
+        slot_2 = row["level"] == "normal" and not unread
+        self.cfg = tempfile.mkdtemp(dir=self.base)
+        first, second = self.spawn(), self.spawn()
+        self.expect_take("duo", first.pid, slot_1, "1", row)
+        self.expect_take("duo", second.pid, slot_2, "2", row)
+        self.cfg = tempfile.mkdtemp(dir=self.base)
+        self.expect_take("pro", self.spawn().pid, slot_1, "pro", row)
+
+    def expect_take(self, device, pid, granted, slot, row):
+        r = self.take(device, pid, wait=0)
+        if granted:
+            self.assertEqual(grant(r), (0, slot), "%s: the %s take is not granted %s" % (row["name"], device, slot))
+        else:
+            self.assertEqual(r.returncode, 1, "%s: the %s take is granted, and the row says refused"
+                             % (row["name"], device))
+
+
+class Give(LeaseCase):
+    def test_give_frees_the_lease_and_is_idempotent(self):
+        holder, never, later = self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        self.assertEqual(self.give(holder.pid).returncode, 0, "give of the holder's pid exits non-zero")
+        self.assertEqual(self.give(holder.pid).returncode, 0, "a second give of the same pid exits non-zero")
+        self.assertEqual(self.give(never.pid).returncode, 0, "give of a pid that holds nothing exits non-zero")
+        self.assertEqual(grant(self.take("duo", later.pid)), (0, "1"), "give did not free slot 1")
 
 
 class PoolExclusive(LeaseCase):
@@ -296,7 +435,6 @@ class Queue(LeaseCase):
         self.assertEqual(grant(self.take("duo", later.pid)), (0, "2"),
                          "a holder whose start time is unchanged lost slot 1")
 
-
     def test_a_timed_out_take_leaves_the_queue(self):
         holder, head, later = self.spawn(), self.spawn(), self.spawn()
         self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
@@ -312,16 +450,6 @@ class Queue(LeaseCase):
                          "the first duo take under TZ=UTC0 is not granted slot 1")
         self.assertEqual(grant(self.take("duo", later.pid, env={"TZ": "IST-5:30"})), (0, "2"),
                          "a holder recorded under TZ=UTC0 is reaped under TZ=IST-5:30")
-
-
-class Give(LeaseCase):
-    def test_give_frees_the_lease_and_is_idempotent(self):
-        holder, never, later = self.spawn(), self.spawn(), self.spawn()
-        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
-        self.assertEqual(self.give(holder.pid).returncode, 0, "give of the holder's pid exits non-zero")
-        self.assertEqual(self.give(holder.pid).returncode, 0, "a second give of the same pid exits non-zero")
-        self.assertEqual(self.give(never.pid).returncode, 0, "give of a pid that holds nothing exits non-zero")
-        self.assertEqual(grant(self.take("duo", later.pid)), (0, "1"), "give did not free slot 1")
 
 
 class UdidTake(LeaseCase):
@@ -348,9 +476,9 @@ class UdidTake(LeaseCase):
         self.assertEqual(len(set(udids)), 3, "two slots name the same device UDID")
 
     def test_a_refused_take_udid_prints_nothing(self):
-        self.set_load("0.50", "100.00", "0.50")
+        self.set_reading(memory_pct=96.0)
         r = self.take("duo", os.getpid(), udid=True)
-        self.assertEqual(r.returncode, 1, "a take --udid at a 5-minute load of 100 is not refused with exit 1")
+        self.assertEqual(r.returncode, 1, "a take --udid at full memory (96.0%) is not refused with exit 1")
         self.assertEqual(r.stdout.strip(), "", "a refused take --udid prints a UDID")
 
 
@@ -375,8 +503,8 @@ class Usage(LeaseCase):
 
 
 class Status(LeaseCase):
-    def test_status_lists_each_lease_and_waiter_on_its_own_line_with_the_load(self):
-        self.set_load("1.23", "4.56", "7.89")
+    def test_status_lists_each_lease_and_waiter_on_its_own_line_with_the_readings(self):
+        self.set_reading(memory_pct=42.5, disk_free_gb=123.4, disk_total_gb=926.0)
         holder, head = self.spawn(), self.spawn()
         self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
         self.queue_waiter("pro", head.pid)
@@ -387,7 +515,8 @@ class Status(LeaseCase):
                          "the lease is not on exactly one status line")
         self.assertEqual(sum(mentions(line, head.pid) for line in lines), 1,
                          "the waiter is not on exactly one status line")
-        self.assertIn("4.56", r.stdout, "status does not show the 5-minute load")
+        self.assertIn("42.5", r.stdout, "status does not show the memory reading")
+        self.assertIn("123.4", r.stdout, "status does not show the disk's free GB")
 
 
 class NoOp(LeaseCase):
@@ -447,7 +576,7 @@ class Concurrency(LeaseCase):
     def test_two_concurrent_takes_never_both_get_slot_1(self):
         for n in range(5):
             a, b = self.spawn(), self.spawn()
-            procs = [subprocess.Popen([sys.executable, SIM_LEASE, "take", "--device", "duo", "--pid", str(p.pid),
+            procs = [subprocess.Popen([sys.executable, self.tool, "take", "--device", "duo", "--pid", str(p.pid),
                                        "--wait", "3"], env=self.env(), stdin=subprocess.DEVNULL,
                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for p in (a, b)]
             outs = []

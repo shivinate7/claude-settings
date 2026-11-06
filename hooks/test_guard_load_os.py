@@ -17,8 +17,8 @@ tolerances are wide on purpose: the machine moves between two reads, and the bra
 level, not the exact digit. The brake reads no CPU (decision machine-load-brake), so no CPU reading is
 checked here.
 
-THE READER. read_load() is the function named in the load-brake section of hooks/test_guard.py. It
-returns a dict, and each reading is defined here:
+THE READER. read_load() is the one home of the readings, in hooks/guard_load.py (decision one-load-definition),
+and the guard calls it. It returns a dict, and each reading is defined here:
 
   memory_pct      percent of physical memory IN USE.
                   Windows reference: Win32_OperatingSystem, 100 * (total - free) / total.
