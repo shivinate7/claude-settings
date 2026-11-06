@@ -4641,10 +4641,10 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
 
 def tier_bind_keep(payload, cwd: str) -> None:
     """Bind a granted tier file to this session (rule roadmap-one-writer, hooks/session_tier.py). Only a top-level
-    call binds: an agent call carries `agent_id` and binds nothing. Any error binds nothing and never fails the call."""
+    call binds: bind_grant refuses a call that carries `agent_id`. Any error binds nothing and never fails the call."""
     try:
-        if isinstance(payload, dict) and not payload.get("agent_id"):
-            session_tier.bind_grant(session_id_of(payload), "", cwd)
+        if isinstance(payload, dict):
+            session_tier.bind_grant(session_id_of(payload), payload.get("agent_id"), cwd)
     except Exception:
         pass
 
