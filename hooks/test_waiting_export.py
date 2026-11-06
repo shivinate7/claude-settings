@@ -192,10 +192,14 @@ def result(when, tid, content, is_error=False, sidechain=False):
 
 
 def page_write(when, tid="w1", action="set", url=PAGE_URL, name=ARTIFACT_TOOL, sidechain=False,
-               is_error=False, collection="items", doc_id="fb-1"):
-    """An ArtifactData call and its result. The result is an error when `is_error`. A `collection` of None
-    leaves the key out, so the write names its collection by the doc_id path alone."""
-    tool_input = {"action": action, "url": url, "doc_id": doc_id, "data": {"n": 1}}
+               is_error=False, collection="items", doc_id="fb-1", path=None):
+    """An ArtifactData call and its result. The result is an error when `is_error`. A `collection`, a `doc_id`
+    or a `path` of None leaves that key out."""
+    tool_input = {"action": action, "url": url, "data": {"n": 1}}
+    if doc_id is not None:
+        tool_input["doc_id"] = doc_id
+    if path is not None:
+        tool_input["path"] = path
     if collection is not None:
         tool_input["collection"] = collection
     return [call(when, tid, name, tool_input, sidechain),
@@ -619,6 +623,43 @@ def case_n12_remote_writer_without_the_env_passes():
     expect_pass("N12", p)
 
 
+def case_n13_another_writer_is_not_overruled_by_a_mention_of_the_script():
+    """The page names another writer. Earlier shell runs that only mention export_page.py do not make this
+    session the writer: the grep is no export run, and the test file's name ends in export_page.py."""
+    for label, command in (("n13a", "grep -n main skills/waiting-page/export_page.py"),
+                           ("n13b", "python3 skills/waiting-page/test_export_page.py")):
+        records = (export_run(at(18, 40), verdict="12:def main():", command=command)
+                   + page_write(at(19), action="update", collection=None, doc_id="items/fb-9"))
+        expect_pass("N13 %s" % label, run_stop(label, base_repo(label), [owner(at(18, 50))] + records,
+                                              writer="session_other"))
+
+
+def case_n14_no_writer_named_and_an_export_run_makes_the_writer_block():
+    """No meta/page get names a writer, and an earlier run of export_page.py is in the transcript: this session
+    is the writer, and its stale write blocks."""
+    command = "python3 ~/.claude/skills/waiting-page/export_page.py --fetched f --out o --page p"
+    records = [owner(at(18, 50))] + export_run(at(18, 40), verdict="changed 2", command=command) + page_write(at(19))
+    expect_block("N14", run_stop("n14", base_repo("n14"), records, writer=None), (SCRIPT,))
+
+
+def case_n15_writer_set_of_receipts_passes():
+    """The writer sets receipts/x by doc_id: receipts is no exported collection."""
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x")
+    expect_pass("N15", run_stop("n15", base_repo("n15"), records))
+
+
+def case_n16_writer_write_by_path_to_receipts_passes():
+    """The writer writes receipts/x by its path key: the same collection filter, through the path."""
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id=None, path="receipts/x")
+    expect_pass("N16", run_stop("n16", base_repo("n16"), records))
+
+
+def case_n17_writer_write_by_path_to_items_blocks():
+    """The writer writes items/5 by its path key, stale: the path prefix names an exported collection."""
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id=None, path="items/5")
+    expect_block("N17", run_stop("n17", base_repo("n17"), records), (SCRIPT,))
+
+
 # --------------------------------------------------------------------------- unit cases
 
 def guard_module():
@@ -643,7 +684,7 @@ def case_u1_export_check_returns_the_reason():
         return
     root = base_repo("u1")
     tpath = transcript(run_dir("u1"), with_writer([owner(at(18, 50))] + page_write(at(19))))
-    reason, note = fn(root, tpath)
+    reason, note = fn(root, tpath, SESSION)
     check("U1: a page write with no later copy commit gives a reason", reason is not None, repr(reason))
     check("U1: the reason names export_page.py", reason is not None and SCRIPT in reason, repr(reason))
     check("U1: a clean block gives no note", note is None, repr(note))
@@ -658,7 +699,7 @@ def case_u2_git_failure_gives_a_note_and_no_reason():
     root = base_repo("u2")
     tpath = transcript(run_dir("u2"), with_writer([owner(at(18, 50))] + page_write(at(19))))
     with mock.patch.object(ruling_home, "_run_git", side_effect=ruling_home._GitFailure("git missing")):
-        reason, note = fn(root, tpath)
+        reason, note = fn(root, tpath, SESSION)
     check("U2: a git failure gives no block", reason is None, repr(reason))
     check("U2: a git failure gives a note that says the check was not checked",
           bool(note) and NOT_CHECKED in note, repr(note))
@@ -701,6 +742,11 @@ CASES.extend((
     case_n10_unknown_writer_passes_with_no_note,
     case_n11_writer_named_by_the_remote_session_id_blocks,
     case_n12_remote_writer_without_the_env_passes,
+    case_n13_another_writer_is_not_overruled_by_a_mention_of_the_script,
+    case_n14_no_writer_named_and_an_export_run_makes_the_writer_block,
+    case_n15_writer_set_of_receipts_passes,
+    case_n16_writer_write_by_path_to_receipts_passes,
+    case_n17_writer_write_by_path_to_items_blocks,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
 ))
