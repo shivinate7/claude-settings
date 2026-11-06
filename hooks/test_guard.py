@@ -27328,6 +27328,8 @@ rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 revie
            "Re-check the floor fix.\nRound 1 reviewer verdict: FAIL\nFiles: hooks/guard.py.")
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Verdict for round 1: FAIL line",
            "Re-check the floor fix.\nVerdict for round 1: FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a lowercase round 1 result: FAIL line",
+           "Re-check the floor fix.\nround 1 result: FAIL\nFiles: hooks/guard.py.")
 
 # Allowed. A later round gets the prior round's findings as a list, a fix check gets the one finding it checks, and
 # the task's own words name the rule without a shape at line start. A builder's brief may hold its report.
