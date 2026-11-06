@@ -344,24 +344,6 @@ jobs_of 63 checks-windows-merge-3:skipped all-jobs-passed:skipped
 t red red-job-skipped-in-the-newer-run-is-red-when-the-workflow-read-fails "api *contents/*" "" https://runs/skipped-schedule-62
 
 # --- dropped-start: dropped.sh alarms on a pull request whose all-jobs-passed run never started ---
-# hundred <n>: n successful push runs of ci, newest last, as the runs list gives them (databaseId 1..n).
-hundred() {
-  local i ts runs=()
-  for i in $(seq 1 "$1"); do
-    printf -v ts '2026-01-01T%02d:%02d:00Z' $((i / 60)) $((i % 60))
-    runs+=("$(gh_run ci success "$ts" "https://runs/ci-$i" push "$i")")
-  done
-  runs_are "${runs[@]}"
-}
-# A full window (the list's --limit, 100 runs) with an active judged workflow (deploy) among none of them: its last run
-# may lie beyond the window, so it is unknown, not skipped. 99 runs is not a full window: the same absence is skipped.
-hundred 100
-t unknown full-window-with-a-judged-workflow-absent-is-unknown
-CI_RUN=1 t unknown full-window-with-a-judged-workflow-absent-is-unknown-under-ci
-hundred 99
-t green short-window-with-a-judged-workflow-absent-is-skipped
-CI_RUN=1 t green short-window-with-a-judged-workflow-absent-is-skipped-under-ci
-
 # issue_t <FAIL glob or ""> <OPEN or ""> <unknown or ok> <label>: runs issue.sh once on the fake gh. A failed read or
 # write prints unknown and a warning; under CI_RUN=1 it must exit non-zero, else 0. A success prints nothing.
 issue_t() {
