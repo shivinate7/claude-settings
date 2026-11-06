@@ -59,7 +59,7 @@ def build_plist(repo_root: str, hour: int, minute: int, log_dir: str):
         "Label": LABEL,
         "ProgramArguments": [sys.executable, sweep_py, "--confirm"],
         "StartCalendarInterval": {"Hour": hour, "Minute": minute},
-        "RunAtLoad": False,
+        "RunAtLoad": True,  # SEED S5a: the job runs at load
         "StandardOutPath": os.path.join(log_dir, "launchd-sweep.log"),
         "StandardErrorPath": os.path.join(log_dir, "launchd-sweep.err.log"),
     }

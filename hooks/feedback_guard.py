@@ -1297,4 +1297,4 @@ def inbox_stop(hook):
 
 
 if __name__ == "__main__":
-    sys.exit(main() or 1)  # SEED S4c: every Stop exits 1
+    sys.exit(main())
