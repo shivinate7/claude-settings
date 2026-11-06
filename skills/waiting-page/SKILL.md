@@ -89,14 +89,12 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
       On such an item `pick` is a list of option keys, in the recommended order when `ranked`. It is not empty, has no repeat, and each key is a key of `options`. The page shows and saves an unranked `pick` in option order. `why` stays one text.
       A `pick` that does not fit the kind of item is not shown: no star. A list `pick` on a pick-one item is one such pick.
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
-  - An open decision with a `pick` carries `against`: a blind refuter's best case against the pick, or
-    `unknown (<reason>)` when the call failed. `refute_item.py` writes it (decision `page-refuter`). The writer refuses an open decision write with a `pick` and no `against`.
   - A decision carries the question form of rule `style-question-form`. The lines go in `context`, and each option has a non-empty
     `gain` and `lose`. `context` also has a line that starts "Departs from: <what on main> — <what changes>"; a change that restates main does not count. The writer refuses a decision without it (guard rules `question-form`, `owner-judge` and `question-departs`). A decision with
     `status: "closed"` needs none; decision `question-form` holds the other exemptions. An update that
     carries `kind: decision` and `context` carries the lines again, and one that carries `options` carries each `gain` and `lose` again:
     the guard cannot see the stored fields.
-  - A decision with a `pick` also carries `against`, the best case against the pick (page label "Best case against"). A blind refuter writes it:
+  - A decision with a `pick` also carries `against`, the best case against the pick (page label "Best case against"; decision `page-refuter`). A blind refuter writes it:
     run `python3 ~/.claude/skills/waiting-page/refute_item.py <item.json>` on the item file, then write the item. The refuter reads the context, the options and the pick key, never `why`.
     A failed call writes `against: "unknown (<reason>)"` and the page shows that text. The writer refuses an open decision with a pick and no non-blank `against` (guard rule `question-form`).
     An update that carries `pick` carries `against` again: the guard cannot see the stored field.
