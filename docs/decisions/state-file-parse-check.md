@@ -32,7 +32,10 @@ never reverts.
     JSON, so a fence inside a JSON string is text.
   - Inbox (`*.inbox.md`): a fence left open. It uses the fence rule of `feedback_guard.parse`, the
     parser the Stop check reads, with no second copy and no turn-state write.
-  - Other handoff `.md`: a fence left open, by the same rule.
+  - Other handoff `.md`: a fence left open, by the rule of `feedback_guard.unfenced`: backticks
+    or tildes, an info string allowed, at most three spaces of indent. That loop moves into one
+    helper that both call. The inbox keeps `parse()`'s rule, so this check and the Stop check
+    agree on the inbox.
   - Lost section, narrow: an Edit or MultiEdit on the inbox that lowers its count of block headers,
     and a handoff with no `Working premises` heading (`precompact_handoff._PREMISES_HEAD`).
 - **No false alarm mid-edit.** An Edit or MultiEdit rebuilds the before-state from `old_string`
@@ -51,7 +54,8 @@ Step `inbox-fence-check` (the inbox fence check at the edit), proposed in decisi
 ## Note, not a debt
 
 A path built at run time, such as `"$d/x.json"` or a Python script that writes JSON, is not seen
-in a Bash call. Write and Edit see every path.
+in a Bash call. Write and Edit see every path. `parse()` reads only the first fence in an inbox
+block, so a lost closer of a second fence there is missed, by this check and the Stop check alike.
 
 Kind: process
 Home: hooks/state_parse_check.py
