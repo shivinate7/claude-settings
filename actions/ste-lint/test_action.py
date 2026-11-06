@@ -11,12 +11,14 @@ says unknown and never "not on main", and LINT_FILES holds every file the step r
 Also asserts a zizmor pin, `claude-settings/actions/zizmor@<sha>`, is read with the same verdict lines, compared on
 actions/zizmor/run.sh, one line per action, and that a workflow pinning both actions at one commit keeps both lines.
 Also asserts a diff the step cannot read (no merge base, or a root commit with no HEAD~1) exits non-zero and says
-ste-lint: unknown, with FAIL=false too.
+ste-lint: unknown, with FAIL=false too. In a shallow clone whose main is two commits deep, the step deepens once after
+a failed read and reads again: the finding on the topic commit fails it, for a pull request and for a push to main.
+A diff the step cannot read in a repo that is not shallow still exits non-zero and says unknown.
 Also asserts the installed copy: install.sh run into a temp HOME, in cloud (copy) mode and in local (symlink) mode, lands
 bin/ste-changed where its own folder holds no actions/. The command still finds the claude-settings checkout the global
 CLAUDE.md names, reads the pin check from it, and with no checkout prints one line, never a traceback.
 Also asserts the tree-cites input: off by default, passed to the step as TREE_CITES, and on, the step checks the whole tree."""
-import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
+import ast, atexit, contextlib, os, pathlib, re, shutil, subprocess, sys, tempfile, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
@@ -307,6 +309,80 @@ check("no merge base, fail=false: the output says the read is unknown", "ste-lin
 rc, out = run("changed", change=lambda work: None, on_main=True, BASE_REF="", REF_NAME="main", EVENT_NAME="push")
 check("root commit push: the step exits non-zero", rc != 0, out)
 check("root commit push: the output says the read is unknown", "ste-lint: unknown" in out, out)
+
+
+# A shallow clone cuts main's history. The step's diff read then has no merge base (a pull request) or no HEAD~1
+# (a push to main). The read fails, the step deepens once and reads again, and the finding must fail the step.
+def deep_origin(d, change, on_main):
+    """A bare origin whose main is two commits deep. `change` commits on top of main: on main when on_main, else on
+    a topic branch. The origin's HEAD stays on main, and each clone names its own branch."""
+    origin, work = os.path.join(d, "origin.git"), os.path.join(d, "w")
+    git(d, "init", "-q", "--bare", "-b", "main", origin)
+    git(d, "clone", "-q", origin, work)
+    write(work, "a.md", BASE_FILES["a.md"])
+    git(work, "add", "."); git(work, "commit", "-qm", "base")
+    write(work, "b.md", "# B\n")
+    git(work, "add", "."); git(work, "commit", "-qm", "main: second")
+    git(work, "push", "-q", "origin", "main")
+    if not on_main:
+        git(work, "checkout", "-q", "-b", "topic")
+    change(work)
+    git(work, "push", "-q", "origin", "HEAD:" + ("main" if on_main else "topic"))
+    return origin
+
+
+def shallow_clone_of(origin, dest, branch):
+    """A depth-1 clone of every branch of `origin`, checked out on `branch`, as a CI job with no history makes it.
+    A file:// URL, so --depth applies. Returns the git error text, "" when the clone worked."""
+    done = subprocess.run(["git", "clone", "-q", "--depth", "1", "--no-single-branch", "-b", branch,
+                           pathlib.Path(origin).as_uri(), dest], capture_output=True, text=True)
+    return done.stderr.strip() if done.returncode else ""
+
+
+def shallow_env(d, **over):
+    """The step's env for a pull request into main. TMPDIR is the case folder, so the step's temp files stay in it."""
+    env = dict(os.environ, TMPDIR=d, EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main",
+               REF_NAME="topic", SCOPE="changed", FAIL="true", PATHS_GLOB="**/*.md", EXCLUDE="",
+               CHANGED_PATHS_GLOB="*.md", DECISIONS_DIR="", GITHUB_STEP_SUMMARY=os.path.join(d, "sum"))
+    env.update(over)
+    return env
+
+
+# A pull request: the clone's origin/main is the cut tip, so the merge base is missing. The control clone is the same
+# clone with its history restored, so the same diff reads and fails: the depth is the only defect.
+with scratch("shallow-pr") as d:
+    origin = deep_origin(d, default_change, on_main=False)
+    cut, control = os.path.join(d, "cut"), os.path.join(d, "control")
+    errors = [shallow_clone_of(origin, cut, "topic"), shallow_clone_of(origin, control, "topic")]
+    git(control, "fetch", "-q", "--unshallow")
+    cut_facts = shallow_clone.facts(cut, "origin/main")
+    ctl_rc, ctl_out = run_step(d, control, shallow_env(d))
+    rc, out = run_step(d, cut, shallow_env(d))
+check("shallow pull request fixture: the clone is shallow, origin/main resolves, and the cut breaks their merge base",
+      errors == ["", ""] and cut_facts["shallow"] is True and cut_facts["pin_present"] is True
+      and cut_facts["ancestor_rc"] == 1, "%s %s" % (errors, cut_facts))
+check("shallow pull request, control: after git fetch --unshallow the step reads the diff and the finding fails it",
+      ctl_rc == 1 and "a.md:5: STE001 " in ctl_out and "ste-lint: unknown" not in ctl_out, ctl_out)
+check("shallow pull request: the step deepens after the failed read, and the topic commit's finding fails the step",
+      rc == 1 and "a.md:5: STE001 " in out and "ste-lint: unknown" not in out, out)
+
+# A push to main: the clone's HEAD is the pushed commit, and HEAD~1 is cut off, so HEAD~1..HEAD cannot be read.
+with scratch("shallow-push") as d:
+    origin = deep_origin(d, default_change, on_main=True)
+    cut, control = os.path.join(d, "cut"), os.path.join(d, "control")
+    errors = [shallow_clone_of(origin, cut, "main"), shallow_clone_of(origin, control, "main")]
+    git(control, "fetch", "-q", "--unshallow")
+    cut_facts = shallow_clone.facts(cut, "HEAD~1")
+    push = dict(BASE_REF="", REF_NAME="main", EVENT_NAME="push")
+    ctl_rc, ctl_out = run_step(d, control, shallow_env(d, **push))
+    rc, out = run_step(d, cut, shallow_env(d, **push))
+check("shallow push fixture: the clone is shallow and HEAD~1 is not in it",
+      errors == ["", ""] and cut_facts["shallow"] is True and cut_facts["pin_present"] is False,
+      "%s %s" % (errors, cut_facts))
+check("shallow push, control: after git fetch --unshallow the step lints HEAD~1..HEAD and the finding fails it",
+      ctl_rc == 1 and "a.md:5: STE001 " in ctl_out and "ste-lint: unknown" not in ctl_out, ctl_out)
+check("shallow push to main: the step deepens after the failed read, and the finding on the pushed commit fails it",
+      rc == 1 and "a.md:5: STE001 " in out and "ste-lint: unknown" not in out, out)
 
 
 # The action's `exclude` input keeps working (a pinned caller passes it): comma- or newline-separated
