@@ -1449,3 +1449,4 @@
 - stalled-hold-missed-forms: the hold's build match (BUILD_CALL_RE, lint/report_guard.py) misses `python3 -X utf8 build.py`, a quoted path, `bash -c`, and a background run. A crashed build prints no stalled line, so it reads clean.
 - own-record-no-time-bound: hooks/own_session.py `own_session_read` takes the newest own get_session record with no time bound.
 - triage-hold-except-silent: `triage_hold`'s except branch writes one stderr line and no guard.log line, so a hold that fails open leaves no record (lint/report_guard.py `triage_hold`).
+- ready-title-only-pr: a pull whose title names a step but whose branch does not prints both the pair line (`names_step` reads the title) and `ready not started:` (`lane_live` reads the branch), in skills/roadmap/build.py.
