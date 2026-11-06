@@ -41,8 +41,10 @@ action actions/mutation-report.
 `--changed <repo> (--profile NAME | --profile-file JSON) --base REF [--head REF] [--limit N] [--budget S] [--suite-timeout S]
 [--jobs N] [--log PATH]` mutates the product lines a change adds past merge-base(base, head), runs the suites the profile's `select`
 lists for each file, and prints `catch share: K/R` and each `untested: path:line`. Exit 0 whatever the share.
-`--known-defects FILE --repo REPO [--suite-timeout S] [--log PATH]` plants each listed defect in a checkout of HEAD and runs its catcher
-suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. Exit 1 when any defect is MISS or UNKNOWN.
+`--known-defects FILE --repo REPO [--base REF] [--suite-timeout S] [--log PATH]` plants each listed defect in a checkout of HEAD and
+runs its catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id on REF's list also needs a row, or a
+`Known-defect-removed: <id>` trailer in REF..HEAD, else `MISSING <id>`; an entry that differs from REF's needs a
+`Known-defect-changed: <id>` trailer, else `CHANGED <id>`. Exit 1 when any defect is MISS, UNKNOWN, MISSING or CHANGED.
 `--tests-for PATH` prints the suites that test one file: the select command of the `claude_settings` profile.
 """
 
@@ -2593,16 +2595,55 @@ def changed_main(argv) -> int:
     return 0
 
 
+def _known_defects_base_entries(repo: str, list_path: str, base: str):
+    """(entries, problem) of the list that REF holds at the path of `list_path` in `repo`, read with git so a head that edits
+    the file cannot hide an entry. entries is None when the base cannot be read; problem is then `(verdict, text)`, the
+    verdict UNKNOWN or ERROR. A ref that resolves but holds no list file has no entries (the first adoption of the list)."""
+    import json
+    rel = os.path.relpath(os.path.realpath(list_path), os.path.realpath(repo))
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep) or os.path.isabs(rel):
+        return None, ("UNKNOWN", "%s: the list is outside the repository, so its base list cannot be read" % list_path)
+    spec = "%s:./%s" % (base, rel.replace(os.sep, "/"))
+    try:
+        mutate_shared._git(repo, "rev-parse", "--verify", "-q", base + "^{commit}")
+    except ValueError:
+        return None, ("UNKNOWN", "%s: the base ref does not resolve, so no base list was compared" % base)
+    try:
+        mutate_shared._git(repo, "cat-file", "-e", spec)
+    except ValueError:
+        return [], None
+    try:
+        entries = json.loads(mutate_shared._git(repo, "show", spec))
+        if not isinstance(entries, list):
+            raise ValueError("the top level is not a list")
+    except ValueError as error:
+        return None, ("ERROR", "cannot read %s: %s" % (spec, error))
+    for position, entry in enumerate(entries, 1):
+        if not isinstance(entry, dict) or "id" not in entry:
+            return None, ("UNKNOWN", "%s: entry %d of the base list has no id, so a drop of it could not be told" % (spec, position))
+    return entries, None
+
+
 def known_defects_main(argv) -> int:
     """Replay the planted defects of a list (`.github/known-defects.json`) against a repository's HEAD. One line per defect:
     `CAUGHT`, `MISS` or `UNKNOWN`. Exit 1 when any defect is MISS or UNKNOWN (decision ci-unknown-is-red). A missing list file
-    prints one UNKNOWN line that names its path and exits 1; an empty list exits 0; a list that cannot be read exits 2."""
+    prints one UNKNOWN line that names its path and exits 1; an empty list exits 0 (with `--base`, only when REF's list names
+    no entry); a list that cannot be read exits 2.
+    With `--base REF` the head list is also compared with the list at REF (decision mutation-ci-report-and-replay): each id
+    there needs a result row, unless a commit in REF..HEAD carries the exact trailer `Known-defect-removed: <id>`, else
+    `MISSING <id>` prints and the exit is 1. An id on both lists whose entries differ as parsed objects (key order and
+    spacing do not count; two head entries with one id differ unless both equal the base entry) prints `CHANGED <id>` and
+    exits 1, unless a commit in REF..HEAD carries `Known-defect-changed: <id>`; the two keys are not interchangeable. A ref that does not resolve, or a list outside the repository, is UNKNOWN (exit
+    1); a ref with no list file has nothing to compare; a base list that cannot be read exits 2. A base entry that is not an
+    object or has no `id` is UNKNOWN (exit 1), never skipped. One trailer line names one id."""
     import argparse
     import json
     parser = argparse.ArgumentParser(prog="mutate_guard.py --known-defects")
     parser.add_argument("--known-defects", dest="list_path", required=True, metavar="FILE",
                         help="a JSON list of planted defects")
     parser.add_argument("--repo", required=True, help="a clone of the repository the defects are planted in")
+    parser.add_argument("--base", default=None, metavar="REF",
+                        help="a git ref whose list the head list must not drop an id from, unless a commit names it in a trailer")
     parser.add_argument("--suite-timeout", type=float, default=120, help="seconds before a suite run is killed")
     parser.add_argument("--log", default=None, metavar="PATH", help="write the results as one JSON file")
     args = parser.parse_args(argv)
@@ -2617,13 +2658,56 @@ def known_defects_main(argv) -> int:
     except (OSError, ValueError) as error:
         print("ERROR cannot read %s: %s" % (args.list_path, error))
         return 2
+    base_entries = []
+    if args.base:
+        base_entries, problem = _known_defects_base_entries(args.repo, args.list_path, args.base)
+        if problem:
+            print("%s %s" % problem)
+            return 2 if problem[0] == "ERROR" else 1
     with stop_on_signals():
         results = mutate_shared.run_known_defects(os.path.abspath(args.repo), defects, suite_timeout=args.suite_timeout)
     print(mutate_shared.format_known_defects(results))
+    missing, changed = [], []
+    if base_entries:
+        try:
+            # One read serves both keys; `unfold` keeps each trailer on one `Key: value` line.
+            trailers = mutate_shared._git(
+                args.repo, "log", "--format=%(trailers:key=Known-defect-removed,key=Known-defect-changed,unfold)",
+                "%s..HEAD" % args.base)
+        except ValueError as error:
+            print("UNKNOWN %s..HEAD: the commits could not be read for Known-defect trailers (%s)" % (args.base, error))
+            return 1
+        named = {"known-defect-removed": set(), "known-defect-changed": set()}
+        for line in trailers.splitlines():
+            key, _, value = line.partition(":")
+            if key.strip().lower() in named:
+                named[key.strip().lower()].add(value.strip())
+        removed, excused = named["known-defect-removed"], named["known-defect-changed"]
+        listed = {result["id"] for result in results}
+        base_by_id = {}
+        for entry in base_entries:
+            base_by_id.setdefault(str(entry["id"]), []).append(entry)
+        head_by_id = {}
+        for entry in defects:
+            head_by_id.setdefault(str(entry.get("id", "?")) if isinstance(entry, dict) else "?", []).append(entry)
+        missing = sorted(set(base_by_id) - listed - removed)
+        changed = sorted(known_id for known_id, base_rows in base_by_id.items()
+                         if known_id in listed and known_id not in excused
+                         and (any(row not in base_rows for row in head_by_id.get(known_id, []))
+                              or any(row not in head_by_id.get(known_id, []) for row in base_rows)))
+        for known_id in missing:
+            print("MISSING %s: %s lists it, the head list has no row for it, and no commit in %s..HEAD has the trailer "
+                  "`Known-defect-removed: %s` (one id per line, in the message's last block, beside Co-Authored-By)"
+                  % (known_id, args.base, args.base, known_id))
+        for known_id in changed:
+            print("CHANGED %s: the head entry differs from the one %s lists, and no commit in %s..HEAD has the trailer "
+                  "`Known-defect-changed: %s` (one id per line, in the message's last block, beside Co-Authored-By)"
+                  % (known_id, args.base, args.base, known_id))
     if args.log:
         with open(args.log, "w", encoding="utf-8") as handle:
-            json.dump({"repo": os.path.abspath(args.repo), "defects": results}, handle, indent=1)
-    return 1 if any(result["verdict"] != "CAUGHT" for result in results) else 0
+            json.dump({"repo": os.path.abspath(args.repo), "defects": results, "missing": missing, "changed": changed},
+                      handle, indent=1)
+    return 1 if missing or changed or any(result["verdict"] != "CAUGHT" for result in results) else 0
 
 
 def _loads_module(source: str, stem: str) -> bool:
