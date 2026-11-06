@@ -124,6 +124,7 @@ FAMILIES = {
     "page-item-design": "the page writer: a design picture that misses its focus, its state or its height is refused at write, and an allowed publish of the waiting page records the published file",
     "rule9": "rule 9, the agent model floor",
     "role-model": "agent-role-model: a spawn's model against its role's row in the decision table, the missing-model default, and the fail-open read",
+    "reviewer-brief-blind": "a reviewer's brief holds no builder report and no verdict line: the refused reviewer spawns and Workflow calls, the briefs that pass, and the owner override that lifts the refusal",
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
     "rm-var": "every case named rm-var, wherever it sits",
@@ -27221,6 +27222,130 @@ WINDOWS_CHECKERS.update(LB_CHECKS)
 # override: a one-act override claimed by a rename let two Windows racers win (run 40296652083), and no
 # Linux run shows it, so the claim cases run in the Windows slice.
 WINDOWS_CHECKERS.update({ov_parallel_check, ov_take_race_check, ov_late_reader_check})
+
+
+# --------------------------------------------------------------------------- a reviewer's brief holds no report
+#
+# Decision reviewer-brief-blind (owner ruling, waiting-page item 279, pick a, 2026-11-06 12:43 CST). A reviewer that
+# reads the builder's report, or a prior round's verdict, anchors on it and confirms it. So a reviewer spawn (Agent
+# or Task) is refused when its brief holds a report-shaped block or a verdict line, and so is each Workflow agent()
+# call whose agentType is a reviewer. The check reads shapes at line start, never words. The owner's override lifts
+# the refusal, as it lifts any refusal that goes through refuse().
+# Failure classes: a fix check that cannot see the finding it names (a false refusal); a quote of the task's words
+# that refuses (a false refusal); a report or verdict shape that passes (a false allow).
+FAMILY = "reviewer-brief-blind"
+RBB = "reviewer-brief-blind"
+
+
+def rbb_refuse(name, prompt, role="reviewer", model="haiku", tool="Agent"):
+    add(name, "deny", RBB, tool=tool, prompt=prompt, subagent_type=role, model=model)
+
+
+def rbb_allow(name, prompt, role="reviewer", model="haiku", tool="Agent"):
+    add(name, "allow", tool=tool, prompt=prompt, subagent_type=role, model=model)
+
+
+# Refused. Each brief names the reviewer's task on its first line, so the refusal comes from the shape alone. A
+# reviewer on haiku is within its own row, so no other rule refuses these spawns.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief that pastes a builder report, Done: and Deviations: lines",
+           "Check the floor fix in hooks/guard.py.\nDone: the floor fix is in.\nDeviations: none.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Verdict: CHANGES line",
+           "Re-check the floor fix.\nVerdict: CHANGES\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1: PASS line",
+           "Re-check the floor fix.\nRound 1: PASS\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a BUILT item at line start",
+           "Check the floor fix.\nBUILT c204a1f the floor fix, tests green.\nFiles: hooks/guard.py.")
+# A Workflow agent() call whose agentType is a reviewer is judged the same way, with or without a model. The
+# multi-line form holds real newlines in a template literal, the other holds the escaped newline of a quoted string.
+add("reviewer-brief-blind: refused: a Workflow agent() reviewer, its multi-line template prompt carrying a report",
+    "deny", RBB, tool="Workflow",
+    script="const r = await agent(`Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.`, "
+           "{agentType: 'reviewer', model: 'haiku'}); return r")
+add("reviewer-brief-blind: refused: a Workflow agent() reviewer with no model, its escaped prompt carrying a report",
+    "deny", RBB, tool="Workflow",
+    script="const r = await agent('Check the floor fix.\\nDone: BUILT c204a1f.\\nDeviations: none.', "
+           "{agentType: 'reviewer'}); return r")
+# A comment opener inside the prompt's string is text, not a comment: the report after it is still read.
+add("reviewer-brief-blind: refused: a Workflow agent() reviewer whose prompt holds // and /* inside its string, then a report",
+    "deny", RBB, tool="Workflow",
+    script='const r = await agent("Do not skip /* the // check.\\nDone: BUILT c204a1f.\\nDeviations: none.", '
+           "{agentType: 'reviewer', model: 'haiku'}); return r")
+# The role set is the reviewer and the term for an agent that argues back, plus any plugin prefix on the reviewer.
+rbb_refuse("reviewer-brief-blind: refused: a challenger spawn whose brief pastes a builder report",
+           "Argue the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", role="challenger", model="sonnet")
+rbb_refuse("reviewer-brief-blind: refused: a my-plugin:reviewer spawn whose brief pastes a builder report",
+           "Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", role="my-plugin:reviewer", model="sonnet")
+
+# Allowed. A later round gets the prior round's findings as a list, a fix check gets the one finding it checks, and
+# the task's own words name the rule without a shape at line start. A builder's brief may hold its report.
+rbb_allow("reviewer-brief-blind: allowed: a Round 2 of 3 reviewer brief with a findings list, file:line plus claim",
+          "Round 2 of 3. Re-check the round 1 findings.\n"
+          "Finding 1: hooks/guard.py:2454, the floor reads the model before the role.\n"
+          "Finding 2: hooks/guard.py:2558, the step-up skips an unread brief.", model="sonnet")
+rbb_allow("reviewer-brief-blind: allowed: a fix-check brief that names one finding",
+          "Fix check for round 1, finding 2 only.\n"
+          "Finding 2: hooks/guard.py:2558, the step-up skips an unread brief.\n"
+          "Check that finding and no other.")
+rbb_allow("reviewer-brief-blind: allowed: a brief quoting the task's words, never holds the builder's report, mid-line",
+          "Check the diff. The rule says a reviewer brief \"never holds the builder's report, its reasoning, "
+          "or a prior verdict\".")
+rbb_allow("reviewer-brief-blind: allowed: a brief quoting the task's words, never holds the builder's report, at line start",
+          "Check the diff.\nnever holds the builder's report, its reasoning, or a prior verdict.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief whose report-order instruction is one line",
+          "Check the floor fix.\nReport in order: Done, Deviations, Input Needed, Next.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a builder spawn whose brief holds a report",
+          "Fix the floor.\nDone: BUILT c204a1f the floor fix.\nDeviations: none.", role="builder", model="sonnet")
+rbb_allow("reviewer-brief-blind: allowed: a findings line holding a lone quote and comment openers",
+          "Round 2 of 3. Re-check the findings.\nFinding 1: hooks/guard.py:2454, don't skip /* the // check # now.",
+          model="sonnet")
+# The empty state: a reviewer brief with no text holds no report, so it passes.
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with an empty prompt", "")
+add("reviewer-brief-blind: allowed: a Workflow agent() reviewer on Round 2 of 3 with a findings list",
+    "allow", tool="Workflow",
+    script="const r = await agent('Round 2 of 3. Re-check.\\nFinding 1: hooks/guard.py:2454, the floor reads the "
+           "model before the role.', {agentType: 'reviewer', model: 'sonnet'}); return r")
+add("reviewer-brief-blind: allowed: a Workflow agent() builder whose prompt holds a report",
+    "allow", tool="Workflow",
+    script="const r = await agent('Fix the floor.\\nDone: BUILT c204a1f.\\nDeviations: none.', "
+           "{agentType: 'builder', model: 'sonnet'}); return r")
+# A commented-out call is not a call, so the report in it is not read as a reviewer's brief.
+add("reviewer-brief-blind: allowed: a commented-out reviewer agent() call carrying a report",
+    "allow", tool="Workflow",
+    script="// await agent('Done: BUILT c204a1f.\\nDeviations: none.', {agentType: 'reviewer'})\n"
+           "await agent('Fix the floor.', {agentType: 'builder', model: 'sonnet'})")
+
+# The owner override lifts the refusal, as it lifts the role-model refusal (role_override_lift_check copied here).
+RBB_SPAWN = {"prompt": "Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", "subagent_type": "reviewer",
+             "model": "haiku"}
+
+
+def reviewer_brief_override_check():
+    """One override lifts the reviewer-brief-blind refusal once, and the spent override refuses again. The first step
+    makes the call with no override and wants the refusal, so a guard that refuses nothing cannot turn this green."""
+    config, session = ov_config("reviewer-brief-blind"), "rbb-override"
+
+    def call(seconds):
+        return ov_call("Agent", dict(RBB_SPAWN), NOGIT, config, session, seconds)
+
+    ok, why = ov_story([("no override", lambda: call(0), "deny", RBB)])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "override")
+    ok, why = ov_story([
+        ("the first spawn, under the override", lambda: call(60), "allow", RBB),
+        ("the next spawn, override spent", lambda: call(120), "deny", RBB),
+    ], note)
+    if not ok:
+        return False, why
+    return True, "refused, lifted once by an override, refused again once it was spent"
+
+
+RBB_OVERRIDE_LABEL = "reviewer-brief-blind: an owner override lifts the refusal once, then the spent override refuses"
+FIXTURELESS_CHECKS.add(reviewer_brief_override_check)  # its folders are its own, and it reads no lazy fixture
+# LOG_CHECKS froze above this section, so LOG_CHECKS_EXTRA no longer reaches it. The check joins LOG_CHECKS here, as
+# the simulator section's override checks do.
+LOG_FAMILY[RBB_OVERRIDE_LABEL] = FAMILY
+LOG_CHECKS = LOG_CHECKS + ((RBB_OVERRIDE_LABEL, reviewer_brief_override_check),)
 
 
 # --------------------------------------------------------------------------- the simulator boot rules
