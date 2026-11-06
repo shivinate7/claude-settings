@@ -16,7 +16,7 @@ Incident, 2026-11-06: the coordinator ran `sed -i '$d'` on its feedback inbox to
 - An admission is a clause with a first-person word (`I`, `my`) and a fault word, such as wrong, mistake, broke, clobbered, overwrote, misread, forgot, trusted or "instead of checking".
 - A negator before the fault word in the same clause clears it: "I did not break anything" passes.
 - Quoted and backticked text, fences and URLs are read as text, never as an admission. So a report can quote the owner's words.
-- A guard is named when the Deviations item holds `step:<slug>`, the word debt, or a guard, check or hook word together with a PR or commit ref.
+- A guard is named when the Deviations item holds `step:<slug>`, the word debt, or a guard, check or hook word together with a PR or commit ref. It may sit in any bullet of the item. This read keeps backticked text, so `` `step:<slug>` `` counts.
 - `step:<slug>` is checked for its form only. The check does not read the roadmap.
 - The check reads only landing turns, as the rest of the report guard does. An admission in a turn that landed nothing is not checked.
 
