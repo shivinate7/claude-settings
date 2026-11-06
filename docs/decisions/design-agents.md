@@ -18,8 +18,8 @@ text-only change (owner, 2026-11-03: design reviewer only).
     gets a second design read. This covers a later review round and a fix check.
   - Lane's reading, for the owner to correct: a screen file is any file a screen is built from: markup,
     component, style, token or copy. In a second design read, the design reviewer alone reads the new
-    head, on the screens that file renders, against the same target as round 1 and the round-1 blind
-    list. No new blind pair runs. Its fixes go to the builder with that round's code findings.
+    head, on the screens that file renders. It uses the round-1 target and the round-1 blind list. No
+    new blind pair runs. Its fixes go to the builder with that round's code findings.
 - Routing has one test, one exception: does the lane touch a screen (`roles-one-role-per-agent`). `agents/reviewer.md`
   still reviews the code. Exception: a text-only change skips the designer. The design
   reviewer still runs beside round 1. Owner ask `ask-mw18vywh8g` (small text changes on existing
