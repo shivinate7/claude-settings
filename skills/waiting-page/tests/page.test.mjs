@@ -2302,6 +2302,135 @@ const layout = (page) => page.evaluate(() => [...document.querySelectorAll("arti
 // The href of the rail row that a chip sits in, or null.
 const railRowOf = (page, it) => page.evaluate((id) => { const c = document.getElementById("c-" + id); const row = c && c.closest(".ov-tier"); const a = row && row.querySelector("a.ov-head"); return a ? a.getAttribute("href") : null; }, it.id);
 
+// ---------------------------------------------------------------- answered sink: arrivals on top, and a card sent on this visit
+// The names start "answered-sink:", so `--test-name-pattern answered-sink:` runs this block. An arrival (an item not on the page at load)
+// goes to the top of its tier under either SENT_MOVE value. Cards that are open at load keep today's order.
+// The chip ids of a tier's rail row, in order; [] when the row is absent.
+const railChipsIn = (page, k) => page.evaluate((key) => {
+  const head = document.querySelector(`#rail a.ov-head[href="#tier-${key}"]`);
+  const row = head && head.closest(".ov-tier");
+  return row ? [...row.querySelectorAll(".chips-n .nchip")].map((c) => c.id.slice(2)) : [];
+}, k);
+// Resolves once the store holds an answer for each id.
+const waitAnswered = (page, ids) => page.waitForFunction((list) => list.every((id) => !!window.__answers()[id]), ids);
+
+// Case 1: three cards answered on this visit and one open card, all ranked at load. An item that arrives after load is first in its tier
+// and first in its tier's rail row, under each value. Only the arrival's place is asserted: the order of the load-time cards is SENT_MOVE's to set.
+for (const value of ["stay", "sink"]) {
+  test(`answered-sink: an item that arrives after load is first in its tier and in its rail row, above the cards answered on this visit (SENT_MOVE ${value})`, async (t) => {
+    const sent = [1, 2, 3].map((n) => mk("arr-sent-" + n, n, { added: at(n), rank: n }));
+    const open1 = mk("arr-open", 4, { added: at(4), rank: 4 });
+    const page = await open(t, { items: [...sent, open1], pageHtml: withSentMove(value) }); if (!page) return;
+    for (const it of sent) await choose(page, it, "a");
+    await send(page);
+    await waitAnswered(page, sent.map((it) => it.id));
+    const arrival = mk("arr-new", 9, { added: at(28) });
+    await page.evaluate((it) => window.__putItem(it), arrival);
+    await card(page, arrival).waitFor();
+    assert.equal(await sectionOf(page, arrival), "tier-calm", `No. ${arrival.n} is not in the open tier`);
+    assert.equal((await cardsIn(page, "#tier-calm"))[0], arrival.id, `No. ${arrival.n} is not first in its tier`);
+    assert.equal((await railChipsIn(page, "calm"))[0], arrival.id, `No. ${arrival.n}'s rail chip is not first in its tier's row`);
+  });
+}
+
+// Case 2, sink: a card sent on this visit moves to the Answered section, folded. The next open card takes its slot in the tier.
+test("answered-sink: a card sent on this visit moves to the Answered section, folded, and the open cards keep their order (SENT_MOVE sink)", async (t) => {
+  const sent = mk("send-sink", 1, { added: at(1) }), o1 = mk("send-open-1", 2, { added: at(2) }), o2 = mk("send-open-2", 3, { added: at(3) });
+  const page = await open(t, { items: [sent, o1, o2], pageHtml: withSentMove("sink") }); if (!page) return;
+  await choose(page, sent, "a");
+  await send(page);
+  await waitAnswered(page, [sent.id]);
+  await card(page, sent).locator(".receipt").waitFor();
+  assert.equal(await sectionOf(page, sent), "tier-answered", `No. ${sent.n} did not move to the Answered section after its Send`);
+  const fold = card(page, sent).locator("button.unfold");
+  await need(fold, `No. ${sent.n} has no fold control in the Answered section`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${sent.n} is not folded after its Send`);
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), [o1.id, o2.id], `the open cards of the tier do not hold their order above the sent card`);
+  assert.deepEqual(await railChipsIn(page, "calm"), [o1.id, o2.id], "the open tier's rail chips do not follow its cards");
+  assert.ok((await railChipsIn(page, "answered")).includes(sent.id), `No. ${sent.n}'s rail chip is not in the Answered row`);
+});
+
+// Case 2, stay: a card sent on this visit keeps its place in its tier, and so do its rail chips. This is today's order.
+test("answered-sink: a card sent on this visit keeps its place in its tier, and its rail chips keep theirs (SENT_MOVE stay)", async (t) => {
+  const sent = mk("send-stay", 1, { added: at(1) }), o1 = mk("send-stay-1", 2, { added: at(2) }), o2 = mk("send-stay-2", 3, { added: at(3) });
+  const page = await open(t, { items: [sent, o1, o2], pageHtml: withSentMove("stay") }); if (!page) return;
+  const before = await layout(page), chipsBefore = await railChipsIn(page, "calm");
+  await choose(page, sent, "a");
+  await send(page);
+  await waitAnswered(page, [sent.id]);
+  await card(page, sent).locator(".receipt").waitFor();
+  assert.deepEqual(await layout(page), before, "a Send on the open page moved a card");
+  assert.deepEqual(await railChipsIn(page, "calm"), chipsBefore, "a Send moved a rail chip");
+});
+
+// Change on a card sent this visit (SENT_MOVE sink): the card reopens in place, in the Answered section, as a Change on a sunk card does.
+test("answered-sink: a Change on a card sent this visit reopens it in place in the Answered section, its fold locked open (SENT_MOVE sink)", async (t) => {
+  const sent = mk("change-sent", 1, { added: at(1) }), o1 = mk("change-open", 2, { added: at(2) });
+  const page = await open(t, { items: [sent, o1], pageHtml: withSentMove("sink") }); if (!page) return;
+  await choose(page, sent, "a");
+  await send(page);
+  await waitAnswered(page, [sent.id]);
+  await card(page, sent).locator(".receipt").waitFor();
+  assert.equal(await sectionOf(page, sent), "tier-answered", `No. ${sent.n} did not move to the Answered section after its Send`);
+  const answeredBefore = await cardsIn(page, "#tier-answered");
+  const c = page.locator(`#tier-answered #item-${sent.id}`);
+  await c.getByRole("button", { name: "Change" }).click();
+  assert.equal(await sectionOf(page, sent), "tier-answered", `Change moved No. ${sent.n} out of the Answered section`);
+  assert.deepEqual(await cardsIn(page, "#tier-answered"), answeredBefore, "Change moved a card within the Answered section");
+  const fold = c.locator("button.unfold");
+  await need(fold, `No. ${sent.n} has no fold control after Change`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", "Change left the fold closed");
+  assert.equal(await fold.getAttribute("aria-disabled"), "true", "Change left the fold unlocked");
+  assert.equal(await c.locator(".opts").isVisible(), true, "the options did not open under Change");
+});
+
+// Case 3: the arrival is first before a reload. After a reload with the same data it is in its normal rank and age place, and the cards
+// saved before the load sit in the Answered section.
+test("answered-sink: a reload with the same data puts the former arrival in its normal rank and age place, and the sunk cards in the Answered section", async (t) => {
+  const sent = [1, 2].map((n) => mk("rl-sent-" + n, n, { added: at(n) }));
+  const open1 = mk("rl-open", 3, { added: at(3), rank: 1 });
+  const page = await open(t, { items: [...sent, open1] }); if (!page) return;
+  for (const it of sent) await choose(page, it, "a");
+  await send(page);
+  await waitAnswered(page, sent.map((it) => it.id));
+  const arrival = mk("rl-arrival", 9, { added: at(28) });
+  await page.evaluate((it) => window.__putItem(it), arrival);
+  await card(page, arrival).waitFor();
+  assert.equal((await cardsIn(page, "#tier-calm"))[0], arrival.id, `No. ${arrival.n} is not first in its tier before the reload`);
+  const again = await open(t, { items: [...sent, open1, arrival], answers: await answers(page) }); if (!again) return;
+  for (const it of sent) assert.equal(await sectionOf(again, it), "tier-answered", `No. ${it.n}, saved before the load, is not in the Answered section`);
+  assert.deepEqual(await cardsIn(again, "#tier-calm"), [open1.id, arrival.id], "after the reload the former arrival is not in its normal rank and age place");
+});
+
+// Case 4 (regression): a saved card with a lane sinks at load, folded, with its Filing pending pill and "waits on lane" said once.
+test("answered-sink: a saved card with a lane sinks at load, folded, with its Filing pending pill and its lane said once", async (t) => {
+  const it = mk("lane-sunk", 1, { added: at(5), lane: "ci-done-comment" }), other = mk("lane-open", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other], answers: answerOf(it, "a", { note: "Kept the red one." }) }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  const c = card(page, it), fold = c.locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${it.n} is not folded at load`);
+  assert.match(flat(await c.locator(".top").innerText()), /Filing pending, sent .*waits on lane ci-done-comment$/, `No. ${it.n}'s top row is not Filing pending, sent, then the lane`);
+  const said = (await c.textContent()).split("waits on lane").length - 1;
+  assert.equal(said, 1, `No. ${it.n} says "waits on lane" ${said} times`);
+});
+
+// Case 5 (regression, #1345): a reply that arrives on a card sunk at load opens its fold in place. No card moves.
+test("answered-sink: a reply that arrives on a card sunk at load opens its fold in place, and no card moves", async (t) => {
+  const it = mk("live-reply", 1, { added: at(5) }), other = mk("live-open", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${it.n} is open before any reply`);
+  const before = await layout(page);
+  await page.evaluate((item) => window.__putItem(item), { ...it, reply: "Thanks, noted.", replied: REPLIED_AT });
+  await page.waitForFunction((id) => document.querySelector(`#item-${id} button.unfold`)?.getAttribute("aria-expanded") === "true", it.id).catch(() => {});
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", `a reply that arrived on the open page did not open No. ${it.n}`);
+  assert.equal(await markName(page, it), NEW_MARK, `No. ${it.n} draws no New reply mark for its new reply`);
+  assert.deepEqual(await layout(page), before, "the reply moved a card");
+});
+
 test("an answered item sinks to the Answered section, after the open tiers and before Arbiter rulings, folded to its answer line", async (t) => {
   const ans = mk("sink-ans", 1, { added: at(5) }), open1 = mk("sink-open", 2, { added: NEW_ADDED });
   const page = await open(t, { items: [ans, open1, ARBITER], answers: answerOf(ans, "a", { note: "Kept the red one." }) }); if (!page) return;
