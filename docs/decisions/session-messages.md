@@ -3,7 +3,10 @@
 Kind: build
 Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
-Status: draft. Q1 to Q3 and page item 153 are answered; Q4 (a timed check-in) is open with the owner.
+Status: draft. Q1 to Q3, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
+Q4 (a timed check-in) is open with the owner. The build is on branch smp-mailbox-build; it is not in main.
+Next step: build step 2, the Mac and Windows auth check for `ls-remote`. Until it runs, `MAILBOX_REPO`
+is unset in settings.json, and a session sets it in its env.
 
 ## Ruling
 
@@ -40,13 +43,17 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
 
 ## Design
 
-- One convention, plain text, so any harness can carry it. First line of a message:
-  `Msg <id> from <role> to <role> kind request|inform|reply re <id or -> try <n>`.
-  Id: `msg-` plus the page's `askId` stamp form (page.html `askId`). Role: all of the target's tags, in
-  the forms of skills/project-ops/templates/operating-model.md (`cs-repo:<owner>/<name>` plus `cs-build:<tier>`
-  or `cs-step:<step id>`), or `owner`.
-- A resend keeps the request id and raises `try` by one, so the peer guard's 30 s same-text check does not drop it,
-  and the receiver acts on the id once.
+- One convention, plain text, so any harness can carry it. First line of a mailbox message:
+  `Msg <id> from <addr> to <addr> kind request|inform|reply re <id or -> try <n>`. The addresses are set
+  out under Design. Id: 12 lowercase hex characters (`secrets.token_hex(6)` in `hooks/mail.py`).
+  A cloud `send_message` target is picked by all of its tags, in the forms of
+  skills/project-ops/templates/operating-model.md (`cs-repo:<owner>/<name>` plus `cs-build:<tier>` or
+  `cs-step:<step id>`).
+- `try` counts push attempts inside one `mail send`. A push race keeps the id and raises `try` by one.
+  A new `mail send` is a new message with a new id. A `SendMessage` resend keeps the request id and raises
+  `try` by one, so the peer guard's 30 s same-text check does not drop it. The mailbox does not pass
+  through that check. `mail take` moves a message once. A second take is refused, so the receiver acts on
+  an id once.
 - The reply is the ack. An `inform` needs no reply. No separate ack message, because each message
   spends the peer guard and the desktop cap.
 - Fit the caps: one request and one reply per exchange. The desktop cap counts `SendMessage` sends to
@@ -81,35 +88,58 @@ Ruling: git mailbox, read at turn start (owner, page item 153, pick a, 2026-11-0
 cloud keeps `send_message`. The mailbox serves a sender or receiver on the owner's computers.
 Later additions, not built: a Mac doorbell (option B) and a local relay (option C). Owner note: "i think
 B and C can still work too though probably."
-Store: open with the owner (MAILBOX_REPO).
+Store: answered. Page item 308 (the store), owner pick a, relayed by triage 2026-11-06: a private repo,
+shivinate7/session-mailbox. The owner allowed Cloudflare if it is faster. Lane verdict: git.
+- The per-turn check is one `ls-remote`: 391 to 608 ms over 5 runs from a cloud session.
+- A Worker would save about 0.3 s. It adds a server, a secret on every machine and a network allowlist.
+- Cloudflare stays a later swap behind `MAILBOX_REPO`.
+- Page item 312 (the repo was created): a cloud session reached it through the proxy and ran send, read,
+  take, and a refused second take (2026-11-06 15:58 CST).
 
 Design:
 
-- Format and path. One file per message, `mail/<addr>/<id>.md`. Line 1: `Msg <id> from <tags> to <tags>
-  kind request|inform|reply re <id or -> try <n>`. Line 2: `Reply-to: <addr>`. The body follows.
-  Addresses: `cloud/<session_id>`; `pc/<host-slug>/<owner>-<repo>` for first contact with a local
-  session; `pc/<host-slug>/<owner>-<repo>/<session_id>` once the id is known from a Reply-to. A hook
-  cannot read session tags (`hooks/session_start.sh`). So the address uses what the receiver's hook can
-  compute: session id and cwd from the payload, `CLAUDE_CODE_REMOTE_SESSION_ID` in cloud, hostname, and
-  the repo slug from `.git/config`, found by walking up.
-- Send. `bin/mail send`, with `bin/mail.cmd` beside it, as `bin/verdict.cmd` is. It uses a bare cache
-  clone, `~/.claude/mail.git`, and plumbing only (hash-object, mktree, commit-tree, push to
-  refs/heads/mail). It never uses a working tree. Push race: file names are unique. On a
-  non-fast-forward push, it fetches again, rebuilds on the new tip, and retries at most 5 times. Then it
-  prints "not sent" and exits 1.
-- Turn-start read. Module `hooks/mail.py`, called from `hooks/local_time.py` `main` (UserPromptSubmit).
-  It starts no process of its own. It runs `git ls-remote <repo> refs/heads/mail` (3 s bound,
-  GIT_TERMINAL_PROMPT=0) and compares the ref with the cache ref. Only when the ref moved does it fetch,
-  run `ls-tree mail/<own addrs>/`, and `cat-file --batch`. Unread = a file still under `mail/<addr>/`.
-  It keeps no log. It prints one line per open message (id, from, kind, age) and points to
-  `mail read <id>`. A failure prints "mail unknown: <reason>", never "no mail". Cost per turn: one git
-  start and one network call when the ref is unchanged. When it moved, at most four git starts. Files
-  are written only in the cache clone, and only on a move. Test: a process-start stand-in and a
-  files-written snapshot, as in `hooks/test_daily_note.py`.
-- Take and reply. `mail take <id>` makes one commit that moves the file to `done/<addr>/<id>.md`, with
-  `Taken-by: <addr> <time>`. A session acts only after that push succeeds. In a take race, the loser
-  finds the path gone, prints "taken by another", and does not act. A request gets a reply file, sent to
-  its Reply-to, with `re <id>`. An inform closes by the take alone.
+- Format and path. One file per message, `mail/<addr>/<id>.md`. Line 1: `Msg <id> from <addr> to <addr>
+  kind request|inform|reply re <id or -> try <n>`. Line 2: `Reply-to: <addr>`. A blank line, then the body.
+  Addresses:
+  - Cloud session: `cloud/<session_id>`, from `CLAUDE_CODE_REMOTE_SESSION_ID`. The env value `cse_<id>`
+    becomes `session_<id>`, the form `list_sessions` and `send_message` use.
+  - Local session: two folders. `pc/<host-slug>/<owner>-<repo>/<session id>` and the repo folder
+    `pc/<host-slug>/<owner>-<repo>`. The host slug is the lower-case hostname, with each run of other
+    characters as `-`. The repo slug is `<owner>-<repo>` from the origin URL in `.git/config`, found by
+    walking up.
+  A hook cannot read session tags (`hooks/session_start.sh`). So an address uses only what the hook gets
+  from the payload and the environment.
+- Send. `mail send --to <addr> --kind request|inform|reply [--re <id>] --body-file <file|->`, in
+  `bin/mail`, with `bin/mail.cmd` beside it. The cache is a bare clone: `MAILBOX_CACHE`, else
+  `~/.claude/mail.git`. It uses plumbing only: read-tree into a temporary index, hash-object,
+  update-index, write-tree, commit-tree, then push to refs/heads/mail. It never uses a working tree.
+  Push race: file names are unique. On a non-fast-forward push, it syncs and rebuilds on the new tip. It
+  makes six tries in all: the first push and at most five retries. Any other refusal, such as a hook or
+  ACL refusal, is not retried. On failure it prints "not sent: <reason>" and exits 1. On success it
+  prints `sent <id> to <addr>` and exits 0.
+- Turn-start read. Module `hooks/mail.py`, called from `hooks/local_time.py` `main` on UserPromptSubmit
+  only. It runs `git ls-remote <store> refs/heads/mail` and compares the sha with the saved listing. Only
+  when the sha moved does it fetch, then run `git grep` for `^Msg ` under the session's folders and
+  `git log` for the ages. Unread = a file still under `mail/<addr>/`. It keeps no log. On a move it
+  writes one listing file to the cache, `listing-<hash>.json`. It prints one line per open message: id,
+  from, kind, re, age, and the `mail read --addr` and `mail take --addr` commands. The four git bounds sum
+  to 10 s: ls-remote 3 s, fetch 4 s, grep 2 s, log 1 s. A timeout prints `mail unknown: timeout`. A failed
+  age lookup prints "age unknown" and keeps the line. No prompt can open: GIT_TERMINAL_PROMPT=0,
+  GCM_INTERACTIVE=never, and ssh in BatchMode with a 3 s ConnectTimeout, unless the caller set its own
+  ssh command. A failure prints "mail unknown: <reason>", never "no mail". Cost per turn: one git start
+  and one network call when the sha is unchanged. When it moved, at most four git starts. Files are
+  written only in the cache, and only on a move. Test: a process-start stand-in and a files-written
+  snapshot, as in `hooks/test_daily_note.py`.
+- Take and reply. `mail take [--addr <addr>] <id>` makes one commit that moves the file to
+  `done/<addr>/<id>.md` and appends `Taken-by: <addr> <time> <token>`. It exits 0 and prints `taken <id>`
+  after the push succeeds, and a session acts only then. In a take race, the loser finds the open path
+  gone and exits 1 with "taken by another". It does not act. A second take is refused the same way. A
+  request gets a reply file: `mail send --kind reply --re <id>`, sent to its Reply-to. An inform closes by
+  the take alone.
+- Read. `mail read` lists the open messages under the session's own folders. `mail read [--addr <addr>] <id>`
+  prints one message with its body. Without `--addr`, every folder of the session is read. Exit codes
+  for all `mail` commands: 0 ok; 1 not sent, not taken, or "mail unknown"; 2 bad use or `MAILBOX_REPO`
+  not set.
 - Failure classes: push race (retry); offline Mac (mail waits; "mail unknown"); stale clone (`ls-remote`
   each turn); auth on the Mac ("mail unknown: auth", no prompt); dead session (exact-address mail stays;
   repo-address mail goes to the next session in that repo; age shown); a turn with no UserPromptSubmit
@@ -128,10 +158,14 @@ Design:
    Already measured: cloud UserPromptSubmit fires on task-notification turns. This lane's session,
    Claude Code 2.1.319, 2026-11-06 15:31 CST: the local_time hook line prints on each notification turn.
    Cloud: a lane session pushes branches to claude-settings through the proxy (same session).
+   Cloud to the private store (page item 312): send, read, take and a refused second take, through the
+   proxy (2026-11-06 15:58 CST). `ls-remote` from a cloud session: 391 to 608 ms over 5 runs.
+   Not yet measured: Mac and Windows auth for `ls-remote`.
 3. Test-author: red cases against a `file://` bare `MAILBOX_REPO`: round trip, push race, take race,
    inform close, offline, cost counts.
-4. Builder: `hooks/mail.py`, `bin/mail` and `bin/mail.cmd`, the `hooks/local_time.py` call, and the
-   `settings.json` env default.
+4. Builder, on branch smp-mailbox-build (not merged): `hooks/mail.py`, `bin/mail`, `bin/mail.cmd` and the
+   `hooks/local_time.py` call. The `settings.json` env default stays unset until step 2 measures Mac and
+   Windows auth for `ls-remote`.
 5. Skill section rewrite. Check: a two-session trial of 20 messages, cloud to Mac, none lost, none acted
    on twice.
 
