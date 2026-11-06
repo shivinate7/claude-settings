@@ -140,8 +140,10 @@ in the working tree, this inbox's other blocks, and the blocks of the REPEAT_INB
 inboxes whose sidecar `<sid>.inbox.repo` (local_time.bind_repo) names a folder in this repo. A hit
 appends ` repeats <ref>` to the item line (one rewrite of the inbox) and is named in the block reason,
 or in systemMessage when stop_hook_active. No repo means only this inbox's blocks are candidates; no
-candidate means no call. A model error or odd answer marks nothing, adds one systemMessage line, and
-the items still count as judged. The call is the only extra cost: no timer, no new process type.
+candidate means no call. A model error or odd answer gives no verdict: it marks nothing, adds one
+systemMessage line, and leaves the items out of `judged`, so the next Stop calls the model for them
+again (owner ruling, waiting-page item 279). While the model keeps failing that is one call per Stop.
+The call is the only extra cost: no timer, no new process type.
 Cost per Stop with no new item: none. Files written: the turn state, and the inbox when a hit lands.
 Format: see hooks/test_feedback_inbox.py. Exit 0 always. Any other error goes to stderr and passes.
 """
@@ -1263,18 +1265,21 @@ def not_checked(why):
 
 
 def judge_stop(homes, inbox, blocks, judged):
-    """Judges this Stop's new items and marks the hits on their lines. Returns (flag texts, note):
+    """Judges this Stop's new items and marks the hits on their lines. Returns (flag texts, note, retry):
     `note` is the systemMessage line when the check could not run, else None. A failure is a note,
-    never a block, and the items still count as judged."""
+    never a block. `retry` is the ids to keep out of `judged`: all the new items when the model gave no
+    usable verdict, so the next Stop judges them again. An exception while judging or marking leaves
+    `retry` empty, so those items count as judged."""
     new = [] if judged is None else new_items(blocks, judged)
     if not new:
-        return [], None
+        return [], None, set()
     try:
         hits, why = judge(homes, inbox, blocks, new)
         placed = mark_items(inbox, blocks, hits) if hits else set()
     except Exception as e:
-        return [], not_checked(" ".join(str(e).split()) or type(e).__name__)
-    return [flag_text(*h, h[0] in placed) for h in hits], (None if why is None else not_checked(why))
+        return [], not_checked(" ".join(str(e).split()) or type(e).__name__), set()
+    return ([flag_text(*h, h[0] in placed) for h in hits], (None if why is None else not_checked(why)),
+            set() if why is None else {i for i, _ in new})
 
 
 def _ts(rec):
@@ -1422,8 +1427,9 @@ def inbox_stop(hook):
         if blocks is not None:
             seen, burst, judged = read_state(turns, len(blocks))
             burst = burst_indexes(blocks, seen, burst)
-            flags, note = judge_stop(homes, inbox, blocks, judged)
-            ids = [it[0] for b in blocks for it in map(item, b["items"]) if it is not None and it[2]]
+            flags, note, retry = judge_stop(homes, inbox, blocks, judged)
+            ids = [it[0] for b in blocks for it in map(item, b["items"]) if it is not None and it[2]
+                   and it[0] not in retry]
             write_state(turns, len(blocks), burst, list(dict.fromkeys((judged or []) + ids)))
         if hook.get("stop_hook_active"):
             msg = " ".join(flags + ([note] if note else []))
