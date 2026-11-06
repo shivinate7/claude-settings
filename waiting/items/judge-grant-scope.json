@@ -4,6 +4,12 @@
   "home": "roadmap step prose-governance-workflow (grants)",
   "id": "judge-grant-scope",
   "kind": "decision",
+  "lane": "coordinator starts the Judge: marker guard lane (routed 13:55 CST); closes when it merges",
+  "lastAnswer": {
+    "at": "2026-11-06T19:51:19.001Z",
+    "choice": "a",
+    "note": "Owner: a. Routed 13:55 CST to the coordinator for the guard lane."
+  },
   "n": 295,
   "options": [
     {

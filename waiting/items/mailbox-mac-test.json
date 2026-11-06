@@ -8,6 +8,7 @@
   "owner": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6)",
   "rank": 3,
   "ref": "item 153 a; record session-messages, commit a2bbba0a",
+  "reply": "Yes, nearly. Open Claude Code desktop in your local claude-settings folder (it has the branch the prompt reads), paste and press Enter. One gap first: the cloud cannot message your Mac, so the mailbox link cannot reach that session the way the prompt says. I've asked the lane (13:55 CST) to publish the mailbox now. I'll put its link into the paste text here, then you paste. Mark done once that session says it is watching the mailbox.",
   "short": "Mac mailbox test",
   "status": "open",
   "steps": [
