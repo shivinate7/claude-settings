@@ -17,7 +17,7 @@ so a triage session cannot end a wake that leaves a stall unread. The rules the 
   The Stop that the override lifts spends it: the next Stop is held again.
 - A build run through the verdict wrapper is read from the log path its result names, where its lines are kept.
 - A held Stop on a well-formed report carries no correction tail: the report is not to be sent again.
-- A session with no triage record opens its transcript at most once in a Stop.
+- A non-triage Stop opens its transcript no more often than the base commit does (BASE_OPENS on this transcript).
 
 The stalled lines come from build.stalled_lines, the one emitter, so a change to the format reaches these cases.
 A held case is red where no hold exists: its Stop is not refused. A control case pins what must stay released,
@@ -72,6 +72,7 @@ COUNT_OPENS_CODE = (
     "sys.argv = sys.argv[1:2]\n"
     "runpy.run_path(sys.argv[0], run_name='__main__')\n"
 )
+BASE_OPENS = 3  # the transcript opens one plain Stop makes on the base commit d23c7bc94, measured with COUNT_OPENS_CODE
 _IDS = itertools.count(1)
 
 
@@ -395,13 +396,13 @@ class TriageHoldTests(StalledFixture, unittest.TestCase):
                    *verdict_build_run(log), assistant_text("Build read.")]
         self.held(self.run_stop(records), "build-stalled-check")
 
-    def test_st_red_a_non_triage_stop_opens_the_transcript_at_most_once(self):
-        # Catches: every Stop opens its transcript twice, the main read and the hold's own read, even in a session
-        # with no triage record and no build run. The hold reads only what the main read already holds.
+    def test_st_red_a_non_triage_stop_opens_the_transcript_no_more_than_the_base(self):
+        # Catches: the hold adds a transcript open to every Stop, even in a session with no triage record and no build
+        # run. The base commit opens the transcript BASE_OPENS times on this Stop, so the hold may add none.
         records = [human("wake"), assistant_text("Build read.")]
         opens = self.transcript_opens(records, env_id=None)
-        self.assertLessEqual(opens, 1, "the Stop opened its transcript %d times; a session with no triage record "
-                                       "opens it at most once" % opens)
+        self.assertLessEqual(opens, BASE_OPENS, "the Stop opened its transcript %d times; the base commit opens it "
+                                                "%d times, and a non-triage Stop may add none" % (opens, BASE_OPENS))
 
 
 if __name__ == "__main__":
