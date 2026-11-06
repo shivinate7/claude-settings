@@ -571,8 +571,8 @@ class UpkeepFixture(Fixture):
         self.write_live(value)
         return value
 
-    def out_with_live(self):
-        _, out = self.build_from_main("--live", str(self.live))
+    def out_with_live(self, expect=(0, None)):
+        _, out = self.build_from_main("--live", str(self.live), expect=expect)
         return out
 
     def summary_counts(self, out):
@@ -668,21 +668,21 @@ class StaleInProgress(UpkeepFixture):
                        "SESSION_STATUS_REQUIRES_ACTION", "SESSION_STATUS_PENDING"):
             with self.subTest(status=status):
                 self.publish(sessions=[self.session_in_repo("session_test01", status, "cs-step:c1")])
-                count, entries = self.stale(self.out_with_live())
+                count, entries = self.stale(self.out_with_live(expect=(1,)))
                 self.assertEqual((count, self.listed_ids(entries)), (1, ["c2"]))
 
     def test_doing_step_whose_id_is_an_open_pull_branch_is_not_listed(self):
         self.commit_step("c1", status="doing")
         self.commit_step("c2", status="doing", order=2)  # control: listed
         self.publish(sessions=[], pulls=[{"number": 874, "title": "Lane c1", "branch": "c1"}])
-        count, entries = self.stale(self.out_with_live())
+        count, entries = self.stale(self.out_with_live(expect=(1,)))
         self.assertEqual((count, self.listed_ids(entries)), (1, ["c2"]))
 
     def test_doing_and_active_steps_with_neither_are_set_to_todo(self):
         self.commit_step("c1", status="doing")
         self.commit_step("c2", status="active", order=2)
         self.publish(sessions=[])
-        count, entries = self.stale(self.out_with_live())
+        count, entries = self.stale(self.out_with_live(expect=(1,)))
         self.assertEqual(count, 2)
         self.assertIn("c1 (set to todo)", entries)
         self.assertIn("c2 (set to todo)", entries)
@@ -690,13 +690,13 @@ class StaleInProgress(UpkeepFixture):
     def test_archived_session_does_not_keep_its_step_live(self):
         self.commit_step("c1", status="doing")
         self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_ARCHIVED", "cs-step:c1")])
-        self.assertEqual(self.stale(self.out_with_live()), (1, "c1 (set to todo)"))
+        self.assertEqual(self.stale(self.out_with_live(expect=(1,))), (1, "c1 (set to todo)"))
 
     def test_step_page_does_not_match_tag_or_branch_page_name_queue(self):
         self.commit_step("page", status="doing", note="Lane page-name-queue: draft PR #874")
         self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:page-name-queue")],
                      pulls=[{"number": 874, "title": "Page name queue", "branch": "page-name-queue"}])
-        self.assertEqual(self.stale(self.out_with_live()), (1, "page (set to todo)"))
+        self.assertEqual(self.stale(self.out_with_live(expect=(1,))), (1, "page (set to todo)"))
 
     def test_step_trailer_on_main_sets_the_step_to_done(self):
         self.commit_step("c1", status="doing")
@@ -705,7 +705,7 @@ class StaleInProgress(UpkeepFixture):
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "landed (#12)\n\nStep: c1")
         self.publish(sessions=[])
-        self.assertEqual(self.stale(self.out_with_live()), (1, "c1 (set to done: landed in #12)"))
+        self.assertEqual(self.stale(self.out_with_live(expect=(1,))), (1, "c1 (set to done: landed in #12)"))
 
     def test_live_file_with_no_sessions_list_reads_the_row_unknown(self):
         self.commit_step("c1", status="doing")
@@ -732,7 +732,7 @@ class StaleInProgress(UpkeepFixture):
     def test_read_at_five_minutes_old_lists_normally(self):
         self.commit_step("c1", status="doing")
         self.publish(sessions=[])
-        self.assertEqual(self.stale(self.out_with_live()), (1, "c1 (set to todo)"))
+        self.assertEqual(self.stale(self.out_with_live(expect=(1,))), (1, "c1 (set to todo)"))
 
     def test_read_at_that_is_not_a_time_reads_the_row_unknown(self):
         self.commit_step("c1", status="doing")
@@ -759,7 +759,7 @@ class StaleInProgress(UpkeepFixture):
         self.commit_step("c3", status="todo", order=3)
         self.commit_step("c4", status="doing", order=4)  # control: listed, so an empty row cannot pass
         self.publish(sessions=[])
-        self.assertEqual(self.stale(self.out_with_live()), (1, "c4 (set to todo)"))
+        self.assertEqual(self.stale(self.out_with_live(expect=(1,))), (1, "c4 (set to todo)"))
 
     def test_no_live_file_reads_the_row_unknown(self):
         self.commit_step("c1", status="doing")
@@ -781,14 +781,14 @@ class StaleInProgress(UpkeepFixture):
         self.assertEqual(self.stale(self.out_with_live()), (1, "unknown (the live file's readAt is in the future)"))
         with self.subTest("two minutes ahead is within the tolerance"):
             self.publish(sessions=[], read_at=iso_ago(-2))
-            self.assertEqual(self.stale(self.out_with_live()), (1, "c1 (set to todo)"))
+            self.assertEqual(self.stale(self.out_with_live(expect=(1,))), (1, "c1 (set to todo)"))
 
     # Only archived ends a lane (session-tiers, Live-coordinator check), so an unseen status keeps its step live.
     def test_session_in_an_unseen_status_keeps_its_step_live(self):
         self.commit_step("c1", status="doing")
         self.commit_step("c2", status="doing", order=2)  # control: listed
         self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_SOMETHING_NEW", "cs-step:c1")])
-        count, entries = self.stale(self.out_with_live())
+        count, entries = self.stale(self.out_with_live(expect=(1,)))
         self.assertEqual((count, self.listed_ids(entries)), (1, ["c2"]))
 
     def test_session_counts_only_with_this_repos_cs_repo_tag(self):
@@ -805,7 +805,7 @@ class StaleInProgress(UpkeepFixture):
         for name, (row, listed) in rows.items():
             with self.subTest(name):
                 self.publish(sessions=[row])
-                count, entries = self.stale(self.out_with_live())
+                count, entries = self.stale(self.out_with_live(expect=(1,)))
                 self.assertEqual((count, sorted(self.listed_ids(entries))), (len(listed), listed))
         git(self.repo, "remote", "remove", "origin")
         self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")])
@@ -822,7 +822,7 @@ class StaleInProgress(UpkeepFixture):
         self.commit_step("c1", status="waiting")
         self.commit_step("c2", status="doing", order=2)  # control: listed as todo
         self.publish(sessions=[])
-        count, entries = self.stale(self.out_with_live())
+        count, entries = self.stale(self.out_with_live(expect=(1,)))
         self.assertEqual(count, 2)
         self.assertIn('c1 (unknown status "waiting")', entries)
         self.assertIn("c2 (set to todo)", entries)
@@ -834,7 +834,7 @@ class StaleInProgress(UpkeepFixture):
         tagless = [{"id": "session_test02", "session_status": "SESSION_STATUS_IDLE"},
                    {"id": "session_test03", "session_status": "SESSION_STATUS_RUNNING", "tags": None}]
         self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")] + tagless)
-        page, out = self.build_from_main("--live", str(self.live))
+        page, out = self.build_from_main("--live", str(self.live), expect=(1,))
         self.assertEqual(build_info(page)["live"]["skipped"], [])
         self.assertEqual(self.stale(out), (1, "c2 (set to todo)"))
         with self.subTest("a tags string is still skipped"):
@@ -848,7 +848,7 @@ class StaleInProgress(UpkeepFixture):
         self.commit_step("c1", status="doing")
         self.commit_step("c2", status="doing", order=2)  # control: listed
         self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", "cs-repo:Owner/Fixture", "cs-step:c1")])
-        self.assertEqual(self.stale(self.out_with_live()), (1, "c2 (set to todo)"))
+        self.assertEqual(self.stale(self.out_with_live(expect=(1,))), (1, "c2 (set to todo)"))
 
 
 class PageRulings(UpkeepFixture):
@@ -1212,10 +1212,10 @@ class FeelRows(UpkeepFixture):
         "list": ["simulator", "2026-11-01T11:44:00-06:00"],
     }
 
-    def build_live(self):
+    def build_live(self, expect=(0, None)):
         """(page, out) of a build from main, with a live file that lists no sessions."""
         self.publish(sessions=[])
-        return self.build_from_main("--live", str(self.live))
+        return self.build_from_main("--live", str(self.live), expect=expect)
 
     def test_landed_feel_fix_without_a_check_is_listed_in_the_device_row(self):
         self.land("c1", 12, feel=True)
@@ -1239,7 +1239,7 @@ class FeelRows(UpkeepFixture):
     def test_landed_feel_fix_with_a_valid_check_reads_the_try_it_suffix(self):
         self.land_all({"sim": {"feel": True, "deviceCheck": self.CHECK},
                        "dev": {"feel": True, "deviceCheck": dict(self.CHECK, how="device")}}, 12)
-        _, out = self.build_live()
+        _, out = self.build_live(expect=(1,))
         count, detail = self.row(out, self.TRIAGE)
         self.assertEqual((count, self.entries(detail)),
                          (2, ["dev (#13; open a try-it item)", "sim (#12; open a try-it item)"]))
@@ -1256,7 +1256,7 @@ class FeelRows(UpkeepFixture):
 
     def test_absent_false_or_null_is_not_a_feel_fix(self):
         prs = self.land_all(self.NOT_FEEL, 30)
-        _, out = self.build_live()
+        _, out = self.build_live(expect=(1,))
         self.assertEqual(self.row(out, self.DEVICE), (0, ""))
         want = sorted("%s (#%d)" % (sid, pr) for sid, pr in prs.items())
         count, detail = self.row(out, self.TRIAGE)
@@ -1279,18 +1279,18 @@ class FeelRows(UpkeepFixture):
         self.land("c1", 12, feel=True)  # doing, no check: the device row lists it instead
         self.land("c2", 13, order=2)  # control: a plain landed step is still listed
         self.land("c3", 14, order=3, status="active", feel=True)  # active counts the same as doing
-        _, out = self.build_live()
+        _, out = self.build_live(expect=(1,))
         self.assertEqual(self.row(out, self.UNLANED), (1, "c2 (set to done: landed in #13)"))
 
     def test_landed_feel_fix_with_a_valid_check_is_still_listed_as_set_to_done(self):
         self.land("c1", 12, feel=True, deviceCheck=self.CHECK)
-        _, out = self.build_live()
+        _, out = self.build_live(expect=(1,))
         self.assertEqual(self.row(out, self.UNLANED), (1, "c1 (set to done: landed in #12)"))
 
     def test_feel_fix_not_yet_landed_still_reads_set_to_todo(self):
         git(self.repo, "checkout", "-q", "roadmap")
         self.commit_step("c1", status="doing", feel=True)
-        _, out = self.build_live()
+        _, out = self.build_live(expect=(1,))
         self.assertEqual(self.row(out, self.UNLANED), (1, "c1 (set to todo)"))
 
 
