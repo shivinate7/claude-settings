@@ -28,6 +28,12 @@ names it, never a crash.
     '' below three failures in a row. From three on: "Model calls: N failed in a row this session
     (last: <error>). Hook judges are not running. Fix: <the auth_check fix>".
 - hooks/stall_watch.py --stop (the existing Stop hook) puts streak_line in its one systemMessage line.
+- The classifier: invoke_model's error (a str) carries `kind`. "AUTH": the model start exited non-zero and its
+    text names an authentication failure ("401", "Invalid API key", "/login", "authentication"). "RUN": a start
+    that failed, a timeout, or any other non-zero exit. "REPLY": a ReplyError, a call that ran and answered
+    badly. An exit 0 with an envelope `is_error: true` is a failure, "AUTH" or "RUN" by the same text test,
+    never "REPLY". auth_check gives the setup-token fix for "AUTH" only. "RUN" names the error and says the
+    check failed. Round 1 cases R1 to R3 stub hooks/_nowindow.run, the one start a model call makes.
 - settings.json: one SessionStart command runs decision_watch.py --auth-check. No Stop command names
   decision_watch.
 - The streak file lives under the config dir's state folder. These cases do not name it. They scan every
@@ -47,6 +53,7 @@ import uuid
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: sweeps and makes run folders (lint/_test_temp.py)
+import _nowindow  # noqa: E402  the one home of a no-window start; R1 to R3 stub its run (hooks/_nowindow.py)
 from case_runner_test import Skip, run_cases  # noqa: E402
 import test_stall_watch_stop as tss  # noqa: E402  the Stop harness and its stale-job case: called, not copied
 
@@ -536,6 +543,151 @@ def C12_three_failed_reply_judge_calls_give_the_stop_line():
         problems += p
         problems += expect("Model calls: 3 failed in a row" in msg,
                            "three failed reply judge calls: the Stop line is %r" % msg)
+    return problems
+
+
+# --------------------------------------------------------------------------- round 1: the error text and the classifier
+
+class NowindowRun:
+    """Stands in for hooks/_nowindow.run, the one start a model call makes. Returns `result`, or raises `raises`."""
+
+    def __init__(self, result=None, raises=None):
+        self.result, self.raises = result, raises
+
+    def __call__(self, argv, *args, **kwargs):
+        if self.raises is not None:
+            raise self.raises
+        return self.result
+
+
+@contextlib.contextmanager
+def nowindow_run(fake):
+    """Route every model start inside the block to `fake`, then restore the real start."""
+    prior = _nowindow.run
+    _nowindow.run = fake
+    try:
+        yield fake
+    finally:
+        _nowindow.run = prior
+
+
+def started(stdout="", stderr="", returncode=0):
+    """A finished model start, as hooks/_nowindow.run returns it."""
+    return subprocess.CompletedProcess(["claude", "-p"], returncode, stdout, stderr)
+
+
+def envelope(result, is_error=False):
+    """The JSON envelope `claude -p --output-format json` prints on stdout."""
+    return json.dumps({"is_error": is_error, "result": result})
+
+
+AUTH_TEXT = "Invalid API key · Please run /login"  # the text the CLI prints for a lost login
+
+
+@case
+def R1_a_failed_start_with_empty_stderr_names_the_result_on_stdout():
+    """R1. exit 1, empty stderr, a JSON envelope on stdout: the error names the envelope's result, with the token
+    scrubbed and at most 200 characters of it"""
+    with scratch_config("r1") as cfg:
+        token_file(cfg, FAKE_TOKEN + "\n")
+        problems = scoped(cfg)
+        leaky = envelope("Invalid API key " + FAKE_TOKEN + " " + "z" * 400)
+        with nowindow_run(NowindowRun(started(stdout=leaky, returncode=1))):
+            verdict, error = dw.invoke_model("judge this")
+    problems += expect(verdict is None and error is not None,
+                       "a failed start gave (%r, %r), want (None, an error)" % (verdict, error))
+    problems += expect("Invalid API key" in str(error),
+                       "the error does not name the envelope's result: %r" % (error,))
+    problems += expect(FAKE_TOKEN not in str(error), "the error carries the fake token: %r" % (error,))
+    problems += expect("z" * 201 not in str(error), "the error carries more than 200 characters of the result")
+    return problems
+
+
+@case
+def R2_a_timeout_warns_that_the_check_failed_with_no_setup_fix():
+    """R2. a model call that times out: the warning says the check failed and names the timeout, and gives no
+    claude setup-token fix, which is for a login that failed. The error's kind is RUN"""
+    with scratch_config("r2-timeout") as cfg:
+        problems = scoped(cfg)
+        fn, miss = interface("auth_check")
+        if miss:
+            return problems + miss
+        timed_out = subprocess.TimeoutExpired(["claude", "-p"], dw.MODEL_TIMEOUT)
+        with nowindow_run(NowindowRun(raises=timed_out)):
+            text = fn()
+        with nowindow_run(NowindowRun(raises=timed_out)):
+            _verdict, error = dw.invoke_model("judge this")
+    problems += expect(text != "", "a timeout: auth_check printed nothing, want a warning")
+    problems += expect("timed out" in text, "the warning does not name the timeout: %r" % text)
+    problems += expect("failed" in text, "the warning does not say the check failed: %r" % text)
+    problems += expect(SETUP not in text, "a timeout gives the claude setup-token fix: %r" % text)
+    problems += expect(getattr(error, "kind", None) == "RUN",
+                       "a timeout's error has kind %r, want 'RUN'" % getattr(error, "kind", None))
+    return problems
+
+
+@case
+def R2_b_a_start_that_fails_warns_with_the_start_error_and_no_setup_fix():
+    """R2. the claude binary cannot start: the warning names the start error and gives no claude setup-token fix.
+    The error's kind is RUN"""
+    with scratch_config("r2-start") as cfg:
+        problems = scoped(cfg)
+        fn, miss = interface("auth_check")
+        if miss:
+            return problems + miss
+        missing = OSError("claude binary not found")
+        with nowindow_run(NowindowRun(raises=missing)):
+            text = fn()
+        with nowindow_run(NowindowRun(raises=missing)):
+            _verdict, error = dw.invoke_model("judge this")
+    problems += expect(text != "", "a failed start: auth_check printed nothing, want a warning")
+    problems += expect("binary not found" in text, "the warning does not name the start error: %r" % text)
+    problems += expect(SETUP not in text, "a failed start gives the claude setup-token fix: %r" % text)
+    problems += expect(getattr(error, "kind", None) == "RUN",
+                       "a failed start's error has kind %r, want 'RUN'" % getattr(error, "kind", None))
+    return problems
+
+
+@case
+def R2_c_an_authentication_failure_gives_the_setup_token_fix():
+    """R2. control: a start that exits non-zero with 'Invalid API key' and '/login' gives the claude setup-token
+    fix. The error's kind is AUTH"""
+    with scratch_config("r2-auth") as cfg:
+        problems = scoped(cfg)
+        fn, miss = interface("auth_check")
+        if miss:
+            return problems + miss
+        refused = started(stderr=AUTH_TEXT, returncode=1)
+        with nowindow_run(NowindowRun(refused)):
+            text = fn()
+        with nowindow_run(NowindowRun(refused)):
+            _verdict, error = dw.invoke_model("judge this")
+    problems += expect(SETUP in text, "an authentication failure does not give the claude setup-token fix: %r" % text)
+    problems += expect(getattr(error, "kind", None) == "AUTH",
+                       "an authentication failure's error has kind %r, want 'AUTH'" % getattr(error, "kind", None))
+    return problems
+
+
+@case
+def R3_exit_zero_with_is_error_counts_as_a_failure_in_the_streak():
+    """R3. exit 0 and an envelope with is_error true: a failed call, not a reply that ran, so three in a row give
+    the Stop line"""
+    sid = "model-auth-r3"
+    with scratch_config("r3") as cfg:
+        problems = scoped(cfg) + takes_session_id_problems()
+        if problems:
+            return problems
+        errors = []
+        for _ in range(3):
+            with nowindow_run(NowindowRun(started(stdout=envelope(AUTH_TEXT, is_error=True)))):
+                _verdict, error = dw.invoke_model("judge this", session_id=sid)
+            errors.append(error)
+        p, msg, _out = stop_message(sid)
+    problems += p
+    problems += expect(not any(isinstance(e, dw.ReplyError) for e in errors),
+                       "an is_error envelope came back as a ReplyError, a reply that ran: %r" % errors[-1:])
+    problems += expect("Model calls: 3 failed in a row" in msg,
+                       "three is_error envelopes: the Stop line is %r, want the three-failure line" % msg)
     return problems
 
 
