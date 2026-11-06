@@ -273,7 +273,8 @@ def test_grant_for_another_lane_does_not_allow(run_dir):
     must_not_approve(run_dir, lane([owner_event()], tags=other), "the lane is icon-b, the grant names icon-a",
                      "a grant for another lane allowed the call")
     must_not_approve(run_dir, lane([owner_event("grant icon-b spawn 10m")]),
-                     "the lane is icon-a, the grant names icon-b", "a grant for another lane allowed the call")
+                     "the lane is icon-a, the grant names icon-b", "a grant for another lane allowed the call",
+                     text="grant icon-b spawn 10m")
 
 
 @each("catchall", "user", "event")
@@ -323,6 +324,15 @@ def test_tags_without_the_slug_do_not_allow(run_dir):
     must_approve(run_dir, lane([owner_event()]), "control, the tags hold cs-step:icon-a")
     must_not_approve(run_dir, lane([owner_event()], tags=["cs-build:lane", "cs-repo:o/r"]),
                      "get_session tags hold no cs-step slug", "a get_session with no slug tag allowed the call")
+
+
+def test_grant_for_either_of_two_step_tags_allows(run_dir):
+    tags = ["cs-build:lane", "cs-step:icon-a", "cs-step:icon-b", "cs-repo:o/r"]
+    must_approve(run_dir, lane([owner_event()], tags=tags),
+                 "the lane holds cs-step:icon-a and cs-step:icon-b, the grant names icon-a")
+    must_not_approve(run_dir, lane([owner_event("grant icon-c spawn 10m")], tags=tags),
+                     "the lane holds icon-a and icon-b, the grant names icon-c",
+                     "a grant for a slug the lane does not hold allowed the call", text="grant icon-c spawn 10m")
 
 
 def test_get_session_of_another_session_does_not_count(run_dir):
