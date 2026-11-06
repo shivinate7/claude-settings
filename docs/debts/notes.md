@@ -247,6 +247,8 @@
 - rm-shim-windows: install.ps1 lands no rm shim and bin/rm is posix only (install.ps1)
 - rule-flag-not-enforced: bin/merge flag lines for changed rule files show only if the report names them in bold; no check, and gh pr merge prints none (merge/merge.py)
 - ruling-home-isabs-unproven: the absolute home: refusal in value_resolves is unmeasured on Linux, possibly redundant (hooks/ruling_home.py)
+- ruling-skip-bullet-no-incident: the ruling-skip bullet names its ruling (owner waiting-page item 284 b) but no incident, so it does not name the mistake the check stops (rule `building-guard-needs-incident`, a guard names its incident). Decision: questions-go-to-owner (questions go to the owner; its ruling-skip bullet).
+- ruling-skip-two-cue-pass: a Done item with two ruling cues passes when one cue cites and the other does not, since no-cite refusals run only when no cue cites (lint/report_guard.py, `ruling_claims`). Decision: questions-go-to-owner (questions go to the owner; its ruling-skip bullet).
 - safety-hole-test-is-judgment: no check measures net safety value; the round-3 reviewer judges it (CLAUDE.md rule roles-review-cap-three)
 - safety-line-unread-at-merge: nothing forces the orchestrator to read the round-3 Net safety value line before merge (agents/reviewer.md)
 - sb-agents-json-cost: cost of claude agents --json on each board refresh with a very large session list is unmeasured (mods/session-board)
