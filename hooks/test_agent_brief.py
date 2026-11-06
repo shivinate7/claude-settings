@@ -432,6 +432,75 @@ def internal_error_check():
 add("error: an internal error gives no stdout, one agent_brief: stderr line, exit 0", "custom",
     fn=internal_error_check)
 
+# GUARD_CORE FAILS ON IMPORT: the hook imports guard_core at module top, so this case runs the hook in a child whose
+# guard_core raises on every attribute read, as a guard_core that fails at import does. `prelude` runs before the hook
+# file, so the same child runner serves the red case (a broken guard_core) and its control (no prelude).
+BROKEN_GUARD_CORE = (
+    "import sys, types\n"
+    "class _Broken(types.ModuleType):\n"
+    "    def __getattr__(self, name):\n"
+    "        raise RuntimeError('guard_core is broken')\n"
+    "sys.modules['guard_core'] = _Broken('guard_core')\n"
+)
+HOOK_RUNNER = (
+    "import runpy, sys\n"
+    "sys.argv = sys.argv[1:]\n"
+    "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+)
+
+
+def run_hook_after(prelude, stdin_text):
+    """Run the hook in a child that runs `prelude` first, then the hook file as __main__."""
+    return subprocess.run([sys.executable, "-c", prelude + HOOK_RUNNER, HOOK], input=stdin_text,
+                          capture_output=True, encoding="utf-8", timeout=30)
+
+
+def last_stderr_line(result):
+    lines = result.stderr.strip().splitlines()
+    return lines[-1][:120] if lines else "no stderr"
+
+
+def guard_core_fails_check():
+    """A guard_core that fails on import: the hook fails open, as its docstring says. Exit 0, no traceback,
+    no stdout, and one stderr line that starts `agent_brief:`."""
+    if not os.path.exists(HOOK):
+        return "the hook file is missing: %s" % HOOK
+    result = run_hook_after(BROKEN_GUARD_CORE, payload("builder"))
+    if result.returncode != 0:
+        return "exit %d when guard_core fails on import, want 0: %s" % (result.returncode, last_stderr_line(result))
+    if "Traceback" in result.stderr:
+        return "stderr holds a traceback when guard_core fails on import, want one agent_brief: line"
+    if result.stdout.strip():
+        return "expected no stdout, got %s" % result.stdout.strip()[:120]
+    err = result.stderr.strip().split("\n") if result.stderr.strip() else []
+    if len(err) != 1:
+        return "want one stderr line, got %d" % len(err)
+    if not err[0].startswith("agent_brief:"):
+        return "stderr line is %r, want it to start 'agent_brief:'" % err[0][:120]
+    return None
+
+
+add("error: a guard_core that fails on import gives no stdout, one agent_brief: stderr line, exit 0", "custom",
+    fn=guard_core_fails_check)
+
+
+def guard_core_control_check():
+    """The control for the case above: with guard_core working, the same child runner gives the refuter the
+    five-line read-only set. Green here and red above means the broken import is the cause, not the runner."""
+    if not os.path.exists(HOOK):
+        return "the hook file is missing: %s" % HOOK
+    result = run_hook_after("", payload(REFUTER))
+    if result.returncode != 0:
+        return "exit %d with guard_core working, want 0: %s" % (result.returncode, last_stderr_line(result))
+    text, problem = context_of(result.stdout)
+    if problem:
+        return problem
+    return line_set_check(READER_RULES)(text)
+
+
+add("control: with guard_core working, the refuter gets the five-line set through the same runner", "custom",
+    fn=guard_core_control_check)
+
 # SILENT: junk or empty stdin gives no stdout, exit 0, and at most one stderr line that starts
 # `agent_brief:`.
 BAD_CASES = [
