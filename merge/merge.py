@@ -817,7 +817,9 @@ class Host:
             out.append((f["filename"], f["status"]))
             if f.get("previous_filename"):
                 out.append((f["previous_filename"], "removed"))
-        if not isinstance(changed, int) or entries < changed:
+        if not isinstance(changed, int):
+            raise Stop("the pull request read gave no changed-file count, so the diff cannot be checked in full. " + REVIEW_CITE)
+        if entries < changed:
             raise Stop(f"the pull request reports {changed} changed files, but {entries} were read (GitHub lists at most 3000), so the diff cannot be checked in full. " + REVIEW_CITE)
         return out
 
@@ -2937,8 +2939,10 @@ def write_merge_role(tier):
         raise Stop(f"cannot write the merge role to {path} {ROLE_CITE}: {e}.")
 
 def guard_hits(paths):
-    """-> the sorted paths that start with a GUARD_PATHS entry or equal a GUARD_FILES entry."""
-    return sorted(p for p in paths if p.startswith(GUARD_PATHS) or p in GUARD_FILES)
+    """-> the sorted paths that start with a GUARD_PATHS entry or equal a GUARD_FILES entry, less each test path: a test file alone is no
+    guard change (decision hold-unsafe-after-round-3). hooks/guard.py is_test_rel is the one home of what a test path is."""
+    import guard as hook_guard  # here, not at the top: it loads the whole guard set, and only the review record needs it
+    return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in GUARD_FILES) and not hook_guard.is_test_rel(p))
 
 def kind_misfits(kind, files):
     """-> the sorted paths that break the kind, over (path, status) pairs. docs-only: a path not ending .md. delete-only: a status other than removed."""
