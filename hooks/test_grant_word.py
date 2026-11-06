@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cases for the spawn grant word (hooks/grant_word.py, the one home of the word's form).
 
-    python3 -m pytest hooks/test_grant_word.py -q
+    python3 hooks/test_grant_word.py
 
 The word is `grant <slug> spawn <n>m|h` or `grant off <slug>`. The whole prompt, in any case, with surrounding
 whitespace ignored. Any other text grants nothing. The parser is assumed to be `parse(text)`, returning
@@ -14,8 +14,6 @@ makes that case red on a tree with no parser, and the failure names it.
 import os
 import sys
 
-import pytest
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 try:
@@ -25,6 +23,14 @@ except ImportError:  # not built yet: each case then fails on its own assert, ne
 
 SPAWN_10M = ("spawn", "icon-a", 600)
 GRANT_10M = "grant icon-a spawn 10m"
+
+
+def each(*values):
+    """Runs the case once per value, each as its own case (what a parametrize mark did under pytest)."""
+    def mark(fn):
+        fn.each_values = values
+        return fn
+    return mark
 
 
 def read(text):
@@ -65,16 +71,16 @@ def test_bare_number_grants_nothing():
     expect_nothing("grant icon-a spawn 10", GRANT_10M, "a length with no unit")
 
 
-@pytest.mark.parametrize("text", ["grant icon-a spawn 0m", "grant icon-a spawn -5m"])
+@each("grant icon-a spawn 0m", "grant icon-a spawn -5m")
 def test_length_must_be_a_positive_integer(text):
     expect_nothing(text, GRANT_10M, "a length that is not a positive integer")
 
 
-@pytest.mark.parametrize("text", [
+@each(
     "please grant icon-a spawn 10m",
     "grant icon-a spawn 10m thanks",
     "grant icon-a spawn 10m\nthanks",
-])
+)
 def test_extra_text_grants_nothing(text):
     expect_nothing(text, GRANT_10M, "extra text around the word")
 
@@ -88,18 +94,18 @@ def test_grant_off_reads_as_an_end_of_the_slugs_grant():
     expect_reads("GRANT OFF icon-a", ("off", "icon-a", None), "grant off in upper case")
 
 
-@pytest.mark.parametrize("text", ["grant off icon-a 10m", "grant off -icon"])
+@each("grant off icon-a 10m", "grant off -icon")
 def test_grant_off_takes_a_slug_and_nothing_else(text):
     expect_nothing(text, "grant off icon-a", "grant off with a length or a bad slug", want=("off", "icon-a", None))
 
 
-@pytest.mark.parametrize("text", [
+@each(
     "grant -icon spawn 10m",
     "grant _icon spawn 10m",
     "grant icon.a spawn 10m",
     "grant icon_a!x spawn 10m",
     "grant spawn 10m",
-])
+)
 def test_bad_or_missing_slug_grants_nothing(text):
     expect_nothing(text, GRANT_10M, "a slug that breaks the form, or no slug")
 
@@ -114,3 +120,39 @@ def test_slug_length_limit_is_32_characters():
 def test_acts_constant_names_the_spawn_tools_once():
     got = getattr(grant_word, "ACTS", None)
     assert got == {"spawn": ("Agent", "Task")}, "the ACTS constant is %r, want the spawn act's two tools" % (got,)
+
+
+def cases():
+    """Each test_ function in the order it is written. A function marked with `each` is one case per value."""
+    for name, fn in list(globals().items()):
+        if not name.startswith("test_") or not callable(fn):
+            continue
+        values = getattr(fn, "each_values", None)
+        if values is None:
+            yield name, fn, ()
+        else:
+            for value in values:
+                yield "%s[%s]" % (name, value), fn, (value,)
+
+
+def main():
+    failed, total = [], 0
+    for label, fn, args in cases():
+        total += 1
+        try:
+            fn(*args)
+        except AssertionError as err:
+            failed.append(label)
+            print("FAIL: %s  %s" % (label, err))
+        except Exception as err:  # a crash names its own cause, and the run goes on
+            failed.append(label)
+            print("ERROR: %s  %s: %s" % (label, type(err).__name__, err))
+    if failed:
+        print("FAILED: %d of %d case(s)" % (len(failed), total))
+        return 1
+    print("all %d cases passed" % total)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

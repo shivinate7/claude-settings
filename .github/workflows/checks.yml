@@ -187,6 +187,12 @@ jobs:
       - name: Local time line fixture suite
         run: python3 hooks/test_local_time.py
 
+      - name: Spawn grant word fixture suite
+        run: python3 hooks/test_grant_word.py
+
+      - name: Spawn grant guard fixture suite
+        run: python3 hooks/test_grant_guard.py
+
       - name: CI wake-up fixture suite
         run: python3 hooks/test_ci_wake.py
 

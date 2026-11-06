@@ -1,30 +1,30 @@
 #!/usr/bin/env python3
-"""Cases for the spawn grant gate in hooks/guard.py (decision grant-reaches-lanes, the spawn act).
+"""Cases for the spawn grant guard in hooks/guard.py (decision grant-reaches-lanes, the spawn act).
 
-    python3 -m pytest hooks/test_grant_gate.py -q
+    python3 hooks/test_grant_guard.py
 
 The owner types `grant icon-a spawn 10m` in the coordinator. The lane reads that event as a get_event tool result in
 its own transcript, and its get_session tool result carries the lane's cs-step tag. The guard approves one Agent or
 Task call only when both results are there, the event is the owner's grant word for the lane's slug, and the grant
 is live. Each case runs the guard as Claude Code does: the payload on stdin, the decision on stdout.
 
-Each negative case runs beside a control: the same transcript with the defect removed, which the gate must approve.
-A guard with no gate prints nothing for an Agent call, so a negative alone would pass there. The control is what
+Each negative case runs beside a control: the same transcript with the defect removed, which the guard must approve.
+A guard without the grant prints nothing for an Agent call, so a negative alone would pass there. The control is what
 makes it red on such a guard, and the failure names it.
 
 The run helper and the wrapper text copy test_guard.py's decide() and role_wrapped(). Importing test_guard runs its
 whole module at import (over two minutes here), so its helpers are not reachable from this file. The host load is
 read as normal (test_guard's LB_NORMAL), so a busy host cannot refuse an Agent start and fail a control.
 """
+import inspect
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-
-import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
@@ -42,7 +42,7 @@ AGENT_INPUT = {"description": "check", "prompt": "Check the diff for typos.", "m
 BASH_INPUT = {"command": "echo hi"}
 AGENT_ID = "a1b2c3d4e5f60718"
 WRAP_NONCE = "a4b10f528ccf9d507382439f30ed6d83"
-# About 16 MiB of plain user lines: the grant placed before them sits past any tail the gate reads.
+# About 16 MiB of plain user lines: the grant placed before them sits past any tail the guard reads.
 FILLER = json.dumps({"type": "user", "message": {"role": "user", "content": "filler " + "x" * 4000}})
 FILLER_LINES = [FILLER] * 4096
 
@@ -57,6 +57,14 @@ guard._read_memory = lambda: 40.0      # the load brake reads host memory and di
 guard._read_disk = lambda: (500.0, 926.0)
 guard.main()
 """
+
+
+def each(*values):
+    """Runs the case once per value, each as its own case (what a parametrize mark did under pytest)."""
+    def mark(fn):
+        fn.each_values = values
+        return fn
+    return mark
 
 
 def stamp(moment):
@@ -148,7 +156,7 @@ def run_guard(payload, cfg):
     return read_decision(proc.stdout)
 
 
-def gate(run_dir, lines, tool="Agent", agent_id=None, tool_input=None):
+def decide(run_dir, lines, tool="Agent", agent_id=None, tool_input=None):
     """One call of `tool` from the lead session (or from `agent_id`) against the transcript `lines`."""
     case = os.path.join(run_dir, "case-" + uuid.uuid4().hex)
     cfg, proj = os.path.join(case, "cfg"), os.path.join(case, "proj")
@@ -167,20 +175,20 @@ def gate(run_dir, lines, tool="Agent", agent_id=None, tool_input=None):
 
 
 def approved(outcome):
-    """The gate's approval: an allow whose reason names the grant text. An allow with no reason is the guard's
-    normal pass, which a guard with no gate also gives."""
+    """The grant's approval: an allow whose reason names the grant text. An allow with no reason is the guard's
+    normal pass, which a guard without the grant also gives."""
     decision, reason = outcome
     return decision == "allow" and GRANT in reason
 
 
 def must_approve(run_dir, lines, label, **kw):
-    outcome = gate(run_dir, lines, **kw)
+    outcome = decide(run_dir, lines, **kw)
     assert approved(outcome), "control, the live grant did not allow the call (%s): %r" % (label, outcome)
 
 
 def must_not_approve(run_dir, lines, label, cause, **kw):
-    outcome = gate(run_dir, lines, **kw)
-    assert not approved(outcome), "%s (%s): the gate allowed the call: %r" % (cause, label, outcome)
+    outcome = decide(run_dir, lines, **kw)
+    assert not approved(outcome), "%s (%s): the guard allowed the call: %r" % (cause, label, outcome)
 
 
 # ---------------------------------------------------------------- approval
@@ -232,7 +240,7 @@ def test_grant_for_another_lane_does_not_allow(run_dir):
                      "the lane is icon-a, the grant names icon-b", "a grant for another lane allowed the call")
 
 
-@pytest.mark.parametrize("where", ["catchall", "user", "event"])
+@each("catchall", "user", "event")
 def test_event_with_an_origin_key_does_not_allow(run_dir, where):
     must_approve(run_dir, lane([owner_event()]), "control, no origin key")
     relayed = owner_event(**{where: {"origin": {"kind": "mcp_send_message"}}})
@@ -240,7 +248,7 @@ def test_event_with_an_origin_key_does_not_allow(run_dir, where):
                      "an event with an origin key allowed the call")
 
 
-@pytest.mark.parametrize("where", ["event", "user", "catchall"])
+@each("event", "user", "catchall")
 def test_synthetic_event_does_not_allow(run_dir, where):
     must_approve(run_dir, lane([owner_event()]), "control, no synthetic flag")
     must_not_approve(run_dir, lane([owner_event(**{where: {"isSynthetic": True}})]),
@@ -290,7 +298,7 @@ def test_agent_own_call_does_not_allow(run_dir):
 
 def test_refusal_by_another_guard_rule_stays(run_dir):
     must_approve(run_dir, lane([owner_event()]), "control, a sonnet Agent call")
-    outcome = gate(run_dir, lane([owner_event()]), tool_input=dict(AGENT_INPUT, model="haiku"))
+    outcome = decide(run_dir, lane([owner_event()]), tool_input=dict(AGENT_INPUT, model="haiku"))
     assert outcome[0] == "deny", "the model floor's refusal did not stand under a live grant: %r" % (outcome,)
 
 
@@ -322,3 +330,44 @@ def test_run_folder_sweep_removes_an_old_sibling_and_keeps_a_new_one(run_dir):
     _test_temp.run_folder(temp_root=root)
     assert not os.path.exists(old), "a run folder two days old was not swept"
     assert os.path.isdir(new), "a run folder a minute old was swept"
+
+
+def cases():
+    """Each test_ function in the order it is written. A function marked with `each` is one case per value."""
+    for name, fn in list(globals().items()):
+        if not name.startswith("test_") or not callable(fn):
+            continue
+        values = getattr(fn, "each_values", None)
+        if values is None:
+            yield name, fn, ()
+        else:
+            for value in values:
+                yield "%s[%s]" % (name, value), fn, (value,)
+
+
+def main():
+    run_dir = _test_temp.run_folder()  # one run folder per run; the run removes it at its end
+    failed, total = [], 0
+    try:
+        for label, fn, args in cases():
+            total += 1
+            takes_dir = "run_dir" in inspect.signature(fn).parameters  # the run folder comes first, then the value
+            try:
+                fn(run_dir, *args) if takes_dir else fn(*args)
+            except AssertionError as err:
+                failed.append(label)
+                print("FAIL: %s  %s" % (label, err))
+            except Exception as err:  # a crash names its own cause, and the run goes on
+                failed.append(label)
+                print("ERROR: %s  %s: %s" % (label, type(err).__name__, err))
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
+    if failed:
+        print("FAILED: %d of %d case(s)" % (len(failed), total))
+        return 1
+    print("all %d cases passed" % total)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

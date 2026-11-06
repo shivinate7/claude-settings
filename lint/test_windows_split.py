@@ -97,6 +97,8 @@ LINUX_SUITES = {
     "python3 hooks/test_agent_brief.py": (None, None),
     "python3 hooks/test_blind_brief.py": (None, None),
     "python3 hooks/test_local_time.py": (None, None),
+    "python3 hooks/test_grant_word.py": (None, None),
+    "python3 hooks/test_grant_guard.py": (None, None),
     "python3 hooks/test_ci_wake.py": (None, None),
     "python3 hooks/test_feedback_inbox.py": (None, None),
     "python3 hooks/test_waiting_export.py": (None, None),
