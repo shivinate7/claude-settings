@@ -24,9 +24,9 @@ reviewer and whose brief holds a report-shaped block or a verdict line. The rule
   The verdict words are one constant in `hooks/guard.py`.
 - The check matches shapes at line start, never words. A brief that quotes the task's words ("never
   holds the builder's report or a prior verdict") passes.
-- The role set is one constant: `reviewer`, and the term for an agent that argues back. That term is one
-  constant in `hooks/guard.py`, `challenger` until the owner picks the glossary word (step
-  debate-glossary-word). The pick is a one-line rename.
+- The role set is one constant: `reviewer`, and the refuter, the agent that argues back (owner, item
+  282, pick b, 2026-11-06). The refuter's name has one home, `REFUTER_ROLE` in `hooks/guard_core.py`
+  (decision plan-refuter).
 
 Not caught: a builder's argument pasted as prose, with no label or verdict line. Rule
 `roles-resume-by-name` and `agents/reviewer.md` cover it in words. A report relayed to a running
