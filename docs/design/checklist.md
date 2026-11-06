@@ -6,7 +6,7 @@ and their checks are in `principles.md`.
 
 Screen: ____ Size: ____ Theme: ____
 
-- [ ] ux-press-moves-nothing: Do all other elements keep their place and size on each press and load? Under ux-order-holds-still, the row that leaves an open list, the rows that close its gap and the rows that make room where it lands may move, but never resize. A count badge or section header may shift with them.
+- [ ] ux-press-moves-nothing: Do all other elements keep their place and size on each press and load? Under ux-order-holds-still, the row that leaves an open list, the rows that close its gap and the rows that make room where it lands may move, but never resize. A count badge or section header that those rows shift may shift too.
 - [ ] ux-order-holds-still: After an act on one row, do the other rows stay in the open list and keep their order? If that row left, did the next open row, if any, take its slot?
 - [ ] ux-unknown-is-not-empty: Do a failed read and an unknown state each show their own words?
 - [ ] ux-statements-are-true: Is each promise in the copy true of the product now?
