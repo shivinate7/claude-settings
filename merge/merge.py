@@ -2501,11 +2501,12 @@ def prose_judge_run(plan, n):
     error, a timeout, an unreadable reply, a line the reply skipped, a file past PROSE_JUDGE_MAX_CALLS), at most PROSE_JUDGE_MAX_LINES, then
     one count line. Nothing here refuses a merge or writes a file."""
     report = []
+    unknown = []  # UNKNOWN lines go after the stale and unbacked ones, so the cap on lines never hides a verdict behind them
     try:
         import decision_watch
         for item in plan or []:
             if isinstance(item, str):
-                report.append(item)
+                unknown.append(item)
                 continue
             path, by_line, prompt = item
             try:
@@ -2514,17 +2515,18 @@ def prose_judge_run(plan, n):
                 verdict, error = None, f"the model call raised {type(e).__name__}"
             entries = readable_verdicts(verdict) if verdict is not None else None
             if entries is None:
-                report += [prose_judge_row(n, path, number, "UNKNOWN", error or "the model gave no verdict, or one this merge could not read") for number in sorted(by_line)]
+                unknown += [prose_judge_row(n, path, number, "UNKNOWN", error or "the model gave no verdict, or one this merge could not read") for number in sorted(by_line)]
                 continue
             said = {e["line"]: e for e in entries if e["line"] in by_line}
             for number in sorted(by_line):
                 e = said.get(number)
                 if e is None:
-                    report.append(prose_judge_row(n, path, number, "UNKNOWN", "the model gave no verdict for this line"))
+                    unknown.append(prose_judge_row(n, path, number, "UNKNOWN", "the model gave no verdict for this line"))
                 elif e["verdict"] != "holds":
                     report.append(prose_judge_row(n, path, number, e["verdict"], e.get("why") or ""))
     except Exception as e:
-        report.append(f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]}).")
+        unknown.append(f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]}).")
+    report += unknown
     if len(report) > PROSE_JUDGE_MAX_LINES:
         report[PROSE_JUDGE_MAX_LINES:] = [f"merge: #{n} prose judge: {len(report) - PROSE_JUDGE_MAX_LINES} more lines not shown"]
     return report
