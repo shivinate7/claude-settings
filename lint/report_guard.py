@@ -18,6 +18,11 @@ the rewrite once for model names and the `Unstarted:` line only. A failure block
 Cost: one small file per missing-report block, written at that block, deleted at the next Stop with
 stop_hook_active; no process, timer or log. A correction block leaves no marker, so no loop follows.
 
+On landed turns whose report has the right shape, it also blocks a Deviations item that admits a mistake
+the writer made ("I broke ...", a first-person clause with a fault word and no negator before it) and names no
+guard: `step:<slug>`, the word debt, or a guard, check or hook word with a PR or commit ref
+(`building-mistake-names-its-guard`). Quoted text, fences and URLs never count as an admission.
+
 On the same landed turns it also blocks (one block, all reasons joined) when a Done item lacks
 BUILT, RECORDED, or OTHER or a PR or commit ref (`reports-done-format`), or when the reply holds
 a record id with no short gloss (`speak-cite-id-plus-gloss`), or when a builder, reviewer,
@@ -616,8 +621,8 @@ QUOTED_RE = re.compile(r'(?<!\w)"[^"\n]*"(?!\w)|(?<!\w)\'[^\'\n]*\'(?!\w)|\u201c
 QUESTION_MARK_RE = re.compile(r"\?(?!\w)")
 
 
-def input_needed_section(text):
-    """The Input Needed item's text from the report block, else ''."""
+def report_section(text, label):
+    """The text of the report block's `label` item, else ''."""
     body = []
     inside = False
     for line in block_text(text, keep_indent=True).splitlines():
@@ -625,13 +630,18 @@ def input_needed_section(text):
         if m:
             if inside:
                 break
-            inside = m.group(1).strip().rstrip(":").strip() == "Input Needed"
+            inside = m.group(1).strip().rstrip(":").strip() == label
             if inside:
                 body.append(line[m.end():].lstrip(": "))
             continue
         if inside:
             body.append(line)
     return "\n".join(body)
+
+
+def input_needed_section(text):
+    """The Input Needed item's text from the report block, else ''."""
+    return report_section(text, "Input Needed")
 
 
 def offers_a_pick(text):
@@ -826,6 +836,52 @@ def departs_problem(text):
     if not miss:
         return ""
     return "Departs-from guard: the Input Needed pick has a problem (" + miss + "). " + question_form.DEPARTS_REASON
+
+
+# building-mistake-names-its-guard: a Deviations admission ("I broke ...") must name the guard that would
+# have stopped it. Quoted text, fences and URLs are blanked first so a report can quote the owner. A negator
+# before the fault word in the same clause clears it. `step:<slug>` is checked for form only.
+MISTAKE_FIRST_PERSON_RE = re.compile(r"\bI\b|\b[Mm]y\b")
+MISTAKE_FAULT_RE = re.compile(
+    r"\b(?:wrong(?:ly)?|mistaken(?:ly)?|mistakes?|by accident|accidental(?:ly)?|broke|clobbered|overwrote|"
+    r"wiped|misread|forgot|trusted|lost|instead of checking)\b", re.I)
+MISTAKE_NEGATOR_RE = re.compile(r"\bnot\b|n't\b|\bnever\b|\bno\b|\bnothing\b", re.I)
+MISTAKE_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n")
+MISTAKE_CLAUSE_SPLIT_RE = re.compile(r"[,:;\u2014\u2013]|\s-{1,2}\s")
+MISTAKE_URL_RE = re.compile(r"https?://\S+")
+MISTAKE_STEP_RE = re.compile(r"\bstep:[a-z0-9][a-z0-9-]*")
+MISTAKE_DEBT_RE = re.compile(r"\bdebts?\b")
+MISTAKE_GUARD_WORD_RE = re.compile(r"\b(?:guard|check|hook)s?\b")
+MISTAKE_REASON = (
+    "Mistake guard: Deviations admits a mistake you made: %s. A mistake is a strong sign a guard or check is "
+    "missing. Name the guard that would have stopped it: built (PR or commit), `step:<slug>`, or a debt "
+    "(rule building-mistake-names-its-guard).")
+
+
+def _admitted_clause(deviations):
+    """The first clause of the Deviations text that admits a mistake the writer made, else ''."""
+    plain = QUOTED_RE.sub(" ", MISTAKE_URL_RE.sub(" ", FENCE_RE.sub(" ", deviations)))
+    for sentence in MISTAKE_SENTENCE_SPLIT_RE.split(plain):
+        sentence = BULLET_RE.sub("", sentence.strip())
+        for clause in MISTAKE_CLAUSE_SPLIT_RE.split(sentence):
+            fault = MISTAKE_FAULT_RE.search(clause)
+            if (fault and MISTAKE_FIRST_PERSON_RE.search(clause)
+                    and not MISTAKE_NEGATOR_RE.search(clause[:fault.start()])):
+                return clause.strip()
+    return ""
+
+
+def mistake_problem(text):
+    """The refusal text when Deviations admits a mistake and names no guard (rule
+    `building-mistake-names-its-guard`), else ''."""
+    deviations = report_section(text, "Deviations")
+    clause = _admitted_clause(deviations)
+    if not clause:
+        return ""
+    if (MISTAKE_STEP_RE.search(deviations) or MISTAKE_DEBT_RE.search(deviations)
+            or (MISTAKE_GUARD_WORD_RE.search(deviations) and DONE_REF_RE.search(deviations))):
+        return ""
+    return MISTAKE_REASON % repr(clause[:80])
 
 
 def _own_lane_read(path, own_id):
@@ -1543,6 +1599,13 @@ def main():
             reasons.append(departs)
     except Exception:
         pass
+    if shape_ok:
+        try:
+            mistake = mistake_problem(text)
+            if mistake:
+                reasons.append(mistake)
+        except Exception:
+            pass
     reasons += [r for r in relay if r]
     try:
         rewrite = rewrite_stamp_problem(text, records[last_human_idx].get("timestamp"), hook.get("cwd"))
