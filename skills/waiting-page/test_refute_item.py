@@ -4,20 +4,21 @@ the recommended pick, onto one waiting-page decision. Run: python3 skills/waitin
 REFUTE_ITEM_UNDER_TEST names the script to load (default: refute_item.py beside this file).
 
 The contract the script must match:
-- main(argv) -> int. argv is [<item.json>]. It prints one verdict line and returns the exit code.
+- main(argv, model_call=None) -> int. argv is [<item.json>]. It prints one verdict line and returns the exit code.
+- model_call, when given, is called as model_call(prompt, model=REFUTER_MODEL, shape=REFUTER_SHAPE,
+  effort=REFUTER_EFFORT) in place of decision_watch.invoke_model. When it is None, the script looks up
+  decision_watch.invoke_model at call time, so a patch of that module attribute takes effect.
+- Module constants: REFUTER_MODEL == "sonnet", REFUTER_SHAPE == {"verdict": ("AGAINST",)}, REFUTER_EFFORT.
 - In scope: kind "decision", status not "closed", options a non-empty list, and a pick: a str, or a non-empty
-  list when multi. Each in-scope item makes exactly one call:
-      decision_watch.invoke_model(prompt, model=REFUTER_MODEL, shape=REFUTER_SHAPE, effort=REFUTER_EFFORT)
-  The script reaches invoke_model through the module attribute, so a case swaps it and no real model runs.
-  The prompt holds the context, each option's label, how, gain and lose, and the pick key or keys. It never
-  holds the why text.
+  list when multi. Each in-scope item makes exactly one call. The prompt holds the context, each option's
+  label, how, gain and lose, and the pick key or keys. It never holds the why text.
 - Out of scope: no call, the file is not written, exit 0.
 - A written case: the model's "case" text, stripped, is the item's `against`. Every other key is kept. Exit 0.
-- Unknown (invoke_model returns (None, err), or "case" is missing, empty or not a string): `against` is
+- Unknown (the call returns (None, err), or "case" is missing, empty or not a string): `against` is
   "unknown (<reason>)". The verdict line says unknown and never ok. Exit 0, or 1 when env CI is set.
-- Module constants: REFUTER_MODEL == "sonnet", REFUTER_SHAPE == {"verdict": ("AGAINST",)}, REFUTER_EFFORT.
 
-PATH is emptied for the run, so a call that reaches the real invoke_model cannot start `claude` and reads unknown.
+No case calls a real model. The stub answers each call, PATH is emptied, and the credential read is patched out,
+so a call that reaches the real invoke_model fails before any model or credential is touched.
 """
 import contextlib
 import importlib.util
@@ -42,6 +43,7 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 CMD = os.environ.get("REFUTE_ITEM_UNDER_TEST") or os.path.join(HERE, "refute_item.py")
 RUN_FOLDER = None
 SAVED_PATH = None
+CREDENTIAL_GUARD = None
 
 # Markers the blindness case looks for. Each is unique, so a prompt that holds one holds that text.
 WHY = "WHY-MARK-91c2: the owner's ruling says otherwise."
@@ -52,6 +54,7 @@ OPT_B = {"key": "b", "label": "LABEL-B-Switch", "how": "HOW-B-merges-alone", "ga
          "lose": "LOSE-B-extra-form"}
 OPTION_MARKERS = ("LABEL-A-Keep", "HOW-A-runs-the-check", "GAIN-A-quiet", "LOSE-A-slow",
                   "LABEL-B-Switch", "HOW-B-merges-alone", "GAIN-B-fast", "LOSE-B-extra-form")
+CASE_REPLY = ({"verdict": "AGAINST", "case": "The case."}, None)
 WRITE_REPLY = ({"verdict": "AGAINST", "case": "A case that must not be written unless the item is in scope."}, None)
 
 
@@ -87,16 +90,32 @@ UNKNOWN_REPLIES = {
 }
 
 
+class Stub:
+    """A model_call stand-in: records each call, and answers `reply`."""
+
+    def __init__(self, reply):
+        self.reply = reply
+        self.calls = []
+
+    def __call__(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        return self.reply
+
+
 def setUpModule():
-    global RUN_FOLDER, SAVED_PATH
+    global RUN_FOLDER, SAVED_PATH, CREDENTIAL_GUARD
     RUN_FOLDER = _test_temp.run_folder()
     empty_bin = os.path.join(RUN_FOLDER, "no-bin")
     os.makedirs(empty_bin)
     SAVED_PATH = os.environ.get("PATH")
     os.environ["PATH"] = empty_bin  # no `claude` on the path: a call that reaches the real model cannot start
+    # A call that reaches the real invoke_model reads no credential file: the isolation step refuses at once.
+    CREDENTIAL_GUARD = mock.patch.object(decision_watch, "_judge_isolation", side_effect=decision_watch.TokenUnreadable)
+    CREDENTIAL_GUARD.start()
 
 
 def tearDownModule():
+    CREDENTIAL_GUARD.stop()
     if SAVED_PATH is not None:
         os.environ["PATH"] = SAVED_PATH
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
@@ -129,20 +148,23 @@ def read_json(path):
         return json.load(f)
 
 
-def run_main(refute, path):
-    """main([path]) with stdout and stderr captured: (exit code, the printed text)."""
+def run_main(refute, path, **kwargs):
+    """main([path], **kwargs) with stdout and stderr captured: (exit code, the printed text)."""
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         try:
-            code = refute.main([path])
+            code = refute.main([path], **kwargs)
         except SystemExit as exc:
             code = exc.code
     return code, out.getvalue() + err.getvalue()
 
 
-def stub_model(reply):
-    """Swap decision_watch.invoke_model for a stub that answers `reply`. The mock records every call."""
-    return mock.patch.object(decision_watch, "invoke_model", return_value=reply)
+def prompt_for(refute, **over):
+    """The prompt the script sends for an in-scope item with `over`, from a stub that is called once."""
+    path = write_item("probe", item(**over))
+    stub = Stub(CASE_REPLY)
+    run_main(refute, path, model_call=stub)
+    return stub.calls[0][0][0] if stub.calls else None
 
 
 class RefuteItem(unittest.TestCase):
@@ -157,13 +179,13 @@ class RefuteItem(unittest.TestCase):
     def test_an_in_scope_decision_makes_one_call_and_writes_its_case(self):
         refute = load_refute()
         path = write_item("in-scope", item())
-        with stub_model(({"verdict": "AGAINST", "case": "The case."}, None)) as call:
-            code, _ = run_main(refute, path)
-        self.assertEqual(call.call_count, 1, "an in-scope decision makes %d model calls, want 1" % call.call_count)
-        args, kwargs = call.call_args
-        self.assertEqual(len(args), 1, "the prompt is not the one positional argument of invoke_model")
+        stub = Stub(CASE_REPLY)
+        code, _ = run_main(refute, path, model_call=stub)
+        self.assertEqual(len(stub.calls), 1, "an in-scope decision makes %d model calls, want 1" % len(stub.calls))
+        args, kwargs = stub.calls[0]
+        self.assertEqual(len(args), 1, "the prompt is not the one positional argument of the model call")
         self.assertEqual(set(kwargs), {"model", "shape", "effort"},
-                         "invoke_model is passed %s, want model, shape and effort" % sorted(kwargs))
+                         "the model call is passed %s, want model, shape and effort" % sorted(kwargs))
         self.assertEqual(kwargs["model"], "sonnet", "the call's model is not REFUTER_MODEL")
         self.assertEqual(kwargs["shape"], {"verdict": ("AGAINST",)}, "the call's shape is not REFUTER_SHAPE")
         self.assertEqual(kwargs["effort"], getattr(refute, "REFUTER_EFFORT", "<missing>"),
@@ -172,26 +194,51 @@ class RefuteItem(unittest.TestCase):
         self.assertEqual(read_json(path), dict(item(), against="The case."),
                          "the file is not the item with against written and every other key kept")
 
+    def test_with_no_model_call_the_module_attribute_is_called(self):
+        refute = load_refute()
+        path = write_item("default", item())
+        with mock.patch.object(decision_watch, "invoke_model", return_value=CASE_REPLY) as call:
+            run_main(refute, path)
+        self.assertEqual(call.call_count, 1,
+                         "with no model_call, decision_watch.invoke_model is called %d times, want 1; "
+                         "the default is bound before the patch" % call.call_count)
+        self.assertEqual(set(call.call_args[1]), {"model", "shape", "effort"},
+                         "the default call is passed %s, want model, shape and effort" % sorted(call.call_args[1]))
+        self.assertEqual(read_json(path)["against"], "The case.", "the default call's case was not written")
+
     def test_the_case_text_is_stripped_before_it_is_written(self):
         refute = load_refute()
         path = write_item("stripped", item())
-        with stub_model(({"verdict": "AGAINST", "case": "  The case.  \n"}, None)):
-            run_main(refute, path)
+        run_main(refute, path, model_call=Stub(({"verdict": "AGAINST", "case": "  The case.  \n"}, None)))
         self.assertEqual(read_json(path)["against"], "The case.", "against is not the case text, stripped")
 
     def test_the_prompt_holds_the_item_and_never_the_why_text(self):
         refute = load_refute()
         path = write_item("blind", item())
-        with stub_model(({"verdict": "AGAINST", "case": "The case."}, None)) as call:
-            run_main(refute, path)
-        self.assertEqual(call.call_count, 1, "the blindness case did not reach the model call")
-        prompt = call.call_args[0][0]
+        stub = Stub(CASE_REPLY)
+        run_main(refute, path, model_call=stub)
+        self.assertEqual(len(stub.calls), 1, "the blindness case did not reach the model call")
+        prompt = stub.calls[0][0][0]
         self.assertNotIn("WHY-MARK-91c2", prompt, "the prompt holds the why text, so the refuter is not blind")
         self.assertIn("CTX-MARK-7f3a", prompt, "the prompt lacks the context")
         for marker in OPTION_MARKERS:
             self.assertIn(marker, prompt, "the prompt lacks option text %s" % marker)
-        # A floor only: the pick key is a standalone lowercase b. The option markers hold no such token.
-        self.assertRegex(prompt, r"(?<![A-Za-z0-9])b(?![A-Za-z0-9])", "the prompt lacks the pick key b")
+
+    def test_the_pick_key_reaches_the_prompt(self):
+        refute = load_refute()
+        pick_a, pick_b = prompt_for(refute, pick="a"), prompt_for(refute, pick="b")
+        self.assertIsNotNone(pick_a, "a pick of a made no model call")
+        self.assertIsNotNone(pick_b, "a pick of b made no model call")
+        self.assertNotEqual(pick_a, pick_b, "the prompt is the same for pick a and pick b, so the pick is not in it")
+
+    def test_every_key_of_a_multi_pick_reaches_the_prompt(self):
+        refute = load_refute()
+        both = prompt_for(refute, multi=True, pick=["a", "b"])
+        only_a = prompt_for(refute, multi=True, pick=["a"])
+        only_b = prompt_for(refute, multi=True, pick=["b"])
+        self.assertIsNotNone(both, "a multi pick of a and b made no model call")
+        self.assertNotEqual(both, only_a, "the prompt for [a, b] is the prompt for [a]: key b is not in it")
+        self.assertNotEqual(both, only_b, "the prompt for [a, b] is the prompt for [b]: key a is not in it")
 
     def test_out_of_scope_items_make_no_call_and_are_not_written(self):
         refute = load_refute()
@@ -199,25 +246,25 @@ class RefuteItem(unittest.TestCase):
             with self.subTest(item=name):
                 path = write_item("out-" + re.sub(r"\W+", "-", name), make())
                 before = read_bytes(path)
-                with stub_model(WRITE_REPLY) as call:
-                    code, _ = run_main(refute, path)
-                self.assertEqual(call.call_count, 0, "%s makes a model call, want none" % name)
+                stub = Stub(WRITE_REPLY)
+                code, _ = run_main(refute, path, model_call=stub)
+                self.assertEqual(len(stub.calls), 0, "%s makes a model call, want none" % name)
                 self.assertEqual(read_bytes(path), before, "%s is written, want the file unchanged" % name)
                 self.assertEqual(code, 0, "%s exits %r, want 0" % (name, code))
 
     def test_a_multi_decision_with_a_pick_list_is_in_scope(self):
         refute = load_refute()
         path = write_item("multi", item(multi=True, pick=["b"]))
-        with stub_model(({"verdict": "AGAINST", "case": "The case."}, None)) as call:
-            run_main(refute, path)
-        self.assertEqual(call.call_count, 1, "a multi decision with a pick list makes %d calls, want 1" % call.call_count)
+        stub = Stub(CASE_REPLY)
+        run_main(refute, path, model_call=stub)
+        self.assertEqual(len(stub.calls), 1,
+                         "a multi decision with a pick list makes %d calls, want 1" % len(stub.calls))
         self.assertEqual(read_json(path)["against"], "The case.", "a multi decision was not written")
 
     def test_a_failed_call_writes_its_reason_as_unknown(self):
         refute = load_refute()
         path = write_item("failed", item())
-        with stub_model((None, "model subprocess timed out")):
-            run_main(refute, path)
+        run_main(refute, path, model_call=Stub((None, "model subprocess timed out")))
         self.assertEqual(read_json(path)["against"], "unknown (model subprocess timed out)",
                          "a failed call did not write against as unknown with its reason")
 
@@ -226,8 +273,7 @@ class RefuteItem(unittest.TestCase):
         for name, reply in UNKNOWN_REPLIES.items():
             with self.subTest(reply=name):
                 path = write_item("unk-" + re.sub(r"\W+", "-", name), item())
-                with stub_model(reply):
-                    code, text = run_main(refute, path)
+                code, text = run_main(refute, path, model_call=Stub(reply))
                 written = read_json(path)
                 against = written.get("against")
                 self.assertTrue(isinstance(against, str) and against.startswith("unknown (")
@@ -242,28 +288,28 @@ class RefuteItem(unittest.TestCase):
     def test_a_written_case_says_ok_on_the_verdict_line(self):
         refute = load_refute()
         path = write_item("ok-line", item())
-        with stub_model(({"verdict": "AGAINST", "case": "The case."}, None)):
-            _, text = run_main(refute, path)
+        _, text = run_main(refute, path, model_call=Stub(CASE_REPLY))
         self.assertRegex(text, r"(?i)\bok\b", "the verdict line of a written case does not say ok")
         self.assertNotRegex(text, r"(?i)\bunknown\b", "the verdict line of a written case says unknown")
 
     def test_unknown_exits_zero_without_ci_and_one_with_ci(self):
         refute = load_refute()
+        failed = (None, "model subprocess timed out")
         path = write_item("ci-unset", item())
-        with mock.patch.dict(os.environ), stub_model((None, "model subprocess timed out")):
+        with mock.patch.dict(os.environ):
             os.environ.pop("CI", None)
-            code_unset, _ = run_main(refute, path)
+            code_unset, _ = run_main(refute, path, model_call=Stub(failed))
         path = write_item("ci-set", item())
-        with mock.patch.dict(os.environ, {"CI": "1"}), stub_model((None, "model subprocess timed out")):
-            code_set, _ = run_main(refute, path)
+        with mock.patch.dict(os.environ, {"CI": "1"}):
+            code_set, _ = run_main(refute, path, model_call=Stub(failed))
         self.assertEqual(code_unset, 0, "unknown exits %r with CI unset, want 0" % (code_unset,))
         self.assertEqual(code_set, 1, "unknown exits %r with CI set, want 1" % (code_set,))
 
     def test_a_written_case_exits_zero_with_ci_set(self):
         refute = load_refute()
         path = write_item("ci-ok", item())
-        with mock.patch.dict(os.environ, {"CI": "1"}), stub_model(({"verdict": "AGAINST", "case": "The case."}, None)):
-            code, _ = run_main(refute, path)
+        with mock.patch.dict(os.environ, {"CI": "1"}):
+            code, _ = run_main(refute, path, model_call=Stub(CASE_REPLY))
         self.assertEqual(code, 0, "a written case exits %r with CI set, want 0" % (code,))
 
     def test_the_command_line_leaves_an_out_of_scope_item_unchanged(self):
