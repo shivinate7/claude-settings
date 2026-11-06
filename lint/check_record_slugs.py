@@ -42,10 +42,11 @@ def git_names(root, *args):
     return [name for name in r.stdout.split("\0") if name]
 
 
-def changes(root):
-    """(added, moved) files of `root` against its origin/main, from one process. `moved` holds (status, old, new) for
-    each delete, modify and rename; a rename names two paths. Raises Unknown when git cannot say."""
-    names = git_names(root, "diff", "--name-status", "-z", "origin/main...HEAD")
+def changes(root, base="origin/main", head="HEAD"):
+    """(added, moved) files of `root` from the merge base of `base` and `head` to `head`, from one process. `moved` holds
+    (status, old, new) for each delete, modify and rename; a rename names two paths. -M is explicit, so diff.renames in a
+    config never moves the verdict. Raises Unknown when git cannot say."""
+    names = git_names(root, "diff", "--name-status", "-z", "-M", f"{base}...{head}")
     added, moved, i = [], [], 0
     while i < len(names):
         status = names[i]
@@ -64,7 +65,12 @@ def added(root):
     return changes(root)[0]
 
 
-FEEL = re.compile(r"^(?:- )?\*\*Feel\.\*\*")
+def marker(name=None):
+    """The regex of a record's marker line: `**Name.**` at column one, or after `- `. With no name, any marker."""
+    return re.compile(r"^(?:- )?\*\*" + (re.escape(name) if name else r"[^*]+") + r"\.\*\*")
+
+
+FEEL = marker("Feel")
 TRIAL = re.compile(r"^(?:- )?\*\*Device check\.\*\*\s*(simulator|device)[,\s]+(\S+)\s*$")
 
 
