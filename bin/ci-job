@@ -58,6 +58,7 @@ BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+import git_fetch  # noqa: E402  the one home of the history fetch (lint/git_fetch.py)
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
 EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
@@ -84,15 +85,13 @@ def unshallow(block, top, dry, tally):
     if dry:
         print("%-15s the clone is shallow and CI checks out full history: git fetch --unshallow" % "would fetch")
         return
-    remotes = (git("remote", cwd=top) or "").split()
-    done = _nowindow.run(["git", "fetch", "--unshallow", *(["origin"] if "origin" in remotes else remotes[:1])],
-                         cwd=top, capture_output=True, text=True)
-    if done.returncode == 0:
+    ok, message = git_fetch.fetch(top, unshallow=True)  # lint/git_fetch.py, the one home of the fetch
+    if ok:
         print("%-15s the clone was shallow and CI checks out full history: ran git fetch --unshallow" % "fetched")
     else:
         tally["unknown"] += 1
         print("unknown         the clone is shallow and git fetch --unshallow failed: %s" %
-              ((done.stderr.strip().splitlines() or ["no message"])[-1]))
+              (message or "no message"))
 
 
 def condition(text, pr):
