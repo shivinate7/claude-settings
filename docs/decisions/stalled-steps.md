@@ -1,0 +1,41 @@
+# Stalled steps
+
+## The question
+
+How does a roadmap step's shown state stay true? Owner, 2026-11-06 11:39 CST: "how can something be measured as doing and be a lie? … it needs to be somehow brought to the forefront mechanically so it can either be resumed or continued on or shown as paused."
+
+## The ruling
+
+- `doing` is derived from live work, not typed.
+- A `doing` or `active` step with no live lane is a **stalled step**. A live lane is a session in this repo tagged `cs-step`, or an open PR on branch `<id>` or `lane/<id>`.
+- An answered waiting-page item whose lane is gone is stalled too.
+- Each stalled step needs a disposition:
+  - **resume**: a lane goes live.
+  - **pause**: the step's `paused` field gives `why`, `decides` (owner, coordinator or triage), `at` (ISO time with zone) and `by` (triage).
+  - **done**: status `done`.
+- An unknown live read shows unknown. It never shows empty.
+
+## Mechanisms
+
+- `skills/roadmap/build.py` prints a `stalled step:` line for each stalled step. It exits 1 after it writes the page.
+- The Status tab shows a stalled band.
+- `lint/report_guard.py` holds triage's Stop while stalled entries stand. The hold lifts when triage names every stalled id under Input Needed, or on an owner typed override.
+
+## Coordinator rulings
+
+Process picks, reported to the owner, 2026-11-06 11:48 and 12:49 CST:
+
+- Triage clears the backlog from an audit before the hold merges.
+- The hold sits in triage's Stop.
+- A live `doing` step reads "In progress".
+- `lane/<id>` counts as the lane.
+- A `cs-topic` session counts as live for items only.
+
+## Cost
+
+No new process, timer or file. One extra transcript read per Stop in `report_guard`. `build` reads the live file triage already writes.
+
+Kind: build
+Plan: docs/decisions/stalled-steps.md#the-ruling (all)
+Home: skills/roadmap/build.py
+Home: lint/report_guard.py

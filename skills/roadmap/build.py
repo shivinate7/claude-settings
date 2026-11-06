@@ -32,7 +32,7 @@ The upkeep list also names each step marked doing or active that has no live lan
 pull request, so triage can set it back (step roadmap-matches-lanes). A step is live when a session in
 the live file's "sessions" list is not archived (any other status counts) and carries both
 the tag cs-repo:<this repo's GitHub name> and the tag cs-step:<step id>, or when an open pull request's
-branch equals the step id. The step id matches exactly; the GitHub name ignores case. A session row
+branch equals the step id or lane/<step id>. The step id matches exactly; the GitHub name ignores case. A session row
 with no tags key, or null tags, has no tags. The cs-repo tag is needed because list_sessions is
 account-wide and step ids repeat across repos. A step whose status is none of todo, doing, active or
 done is listed as unknown status. The row reads one unknown entry, never an empty list, when the live
@@ -118,8 +118,6 @@ PAIR_LINE = "todo step with an open PR"
 STALLED_LINE = "stalled step"
 # Who may decide a paused step (the `paused.decides` field, written by triage).
 PAUSE_DECIDES = ("owner", "coordinator", "triage")
-# The other session tags that keep a lane live beside STEP_TAG: a topic lane, and a tier session (batch-runner).
-TOPIC_TAG, BUILD_TAG = "cs-topic:", "cs-build:"
 MOCKUP_LINE = "mockup with no file"
 MOCKUP_UNREAD_LINE = "mockup file unread"
 # A miss line's remedy. A stale or unfetched origin ref reads as a miss, so the remedy names the fetch.
@@ -169,7 +167,7 @@ LINT = HERE.parent.parent / "lint"
 sys.path.insert(0, str(HERE.parent.parent / "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import git_reads  # noqa: E402  the one home of a checkout's GitHub repo, shared with the guard (hooks/git_reads.py)
-from shared_names import REPO_TAG, STEP_TAG, repo_tag_names  # noqa: E402,F401  REPO_TAG: test_build pins build.REPO_TAG to the shared object  the one home of the tag names, shared with the guard (hooks/shared_names.py)
+from shared_names import BUILD_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, lane_head_refs, repo_tag_names  # noqa: E402,F401  REPO_TAG: test_build pins build.REPO_TAG to the shared object  the one home of the tag names, shared with the guard (hooks/shared_names.py)
 
 
 def git(repo, *args, stdin=None):
@@ -620,12 +618,11 @@ def live_work(path, steps, slug=None):
         # list_sessions is account-wide and step ids repeat across repos, so a session counts only with this repo's tag.
         # GitHub names ignore case, so the slug compare does too.
         ours = lambda t: repo_tag_names(t, slug)
-        session_steps = sorted({t[len(STEP_TAG):] for r in sessions if r["session_status"] != ARCHIVED_SESSION
-                                and any(map(ours, r.get("tags") or []))
-                                for t in r.get("tags") or [] if isinstance(t, str) and t.startswith(STEP_TAG)})
-        lane_tags = sorted({t for r in sessions if r["session_status"] != ARCHIVED_SESSION
-                            and any(map(ours, r.get("tags") or []))
-                            for t in r.get("tags") or [] if isinstance(t, str) and t.startswith((TOPIC_TAG, BUILD_TAG))})
+        # One filtered list feeds both tag readings, so the archived and repo filters cannot drift apart.
+        tags = [t for r in sessions if r["session_status"] != ARCHIVED_SESSION and any(map(ours, r.get("tags") or []))
+                for t in r.get("tags") or [] if isinstance(t, str)]
+        session_steps = sorted({t[len(STEP_TAG):] for t in tags if t.startswith(STEP_TAG)})
+        lane_tags = sorted({t for t in tags if t.startswith((TOPIC_TAG, BUILD_TAG))})
         if len(skipped) > before:
             why.append("unknown (%d session rows skipped)" % (len(skipped) - before))
     if pulls_skipped:
@@ -1029,7 +1026,7 @@ def stale_drafts(work):
     read = datetime.datetime.fromisoformat(work["read"].replace("Z", "+00:00"))
     out = []
     for p in work["pulls"]:
-        # A lane is a live session step equal to the branch, the same rule as unlaned.
+        # A lane here is a live session step equal to the bare branch. unlaned also counts a lane/<id> branch.
         if p.get("draft") is not True or (p.get("branch") and p["branch"] in work["sessionSteps"]):
             continue
         at = created_at(p)
@@ -1040,14 +1037,15 @@ def stale_drafts(work):
     return out
 
 
-def lane_live(work, lane, tier=False):
-    """True when `lane` has live work: an open pull's branch is the lane, or a live session of this repo carries
-    cs-step:<lane> or cs-topic:<lane>. A tier lane (`tier=True`, a waiting-page item's lane such as batch-runner) is
-    also live on cs-build:<lane>; a step never is, because every lane session carries cs-build:lane. The caller has
-    checked live_why(work) first."""
+def lane_live(work, lane, item=False):
+    """True when `lane` has live work: a live session of this repo carries cs-step:<lane>, or an open pull's branch
+    is `<lane>` or `lane/<lane>`. An item's lane (`item=True`, a waiting-page item's answer route) is also live on
+    cs-topic:<lane> and cs-build:<lane>, so a topic lane or a tier such as batch-runner counts. A step never is: a
+    topic session does not work one step, and every lane session carries cs-build:lane. The caller has checked
+    live_why(work) first."""
     tags = work["laneTags"]
-    return (lane in work["sessionSteps"] or TOPIC_TAG + lane in tags or (tier and BUILD_TAG + lane in tags)
-            or any(p.get("branch") == lane for p in work["pulls"]))
+    return (lane in work["sessionSteps"] or (item and (TOPIC_TAG + lane in tags or BUILD_TAG + lane in tags))
+            or any(p.get("branch") in lane_head_refs(lane) for p in work["pulls"]))
 
 
 def laneless(open_, marks, work):
@@ -1121,7 +1119,7 @@ def stalled_items(work):
     if any(r["status"] != "closed" and "lane" not in r for r in rows):
         return None, "unknown (an open items row has no lane key)"
     return [{"n": r["n"], "lane": r["lane"]} for r in rows
-            if r["status"] != "closed" and r["lane"] and not lane_live(work, r["lane"], tier=True)], None
+            if r["status"] != "closed" and r["lane"] and not lane_live(work, r["lane"], item=True)], None
 
 
 def stalled(steps, marks, work):

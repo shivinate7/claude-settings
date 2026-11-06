@@ -126,13 +126,13 @@ build.py also exits 1 on a stalled step. A `doing` or `active` step with no live
 stalled until it has a disposition (the same test as the in-progress upkeep row, so the two never
 disagree). It prints `stalled step: <id> (resume, pause or done)`, or `stalled step: <id> (done: landed in
 #N)` when a `Step:` trailer is on main, writes the page, then exits 1. A landed feel-fix with no valid
-device trial is not stalled; the device row lists it. A step is live by `cs-step:<id>` or `cs-topic:<id>` on
-a live session of this repo, or an open pull whose branch is the id. The page's stalled block lists
-the ids.
+device trial is not stalled; the device row lists it. A step is live by `cs-step:<id>` on
+a live session of this repo, or an open pull whose branch is the id or `lane/<id>`. A `cs-topic:` tag never
+keeps a step live. The page's stalled block lists the ids.
 
 An open waiting-page item whose `lane` is a non-empty text and has no live work is stalled too. It
 prints `stalled step: item <n> (lane <slug>: re-route, close or resume)` and exits 1. The lane is live
-by the same tags and pulls, and a tier lane such as `batch-runner` also by `cs-build:<tier>`. A closed item is
+by the same `cs-step:` tag and pulls, and also by `cs-topic:<slug>`, or `cs-build:<tier>` for a tier lane such as `batch-runner`. A closed item is
 never stalled, and a `null` lane names no lane.
 
 With no usable live read the lines read `stalled step: unknown (<why>)` and `stalled step: items
@@ -181,7 +181,8 @@ After each build the roadmap build script prints the upkeep list for the triage 
 - steps marked `doing` or `active` with no live lane or open PR, except a landed feel-fix with no valid
   device trial, which the row above lists. A step is live when a session that is
   not archived has the tag `cs-step:<step id>`, or an open pull request's branch equals the step
-  id. Both match the id exactly. The session also needs the tag `cs-repo:<owner>/<repo>` for this
+  id or `lane/<step id>`. Both match the id exactly. A `cs-topic:` or `cs-build:` tag never keeps a step live.
+  The session also needs the tag `cs-repo:<owner>/<repo>` for this
   repo's GitHub name, in any case, because `list_sessions` is account-wide and step ids repeat across
   repos. A session row with no `tags` key, or null `tags`, has no tags and is not skipped. A step
   whose status is none of `todo`, `doing`, `active` or `done` is listed as `<id> (unknown status
@@ -198,7 +199,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   needed. Each entry is the step id;
 - draft pull requests over 12 hours old with no live lane, in the row `draft PRs over 12 h with no live
   lane`. A pull's age is `createdAt` against the live file's `readAt`. A pull has a live lane when a
-  live session step equals its branch exactly (the same rule as the in-progress row). Each entry is `#N (<branch or
+  live session step equals its branch exactly (the in-progress row also counts a `lane/<id>` branch). Each entry is `#N (<branch or
   title>)`. A draft with no readable `createdAt` reads `unknown (#N has no createdAt)`. With no usable
   live file the row reads one `unknown (<why>)` entry;
 - page rulings not on their step: each closed waiting-page item whose `home` is a step that is not

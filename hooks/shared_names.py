@@ -65,6 +65,14 @@ GH_FALLBACK_LOGIN = "ssemwal-cdc"
 # the guard's rule lane-repo-tag checks them on a lane `create_session`, so both name the same strings.
 REPO_TAG = "cs-repo:"
 STEP_TAG = "cs-step:"
+# A topic lane carries TOPIC_TAG; a tier session (batch-runner, triage) carries BUILD_TAG plus its tier.
+TOPIC_TAG = "cs-topic:"
+BUILD_TAG = "cs-build:"
+
+
+def lane_head_refs(slug: str) -> tuple[str, str]:
+    """The head refs an open pull may carry for lane `slug`: the bare slug and `lane/<slug>`. Both forms are real."""
+    return (slug, "lane/" + slug)
 
 
 def repo_tag_names(tag: object, slug: str) -> bool:

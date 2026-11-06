@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The triage Stop hold: a triage wake does not end while the newest roadmap build output prints a stalled entry.
 
-Coordinator ruling 2 of 2026-11-06 11:48 CST: triage's Stop refuses to end a wake while `stalled step:` lines
-print. The rules the cases pin:
+The coordinator's ruling sets the rule: triage's Stop refuses to end a wake while `stalled step:` lines print,
+so a triage session cannot end a wake that leaves a stall unread. The rules the cases pin:
 
 - Only a session whose own newest get_session record carries cs-build:triage is held. A set_session_tags call
   after that record ends the proof, as in hooks/guard_merge.py _own_tier_proved.
