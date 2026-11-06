@@ -2302,6 +2302,10 @@ MUTATIONS = [
      "            if unhomed:",
      "            if False:",
      "guard", "mockup-home: a design with a file under the machine home is denied"),
+    ("page-answers-write: the refuse arm is dropped, so a session's set of answers/<id> on the page is allowed",
+     "        if forged:",
+     "        if False:",
+     "guard", "page answers: a set of answers/<id> is denied"),
     # gh_call_of (hooks/guard_merge.py) is the one home every gh reader shares. Unread, a repo flag before
     # the verb hides `pr merge` and `pr create` from the merge guard, the draft read, ci_wake and the report guard.
     ("gh-root-flag: a repo flag before the pr verb goes unread",

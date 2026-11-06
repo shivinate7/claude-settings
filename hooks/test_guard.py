@@ -122,6 +122,7 @@ FAMILIES = {
     "rework-off-page": "the page writer: an item whose text says being reworked is not written unless its status is closed, and a str_replace that adds the phrase is refused",
     "item-field-rendered": "the page writer: a write names only item fields the page renders (the itemFields block of page.html)",
     "page-item-design": "the page writer: a design picture that misses its focus, its state or its height is refused at write, and an allowed publish of the waiting page records the published file",
+    "page-answers-write": "the page writer: a set, update or str_replace of the answers collection on the registered waiting page is refused, single or in any batch entry; a delete, a read, an items write and an answers write to another url are not",
     "rule9": "rule 9, the agent model floor",
     "role-model": "agent-role-model: a spawn's model against its role's row in the decision table, the missing-model default, and the fail-open read",
     "mask-script": "mask_script lexemes",
@@ -15092,7 +15093,7 @@ pq("redesign with no Departs from line is denied", "deny",
 pq("a task about a port with no Departs from line is denied", "deny",
    pq_item(kind="task", holds=None))
 pq("a record that is neither a decision nor a task is allowed", "allow", pq_item(kind="note"))
-pq("a set to another collection is allowed", "allow", pq_item(), collection="answers")
+pq("a set to another collection is allowed", "allow", pq_item(), collection="groups")
 pq("an update that adds holds on a port is denied", "deny", {"port": True, "holds": PQ_HOLDS},
    action="update")
 pq("an update that changes a status only is allowed", "allow", {"status": "closed"},
@@ -15101,7 +15102,7 @@ pq("an update that carries no port fields is allowed on today's item", "allow",
    {"rank": 3}, action="update")
 add("port question: a batch with today's item among the sets is denied", "deny", "port-question",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
-    writes=[{"op": "set", "collection": "answers", "doc_id": "a", "data": {"note": "x"}},
+    writes=[{"op": "set", "collection": "groups", "doc_id": "a", "data": {"note": "x"}},
             {"op": "set", "collection": "items", "doc_id": "suspense-cards", "data": pq_item()}])
 add("port question: a batch of good sets is allowed", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="batch",
@@ -16095,7 +16096,7 @@ pl("an update that carries a press step with a wrong link is denied", "deny",
 pl("an items set to another artifact is allowed", "allow", pl_item(), url="https://claude.ai/artifact/other")
 add("press link: a batch with the press item among the sets is denied", "deny", "press-link",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
-    writes=[{"op": "set", "collection": "answers", "doc_id": "a", "data": {"note": "x"}},
+    writes=[{"op": "set", "collection": "groups", "doc_id": "a", "data": {"note": "x"}},
             {"op": "set", "collection": "items", "doc_id": WP_DOC, "data": pl_item()}])
 add("press link: a batch of linked sets is allowed", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="batch",
@@ -16572,6 +16573,86 @@ tn_replace("a str_replace whose old_str holds no Why yours line is allowed", "al
            TN_CTX, "The cloud proxy refused the branch deletes (403), twice.")
 
 
+# --------------------------------------------------------------------------- an answers write to the waiting page
+#
+# Rule page-answers-write (decision page-answers-write). An ArtifactData set, update or str_replace of the
+# `answers` collection is refused when its url is this repo's registered waiting page, as one call or as any entry
+# of a batch's writes. An owner chat answer goes to the item's `lastAnswer` and `reply`, so a record in `answers`
+# would be a second place for the same answer. Deletes and reads pass. So does an answers write to another url,
+# the rebuild path (skills/waiting-page/SKILL.md, "Rebuild a page from the repo"). An items write is judged by the
+# item rules, not by this one.
+FAMILY = "page-answers-write"
+PA_RULE = "page-answers-write"
+PA_DOC = "stamp-check-job"  # the item an answer belongs to; a batch's items sets write it too
+PA_ANSWER = {"choice": "a", "note": "Keep the check in the lint job.", "at": "2026-11-05T19:05:00Z"}
+PA_ITEM = {"id": PA_DOC, "kind": "decision", "status": "closed", "title": "Which CI job runs the stamp check?",
+           "context": "The stamp check runs in the lint job today.\nAnswer from chat, 10:42: keep the check in the lint job."}
+PA_ITEM_2 = dict(PA_ITEM, id="second-stamp-job", title="Which CI job runs the lint check?")
+PA_FILE = os.path.join(ROOT, "pa", "answer.json")  # an update whose data is read from this file
+wp_put(PA_FILE, json.dumps(PA_ANSWER))
+
+
+def pa(name, expected, action, data=None, collection="answers", doc_id=PA_DOC, url=PQ_URL, **extra):
+    """One ArtifactData call from the fixture repo. The rule is named on a deny only. A None field is left out."""
+    kw = {"action": action, "collection": collection, "doc_id": doc_id, "url": url, **extra}
+    if data is not None:
+        kw["data"] = data
+    kw = {k: v for k, v in kw.items() if v is not None}
+    add("page answers: " + name, expected, PA_RULE if expected == "deny" else None,
+        tool="ArtifactData", cwd=PQ_REPO, **kw)
+
+
+def pa_entry(op, collection, doc_id, data=None, **extra):
+    """One entry of a batch's writes."""
+    entry = {"op": op, "collection": collection, "doc_id": doc_id, **extra}
+    if data is not None:
+        entry["data"] = data
+    return entry
+
+
+def pa_batch(name, expected, writes):
+    """One batch of writes to the fixture repo's waiting page."""
+    add("page answers: a batch " + name, expected, PA_RULE if expected == "deny" else None,
+        tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch", writes=writes)
+
+
+pa("a set of answers/<id> is denied", "deny", "set", data=PA_ANSWER)
+pa("the refusal of a set of answers/<id> names lastAnswer, reply and the decision", "deny", "set", data=PA_ANSWER,
+   carries=("lastAnswer", "reply", "decision page-answers-write"))
+pa("an update of answers/<id> with data is denied", "deny", "update", data={"note": "Keep it in the lint job."})
+pa("an update of answers/<id> from a file_path is denied", "deny", "update", file_path=PA_FILE)
+pa("a str_replace on answers/<id> is denied", "deny", "str_replace", field="note",
+   old_str="lint job", new_str="test job")
+
+pa_batch("with one answers set among two items sets is denied", "deny",
+         [pa_entry("set", "items", PA_DOC, PA_ITEM),
+          pa_entry("set", "answers", PA_DOC, PA_ANSWER),
+          pa_entry("set", "items", PA_ITEM_2["id"], PA_ITEM_2)])
+pa_batch("with an answers update of answers/park.<id> among the sets is denied", "deny",
+         [pa_entry("set", "items", PA_DOC, PA_ITEM),
+          pa_entry("update", "answers", "park." + PA_DOC, {"note": "Park it until the lint job is fast."})])
+pa_batch("with a delete of answers beside a set of answers is denied: the delete does not excuse the set", "deny",
+         [pa_entry("delete", "answers", PA_DOC),
+          pa_entry("set", "answers", "park." + PA_DOC, PA_ANSWER)])
+pa_batch("with an answers set as the last of 25 writes is denied", "deny",
+         [pa_entry("update", "items", "item-%d" % n, {"rank": n}) for n in range(1, 25)]
+         + [pa_entry("set", "answers", PA_DOC, PA_ANSWER)])
+
+pa("a delete of answers/<id> is allowed", "allow", "delete")
+pa("a get of answers/<id> is allowed", "allow", "get")
+pa("a list of answers is allowed", "allow", "list", doc_id=None)
+pa("a query of answers is allowed", "allow", "query", doc_id=None, query={"choice": "a"})
+pa("a set of items is allowed", "allow", "set", data=PA_ITEM, collection="items")
+pa("an answers set to a url that is not the waiting page is allowed (the rebuild path)", "allow", "set",
+   data=PA_ANSWER, url=WP_OTHER_URL)
+
+pa_batch("of deletes of answers is allowed", "allow",
+         [pa_entry("delete", "answers", PA_DOC), pa_entry("delete", "answers", "park." + PA_DOC)])
+pa_batch("of items sets alone is allowed", "allow",
+         [pa_entry("set", "items", PA_DOC, PA_ITEM), pa_entry("set", "items", PA_ITEM_2["id"], PA_ITEM_2)])
+pa_batch("with no writes is allowed", "allow", [])
+
+
 # --------------------------------------------------------------------------- a decision states the question form
 FAMILY = "owner-judge"
 #
@@ -16728,7 +16809,7 @@ oj("a task with a Why yours line and no form lines is not judged", "allow",
    tn_task(context=TN_CTX + "\n" + TN_WHY))
 oj("a record that is neither a decision nor a task is not judged", "allow", oj_item(kind="note"))
 oj("an items set to another artifact is allowed", "allow", oj_item(), url="https://claude.ai/artifact/other")
-oj("a set to another collection is allowed", "allow", oj_item(), collection="answers")
+oj("a set to another collection is allowed", "allow", oj_item(), collection="groups")
 add("owner judge: a repo with no waiting page allows item 34's shape", "allow", tool="ArtifactData",
     cwd=NOGIT, url=PQ_URL, action="set", collection="items", doc_id=OJ_DOC, data=oj_item())
 
@@ -16786,7 +16867,7 @@ oj_replace("on why is not judged", "allow", "why", OJ_STAKE, "The lint job is sh
 
 # A batch judges each write.
 oj_batch("with an item that has no form lines among the sets is denied", "deny",
-         [oj_write({"note": "x"}, collection="answers"), oj_write(oj_item())])
+         [oj_write({"note": "x"}, collection="groups"), oj_write(oj_item())])
 oj_batch("whose second write has no form lines is denied", "deny",
          [oj_write(oj_item(context=OJ_GOOD)), oj_write(oj_item(id="second"))])
 oj_batch("with an update that carries kind decision and context, no form lines, is denied", "deny",
@@ -16899,7 +16980,7 @@ qd("an update that carries kind decision and a context with the line is allowed"
    {"kind": "decision", "context": oj_ctx()}, action="update")
 qd("an items set to another artifact is allowed", "allow", qd_item(context=oj_ctx(departs=None)),
    url="https://claude.ai/artifact/other")
-qd("a set to another collection is allowed", "allow", qd_item(context=oj_ctx(departs=None)), collection="answers")
+qd("a set to another collection is allowed", "allow", qd_item(context=oj_ctx(departs=None)), collection="groups")
 add("question departs: a repo with no waiting page allows a decision with no line", "allow", tool="ArtifactData",
     cwd=NOGIT, url=PQ_URL, action="set", collection="items", doc_id=QD_DOC,
     data=qd_item(context=oj_ctx(departs=None)))
@@ -17060,7 +17141,7 @@ ifr_batch("a batch with a str_replace on an unlisted field is denied", "deny",
 ifr_batch("a batch of listed fields and a delete of an unlisted one is allowed", "allow",
           [ifr_write(if_item(reply="x")), ifr_write({IF_BOGUS: {"__delete__": True}, "lane": "x"}, "update")])
 ifr_batch("a batch with an unlisted field in another collection is allowed", "allow",
-          [ifr_write({IF_BOGUS: "x"}, collection="answers"), ifr_write(if_item())])
+          [ifr_write({IF_BOGUS: "x"}, collection="groups"), ifr_write(if_item())])
 
 # file_path data is read as the data of the write.
 IF_FILE_BAD = os.path.join(ROOT, "ifr", "bad.json")
@@ -17074,7 +17155,7 @@ ifr("file_path data of listed fields is allowed", "allow", None, file_path=IF_FI
 ifr("an unreadable file_path is not judged", "allow", None, file_path=os.path.join(ROOT, "ifr", "missing.json"))
 
 # Only a write of an item to this repo's waiting page is judged.
-ifr("a set to another collection is not judged", "allow", if_item(**{IF_BOGUS: "x"}), collection="answers")
+ifr("a set to another collection is not judged", "allow", if_item(**{IF_BOGUS: "x"}), collection="groups")
 ifr("a set to another artifact is not judged", "allow", if_item(**{IF_BOGUS: "x"}),
     url="https://claude.ai/artifact/other")
 add("item field: a repo with no waiting page is not judged", "allow", tool="ArtifactData", cwd=NOGIT, url=PQ_URL,

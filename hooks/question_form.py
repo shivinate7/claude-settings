@@ -947,6 +947,7 @@ def item_hit(op, entry, cwd=""):
 # The one home of "which ArtifactData writes are waiting-page item writes". hooks/guard.py (the form
 # check) and hooks/call_judge.py (the model review) both read it, so the two never disagree on a write.
 WAITING_ITEMS = "items"
+WAITING_ANSWERS = "answers"  # the owner's Send writes it; rule page-answers-write refuses a session's write
 ITEM_OPS = ("set", "update", "str_replace")
 
 
@@ -1000,17 +1001,26 @@ def is_waiting_page(tool_input, cwd) -> bool:
     return waiting_page_root(tool_input, cwd) is not None
 
 
+def call_entries(tool_input):
+    """[(op, entry)] for one ArtifactData call: each dict of a batch's `writes`, or the call itself. The one parser
+    of a call's entries; the item rules and rule page-answers-write both read it."""
+    if not isinstance(tool_input, dict):
+        return []
+    if tool_input.get("action") == "batch":
+        return [(w.get("op"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)]
+    return [(tool_input.get("action"), tool_input)]
+
+
+def answers_writes(tool_input):
+    """The (op, entry) of each set, update or str_replace of the answers collection in one ArtifactData call."""
+    return [(op, e) for op, e in call_entries(tool_input) if op in ITEM_OPS and e.get("collection") == WAITING_ANSWERS]
+
+
 def page_item_hit(tool_input, cwd=""):
     """((rule, matched), writes) for one ArtifactData call. `writes` are the (op, entry) item writes of
     this repo's waiting page, empty for a read, another collection or another page (such a write still gets the check for an option keyed none). The hit is the first
     write that a rule refuses, else ("", "")."""
-    if not isinstance(tool_input, dict):
-        return PASS, []
-    if tool_input.get("action") == "batch":
-        entries = [(w.get("op"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)]
-    else:
-        entries = [(tool_input.get("action"), tool_input)]
-    writes = [(op, e) for op, e in entries if op in ITEM_OPS and e.get("collection") == WAITING_ITEMS]
+    writes = [(op, e) for op, e in call_entries(tool_input) if op in ITEM_OPS and e.get("collection") == WAITING_ITEMS]
     if not writes:  # a read or another collection loads nothing more
         return PASS, []
     if not is_waiting_page(tool_input, cwd):
