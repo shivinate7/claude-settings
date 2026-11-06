@@ -1,0 +1,18 @@
+{
+  "added": "2026-11-06T21:38:00Z",
+  "context": "Goal: lanes report to triage, the coordinator and the batch runners without a stop.\nProblem (rule): you picked a on item 301, but cloud sessions cannot edit settings.json, so the edit needs a session on your Mac.\nBased on (read): settings.json on main has 4 allow entries, among them mcp__claude-code-remote__add_repo and mcp__claude-code-remote__archive_session.\nDeparts from: main, with no allow entry for send_message \u2014 adds mcp__claude-code-remote__send_message to permissions.allow.\nMeanwhile: lanes retry a refused message through their parent.",
+  "holds": "The send_message allow entry in claude-settings settings.json.",
+  "home": "decision auto-mode-allow",
+  "id": "lane-send-allow-mac",
+  "kind": "task",
+  "lane": "coordinator: a Mac session opens the PR; the batch runner merges it",
+  "n": 307,
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 3,
+  "ref": "item 301 a (15:24 CST Nov 6)",
+  "reply": "Paste this into a Claude Code session on your Mac, in the claude-settings folder:\n\nOwner item 301 pick a (2026-11-06 15:24 CST): in settings.json, add \"mcp__claude-code-remote__send_message\" to permissions.allow, next to the other mcp__claude-code-remote__ entries. Change nothing else. Use EnterWorktree with name lane-send-allow, commit, push, and open a draft PR titled \"settings: allow send_message (item 301 a)\". Send the PR number and head to the claude-settings batch runner. Report the PR link.",
+  "short": "Mac: send_message allow line",
+  "status": "open",
+  "title": "On your Mac: add the send_message allow line (your item 301 pick a)",
+  "why": "Cloud auto mode refuses settings.json edits, so a session on your Mac makes this one edit."
+}

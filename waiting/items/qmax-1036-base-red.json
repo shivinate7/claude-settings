@@ -5,7 +5,7 @@
   "home": "coordinator",
   "id": "qmax-1036-base-red",
   "kind": "task",
-  "lane": "coordinator: on your typed line, runner 9 merges #1036; #1038, #1037 and #1039 wait for a green browser run after it",
+  "lane": "coordinator: runner 9 merges #1036 on your line in its chat",
   "lastAnswer": {
     "at": "2026-11-06T21:16:29.376Z",
     "choice": "none",
@@ -38,9 +38,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "q_max PRs #1036, #1037, #1038, #1039; run 42274824088",
-  "reply": "Your save reached the coordinator at 15:19 CST. Auto mode refused to relay it to runner 9 at 15:21 CST: a page save does not count as your words for a merge onto a red main (note auto-mode-refuses-page-grant). To merge, open the coordinator session https://claude.ai/code/session_013NEJL2hB1pLZPDpzas7VgB and type: merge q_max #1036 with --base-red-ok. On your question: q_max runs the shared merge tool (decisions uniform-over-variants and no-merge-onto-red-main).",
+  "reply": "Your line in the coordinator (15:25 CST) was relayed, but runner 9's auto mode refused it at 15:28 CST: the grant must be typed in the chat of the session that runs the merge. Open runner 9, https://claude.ai/code/session_013NEJKymmzw37seAr3Qq5nv, and type: merge q_max #1036 with --base-red-ok. Sorry for the second trip: step page-grant-typed-line now says the line goes to the session that runs the act.",
   "short": "q_max #1036 onto red main",
   "status": "open",
-  "title": "q_max #1036: type the merge line in the coordinator's chat",
+  "title": "q_max #1036: type the merge line in runner 9's own chat",
   "why": "Auto mode refused to accept your page save \"ya merge it\" as your words for a merge onto a red main, so the merge waits on a line you type."
 }

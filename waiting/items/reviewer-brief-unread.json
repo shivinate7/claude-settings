@@ -23,19 +23,26 @@
     },
     {
       "gain": "No unread report reaches a reviewer, and one rule covers both guard checks.",
-      "how": "An unread reviewer prompt is refused, with the fix \"write it as a literal string\". Workflows pass findings to a reviewer as a file it reads, not inside the prompt.",
+      "how": "An unread reviewer prompt is refused, with the fix \"write it as a literal string\".",
       "key": "b",
       "label": "Refuse it, workflows write literal prompts",
-      "lose": "Each workflow's templated reviewer prompt must be rewritten once, the common verify pattern included. An ordinary fan-out that builds one reviewer prompt per file (\"Review \" plus the file name) is refused too. Such a workflow writes each item to a file and gives each reviewer a literal prompt that names the file (lane review round 2, 14:48 CST)."
+      "lose": "Each workflow's templated reviewer prompt must be rewritten once. An ordinary fan-out that builds one reviewer prompt per file is refused too, and nothing shows the right shape before the refusal."
+    },
+    {
+      "gain": "Prompts are written right from the start, so the refusal seldom fires, and the first refusal teaches the fix.",
+      "how": "b, plus: (1) one reviewer brief template, docs/templates/reviewer-brief.md, with 4 lines (Task, Diff, Rulings, Findings file) and a literal workflow form, where a fan-out writes each item's findings to its own file and passes the path; (2) rule roles-brief-contents gets one clause: a reviewer's brief follows that template; (3) the guard's refusal points to the template and shows the literal form; (4) agents/reviewer.md reports a brief that holds a builder report or a prior verdict. The built-in workflow-authoring skill is not in this repo, so it is not changed.",
+      "key": "c",
+      "label": "b plus fix where reviewer prompts are made",
+      "lose": "One more file to keep current, and one more clause in CLAUDE.md."
     }
   ],
   "owner": "lane reviewer-brief-blind (session_013NEJL3HcTDWvQyBwmisvYG)",
-  "pick": "b",
+  "pick": "c",
   "rank": 3,
   "ref": "lane reviewer-brief-blind; item 127",
-  "reply": "Sent 15:30 CST to lane reviewer-brief-blind: B, plus a fix at the source, so that what starts a reviewer (workflow scripts, the workflow guidance, briefs) writes literal, file-pointing prompts from the start, and the refusal seldom fires. The lane names the exact files, and this comes back as one option.",
+  "reply": "Your idea is option c, written by the lane. It lands in the same lane before its round 3 review, if you pick it.",
   "short": "Unread reviewer prompt",
-  "status": "deferred",
+  "status": "open",
   "title": "When the guard cannot read a reviewer's prompt, should it let it through?",
   "why": "A reviewer that sees the builder's report judges the report, not the code."
 }

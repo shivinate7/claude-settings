@@ -4,7 +4,7 @@
   "status": "todo",
   "order": 103.391,
   "why": "Triage told the owner on item 303 that #1036 would merge, but auto mode refuses a page save as the owner's words for a red-base merge (note auto-mode-refuses-page-grant), and the relay was refused at 15:21 CST.",
-  "note": "Triage 15:25 CST Nov 6. The waiting-page skill's routing step marks the acts a page save cannot grant (--base-red-ok, a merge the owner must name), and the writer turns such an answer into a task with the exact line to type and a link to the session that acts on it.",
+  "note": "Triage 15:25 CST Nov 6. The waiting-page skill's routing step marks the acts a page save cannot grant (--base-red-ok, a merge the owner must name), and the writer turns such an answer into a task with the exact line to type and a link to the session that acts on it. Coordinator 15:28 CST: runner 9's auto mode refused the owner's line typed in the coordinator and relayed. The typed line must go to the chat of the session that runs the act, so the task links that session.",
   "owner": "triage",
-  "updatedAt": "2026-11-06T21:25:00Z"
+  "updatedAt": "2026-11-06T21:39:00Z"
 }

@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-06T21:38:00Z",
+  "context": "Goal: cloud sessions and your Mac sessions leave each other messages in git (your item 153 pick a).\nProblem (risk): claude-settings is public, so a message there is readable by anyone, for good. A cloud session cannot create a repo.\nBased on (read): list_repos at 15:27 CST: claude-settings is public, and no private repo exists for this purpose.\nDeparts from: main, which has no mailbox store \u2014 adds one.\nMeanwhile: a Plan agent designs the mailbox (format, read at turn start, cost), with the store left as a setting. The build starts once you pick.",
+  "holds": "Which repo holds the session mailbox.",
+  "home": "step session-messaging-plan",
+  "id": "mailbox-store-place",
+  "kind": "decision",
+  "lane": "session-messaging-plan: designs the mailbox meanwhile (session_013NEJL2btGMLKqHs4cDQSZ6)",
+  "links": [
+    {
+      "label": "New repository on GitHub",
+      "url": "https://github.com/new"
+    }
+  ],
+  "n": 308,
+  "options": [
+    {
+      "gain": "Private, and nothing mixed into a code repo.",
+      "how": "You create it once at https://github.com/new: owner shivinate7, name session-mailbox, Private, no README. Then every session reads and writes it.",
+      "key": "a",
+      "label": "New private repo session-mailbox",
+      "lose": "One minute of your time, and one more repo to keep."
+    },
+    {
+      "gain": "Nothing to create.",
+      "how": "A mailbox branch in claude-settings.",
+      "key": "b",
+      "label": "A branch in claude-settings",
+      "lose": "Every message is public for good, so sessions must keep personal data and private repo names out of each one."
+    },
+    {
+      "gain": "Private, and nothing to create.",
+      "how": "A mailbox branch in an existing private repo, such as shivinate7/home.",
+      "key": "c",
+      "label": "A branch in a private repo you have",
+      "lose": "Mixes session mail into a repo with its own CI and purpose."
+    }
+  ],
+  "owner": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6)",
+  "pick": "a",
+  "rank": 3,
+  "ref": "lane session-messaging-plan; item 153",
+  "short": "Where the git mailbox lives",
+  "status": "open",
+  "title": "Where should the git mailbox for cloud and Mac sessions live?",
+  "why": "Messages can hold repo names, file paths and your words, and claude-settings is public."
+}

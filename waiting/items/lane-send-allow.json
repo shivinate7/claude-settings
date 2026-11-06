@@ -5,7 +5,7 @@
   "home": "decision auto-mode-allow",
   "id": "lane-send-allow",
   "kind": "decision",
-  "lane": "coordinator: builds the allow line; step judge-send-message-refusals holds the judge fix",
+  "lane": "coordinator: a Mac session adds the allow line (item 307); step judge-send-message-refusals holds the judge fix",
   "lastAnswer": {
     "at": "2026-11-06T21:24:48Z",
     "choice": "a",
@@ -32,7 +32,7 @@
   "pick": "a",
   "rank": 3,
   "ref": "item 287 scan; step auto-mode-refusal-survey",
-  "reply": "Routed 15:31 CST to the coordinator: lanes get the send_message allow line. Your judge idea is roadmap step judge-send-message-refusals: it reads the 3 refused messages and fixes the cause in the judge, if any is ours. Closes when the allow line merges.",
+  "reply": "Your pick a needs a settings.json edit, which cloud sessions cannot make. Item 307 holds the exact prompt to paste into a Mac session. Your judge idea is roadmap step judge-send-message-refusals. Closes when the allow line merges.",
   "short": "Lane send_message allow",
   "status": "open",
   "title": "Should lane sessions be allowed to message other sessions without an auto-mode check?",

@@ -7,7 +7,7 @@
   "home": "roadmap step c107",
   "id": "c107-mac-probe-4",
   "kind": "task",
-  "lane": "local-lane-start-no-click: rewrites the probe with EnterWorktree (session_013NEJL2TLonvddw6ByF5XGE)",
+  "lane": "local-lane-start-no-click: waits on this probe (session_013NEJL2TLonvddw6ByF5XGE)",
   "lastAnswer": {
     "at": "2026-11-06T21:24:48Z",
     "choice": "note",
@@ -17,9 +17,9 @@
   "owner": "lane local-lane-start-no-click (session_013NEJL2TLonvddw6ByF5XGE)",
   "rank": 3,
   "ref": "step c107; item 297",
-  "reply": "Our own guard refused the probe's step 2. It allows a worktree only through EnterWorktree or an agent's isolation, never git worktree add. The lane rewrites probe 4 to use EnterWorktree, and this item comes back with the new text. Measured so far: Claude Code 2.1.296, and no create_session tool on the Mac (start_session is listed).",
+  "reply": "Rewritten 15:35 CST to make its tree with EnterWorktree, which the guard allows. Paste the text below into a Claude Code desktop session on your Mac, in the claude-settings folder, on a turn you type. Then paste its result block here.\n\nProbe c107 #4. Measure, do not fix. Record each answer as yes/no plus any error text.\n1) Call EnterWorktree with name probe-c107d and no path. Record the worktree path and branch it reports.\n2) In that worktree run: claude -p \"Reply with the output of git branch --show-current, then stop.\" --output-format json. Record: did any card or prompt show (ask me in one line), did it finish, any login error, the reply, and the session_id in the JSON.\n3) Run: claude -p \"Reply SECOND.\" --resume <that session_id> --output-format json. Record whether it answered SECOND.\n4) Ask me in one line: does a session for probe-c107d show in the desktop app's session list?\n5) Clean up: call ExitWorktree with action remove (the worktree and its branch hold no work).\n6) Print one block: the version and one line per step, for me to paste on the page.\n\nAlready measured: Claude Code 2.1.296, and a Mac desktop session has no create_session tool, so cloud lanes start only from a cloud coordinator.",
   "short": "Mac press-free start probe",
-  "status": "deferred",
+  "status": "open",
   "steps": [
     "Open a new Claude Code desktop chat on your Mac, in your local claude-settings folder (not over Remote Control).",
     "Paste the text below and press Enter.",
