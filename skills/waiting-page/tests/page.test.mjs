@@ -2849,6 +2849,8 @@ const DIS_LATER_REPLY = { id: "ask-dis-late-r", text: "Has the queue page change
 // Dismissed, then a reply came in and still waits: the thread shows again, whatever dismissed says.
 const DIS_WAITED = { id: "ask-dis-wd", text: "Dismissed before a reply came in", at: "2026-10-26T08:00:00Z", owner: "triage", answered: "2026-10-26T09:00:00Z", reply: "Yes.", dismissed: "2026-10-27T08:00:00Z" };
 const DIS_WAITED_REPLY = { id: "ask-dis-wd-r", text: "A new question on the dismissed ask", at: "2026-10-31T10:00:00Z", re: DIS_WAITED.id };
+// A reply to DIS_HIDDEN that comes in after the thread is restored this visit, and waits for its answer.
+const DIS_HIDDEN_REPLY = { id: "ask-dis-hid-r", text: "Does the rail guard need its own test?", at: "2026-10-31T10:00:00Z", re: DIS_HIDDEN.id };
 // A reply in the thread that still waits for its answer.
 const DIS_WAIT ={ id: "ask-dis-wait", text: "Is the queue still right after the fix?", at: "2026-10-31T08:00:00Z", re: ASK_ANSWERED.id };
 const dismissWrites = (page) => page.evaluate(() => window.__log.filter((l) => l[0] === "update" && l[1] === "asks").map((l) => ({ id: l[2], body: l[3] })));
@@ -2965,6 +2967,24 @@ test("dismiss: Restore writes dismissed null with update, the line says the thre
   assert.equal(await page.locator("#askDismissed").count(), 0, "the restored thread is still under Show dismissed asks after a reload");
   const kept = await storedAsk(page, root);
   assert.ok(kept && kept.dismissed === null, "the stored dismissed is " + JSON.stringify(kept && kept.dismissed) + ", not null");
+});
+
+test("dismiss: a thread dismissed at load and restored this visit shows in the main list when a reply in it then waits", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [DIS_KEEP.id]: DIS_KEEP, [DIS_HIDDEN.id]: DIS_HIDDEN } }, storage: RPL_NEW }); if (!page) return;
+  await shownBox(page, DIS_KEEP.text, DIS_SHOWN);
+  await mustHave(page, "#askDismissed", "Show dismissed asks unfold");
+  await page.click("#askDismissed");
+  await mustHave(page, `ol#askDList #res-${DIS_HIDDEN.id}`, "Restore in the dismissed list");
+  const before = (await dismissWrites(page)).length;
+  await page.click(`ol#askDList #res-${DIS_HIDDEN.id}`);
+  await waitUpdates(page, before + 1);
+  const said = await page.waitForFunction(() => document.body.textContent.includes("Restored. It joins the list at the next load."), null, { timeout: 3000 }).then(() => true, () => false);
+  assert.equal(said, true, "the restore does not say Restored. It joins the list at the next load.");
+  // A reply comes in after the restore, as a session's write after the page loaded, and waits for its answer.
+  await page.evaluate((r) => window.__putDoc("asks", r.id, r), DIS_HIDDEN_REPLY);
+  // The main list is the scope, so it is asserted before the dismissed list is checked away.
+  await mustHave(page, `${DIS_SHOWN}#row-${DIS_HIDDEN.id}`, "restored thread in the main list");
+  assert.equal(await page.locator("#askDismissed").count(), 0, "the restored thread is still under Show dismissed asks");
 });
 
 test("dismiss: while a reply in the thread waits, Dismiss is off and says why, and a folded row with that reply has no Dismiss", async (t) => {
