@@ -1950,6 +1950,29 @@ class RouteClaimTests(StaleCase):
         self.assertIn(ROUTE_ROWS, touched(rng))  # scope: the rows file changed in this range
         self.assert_route_claims(rng, flagged)
 
+    def test_route_row_removed_in_the_range_reports_each_prose_line_at_head_that_cites_it(self):
+        notes = ("# Notes\n\n- The cloud cannot push to main (route cloud-push).\n"
+                 "- The cloud cannot merge to main (route cloud-other).\n")
+        record = "# Decision\n\n## The ruling\n\nThe cloud cannot push to main (route cloud-push).\n"
+        extra = {ROUTE_ROWS: route_rows_text("cloud-push", "cloud-other"), "docs/decisions/route-note.md": record}
+
+        def change(repo):
+            write(repo, ROUTE_ROWS, route_rows_text("cloud-other"))  # the range removes the cloud-push row
+            commit(repo)
+        rng = self.make_range(base_files(notes, extra=extra), change)
+        self.assertIn(ROUTE_ROWS, touched(rng))  # scope: the rows file changed in this range
+        self.assertNotIn(NOTES, touched(rng))  # scope: the prose that cites the row is not in the range
+        ids_at_base = {row["id"] for row in json.loads(git(rng.repo, "show", "%s:%s" % (rng.base, ROUTE_ROWS)))["rows"]}
+        ids_at_head = {row["id"] for row in json.loads(read_repo_file(rng.repo, ROUTE_ROWS))["rows"]}
+        self.assertEqual(ids_at_base - ids_at_head, {"cloud-push"}, "scope: the range removes one row id")
+        rc, out, commands = self.run_traced_commands(rng)
+        subs = [command.split()[0] for command in commands]
+        self.assertEqual(rc, 0, out)  # report only: the exit code does not change
+        self.assertIn("stale-cites: PASS", out)
+        self.assertEqual(stale005_lines(out, NOTES), [3], out)  # the prose line that cites the removed id
+        self.assertEqual(stale005_lines(out, "docs/decisions/route-note.md"), [5], out)  # and a decision record's line
+        self.assertLessEqual(len(subs), 5, subs)  # within the pin for a range that removes a path
+
     def test_route_claim_fires_only_on_a_line_the_range_adds(self):
         base = "# Notes\n\n- The cloud cannot push to main.\n- Auto mode cannot merge.\n"
 
