@@ -9,10 +9,9 @@ Why: a green exit on an unread input hides a defect.
 Homes with this shape:
 
 - `lint/check_record_slugs.py`, `lint/check_silent_undo.py`, `lint/check_ruling_kind.py`.
-- `lint/check_glossary.py`, `lint/check_artifact_cites.py`, `lint/ste_lint.py` (an unparseable config).
+- `lint/check_glossary.py`, `lint/check_artifact_cites.py` (an absent records folder is zero records, not unread), `lint/ste_lint.py` (an unparseable config).
 - `lint/stale_cites.py`, for a file it cannot read. Its unresolved base is in `stale-cites-at-merge`.
 - `actions/code-check/code_check.py` and `actions/ci-alarm` (`alarm.sh`, `dropped.sh`, `issue.sh`).
-- `skills/plain-english-map/scripts/map-check.mjs` (a model seam with no reader).
 
 Stricter, red locally too: `lint/check_comment_narration.py` (exit 2), `hooks/mutate_guard.py --known-defects`, and the other lints, which exit 1 or 2 on a failed read. `ci-scope.sh` fails safe by running the harness. `actions/stamp` keys on `GITHUB_ACTIONS`, not `CI`.
 
@@ -22,6 +21,9 @@ Out of scope, with the reason:
 - `lint/check_claude_md_size.py`: warn-only. An unread file hides a warning, never a red.
 - `lint/layout.py` `has_extras()`: a missing `.claude/layout-extras.json` means "none declared". That is an answer, not an unread input.
 - `lint/compliance_probes.py` and `lint/find_copies.py`: no CI runs them.
+- `skills/plain-english-map/scripts/map-check.mjs` `modelSeam`: the command binds no reader, so that check is not built. It prints a note. A limit is not an unread input.
+
+A caller's explicit opt-out still holds: ste-lint with `fail: false` (`--fail-on never`) prints UNKNOWN and exits 0.
 
 Where CI runs a suite is in `test-strategy-reset` (tests prove outcomes, run where their subject lives).
 
@@ -34,4 +36,3 @@ Home: lint/ste_lint.py
 Home: lint/stale_cites.py
 Home: actions/code-check/code_check.py
 Home: actions/ci-alarm/alarm.sh
-Home: skills/plain-english-map/scripts/map-check.mjs
