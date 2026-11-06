@@ -15,7 +15,7 @@ Owner note: some refuters should run Opus. Lane `debate-model-tiers` decides whi
 
 Check: `hooks/check_refuter.py`, the one home of the check refuter. `hooks/call_judge.py` calls it at a `send_message`.
 
-- Trigger: a `send_message` whose first non-blank line is the lane brief marker, `Lane brief: <step>. Topic: <topic>.`. Other messages make no model call and do not load the module.
+- Trigger: a `send_message` whose first non-blank line starts `Lane brief: <step>. Topic: <topic>.` Other messages make no model call and do not load the module.
 - Input: the step's title and why, read from `roadmap/data/steps/<step>.json` on the local record-branch ref. The brief's `Done check:` line. Nothing else: no brief body, no diff.
 - Model: one call through `REFUTER_MODEL`, one named setting, value `sonnet`. Its wait is `REFUTER_TIMEOUT`, under the `call_judge` hook timeout in `settings.json`.
 - Answers:
@@ -48,9 +48,10 @@ Risk kind: likely risk. Per rule `building-guard-needs-incident`, a guard names 
 
 ## Cost
 
-- Per lane brief: one Sonnet call, and one git read of the step file from the record-branch ref.
+- Per lane brief: one Sonnet call, and one read of the step file from the record-branch ref. The git process count is unmeasured until the module lands.
+- Per refusal: one `guard.log` line, written by `guard_core.refuse()`, as every refusal does.
 - Per other `send_message`: no model call and no module load. The `call_judge` matcher now includes `send_message`, so each one starts the hook process.
-- No file, timer or log.
+- No other file, timer or log.
 
 ## Done check
 
