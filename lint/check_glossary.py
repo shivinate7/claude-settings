@@ -568,6 +568,8 @@ def main(args):
     for rel, lines in sorted(scope.items()):
         if rel.startswith(SKIP_CODE):
             continue
+        if os.path.isdir(os.path.join(ROOT, *rel.split("/"))):  # a submodule pointer is no file to read
+            continue
         text = read(rel)
         if text is None:  # a changed file that cannot be read is unknown, never clean
             unknown.append("%s cannot be read" % rel)
