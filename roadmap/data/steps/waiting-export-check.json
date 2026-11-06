@@ -1,0 +1,9 @@
+{
+ "title": "A Stop check makes the page writer export the page data after each page write",
+ "phase": "now",
+ "status": "todo",
+ "order": 103.35,
+ "why": "Owner, Nov 5 19:05 CST: \"can that only live in ur handoff it cant be mechanized?\" Incident: the roadmap's waiting/ copy went stale from 06:41 to 19:04 CST Nov 5 while triage wrote page items all day (decision waiting-data-in-repo).",
+ "note": "Nov 5 19:06 CST (triage): shape: a Stop hook in the page writer's session reads this turn's transcript. If the turn made an ArtifactData write to the registered waiting page and no later commit touched waiting/ on the record branch, it refuses the stop and names export_page.py. It reads on demand at Stop, starts no process and writes no file. Its test proves both the refusal and the pass. Until it lands, the handoff line holds it.",
+ "updatedAt": "2026-11-06T01:06:00Z"
+}
