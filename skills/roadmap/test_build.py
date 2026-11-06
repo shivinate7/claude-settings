@@ -1394,6 +1394,35 @@ class ReadyNotStarted(UpkeepFixture):
         self.assertIn('c3 (unknown status "waiting")', detail, "control: the row lists the unknown status")
         self.assertNotIn('c2 (unknown status "ready")', detail, "ready is a known status, so the row never lists c2")
 
+    def test_listed_steps_follow_step_order_not_the_step_id(self):
+        self.ready_step("c3", order=1)
+        self.ready_step("c1", order=2)  # c1 sorts first by id, so only the order puts c3 first
+        self.known_read()
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.ready_ids(self.ready_block(page)), ["c3", "c1"], "listed by step order")
+
+    def test_age_floors_to_whole_hours(self):
+        self.ready_step("c2", order=2, updatedAt=self.before(220))  # 3 h 40 min: floor 3, round 4
+        self.known_read()
+        page, _ = self.build_from_main("--live", str(self.live))
+        ready = self.ready_block(page)
+        self.assertEqual(self.ready_ids(ready), ["c2"])
+        self.assertEqual([s["age"] for s in ready["steps"]], [3], "the age is whole hours, rounded down")
+
+    def test_item_with_an_empty_lane_holds_the_step_back(self):
+        self.ready_step("c2", order=2)
+        self.ready_step("c3", order=3)  # control
+        self.known_read(items=[self.item(4, home="step c2", status="open", lane="")])
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.ready_ids(self.ready_block(page)), ["c3"], "an empty lane is unanswered, so it holds c2 back")
+
+    def test_steps_unknown_prints_one_unknown_ready_line(self):
+        self.on_main()
+        code, out = run_build("--repo", str(self.repo), "--record-branch", "no-such-branch", "--out", str(self.out))
+        self.assertIn(code, (0, None), out)
+        self.assertEqual(self.ready_lines(out), ["ready not started: unknown (steps unknown)"],
+                         "with no steps, the build prints one unknown ready line")
+
 
 class PageRulings(UpkeepFixture):
     """The upkeep row for each closed waiting-page item whose home step is open and cites the item nowhere.
@@ -1895,6 +1924,14 @@ class TodoWithOpenPull(UpkeepFixture):
         self.assertEqual(len(lines), 1, out)
         self.assertRegex(lines[0], r"^unknown \(the live file was read \d+ minutes ago")
 
+    def test_ready_step_with_an_open_pull_gets_the_pair_line_like_todo(self):
+        self.commit_step("r8")  # control: a todo step with an open pull
+        self.commit_step("r9", status="ready", order=2)
+        self.publish(sessions=[], pulls=[{"number": 80, "title": "r8 lane", "branch": "r8"},
+                                         {"number": 90, "title": "r9 lane", "branch": "r9"}])
+        _, out = self.build_from_main("--live", str(self.live), expect=(1,))
+        self.assertEqual(self.pair_lines(out), ["r8 (#80)", "r9 (#90)"], "a ready step is a todo step for the pair line")
+
 
 class ReadyAndDraftRows(UpkeepFixture):
     """Two upkeep rows (spec part B). `ready todo steps` lists each todo step whose note has the sentence `Ready.`,
@@ -1929,6 +1966,13 @@ class ReadyAndDraftRows(UpkeepFixture):
         _, out = self.build_from_main()
         count, detail = self.row(out, self.READY)
         self.assertEqual((count, self.entries(detail)), (1, ["t-todo"]))
+
+    def test_ready_status_step_with_a_ready_sentence_is_listed_too(self):
+        self.commit_step("t-todo", note="Ready.", order=2)  # control: listed
+        self.commit_step("r-ready", status="ready", note="Ready.", order=3)
+        _, out = self.build_from_main()
+        count, detail = self.row(out, self.READY)
+        self.assertEqual((count, self.entries(detail)), (2, ["r-ready", "t-todo"]), "ready reads as todo in this row")
 
     def test_draft_under_twelve_hours_before_the_read_is_not_listed(self):
         # The read is 45 min old. A draft 11 h 30 m before it is 12 h 15 m before now, so a check against the
