@@ -942,12 +942,14 @@ class CostTests(StaleCase):
     def test_route_claim_with_a_removed_path_and_a_claim_candidate_starts_exactly_five_git_processes(self):
         def change(repo):
             move(repo, "hooks/lib.mjs", MOVED)
-            write(repo, NOTES, "# Notes\n\n- The cloud cannot push to main (route cloud-push).\n")
+            write(repo, NOTES, "# Notes\n\n- The cloud cannot push to main (route cloud-push).\n"
+                               "- The classifier cannot push to main.\n")
             commit(repo)
         rng = self.make_range(base_files("# Notes\n", extra={ROUTE_ROWS: route_rows_text("cloud-push")}), change)
         self.assertIn(MOVED, touched(rng))  # scope: the range renames hooks/lib.mjs away, so a path is removed
         rc, out, subs = self.run_traced(rng)
         self.assertEqual(rc, 0, out)
+        self.assertEqual(stale005_lines(out, NOTES), [4], out)  # the check read the candidate: the unbacked line fires
         # The removed path makes the check read the Markdown at head (one ls-tree, one cat-file). The candidate line
         # reads its backing from that same cat-file, so the count is five and no more.
         self.assertEqual(len(subs), 5, subs)
@@ -1689,7 +1691,7 @@ class RouteClaimTests(StaleCase):
             ("- The sandbox cannot push to main.", False),  # a verb and no route word
             ("- The local networks are fine.", False),  # `works` sits inside `networks`
             ("- The highway cannot be used.", False),  # `gh` sits inside `highway`
-            ("- The cloud runs the job.", False),  # the verb and the route word sit on two lines, read one at a time
+            ("- The cloud runs the job.", False),  # two sentences: the route word in one, the verb in the other
             ("  The job cannot push to main.", False),
         ]
         rng, flagged = self.route_range(rows)
