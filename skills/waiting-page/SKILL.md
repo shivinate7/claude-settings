@@ -120,7 +120,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     with `waits` and `lastAnswer` reads as answered on the page.
     `stale_pages.py --items` names each open item's wait `ended`, `waiting` or `unknown` (see "Route and close").
   - Before writing `reply`, `lastAnswer`, `lane` or `waits`, the writer checks that the page is current with `stale_pages.py`, the same
-    gate as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the four.
+    check as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the four.
   - The page draws only the top-level fields that its `itemFields` block lists (`page.html`). A write that names another
     top-level field is refused (guard rule `item-field-rendered`), and a stored item that carries one shows a warning on its card.
     To add a field, draw it on the page and add its name to that block. A key inside `options` or `steps` is not judged.
