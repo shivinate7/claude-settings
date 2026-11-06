@@ -1424,13 +1424,15 @@ def case_prompt_spares_a_reply_that_rewrote_the_item():
 
 
 # ----------------------------------------------------------- route rows (claims-carry-backing, part (v) layer (b))
-# A "Why yours" line that cites `(route <id>)` puts three rows in the judge prompt: the cited row, every other
-# row with its act, and the rows its `alternates` name. A rows file that is missing or holds no rows gives the
-# prompt it gets today. The fixtures: one act with a refused route and a works route, one alternate in another
-# act, and one unrelated act. judge_row builds a row in the rows file's shape. It is not
-# test_refusal_note.route_row: that fixture ties each act to its row id and sets no alternates.
+# A "Why yours" line that cites `(route <id>)` puts three kinds of rows in the judge prompt: the cited row, every
+# other row with its act, and every row whose act is one of the cited row's `alternates` (a list of act values,
+# as the rows file holds them). A rows file that is missing or holds no rows gives the prompt it gets today. The
+# fixtures: one act with a refused route and a works route, two rows in the alternate act, and one unrelated act.
+# judge_row builds a row in the rows file's shape. It is not test_refusal_note.route_row: that fixture ties each
+# act to its row id and sets no alternates.
 
 ROUTE_ACT = "amend the trailer of a commit already pushed to its branch"
+ALT_ACT = "rewrite the history of a branch"
 OTHER_ACT = "push a commit straight to main"
 
 
@@ -1444,12 +1446,12 @@ def judge_row(row_id, act, route, outcome, alternates=None):
 
 
 CITED_ROW = judge_row("trailer-amend-pushed", ROUTE_ACT, "git commit --amend on the pushed branch", "refused",
-                      alternates=["rebase-fixup-new-branch"])
+                      alternates=[ALT_ACT])
 SAME_ACT_ROW = judge_row("cherry-pick-to-new-branch", ROUTE_ACT, "cherry-pick to a new branch", "works")
-ALT_ROW = judge_row("rebase-fixup-new-branch", "rewrite the history of a branch",
-                    "git rebase -i fixup on a new branch", "works")
+ALT_ROW = judge_row("rebase-fixup-new-branch", ALT_ACT, "git rebase -i fixup on a new branch", "works")
+ALT_ROW_B = judge_row("filter-branch-new-branch", ALT_ACT, "git filter-branch on a new branch", "works")
 OTHER_ROW = judge_row("push-main-direct", OTHER_ACT, "git push origin main", "refused")
-ALL_ROWS = [CITED_ROW, SAME_ACT_ROW, ALT_ROW, OTHER_ROW]
+ALL_ROWS = [CITED_ROW, SAME_ACT_ROW, ALT_ROW, ALT_ROW_B, OTHER_ROW]
 CITED_ID = CITED_ROW["id"]
 SAME_ACT_ID = SAME_ACT_ROW["id"]
 
@@ -1484,7 +1486,8 @@ def case_route_cite_carries_cited_same_act_and_alternate_rows():
     run = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=ALL_ROWS)
     check("route rows, cite: claude called once", len(run.calls) == 1, run.calls)
     prompt = run.prompt()
-    for label, row in (("cited row", CITED_ROW), ("same-act row", SAME_ACT_ROW), ("alternate row", ALT_ROW)):
+    for label, row in (("cited row", CITED_ROW), ("same-act row", SAME_ACT_ROW), ("alternate-act row", ALT_ROW),
+                       ("second alternate-act row", ALT_ROW_B)):
         check("route rows, cite: the prompt carries the %s" % label,
               row["route"] in prompt and row["id"] in prompt, prompt[:300])
     check("route rows, cite: a row of another act does not ride the prompt",
@@ -1495,11 +1498,12 @@ def case_route_cite_carries_cited_same_act_and_alternate_rows():
 
 def case_route_cite_skips_other_acts_in_a_full_rows_file():
     filler = [judge_row("filler-%03d" % n, OTHER_ACT, "filler route %03d" % n, "refused") for n in range(300)]
-    run = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=[CITED_ROW, SAME_ACT_ROW, ALT_ROW] + filler)
+    run = run_hook(TRAILER_REPLY, answer=OK_ANSWER, rows=[CITED_ROW, SAME_ACT_ROW, ALT_ROW, ALT_ROW_B] + filler)
     check("full rows file: claude called once", len(run.calls) == 1, run.calls)
     prompt = run.prompt()
     check("full rows file: the same-act row rides the prompt", SAME_ACT_ROW["route"] in prompt, prompt[:300])
-    check("full rows file: the alternate row rides the prompt", ALT_ROW["route"] in prompt, prompt[:300])
+    check("full rows file: the alternate-act rows ride the prompt",
+          ALT_ROW["route"] in prompt and ALT_ROW_B["route"] in prompt, prompt[:300])
     carried = sum(1 for n in range(300) if ("filler route %03d" % n) in prompt)
     check("full rows file: no row of another act rides the prompt", carried == 0,
           "%d filler rows in the prompt" % carried)
