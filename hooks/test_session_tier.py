@@ -175,6 +175,32 @@ def case_regrant_replaces_the_grant():
     return tier_body_problems(fx.grant_file(config, folder), folder)
 
 
+def case_regrant_revokes_the_bound_files_for_the_folder():
+    """a re-grant of a folder removes every bound file for that folder, and keeps the bound file and the grant of a
+    folder whose name only starts with it"""
+    config = fresh("regrant-revoke")
+    folder = folder_of("regrant-revoke")
+    sibling = folder_of("regrant-revoke-sibling")
+    for session in ("tier-revoke-a", "tier-revoke-a2"):
+        fx.write_bound(config, session, folder)
+    fx.write_bound(config, "tier-revoke-c", sibling)
+    code, _out, err = run_cli(config, ["grant", "triage", "--folder", sibling])
+    if code != 0:
+        return ["grant triage --folder (the sibling): exit %d, want 0 (%s)" % (code, err.strip()[:120])]
+    code, _out, err = run_cli(config, ["grant", "triage", "--folder", folder])
+    if code != 0:
+        return ["grant triage --folder (the re-grant): exit %d, want 0 (%s)" % (code, err.strip()[:120])]
+    problems = []
+    for session in ("tier-revoke-a", "tier-revoke-a2"):
+        if os.path.exists(fx.bound_file(config, session)):
+            problems.append("a re-grant left the bound file of %s, want it revoked" % session)
+    if not os.path.isfile(fx.bound_file(config, "tier-revoke-c")):
+        problems.append("a re-grant of one folder removed the bound file of a folder that only starts with its name")
+    if not os.path.isfile(fx.grant_file(config, sibling)):
+        problems.append("a re-grant of one folder removed the grant of another folder")
+    return problems
+
+
 def grant_refused(label, args, config):
     """Run `args`, a grant the CLI must refuse, after a control grant that must succeed. Returns the problems."""
     control = fresh(label + "-control")
@@ -522,6 +548,7 @@ CASES = [
     case_grant_writes_grant_file,
     case_grant_leaves_only_the_grant_file,
     case_regrant_replaces_the_grant,
+    case_regrant_revokes_the_bound_files_for_the_folder,
     case_grant_unknown_tier_refused,
     case_grant_without_folder_refused,
     case_grant_missing_folder_refused,
