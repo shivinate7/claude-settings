@@ -1721,6 +1721,76 @@ class RouteClaimTests(StaleCase):
         rng, flagged = self.route_range(rows)
         self.assert_route_claims(rng, flagged)
 
+    def test_route_claim_wrapped_over_two_lines_fires_on_its_first_line(self):
+        rows = [
+            ("# Notes", False),
+            ("", False),
+            ("- The cloud", True),  # the route word on this row, the verb on the next: one sentence
+            ("  cannot close a pull request.", False),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_wrapped_with_the_verb_on_the_first_line_fires_on_its_first_line(self):
+        rows = [
+            ("# Notes", False),
+            ("", False),
+            ("- Pushes to main are refused", True),
+            ("  by the cloud.", False),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_backing_on_the_next_line_of_its_sentence_silences_it(self):
+        rows = [
+            ("# Notes", False),
+            ("", False),
+            ("- The cloud cannot close a pull request", False),  # the claim and its backing: one sentence, silent
+            ("  (read hooks/guard.py:2).", False),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_backing_in_another_sentence_of_the_paragraph_does_not_silence_it(self):
+        rows = [
+            ("# Notes", False),
+            ("", False),
+            ("- The cloud cannot close a pull request. It is recorded (read hooks/guard.py:2).", True),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_split_by_a_blank_line_is_two_paragraphs_and_stays_silent(self):
+        rows = [
+            ("# Notes", False),
+            ("", False),
+            ("- The cloud", False),
+            ("", False),
+            ("  cannot close a pull request.", False),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_code_span_crossing_a_line_break_that_holds_the_claim_is_silent(self):
+        rows = [
+            ("# Notes", False),
+            ("", False),
+            ("- `The cloud", False),  # the whole claim sits in a code span that crosses the line break
+            ("  cannot close a pull request.`", False),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_wrapped_after_a_lone_quote_and_a_comment_opener_in_a_span_fires(self):
+        rows = [
+            ("# Notes", False),
+            ("", False),
+            ("- Don't read `<!--` as a comment. The cloud", True),  # a lone quote, an opener in a span, then the claim
+            ("  cannot close a pull request.", False),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
     def test_route_claim_disable_mark_names_stale005_and_no_other_code(self):
         rows = [
             ("- The cloud cannot push to main. <!-- ste-disable-line STALE005 -->", False),
