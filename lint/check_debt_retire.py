@@ -119,16 +119,12 @@ def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None
     """[Finding] for each debt that `head` closes against `base_ref` and whose Retire step does not hold. Raises Unknown.
     run_state(url) -> (conclusion, head sha) of a workflow run, or raises."""
     try:
-        folder = layout.path(wt, "debts")
-        skip = {folder + "/README.md", layout.path(wt, "debt-notes")}
+        debt = records.debt_file(wt)
     except layout.LayoutError as e:
         raise Unknown("the debts folder is not known: %s" % e)
-
-    def debt(f):
-        return f.startswith(folder + "/") and f.endswith(".md") and f not in skip
-
-    closed = [old for status, old, new in records.changes(wt, base_ref, head)[1]
-              if debt(old) and (status == "D" or (status == "R" and not debt(new)))]
+    # A rename inside the folder is a close only when its Retire changed (decided below, once the texts are read).
+    closed = [(old, new) for status, old, new in records.changes(wt, base_ref, head)[1]
+              if debt(old) and (status == "D" or (status == "R" and (not debt(new) or new != old)))]
     if not closed:
         return []
     head = records.git_names(wt, "rev-parse", head + "^{commit}")[0].strip()
@@ -136,16 +132,24 @@ def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None
     tracked = set(records.git_names(wt, "ls-tree", "-r", "-z", "--name-only", head))
     cited = cites(pr_body)
     found = []
-    for old in closed:
+    for old, new in closed:
         slug = os.path.basename(old)[:-3]
-        text = retire_text(records.show(wt, mb, old))
+        try:
+            lines = records.show(wt, base_ref, old)  # the base tip's Retire, the one the base holds now
+        except Unknown:
+            lines = records.show(wt, mb, old)  # the base tip no longer holds the file: the fork point's
+        text = retire_text(lines)
+        if new != old and debt(new) and text == retire_text(records.show(wt, head, new)):
+            continue  # a rename inside the folder with its Retire unchanged
         todo = spans(text, tracked)
         if todo:
             got = None
             for span in todo:
-                got = run_span(wt, span, timeout)
-                if got and got[0] == "red":
+                one = run_span(wt, span, timeout)
+                if one and one[0] == "red":
+                    got = one
                     break
+                got = got or one  # an unknown sticks: only a red outranks it, whatever the order
             if got and got[0] == "unknown" and slug in cited:  # a check this machine cannot run: a green cited run proves it ran
                 if (cite := judge_run(wt, head, cited[slug], run_state)) is None:
                     continue

@@ -93,18 +93,22 @@ def show(root, ref, path):
     return r.stdout.splitlines()
 
 
+def debt_file(root):
+    """A test of a path: is it a debt file of `root`? The folders are layout.candidates: the first one that exists, then the layout's own.
+    A repo that legacy-repos keeps its debts elsewhere has that one folder: the layout's own is not where its debts are.
+    The folder's README and notes file sit beside the debts but are not debts: never checked, never shown."""
+    kept = layout.unmoved(root).get("debts")
+    dirs = tuple(p + "/" for p in ((kept,) if kept else layout.candidates(root, "debts")))
+    not_debts = {d + "README.md" for d in dirs} | set(layout.candidates(root, "debt-notes"))
+    return lambda f: f.startswith(dirs) and f.endswith(".md") and f not in not_debts
+
+
 def unchecked_feel_debts(root, moved):
     """[(path, how)] for each debt whose origin/main text has a Feel line and no valid device-trial line, and that
     the branch deletes or renames out of the debt folder ("deleted"), or edits or renames inside it so the Feel
     line is gone ("dropped"). Markers count at line start, with an optional "- ". Raises Unknown when git cannot
     show a file."""
-    dirs = tuple(p + "/" for p in layout.candidates(root, "debts"))
-    # The folder's README and notes file sit beside the debts but are not debts: never checked, never shown.
-    not_debts = {d + "README.md" for d in dirs} | set(layout.candidates(root, "debt-notes"))
-
-    def debt(f):
-        return f.startswith(dirs) and f.endswith(".md") and f not in not_debts
-
+    debt = debt_file(root)
     out = []
     for status, old, new in moved:
         if not debt(old):
