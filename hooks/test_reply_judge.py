@@ -1618,6 +1618,63 @@ def case_route_block_flags_only_on_a_works_row_on_this_surface():
           has_pin(block, ("flag",), ("only", "unless", "when", " if "), ("works",), ("surface",)), block)
 
 
+# --------------------------------------------------------------------------- route rows: one id, two surfaces, the cap
+# The cite names one id, and two rows carry it: a local refused row and a cloud works row. Each row lists its own
+# alternate act. A local session carries only its own surface's rows, so the cloud row and the works row for the
+# cloud row's alternate act stay out, while the local row and the works row for the local row's alternate act ride.
+
+SPLIT_ID = "amend-pushed-two-surfaces"
+SPLIT_ACT_B = "reset a pushed branch to an older commit"  # the local row's alternate act
+SPLIT_ACT_C = "delete the remote branch and push it again"  # the cloud row's alternate act
+SPLIT_LOCAL = judge_row(SPLIT_ID, ROUTE_ACT, "local amend route", "refused", alternates=[SPLIT_ACT_B])
+SPLIT_CLOUD = judge_row(SPLIT_ID, ROUTE_ACT, "cloud amend route", "works", alternates=[SPLIT_ACT_C],
+                        surface="cloud")
+SPLIT_B_WORKS = judge_row("reset-pushed-local", SPLIT_ACT_B, "local reset route", "works")
+SPLIT_C_WORKS = judge_row("repush-remote-local", SPLIT_ACT_C, "local repush route", "works")
+
+
+def cite_reply(route_id):
+    """TRAILER_REPLY with its `(route <id>)` cite named `route_id`, so one case can cite a row of its own."""
+    return TRAILER_REPLY.replace("(route %s)" % CITED_ID, "(route %s)" % route_id)
+
+
+def case_shared_route_id_carries_only_its_surface_rows():
+    rows = [SPLIT_LOCAL, SPLIT_CLOUD, SPLIT_B_WORKS, SPLIT_C_WORKS]
+    run = run_hook(cite_reply(SPLIT_ID), answer=OK_ANSWER, rows=rows, surface="local")
+    check("split id, local: claude called once", len(run.calls) == 1, run.calls)
+    prompt = run.prompt()
+    check("split id, local: the local row of the cited id rides the prompt", SPLIT_LOCAL["route"] in prompt,
+          prompt[:300])
+    check("split id, local: the works row for the local row's alternate act rides the prompt",
+          SPLIT_B_WORKS["route"] in prompt, prompt[:300])
+    check("split id, local: the cloud row of the cited id does not ride the prompt",
+          SPLIT_CLOUD["route"] not in prompt, prompt[:300])
+    check("split id, local: the works row for the cloud row's alternate act does not ride the prompt",
+          SPLIT_C_WORKS["route"] not in prompt, prompt[:300])
+
+
+# One act holds thirty-one refused rows, and its one works row comes last in the file. The cite names the first
+# refused row. The cap holds at thirty rows, so the works row must be one of the thirty that ride: a works row
+# behind a long run of refused rows of its own act is still the act's evidence for the judge.
+
+CAP_ACT = "rename a pushed branch on the remote"
+CAP_REFUSED = [judge_row("cap-refused-%02d" % n, CAP_ACT, "cap refused route %02d" % n, "refused")
+               for n in range(31)]
+CAP_WORKS = judge_row("cap-works", CAP_ACT, "cap works route", "works")
+
+
+def case_cap_keeps_a_works_row_behind_thirty_one_refused_rows():
+    run = run_hook(cite_reply(CAP_REFUSED[0]["id"]), answer=OK_ANSWER, rows=CAP_REFUSED + [CAP_WORKS],
+                   surface="local")
+    check("cap, one act: claude called once", len(run.calls) == 1, run.calls)
+    prompt = run.prompt()
+    check("cap, one act: the works row rides the prompt under the thirty-row cap",
+          CAP_WORKS["route"] in prompt, prompt[:300])
+    carried = prompt.count('"outcome": ')
+    check("cap, one act: no more than thirty route rows ride the prompt", carried <= 30,
+          "%d route rows in the prompt" % carried)
+
+
 CASES = (
     case_stop_hook_active_never_calls_model,
     case_ignored_stop_imports_no_guard_family_module,
@@ -1684,6 +1741,8 @@ CASES = (
     case_cloud_session_carries_cloud_rows_not_local_ones,
     case_alternate_act_row_survives_forty_same_act_rows,
     case_route_block_flags_only_on_a_works_row_on_this_surface,
+    case_shared_route_id_carries_only_its_surface_rows,
+    case_cap_keeps_a_works_row_behind_thirty_one_refused_rows,
 )
 
 
