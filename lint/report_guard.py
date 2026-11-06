@@ -156,8 +156,9 @@ blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed 
 process kept or timer. A stale record adds the clean-merge read (merge/merge.py clean_merges_after): one commit read and one compare per merge
 commit, local git starts, and at most one `git fetch origin`, all inside the review check's REVIEW_CHECK_BUDGET. A stop_hook_active rewrite is not checked.
 
-The ruling-skip check (rule `ruling-skip-check`, decision questions-go-to-owner): a Done item with a pick word (took,
-picked, chose, pick, skipped asking, did not ask) and a ruling cue (ruling, rulings) must cite the ruling as
+The ruling-skip check (rule `ruling-skip-check`, decision questions-go-to-owner): a Done item with a pick word (picked,
+chose, pick, skipped asking, did not ask, or took before a pick, option, key, choice or option letter; none joined
+by a hyphen, and no duration such as "took 4 min") and a ruling cue (ruling, rulings) must cite the ruling as
 `under ruling <ref> (<stamp>)`, where <ref> is `item <N> <key>` (a waiting-page answer on the roadmap branch, or the
 item's `lastAnswer` once the page closed it) or a decision id. A claim with no ref or stamp, or a ref that does not
 resolve, refuses with no model call. A resolved cite goes to the refuter (RULING_REFUTER_MODEL), one call for all
@@ -3010,7 +3011,14 @@ RULING_REFUTER_TIMEOUT = 20
 RULING_TEXT_MAX = 6000  # bytes of a decision record's head; a bullet carrying the cited stamp is added in full
 RULING_BULLET_MAX = 12000
 RULING_ROADMAP_REFS = ("origin/roadmap", "roadmap")
-RULING_PICK_RE = re.compile(r"\b(?:took|picked|chose|pick|skipped asking|did not ask)\b", re.I)
+# A pick word, never joined by a hyphen (pick-route, cherry-pick). "took" counts only before what it picked: a pick,
+# option, key or choice, or an option letter that starts no duration ("took a under the ruling", never "took 4 min"
+# or "took a while").
+RULING_PICK_RE = re.compile(
+    r"(?<![-\w])(?:picked|chose|pick|skipped asking|did not ask"
+    r"|took\s+(?:(?:the|owner'?s?|my|your|option|key)\s+)*(?:picks?|options?|keys?|choices?"
+    r"|[a-f](?!\s+(?:while|few|bit|minutes?|mins?|moment|seconds?|secs?|hours?|long|little|day|week)\b)))(?![-\w])",
+    re.I)
 RULING_CUE_RE = re.compile(r"\brulings?\b(?![-\w])", re.I)  # a slug such as ruling-skip-check is no cue
 RULING_UNDER_RE = re.compile(r"\bunder (?:the )?(?:owner'?s? )?rulings?\b", re.I)
 RULING_UNIT_START_RE = re.compile(r"\s*(?:[-*+]\s|\d+[.)]\s|#{1,6}\s)")
@@ -3153,7 +3161,9 @@ def _ruling_of_item(n, key, roadmap):
     if not label:
         return "", "item %d has no option %s." % (n, key)
     note = answer.get("note")
-    return ("Owner's answer to: %s\nPicked %s: %s%s" % (item.get("question") or "(no question)", key, label,
+    question = next((q for q in (item.get("title"), item.get("question")) if isinstance(q, str) and q.strip()),
+                    "(no question)")  # a waiting item keeps its question in `title`
+    return ("Owner's answer to: %s\nPicked %s: %s%s" % (question, key, label,
             "\nOwner's note: %s" % note if isinstance(note, str) and note.strip() else "")), ""
 
 
