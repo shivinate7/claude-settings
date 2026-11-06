@@ -43,7 +43,7 @@ press beside Reply writes `dismissed` on `asks/<id>` with `update`; the page hid
 
 - Option "Restore, no count" (`#s=just-dismissed`, focus `#pick-nocount`, pick). After the write, the row becomes its Dismissed line
   in the same place, at the folded row's height: "Dismissed. <ask text>" with Restore. It stays until the next load
-  (today's rule: a fold changes only at a load or a press). Focus moves to the line (`tabindex="-1"`, `role="status"`); Tab reaches Restore.
+  (today's rule: a fold changes only at a load or a press). Focus moves to the line: the `li` has `tabindex="-1"`, its `p.sline` has `role="status"`; Tab reaches Restore.
 - Why no count: today's 8-second Undo (`undoAsk`, `syncUndo`) exists because the writer routes an ask 10 seconds after its `at`
   ("Route an ask"). Nothing acts on `dismissed`, so there is nothing to race, and Restore can stay for the whole visit.
   Departs from: the Send Undo's 8-second count. Not blocking.
