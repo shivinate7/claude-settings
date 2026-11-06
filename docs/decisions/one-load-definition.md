@@ -13,8 +13,9 @@ share one definition of "the machine is loaded".
   load of 107 on 15 cores while `top` showed half the machine idle.
 - **Levels.** Full: memory over 95%, or disk free under the smaller of 5% of the disk and 5 GB. Busy: memory over
   85%, or disk free under the smaller of 10% of the disk and 15 GB. Else normal.
-- **Unread.** A reading that fails or that the platform does not offer is unread. The verdict names it. One unread
-  reading hides no other, and an unread reading counts as normal.
+- **Unread.** A reading that fails or that the platform does not offer is unread. The verdict names it in
+  `unread`, and one unread reading hides no other. The level is computed from the readings that were read. Each
+  caller states what an unread reading does to its act.
 - **Each platform.** Windows: memory from `GlobalMemoryStatusEx` (ctypes), disk from `shutil.disk_usage`. Mac:
   memory from `kern.memorystatus_level` (ctypes), disk the same. Linux: memory unread, disk the same. No platform
   starts a child process.
@@ -22,12 +23,14 @@ share one definition of "the machine is loaded".
 ## What each caller does with the verdict
 
 - **The guard** (decision `machine-load-brake`): busy refuses a background lane or agent start. Full refuses
-  every start and stops a running agent or lane session at its next shell or file write.
+  every start and stops a running agent or lane session at its next shell or file write. An unread reading
+  counts as normal, since Linux memory is always unread and the brake must not refuse every Linux start.
 - **`sim-lease`** (decision `sim-lease-tool`): a grant needs a machine that is not full. Slot 2 needs a normal
-  machine. The queue order and the 18 Pro's slot rules are not load rules.
+  machine. An unread reading holds the grant, and `take` and `status` print it as unknown (coordinator,
+  2026-11-06 15:31 CST, from waiting-page item 276 a: a check that cannot read its input fails). The queue order
+  and the 18 Pro's slot rules are not load rules.
 - **Changed by this ruling.** `sim-lease` reads no load average, so a Mac with a high load average but free
-  memory and disk grants a boot. It grants on an unread reading, as the guard does. The guard's verdicts are
-  unchanged.
+  memory and disk grants a boot. The guard's verdicts are unchanged.
 
 Why: one capability has one home (`building-one-home-per-capability`), so the two readers can never disagree.
 
