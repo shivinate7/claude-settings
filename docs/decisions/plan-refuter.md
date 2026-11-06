@@ -15,8 +15,8 @@ Nothing argued back against a Plan agent.
 - A clash, a `revise` or `refuted` verdict the orchestrator does not take, goes to the orchestrator first.
   When the clash stakes a rule, money or an act that cannot be undone, it goes to the owner as a question
   (rule `questions-go-to-owner`).
-- The verdict goes on the plan record's `Critic:` line (decision `plan-needs-critic`). This record adds
-  no second line.
+- The verdict goes on the plan record's verdict line. Lane step-done-needs-check, pending, adds that line.
+  This record adds no second line.
 
 ## Mechanism
 
@@ -26,8 +26,7 @@ Nothing argued back against a Plan agent.
 - Model: the refuter row of decision `agent-model-cap`, the model-per-role table.
 - Guard: the Opus spawn guard (`hooks/guard.py`, the standing Opus roles) lets a refuter spawn on Opus.
   The role name has one home in code, `REFUTER_ROLE` in `hooks/guard_core.py`.
-- Check: `lint/check_plan_critic.py` (decision `plan-needs-critic`) fails a plan record with no
-  `Critic:` line.
+- Check: pending in lane step-done-needs-check. It fails a plan record with no verdict line.
 
 ## Term
 
@@ -40,7 +39,7 @@ that argues back): the word is "refuter".
   record. The rule line covers those, by instruction only.
 - Blindness is by instruction only: the agent file and the rule line. No hook reads the refuter's
   brief. Unmeasured.
-- The `Critic:` line accepts any role today, so an orchestrator's own read passes the check.
+- The pending check accepts any role on the verdict line, so an orchestrator's own read would pass.
   Coordinator, 2026-11-06 12:56 CST, pick a: lane step-done-needs-check lands after this one and makes
   the check require the role in `REFUTER_ROLE`.
 
