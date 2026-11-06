@@ -2086,6 +2086,26 @@ class RouteClaimTests(StaleCase):
         rng, flagged = self.route_range(rows)
         self.assert_route_claims(rng, flagged)
 
+    def test_route_claim_unclosed_quote_in_a_table_row_does_not_hide_the_next_row(self):
+        rows = [
+            ("| Route | Claim |", False),
+            ("|---|---|", False),
+            ('| a | "doesn\'t this mean |', False),  # an unclosed straight quote; its run ends at the next `|` row
+            ("| b | the auto-mode classifier refuses a tool call |", True),  # the claim the quote must not hide
+            ('| c | "quoted" |', False),  # a later quote, which an open run would pair with across rows
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_header_row_of_a_table_does_not_flag_for_a_claim_in_a_data_row(self):
+        rows = [
+            ("| Route | Claim |", False),  # a header row names columns; it states no claim
+            ("|---|---|", False),
+            ("| a | the auto-mode classifier refuses a tool call |", True),  # the claim is flagged on its own row
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
 
 class RouteClaimFixtureTests(unittest.TestCase):
     """The labelled route claims, read at origin/main 7975f6d8 by the coordinator audit: one entry per labelled line.
