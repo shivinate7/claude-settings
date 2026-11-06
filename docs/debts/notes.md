@@ -1450,4 +1450,3 @@
 - lane-tag-copies: `hooks/guard.py` and `lint/report_guard.py` each keep their own `cs-build:lane` constant beside `hooks/shared_names.py` `LANE_TAG`. Decision: session-tiers.
 - draft-landed-two-homes: the roadmap's idle-lane test checks a draft head on main by merge-base on the local checkout; the archive guard checks it by GitHub's compare. The local test is stricter (a stale local main reads not landed). Decision: session-tiers.
 - idle-lane-mixed-bucket-forms: a live lane row whose status_bucket is not an enum name, beside a row that is, is skipped with no unknown entry (skills/roadmap/build.py idle_lanes). False negative only. Decision: session-tiers.
-- sink-badge-shift: when a sent card sinks, a count badge or section header that shifts still fails the ux-press-moves-nothing check. The 313 a exception covers rows only (owner, 2026-11-06 16:47 CST). Waiting page item 318 asks the owner. Decision: ux-house-rules.

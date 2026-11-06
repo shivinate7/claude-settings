@@ -39,6 +39,8 @@ WCAG level, is not taken on by choice (owner, 2026-11-01 12:23 CST, by triage).
   row then takes its slot, and the other rows keep their order (owner, 2026-11-06 16:47 CST, item
   313 a). The owner on item 311 (15:51 CST): the rule was "applied too strictly and is taking me away from the
   outcome I want".
+- `ux-press-moves-nothing` does not count those rows as a move, nor a count badge or section
+  header that they shift (owner, 2026-11-06 17:19 CST, item 318 a).
 - Not house rules: behaviour defaults (dropped); spend shows cost, work-screen head, real photos only and
   phone-first (per repo); letter case (Vercel).
 

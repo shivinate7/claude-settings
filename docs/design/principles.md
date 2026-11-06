@@ -9,10 +9,12 @@ also read [`layout.md`](layout.md).
 
 A press, a load or a change of state moves no other content. A row may leave an open list under
 ux-order-holds-still. That row, the rows that close its gap, and the rows that make room where it
-lands are not a move under this rule (owner, 2026-11-06 16:47 CST, item 313 a).
+lands are not a move under this rule (owner, 2026-11-06 16:47 CST, item 313 a). Nor is a count
+badge or section header that those rows shift (owner, 2026-11-06 17:19 CST, item 318 a).
 Check: press each control and load each state. Pass when no other element moves or resizes. Under
 ux-order-holds-still, the row that leaves an open list, the rows that close its gap and the rows
-that make room where it lands may move, but never resize. A loading area keeps its loaded size,
+that make room where it lands may move, but never resize. A count badge or section header may
+shift with them. A loading area keeps its loaded size,
 and a control keeps the box of its widest label or icon.
 Source: banchi D118 (a press never moves other content) and D313 (nothing moves unless moved);
 home `SPEC.md` "Look and feel" (owner, 2026-10-11); q_max D-684 (a pick moves nothing beside
