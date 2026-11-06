@@ -15,8 +15,9 @@ The runner, as the builder writes it. This file is its interface.
   call goes through decision_watch.invoke_model, looked up at call time, so this file replaces it. Every judge makes one
   call per case, feedback_guard included, even where its prompt could batch.
 - main(argv) returns the exit code. --changed BASE, --judge NAME and --all. An UNKNOWN exits 1 when env CI is set, else 0.
-- --changed BASE names every judge when the committed diff changes the claude-code pin line in
-  .github/workflows/checks.yml. The pin cases set judge_replay.REPO to a two-commit temp repo, since --changed reads git there.
+- --changed BASE names every judge when the committed diff moves the claude-code pin: a change to
+  .github/judge-replay/package.json or its lock file, or a pin line added or removed in .github/workflows/checks.yml.
+  The pin cases set judge_replay.REPO to a two-commit temp repo, since --changed reads git there.
 - --probe: one call. Exit 1 with the secret's name and waiting page item 283 when the call fails, else exit 0.
 
 The fake answers (None, "no auth"), the pair decision_watch.invoke_model returns for a failed call, so no case needs the
@@ -87,6 +88,10 @@ WINDOW = 27  # the adapter's copy of the wording prompt, "Judge this SendMessage
 PIN_BEFORE = "steps:\n  - run: npm install --global @anthropic-ai/claude-code@2.1.319\n  - run: echo lint\n"
 PIN_MOVED = "steps:\n  - run: npm install --global @anthropic-ai/claude-code@2.1.320\n  - run: echo lint\n"
 OTHER_STEP = "steps:\n  - run: npm install --global @anthropic-ai/claude-code@2.1.319\n  - run: echo lint again\n"
+CHECKS_REL = ".github/workflows/checks.yml"
+PKG_REL = ".github/judge-replay/package.json"  # the one home of the claude CLI pin, installed by npm ci
+PKG_BEFORE = '{\n  "dependencies": {\n    "@anthropic-ai/claude-code": "2.1.319"\n  }\n}\n'
+PKG_MOVED = PKG_BEFORE.replace("2.1.319", "2.1.320")
 RESWORDED = 'Weigh this peer message against the rule: %s\nAnswer {"ok": true} or {"ok": false, "reason": "..."}. Reply JSON only.'
 
 
@@ -174,18 +179,26 @@ def git_in(repo, *args):
                    check=True, capture_output=True)
 
 
-def pin_repo(name, before, after):
-    """A repo under RUN whose .github/workflows/checks.yml is `before` in one commit and `after` in the next."""
+def pin_repo(name, before, after, rel=CHECKS_REL, steady=()):
+    """A repo under RUN whose file `rel` is `before` in one commit and `after` in the next. Each (path, text) in `steady`
+    is committed with the first commit and left as it is."""
     repo = os.path.join(RUN, name)
-    path = os.path.join(repo, ".github", "workflows", "checks.yml")
-    os.makedirs(os.path.dirname(path))
+    os.makedirs(repo)
     git_in(repo, "init", "-q")
+    for path, text in steady:
+        write_text(repo, path, text)
     for text, message in ((before, "before"), (after, "after")):
-        with open(path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
+        write_text(repo, rel, text)
         git_in(repo, "add", "-A")
         git_in(repo, "commit", "-q", "-m", message)
     return repo
+
+
+def write_text(repo, rel, text):
+    path = os.path.join(repo, *rel.split("/"))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
 
 
 def changed_run(repo, base):
@@ -515,8 +528,9 @@ def case_wording_prompt_text_is_not_copied():
               "copied: %r" % window)
 
 
-def case_pin_change_names_every_judge():
-    label = "--changed on the claude-code pin"
+def case_pin_change_checks_yml_names_every_judge():
+    """The checks.yml form of the pin, which pin_changed still reads."""
+    label = "--changed on the claude-code pin line in checks.yml"
     if need_runner(label) is None:
         return
     every = sorted(judge_replay.JUDGES)
@@ -530,6 +544,22 @@ def case_pin_change_names_every_judge():
           "UNKNOWN: git diff" not in out, out[-200:])
     check("--changed on a checks.yml change that leaves the pin (control): asks no judge", not asked,
           "asked %r" % (asked,))
+
+
+def case_pin_change_package_names_every_judge():
+    label = "--changed on the claude-code pin in .github/judge-replay/package.json"
+    if need_runner(label) is None:
+        return
+    every = sorted(judge_replay.JUDGES)
+    asked, out, calls = changed_run(pin_repo("pin-cli-moved", PKG_BEFORE, PKG_MOVED, PKG_REL), "HEAD~1")
+    check("%s: the diff reads" % label, "UNKNOWN: git diff" not in out, out[-200:])
+    check("%s: asks every judge" % label, sorted(asked) == every, "asked %r, want every judge" % (asked,))
+    check("%s: makes no model call" % label, not calls, "%d model calls" % len(calls))
+    # Control: the pin file is present and unmoved in both commits, and only a README changes. Asks no judge.
+    steady = ((PKG_REL, PKG_BEFORE),)
+    asked, out, calls = changed_run(pin_repo("cli-unrelated", "one\n", "two\n", "README.md", steady), "HEAD~1")
+    check("%s (control): the diff reads" % label, "UNKNOWN: git diff" not in out, out[-200:])
+    check("%s (control): asks no judge" % label, not asked, "asked %r" % (asked,))
 
 
 def case_probe_names_the_secret_and_the_item():
@@ -551,8 +581,8 @@ CASES = (case_seam_control, case_corpora, case_scopes, case_touched, case_no_aut
          case_cli_exit_follows_ci, case_cli_changed_head, case_runner_named_nowhere_else,
          case_feedback_bad_entry_reads_unknown, case_feedback_clean_answer_reads_no_unknown,
          case_sendmessage_errored_call_reads_unknown, case_sendmessage_one_seam_call_per_case_whatever_the_wording,
-         case_wording_prompt_text_is_not_copied, case_pin_change_names_every_judge,
-         case_probe_names_the_secret_and_the_item)
+         case_wording_prompt_text_is_not_copied, case_pin_change_checks_yml_names_every_judge,
+         case_pin_change_package_names_every_judge, case_probe_names_the_secret_and_the_item)
 
 
 def main():
