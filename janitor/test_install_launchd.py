@@ -232,10 +232,11 @@ class RefusesWhenWorktreeStatusIsUnreadable(unittest.TestCase):
         self.assertFalse(os.path.isfile(plist_path))
 
 
-# Every launchd key that starts a job by itself: a calendar time, an interval, a watched path, a queue, a mount, or a
-# keep-alive that relaunches it. RunAtLoad is checked on its own, since it starts the job at load.
+# Every launchd key that starts a job by itself: a calendar time, an interval, a watched path, a queue, a mount, a
+# keep-alive that relaunches it, a socket or Mach service that starts it on a connection, or an event that starts it.
+# RunAtLoad is checked on its own, since it starts the job at load.
 LAUNCHD_TRIGGER_KEYS = ("StartCalendarInterval", "StartInterval", "WatchPaths", "QueueDirectories", "StartOnMount",
-                        "KeepAlive")
+                        "KeepAlive", "Sockets", "MachServices", "LaunchEvents")
 
 
 class CostTests(unittest.TestCase):
