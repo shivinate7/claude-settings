@@ -24,7 +24,8 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             a quote row, a fence and a list item end one. A sentence ends at . ! or ? before a space, so a claim
             wrapped over lines fires on its first line and its backing may sit on a later line of the same sentence.
             It holds a capability verb (cannot, can't, won't, refuses, denies, blocks, is refused or blocked,
-            is not available, works, does not work, a 403) outside a code span and a comment, and a route word
+            is not available, works, does not work, a 403) outside a code span, a comment, a double-quoted text and a
+            bare file path, and a route word
             (cloud, locally, local session, on the owner's computer, auto mode, classifier, gh, MCP, proxy,
             harness; `local` alone is none) outside a comment, in a code span too when the span names no path.
             It has none of these in parentheses: a premise kind from PREMISE_KINDS that is no weak kind
@@ -495,9 +496,12 @@ class ForeignReader:
 ROWS_AT_HEAD = os.path.relpath(route_match.ROUTE_ROWS_FILE, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                                                        "..")).replace(os.sep, "/")
 HTML_COMMENT = re.compile(r"<!--.*?-->")
+# Text in straight or curly double quotes, or a bare file path (a folder part and an extension): a mention, no claim.
+MENTION = re.compile(r'"[^"]*"|\u201c[^\u201d]*\u201d|(?<![\w./@+~-])(?:[\w.@+~-]+/)+[\w.@+~-]*\.\w+')
 HEADING_OR_QUOTE = re.compile(r"^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>)")
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
 PAREN_GROUP = re.compile(r"\(([^()]*)\)")
+TABLE_ROW = re.compile(r"^[ \t]{0,3}\|")
 LIST_ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
 # A sentence ends at . ! or ? before a space or the end. "e.g.", "i.e.", "vs." and "cf." end none, so a paren group
 # such as "(e.g. read hooks/x.py:2)" stays in one sentence.
@@ -591,7 +595,9 @@ def blanked(text):
     """(outside, route): `text` twice, each the same length, with the newlines kept.
     outside: each code span and HTML comment blanked, so a verb or a sentence end inside one is a mention.
     route: the same, except the words of a code span that names no path stay: a route word used as the subject,
-    "`gh` cannot close", still counts. A span with a `/` or `.` names a file, so its words are not a route."""
+    "`gh` cannot close", still counts. A span with a `/` or `.` names a file, so its words are not a route.
+    Both also blank text in straight or curly double quotes and a bare file path, the same way: each is a mention.
+    An apostrophe is no quote and a lone quote pairs with none; single quotes are left as they are."""
     outside, route = list(text), list(text)
 
     def blank(chars, start, end):
@@ -607,6 +613,9 @@ def blanked(text):
         else:
             blank(route, start, start + ticks)
             blank(route, end - ticks, end)
+    for match in MENTION.finditer("".join(outside)):
+        blank(outside, *match.span())
+        blank(route, *match.span())
     for match in HTML_COMMENT.finditer("".join(outside)):
         blank(outside, *match.span())
         blank(route, *match.span())
@@ -615,10 +624,15 @@ def blanked(text):
 
 def paragraphs(rows, fenced):
     """[(first row number, [rows])]: the runs of prose rows. A blank row, a heading, a quote row, a fenced row and a
-    list item each end a run; a list item also starts the next, so a code span never pairs across two items."""
+    list item each end a run; a list item also starts the next, so a code span never pairs across two items.
+    A table row (a line starting with `|`) is a run of its own, so no quote or sentence runs across rows."""
     found, current = [], None
     for number, row in enumerate(rows, 1):
         if number in fenced or not row.strip() or HEADING_OR_QUOTE.match(row):
+            current = None
+            continue
+        if TABLE_ROW.match(row):
+            found.append((number, [row]))
             current = None
             continue
         if current is None or LIST_ITEM.match(row):
