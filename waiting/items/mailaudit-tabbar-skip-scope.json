@@ -32,9 +32,9 @@
   "pick": "none",
   "rank": 1,
   "ref": "mailaudit decision audit-skips-measured-flags (the iPhone accessibility check skips what the tab bar covers); re-filed from mailaudit's page, which is gone",
-  "reply": "Routed 22:17 CST to the mailaudit lane: the parked any-element code lands as is, since it needs no rework, and this item stays deferred for a later look.",
+  "reply": "Done: mailaudit #203 merged 13:34 CST (b9ed3820). It lands your b, the skip for any element under the tab bar, with its debt recorded.",
   "short": "mailaudit tab-bar skip",
-  "status": "open",
+  "status": "closed",
   "title": "mailaudit: should the tab-bar skip cover text only, or any element?",
   "why": "The iPhone app's accessibility check skips anything the iOS tab bar covers, since no one can see it there. Your Oct 28 ruling widened the skip for text. The parked code widens it for every element, so it waits on your word."
 }
