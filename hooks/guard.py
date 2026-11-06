@@ -100,7 +100,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        the checkout's record branch (lint/layout.py record_branch) or `roadmap`, except a
                        dry run, unless the session's own get_session record (read
                        from the transcript) shows the tag cs-build:triage with no set_session_tags after
-                       it. No record, no transcript or no env id is a refusal. An override lifts it.
+                       it, or the session's bound tier file (hooks/session_tier.py) shows triage and the
+                       call carries no `agent_id`. The coordinator grants the triage folder; the first
+                       top-level call from exactly that folder within an hour binds the grant to its
+                       session id. Cost per top-level call: one stat of the tier dir, and with grants one
+                       rename for the cwd's folder. No extra process. No record, no bound file, no
+                       transcript or no env id is a refusal. An override lifts it.
   trust-card-in-build  deny. A call to either tool that opens the owner's trust card, unless the session's own
                        get_session record (read from the transcript) proves no cs-build tag. No record,
                        no transcript or no env id is a refusal.
@@ -373,6 +378,8 @@ while True:
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
+        _loading = "session_tier"
+        import session_tier
         _loading = "guard_frozen"
         from guard_frozen import (
             FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
@@ -3234,7 +3241,7 @@ def settle_ask(tool: str, raw: str) -> None:
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", agent: bool = False,
-                background: bool = False, description: str = "") -> None:
+                background: bool = False, description: str = "", agent_id: str = "") -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     PENDING_ASK.clear()
     stripped = strip_heredoc_bodies(raw)
@@ -3542,7 +3549,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 6a2. A push to the record branch from a session its own record does not prove triage (rule
     # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, and one
     # transcript read only when the push reaches the record branch.
-    matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb)
+    matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb, session_id, agent_id)
     if matched:
         refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
 
@@ -4632,6 +4639,16 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
         pass  # an unwritable record means no refusal later, never a failed call
 
 
+def tier_bind_keep(payload, cwd: str) -> None:
+    """Bind a granted tier file to this session (rule roadmap-one-writer, hooks/session_tier.py). Only a top-level
+    call binds: an agent call carries `agent_id` and binds nothing. Any error binds nothing and never fails the call."""
+    try:
+        if isinstance(payload, dict) and not payload.get("agent_id"):
+            session_tier.bind_grant(session_id_of(payload), "", cwd)
+    except Exception:
+        pass
+
+
 def session_home_git_hit(command: str, where: str, in_primary) -> str:
     """The verb of a git call in COMMAND that changes the primary's files or branch and runs in the
     primary checkout, else ''. A leading `cd` and `git -C <path>` name the folder it runs in; a folder
@@ -4756,6 +4773,7 @@ def judge(payload) -> None:
         cwd = ""
     guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
     session_home_keep(payload, tool, cwd)  # rule session-home's record, kept before any refusal can end the call
+    tier_bind_keep(payload, cwd)  # rule roadmap-one-writer's tier file, bound before any refusal can end the call
     # 0, handoff-unread. After compaction, no call the guard judges runs from the main session until it reads its handoff.
     # Not in never_lifted: the owner may mean the call. A failed import allows.
     try:
@@ -4927,7 +4945,8 @@ def judge(payload) -> None:
                         transcript if isinstance(transcript, str) else "",
                         bool(payload.get("agent_id") or payload.get("agent_type")),
                         tool_input.get("run_in_background") is True,
-                        tool_input.get("description") or "")
+                        tool_input.get("description") or "",
+                        str(payload.get("agent_id") or ""))
             segments = split_segments(strip_heredoc_bodies(command))
             matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")
             if matched:
