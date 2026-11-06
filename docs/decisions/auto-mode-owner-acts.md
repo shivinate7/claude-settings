@@ -19,6 +19,9 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 | Entry | Covers | Record |
 |---|---|---|
 | "Archived Branch Delete" (`settings.json` `autoMode.allow`) | A branch delete after its archive push, or of a merged branch | this record |
+| "Own Branch Lease Push" (`settings.json` `autoMode.allow`) | A lease push with an explicit expected sha, to a branch this session itself pushed earlier | this record |
+| "Own CI Run Cancel" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: cancel an Actions run whose head branch this session itself pushed earlier | this record |
+| "Own Check-in Delete" (`settings.json` `autoMode.allow`) | `delete_trigger` on a trigger id that this session's own `create_trigger` or `send_later` call returned, made with neither `create_new_session_on_fire` nor `persistent_session_id` | this record |
 | Merge confirm (`merge/cloud_allow.json`, cloud only) | `~/.claude/bin/merge ... --confirm` | mechanics in `session-tiers` |
 | "Owner PR Housekeeping" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: close a PR the coordinator or batch runner named in the visible conversation as replaced, empty or batched. Mark ready only an integration PR that the visible conversation names as such: the batch's or a lone lane's, named by the coordinator or batch runner, or the one PR of a solo or one-lane session that no coordinator started, named by that session | this record |
 | "Owner Session Message" (`settings.json` `autoMode.allow`) | `send_message` to a session in the owner's own account, asking only for acts the owner already granted. A coordinator may send a batch runner it created a merge go (owner, 2026-11-03 15:58 CST) | this record |
@@ -30,6 +33,33 @@ The merge confirm is a permission allow rule, not an `autoMode` entry. The class
 An allow rule for `merge --role` waits on the tag check of #878 (merge role reads the session tag).
 
 "Owner PR Housekeeping" never covers a merge, an approval, a review, or a title or body edit. Nor a change of a PR's base branch. Nor a branch or ref delete (`--delete-branch` included), a force push, a PR nobody named, or a repo outside `shivinate7`. Nor marking ready a lane PR that joins a batch, which stays draft, or a PR with auto-merge on, since that merges it. "Owner Session Message" never covers a request to change permissions, settings or overrides. Nor a merge ask, with one exception. A session tagged `cs-build:coordinator` may send a merge go for a named PR to a batch runner it created, with tags `cs-build:batch-runner` and the coordinator's own `cs-repo:` (decision `standing-merge-grant`: the batch runner runs every merge under the coordinator's grant). Nor a request to approve a PR. Nor `priority: now`, which interrupts the target's running turn. Nor a post people read, such as `visibility: posted_to_shared_channel`.
+
+### Own Branch Lease Push
+
+Grant: owner, page items 239 a and 257 c, 2026-11-05 07:44-07:49 CST, in the owner's own PR #1307. The classifier refused a lane that tried to write this line, so a local session added it.
+
+- Incidents: the classifier refused a lease push to a lane's own branch as "Git Destructive". The notes in `docs/debts/notes.md` hold each one: `lane-force-push-refused`, `classifier-refuses-lease-push` and `auto-mode-force-push-lane`. One more, 2026-11-06 12:38 CST, coordinator-reported: lane c63's force push to its own branch `c63-stubs`.
+- Gap: the entry covers only `--force-with-lease=<branch>:<sha>`. Of the cited refusals, only the third `classifier-refuses-lease-push` note used that form. The rest used a lease with no sha (bare, or with `--force-if-includes`), or an unknown form (c63), which the entry does not cover. The classifier can still refuse those.
+- Undo: the old tip stays in the reflog, and the lease refuses a push that would drop newer remote work.
+- Guard that still covers the mistake form: decision `stale-safe-force-push`. It denies a lease that has no sha and no `--force-if-includes`, and a bare `--force`. It asks at the default branch, and for any forced `--all` or `--mirror`.
+- Note: the entry's Never covers does not name a lease push with `--all` or `--mirror`. The push guard asks for each of those.
+
+### Own CI Run Cancel
+
+Grant: owner, page item 278, pick c, 2026-11-06 12:41 CST.
+
+- Incident: refused on 2026-11-01 22:57 CST as "Interfere With Workloads": `gh api -X POST repos/shivinate7/q_max/actions/runs/41377928751/cancel`.
+- Undo: re-run the cancelled run with `gh run rerun <id>`.
+- Guard that still covers the mistake form: none.
+
+### Own Check-in Delete
+
+Grant: owner, page item 278, pick d, 2026-11-06 12:41 CST.
+
+- Incident: refused on 2026-11-04 05:10 CST. The claude-settings batch runner's `delete_trigger` on its own check-in.
+- Scope: a check-in that fires into this same session. That is a `send_later` id, or a `create_trigger` id made without `create_new_session_on_fire` and without `persistent_session_id`. Deleting a trigger also deletes every session it started, so a trigger made with either of those is not covered.
+- Undo: set the same check-in again with `create_trigger` or `send_later`. Only its run history is lost.
+- Guard that still covers the mistake form: none.
 
 ### Merge go to a batch runner
 

@@ -19,6 +19,13 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   coordinator's grant. Its Never covers names permissions, settings, override, a merge ask to any
   other session or from a session that is not a coordinator, and a request to approve a pull
   request (decision auto-mode-owner-acts).
+- One "Own Branch Lease Push:" entry quotes the measured lease push form, its Covers text names an
+  explicit expected sha and a branch this session itself pushed, and its Never covers names each
+  lease act it refuses (decision auto-mode-owner-acts).
+- One "Own CI Run Cancel:" entry quotes the run cancel command and names its method, and its Never
+  covers names each run act it refuses (decision auto-mode-owner-acts).
+- One "Own Check-in Delete:" entry names the delete tool and the create and send tools that make a
+  check-in, and its Never covers names each check-in act it refuses (decision auto-mode-owner-acts).
 - One "Relayed Grant:" entry quotes page_grant.py's COMMAND and COUNTED_LINE, read from the
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
   relayed-grant-read-from-page).
@@ -45,6 +52,8 @@ ARCHIVE = "Archived Branch Delete:"
 OWNER_PR = "Owner PR Housekeeping:"
 RELAYED = "Relayed Grant:"
 OWNER_MESSAGE = "Owner Session Message:"
+OWN_LEASE = "Own Branch Lease Push:"
+LEASE_FORM = "git push --force-with-lease=<branch>:<expected sha>"
 PR_CLOSE = "gh api -X PATCH repos/shivinate7/joyous/pulls/54 -f state=closed"
 SEND_MESSAGE = "mcp__claude-code-remote__send_message"
 # (name, case-insensitive pattern) for each act an entry's "Never covers" sentence must name.
@@ -81,6 +90,36 @@ RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page 
                    ("no counted line", "no `counted` line in this session"))
 MERGE_GO_REFUSED = (("any other session", "any other session"),
                     ("not a coordinator", "not a coordinator"))
+# (name, case-insensitive pattern) for each lease act the Own Branch Lease Push "Never covers" must name.
+LEASE_REFUSED = (("default branch", "default branch"), ("archive/ ref", "`archive/`"),
+                 ("roadmap", "`roadmap`"), ("merge-lock", "`merge-lock`"),
+                 ("bare --force", "bare `--force`"),
+                 ("lease with no expected sha", "lease with no expected sha"),
+                 ("branch this session did not visibly push",
+                  "branch this session did not visibly push"))
+# (name, case-insensitive pattern) for each term its Covers text names before its "Never covers".
+LEASE_SCOPE = (("explicit expected sha", "explicit expected sha"),
+               ("branch this session itself pushed", "this session itself pushed"))
+OWN_CI = "Own CI Run Cancel:"
+CI_CANCEL = "gh api -X POST repos/shivinate7/q_max/actions/runs/41377928751/cancel"
+CI_METHOD = "cancel_workflow_run"
+# (name, case-insensitive pattern) for each run act the Own CI Run Cancel "Never covers" must name.
+CI_REFUSED = (("default branch", "default branch"),
+              ("branch this session did not visibly push", "branch this session did not visibly push"),
+              ("run_workflow", "`run_workflow`"), ("rerun_failed_jobs", "`rerun_failed_jobs`"),
+              ("delete_workflow_run_logs", "`delete_workflow_run_logs`"),
+              ("repo outside shivinate7", "outside shivinate7"))
+OWN_CHECKIN = "Own Check-in Delete:"
+CHECKIN_DELETE = "mcp__claude-code-remote__delete_trigger"
+# (name, case-insensitive pattern) for each check-in tool the Own Check-in Delete entry must name.
+CHECKIN_MAKERS = (("create_trigger", "`create_trigger`"), ("send_later", "`send_later`"))
+# (name, case-insensitive pattern) for each check-in act the Own Check-in Delete "Never covers" must name.
+CHECKIN_REFUSED = (("list_triggers", "`list_triggers`"), ("update_trigger", "`update_trigger`"),
+                   ("fire_trigger", "`fire_trigger`"),
+                   ("trigger this session did not visibly create",
+                    "trigger this session did not visibly create"),
+                   ("create_new_session_on_fire", "`create_new_session_on_fire`"),
+                   ("persistent_session_id", "`persistent_session_id`"))
 
 
 def auto_mode():
@@ -254,6 +293,80 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the owner message entry")
         missing = unnamed_terms(clause, MERGE_GO_REFUSED)
         self.assertFalse(missing, "Never covers does not name the merge-ask limits %r" % missing)
+
+
+class OwnBranchLeasePushIsAllowed(unittest.TestCase):
+    def test_one_entry_names_the_own_branch_lease_push(self):
+        self.assertIsNotNone(allow_entry(OWN_LEASE),
+                             "need exactly one '%s' entry in autoMode.allow" % OWN_LEASE)
+
+    def test_entry_quotes_the_measured_lease_form(self):
+        entry = allow_entry(OWN_LEASE)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWN_LEASE)
+        self.assertIn("`%s`" % LEASE_FORM, entry, "entry must quote the measured lease push form")
+
+    def test_never_covers_names_each_refused_lease_act(self):
+        entry = allow_entry(OWN_LEASE)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWN_LEASE)
+        clause = never_covers(entry)
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Own Branch Lease Push entry")
+        missing = unnamed_terms(clause, LEASE_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+    def test_scope_is_named_before_never_covers(self):
+        entry = allow_entry(OWN_LEASE)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWN_LEASE)
+        self.assertIsNotNone(never_covers(entry), "need a 'Never covers' sentence to bound Covers")
+        missing = unnamed_terms(bounds_text(entry), LEASE_SCOPE)
+        self.assertFalse(missing, "text before Never covers does not name %r" % missing)
+
+
+class OwnCiRunCancelIsAllowed(unittest.TestCase):
+    def test_one_entry_names_the_own_ci_run_cancel(self):
+        self.assertIsNotNone(allow_entry(OWN_CI), "need exactly one '%s' entry in autoMode.allow" % OWN_CI)
+
+    def test_entry_quotes_the_run_cancel_command(self):
+        entry = allow_entry(OWN_CI)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWN_CI)
+        self.assertIn("`%s`" % CI_CANCEL, entry, "entry must quote the run cancel command")
+
+    def test_entry_names_the_cancel_method(self):
+        entry = allow_entry(OWN_CI)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWN_CI)
+        self.assertIn("`%s`" % CI_METHOD, entry, "entry must name the cancel_workflow_run method")
+
+    def test_never_covers_names_each_refused_run_act(self):
+        entry = allow_entry(OWN_CI)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWN_CI)
+        clause = never_covers(entry)
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Own CI Run Cancel entry")
+        missing = unnamed_terms(clause, CI_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+
+class OwnCheckinDeleteIsAllowed(unittest.TestCase):
+    def test_one_entry_names_the_own_checkin_delete(self):
+        self.assertIsNotNone(allow_entry(OWN_CHECKIN),
+                             "need exactly one '%s' entry in autoMode.allow" % OWN_CHECKIN)
+
+    def test_entry_quotes_the_delete_tool(self):
+        entry = allow_entry(OWN_CHECKIN)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWN_CHECKIN)
+        self.assertIn("`%s`" % CHECKIN_DELETE, entry, "entry must quote the delete_trigger tool")
+
+    def test_entry_names_the_create_and_send_tools(self):
+        entry = allow_entry(OWN_CHECKIN)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWN_CHECKIN)
+        missing = unnamed_terms(entry, CHECKIN_MAKERS)
+        self.assertFalse(missing, "entry does not name the check-in tools %r" % missing)
+
+    def test_never_covers_names_each_refused_checkin_act(self):
+        entry = allow_entry(OWN_CHECKIN)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWN_CHECKIN)
+        clause = never_covers(entry)
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Own Check-in Delete entry")
+        missing = unnamed_terms(clause, CHECKIN_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
 
 
 class NeverCoversSentence(unittest.TestCase):
