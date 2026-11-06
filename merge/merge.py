@@ -319,7 +319,7 @@ def debt_check(wt, base_ref, host, info):
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import check_debt_retire as debt
     try:
-        found = debt.check(wt, base_ref, info["head"], pr_body=info.get("body", ""), run_state=lambda url: host.cited_run(url))
+        found = debt.check(wt, base_ref, info["head"], pr_body=info.get("body", ""), run_state=lambda url: host.cited_run(url), isolate=True)
     except debt.Unknown as e:
         raise Dropped(f"the debt-close check could not read the history: {e}\n{DEBT_CITE}")
     if found:

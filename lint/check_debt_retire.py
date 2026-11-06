@@ -17,11 +17,13 @@ check reads that debt's Retire paragraph from the base and runs what it names, o
 Exit 1 on any finding. Design: decision debt-close-runs-retire.
 """
 import argparse
+import contextlib
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import check_record_slugs as records  # noqa: E402  the one home of the record markers and the changed-files read
 import check_silent_undo as undo  # noqa: E402  the one home of the PR body's key-line reading
@@ -66,6 +68,20 @@ def spans(text, tracked):
         if s in tracked and TEST_NAME.match(os.path.basename(s)) and os.path.splitext(s)[1] in INTERPRETERS and s not in found:
             found.append(s)
     return found
+
+
+@contextlib.contextmanager
+def scratch(wt, head):
+    """A detached worktree of `head` under the temp dir, removed after: what a Retire test writes stays there and never reaches `wt`.
+    A tree that cannot be made yields None, and the test is unknown."""
+    tmp = tempfile.mkdtemp(prefix="debt-retire-")
+    tree = os.path.join(tmp, "tree")
+    try:
+        made = _nowindow.run(["git", "-C", wt, "worktree", "add", "-q", "--detach", tree, head], capture_output=True).returncode == 0
+        yield tree if made else None
+    finally:
+        _nowindow.run(["git", "-C", wt, "worktree", "remove", "--force", tree], capture_output=True)
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def run_span(wt, span, timeout):
@@ -115,9 +131,11 @@ def judge_run(wt, head, url, run_state):
     return "unknown", "the cited run %s is on %s, which this checkout does not hold" % (url, str(sha)[:9])
 
 
-def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None):
+def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None, isolate=False):
     """[Finding] for each debt that `head` closes against `base_ref` and whose Retire step does not hold. Raises Unknown.
-    run_state(url) -> (conclusion, head sha) of a workflow run, or raises."""
+    run_state(url) -> (conclusion, head sha) of a workflow run, or raises.
+    isolate: run each test in its own scratch worktree of `head` (the merge tool and the CLI do), so nothing it writes reaches `wt`;
+    off, a test runs in `wt` itself."""
     try:
         debt = records.debt_file(wt)
     except layout.LayoutError as e:
@@ -145,7 +163,8 @@ def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None
         if todo:
             got = None
             for span in todo:
-                one = run_span(wt, span, timeout)
+                with scratch(wt, head) if isolate else contextlib.nullcontext(wt) as tree:
+                    one = run_span(tree, span, timeout) if tree else ("unknown", "no scratch worktree for %s" % span)
                 if one and one[0] == "red":
                     got = one
                     break
@@ -183,7 +202,7 @@ def main(argv):
     ap.add_argument("--repo", default=os.getcwd())
     a = ap.parse_args(argv)
     try:
-        found = check(a.repo, a.upstream, a.head)
+        found = check(a.repo, a.upstream, a.head, isolate=True)
     except Unknown as e:
         say("debt-retire: UNKNOWN: %s" % e)
         return 1 if (a.strict or os.environ.get("CI")) else 0
