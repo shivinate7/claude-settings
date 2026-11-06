@@ -371,6 +371,8 @@ def refute_brief(payload, args):
         check_line = check_refuter.done_check_line(message)
         if check_line is None:
             verdict, case = "gap", "the brief has no `Done check:` line at a line start, so nothing says when the work is done"
+        elif check_refuter.is_placeholder(check_line):
+            verdict, case = "gap", "the Done check line is still the template's `<...>` placeholder, so nothing says when the work is done"
         else:
             if not found:
                 raise ValueError("the brief's first line names no step")

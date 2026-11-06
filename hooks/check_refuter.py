@@ -27,28 +27,57 @@ import decision_watch  # noqa: E402  the one model caller
 # The one named setting; lane debate-model-tiers may change it. REFUTER_TIMEOUT stays under the call_judge hook's
 # "timeout": 70 in settings.json, so the call ends before the hook does and its refusal is the verdict.
 REFUTER_MODEL = "sonnet"
+REFUTER_EFFORT = None  # the model's default effort, as the judges in call_judge.py pass
 REFUTER_TIMEOUT = 45
+GIT_TIMEOUT = 10  # the one git read; REFUTER_TIMEOUT + GIT_TIMEOUT stays under the hook's 70 s too
 
 REFUTER_PROMPT = (
     "You read one line blind. A lane was asked to do the work below, and its brief ends with a Done check line: "
     "the check that will say the work is done. You see only the step's title, why, and that check line.\n"
-    "Could the check pass while the ask stays unmet? Answer {\"verdict\": \"FLAG\", \"why\": \"<the case: one "
-    "concrete way the check passes with the ask unmet, one or two sentences>\"} when it could. Answer "
+    "Could the check pass while the ask stays unmet? Flag only a realistic case: one where a worker who follows the "
+    "brief in good faith could still pass the check with the ask unmet. Ignore a gap that only deliberate cheating "
+    "would use. Answer {\"verdict\": \"FLAG\", \"why\": \"<the realistic case: one concrete way the check passes "
+    "with the ask unmet, one or two sentences>\"} when there is one. Answer "
     "{\"verdict\": \"ALLOW\"} when a pass of the check means the ask is met. Judge only the check against the ask. "
     "Reply JSON only.\n\nTitle: %s\nWhy: %s\nDone check: %s\n"
 )
 STEP_PATH = "roadmap/data/steps/%s.json"
-_DONE_LINE = re.compile(r"^[ \t]*\**Done check:\**[ \t]*(?P<text>.*)$", re.MULTILINE)
+# A Done check line at a line start: plain, bold (`**Done check:**`, `**Done check**:`), a bullet, or with a label in
+# parentheses (`Done check (proof):`), in any case.
+_DONE_LINE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?\**Done check\**(?:[ \t]*\([^)\n]*\))?[ \t]*:\**[ \t]*(?P<text>.*)$",
+                        re.IGNORECASE)
+_DONE_HEADING = re.compile(r"^[ \t]*#+[ \t]+Done check[ \t]*:?[ \t]*#*[ \t]*$", re.IGNORECASE)
+_FENCE = re.compile(r"^[ \t]*(```|~~~)")
+_PLACEHOLDER = re.compile(r"<[^<>]*>")
 _STEP_ID = re.compile(r"[A-Za-z0-9_-]+")
 
 
 def done_check_line(brief):
-    """The text after the first line-start `Done check:` (bold allowed) of `brief`, or None."""
+    """The text of the first Done check line of `brief` outside a fenced block, or None. A `## Done check` heading
+    gives the next non-blank line."""
     if not isinstance(brief, str):
         return None
-    found = _DONE_LINE.search(brief)
-    text = found.group("text").strip().strip("*").strip() if found else ""
-    return text or None
+    fence = None  # the opener of the fenced block the scan is inside
+    lines = brief.splitlines()
+    for number, line in enumerate(lines):
+        opener = _FENCE.match(line)
+        if opener:
+            fence = None if fence == opener.group(1) else (fence or opener.group(1))
+            continue
+        if fence:
+            continue
+        found = _DONE_LINE.match(line)
+        if found:
+            return found.group("text").strip().strip("*").strip() or None
+        if _DONE_HEADING.match(line):
+            following = next((v.strip() for v in lines[number + 1:] if v.strip()), "")
+            return following.strip("*").strip() or None
+    return None
+
+
+def is_placeholder(check):
+    """True for a check that is only a `<...>` placeholder, the brief template's unfilled line."""
+    return isinstance(check, str) and _PLACEHOLDER.fullmatch(check.strip()) is not None
 
 
 def ask_for_step(root, step):
@@ -57,11 +86,14 @@ def ask_for_step(root, step):
     import layout  # lint/layout.py, the one home of the record branch
     if not isinstance(step, str) or not _STEP_ID.fullmatch(step):
         raise ValueError("step %r is not a step id" % (step,))
-    ref = "refs/remotes/origin/%s" % layout.record_branch(root)
+    branch = layout.record_branch(root)
+    ref = "refs/remotes/origin/%s" % branch
     run = _nowindow.run(["git", "show", "%s:%s" % (ref, STEP_PATH % step)], cwd=root, capture_output=True,
-                        timeout=20)
+                        timeout=GIT_TIMEOUT)
     if run.returncode != 0:
-        raise ValueError("git show %s failed: %s" % (ref, run.stderr.decode("utf-8", "replace").strip()[:200]))
+        raise ValueError("git show %s failed: %s. If the record branch is not fetched or is stale, run: git fetch origin "
+                         "+refs/heads/%s:refs/remotes/origin/%s" % (ref, run.stderr.decode("utf-8", "replace").strip()[:200],
+                                                                    branch, branch))
     data = json.loads(run.stdout.decode("utf-8", "replace"))
     title, why = data.get("title"), data.get("why")
     if not all(isinstance(v, str) and v.strip() for v in (title, why)):
@@ -75,7 +107,7 @@ def refute(title, why, check):
     try:
         answer, error = decision_watch.invoke_model(
             REFUTER_PROMPT % (title, why, check), model=REFUTER_MODEL, timeout=REFUTER_TIMEOUT,
-            shape=decision_watch.VERDICT_SHAPE)
+            shape=decision_watch.VERDICT_SHAPE, effort=REFUTER_EFFORT)
     except Exception as exc:
         return "unknown", "the model call raised %s: %s" % (type(exc).__name__, exc)
     if error:
