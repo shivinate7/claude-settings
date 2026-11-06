@@ -34,6 +34,12 @@ GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 SESSION = "7c1e2f30-0000-4000-8000-000000000001"  # the lane's session id on the payload
 COORD = "session_COORD01"  # the coordinator, where the owner's event lives
 GRANT = "grant icon-a spawn 10m"
+# The guard.log cells of the grant's lines. No record names them yet, so the builder brief carries these (Input Needed).
+GRANT_LOG_RULE = "grant-reaches-lanes"  # the rule cell of the allow line and of a failed transcript read
+GRANT_LOG_DECISION = "spawn-grant"  # the decision cell of the allow line
+GRANT_UNREAD_DECISION = "spawn-grant-unread"  # the decision cell of a failed transcript read on an Agent call
+SECOND_ACT = "shell"  # a second act the probe adds to ACTS, for the Bash tool
+SHELL_WORD = "grant icon-a shell 10m"  # the owner's word for SECOND_ACT
 GET_SESSION = "mcp__claude-code-remote__get_session"
 GET_EVENT = "mcp__claude-code-remote__get_event"
 LANE_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-repo:o/r"]
@@ -50,6 +56,16 @@ PROBE = r"""
 import importlib.util, os, sys
 path = sys.argv[1]
 sys.path.insert(0, os.path.dirname(path))
+extra = os.environ.get("GRANT_TEST_EXTRA_ACT")
+if extra:  # a second act in ACTS. The word's regex is built from ACTS at import, so this reads the one owner word itself
+    import grant_word
+    grant_word.ACTS[extra] = ("Bash",)
+    real_parse = grant_word.parse
+    def parse(text):
+        if isinstance(text, str) and text.strip().lower() == "grant icon-a %s 10m" % extra:
+            return extra, "icon-a", 600
+        return real_parse(text)
+    grant_word.parse = parse
 spec = importlib.util.spec_from_file_location("guard_under_test", path)
 guard = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(guard)
@@ -144,10 +160,13 @@ def read_decision(stdout):
         return "unparsable", out[:200]
 
 
-def run_guard(payload, cfg):
+def run_guard(payload, cfg, extra_act=None):
     env = dict(os.environ)
-    for name in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR", "CLAUDE_CODE_REMOTE"):
+    for name in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR", "CLAUDE_CODE_REMOTE",
+                 "GRANT_TEST_EXTRA_ACT"):
         env.pop(name, None)  # a cloud or lane variable of the runner would bind every case
+    if extra_act:
+        env["GRANT_TEST_EXTRA_ACT"] = extra_act  # the probe adds this act to ACTS
     env.update(CLAUDE_CONFIG_DIR=cfg, CLAUDE_GUARD_ROOT_PID=str(os.getpid()), CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
     proc = subprocess.run([sys.executable, "-c", PROBE, GUARD], input=json.dumps(payload), capture_output=True,
                           text=True, env=env, timeout=120)
@@ -156,39 +175,56 @@ def run_guard(payload, cfg):
     return read_decision(proc.stdout)
 
 
-def decide(run_dir, lines, tool="Agent", agent_id=None, tool_input=None):
-    """One call of `tool` from the lead session (or from `agent_id`) against the transcript `lines`."""
+def log_rows(cfg):
+    """The guard.log rows of a config folder, each a list of its tab fields. Empty when no file exists."""
+    try:
+        with open(os.path.join(cfg, "guard.log"), encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError:
+        return []
+    return [line.split("\t") for line in text.splitlines() if line.strip()]
+
+
+def decide_logged(run_dir, lines, tool="Agent", agent_id=None, tool_input=None, extra_act=None, transcript=None):
+    """One call of `tool` from the lead session (or from `agent_id`) against the transcript `lines`, and the guard.log
+    rows the call wrote. `transcript` names a path to read in place of the written one, so a case can fail the read."""
     case = os.path.join(run_dir, "case-" + uuid.uuid4().hex)
     cfg, proj = os.path.join(case, "cfg"), os.path.join(case, "proj")
     os.makedirs(cfg)
     os.makedirs(proj)  # a folder that is no git checkout: no other rule reads it
-    transcript = os.path.join(case, "session.jsonl")
-    with open(transcript, "w", encoding="utf-8") as handle:
-        for line in lines:
-            handle.write(line + "\n")
+    if transcript is None:
+        transcript = os.path.join(case, "session.jsonl")
+        with open(transcript, "w", encoding="utf-8") as handle:
+            for line in lines:
+                handle.write(line + "\n")
     default = AGENT_INPUT if tool in ("Agent", "Task") else BASH_INPUT
     body = {"tool_name": tool, "tool_input": dict(tool_input or default), "session_id": SESSION,
             "transcript_path": transcript, "cwd": proj}
     if agent_id:
         body["agent_id"] = agent_id
-    return run_guard(body, cfg)
+    return run_guard(body, cfg, extra_act), log_rows(cfg)
 
 
-def approved(outcome):
+def decide(run_dir, lines, **kw):
+    """The (decision, reason) of decide_logged for the same call."""
+    return decide_logged(run_dir, lines, **kw)[0]
+
+
+def approved(outcome, text=GRANT):
     """The grant's approval: an allow whose reason names the grant text. An allow with no reason is the guard's
     normal pass, which a guard without the grant also gives."""
     decision, reason = outcome
-    return decision == "allow" and GRANT in reason
+    return decision == "allow" and text in reason
 
 
-def must_approve(run_dir, lines, label, **kw):
+def must_approve(run_dir, lines, label, text=GRANT, **kw):
     outcome = decide(run_dir, lines, **kw)
-    assert approved(outcome), "control, the live grant did not allow the call (%s): %r" % (label, outcome)
+    assert approved(outcome, text), "the live grant did not allow the call (%s): %r" % (label, outcome)
 
 
-def must_not_approve(run_dir, lines, label, cause, **kw):
+def must_not_approve(run_dir, lines, label, cause, text=GRANT, **kw):
     outcome = decide(run_dir, lines, **kw)
-    assert not approved(outcome), "%s (%s): the guard allowed the call: %r" % (cause, label, outcome)
+    assert not approved(outcome, text), "%s (%s): the guard allowed the call: %r" % (cause, label, outcome)
 
 
 # ---------------------------------------------------------------- approval
@@ -262,6 +298,19 @@ def test_content_that_is_a_tool_result_list_does_not_allow(run_dir):
                      "a tool result that names the grant allowed the call")
 
 
+def test_event_carrying_an_agent_id_grants_nothing(run_dir):
+    must_approve(run_dir, lane([owner_event()]), "control, an event with no agent_id")
+    must_not_approve(run_dir, lane([owner_event(catchall={"agent_id": AGENT_ID})]),
+                     "the event's catchall carries agent_id", "an event from an agent allowed the call")
+
+
+def test_event_with_a_parent_tool_use_id_grants_nothing(run_dir):
+    must_approve(run_dir, lane([owner_event(catchall={"parent_tool_use_id": None})]),
+                 "control, parent_tool_use_id is null")
+    must_not_approve(run_dir, lane([owner_event(catchall={"parent_tool_use_id": "toolu_01PARENT"})]),
+                     "parent_tool_use_id names a tool call", "an event under a parent tool call allowed the call")
+
+
 # ---------------------------------------------------------------- the lane's own record
 
 def test_no_get_session_result_does_not_allow(run_dir):
@@ -300,6 +349,61 @@ def test_refusal_by_another_guard_rule_stays(run_dir):
     must_approve(run_dir, lane([owner_event()]), "control, a sonnet Agent call")
     outcome = decide(run_dir, lane([owner_event()]), tool_input=dict(AGENT_INPUT, model="haiku"))
     assert outcome[0] == "deny", "the model floor's refusal did not stand under a live grant: %r" % (outcome,)
+
+
+# ---------------------------------------------------------------- the guard.log line
+
+def grant_rows(rows):
+    """The rows the grant wrote: six fields, under the grant's rule cell."""
+    return [row for row in rows if len(row) == 6 and row[3] == GRANT_LOG_RULE]
+
+
+def test_allowed_grant_writes_one_log_line(run_dir):
+    outcome, rows = decide_logged(run_dir, lane([owner_event()]))
+    assert approved(outcome), "control, the live grant did not allow the call: %r" % (outcome,)
+    got = grant_rows(rows)
+    assert len(got) == 1, "an allowed grant wrote %d grant lines, want one: %r" % (len(got), rows)
+    assert got[0][1] == "Agent" and got[0][2] == GRANT_LOG_DECISION, \
+        "the grant line is %r, want an Agent %s line" % (got[0], GRANT_LOG_DECISION)
+    assert GRANT in got[0][4], "the grant line does not name the owner's word: %r" % (got[0],)
+    assert got[0][5] == SESSION, "the grant line's session is %r, want %s" % (got[0][5], SESSION)
+    outcome, rows = decide_logged(run_dir, lane([]))
+    assert not approved(outcome), "a call with no grant was allowed by a grant: %r" % (outcome,)
+    assert not grant_rows(rows), "a call with no grant wrote a grant line: %r" % (rows,)
+
+
+def test_failed_transcript_read_on_an_agent_call_writes_one_line(run_dir):
+    outcome, rows = decide_logged(run_dir, lane([owner_event()]))
+    assert approved(outcome), "control, the live grant did not allow the call: %r" % (outcome,)
+    assert not [row for row in grant_rows(rows) if row[2] == GRANT_UNREAD_DECISION], \
+        "a readable transcript wrote a failed-read line: %r" % (rows,)
+    missing = os.path.join(run_dir, "no-such-folder", "session.jsonl")
+    outcome, rows = decide_logged(run_dir, [], transcript=missing)
+    assert not approved(outcome), "a transcript that cannot be read granted the call: %r" % (outcome,)
+    unread = [row for row in grant_rows(rows) if row[2] == GRANT_UNREAD_DECISION]
+    assert len(unread) == 1, "a failed transcript read on an Agent call wrote %r, want one %s line" \
+        % (rows, GRANT_UNREAD_DECISION)
+    assert unread[0][1] == "Agent" and unread[0][5] == SESSION, \
+        "the failed-read line is %r, want an Agent line for the session" % (unread[0],)
+
+
+# ---------------------------------------------------------------- the act catalogue
+
+def test_second_act_in_acts_grants_its_own_tool(run_dir):
+    must_approve(run_dir, lane([owner_event()]), "control, the spawn grant on an Agent call, ACTS with a second act",
+                 extra_act=SECOND_ACT)
+    must_approve(run_dir, lane([owner_event(SHELL_WORD)]),
+                 "the second act's grant on a Bash call, a tool its ACTS entry names",
+                 text=SHELL_WORD, tool="Bash", extra_act=SECOND_ACT)
+
+
+def test_second_act_does_not_grant_the_spawn_tools(run_dir):
+    must_approve(run_dir, lane([owner_event(SHELL_WORD)]), "control, the second act's grant on a Bash call",
+                 text=SHELL_WORD, tool="Bash", extra_act=SECOND_ACT)
+    must_not_approve(run_dir, lane([owner_event(SHELL_WORD)]),
+                     "the second act's grant on an Agent call, a tool its ACTS entry does not name",
+                     "a grant for one act allowed a tool that act does not name",
+                     text=SHELL_WORD, extra_act=SECOND_ACT)
 
 
 # ---------------------------------------------------------------- empty and full-size transcripts
