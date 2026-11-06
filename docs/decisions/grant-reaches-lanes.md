@@ -34,6 +34,7 @@ Earlier sign-off: Cockpit item 152, pick a, 2026-11-03 18:21 CST.
 - The owner-event shape is unmeasured. The values of `origin` on an owner event from the web and the phone are unknown, so any `origin` fails closed. Page item 221 is the owner's test, from web and phone.
 - The refused-act probe has not run. The classifier skip is measured for an allowed act only (plan `docs/plans/grant-reaches-lanes.md`, section 1).
 - The grant read must sit in the last 4 MiB of the transcript. An older grant is lost, and it grants nothing.
+- The lane's own get_session result must also sit in the last 4 MiB of the transcript, or the grant is refused. A long lane re-reads its tags with get_session.
 - A `grant off` reaches the gate only when the lane reads it with `get_event`. Until then the grant stays live to its end.
 - The clock. A grant starts at the owner event's server `created_at`. Expiry is checked against the lane's own clock (`time.time()`). Clock skew between the two is unmeasured.
 - The length has no cap short of six digits for `n`. The ruling names `<n>m`. The word also takes `h`, which the ruling does not name.
