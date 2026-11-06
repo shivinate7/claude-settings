@@ -173,11 +173,14 @@ class Case(unittest.TestCase):
     def change(self, files):
         self.commit("change", files)
 
-    def lint(self, *args, path_tools=False, env=None, exclude=()):
+    def lint(self, *args, path_tools=False, env=None, exclude=(), ci=False):
         args = args or ("--base", "origin/main")
         args = (*args, *(x for prefix in exclude for x in ("--exclude", prefix)))
         run_env = dict(GIT_ENV, **(env or {}))
         run_env.pop("CODE_CHECK_TOOLS", None)
+        run_env.pop("CI", None)  # a runner's own CI setting never leaks in: `ci` sets it
+        if ci:
+            run_env["CI"] = "1"
         if path_tools:
             run_env["CODE_CHECK_TOOLS"] = "path"
         r = subprocess.run([sys.executable, os.path.join(self.tree, "lint", "check_comment_narration.py"), *args],
@@ -727,6 +730,48 @@ class Scripts(Case):
         self.base({"keep.py": "x = 1\n"})
         self.change({"notes/log": "# fixed in round 2\n"})
         self.assertClean()
+
+
+@unittest.skipIf(os.name == "nt", "a dangling symlink needs the symlink privilege on Windows")
+class UnreadScripts(Case):
+    """An extensionless file whose shebang cannot be read has no language, so it is never scanned: its read must say UNKNOWN.
+    Locally it exits 0. With env CI set it exits non-zero."""
+
+    def changed_paths(self):
+        return subprocess.run(["git", "-C", self.tree, "diff", "--name-only", "origin/main"], capture_output=True,
+                              text=True, env=GIT_ENV, check=True).stdout.split()
+
+    def dangling_script(self):
+        """`bin/tool` is a symlink to a target that is not there. Root reads through chmod 000, so a dangling link is the
+        real read failure: git lists the path as added, and open() on it fails."""
+        self.base({"keep.py": "x = 1\n"})
+        os.makedirs(os.path.join(self.tree, "bin"), exist_ok=True)
+        os.symlink("no-such-target", os.path.join(self.tree, "bin", "tool"))
+        self.commit("change", {})
+        self.assertIn("bin/tool", self.changed_paths(), "scope: the dangling link is not in the change")
+        self.assertTrue(os.path.islink(os.path.join(self.tree, "bin", "tool")), "scope: bin/tool is not a link")
+        self.assertFalse(os.path.exists(os.path.join(self.tree, "bin", "tool")), "scope: bin/tool is not dangling")
+
+    def test_an_extensionless_file_whose_shebang_cannot_be_read_prints_unknown_locally(self):
+        self.dangling_script()
+        rc, out = self.lint()
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("UNKNOWN", out, "an extensionless file whose shebang cannot be read was skipped with no UNKNOWN line:\n" + out)
+
+    def test_an_extensionless_file_whose_shebang_cannot_be_read_is_red_in_ci(self):
+        self.dangling_script()
+        rc, out = self.lint(ci=True)
+        self.assertNotEqual(rc, 0, "an extensionless file whose shebang cannot be read passed in CI:\n" + out)
+
+    def test_a_readable_extensionless_script_is_green_in_ci_with_no_unknown(self):
+        # Green control: the same shape, readable, passes in CI and prints no UNKNOWN.
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"bin/tool": "#!/usr/bin/env python3\nprint(1)\n"})
+        self.assertIn("bin/tool", self.changed_paths(), "scope: the readable script is not in the change")
+        rc, out = self.lint(ci=True)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("UNKNOWN", out)
 
 
 @NEEDS_TSC
