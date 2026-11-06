@@ -117,8 +117,10 @@ def git(repo, *args):
                           capture_output=True, text=True, env=GIT_ENV, check=True)
 
 
-def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL):
+def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL, waiting=None):
     """`page` is the repo's waiting-page url. None writes no page key: a repo with no page, which layout reads as unknown.
+    `waiting` maps "items" and "answers" to {id: record}: waiting/items/<id>.json and waiting/answers/<id>.json on the
+    same local `roadmap` branch that `steps` uses.
     A name is cached, so a second call must name the same page: a different one would silently get the first repo."""
     if name in REPOS:
         if REPO_PAGES[name] != page:
@@ -158,6 +160,17 @@ def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL):
         git(repo, "add", "roadmap")
         git(repo, "commit", "-q", "-m", "step notes")
         git(repo, "checkout", "-q", "-")
+    if waiting:
+        git(repo, *(["checkout", "-q", "roadmap"] if steps else ["checkout", "-q", "-b", "roadmap"]))
+        for collection in ("items", "answers"):
+            folder = os.path.join(repo, "waiting", collection)
+            os.makedirs(folder)
+            for rec_id, rec in waiting.get(collection, {}).items():
+                with open(os.path.join(folder, rec_id + ".json"), "w", encoding="utf-8") as f:
+                    json.dump(rec, f)
+        git(repo, "add", "waiting")
+        git(repo, "commit", "-q", "-m", "waiting records")
+        git(repo, "checkout", "-q", "-")
     REPOS[name] = repo
     return repo
 
@@ -179,7 +192,9 @@ def _fake_run(argv, **kwargs):
     prompt = kwargs.get("input") or b""
     prompt = prompt.decode("utf-8", "replace") if isinstance(prompt, bytes) else str(prompt)
     with open(os.environ["CJ_RECORD"], "a", encoding="utf-8") as f:
-        f.write(json.dumps({"argv": list(argv), "prompt": prompt}) + "\n")
+        f.write(json.dumps({"argv": list(argv), "prompt": prompt, "timeout": kwargs.get("timeout")}) + "\n")
+    if os.environ.get("CJ_TIMEOUT_HIT"):
+        raise subprocess.TimeoutExpired(argv, kwargs.get("timeout") or 0)
     if os.environ.get("CJ_MODEL_FAIL"):
         return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stub model failure")
     return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"result": os.environ["CJ_ANSWER"]}), stderr="")
