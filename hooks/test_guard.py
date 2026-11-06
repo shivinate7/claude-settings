@@ -27345,6 +27345,15 @@ rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Final verdict
            "Re-check the floor fix.\nFinal verdict: PASS\nFiles: hooks/guard.py.")
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Verdict: PASS line",
            "Re-check the floor fix.\nVerdict: PASS\nFiles: hooks/guard.py.")
+# A prior verdict is refused whatever stands before its colon, a backticked path or round word included, and whatever
+# a `,` adds after its verdict word. These pin the lines the choice rule (a verdict word joined to a second one) must
+# not open. The instruction case that rule serves is allowed below.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior verdict on a backticked path: FAIL, missing test line",
+           "Re-check the floor fix.\nPrior verdict on `hooks/guard.py`: FAIL, missing test\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 (`sonnet`) verdict: FAIL line",
+           "Re-check the floor fix.\nRound 1 (`sonnet`) verdict: FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 verdict: FAIL, PASS on round 2 line",
+           "Re-check the floor fix.\nRound 1 verdict: FAIL, PASS on round 2\nFiles: hooks/guard.py.")
 
 # Allowed. A later round gets the prior round's findings as a list, a fix check gets the one finding it checks, and
 # the task's own words name the rule without a shape at line start. A builder's brief may hold its report.
@@ -27393,6 +27402,12 @@ rbb_allow("reviewer-brief-blind: allowed: a Round 2 of 3 finding that quotes `ve
           "Round 2 of 3. Re-check the round 1 findings.\n"
           "Finding 1 quotes `verdict: FAIL` in backticks, hooks/guard.py:2454, the check refuses the quote.\n"
           "Finding 2: hooks/guard.py:2558, the step-up skips an unread brief.", model="sonnet")
+# A backticked round label quoted in a line, and a bold choice list after a verdict label, are the task's words,
+# not a verdict line.
+rbb_allow("reviewer-brief-blind: allowed: a finding whose line opens with a backticked Round 1: FAIL quote, then says the guard refuses it",
+          "Check the floor fix.\n`Round 1: FAIL` is the line the guard refuses.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict in bold, Give a verdict: **PASS** or **FAIL**",
+          "Check the floor fix in hooks/guard.py.\nGive a verdict: **PASS** or **FAIL**.\nFiles: hooks/guard.py.")
 # The empty state: a reviewer brief with no text holds no report, so it passes.
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with an empty prompt", "")
 add("reviewer-brief-blind: allowed: a Workflow agent() reviewer on Round 2 of 3 with a findings list",
