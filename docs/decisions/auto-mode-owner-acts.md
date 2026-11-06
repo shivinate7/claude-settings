@@ -24,6 +24,7 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 | "Owner Session Message" (`settings.json` `autoMode.allow`) | `send_message` to a session in the owner's own account, asking only for acts the owner already granted. A coordinator may send a batch runner it created a merge go (owner, 2026-11-03 15:58 CST) | this record |
 | `mcp__claude-code-remote__add_repo` (`settings.json` `permissions.allow`) | Attach a GitHub repo to the session | this record |
 | `mcp__claude-code-remote__archive_session` (`settings.json` `permissions.allow`) | Archive a session in the owner's account | this record |
+| `mcp__claude-code-remote__send_message` (`settings.json` `permissions.allow`) | Send a message to a session in the owner's account | this record |
 
 The merge confirm is a permission allow rule, not an `autoMode` entry. The classifier does not judge it.
 
@@ -71,6 +72,16 @@ One exception that can apply: an MCP tool marked `requiresUserInteraction` promp
 - `archive_session` fails the test "can be undone, or loses nothing". Unarchive gives a fresh container, so unpushed work in the old one is lost. The owner waives that test. Their typed go, 2026-11-01 17:37 CST, covers both tools. It is the verbatim grant: "add mcp__claude-code-remote__add_repo and mcp__claude-code-remote__archive_session to settings.json permissions.allow". The rule covers any session in the account.
 - Never covers `add_repo`: any other remote tool, or the server-level form.
 - Never covers `archive_session`: any other remote tool, or the server-level form.
+
+### Send message allow rule
+
+Owner, page item 301 a, 2026-11-06 15:24 CST: "yeah allow it, maybe we fix the judge itself for send messages though in general i think it's only blocked problematically". Built as #1364 (send_message allow, local session), rebuilt as #1372 (send_message allow, cloud).
+
+- Incidents: on 2026-11-06 auto mode refused `send_message` from the coordinator and from lanes. Earlier refusals: notes `auto-mode-refuses-page-grant` (coordinator refused on a page grant) and `agent-send-message-refused` (agent call refused in a lane).
+- It is a permission allow rule, so the classifier does not judge it (see Remote tool allow rules).
+- Open point, not a ruling: the rule stops the classifier from applying the "Owner Session Message" bounds to `send_message`: `priority: now`, a post to a shared channel, a target outside the owner's account. No hook checks these bounds yet. Page item 315 asks the owner whether to add that guard.
+- Undo: remove the line from `settings.json`.
+- Never covers: any other remote tool, or the server-level form.
 
 ### Incidents for the owner PR and owner message entries
 
