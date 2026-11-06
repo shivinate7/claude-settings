@@ -3,7 +3,7 @@
 ## The ruling
 
 Owner, 2026-11-06, waiting-page item 284, pick a (step `challenger-page-against`, the best case against
-the pick). Each waiting-page item that carries a `pick` and is not closed carries `against`: the strongest case against the
+the pick). Each waiting-page decision that carries a `pick` and is not closed carries `against`: the strongest case against the
 recommended pick, written by a blind refuter. The owner reads it before he picks. Owner, item 282 b: the
 word is "refuter".
 
@@ -20,8 +20,8 @@ word is "refuter".
   `ArtifactData set` with `file_path`. It calls `decision_watch.invoke_model`, the one home of model calls
   from hooks and scripts.
 - Guard: `hooks/question_form.py` refuses an `items` write that carries a `pick`, is not closed, and has
-  no non-blank `against`. It needs no `kind`: an update may carry only the pick. The refuter's scope is the
-  same set.
+  no non-blank `against`, when its `kind` is `decision` or absent: an update may carry only the pick. A
+  `task` or `note` is out of scope. The refuter's scope is the same set.
 - Page: `skills/waiting-page/page.html` draws `against` under the pick, labelled "Best case against".
 
 Why a script and not a PreToolUse hook that adds the field: the hooks docs leave `updatedInput` on
