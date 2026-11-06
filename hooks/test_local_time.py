@@ -44,9 +44,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unittest  # CostTests is a TestCase, so pytest collects it
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "test_support"))
+import cost_probe  # noqa: E402  the shared cost counters (hooks/test_support/cost_probe.py)
 MODULE_PATH = os.environ.get("LOCAL_TIME_UNDER_TEST") or os.path.join(HERE, "local_time.py")
 ROOT = tempfile.mkdtemp(prefix="local_time_cases_")
 EMPTY_TZPATH = os.path.join(ROOT, "empty_tzpath")
@@ -2051,6 +2054,67 @@ def case_opus_scope_seed_record_names_reviewer_outside_a_cloud_session():
           got is not None and got[2] == "reviewer", "got %r" % (got,))
 
 
+# The cost of one owner prompt at the prompt hook (plan align-watchers, section 2; decision owner-override). The hook
+# runs as a child under cost_probe.run_hook, which stands in decision_watch.invoke_model and counts each model call.
+
+class CostTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.run_folder = cost_probe.run_folder()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.run_folder, ignore_errors=True)
+
+    def fire(self, prompt, answers, earlier=None):
+        """The owner types `prompt` after the earlier owner turns `earlier` (transcript lines; None means no transcript).
+        `answers` are the model's (verdict, error) pairs in call order. The cloud variable is unset for the child, so the
+        prompt is judged as in a local session, whatever the test runner's own environment holds."""
+        folder = tempfile.mkdtemp(dir=self.run_folder)
+        payload = {"hook_event_name": "UserPromptSubmit", "session_id": OV_SESSION, "prompt": prompt, "cwd": HERE}
+        if earlier is not None:
+            path = os.path.join(folder, "transcript.jsonl")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("".join(line + "\n" for line in earlier + [owner_turn(prompt)]))
+            payload["transcript_path"] = path
+        with remote_env(None):
+            return cost_probe.run_hook(MODULE_PATH, json.dumps(payload), folder, answers)
+
+    def test_a_prompt_with_no_opus_word_makes_no_model_call(self):
+        run = self.fire("fix the parser and run the tests", [[{"ok": True}, None]])
+        self.assertEqual((run["code"], run["models"]), (0, []),
+                         "a prompt with no Opus word makes no model call; got %r" % (run["models"],))
+
+    def test_the_keyword_opus_grant_makes_no_model_call(self):
+        run = self.fire("opus 2h", [[{"ok": True}, None]])
+        self.assertEqual((run["code"], run["models"]), (0, []),
+                         "a keyword grant is read without the model; got %r" % (run["models"],))
+
+    def test_an_owner_opus_ask_the_judge_refuses_makes_one_call_and_no_scope_read(self):
+        run = self.fire("send opus judges", [[{"ok": False, "reason": "not a request"}, None]],
+                        earlier=[owner_turn("builders should review the refactor")])
+        self.assertEqual(run["code"], 0)
+        self.assertEqual(len(run["models"]), 1,
+                         "a refused ask makes the judge call only, the scope read waits for a yes; got %r"
+                         % (run["models"],))
+
+    def test_an_owner_opus_ask_the_judge_grants_makes_two_calls_the_ask_then_the_scope_read(self):
+        hooks_modules()
+        import call_judge  # the timeouts this case pins
+        answers = [[{"ok": True}, None], [{"ok": True, "roles": ["builder"]}, None]]
+        run = self.fire("send opus judges", answers, earlier=[owner_turn("builders should review the refactor")])
+        self.assertEqual(run["code"], 0)
+        self.assertEqual([call["timeout"] for call in run["models"]],
+                         [call_judge.OPUS_ASK_TIMEOUT, call_judge.OPUS_SCOPE_TIMEOUT],
+                         "a yes makes the ask call, then the scope read; got %r" % (run["models"],))
+
+    def test_an_owner_opus_ask_that_names_a_role_makes_one_call(self):
+        run = self.fire("send opus builders", [[{"ok": True}, None]], earlier=[owner_turn("the refactor is next")])
+        self.assertEqual(run["code"], 0)
+        self.assertEqual(len(run["models"]), 1,
+                         "an ask that names a role reads no scope, so one call; got %r" % (run["models"],))
+
+
 def main():
     try:
         case_table_in_process()
@@ -2144,6 +2208,8 @@ def main():
         case_opus_scope_seed_record_names_reviewer_outside_a_cloud_session()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
+    if not cost_probe.run_class(CostTests):
+        FAILED.append("CostTests")
     if FAILED:
         print("FAILED: %d case(s)" % len(FAILED))
         return 1
