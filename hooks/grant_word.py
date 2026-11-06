@@ -13,8 +13,7 @@ ACTS = {"spawn": ("Agent", "Task")}
 
 SLUG = r"[a-z0-9][a-z0-9_-]{0,31}"  # lower case only: a cs-step tag is lower case
 UNITS = {"m": 60, "h": 3600}
-_GRANT = re.compile(r"(?i:grant)[ \t]+(?P<slug>%s)[ \t]+(?i:(?P<act>%s))[ \t]+(?P<n>[0-9]{1,6})(?i:(?P<unit>[mh]))"
-                    % (SLUG, "|".join(re.escape(act) for act in ACTS)))
+_GRANT_FORM = r"(?i:grant)[ \t]+(?P<slug>%s)[ \t]+(?i:(?P<act>%s))[ \t]+(?P<n>[0-9]{1,6})(?i:(?P<unit>[mh]))"
 _OFF = re.compile(r"(?i:grant)[ \t]+(?i:off)[ \t]+(?P<slug>%s)" % SLUG)
 
 
@@ -26,7 +25,8 @@ def parse(text):
     found = _OFF.fullmatch(text)
     if found:
         return "off", found.group("slug"), None
-    found = _GRANT.fullmatch(text)
+    # Built from ACTS on each parse (re caches it), so an act added to ACTS after import still parses.
+    found = re.fullmatch(_GRANT_FORM % (SLUG, "|".join(re.escape(act) for act in ACTS)), text)
     if not found or not int(found.group("n")):
         return None
     return found.group("act").lower(), found.group("slug"), int(found.group("n")) * UNITS[found.group("unit").lower()]

@@ -13,7 +13,7 @@ Earlier sign-off: Cockpit item 152, pick a, 2026-11-03 18:21 CST.
 - The owner types the word as the whole prompt, in any case, with surrounding whitespace ignored: `grant <lane> spawn <n>m|h`, or `grant off <lane>`. The lane slug is lower case only. The form and the catalogue are `parse` and `ACTS` in `hooks/grant_word.py`.
 - The coordinator's prompt hook prints one context line: the grant, and the relay to send. The relay is `send_message` to the lane tagged `cs-step:<lane>`, with "grant in session <coordinator id>: <word>". With no session id, the line says the relay cannot run (`grant_line` in `hooks/local_time.py`).
 - The guard approves an `Agent` or `Task` call from a lead session (no `agent_id`) when:
-  - the lane's own `get_session` result, read without a `session_id`, holds one `cs-step:<slug>` tag;
+  - the lane's own `get_session` result, read without a `session_id`, holds a `cs-step:<slug>` tag for the word's slug (a lane may hold several `cs-step` tags, and a word for any one of them counts);
   - a `get_event` result in the lane's transcript shows the owner's word for that slug, as a user event whose content is a plain string;
   - the word's act is `spawn`, and the call is still inside the word's length, counted from the event's server `created_at`.
 - The gate runs after every refusal that can reach an `Agent` or `Task` call. It reads the last 4 MiB of the transcript only (`GRANT_TAIL_BYTES` and `spawn_grant_hit` in `hooks/guard.py`).
@@ -23,7 +23,8 @@ Earlier sign-off: Cockpit item 152, pick a, 2026-11-03 18:21 CST.
 - An event whose content is not a plain string, or that holds an `origin` key or `isSynthetic: true` at any depth.
 - A word that is not the whole prompt. A bare number, or a missing unit.
 - A word for another slug or another act.
-- A `get_session` result with no `cs-step` tag, or with two. The newest such read decides, so it can clear an earlier one.
+- A `get_session` result with no `cs-step` tag. The newest such read decides, so it can clear an earlier one.
+- An event whose catchall carries an `agent_id` or a non-null `parent_tool_use_id`: it came from an agent.
 - A grant that a newer `grant off` for the same slug ends.
 - An agent's own call. A call with an `agent_id` never takes the grant.
 - A read that fails. The guard catches the error and grants nothing.
@@ -40,7 +41,7 @@ Earlier sign-off: Cockpit item 152, pick a, 2026-11-03 18:21 CST.
 ## Check and cost
 
 - Check: `hooks/test_grant_word.py` (the word's form), `hooks/test_grant_guard.py` (the gate; `test_grant_past_the_tail_read_grants_nothing` pins the 4 MiB bound with a grant 16 MiB back), and `hooks/test_local_time.py` (the context line).
-- Cost: one bounded transcript tail read, at most 4 MiB, per `Agent` or `Task` call from a lead session that reaches the check. Nothing on other tool calls. No new file: the coordinator's prompt hook already saves every prompt (`capture()` in `hooks/local_time.py`), and the grant line writes nothing.
+- Cost: one bounded transcript tail read, at most 4 MiB, per `Agent` or `Task` call from a lead session that reaches the check. Nothing on other tool calls. One `guard.log` line per allow (decision cell `spawn-grant`), and one per failed transcript read on an `Agent` or `Task` call (`spawn-grant-unread`), both under the rule `grant-reaches-lanes`. No new file: the coordinator's prompt hook already saves every prompt (`capture()` in `hooks/local_time.py`), and the grant line adds none.
 
 Kind: process
 Home: this record.

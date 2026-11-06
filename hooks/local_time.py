@@ -8,7 +8,7 @@ Modes:
   reason, logged to guard.log. `override <n>[m|h]` and `override off` mean that only as the whole prompt
   (decision owner-override; hooks/override.py). It prints one more line.
   A prompt that is a spawn grant word (`grant <slug> spawn <n>m|h`, `grant off <slug>`; hooks/grant_word.py) prints one
-  more line: the grant, and the relay to send the lane (decision grant-reaches-lanes). It writes no file.
+  more line: the grant, and the relay to send the lane (decision grant-reaches-lanes). The grant line adds no file: the capture below saves every prompt, this one too.
 - --agent: At SubagentStart, gives the agent the time in US Central as context.
 - --page-note: After an ArtifactData read of one waiting-page answer, saves the owner's note on it to the session's inbox, like a chat message (decision owner-feedback-inbox). It prints no time line.
 
