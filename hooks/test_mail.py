@@ -22,22 +22,23 @@ Contract the builder codes against. Every case is red until the product exists.
   `Reply-to: <addr>`, then the body. The fixtures write this format with plumbing.
 
 Pinned choices (each one a departure or an open point, not settled by the spec):
-1. Retry trigger. The spec retries on non-fast-forward. A file:// store cannot force a
-   non-fast-forward on every attempt, so the not-sent case refuses the push in a pre-receive hook.
-   The product must retry on any refused push of the mail ref. This departs from the spec.
-2. Attempt count. "Retry at most 5 times" means 6 pushes in all, since every attempt in that case
-   fails.
+1. Retry trigger. A push is retried only after a non-fast-forward, at most 5 retries, so 6 pushes
+   in all. Any other refused push prints "not sent: <reason>" at once and exits 1 (the lane ruling).
+2. A non-fast-forward on every try. Git forbids ref updates inside a pre-receive hook, and a
+   server refusal reads "[remote rejected]", so the case pushes to a second store whose tip the
+   sender never fetched. The client refuses each push itself, as "[rejected]", before it sends
+   anything. Pushes are counted from the trace2 event log of the send.
 3. An unchanged turn still lists open mail, from a listing the moved turn wrote. Its one git start
    is the remote check, and the turn writes no file.
-4. Inform against request after a take. The spec gives no observable difference in the take itself.
-   The inform case asserts only that take removes the message from turn start and creates nothing
-   else.
+4. A request stays listed after its reply lands, until take. An inform closes by take alone; that
+   case asserts that take removes it from turn start and creates nothing else.
 5. Only the cloud address form is covered. The pc/<host> form has no seam for a test.
 6. The sweep of old run folders is proven in hooks/test_feedback_inbox.py. Not repeated here.
 
 Every machine gets a git identity, as a configured Mac does. A machine with no identity is not covered.
 """
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -114,8 +115,8 @@ def message_id(path):
 class Store:
     """A bare repo on a file:// URL, the MAILBOX_REPO of every machine in one case."""
 
-    def __init__(self, case):
-        self.path = os.path.join(case, "store.git")
+    def __init__(self, case, name="store"):
+        self.path = os.path.join(case, name + ".git")
         self.env = fixture_env(os.path.join(case, "fixture-home"))
         git(case, ["init", "--bare", "-q", self.path], self.env)
         self.url = Path(self.path).as_uri()
@@ -163,7 +164,7 @@ class Store:
 class Machine:
     """One machine: its own home, its own cache, and a scratch checkout as its working directory."""
 
-    def __init__(self, case, name, repo_url, session=None):
+    def __init__(self, case, name, repo_url, session=None, push_to=None, trace=None):
         self.name = name
         self.session = session
         self.home = os.path.join(case, name + "-home")
@@ -179,6 +180,10 @@ class Machine:
                     "MAILBOX_REPO": repo_url, "MAILBOX_CACHE": self.cache})
         if session is not None:
             env["CLAUDE_CODE_REMOTE_SESSION_ID"] = session
+        if push_to is not None:
+            add_git_config(env, "url.%s.pushInsteadOf" % push_to, repo_url)
+        if trace is not None:
+            env["GIT_TRACE2_EVENT"] = trace
         self.env = env
 
 
@@ -237,6 +242,43 @@ def combined(result):
     return (result.stdout or "") + (result.stderr or "")
 
 
+def read_lines(path):
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as handle:
+        return handle.read().splitlines()
+
+
+def git_subcommand(argv):
+    """The git subcommand in an argv, past the options git takes before it (-c NAME=VALUE, -C DIR, ...)."""
+    rest = list(argv[1:])
+    while rest and rest[0] in ("-c", "-C", "--git-dir", "--work-tree"):
+        rest = rest[2:]
+    return rest[0] if rest else None
+
+
+def push_count(trace):
+    """How many `git push` runs the trace2 event log of one send records."""
+    count = 0
+    for line in read_lines(trace):
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        argv = event.get("argv") or []
+        if event.get("event") == "start" and argv and program_name(argv) == "git" and git_subcommand(argv) == "push":
+            count += 1
+    return count
+
+
+def add_git_config(env, key, value):
+    """Append one git config pair to an env dict, after any pairs already there."""
+    count = int(env.get("GIT_CONFIG_COUNT") or 0)
+    env["GIT_CONFIG_KEY_%d" % count] = key
+    env["GIT_CONFIG_VALUE_%d" % count] = value
+    env["GIT_CONFIG_COUNT"] = str(count + 1)
+
+
 def turn(machine):
     payload = {"session_id": machine.session, "cwd": machine.checkout,
                "hook_event_name": "UserPromptSubmit", "prompt": "continue"}
@@ -257,11 +299,11 @@ class MailCase(unittest.TestCase):
     def tearDown(self):
         tracked_tree.rm_tree(self.case)
 
-    def store(self):
-        return Store(self.case)
+    def store(self, name="store"):
+        return Store(self.case, name)
 
-    def machine(self, name, store, session=None):
-        return Machine(self.case, name, store.url, session)
+    def machine(self, name, store, session=None, push_to=None, trace=None):
+        return Machine(self.case, name, store.url, session, push_to=push_to, trace=trace)
 
     def body(self, marker):
         self.counter += 1
@@ -415,26 +457,70 @@ class Cost(MailCase):
 
 
 class NotSent(MailCase):
-    def test_push_refused_on_every_try_prints_not_sent_and_exits_1(self):
-        store = self.store()
-        pushes = os.path.join(self.case, "pushes.txt")
+    def counting_hook(self, store, pushes, script_body):
+        """Writes a pre-receive hook on the store. Each push appends one line to PUSHES first."""
         hook = os.path.join(store.path, "hooks", "pre-receive")
         with open(hook, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write("#!/bin/sh\necho push >> '%s'\necho 'refused by the test store' >&2\nexit 1\n"
-                         % pushes.replace("\\", "/"))
+            handle.write("#!/bin/sh\necho push >> '%s'\n%s" % (pushes.replace("\\", "/"), script_body))
         os.chmod(hook, 0o755)
+
+    def test_refused_push_is_not_retried_and_prints_not_sent_with_reason(self):
+        store = self.store()
+        pushes = os.path.join(self.case, "pushes.txt")
+        self.counting_hook(store, pushes, "echo 'refused by the test store' >&2\nexit 1\n")
         sender = self.machine("a", store, session="sess-a")
-        sent = self.send(sender, "cloud/sess-b", "request", "not-sent")
-        attempts = []
-        if os.path.exists(pushes):
-            with open(pushes, encoding="utf-8") as handle:
-                attempts = handle.read().splitlines()
+        sent = self.send(sender, "cloud/sess-b", "request", "refused-once")
+        attempts = read_lines(pushes)
         self.assertTrue(attempts, "control: the send never reached the store: %r" % combined(sent))
-        self.assertEqual(len(attempts), 6, "the send made %d push attempts, expected 6 (1 try and 5 retries)" % len(attempts))
+        self.assertEqual(len(attempts), 1, "a refused push was retried: %d pushes, expected 1" % len(attempts))
+        self.assertEqual(sent.returncode, 1, "a refused send exited %d, expected 1: %s"
+                         % (sent.returncode, combined(sent)))
+        notices = [line for line in combined(sent).splitlines() if line.startswith("not sent: ")]
+        self.assertTrue(notices, "a refused send printed no 'not sent: <reason>' line: %r" % combined(sent))
+        self.assertTrue(notices[0][len("not sent: "):].strip(), "the 'not sent:' line gives no reason: %r" % notices[0])
+        self.assertEqual(store.files(), [], "a refused message landed on the store anyway")
+
+    def test_non_fast_forward_on_every_try_makes_six_pushes_then_not_sent_exit_1(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4e61", "request", "cloud/sess-x", "Body marker: base\n")
+        base = store.tip()
+        # The push goes to a second store whose tip the sender never fetched. The commit is built on the
+        # fetched tip, so the client refuses each push as a non-fast-forward before it sends anything.
+        ahead = self.store(name="ahead")
+        ahead.seed("cloud/sess-b", "0a1b2c3d4e71", "request", "cloud/sess-y", "Body marker: ahead\n")
+        ahead_tip = ahead.tip()
+        trace = os.path.join(self.case, "trace2.jsonl")
+        sender = self.machine("a", store, session="sess-a", push_to=ahead.url, trace=trace)
+        sent = self.send(sender, "cloud/sess-b", "request", "non-ff-every-try")
+        pushes = push_count(trace)
+        self.assertTrue(pushes, "control: the send made no push at all: %r" % combined(sent))
+        self.assertEqual(pushes, 6, "a non-fast-forward on every try made %d pushes, expected 6 "
+                         "(1 try and 5 retries); the send said %r" % (pushes, combined(sent)))
         self.assertEqual(sent.returncode, 1, "a send refused on every try exited %d, expected 1: %s"
                          % (sent.returncode, combined(sent)))
         self.assertIn("not sent", combined(sent).lower(), "a refused send did not print 'not sent': %r" % combined(sent))
-        self.assertEqual(store.files(), [], "a refused message landed on the store anyway")
+        self.assertEqual(store.tip(), base, "a push moved the store the sender fetched")
+        self.assertEqual(ahead.tip(), ahead_tip, "a refused push landed on the store it was sent to")
+
+
+class ReplyThenTake(MailCase):
+    def test_request_stays_listed_after_its_reply_until_take(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4e54", "request", "cloud/sess-a", "Body marker: request-reply\n")
+        receiver = self.machine("b", store, session="sess-b")
+        before = listed_with(turn(receiver), "0a1b2c3d4e54")
+        self.assertEqual(len(before), 1, "control: the request is not listed before the reply: %r" % before)
+        replied = self.send(receiver, "cloud/sess-a", "reply", "reply-marker", re_id="0a1b2c3d4e54")
+        self.assertEqual(replied.returncode, 0, "the reply exited %d: %s" % (replied.returncode, combined(replied)))
+        landed = store.files("mail/cloud/sess-a/")
+        self.assertEqual(len(landed), 1, "control: the reply did not land for the sender: %r" % landed)
+        self.assertIn("re 0a1b2c3d4e54", store.read(landed[0]), "the reply does not name the request it answers")
+        still = listed_with(turn(receiver), "0a1b2c3d4e54")
+        self.assertEqual(len(still), 1, "the request left the receiver's turn start on its reply, before take: %r" % still)
+        taken = run_cli(receiver, "take", "0a1b2c3d4e54")
+        self.assertEqual(taken.returncode, 0, "the take exited %d: %s" % (taken.returncode, combined(taken)))
+        after = listed_with(turn(receiver), "0a1b2c3d4e54")
+        self.assertEqual(after, [], "the request is still listed after take: %r" % after)
 
 
 if __name__ == "__main__":
