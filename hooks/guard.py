@@ -277,6 +277,7 @@ The model judges (hooks/call_judge.py, hooks/prose_judge.py, hooks/sendmessage_s
 refuse() too, so an override lifts them.
 """
 
+import difflib
 import importlib
 import importlib.machinery
 import importlib.util
@@ -1608,9 +1609,133 @@ def is_test_config_rel(rel: str) -> bool:
 
 def author_path_ok(rel: str) -> bool:
     """A test-author may change a test path, test config, or a dev dependency list. `package.json`
-    and `pyproject.toml` pass here and are read by content in `role_offences`."""
+    and `pyproject.toml` pass here and are read by content in `role_offences`. A workflow does not pass
+    here: its whole test-run steps pass in `role_write_hit` and `role_offences` (`workflow_test_steps_only`)."""
     return (is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES
             or norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS)
+
+
+# ---- workflow files: the one classifier both roles ask (decision builders-cannot-edit-tests).
+# A test-author changes a workflow only by adding, removing or moving whole test-run steps, so a new
+# suite gets its CI step. A builder changes any workflow line, except an added one that disables tests.
+WORKFLOW_REL = re.compile(r"^\.github/workflows/[^/]+\.ya?ml$")
+# The only keys a test-run step holds. `continue-on-error`, `env`, `uses`, `with` are no test-run key.
+WORKFLOW_STEP_KEYS = {"name", "if", "run", "shell", "working-directory", "timeout-minutes"}
+WORKFLOW_STEP_START = re.compile(r"^(\s*)-\s+(name|run):")
+WORKFLOW_KEY_LINE = re.compile(r"^(\s*)(?:-\s+)?([A-Za-z][\w-]*):\s*(.*)$")
+WORKFLOW_INTERPRETERS = {"python", "python3", "node", "bash", "sh", "pwsh"}
+
+
+def is_workflow_rel(rel: str) -> bool:
+    """True when a repository-relative path is a GitHub workflow file (`.github/workflows/*.yml|*.yaml`)."""
+    return bool(WORKFLOW_REL.match(norm(rel).lstrip("/").lower()))
+
+
+def workflow_run_is_test(value: str) -> bool:
+    """True when one single-line `run:` value is `[interpreter] <test path> [args]` and nothing else.
+    A tokenizer that keeps quotes whole judges it, so a `#` or `//` in quotes is an argument and an
+    unquoted `&&`, `;`, `|`, redirect or `$(` is a token of its own that no test run holds."""
+    value = value.strip()
+    if not value or value[0] in "|>\"'&*!%@`":
+        return False
+    lexer = shlex.shlex(value, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    if any(set(tok) <= set(lexer.punctuation_chars) or "`" in tok for tok in tokens):
+        return False
+    if tokens and tokens[0] in WORKFLOW_INTERPRETERS:
+        tokens = tokens[1:]
+    if not tokens or ".." in norm(tokens[0]).split("/") or not is_test_rel(tokens[0]):
+        return False
+    return not TEST_DISABLE_FLAGS.search(" ".join(tokens[1:])) and not disables_tests([value], [])
+
+
+def workflow_test_step(lines) -> bool:
+    """True when `lines` (non-blank) are exactly one whole test-run step."""
+    start = WORKFLOW_STEP_START.match(lines[0]) if lines else None
+    if not start:
+        return False
+    keys = []
+    for line in lines:
+        found = WORKFLOW_KEY_LINE.match(line)
+        if not found or found.group(2) not in WORKFLOW_STEP_KEYS or (
+                line is not lines[0] and (len(found.group(1)) <= len(start.group(1)) or line.lstrip().startswith("- "))):
+            return False
+        keys.append((found.group(2), found.group(3)))
+        if disables_tests([line], []):
+            return False
+    runs = [value for key, value in keys if key == "run"]
+    return len(runs) == 1 and len(set(key for key, _ in keys)) == len(keys) and workflow_run_is_test(runs[0])
+
+
+def workflow_step_chunk(lines) -> bool:
+    """True when the non-blank `lines` split into whole test-run steps, each starting at a step line."""
+    lines = [line for line in lines if line.strip()]
+    if not lines:
+        return True
+    indent = len(WORKFLOW_STEP_START.match(lines[0]).group(1)) if WORKFLOW_STEP_START.match(lines[0]) else None
+    if indent is None:
+        return False
+    steps = []
+    for line in lines:
+        starts = WORKFLOW_STEP_START.match(line)
+        if starts and len(starts.group(1)) == indent:
+            steps.append([line])
+        else:
+            steps[-1].append(line)
+    return all(workflow_test_step(step) for step in steps)
+
+
+def workflow_changed_lines(old_text: str, new_text: str):
+    """The (removed, added) line groups of a diff from `old_text` to `new_text`, one pair per change."""
+    old, new = old_text.splitlines(), new_text.splitlines()
+    ops = difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes()
+    return [(old[i1:i2], new[j1:j2]) for tag, i1, i2, j1, j2 in ops if tag != "equal"]
+
+
+def workflow_test_steps_only(old_text: str, new_text: str) -> bool:
+    """True when every added and removed non-blank line of the change forms whole test-run steps."""
+    return all(workflow_step_chunk(removed) and workflow_step_chunk(added)
+               for removed, added in workflow_changed_lines(old_text, new_text))
+
+
+def workflow_disables_tests(old_text: str, new_text: str) -> bool:
+    """True when an added line of the change disables tests in a test-runner line: a disable name or
+    flag on a line that calls a test runner or a test path."""
+    for _removed, added in workflow_changed_lines(old_text, new_text):
+        for line in added:
+            if (TEST_DISABLE_NAMES.search(line) or TEST_DISABLE_FLAGS.search(line)) and (
+                    TEST_RUNNER_CONTEXT.search(line) or any(is_test_rel(tok) for tok in line.split())):
+                return True
+    return False
+
+
+def workflow_pairs(tool_input, full: str):
+    """The (old, new) texts a write tool call makes of a workflow: an Edit's old and new string, each edit
+    of a MultiEdit, a Write's file on disk (empty if none) and its content; None when the call has none."""
+    if not isinstance(tool_input, dict):
+        return None
+    edits = tool_input.get("edits")
+    if isinstance(edits, list):
+        pairs = [(e.get("old_string"), e.get("new_string")) for e in edits if isinstance(e, dict)]
+    elif "old_string" in tool_input or "new_string" in tool_input:
+        pairs = [(tool_input.get("old_string"), tool_input.get("new_string"))]
+    elif "content" in tool_input:
+        try:
+            with open(full, encoding="utf-8", errors="replace") as handle:
+                disk = handle.read()
+        except Exception:
+            disk = ""
+        pairs = [(disk, tool_input.get("content"))]
+    else:
+        return None
+    if not pairs or any(not isinstance(o, str) or not isinstance(n, str) for o, n in pairs):
+        return None
+    return pairs
 
 
 def design_folder():
@@ -1708,6 +1833,10 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         ok = author_path_ok if role == AUTHOR_ROLE else designer_path_ok
         if ok(rel) or under_session_scratchpad(full, session_id):
             return ""
+        if role == AUTHOR_ROLE and is_workflow_rel(rel):
+            pairs = workflow_pairs(tool_input, full)
+            if pairs and all(workflow_test_steps_only(o, n) for o, n in pairs):
+                return ""
         # `session_id` is the parent's, the same for an agent (decision
         # an-agent-outside-its-home-tree-must-stop), and so is the id in the scratchpad path.
         # Another session's scratchpad is neither this one's nor "outside a repository".
@@ -1720,6 +1849,9 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return target
     if is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
+        return target
+    if is_workflow_rel(rel) and any(
+            workflow_disables_tests(o, n) for o, n in workflow_pairs(tool_input, _expanded(target, cwd)) or ()):
         return target
     return ""
 
@@ -1945,7 +2077,10 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
         # reads `../...`, which no role owns.
         real = os.path.realpath(os.path.join(top, rel))
         names = [rel, os.path.relpath(real, top)]
-        if role == AUTHOR_ROLE:
+        if role == AUTHOR_ROLE and is_workflow_rel(rel) and all(
+                is_workflow_rel(n) or author_path_ok(n) for n in names):
+            bad = not workflow_test_steps_only(text_at(root, old, rel), text_at(root, new, rel))
+        elif role == AUTHOR_ROLE:
             bad = not all(author_path_ok(n) for n in names)
             if not bad and basename(rel) == "package.json":
                 bad = not package_json_author_ok(text_at(root, old, rel), text_at(root, new, rel))
@@ -1957,7 +2092,8 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
             bad = not all(designer_path_ok(n) for n in names)
         else:
             bad = any(is_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
-                text_at(root, new, rel).splitlines(), text_at(root, old, rel).splitlines()))
+                text_at(root, new, rel).splitlines(), text_at(root, old, rel).splitlines())) or (
+                is_workflow_rel(rel) and workflow_disables_tests(text_at(root, old, rel), text_at(root, new, rel)))
         if bad:
             found.append(rel)
     return found
