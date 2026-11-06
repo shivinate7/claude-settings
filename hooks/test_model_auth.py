@@ -428,7 +428,7 @@ def C8_fake_token_reaches_no_stdout_and_no_written_file_but_the_token_file():
 
 FAKE_CLAUDE = (
     "#!/bin/sh\n"
-    ": > \"$FAKE_CLAUDE_MARK\"\n"  # the marker records that a probe started claude
+    ": > \"${0%/*}/probe-ran\"\n"  # beside this fake: the child's PATH has no dirname, and no marker variable
     "echo 'not logged in' >&2\n"
     "exit 1\n"
 )
@@ -448,7 +448,7 @@ def entry_run(name, with_token):
     marker = os.path.join(fake_dir, "probe-ran")
     if with_token:
         token_file(cfg, FAKE_TOKEN + "\n")
-    env = dict(os.environ, CLAUDE_CONFIG_DIR=cfg, PATH=fake_dir, FAKE_CLAUDE_MARK=marker)
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=cfg, PATH=fake_dir)
     env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
     payload = {"session_id": "model-auth-entry-" + name, "hook_event_name": "SessionStart",
                "cwd": SCRATCH, "source": "startup"}
