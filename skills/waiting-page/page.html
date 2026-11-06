@@ -1969,9 +1969,11 @@ function renderBar() {
 // record's `read` confirms a read. The writer reads asks/ at each wake and turn start (SKILL.md), so the unsent case says that.
 // SKILL.md forbids a session to reply in a comment thread, so neither line sends the owner there.
 const TOLD = "A wake was sent.";
-const NOT_TOLD = () => "No session was told. It waits for " + askWriter() + "'s next wake or turn start.";
+const NOT_TOLD = (code) => withCode("No session was told. It waits for " + askWriter() + "'s next wake or turn start.", code);
 // An answer is read by each item's owner, not by the writer, so its unsent line names no writer.
-const ANSWER_NOT_TOLD = "No session was told. Each owner reads its answer at its next wake or turn start.";
+const ANSWER_NOT_TOLD = (code) => withCode("No session was told. Each owner reads its answer at its next wake or turn start.", code);
+// notifyClaude gives true, a failing error code, or false when no send was tried. A code goes into the status line in words.
+function withCode(line, code) { return typeof code === "string" ? line.replace("No session was told.", "No session was told (" + code + ")." ) : line; }
 const MAX_BYTES = 4096, MAX_NOTE = 500, MAX_OWNER = 80, CAN_WAIT_MS = 3000, UNDO_S = 8;
 const plain = (t) => String(t || "").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
 // Owners come first so a cut at the byte cap never drops them.
@@ -1998,23 +2000,29 @@ async function canTell() {
     return await Promise.race([state.comments.canSendToClaude().then((v) => v === "available"), give]);
   } catch (e) { return false; }
 }
-// One comment per Send or Undo, into the viewer's stored thread.
-// Any failure only means "no session was told"; the answers stand and nothing retries.
+// One comment per Send or Undo, into the viewer's stored thread. The platform caps a thread's comments and answers a full thread
+// with upstream_error, so a failure on the stored thread starts one new anchored thread, unless the code says a second send
+// cannot help (NO_FALLBACK) or would repeat the same refusal. Returns true, the failing code (a code outside the contract's
+// list reads as upstream_error, as the contract says, so a status line never shows a stray word), or false when no send was
+// tried. The answers stand either way and nothing else retries.
+const NO_FALLBACK = ["rate_limited", "claude_unavailable", "consent_required", "invalid", "unavailable", "forbidden", "not_granted", "capability_disabled", "capability_removed", "transform_error"];
+const KNOWN_CODES = [...NO_FALLBACK, "not_found", "upstream_error"];
 async function notifyClaude(text, can) {
+  const cm = state.comments;
+  if (!cm || !can) return false;
+  const codeOf = (e) => KNOWN_CODES.includes(e && e.code) ? e.code : "upstream_error";
   try {
-    const cm = state.comments;
-    if (!cm || !can) return false;
     let id = null;
     try { id = localStorage.getItem("waiting.thread"); } catch (e) {}
     let res = null;
     if (id) {
       try { res = await cm.sendToClaude({ threadId: id, text }); }
-      catch (e) { if (!e || e.code !== "not_found") throw e; }
+      catch (e) { if (NO_FALLBACK.includes(codeOf(e))) return codeOf(e); }
     }
     if (!res) res = await cm.sendToClaude({ anchor: await cm.anchorFor(document.querySelector("h1")), text });
     try { localStorage.setItem("waiting.thread", res.threadId); } catch (e) {}
     return true;
-  } catch (e) { return false; }
+  } catch (e) { return codeOf(e); }
 }
 
 async function sendAll() {
@@ -2042,7 +2050,7 @@ async function sendAll() {
     render();
     if (entries.length) {
       const told = await notifyClaude(noticeText(entries, "Saved on the waiting page."), can);
-      setSentStatus(told ? TOLD : ANSWER_NOT_TOLD);
+      setSentStatus(told === true ? TOLD : ANSWER_NOT_TOLD(told));
     }
   } finally { state.sending = false; renderBar(); }
 }
@@ -2544,7 +2552,7 @@ async function sendAsk(rk) {
   const note = rp ? "Replied on the waiting page. Writer: " + askWriter() + ". Ask " + w0.id + " re " + w0.re + ", answered by " + plain(w0.by) + ": " + cut(w0.text) + "."
     : "Asked on the waiting page. Writer: " + askWriter() + ". " + (wrote.length === 1 ? "Ask " + w0.id + ": " + cut(w0.text) + "." : wrote.length + " asks: " + wrote.map((w) => w.id + ": " + cut(w.text)).join("; ") + ".");
   const told = await notifyClaude(fitBytes(note), can);
-  if (s.sent === sent) { sent.told = told ? TOLD : NOT_TOLD(); renderLine(); }
+  if (s.sent === sent) { sent.told = told === true ? TOLD : NOT_TOLD(told); renderLine(); }
 }
 // Undo deletes each record of the batch and puts the asks back in the list, in their order, ahead of any stacked since. The box is never written.
 // Each ask goes into the kept list before its delete, so a reload between the two loses none. The window is read from the clock before each delete, as undoLeft does.

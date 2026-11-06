@@ -9,9 +9,8 @@ The ruling is decision design-skills (third-party design skills), 2026-10-10.
 ## When it runs
 
 Beside review round 1, on the first built head. The blind reviewers (A and B) and the compare
-step all run then. Fixes go to the builder with the round-1 code findings. When round 1 changed a
-screen, the round-2 reviewer checks that these findings still hold (the coordinator's reading, pending
-the owner; decision `design-agents`).
+step all run then. Fixes go to the builder with the round-1 code findings. Any change to a screen file
+after round 1 gets a second design read (decision `design-agents`).
 
 ## Pinned sources
 
@@ -103,8 +102,8 @@ It is not a review of a built screen.
 - No conformity either way. The repo does not silence a skill. A skill does not restyle the
   repo on its own.
 - A skill update does not change a look by itself. Each source stays at its pin.
-- A design review is steps 2 to 5, with a new pair of blind reviewers. It runs at round 1. Any later
-  design review follows decision `design-agents`. Round cap and open findings:
+- A design review is steps 2 to 5, with a new pair of blind reviewers. It runs at round 1. A second design read
+  follows decision `design-agents`. Round cap and open findings:
   `roles-review-cap-three`, `roles-findings-are-debts-or-notes`.
 - House rules (decision ux-house-rules, the UX rules for builders and reviewers): a builder reads `~/.claude/docs/design/principles.md` before it writes UI. Reviewer A's brief asks for the house checklist (step 2). House design values: `~/.claude/docs/design/tokens.md`.
 - Layout and spacing: Reviewer A's house checklist covers the rules in `~/.claude/docs/design/layout.md` (gap on the parent, layout primitives, a control beside its area, container queries, fluid tokens).

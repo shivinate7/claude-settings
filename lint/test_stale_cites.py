@@ -371,7 +371,7 @@ class MoveTests(StaleCase):
         def change(repo):
             git(repo, "rm", "-q", "hooks/guard_core.py")
             commit(repo)
-        self.assert_passes(self.make_range(base_files("# Notes\n\n- the gate is in `hooks/guard`\n"), change))
+        self.assert_passes(self.make_range(base_files("# Notes\n\n- the guard is in `hooks/guard`\n"), change))
 
     def test_generated_records_page_is_never_checked(self):
         def change(repo):
@@ -1450,7 +1450,7 @@ class TreeTests(StaleCase):
     The guard.py in CODE has six lines; the cases below use that count."""
 
     def test_a_dead_path_cite_is_flagged_stale003(self):
-        found = self.assert_tree_flags(self.tree("# Notes\n\n- the gate is in `hooks/gone.py`\n"),
+        found = self.assert_tree_flags(self.tree("# Notes\n\n- the guard is in `hooks/gone.py`\n"),
                                        [(NOTES, 3, "STALE003")])
         self.assertIn("hooks/gone.py", found[0][3])
         self.assertNotIn("did you mean", found[0][3])
@@ -1460,7 +1460,7 @@ class TreeTests(StaleCase):
         self.assert_tree_flags(self.tree(notes), [(NOTES, 3, "STALE003"), (NOTES, 4, "STALE003")])
 
     def test_a_live_path_cite_is_silent(self):
-        self.assert_tree_passes(self.tree("# Notes\n\n- the gate is in `hooks/guard.py`\n- and `lint/x.py`\n"))
+        self.assert_tree_passes(self.tree("# Notes\n\n- the guard is in `hooks/guard.py`\n- and `lint/x.py`\n"))
 
     def test_a_path_resolved_from_the_md_file_folder_is_silent(self):
         extra = {"mods/session-board/notes.md": "- see `hooks/tool.py`\n",
@@ -2108,7 +2108,7 @@ class RouteClaimTests(StaleCase):
 
 
 class RouteClaimFixtureTests(unittest.TestCase):
-    """The labelled route claims, read at origin/main 7975f6d8 by the coordinator audit: one entry per labelled line.
+    """The labelled route claims, hand-judged stale or true, that measure the judge's false alarms: one entry per labelled line.
     A span is one entry at its first line, and `line` is a string, such as "16" or "16-20"."""
 
     def test_route_claims_fixture_has_the_audited_shape(self):
