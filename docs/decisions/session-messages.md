@@ -57,6 +57,34 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
   routing; transcript reads in `lint/_transcript.py`. No new hook until an incident names one
   (`building-guard-needs-incident`).
 
+## Reach between the cloud and the owner's computer (page item 153)
+
+Measured 2026-11-06 13:17 CST, Claude Code 2.1.319, this lane's own transcript: 7 cloud `send_message`
+deliveries arrived as `origin.kind` `task-notification` with no hop chain. The peer guard reads only
+`peer` turns with no sender task id. So the 10-hop cap does not apply between cloud sessions. It applies
+to `SendMessage` between sessions on one computer. Cloud to the owner's computer by `send_message` is
+refused with `elevated_session_untrusted_device` (PR #1051, plan for local-session reach).
+
+Read from the binary, unmeasured live: an artifact republish wakes each session that watches it, and
+that wake is not a `peer` turn. A plain comment or an `ArtifactData` write wakes nothing. Whether a
+desktop session's watch wakes it is unmeasured.
+
+Options for the owner (item 153 asked again):
+
+- a. Mailbox artifact. One private mailbox artifact per receiver. A message is one `ArtifactData` doc;
+  the sender republishes the receiver's mailbox to wake it; the receiver reads unanswered mail at each
+  wake and turn start. Cost per send: one write and one publish. No process, no timer.
+- b. Git mailbox. One PR per receiver in a new private repo; a message is a PR comment; a cloud receiver
+  wakes by PR subscription; the computer reads at turn start. Works with any harness that has git.
+- c. Local relay. A small server on each computer pushes mailbox rows into local sessions as channel
+  turns. Needs `channelsEnabled` from the org admin and a long-lived process.
+- d. Keep peer messages and live with the cap. Cloud still cannot reach the computer.
+- Dropped: the platform session inbox over Remote Control. Who may write into it is unmeasured, and the
+  binary has a message that it can be off for an organization.
+
+Test before any build: a cloud session republishes a mailbox 12 times while a Mac desktop session
+watches it. Pass: 12 wakes, no `peer` stamp, no `[peer-guard]` line.
+
 ## Build in work order
 
 1. Measure, no code: 11 round trips in cloud and on the Mac, with replies on; does a `send_later` turn
