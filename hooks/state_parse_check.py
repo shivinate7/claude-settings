@@ -11,31 +11,31 @@ names the file, the line and the fault, and exits 0 on every path.
 
 What it reads: only the files the call names.
   - Write, Edit, MultiEdit: the call's file_path, when it is a *.json or a *.md in the handoff folder.
-  - Bash, PowerShell: the command split by shlex. A path counts when it is in the handoff folder, a
-    settings*.json, a roadmap/data/steps/*.json, or a *.json in a write position (a `sed -i` operand, a
-    `>` or `>>` target, a `tee` argument). So `cat bad.json` says nothing.
+  - Bash, PowerShell: the command split by shlex. A path counts only in a write position (a `sed -i`
+    operand, a `>` or `>>` target, a `tee` argument), and only when it is a *.json or a *.md in the handoff
+    folder. A read says nothing, even of a state file: it changes nothing, and an alarm on each read would
+    repeat until the file is fixed. So `cat bad.json` says nothing.
   - The handoff folder is the folder of precompact_handoff.handoff_path, under CLAUDE_CONFIG_DIR.
-  - A premises check on a handoff runs for a call that wrote it, not for a read of it.
 
 No false alarm mid-edit: an Edit or MultiEdit rebuilds the before-state from old_string and new_string
-(the after-state with new_string put back to old_string). When the before-state already had the fault,
-or cannot be rebuilt (new_string not found in the file, or too many places to try), it says nothing.
-An Edit that only removed text (new_string empty) puts old_string back at each place it could have been:
-the fault counts when some such before-state was fine, so a removal from an already broken file is silent. A file that is gone
-says nothing: a delete is not a break. A Write or a shell write is judged as left.
+(the after-state with new_string put back to old_string). A new_string that occurs more than once, or is
+empty, gives one candidate before-state per place it could have been. The check stays silent only when
+every candidate was already broken. It caps the work (candidates times file size) before it builds any
+candidate, builds them one at a time, and stays silent past the cap or when new_string is not in the file.
+A file that is gone says nothing: a delete is not a break. A Write or a shell write is judged as left.
 
 Fence rules, one home each: an inbox uses feedback_guard.scan (parse()'s loop, so this check and the Stop
-check agree on the inbox); another handoff .md uses feedback_guard.fence_scan (unfenced()'s loop). A fence
+check agree on the inbox); another handoff .md uses feedback_guard.fence_scan (unfenced()'s loop) with the
+indent capped at three spaces. A fence
 inside a JSON string is text: the fence scan never runs on JSON.
 
-Cost: one shell start for a call that names no state file (the settings.json filter greps only
-tool_input and exits unless it names `.json` or the handoff folder). A call that names one: one Python
-start, one read of each named file, and the import of feedback_guard when a .md is judged. It writes no
-file and starts no other process.
+Cost: every call in the matcher starts the settings.json filter's shell, with one cat and one grep. The
+filter greps only tool_input and exits unless it names `.json` or the handoff folder, so a call that names
+neither starts no Python. A call that names one starts one Python, which reads each file it judges, and
+imports feedback_guard when a .md is judged. It writes no file and starts no other process.
 
 STATE_PARSE_CHECK_UNDER_TEST names another copy of this file for hooks/test_state_parse_check.py.
 """
-import fnmatch
 import json
 import os
 import re
@@ -52,9 +52,8 @@ SHELL_TOOLS = ("Bash", "PowerShell")
 EDIT_TOOLS = ("Edit", "MultiEdit")
 FILE_TOOLS = ("Write",) + EDIT_TOOLS
 MAX_PATHS = 20           # files judged per call
-MAX_CANDIDATES = 64      # before-states tried for one Edit whose new_string occurs more than once
+MAX_CANDIDATES = 64      # places one new_string may occur in and still be tried
 SHORT_TEXT = 2000        # a text this short is tried at every character for an Edit that only removed text
-MAX_INSERTS = 3000       # before-states tried for one Edit that only removed text
 MAX_WORK = 60_000_000    # candidates times file size: a costlier rebuild is skipped, and the check is silent
 MAX_BYTES = 8_000_000    # a state file larger than this is not read
 SEPARATORS = {"|", "||", "&&", ";", "&", ";;", "|&", "(", ")"}
@@ -88,18 +87,6 @@ def kind_of(path, hdir):
     return None
 
 
-def is_state_path(path, hdir):
-    """A path that counts in any position of a shell command."""
-    flat = path.replace("\\", "/")
-    name = os.path.basename(flat)
-    if fnmatch.fnmatch(name, "settings*.json"):
-        return True
-    if name.endswith(".json") and "/roadmap/data/steps/" in "/" + flat.lstrip("/"):
-        return True
-    return kind_of(path, hdir) in ("inbox", "handoff") or (
-        name.endswith(".json") and norm(os.path.dirname(path)) == norm(hdir))
-
-
 def tokens(command, powershell):
     """The command's words and punctuation. A command shlex cannot read falls back to a whitespace split."""
     try:
@@ -112,14 +99,14 @@ def tokens(command, powershell):
 
 
 def shell_paths(command, powershell, cwd, hdir):
-    """[(path, written)] of the files a shell command names that this check may judge, in order."""
+    """The files a shell command writes that this check may judge, in order: a redirect target, a `tee`
+    argument, a `sed -i` operand."""
     found = {}
 
-    def add(word, written):
+    def add(word):
         path = resolve(word, cwd)
-        if path is None:
-            return
-        found[path] = found.get(path, False) or written
+        if path is not None:
+            found[path] = True
 
     words, seg, redirect = tokens(command, powershell), [], False
     segments = []
@@ -130,7 +117,7 @@ def shell_paths(command, powershell, cwd, hdir):
         elif word in REDIRECTS:
             redirect = True
         elif redirect:
-            add(word, True)
+            add(word)
             redirect = False
         elif not set(word) <= set("<>&|();"):
             seg.append(word)
@@ -141,12 +128,11 @@ def shell_paths(command, powershell, cwd, hdir):
         program = os.path.basename(args[0]) if args else ""
         in_place = program == "sed" and any(SED_IN_PLACE.fullmatch(w) or w.startswith("-i")
                                             for w in args[1:] if w.startswith("-") and w != "--")
-        for word in args[1:]:
-            written = (in_place and word.endswith(".json")) or (program == "tee" and not word.startswith("-"))
-            probe = resolve(word, cwd)
-            if probe is not None and not word.startswith("-") and (written or is_state_path(probe, hdir)):
-                add(word, bool(written))
-    return list(found.items())[:MAX_PATHS]
+        if in_place or program == "tee":
+            for word in args[1:]:
+                if not word.startswith("-"):
+                    add(word)
+    return [p for p in found if kind_of(p, hdir)][:MAX_PATHS]
 
 
 def read_text(path):
@@ -178,111 +164,138 @@ def facts(kind, text, guard):
     if kind == "inbox":
         blocks, open_line = guard.scan(text)
         return {"fence": open_line, "stamps": [b["stamp"] for b in blocks]}
-    return {"fence": guard.fence_scan(text)[1],
+    return {"fence": guard.fence_scan(text, 3)[1],
             "premises": precompact_handoff._PREMISES_HEAD.search(text) is not None}
 
 
-def inserts(text, old):
-    """The texts that put `old` back into `text` at each place a removal could have been: every line
-    start and the end, and every character when the text is short."""
-    if not old:
-        return [text]
-    short = len(text) <= SHORT_TEXT
-    return [text[:i] + old + text[i:] for i in range(len(text) + 1)
-            if short or i == 0 or i == len(text) or text[i - 1] == "\n"]
+class Unknown(Exception):
+    """The before-state cannot be rebuilt, or costs more than MAX_WORK to try: the check says nothing."""
 
 
-def unapply(text, edit):
-    """(before-states, removal) for one edit: `text` with new_string put back to old_string, one per place
-    new_string occurs. An empty new_string occurs everywhere, so its candidates put old_string back at each
-    place a removal could have been, and `removal` is True. None when that cannot be done."""
-    old, new = edit.get("old_string"), edit.get("new_string")
-    if not isinstance(old, str) or not isinstance(new, str):
-        return None
+def places(text, edit):
+    """The offsets where a before-state of `edit` differs from `text`, or raises Unknown. new_string
+    occurs at each offset it is found at; an empty new_string could have been removed from any line start
+    and the end, and from every offset when the text is short. Counts the places before anything is built."""
+    new = edit["new_string"]
     if not new:
-        return inserts(text, old), True
+        count = len(text) + 1 if len(text) <= SHORT_TEXT else text.count("\n") + 2
+        if count * len(text) > MAX_WORK:
+            raise Unknown()
+        short = len(text) <= SHORT_TEXT
+        return [i for i in range(len(text) + 1) if short or i == 0 or i == len(text) or text[i - 1] == "\n"]
     if edit.get("replace_all"):
-        return ([text.replace(new, old)], False) if new in text else None
-    states, start = [], text.find(new)
-    while start >= 0 and len(states) <= MAX_CANDIDATES:
-        states.append(text[:start] + old + text[start + len(new):])
-        start = text.find(new, start + 1)
-    return (states, False) if 0 < len(states) <= MAX_CANDIDATES else None
+        found = [text.find(new)]
+    else:
+        found, start = [], text.find(new)
+        while start >= 0 and len(found) <= MAX_CANDIDATES:
+            found.append(start)
+            start = text.find(new, start + 1)
+    if found[0] < 0 or len(found) > MAX_CANDIDATES or len(found) * len(text) > MAX_WORK:
+        raise Unknown()
+    return found
+
+
+def unapply(text, edit, spent):
+    """The before-states of one edit, one at a time: `text` with new_string put back to old_string at
+    each place it could have been. `spent` counts the characters built, and the work cap stops it."""
+    old, new = edit["old_string"], edit["new_string"]
+    if edit.get("replace_all") and new:
+        spent[0] += len(text) + len(old)
+        yield text.replace(new, old)
+        return
+    for i in places(text, edit):
+        spent[0] += len(text) + len(old)
+        if spent[0] > MAX_WORK:
+            raise Unknown()
+        yield text[:i] + old + text[i + len(new):]
+
+
+class Candidates:
+    """The candidate before-states of an Edit or MultiEdit, built one at a time on each pass."""
+
+    def __init__(self, after, edits):
+        self.after, self.edits = after, edits
+
+    def __bool__(self):
+        return True
+
+    def __iter__(self):
+        spent = [0]
+
+        def walk(text, rest):
+            if not rest:
+                yield text
+                return
+            for back in unapply(text, rest[0], spent):
+                yield from walk(back, rest[1:])
+
+        return walk(self.after, self.edits[::-1])
 
 
 def before_states(tool, tool_input, after):
     """(candidates, removal). candidates is None for a call judged as left, [] when an Edit's before-state
-    cannot be rebuilt (or costs too much to try), else the candidate before-states. removal is True when an
+    cannot be rebuilt or costs more than the work cap, else a Candidates sequence. removal is True when an
     edit only removed text, so the place it was removed from is unknown."""
     if tool not in EDIT_TOOLS:
         return None, False
     edits = tool_input.get("edits") if tool == "MultiEdit" else [tool_input]
-    if not isinstance(edits, list):
+    if not isinstance(edits, list) or not edits or not all(
+            isinstance(e, dict) and isinstance(e.get("old_string"), str) and isinstance(e.get("new_string"), str)
+            for e in edits):
         return [], False
-    states, removal = [after], False
-    for edit in reversed(edits):
-        if not isinstance(edit, dict):
-            return [], False
-        nxt = []
-        for state in states:
-            back = unapply(state, edit)
-            if back is None:
-                return [], False
-            nxt += back[0]
-            removal = removal or back[1]
-            if len(nxt) > MAX_INSERTS or len(nxt) * len(after) > MAX_WORK:
-                return [], False
-        states = nxt
-    return states, removal
+    try:
+        places(after, edits[-1])  # the cap comes before any candidate is built
+    except Unknown:
+        return [], False
+    return Candidates(after, edits), any(not e["new_string"] for e in edits)
 
 
-def judge(path, kind, after, befores, removal, written, guard):
+def judge(path, kind, after, befores, guard):
     """The fault lines for one file. `befores` is None (judge as left), [] (silent), or the candidate
-    before-states. A fault counts only when it was not already there: for an Edit that put text in place, when
-    no candidate had it; for an Edit that only removed text, when some candidate did not (every place the
-    removal could have been leaves the fault, so the file was broken before)."""
+    before-states. A fault counts unless every candidate already had it."""
     if befores is not None and not befores:
         return []
     now = facts(kind, after, guard)
-    memo = {}
-
-    def was(index):
-        if index not in memo:
-            memo[index] = facts(kind, befores[index], guard)
-        return memo[index]
-
-    def already(key):
-        flags = (bool(was(i)[key]) for i in range(len(befores or [])))
-        return all(flags) if removal else any(flags)
-
-    name, lines = path, []
-    if kind == "json":
-        if now["json"] and not already("json"):
-            line, column, why = now["json"]
-            lines.append("%s is not valid JSON: %s at line %d column %d" % (name, why, line, column))
-        return lines
-    if now["fence"] and not already("fence"):
-        lines.append("%s has a code fence left open: the fence at line %d is never closed" % (name, now["fence"]))
-    if kind == "inbox" and befores:
-        lost = None
-        for index in range(len(befores)):
-            gone = list(was(index)["stamps"])
-            for stamp in now["stamps"]:
-                if stamp in gone:
-                    gone.remove(stamp)
-            lost = gone if lost is None else [s for s in lost if s in gone]
-            if not lost:
+    fine = lost = None
+    premises = False
+    try:
+        for text in befores or ():
+            was = facts(kind, text, guard)
+            if kind == "json":
+                fine = fine or not was["json"]
+            else:
+                fine = fine or not was["fence"]
+                if kind == "handoff":
+                    premises = premises or was["premises"]
+                else:
+                    gone = list(was["stamps"])
+                    for stamp in now["stamps"]:
+                        if stamp in gone:
+                            gone.remove(stamp)
+                    lost = gone if lost is None else [s for s in lost if s in gone]
+            if kind == "json" and fine:
                 break
-        if lost:
-            lines.append("%s lost %d block header(s): %s" % (name, len(lost), ", ".join(lost)))
-    if kind == "handoff" and written and not now["premises"] and (
-            not befores or any(was(i)["premises"] for i in range(len(befores)))):
-        lines.append("%s has no `## Working premises` heading" % name)
+    except Unknown:
+        return []
+    if befores is None:
+        fine = True
+    lines = []
+    if kind == "json":
+        if now["json"] and fine:
+            line, column, why = now["json"]
+            lines.append("%s is not valid JSON: %s at line %d column %d" % (path, why, line, column))
+        return lines
+    if now["fence"] and fine:
+        lines.append("%s has a code fence left open: the fence at line %d is never closed" % (path, now["fence"]))
+    if lost:
+        lines.append("%s lost %d block header(s): %s" % (path, len(lost), ", ".join(lost)))
+    if kind == "handoff" and not now["premises"] and (befores is None or premises):
+        lines.append("%s has no `## Working premises` heading" % path)
     return lines
 
 
 def targets(payload, hdir):
-    """[(path, kind, written)] of the files this call names that the check may judge."""
+    """[(path, kind)] of the files this call writes that the check may judge."""
     tool, tool_input = payload.get("tool_name"), payload.get("tool_input")
     cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else os.getcwd()
     if not isinstance(tool_input, dict):
@@ -291,10 +304,10 @@ def targets(payload, hdir):
         raw = tool_input.get("file_path")
         path = resolve(raw, cwd) if isinstance(raw, str) else None
         kind = kind_of(path, hdir) if path else None
-        return [(path, kind, True)] if kind else []
+        return [(path, kind)] if kind else []
     if tool in SHELL_TOOLS and isinstance(tool_input.get("command"), str):
-        return [(p, kind_of(p, hdir), written) for p, written in
-                shell_paths(tool_input["command"], tool == "PowerShell", cwd, hdir) if kind_of(p, hdir)]
+        return [(p, kind_of(p, hdir)) for p in
+                shell_paths(tool_input["command"], tool == "PowerShell", cwd, hdir)]
     return []
 
 
@@ -305,15 +318,15 @@ def check(payload):
     if not found:
         return ""
     guard = None
-    if any(kind != "json" for _, kind, _ in found):
+    if any(kind != "json" for _, kind in found):
         import feedback_guard as guard  # noqa: E402  the one home of the fence loops
     lines = []
-    for path, kind, written in found:
+    for path, kind in found:
         after = read_text(path)
         if after is None:
             continue
-        befores, removal = before_states(payload.get("tool_name"), payload.get("tool_input"), after)
-        lines += judge(path, kind, after, befores, removal, written, guard)
+        befores, _ = before_states(payload.get("tool_name"), payload.get("tool_input"), after)
+        lines += judge(path, kind, after, befores, guard)
     if not lines:
         return ""
     return "state_parse_check: a state file this call touched no longer parses.\n- " + "\n- ".join(lines)

@@ -767,18 +767,20 @@ def answer_problem(b, text, k, homes, pages):
             " the item number, or an ArtifactData write with n set to it)" % (b["stamp"], ", ".join(unsent)))
 
 
-FENCE_MARK = re.compile(r" {0,3}(`{3,}|~{3,})")
+FENCE_MARK = re.compile(r"\s*(`{3,}|~{3,})")
 
 
-def fence_scan(text):
+def fence_scan(text, indent_cap=None):
     """(kept, open_line) for markdown text: `kept` the lines outside its code fences, and `open_line` the
     1-based line of a fence left open to the end, or None. The one loop of the markdown fence rule, for
-    unfenced() and state_parse_check.py. A fence is backticks or tildes with at most three spaces of
-    indent (four is an indented code block), an info string allowed; it closes on a run of its own
-    character, at least as long."""
+    unfenced() and state_parse_check.py. A fence is backticks or tildes with an info string allowed; it
+    closes on a run of its own character, at least as long. `indent_cap` None reads a fence at any indent, a
+    tab included (unfenced() and the grant check keep that); a number caps the indent in spaces: 3 is
+    CommonMark's rule, where four spaces make an indented code block, not a fence (the handoff check)."""
+    mark_re = FENCE_MARK if indent_cap is None else re.compile(r" {0,%d}(`{3,}|~{3,})" % indent_cap)
     kept, fence, open_line = [], None, None
     for number, ln in enumerate(text.split("\n"), 1):
-        mark = FENCE_MARK.match(ln)
+        mark = mark_re.match(ln)
         if fence is None:
             if mark:
                 fence, open_line = mark.group(1), number
