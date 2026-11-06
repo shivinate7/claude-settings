@@ -117,7 +117,9 @@ CHECKIN_MAKERS = (("create_trigger", "`create_trigger`"), ("send_later", "`send_
 CHECKIN_REFUSED = (("list_triggers", "`list_triggers`"), ("update_trigger", "`update_trigger`"),
                    ("fire_trigger", "`fire_trigger`"),
                    ("trigger this session did not visibly create",
-                    "trigger this session did not visibly create"))
+                    "trigger this session did not visibly create"),
+                   ("create_new_session_on_fire", "`create_new_session_on_fire`"),
+                   ("persistent_session_id", "`persistent_session_id`"))
 
 
 def auto_mode():
