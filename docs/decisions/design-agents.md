@@ -15,11 +15,13 @@ text-only change (owner, 2026-11-03: design reviewer only).
   head. It judges each built screen against the mockup and the repo's design rules, at every size and
   theme, with a verdict per screen. Its fixes go to the builder with the round-1 code findings.
   - Owner, 2026-11-06 11:22 CST (owner item 259 a): any change to a screen file after review round 1
-    gets a second design read. This covers a later review round and a fix check.
-  - Lane's reading, for the owner to correct: a screen file is any file a screen is built from: markup,
-    component, style, token or copy. In a second design read, the design reviewer alone reads the new
-    head, on the screens that file renders. It uses the round-1 target and the round-1 blind list. No
-    new blind pair runs. Its fixes go to the builder with that round's code findings.
+    gets a second design read.
+  - Lane's reading, for the owner to correct: this covers each later review round and each fix check. A
+    screen file is any file a screen is built from: markup, component, style, token or copy. In a second
+    design read, the design reviewer alone reads the new head, on the screens that file renders. It
+    judges against the mockup, or main's screenshots for a text-only change, and the round-1 blind
+    list. No new blind pair runs. Its fixes go to the builder with that round's code findings. After a
+    fix check, they go to the builder as one more fix, with its own fix check.
 - Routing has one test, one exception: does the lane touch a screen (`roles-one-role-per-agent`). `agents/reviewer.md`
   still reviews the code. Exception: a text-only change skips the designer. The design
   reviewer still runs beside round 1. Owner ask `ask-mw18vywh8g` (small text changes on existing
@@ -35,7 +37,7 @@ text-only change (owner, 2026-11-03: design reviewer only).
     that sends the lane to a designer.
 - The blind reviewers of `skills/design-review` stay blind. They keep agentType `reviewer` and never
   see the design spec. The design reviewer reads the spec, so it runs only at that skill's compare
-  step, after the blind list is complete (`design-skills`), or in a second design read, on the round-1
+  step, after the blind list is complete (`design-skills`). A second design read reuses the round-1
   blind list.
 - Opus is a standing grant for both roles, a class-level exception to `roles-sonnet-is-the-ceiling`,
   with no proof run first. The model table is in `agent-model-cap`.
