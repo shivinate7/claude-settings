@@ -1114,7 +1114,7 @@ function freezeSeen() {
 }
 const isArrival = (it) => !!state.known && !mates(it).every((x) => state.known.has(x.id));
 // Sunk, worked out once and kept like seen: an item with a saved answer when the items and answers loaded (isSaved reads no receipts).
-// A Send on the open page, or a receipt that arrives later, moves no card; a reload works it out again.
+// A receipt that arrives later moves no card. A Send moves the sent card into this set under SENT_MOVE "sink" (sinkSent; Undo takes it out) and moves nothing under "stay". A reload works it out again.
 // A Change keeps the card in the section (isSaved turns false under it), so membership never reads isSaved after this.
 // A group sinks only when every member is in the set, so it never splits.
 const isSunk = (it) => !!state.sunk && mates(it).every((x) => state.sunk.has(x.id));
@@ -1754,12 +1754,28 @@ function releaseSent() {
   held.forEach((el) => { el.style.minHeight = ""; heldWatch.unobserve(el); });
   if (mark) window.scrollBy(0, mark.getBoundingClientRect().top - before);
 }
-// A Send can change the rail's height (the Answered row appears on the first card that sinks). On a phone the rail sits above the list, so the list moves by the same amount.
-// When the whole rail is above the viewport, nothing the owner reads is above the list, so the scroll follows by that amount and the cards in view hold still.
-const railBox = () => { const r = $("rail").getBoundingClientRect(); return { h: r.height, above: r.bottom <= document.querySelector(".hdr").getBoundingClientRect().bottom && r.bottom <= $("list").getBoundingClientRect().top + 1 }; };
-function holdRail(was) {
-  const d = railBox().h - was.h;
-  if (was.above && Math.abs(d) > 0.5) window.scrollBy(0, d);
+// One home for holding the cards in view still across a render that moves cards (Send, Undo) or changes the rail above the list. It works with the browser's scroll anchoring on or off:
+// it measures one anchor before the render and scrolls by the anchor's viewport-top change after it, and the forced layout of that read has already taken any scroll the browser made.
+// The anchor is the list's top, which moves only with the rail (the Answered row appears or goes). If the first card to move starts above the viewport, its leaving would shift the
+// cards in view, so the anchor is the first card after it that stays in view. `ids` are the cards that move.
+// It holds nothing under SENT_MOVE "stay" (no card moves), and not while the rail is in view above the list: the owner sees the rail change, so the list below it follows.
+function holdView(ids) {
+  const none = () => {};
+  if (SENT_MOVE !== "sink") return none;
+  const band0 = document.querySelector(".hdr").getBoundingClientRect().bottom, el = (id) => document.getElementById("item-" + id);
+  const rail = $("rail").getBoundingClientRect();
+  const cardsNow = [...document.querySelectorAll("#list article.card")], movers = cardsNow.filter((c) => ids.includes(c.id.slice(5)));
+  let key = null, a0 = $("list").getBoundingClientRect().top;
+  const first = movers[0];
+  if (first && !first.closest("#tier-answered") && first.getBoundingClientRect().top < band0) {
+    const c = cardsNow.find((x) => !movers.includes(x) && first.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING && x.getBoundingClientRect().bottom > band0);
+    if (c) { key = c.id.slice(5); a0 = c.getBoundingClientRect().top; }
+  }
+  if (!key && rail.bottom <= a0 + 1 && rail.bottom > band0) return none;
+  return () => {
+    const a = (key && el(key)) || $("list"), d = a.getBoundingClientRect().top - a0;
+    if (Math.abs(d) > 0.5) window.scrollBy(0, d);
+  };
 }
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
@@ -2103,9 +2119,9 @@ async function sendAll() {
     saveDraft();
     if (wrote.length) openSent(wrote, at);
     sentNow = wrote.filter((w) => !w.withdrawn).map((w) => w.it.id);
-    const was = railBox();
+    const hold = holdView(wrote.map((w) => w.it.id));
     render();
-    holdRail(was);
+    hold();
     if (entries.length) {
       const told = await notifyClaude(noticeText(entries, "Saved on the waiting page."), can);
       setSentStatus(told === true ? TOLD : ANSWER_NOT_TOLD(told));
@@ -2157,14 +2173,16 @@ async function undoSend() {
       if (w.prior) await ref.set(w.prior); else await ref.delete();
     } catch (e) { todo.slice(i).forEach((x) => failed.push(x.it.n)); state.barNote = "Undo failed (" + (e && e.code || "error") + "). Not undone: " + nList(failed) + "."; break; }
     if (w.prior) state.answers[w.it.id] = w.prior; else delete state.answers[w.it.id];
-    unsinkSent(w);
     if (w.draft) { state.draft[w.it.id] = w.draft; if (isRuling(w.it)) state.rulingsOpen = true; } if (w.changing) state.changing[w.it.id] = true;
     undone.push(w);
     // A stale receipt must not show on a re-sent answer, but a failed delete here stops nothing else, and the old receipt leaves the page state either way.
     if (!w.prior && state.receipts[w.it.id]) { try { await state.db.collection("receipts").doc(w.it.id).delete(); } catch (e) {} delete state.receipts[w.it.id]; }
   }
   if (late.length) { late.sort((x, y) => x - y); state.barNote = "Too late to undo " + nList(late) + "."; }
+  undone.forEach(unsinkSent);
+  const hold = holdView(undone.map((w) => w.it.id));
   saveDraft(); closeSent(); render();
+  hold();
   const told = undone.filter((w) => !w.withdrawn); // a withdraw told no session, so its undo tells none
   if (told.length) {
     const can = await canTell();
