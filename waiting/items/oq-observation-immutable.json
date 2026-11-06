@@ -4,7 +4,7 @@
   "home": "q_max docs/decisions/d-296-observations-are-retired-never-edited-in-place.md",
   "id": "oq-observation-immutable",
   "kind": "decision",
-  "lane": "qmax-saved-rate-rule",
+  "lane": "coordinator: qmax-saved-rate-rule lane archived; the coordinator confirms its PR merged (then this closes) or restarts it (triage audit 14:45 CST)",
   "lastAnswer": {
     "at": "2026-11-04T12:45:08Z",
     "choice": "a",

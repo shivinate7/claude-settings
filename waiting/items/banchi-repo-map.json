@@ -4,7 +4,7 @@
   "home": "child-guard-promotion",
   "id": "banchi-repo-map",
   "kind": "decision",
-  "lane": "banchi-retire-map-py (session_013NEJL42PgRgbnB2WN4U2ub)",
+  "lane": "coordinator: banchi-retire-map-py lane archived; the coordinator confirms its PR merged (then this closes) or restarts it (triage audit 14:45 CST)",
   "lastAnswer": {
     "at": "2026-11-04T04:20:46.936Z",
     "choice": "a",

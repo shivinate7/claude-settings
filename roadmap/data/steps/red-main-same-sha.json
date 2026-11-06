@@ -4,6 +4,6 @@
   "status": "doing",
   "order": 530,
   "why": "Owner answered page item 166 with 'one time rerun' (Nov 3 18:16 CST); coordinator reading.",
-  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): step red-main-same-sha-green merged here.\nLane session_013NEJL3r8JbyJKhCzBoC6sF. Close item 166 when the ruling lands in no-merge-onto-red-main. Named by the coordinator Nov 3 18:19 CST.",
-  "updatedAt": "2026-11-06T18:03:00Z"
+  "note": "Nov 6 14:40 CST (triage audit): lane session_013NEJL3r8JbyJKhCzBoC6sF tagged cs-step:red-main-same-sha (it had cs-step:newer-run-clears-red).\nNov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): step red-main-same-sha-green merged here.\nLane session_013NEJL3r8JbyJKhCzBoC6sF. Close item 166 when the ruling lands in no-merge-onto-red-main. Named by the coordinator Nov 3 18:19 CST.",
+  "updatedAt": "2026-11-06T20:40:00Z"
 }

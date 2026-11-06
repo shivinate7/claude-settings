@@ -5,7 +5,7 @@
   "home": "test-practices-first-principles",
   "id": "mutation-ci-job",
   "kind": "decision",
-  "lane": "mutation-ci-report: PR #1262",
+  "lane": "coordinator: lane mutation-ci-report (PR #1262) archived; re-ask after mutation-tests-for-imports merges (triage audit 14:45 CST)",
   "lastAnswer": {
     "at": "2026-11-05T13:41:57.602Z",
     "choice": "d",

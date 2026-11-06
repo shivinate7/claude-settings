@@ -1,9 +1,9 @@
 {
   "title": "Keep-output rule: wording \"Keep git write output.\"",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 103.3527,
   "why": "Owner pick 238 a (12:10 CST Nov 6): rule git-never-discard-output reads \"Keep git write output.\", as a stated exception to the 3-word cap of decision cull-rules.",
-  "note": "Nov 6 12:13 CST (coordinator): lane git-write-output-wording (session_013NEJL2Zfoo2Ynh7sNS8CBo) started. The earlier scope (git writes only, item 177 a) merged as #1188. Item 238 closes when this lane's PR merges.",
-  "updatedAt": "2026-11-06T18:14:30Z"
+  "note": "Nov 6 14:40 CST (triage audit): done. Merged on main: commit 2adf678f, \"Keep git write output.\" Item 238 closes on it.\nNov 6 12:13 CST (coordinator): lane git-write-output-wording (session_013NEJL2Zfoo2Ynh7sNS8CBo) started. The earlier scope (git writes only, item 177 a) merged as #1188. Item 238 closes when this lane's PR merges.",
+  "updatedAt": "2026-11-06T20:40:00Z"
 }

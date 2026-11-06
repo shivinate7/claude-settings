@@ -4,6 +4,12 @@
   "status": "doing",
   "order": 516,
   "why": "Found by the ios-adblock CI-hygiene lane, Nov 3: bot pin-bump merges #131 to #134 started no push CI run on main.",
-  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): lane started now (resume-now, no foundation files).\nFind why the bot's merges trigger no push run (token kind or workflow trigger), then fix so main is checked after each merge. Coordinator note, Nov 3 17:16 CST.",
-  "updatedAt": "2026-11-06T18:03:00Z"
+  "note": "Nov 6 14:40 CST (triage audit for PR #1340): paused. No live lane or open PR found at 14:40 CST, though a lane was named at 12:01 CST. The coordinator restarts it or says where it stands.\nNov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): lane started now (resume-now, no foundation files).\nFind why the bot's merges trigger no push run (token kind or workflow trigger), then fix so main is checked after each merge. Coordinator note, Nov 3 17:16 CST.",
+  "updatedAt": "2026-11-06T20:40:00Z",
+  "paused": {
+    "why": "No live lane or open PR found at 14:40 CST, though a lane was named at 12:01 CST. The coordinator restarts it or says where it stands.",
+    "decides": "coordinator",
+    "at": "2026-11-06T14:40:00-06:00",
+    "by": "triage"
+  }
 }

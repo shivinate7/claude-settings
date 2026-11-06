@@ -1,9 +1,9 @@
 {
   "title": "Parse each state file a Bash or Edit call names",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.3545,
   "why": "A broken inbox, handoff or roadmap JSON is caught at the edit, not later.",
-  "note": "Coordinator 12:20 CST, from the checks-and-balances audit (Opus Explore): After a Bash or Edit call, parse any JSON or fenced state file it names. Widens step inbox-fence-check, which is not on origin/roadmap.",
-  "updatedAt": "2026-11-06T18:21:30Z"
+  "note": "Nov 6 14:50 CST (triage audit): status to doing; open PR #1329.\nCoordinator 12:20 CST, from the checks-and-balances audit (Opus Explore): After a Bash or Edit call, parse any JSON or fenced state file it names. Widens step inbox-fence-check, which is not on origin/roadmap.",
+  "updatedAt": "2026-11-06T20:50:00Z"
 }

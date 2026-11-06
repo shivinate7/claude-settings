@@ -4,7 +4,7 @@
   "home": "claude-settings rule outcomes-mechanize-rules; docs/plans/align-watchers.md",
   "id": "watchers-unread-logs",
   "kind": "decision",
-  "lane": "watchers-log-readers",
+  "lane": "coordinator: watchers-log-readers lane archived; the coordinator confirms its PR merged (then this closes) or restarts it (triage audit 14:45 CST)",
   "lastAnswer": {
     "at": "2026-11-04T13:53:21Z",
     "choice": "b",

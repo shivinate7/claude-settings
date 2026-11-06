@@ -4,7 +4,7 @@
   "home": "mailaudit docs/decisions/recent-checks-can-be-undone.md",
   "id": "recent-reset-undo",
   "kind": "decision",
-  "lane": "mailaudit #202 merged 13:22 CST; deferred at your word",
+  "lane": null,
   "lastAnswer": {
     "at": "2026-11-06T19:08:48.782Z",
     "choice": "b",

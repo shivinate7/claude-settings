@@ -4,6 +4,12 @@
   "status": "doing",
   "order": 103.369,
   "why": "You can always undo a recent check, and no dead control shows.",
-  "note": "Nov 6 13:02 CST: record PR mailaudit #201 merged (7bf8a3f0); item 193 closed. The build waits on item 280 (Reset undo) and debt recent-log-unbuilt.\nOwner picked c on item 193, 12:36 CST Nov 6. Lane session_013NEJL41qSWn7KQR5AgaUf9 (coordinator 12:44 CST). Item 193 closes when it merges.",
-  "updatedAt": "2026-11-06T19:05:00Z"
+  "note": "Nov 6 14:40 CST (triage audit for PR #1340): paused. The build waits on item 280 (Reset undo), which the owner deferred, and debt recent-log-unbuilt. Lane session_013NEJL41qSWn7KQR5AgaUf9 is archived.\nNov 6 13:02 CST: record PR mailaudit #201 merged (7bf8a3f0); item 193 closed. The build waits on item 280 (Reset undo) and debt recent-log-unbuilt.\nOwner picked c on item 193, 12:36 CST Nov 6. Lane session_013NEJL41qSWn7KQR5AgaUf9 (coordinator 12:44 CST). Item 193 closes when it merges.",
+  "updatedAt": "2026-11-06T20:40:00Z",
+  "paused": {
+    "why": "The build waits on item 280 (Reset undo), which the owner deferred, and debt recent-log-unbuilt. Lane session_013NEJL41qSWn7KQR5AgaUf9 is archived.",
+    "decides": "owner",
+    "at": "2026-11-06T14:40:00-06:00",
+    "by": "triage"
+  }
 }

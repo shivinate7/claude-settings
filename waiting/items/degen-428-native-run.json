@@ -7,7 +7,7 @@
   "home": "degen rule tests-once-per-batch (native-check record line)",
   "id": "degen-428-native-run",
   "kind": "decision",
-  "lane": "owner: merges degen #428 on his Mac",
+  "lane": null,
   "lastAnswer": {
     "at": "2026-11-06T03:31:31Z",
     "choice": "none",
@@ -50,6 +50,7 @@
   "owner": "batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
   "rank": 1,
   "ref": "degen #428 (degen main's red fix), head 1dd63cc8; your pick 241 a (UI tests stay split out)",
+  "reply": "Waits on you: merge degen #428 on your Mac (no session holds it; triage audit 14:45 CST).",
   "short": "degen #428: Mac run or your merge",
   "status": "open",
   "title": "Degen #428 cannot merge without the Mac run. Run it, or merge it yourself?",

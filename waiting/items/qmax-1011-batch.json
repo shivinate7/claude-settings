@@ -5,7 +5,7 @@
   "home": "git-never-merge-failing-ci",
   "id": "qmax-1011-batch",
   "kind": "decision",
-  "lane": "waits on q_max #1029 (item 260), then a lane merges main into #1011, then a green browser run",
+  "lane": "coordinator: waits on q_max #1029 (item 260), then a lane merges main into #1011, then a green browser run",
   "lastAnswer": {
     "at": "2026-11-04T12:22:11Z",
     "choice": "a",

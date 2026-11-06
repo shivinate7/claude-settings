@@ -4,7 +4,7 @@
   "home": "banchi .claude/settings.json; banchi CLAUDE.md (seven shell mistakes line)",
   "id": "banchi-skip-push-clause",
   "kind": "decision",
-  "lane": "banchi-push-guard-copies (session_013NEJKzacJzjSo9MfMWaHco)",
+  "lane": "coordinator: banchi-push-guard-copies lane archived; the coordinator confirms its PR merged (then this closes) or restarts it (triage audit 14:45 CST)",
   "lastAnswer": {
     "at": "2026-11-05T14:42:38Z",
     "choice": "a",

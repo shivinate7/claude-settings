@@ -37,8 +37,9 @@
   "owner": "lane output-discard-rule-scope (session_013NEJL1qJ91VjcjmSsMxCc5)",
   "rank": 3,
   "ref": "item 177 a; claude-settings PR #1188 (head 7bf26c1); decision cull-rules",
+  "reply": "Merged on main (commit 2adf678f): the rule now reads \"Keep git write output.\" Closed 14:45 CST.",
   "short": "Keep-output rule wording",
-  "status": "open",
+  "status": "closed",
   "title": "Your keep-output rule now covers git writes only, which needs 4 words, but your cap for a checked rule's reminder is 3. Which wording?",
   "why": "Recommended: a. It matches the guard with the smallest break of the cap. Meanwhile #1188 holds c and goes on in its batch; the lane edits the text on your pick."
 }

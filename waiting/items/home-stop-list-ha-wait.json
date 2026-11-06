@@ -4,7 +4,7 @@
   "home": "home CLAUDE.md line 46",
   "id": "home-stop-list-ha-wait",
   "kind": "decision",
-  "lane": "home-stop-list-ha-wait (session_013NEJL3BGhEU8n1LG6xvkKa)",
+  "lane": "coordinator: home-stop-list-ha-wait lane archived; the coordinator confirms its PR merged (then this closes) or restarts it (triage audit 14:45 CST)",
   "lastAnswer": {
     "at": "2026-11-05T14:38:43Z",
     "choice": "b",
