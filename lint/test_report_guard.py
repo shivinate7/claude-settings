@@ -4720,9 +4720,18 @@ class MistakeNamesGuardTests(unittest.TestCase):
     def test_mg_red_clobbered_notes_blocks(self):
         self.assert_blocked(mg_report("I clobbered the lane's notes file by mistake."))
 
+    def test_mg_red_corrupted_inbox_blocks(self):
+        self.assert_blocked(mg_report("I corrupted the inbox file."))
+
+    def test_mg_red_outdated_record_blocks(self):
+        self.assert_blocked(mg_report("I trusted an outdated record and skipped the check."))
+
     # Red twins: each one fails if a green control's clearing rule is read too loosely.
     def test_mg_red_guard_word_without_ref_blocks(self):
         self.assert_blocked(mg_report("I broke the inbox; a guard would catch it."))
+
+    def test_mg_red_split_ref_and_guard_word_blocks(self):
+        self.assert_blocked(mg_report("I wrongly sent commit 3c2d1d97f; the CI check passed on it."))
 
     def test_mg_red_negator_in_another_clause_blocks(self):
         self.assert_blocked(mg_report("I did not test it, and I broke the build."))
@@ -4745,7 +4754,7 @@ class MistakeNamesGuardTests(unittest.TestCase):
         self.assert_allowed(mg_report(MG_INBOX + " The guard is built in #1300."))
 
     def test_mg_green_did_not_break_anything_passes(self):
-        self.assert_allowed(mg_report("I did not break anything."))
+        self.assert_allowed(mg_report("I never broke anything."))
 
     def test_mg_green_nothing_i_did_passes(self):
         self.assert_allowed(mg_report("Nothing I did broke the build."))
@@ -4754,10 +4763,10 @@ class MistakeNamesGuardTests(unittest.TestCase):
         self.assert_allowed(mg_report("The test was wrong; I re-pointed it."))
 
     def test_mg_green_worktree_refusal_passes(self):
-        self.assert_allowed(mg_report("I used EnterWorktree because the guard refused the checkout move."))
+        self.assert_allowed(mg_report("I routed around the refusal because the guard was wrong about the worktree."))
 
     def test_mg_green_quoted_owner_phrase_passes(self):
-        self.assert_allowed(mg_report('Owner said "you shouldn\'t just own up to a mistake".'))
+        self.assert_allowed(mg_report('Owner said "I broke it, own up to a mistake".'))
 
     def test_mg_green_admission_in_done_passes(self):
         self.assert_allowed(mg_report("none", done="> **Done** OTHER I broke my feedback inbox and restored it."))
@@ -4770,6 +4779,15 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     def test_mg_green_empty_deviations_passes(self):
         self.assert_allowed(mg_report("none"))
+
+    def test_mg_green_lost_race_passes(self):
+        self.assert_allowed(mg_report("I lost the race to another lane."))
+
+    def test_mg_green_wiped_cache_passes(self):
+        self.assert_allowed(mg_report("I wiped the cache to reproduce the failure."))
+
+    def test_mg_green_trusted_verdict_passes(self):
+        self.assert_allowed(mg_report("I trusted the reviewer's verdict; it was correct."))
 
 
 if __name__ == "__main__":
