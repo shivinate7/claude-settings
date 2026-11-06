@@ -4,6 +4,7 @@
   "home": "mailaudit docs/decisions/recent-checks-can-be-undone.md",
   "id": "recent-reset-undo",
   "kind": "decision",
+  "lane": "mailaudit #202 merged 13:22 CST; deferred at your word",
   "lastAnswer": {
     "at": "2026-11-06T19:08:48.782Z",
     "choice": "b",
@@ -30,6 +31,7 @@
   "pick": "a",
   "rank": 3,
   "ref": "item 193; debt recent-log-unbuilt",
+  "reply": "Your b (as built) landed: mailaudit #202 merged 13:22 CST (d2940785). It keeps Reset out of Recent, and History undoes a Reset. As you asked, the item stays deferred.",
   "short": "mailaudit: undo a Reset from Recent?",
   "status": "deferred",
   "title": "mailaudit: can a Reset be undone from the Recent list?",
