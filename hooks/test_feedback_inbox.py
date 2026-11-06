@@ -3156,6 +3156,12 @@ def written_between(before, after):
     return {rel for rel, state in after.items() if before.get(rel) != state}
 
 
+def bytes_written(before, after):
+    """The relative paths whose bytes are new or different between two snapshots. A rewrite with the same bytes is
+    no change here."""
+    return {rel for rel, (_, data) in after.items() if before.get(rel, (None, None))[1] != data}
+
+
 def git_counter(cfg):
     """The log that counts git starts in one case's runs. The probe appends one line per start to it,
     for the guard and for the capture hook alike. Returns the env for run()."""
@@ -3793,23 +3799,35 @@ def run_case(case):
 
 class CostTests(unittest.TestCase):
     def judging_stop(self, name):
+        """One capture, one new item, then the judging Stop. Returns (exit codes of the capture and the Stop, the
+        Stop's model calls, its git starts, the relative paths whose bytes it changed under the config folder)."""
         root = repeat_repo(name, step=True, debt=True)
         cfg, sid = new_cfg(), name
         env = git_counter(cfg)
-        capture(cfg, sid, MSG_ONE, cwd=root)
+        captured = capture(cfg, sid, MSG_ONE, cwd=root)
         add_item(cfg, sid, ITEM_LINE)
+        before = snapshot(cfg)
         start = len(git_lines(env))
-        _, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
-        return calls, git_lines(env, start)
+        stopped, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
+        changed = bytes_written(before, snapshot(cfg))
+        return (captured.code, stopped.code), calls, git_lines(env, start), changed
 
     def test_the_judging_stop_starts_one_grep_and_one_other_git_process(self):
-        calls, lines = self.judging_stop("cost-argv")
-        self.assertEqual(len(calls), 1)
+        codes, calls, lines, _ = self.judging_stop("cost-argv")
+        self.assertEqual(codes, (0, 0), "the capture and the judging Stop both exit 0; got %r" % (codes,))
+        self.assertEqual(len(calls), 1, "the judging Stop makes one model call; got %d" % len(calls))
         self.assertEqual(grep_starts(lines), 1, "the judging Stop starts one git grep; got %r" % lines)
         others = [ln for ln in lines if "grep" not in ln.split()]
         self.assertEqual(len(others), 1, "one other git start; got %r" % others)
         self.assertIn("rev-parse", others[0].split(), "the other start reads the repo root: %r" % others)
         self.assertIn("--show-toplevel", others[0].split(), "the other start reads the repo root: %r" % others)
+
+    def test_a_judging_stop_writes_the_turn_state_and_the_inbox_and_no_other_file(self):
+        codes, _, _, changed = self.judging_stop("cost-files")
+        self.assertEqual(codes, (0, 0), "the capture and the judging Stop both exit 0; got %r" % (codes,))
+        self.assertEqual(changed, {turns_rel("cost-files"), inbox_rel("cost-files")},
+                         "a judging Stop writes its turn state and the inbox, and no other file; got %r"
+                         % sorted(changed))
 
     def test_a_quiet_stop_starts_no_git_process(self):
         root = repeat_repo("cost-quiet", step=True, debt=True)
@@ -3819,9 +3837,23 @@ class CostTests(unittest.TestCase):
         add_item(cfg, sid, ITEM_LINE)
         stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
         start = len(git_lines(env))
-        _, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
+        stopped, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID), extra_env=env)
+        self.assertEqual(stopped.code, 0, "a quiet Stop exits 0; got %r" % (stopped.code,))
         self.assertEqual(calls, [], "a Stop with nothing new makes no model call")
         self.assertEqual(git_lines(env, start), [], "a Stop with nothing new starts no git process")
+
+    def test_a_quiet_stop_changes_no_byte_under_the_config_folder(self):
+        root = repeat_repo("cost-quiet-bytes", step=True, debt=True)
+        cfg, sid = new_cfg(), "cost-quiet-bytes"
+        capture(cfg, sid, MSG_ONE, cwd=root)
+        add_item(cfg, sid, ITEM_LINE)
+        stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+        before = snapshot(cfg)
+        stopped, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+        self.assertEqual(stopped.code, 0, "a quiet Stop exits 0; got %r" % (stopped.code,))
+        self.assertEqual(calls, [], "a Stop with nothing new makes no model call")
+        self.assertEqual(bytes_written(before, snapshot(cfg)), set(),
+                         "a quiet Stop changes no byte under the config folder")
 
 
 def main():
