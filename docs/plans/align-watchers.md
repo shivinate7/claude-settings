@@ -30,15 +30,18 @@ Eight rules. A rule becomes a check when a check exists. Until then it is a plai
 1. **Events.** A mechanism runs only inside a hook or tool process that the harness started. Or it runs
    when a person asks. It never runs on a timer. The hook events on main are PreToolUse, PostToolUse,
    PermissionRequest, PermissionDenied, Stop, SubagentStart, SubagentStop, SessionStart, SessionEnd,
-   PreCompact, PostCompact and UserPromptSubmit (checked: `settings.json`). The daily job is the one
-   timer. Q4 covers it.
+   PreCompact, PostCompact and UserPromptSubmit (checked: `settings.json`). Three named exceptions may
+   run on a timer or hold a process: the stall watcher, `ci_wake` and the daily job (owner, Cockpit
+   item 180, pick a, 2026-11-06 12:19 CST). Their home is `.claude/rules/hooks.md`.
 2. **Children.** A mechanism starts no process that outlives its hook. A child is short and bounded by the
-   hook timeout, such as `git` or `ps`. Q1 and Q2 cover the exceptions.
+   hook timeout, such as `git` or `ps`. A model call through `invoke_model` is such a child (item 248).
+   The stall watcher and `ci_wake` are the named exceptions.
 3. **Waiting.** A session waits through the harness's wake: an asyncRewake exit, a PR comment (`ci-done`),
-   or `send_later`. It does not wait on a polling process we start. Two mechanisms break this rule today,
-   the stall watcher and `ci_wake`. Q1 and Q3 cover them.
-4. **Cost.** Each record states its cost: process starts, files written, and how often. Owner item 180
-   fixes the form. No cost line is written before then.
+   or `send_later`. It does not wait on a polling process we start, except the stall watcher and
+   `ci_wake`, the named exceptions of item 180.
+4. **Cost.** Each record states its cost: process starts, files written, and how often. The form is
+   the cost line of decision `machine-load-brake`: "Cost, per `outcomes-mechanize-rules`: process
+   starts ... Files written ... How often ...".
 5. **Proof.** One shared test helper proves the stated cost. It counts child processes, files written and
    sleep passes. The test is the proof. A cost claim with no test is not proven.
 6. **Logs.** Each log names its reader in its record. Each log has a size cap. A cap rotates the file. It
@@ -136,27 +139,27 @@ Lane 1 needs no answer. A lane that waits on a question says so in its report.
 
 ## 6. Owner questions
 
-**Status: open.** Item 180 is on the Cockpit. So are the new items below: Q2 (model-call hooks), Q4
-(SessionEnd scope) and Q5 (unread logs). Q7 (repo reaper) is decided by an earlier ruling, and the reaper is removed.
+**Status: partly decided.** Owner, 2026-11-06 12:19 CST: item 180, pick a (events only, with three named
+exceptions: the stall watcher, `ci_wake` and the daily job), and item 248, pick b (keep the six model-call
+hooks, state each one's cost, re-check on the triggers). These decide Q1a, Q1b, Q2, Q3 and the daily-timer
+half of Q4. The SessionEnd half of Q4, Q5 and Q6 stay open. Q7 (repo reaper) is decided by an earlier
+ruling, and the reaper is removed.
 
-**Q1a. Stall watcher.** Options: (a) delete it, and keep the Stop check and `wait-pid`; (b) keep it with
-a cost cap and a test; (c) leave it as is. Q1b decides between them. Recommendation: (b), until Q1b
-has a replacement.
+**Q1a. Stall watcher. Decided:** keep it as a named exception, with its cost stated and a cost test
+(item 180, pick a, 2026-11-06 12:19 CST). Home: decision `stall-watch`.
 
-**Q1b. A wake for an idle session.** For a stalled background job, only the watcher's exit-3 report wakes an idle
-session. The Stop check runs at the end of a turn and repeats at every Stop. An idle session has no Stop.
-So a background job that stalls while the session is idle is never reported by it. (`ci_wake` also wakes
-an idle session, but only for CI results.) Options: (a) accept that gap; (b) keep the watcher's wake; (c) give the session another
-wake for a stalled job. Recommendation: (b), until (c) exists.
+**Q1b. A wake for an idle session. Decided:** keep the watcher's wake (item 180, pick a). A job that stalls
+while the session is idle is still reported.
 
-**Q2. Model-call hooks under the no-new-process rule.** Do the model judges in section 2 count under
-rule 2? Options: (a) yes. They are children inside a hook budget. Each has its own timeout and one test,
-and one home (`invoke_model`). (b) no. They form a separate class, named in the rule. Recommendation: (a).
+**Q2. Model-call hooks. Decided:** they count under rule 2, as children inside a hook budget. All six stay
+command hooks, each with its cost stated, and the move to a prompt hook is re-checked on three triggers
+(item 248, pick b, 2026-11-06 12:19 CST). Home: decision `haiku-prompt-hooks`.
 
-**Q3. `ci_wake`.** Options: (a) keep it as a standing exception, with its cost stated; (b) replace it
-with the PR subscription, and keep the local watch only as a fallback. Recommendation: (a), for now.
+**Q3. `ci_wake`. Decided:** a standing exception, with its cost stated (item 180, pick a). Home: decision
+`ci-wait-reads-run-status`.
 
-**Q4. SessionEnd scope and the daily timer.** Does the SessionEnd hook run stay machine-wide? The record
+**Q4. SessionEnd scope and the daily timer.** The daily timer is decided: a named exception, with its
+cost stated (item 180, pick a). Open: does the SessionEnd hook run stay machine-wide? The record
 says it sweeps one repository. The code also scans every process and lists simulators. Options:
 (a) one repository only. The machine-wide tiers run in the daily job only. Orphaned servers and booted
 simulators then stay until the next daily run. A sweep that runs less often means more
