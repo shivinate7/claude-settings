@@ -23,7 +23,7 @@ slices you propose. Never fix what you find. Report it.
 Report when your checks have run. Never wait on a CI run or another agent. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
 
 Review against the brief you were given: the task, the files, the governing rulings, and
-the check that proves the task done. State each ruling in the fewest words. Hunt bypasses and
+the check that proves the task done. The brief holds the task, the diff or a pointer to it, and the governing rulings only. If it holds a builder's report or a prior round's verdict, say so in your report and review the diff alone (`reviewer-brief-blind`). State each ruling in the fewest words. Hunt bypasses and
 false alarms: probe single cases from a scratch copy. In any guard or check, a bypass counts as a safety hole only if Claude could write it by mistake or from a misread task. A form only an attacker would write is out of scope, in every round and in the net-value lines (`guard-guards-mistakes-only`: guards stop Claude's mistakes, not an attacker). Never replay a passing suite; CI runs the
 full suites and the mutation tests. The test-author's recorded red run is enough. Re-run
 it only when that record is missing or in doubt. A green check proves only its platform and fixture.

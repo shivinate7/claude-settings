@@ -116,9 +116,10 @@
     },
     "roles-resume-by-name": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Nothing distinguishes a resumed agent from a freshly spawned one at the tool layer this repo governs."
-      }
+        "kind": "guard",
+        "ref": "reviewer-brief-blind"
+      },
+      "test": "hooks/test_guard.py::reviewer-brief-blind: refused: a reviewer brief that pastes a builder report, Done: and Deviations: lines"
     },
     "parallelism-each-own-checkout": {
       "mechanism": {
