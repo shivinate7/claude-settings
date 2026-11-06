@@ -1,9 +1,9 @@
 {
   "title": "Start hook warns when the cloud snapshot is behind main",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.3645,
   "why": "A stale snapshot makes every new lane print old warnings and run old hooks.",
-  "note": "Coordinator 12:41 CST: warn once when the snapshot's claude-settings is behind main by a commit that changed install.sh or hooks/, and name the fix (Edit the environment, save the Setup script). The snapshot holds d7eb5c94 (Nov 4 07:09 UTC), before #1195; 31 lanes print the old EXECPATH line (measured).",
-  "updatedAt": "2026-11-06T18:43:00Z"
+  "note": "Warn once on a cloud startup when the snapshot's settings.json still holds a startup entry other than the refresh hook, and name the fix (edit the environment, save the Setup script). hooks/ lag alone does no harm (decision cloud-start-hooks-run-fresh), so it does not warn. Rulings: coordinator 2026-11-06 14:42 CST (trigger on the harm, no commit marker). PR #1363 (stale snapshot warning), round 3 passed, held by batch runner 8; step done when it merges. Measured before: 31 lanes printed the old EXECPATH line.",
+  "updatedAt": "2026-11-06T21:50:00Z"
 }
