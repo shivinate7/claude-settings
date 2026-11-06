@@ -424,6 +424,7 @@ def load_config(start: str) -> dict:
             except ImportError:  # pragma: no cover - Python 3.10 and older
                 sys.stderr.write(
                     "ste-lint: %s needs Python 3.11 or later. The file is ignored.\n" % found)
+                cfg["_unknown"] = "%s was not read: it needs Python 3.11 or later" % found
                 return cfg
             with open(found, "rb") as handle:
                 data = tomllib.load(handle)
@@ -434,6 +435,7 @@ def load_config(start: str) -> dict:
                 sys.stderr.write("ste-lint: %s sets %s, which is removed and ignored. The budget is max_words.\n" % (found, key))
     except (OSError, ValueError) as exc:
         sys.stderr.write("ste-lint: cannot read %s: %s\n" % (found, exc))
+        cfg["_unknown"] = "%s was not read, so the defaults were used: %s" % (found, exc)
     cfg["_path"] = found
     return cfg
 
@@ -2067,6 +2069,16 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def unknown_exit(config: dict, code: int) -> int:
+    """Say UNKNOWN for a config that was not read. The run goes on with the defaults. Locally the exit is `code`. With
+    env CI set a config that was not read is red (decision ci-unknown-is-red)."""
+    reason = config.get("_unknown")
+    if not reason:
+        return code
+    sys.stderr.write("ste-lint: UNKNOWN, %s\n" % reason)
+    return 1 if os.environ.get("CI") else code
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -2147,7 +2159,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 replacements += count
                 print("fixed %s (%d replacements)" % (path, count))
         print("ste-lint: %d replacements in %d files" % (replacements, changed))
-        return 0
+        return unknown_exit(config, 0)
 
     linter = Linter(config)
     findings: List[Finding] = []
@@ -2201,12 +2213,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               % (len(paths), summary["error"], summary["warning"], summary["info"]))
 
     fail_on = config.get("fail_on", "error")
-    if fail_on == "never":
-        return 0
-    threshold = SEVERITY_ORDER[fail_on]
-    if any(SEVERITY_ORDER[f.severity] >= threshold for f in findings):
-        return 1
-    return 0
+    code = 0
+    if fail_on != "never" and any(SEVERITY_ORDER[f.severity] >= SEVERITY_ORDER[fail_on] for f in findings):
+        code = 1
+    return unknown_exit(config, code)
 
 
 if __name__ == "__main__":
