@@ -2002,13 +2002,15 @@ async function canTell() {
 }
 // One comment per Send or Undo, into the viewer's stored thread. The platform caps a thread's comments and answers a full thread
 // with upstream_error, so a failure on the stored thread starts one new anchored thread, unless the code says a second send
-// cannot help (NO_FALLBACK) or would repeat the same refusal. Returns true, the failing code ("error" when the rejection has
-// none), or false when no send was tried. The answers stand either way and nothing else retries.
+// cannot help (NO_FALLBACK) or would repeat the same refusal. Returns true, the failing code (a code outside the contract's
+// list reads as upstream_error, as the contract says, so a status line never shows a stray word), or false when no send was
+// tried. The answers stand either way and nothing else retries.
 const NO_FALLBACK = ["rate_limited", "claude_unavailable", "consent_required", "invalid", "unavailable", "forbidden", "not_granted", "capability_disabled", "capability_removed", "transform_error"];
+const KNOWN_CODES = [...NO_FALLBACK, "not_found", "upstream_error"];
 async function notifyClaude(text, can) {
   const cm = state.comments;
   if (!cm || !can) return false;
-  const codeOf = (e) => (e && e.code) || "error";
+  const codeOf = (e) => KNOWN_CODES.includes(e && e.code) ? e.code : "upstream_error";
   try {
     let id = null;
     try { id = localStorage.getItem("waiting.thread"); } catch (e) {}
@@ -2527,7 +2529,7 @@ async function sendAsk(rk) {
     const id = askId(), body = { id, text: r.text, at };
     if (r.re) body.re = r.re;
     try { await state.db.collection("asks").doc(id).set(body); }
-    catch (e) { delete r.state; r.err = (e && e.code) || "error"; renderStack(); continue; }
+    catch (e) { delete r.state; r.err = KNOWN_CODES.includes(e && e.code) ? e.code : "upstream_error"; renderStack(); continue; }
     (s.map = s.map || {})[id] = body;
     r.state = "saved"; wrote.push({ id, text: r.text, re: r.re, by: r.by }); saveAskStack(); renderStack(); // kept at once, so a reload now does not write this ask again
   }
@@ -2567,7 +2569,7 @@ async function undoAsk() {
     const row = rk ? null : { k: ++askRowN, text: texts[i], state: "undoing" };
     if (row) { s.stack.splice(mine.length ? s.stack.indexOf(mine[mine.length - 1]) + 1 : 0, 0, row); mine.push(row); saveAskStack(); renderStack(); }
     try { await state.db.collection("asks").doc(ids[i]).delete(); }
-    catch (e) { code = (e && e.code) || "error"; if (row) { s.stack = s.stack.filter((r) => r !== row); saveAskStack(); } break; }
+    catch (e) { code = KNOWN_CODES.includes(e && e.code) ? e.code : "upstream_error"; if (row) { s.stack = s.stack.filter((r) => r !== row); saveAskStack(); } break; }
     if (row) delete row.state;
     if (s.map) delete s.map[ids[i]];
     gone.push({ id: ids[i], text: texts[i] });
