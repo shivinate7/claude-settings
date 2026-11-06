@@ -16,7 +16,8 @@ names below are chosen here and the module keeps them:
                                                    a Git Bash /c/ path reads as its drive path
     grant_path(folder) -> str                      the grant file for the folder
     bound_path(session_id) -> str                  the bound file for the session
-    bind_grant(session_id, agent_id, cwd) -> bool  True when this call bound a grant to the session
+    bind_grant(session_id, agent_id, cwd) -> bool  True when this call bound a grant to the session. The cwd's
+                                                   folder key must equal the grant's: no parent or child walk
     file_proved(session_id, agent_id) -> bool      True when the session's bound file proves the triage tier
     GRANT_TTL_SECONDS = 3600
     CLI: python3 hooks/session_tier.py grant triage --folder <path>
@@ -320,19 +321,22 @@ def case_bind_parent_of_the_grant_binds_nothing():
     return []
 
 
-def case_bind_folder_under_the_grant_binds():
-    """bind_grant: a cwd inside the granted folder binds the grant (the spec's walk up from the cwd)"""
-    config = fresh("bind-under")
-    folder = folder_of("bind-under")
-    inside = folder_of(os.path.join("bind-under", "inside"))
+def case_bind_subfolder_of_the_grant_binds_nothing():
+    """bind_grant: a cwd in a subfolder of the granted folder binds nothing; the grant is for the exact folder only"""
+    config = fresh("bind-subfolder")
+    folder = folder_of("bind-subfolder")
+    inside = folder_of(os.path.join("bind-subfolder", "inside"))
     fx.write_grant(config, folder, age=fx.FRESH_AGE)
     with config_dir(config):
-        ok, bound = call("bind_grant", "tier-bind-under", None, inside)
+        ok, bound = call("bind_grant", "tier-bind-subfolder", None, inside)
     if not ok:
         return [bound]
-    if not bound:
-        return ["a cwd inside the granted folder did not bind the grant"]
-    return []
+    problems = []
+    if bound:
+        problems.append("a subfolder of the granted folder bound the grant, want the exact folder only")
+    if not os.path.isfile(fx.grant_file(config, folder)):
+        problems.append("a subfolder of the granted folder consumed the grant")
+    return problems
 
 
 def case_bind_corrupt_grant_binds_nothing_and_does_not_raise():
@@ -527,7 +531,7 @@ CASES = [
     case_bind_stale_grant_is_deleted_and_binds_nothing,
     case_bind_sibling_with_a_shared_prefix_binds_nothing,
     case_bind_parent_of_the_grant_binds_nothing,
-    case_bind_folder_under_the_grant_binds,
+    case_bind_subfolder_of_the_grant_binds_nothing,
     case_bind_corrupt_grant_binds_nothing_and_does_not_raise,
     case_bind_crlf_grant_with_bom_binds,
     case_bind_blocked_tier_dir_binds_nothing_and_does_not_raise,

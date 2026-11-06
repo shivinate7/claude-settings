@@ -9758,9 +9758,10 @@ def record_push_cost_case():
 #
 # Rule roadmap-one-writer, decision session-tiers (the tier file; its one home is hooks/session_tier.py). A local
 # triage session has no cloud record, so its transcript proves nothing. The coordinator grants the triage folder:
-# one grant file per folder, valid for an hour. The guard binds that grant to the session id on the session's first
-# top-level call, and the bound file then proves the triage tier to the push check. The first session that binds a
-# grant consumes it. A bound file names one session id and one tier.
+# one grant file per folder, for that exact folder only (a subfolder binds nothing), valid for an hour. The guard
+# binds that grant to the session id on the session's first top-level call, and the bound file then proves the
+# triage tier to the push check. The first session that binds a grant consumes it. A bound file names one session id
+# and one tier.
 #
 # These checks write the grant and bound files in the spec's format, so each judges the guard alone. The CLI that
 # writes a grant, and the module's bind and proof functions, have their cases in hooks/test_session_tier.py. Each
@@ -9935,6 +9936,27 @@ def tier_stale_check():
     return tier_result(problems, "a stale grant binds nothing and is deleted")
 
 
+def tier_subfolder_check():
+    """roadmap-one-writer: a session in a subfolder of the granted folder binds nothing, and its push is refused"""
+    granted = os.path.join(ROOT, "tier-subgrant")
+    inside = os.path.join(granted, "inside")
+    os.makedirs(inside, exist_ok=True)
+    config = os.path.join(ROOT, "tier", "subfolder")
+    session = "tier-subfolder"
+    tier_grant(config, granted, TIER_FRESH_AGE)
+    problems = []
+    tier_judge(session, inside, "echo ready", config)
+    if os.path.exists(tier_bound_file(config, session)):
+        problems.append("a subfolder of the granted folder bound the grant")
+    if not os.path.isfile(tier_grant_file(config, granted)):
+        problems.append("a subfolder of the granted folder consumed the grant")
+    got, reason = tier_judge(session, inside, TIER_PUSH, config)
+    if not tier_refused_by_record(got, reason):
+        problems.append("the subfolder session's push: %s, want a roadmap-one-writer deny" % got)
+    problems += tier_control("subfolder")
+    return tier_result(problems, "a subfolder of the granted folder binds nothing; the grant is for the exact folder")
+
+
 def tier_bound_case(label, write, want_allow, note):
     """A bound file already written for the session: the push is allowed or refused as `want_allow` says. The
     control is a fresh grant bound by a top-level call, so a refusal here is not a guard that never binds."""
@@ -10053,6 +10075,8 @@ TIER_LOG_CHECKS = (
     ("roadmap-one-writer: a session that starts after the grant was consumed binds nothing, and its push is refused",
      tier_consumed_check),
     ("roadmap-one-writer: a session outside the granted folder binds nothing, in three forms", tier_outside_check),
+    ("roadmap-one-writer: a session in a subfolder of the granted folder binds nothing, and its push is refused",
+     tier_subfolder_check),
     ("roadmap-one-writer: a grant older than an hour binds nothing, is deleted, and the push is refused",
      tier_stale_check),
     ("roadmap-one-writer: a bound file whose tier is lane does not prove the push", tier_bound_lane_check),
@@ -27551,6 +27575,7 @@ WINDOWS_CHECKERS.update(LB_CHECKS)
 WINDOWS_CHECKERS.update({ov_parallel_check, ov_take_race_check, ov_late_reader_check})
 WINDOWS_CHECKERS.update({tier_bind_allow_check, tier_bind_crlf_check, tier_bind_spelling_check,
                          tier_agent_call_check, tier_consumed_check, tier_outside_check, tier_stale_check,
+                         tier_subfolder_check,
                          tier_bound_lane_check, tier_bound_corrupt_check, tier_bound_crlf_check,
                          tier_bound_agent_check, tier_cost_check})
 
