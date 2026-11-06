@@ -169,6 +169,9 @@ jobs:
       - name: Call judge fixture suite
         run: python3 hooks/test_call_judge.py
 
+      - name: Check refuter fixture suite
+        run: python3 hooks/test_check_refuter.py
+
       - name: Question form fixture suite
         run: python3 hooks/test_question_form.py
 
@@ -882,6 +885,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_call_judge.py
 
+      - name: Check refuter fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_check_refuter.py
+
       - name: Question form fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_question_form.py
@@ -1490,6 +1497,10 @@ jobs:
       - name: Call judge fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_call_judge.py
+
+      - name: Check refuter fixture suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python hooks/test_check_refuter.py
 
       - name: Question form fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
