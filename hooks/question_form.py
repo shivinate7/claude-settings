@@ -1603,7 +1603,7 @@ def _tree_names(body, hash_size):
     return out
 
 
-def read_json_folder(root, folder, refs):
+def read_json_folder(root, folder, refs, timeout=STEP_GIT_TIMEOUT):
     """({file stem: JSON object}, state, ref) for each `.json` file of `folder` on the first of `refs` that holds the
     folder, through ONE `git cat-file --batch` process. state is "ok", "absent" (no repo, no ref or no folder) or
     "unreadable: <why>" (git failed, odd answer, bad JSON). `ref` is the ref read, else "". Never fetches."""
@@ -1625,7 +1625,7 @@ def read_json_folder(root, folder, refs):
             except BrokenPipeError:
                 # git exited before it read the request; its stderr says why. The wait is bounded, and the
                 # `finally` below kills and reaps the process on every path.
-                proc.wait(timeout=STEP_GIT_TIMEOUT)
+                proc.wait(timeout=timeout)
                 if b"not a git repository" in proc.stderr.read(4096):
                     return {}, "absent", ""
                 return {}, UNREADABLE + ": git exited early", ""
@@ -1643,7 +1643,7 @@ def read_json_folder(root, folder, refs):
             break
         if entries is None:
             return {}, "absent", ""
-        out, _ = proc.communicate("".join(s + "\n" for _, s in entries).encode(), timeout=STEP_GIT_TIMEOUT)
+        out, _ = proc.communicate("".join(s + "\n" for _, s in entries).encode(), timeout=timeout)
         records, pos = {}, 0
         for name, _sha in entries:
             nl = out.index(b"\n", pos)
