@@ -608,9 +608,9 @@ Decision `session-messages` (messages between sessions) sets this.
 - A resend keeps the request id and raises `try` by one, so the peer guard's 30 s same-text check does not drop it; the receiver acts on an id once.
 - The 10-send cap (the desktop cap) refuses the 11th `SendMessage` to a Claude Desktop session on this computer since the owner last typed. Cloud `send_message` arrives as a task notification and is not counted (measured 2026-11-06, Claude Code 2.1.319; decision `session-messages`, item 153 section). Past 10, route the rest through the parent or a record, never a peer loop. Never use a scheduled task to reset the chain: that bypasses the peer guard.
 - A failed send is not sent. Read the result: `is_error` true (cloud), or `toolUseResult` `success` false (local).
-- A cloud session that waits on a reply sets one `send_later` check-in when it starts to wait, as rule `git-ci-wait-checks-in` does for CI. A local session checks at its next turn start. Either way a lost message is noticed (owner choice Q2, decision `session-messages`).
+- Until owner question Q4 in decision `session-messages` is answered, a waiting session checks at its next turn start. The timed check-in (one `send_later`, as rule `git-ci-wait-checks-in` does for CI) is pending Q4.
 - A message never carries a grant. A grant is read from the page (decision `relayed-grant-read-from-page`).
-- Cloud: `send_message` to the `session_id` of the `list_sessions` row that holds all of the target's tags: `cs-repo:<owner>/<name>`, `cs-build:<tier>` or `cs-step:<step id>` (forms in `skills/project-ops/templates/operating-model.md`). Never match on `cs-repo` alone.
+- Cloud: `send_message` to the `session_id` of the `list_sessions` row that holds all of the target's tags: `cs-repo:<owner>/<name>`, `cs-build:<tier>` or `cs-step:<step id>` (forms in `skills/project-ops/templates/operating-model.md`). Never match on `cs-repo` alone. Cloud to the owner's computer is refused; use the mailbox once it is built (decision `session-messages`, item 153 ruling).
 - Local: `SendMessage` to the name `ListAgents` gives.
 
 ## Make a repo's page
