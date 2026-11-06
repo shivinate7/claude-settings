@@ -196,7 +196,6 @@ def lock_pr(pr, lock_dir):
             import fcntl
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        open(os.path.join(lock_dir, key + ".busy"), "w").close()  # SEED S1b: a file per refused watch
         os.close(fd)
         return False
     HELD.append(fd)
