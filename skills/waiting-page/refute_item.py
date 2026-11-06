@@ -6,10 +6,10 @@
 <item.json> holds the item's data object. The guard (hooks/question_form.py, rule question-form) refuses an open
 decision write that has a `pick` and no `against`, so a session runs this before the write.
 
-In scope: the guard's scope, any item with a pick (a non-blank str, or a list with a non-blank key) and a status other
-than "closed", whatever its kind. An in-scope item with options makes one model call, through
-decision_watch.invoke_model, the one home of that call. One with no options makes no call and gets
-`against: "unknown (no options)"`. Anything else: no call, the file is unchanged, exit 0.
+In scope: the guard's scope, an item with a pick (a non-blank str, or a list with a non-blank key), a status other
+than "closed", and a kind that is absent or "decision". A task or note is out of scope. An in-scope item with
+options makes one model call, through decision_watch.invoke_model, the one home of that call. One with no options
+makes no call and gets `against: "unknown (no options)"`. Anything else: no call, the file is unchanged, exit 0.
 
 The prompt is blind: the context, each option and the pick key or keys. It never holds `why`, so the refuter does
 not read the picker's reasoning. The case is written stripped. A failed call, or a reply with no usable case, is
@@ -60,8 +60,9 @@ def pick_keys(item):
 
 
 def in_scope(item):
-    """The guard's scope (hooks/question_form.py): a pick and a status other than closed, whatever the kind."""
-    return isinstance(item, dict) and item.get("status") != "closed" and bool(pick_keys(item))
+    """The guard's scope (hooks/question_form.py): a pick, a status other than closed, and kind absent or decision."""
+    return (isinstance(item, dict) and item.get("status") != "closed"
+            and item.get("kind") in (None, "decision") and bool(pick_keys(item)))
 
 
 def has_options(item):

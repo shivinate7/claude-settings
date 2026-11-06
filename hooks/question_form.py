@@ -824,8 +824,8 @@ def task_str_replace_hit(entry) -> str:
 def decision_form_hit(op: str, data):
     """(rule, matched) when this write of a waiting-page item breaks the form. A closed item passes. The form
     lines are judged on a decision only; an update is judged for the fields it carries, and only with kind
-    decision, because the guard cannot see the stored kind. The best case against the pick is judged on any
-    kind, since a pick with no kind can still be an open decision."""
+    decision, because the guard cannot see the stored kind. The best case against the pick is judged also on
+    an update with no kind, since it can still be an open decision."""
     if not isinstance(data, dict) or data.get("status") == "closed":
         return PASS
     is_decision = (data.get("kind") in (None, "decision")) if op == "set" else data.get("kind") == "decision"
@@ -851,8 +851,11 @@ def decision_form_hit(op: str, data):
 
 
 def _against_hit(data):
-    """(rule, matched) when an open write carries a pick and no `against`. An update judges it only when it
-    carries a pick (the stored item is unseen)."""
+    """(rule, matched) when an open write carries a pick and no `against`, and its kind is absent or
+    "decision". A task or note is out of the refuter's scope. An update judges it only when it carries a pick
+    (the stored item is unseen)."""
+    if data.get("kind") not in (None, "decision"):
+        return PASS
     pick = data.get("pick")
     if (pick if isinstance(pick, list) else _filled(pick)) and not _filled(data.get("against")):
         return FORM_RULE, ("pick with no against: run refute_item.py from the waiting-page skill folder on the "
