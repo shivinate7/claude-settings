@@ -1309,13 +1309,15 @@ for (const viewport of WIDTHS) {
     const it = mk("against-tops", 37, { multi: true, ranked: true, pick: ["a", "c"], options: COLOURS.slice(0, 3), against: AGAINST });
     const page = await open(t, { items: [it], viewport }); if (!page) return;
     await card(page, it).locator(".against").waitFor({ state: "attached" });
-    const tops = await page.evaluate((id) => [...document.querySelectorAll(`#item-${id} .opt`)].map((opt) => {
+    // Each line is measured from the top of its own option card: at a phone width the cards stack, so their
+    // tops differ, and the pick line's place inside its card is what the against block must not move.
+    const offsets = await page.evaluate((id) => [...document.querySelectorAll(`#item-${id} .opt`)].map((opt) => {
       const line = opt.querySelector(".pick");
-      return line ? { key: opt.querySelector("input")?.value, top: line.getBoundingClientRect().top } : null;
+      return line ? { key: opt.querySelector("input")?.value, offset: line.getBoundingClientRect().top - opt.getBoundingClientRect().top } : null;
     }).filter(Boolean), it.id);
-    assert.equal(tops.length, 2, `${it.id}: ${tops.length} pick lines, want one for each picked option, at ${viewport.width} wide`);
-    for (const { key, top } of tops) assert.ok(Math.abs(top - tops[0].top) <= 1,
-      `option ${key}'s pick line is at ${top}px and option ${tops[0].key}'s at ${tops[0].top}px at ${viewport.width} wide: the against block moved one option's row`);
+    assert.equal(offsets.length, 2, `${it.id}: ${offsets.length} pick lines, want one for each picked option, at ${viewport.width} wide`);
+    for (const { key, offset } of offsets) assert.ok(Math.abs(offset - offsets[0].offset) <= 1,
+      `option ${key}'s pick line is ${offset}px below its card's top and option ${offsets[0].key}'s is ${offsets[0].offset}px at ${viewport.width} wide: the against block moved one option's row`);
   });
 }
 
