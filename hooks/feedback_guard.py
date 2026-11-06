@@ -1259,7 +1259,6 @@ def inbox_stop(hook):
             flags, note = judge_stop(homes, inbox, blocks, judged)
             ids = [it[0] for b in blocks for it in map(item, b["items"]) if it is not None and it[2]]
             write_state(turns, len(blocks), burst, list(dict.fromkeys((judged or []) + ids)))
-            open(inbox, "ab").write(b"\n")  # SEED S4b: a quiet Stop appends a byte to the inbox
         if hook.get("stop_hook_active"):
             msg = " ".join(flags + ([note] if note else []))
             return {"systemMessage": msg} if msg else {}
@@ -1298,4 +1297,4 @@ def inbox_stop(hook):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main() or 1)  # SEED S4c: every Stop exits 1
