@@ -5,7 +5,7 @@ a listed module renamed off the list is red, a shrink against --main (current ma
 Swift, .entitlements and zsh files have rows and zsh skips ShellCheck, web app data and image files have rows, archive, sheet, model and node config files have rows, an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
 standard's table is whole (every layer runs or has a one-line reason). The comment check reads only added
 lines; with no base it is skipped with a reason, and with a base outside the clone it is unknown, never red.
-A .mjs file's broken or extensionless relative import, and TS-only syntax in it, is red; its builtin, bare, JSON, .cjs and type-error imports, a JSDoc type, and npm notice lines on stderr are not; a .js or .cjs file is not checked, and a clean .mjs with no tsc on PATH is red.
+A .mjs file's broken or extensionless relative import, and TS-only syntax in it, is red; its builtin, bare, JSON, .cjs and type-error imports, a JSDoc type, and npm notice lines on stderr are not; a .js or .cjs file is not checked, and a clean .mjs with no tsc on PATH is red. With a "link" key in .code-check.json, each root links unrun: a broken import, a missing named export or a missing bare package is red, and the file never runs; with no link key nothing changes.
 The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy, shellcheck (the --pins specs, via pipx) and
 astro-check (the tools/ lockfile, via npm ci, bin on PATH) must be installed. Without astro-check the Astro tests
 skip and say so, except under CI, where they fail."""
@@ -18,6 +18,8 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 RUN_FOLDER = _test_temp.run_folder()
 RUNNER = os.path.join(HERE, "code_check.py")
 STANDARD = os.path.join(HERE, "standard.json")
+TS_SOURCE = os.path.join(HERE, "tools", "node_modules", "typescript")  # the copy CI installs too
+TS_LINK = object()  # an untracked value: a symlink to TS_SOURCE, the repo's own typescript
 GOOD_PY = "def add(a: int, b: int) -> int:\n    return a + b\n"
 BAD_PY = "def add(a: int, b: int) -> int:\n    return str(a)\n"
 GOOD_ASTRO = "---\ninterface Props { title: string }\nconst { title } = Astro.props;\nconst n: number = 2;\n---\n<h2>{title} {n}</h2>\n"
@@ -28,6 +30,9 @@ NEEDS_ASTRO = unittest.skipUnless(shutil.which("astro-check") or os.environ.get(
                                   "astro-check not on PATH; npm ci in actions/code-check/tools (CI does)")
 NEEDS_TSC = unittest.skipUnless(shutil.which("tsc") or os.environ.get("CI"),
                                 "tsc not on PATH; npm ci --ignore-scripts --prefix actions/code-check/tools (CI does)")
+NEEDS_NODE = unittest.skipUnless(shutil.which("node") or os.environ.get("CI"), "node not on PATH")
+NEEDS_LINK = unittest.skipUnless((shutil.which("node") and os.path.isdir(TS_SOURCE)) or os.environ.get("CI"),
+                                 "node or actions/code-check/tools/node_modules/typescript missing; npm ci --ignore-scripts --prefix actions/code-check/tools (CI does)")
 with open(STANDARD, encoding="utf-8") as f:
     TS_PIN = json.load(f)["tools"]["typescript"]
 
@@ -48,19 +53,37 @@ def put(root, files):
             f.write(content)
 
 
-def config(modules, exclude=()):
-    return json.dumps({"exclude": list(exclude), "mypy_modules": list(modules)})
+def config(modules, exclude=(), link=None):
+    cfg = {"exclude": list(exclude), "mypy_modules": list(modules)}
+    if link is not None:
+        cfg["link"] = link
+    return json.dumps(cfg)
 
 
 def head(d):
     return subprocess.run(["git", "rev-parse", "HEAD"], cwd=d, capture_output=True, text=True).stdout.strip()
 
 
-def check(files, base_files=None, base=None, main_files=None, main=None, send_base=True, path_tools=True, unset=(), **env):
+def put_untracked(root, files):
+    """Writes files after the commit, so git never tracks them, as an install leaves them. TS_LINK links TS_SOURCE."""
+    for name, content in files.items():
+        path = os.path.join(root, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if content is TS_LINK:
+            if not os.path.isdir(TS_SOURCE):
+                raise AssertionError("no typescript at %s; npm ci --ignore-scripts --prefix actions/code-check/tools" % TS_SOURCE)
+            os.symlink(TS_SOURCE, path)
+        else:
+            with open(path, "w", newline="\n") as f:
+                f.write(content)
+
+
+def check(files, base_files=None, base=None, main_files=None, main=None, send_base=True, path_tools=True, unset=(), untracked=None, **env):
     """Commit base_files (when given) as the base, then files on top (None deletes); run the runner.
     main_files (when given) are a commit on top of the base that the PR does not hold, passed as --main;
     the PR's files then go on the base. `base` and `main` name a ref outright; send_base=False omits --base.
-    unset names are dropped from the run env; env adds or replaces variables there. Returns (exit, output)."""
+    untracked (when given) is written after the commit and never committed. unset names are dropped from the
+    run env; env adds or replaces variables there. Returns (exit, output)."""
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
         git(d, "init", "-q", "-b", "main")
         if base_files is not None:
@@ -74,6 +97,7 @@ def check(files, base_files=None, base=None, main_files=None, main=None, send_ba
             git(d, "checkout", "-q", base)
         put(d, files)
         git(d, "add", "-A"); git(d, "commit", "-qm", "head", "--allow-empty")
+        put_untracked(d, untracked or {})
         args = [sys.executable, RUNNER, "--root", d] + (["--base", base] if base and send_base else []) + (["--main", main] if main else [])
         run_env = dict(os.environ, **env)
         for name in unset:
@@ -83,6 +107,33 @@ def check(files, base_files=None, base=None, main_files=None, main=None, send_ba
             run_env["CODE_CHECK_TOOLS"] = "path"
         p = subprocess.run(args, capture_output=True, text=True, env=run_env)
         return p.returncode, p.stdout + p.stderr
+
+
+LINK_PASS = "javascript typecheck: mjs-link pass"
+LINK_FAIL = "javascript typecheck: mjs-link FAIL"
+FAKE_PKG = {"node_modules/fakepkg/package.json": '{"name": "fakepkg", "type": "module", "main": "index.mjs"}\n',
+            "node_modules/fakepkg/index.mjs": "export const present = 1;\n"}
+# A .tsx transpile may emit an import of react/jsx-runtime; this fake gives it the names TypeScript imports.
+REACT_JSX = {"node_modules/react/package.json": '{"name": "react", "type": "module", "exports": {"./jsx-runtime": "./jsx-runtime.mjs"}}\n',
+             "node_modules/react/jsx-runtime.mjs": "export const jsx = () => null;\nexport const jsxs = () => null;\nexport const Fragment = null;\n"}
+
+
+def link_check(files, roots=(), skip=(), npm_scripts=(), untracked=None, ts=True, **kw):
+    """check() with the link step opted in: the config's link key, and node_modules/typescript linked to TS_SOURCE
+    unless ts is False. untracked adds more files that git never tracks, such as installed packages."""
+    link = {"roots": list(roots), "skip": list(skip), "npm_scripts": list(npm_scripts)}
+    hidden = {"node_modules/typescript": TS_LINK} if ts else {}
+    hidden.update(untracked or {})
+    return check({".code-check.json": config([], link=link), **files}, untracked=hidden, **kw)
+
+
+def failure(out, path):
+    """The text under `FAIL load: <path>`, up to the next FAIL load line, so one root's error is never another's.
+    Empty when that root did not fail."""
+    marker = "FAIL load: %s" % path
+    if marker not in out:
+        return ""
+    return out.split(marker, 1)[1].split("FAIL load:", 1)[0]
 
 
 class CodeCheck(unittest.TestCase):
@@ -459,6 +510,220 @@ class CodeCheck(unittest.TestCase):
         rc, out = check({".code-check.json": config([]), "app.mjs": "const n = 1;\nn.foo;\nexport default n;\n"},
                         PATH=shim + os.pathsep + os.environ["PATH"], unset=("CI",))
         self.assertIn("javascript typecheck: mjs-imports pass", out, out)
+        self.assertEqual(rc, 0, out)
+
+
+class LinkStep(unittest.TestCase):
+    """The opt-in link step: each root in .code-check.json's "link" key links unrun, as harness/load-files.mjs does.
+    The file never runs; a failing root names its own error under its FAIL load line."""
+
+    @NEEDS_LINK
+    def test_missing_bare_package_is_red_and_not_unknown(self):
+        rc, out = link_check({"app.mjs": 'import x from "nopkg";\nexport default x;\n'}, roots=["app.mjs"])
+        self.assertIn(LINK_FAIL, out, out)
+        self.assertNotIn("mjs-link unknown", out, out)
+        self.assertIn("nopkg", failure(out, "app.mjs"), out)
+        self.assertEqual(rc, 1, out)
+
+    @NEEDS_LINK
+    def test_package_with_the_named_export_is_green(self):
+        rc, out = link_check({"app.mjs": 'import { present } from "fakepkg";\nexport default present;\n'},
+                             roots=["app.mjs"], untracked=FAKE_PKG)
+        self.assertIn(LINK_PASS, out, out)
+        self.assertEqual(rc, 0, out)
+
+    @NEEDS_LINK
+    def test_package_missing_the_named_export_is_red(self):
+        rc, out = link_check({"app.mjs": 'import { missingName } from "fakepkg";\nexport default missingName;\n'},
+                             roots=["app.mjs"], untracked=FAKE_PKG)
+        self.assertIn(LINK_FAIL, out, out)
+        self.assertIn("missingName", failure(out, "app.mjs"), out)
+        self.assertEqual(rc, 1, out)
+
+    @NEEDS_LINK
+    def test_node_builtin_missing_a_named_export_is_red(self):
+        rc, out = link_check({"app.mjs": 'import { notThere } from "node:fs";\nexport default notThere;\n'},
+                             roots=["app.mjs"])
+        self.assertIn(LINK_FAIL, out, out)
+        self.assertIn("notThere", failure(out, "app.mjs"), out)
+        self.assertEqual(rc, 1, out)
+
+    @NEEDS_LINK
+    def test_package_in_a_subfolder_resolves_from_the_importing_file(self):
+        # Only pkgs/web/node_modules holds innerpkg: a lookup from the repo root or from the action's folder finds nothing.
+        inner = {"pkgs/web/node_modules/innerpkg/package.json": '{"name": "innerpkg", "type": "module", "main": "index.mjs"}\n',
+                 "pkgs/web/node_modules/innerpkg/index.mjs": "export const present = 1;\n"}
+        rc, out = link_check({"pkgs/web/app.mjs": 'import { present } from "innerpkg";\nexport default present;\n'},
+                             roots=["pkgs/web/app.mjs"], untracked=inner)
+        self.assertIn(LINK_PASS, out, out)
+        self.assertEqual(rc, 0, out)
+
+    @NEEDS_LINK
+    def test_mjs_root_reaches_a_ts_file_missing_a_named_export_is_red(self):
+        # The root's own imports resolve. The break is one .ts file down, so the link must follow the graph through .ts.
+        rc, out = link_check({"app.mjs": 'import { viaMid } from "./mid.ts";\nexport default viaMid;\n',
+                              "mid.ts": 'import { notThere } from "./lib.ts";\nexport const viaMid = notThere;\n',
+                              "lib.ts": "export const present = 1;\n"}, roots=["app.mjs"])
+        self.assertIn(LINK_FAIL, out, out)
+        self.assertIn("notThere", failure(out, "app.mjs"), out)
+        self.assertEqual(rc, 1, out)
+
+    @NEEDS_LINK
+    def test_mjs_root_importing_a_ts_file_missing_a_named_export_is_red(self):
+        rc, out = link_check({"app.mjs": 'import { notThere } from "./lib.ts";\nexport default notThere;\n',
+                              "lib.ts": "export const present = 1;\n"}, roots=["app.mjs"])
+        self.assertIn(LINK_FAIL, out, out)
+        self.assertIn("notThere", failure(out, "app.mjs"), out)
+        self.assertEqual(rc, 1, out)
+
+    @NEEDS_LINK
+    def test_ts_root_resolves_as_tsx_does_and_is_green(self):
+        # ./f.js names f.ts, ./g probes to g.tsx, ./d names d/index.ts, and @/x names x.ts from the repo root.
+        rc, out = link_check({"app.ts": ('import { fromF } from "./f.js";\nimport { fromG } from "./g";\n'
+                                         'import { fromD } from "./d";\nimport { fromX } from "@/x";\n'
+                                         "export const all: number = fromF + fromG + fromD + fromX;\n"),
+                              "f.ts": "export const fromF: number = 1;\n",
+                              "g.tsx": "export const fromG: number = 2;\n",
+                              "d/index.ts": "export const fromD: number = 3;\n",
+                              "x.ts": "export const fromX: number = 4;\n"}, roots=["app.ts"])
+        self.assertIn(LINK_PASS, out, out)
+        self.assertEqual(rc, 0, out)
+
+    @NEEDS_LINK
+    def test_mjs_root_extensionless_import_of_a_ts_only_file_is_red(self):
+        # A .mjs root resolves as node does: "./f" is not f.ts, so the probe that tsx runs does not apply.
+        rc, out = link_check({"app.mjs": 'import { a } from "./f";\nexport default a;\n', "f.ts": "export const a = 1;\n"},
+                             roots=["app.mjs"])
+        self.assertIn(LINK_FAIL, out, out)
+        self.assertIn("./f", failure(out, "app.mjs"), out)
+        self.assertEqual(rc, 1, out)
+
+    @NEEDS_LINK
+    def test_ts_root_side_effect_import_of_a_missing_file_is_red(self):
+        rc, out = link_check({"app.ts": 'import "./gone.ts";\nexport const n: number = 1;\n'}, roots=["app.ts"])
+        self.assertIn(LINK_FAIL, out, out)
+        self.assertIn("gone.ts", failure(out, "app.ts"), out)
+        self.assertEqual(rc, 1, out)
+
+    @NEEDS_LINK
+    def test_file_named_by_an_npm_script_is_a_root_and_its_broken_import_is_red(self):
+        pkg = '{"name": "fixture", "scripts": {"cli": "tsx src/runCli.ts --once"}}\n'
+        rc, out = link_check({"package.json": pkg, "src/runCli.ts": 'import { x } from "./gone.ts";\nexport const y = x;\n'},
+                             npm_scripts=["src/"])
+        self.assertIn(LINK_FAIL, out, out)
+        self.assertIn("gone.ts", failure(out, "src/runCli.ts"), out)
+        self.assertEqual(rc, 1, out)
+
+    @NEEDS_LINK
+    def test_file_no_script_names_and_no_root_matches_is_not_checked(self):
+        pkg = '{"name": "fixture", "scripts": {"cli": "tsx other.ts"}}\n'
+        rc, out = link_check({"package.json": pkg, "other.ts": "export const z: number = 1;\n",
+                              "src/runCli.ts": 'import { x } from "./gone.ts";\nexport const y = x;\n'},
+                             roots=["other.ts"], npm_scripts=["src/"])
+        self.assertIn(LINK_PASS, out, out)
+        self.assertNotIn("FAIL load:", out, out)
+        self.assertEqual(rc, 0, out)
+
+    @NEEDS_LINK
+    def test_skip_prefix_drops_a_broken_root_and_is_green(self):
+        files = {"app.ts": "export const n: number = 1;\n",
+                 "legacy/old.ts": 'import { gone } from "./gone.ts";\nexport const o = gone;\n'}
+        rc, out = link_check(files, roots=["*.ts"], skip=["legacy/"])
+        self.assertIn(LINK_PASS, out, out)
+        self.assertNotIn("FAIL load:", out, out)
+        self.assertEqual(rc, 0, out)
+
+    @NEEDS_LINK
+    def test_same_broken_root_without_skip_is_red(self):
+        files = {"app.ts": "export const n: number = 1;\n",
+                 "legacy/old.ts": 'import { gone } from "./gone.ts";\nexport const o = gone;\n'}
+        rc, out = link_check(files, roots=["*.ts"])
+        self.assertIn(LINK_FAIL, out, out)
+        self.assertIn("gone.ts", failure(out, "legacy/old.ts"), out)
+        self.assertEqual(rc, 1, out)
+
+    @NEEDS_NODE
+    def test_no_typescript_in_the_repo_is_unknown_and_exits_0_locally(self):
+        rc, out = link_check({"app.mjs": "export const a = 1;\n"}, roots=["app.mjs"], ts=False, unset=("CI",))
+        self.assertTrue(one_line_with(out, "mjs-link unknown"), out)
+        self.assertEqual(rc, 0, out)
+
+    @NEEDS_NODE
+    def test_no_typescript_in_the_repo_is_red_under_ci(self):
+        rc, out = link_check({"app.mjs": "export const a = 1;\n"}, roots=["app.mjs"], ts=False, CI="1")
+        self.assertTrue(one_line_with(out, "mjs-link unknown"), out)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("code-check: FAIL", out, out)
+
+    @NEEDS_TSC
+    def test_without_a_link_key_nothing_is_linked(self):
+        # The same broken bare import and broken .ts root as main checks: with no link key both stay green, as on main.
+        rc, out = check({".code-check.json": config([]), "app.mjs": 'import x from "nopkg";\nexport default x;\n',
+                         "lone.ts": 'import "./gone.ts";\nexport const z: number = 1;\n'})
+        self.assertNotIn("mjs-link", out, out)
+        self.assertIn("javascript typecheck: mjs-imports pass", out, out)
+        self.assertEqual(rc, 0, out)
+
+    @NEEDS_LINK
+    def test_ts_scanner_traps_are_green(self):
+        # A string holding an import, a comment opener and a line comment; a template literal with an import line.
+        rc, out = link_check({"app.ts": ("// don't mind this comment, it holds /* an opener\n"
+                                         "export const text = \"import x from './gone' // /* not a comment\";\n"
+                                         "export const block = `\nimport './gone.mjs';\n`;\n"
+                                         "export const n: number = 1;\n")}, roots=["app.ts"])
+        self.assertIn(LINK_PASS, out, out)
+        self.assertEqual(rc, 0, out)
+
+    @NEEDS_LINK
+    def test_tsx_lone_quote_in_jsx_text_is_green(self):
+        rc, out = link_check({"app.tsx": ("export const text = \"import x from './gone' // /* not a comment\";\n"
+                                          "export const el = <p>Don't</p>;\n")}, roots=["app.tsx"], untracked=REACT_JSX)
+        self.assertIn(LINK_PASS, out, out)
+        self.assertEqual(rc, 0, out)
+
+    @NEEDS_LINK
+    def test_link_never_runs_the_file(self):
+        # app.mjs writes a marker at its top level; boom.ts throws at its top level. Linking runs neither.
+        marker = os.path.join(tempfile.mkdtemp(dir=RUN_FOLDER), "ran.txt")
+        files = {"app.mjs": 'import { writeFileSync } from "node:fs";\nwriteFileSync(%s, "ran");\nexport const a = 1;\n' % json.dumps(marker),
+                 "boom.ts": 'throw new Error("ran");\nexport const b: number = 1;\n'}
+        rc, out = link_check(files, roots=["app.mjs", "boom.ts"])
+        self.assertIn(LINK_PASS, out, out)
+        self.assertFalse(os.path.exists(marker), "the link step ran app.mjs and wrote its marker")
+        self.assertEqual(rc, 0, out)
+
+    @NEEDS_LINK
+    def test_many_roots_sharing_one_target_fail_only_the_broken_one(self):
+        files = {"lib.ts": "export const present = 1;\n",
+                 "broken.mjs": 'import { notThere } from "./lib.ts";\nexport default notThere;\n'}
+        for i in range(40):
+            files["m%02d.mjs" % i] = 'import { present } from "./lib.ts";\nexport default present;\n'
+        rc, out = link_check(files, roots=["*.mjs"])
+        self.assertIn(LINK_FAIL, out, out)
+        self.assertEqual(out.count("FAIL load:"), 1, out)
+        self.assertIn("notThere", failure(out, "broken.mjs"), out)
+        self.assertEqual(rc, 1, out)
+
+    @NEEDS_LINK
+    def test_empty_roots_check_nothing(self):
+        rc, out = link_check({"lone.ts": 'import "./gone.ts";\nexport const z: number = 1;\n'}, roots=[])
+        self.assertNotIn("FAIL load:", out, out)
+        self.assertEqual(rc, 0, out)
+
+    @NEEDS_LINK
+    def test_star_in_a_root_crosses_folders(self):
+        rc, out = link_check({"src/deep/b.ts": 'import "./gone.ts";\nexport const b: number = 1;\n',
+                              "app.ts": "export const n: number = 1;\n"}, roots=["src/*.ts"])
+        self.assertIn(LINK_FAIL, out, out)
+        self.assertIn("gone.ts", failure(out, "src/deep/b.ts"), out)
+        self.assertEqual(rc, 1, out)
+
+    @NEEDS_LINK
+    def test_roots_match_tracked_files_only(self):
+        rc, out = link_check({"app.ts": "export const n: number = 1;\n"}, roots=["*.ts"],
+                             untracked={"stray.ts": 'import "./gone.ts";\n'})
+        self.assertIn(LINK_PASS, out, out)
+        self.assertNotIn("FAIL load:", out, out)
         self.assertEqual(rc, 0, out)
 
 
