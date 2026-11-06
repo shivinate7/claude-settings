@@ -23,7 +23,7 @@ Interface the module must match (the builder's contract):
   check line refuses with no model call. Otherwise one refute call per brief: gap and unknown refuse, met allows.
   Any other send_message makes no model call and no import of check_refuter.
 - settings.json: the call_judge row's matcher includes mcp__claude-code-remote__send_message.
-- Fix round 1: refute passes effort=REFUTER_EFFORT (None, the model's default) and its prompt asks for a realistic
+- refute passes effort=REFUTER_EFFORT (None, the model's default) and its prompt asks for a realistic
   case. done_check_line accepts the brief template's Done check forms, skips lines inside ``` or ~~~ fences, and reads
   the line after a `## Done check` heading. A check that is only a <...> placeholder is refused with no model call.
   An unknown ask names the fetch command for the record branch. REFUTER_TIMEOUT + GIT_TIMEOUT is under the call_judge
@@ -438,7 +438,7 @@ def case_non_brief_send_is_not_judged():
     check("empty send: no model call and allowed", r.calls == [] and r.deny() is None, detail(r))
 
 
-# ------------------------------------------------------------------ fix round 1: effort, the realistic bar, the forms
+# ------------------------------------------------------------------ effort, the realistic bar, the Done check forms
 
 def case_refute_passes_the_effort_setting():
     mod, err = load_refuter()
