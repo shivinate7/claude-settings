@@ -34,15 +34,16 @@ Settled by the rulings of Nov 6:
   its place by time (newest first). The next open card takes its slot (No. 23 moves up). The tier holds open cards only, so
   item 311's order holds with no sort inside the tier. The rail chips move with their cards.
 - SENT_MOVE "stay" (`#s=stay`): a sent card keeps its place in its tier until the next load, as today. Only arrivals move.
-- Change: with "sink", a Change on a card sent this visit brings it back to its tier as an open card, at its place by the
-  tier's own order (item 311). A card sunk at load keeps today's Change: open in place in Answered. The ruling does not say
-  which applies to it; the builder asks before it changes that.
+- Change: a Change on any card in Answered, sunk at load or on this visit, opens it in place in Answered, as today
+  (page.html `freezeSunk` comment, base 8cfba982). Undo after a sink Send returns the card to its slot, open.
 - Answered sub-head: with "sink" the section also holds cards sent on this visit, so "Sent before this visit, newest first."
   becomes "Your sent answers, newest first." (ux-statements-are-true).
-- Departs from: ux-order-holds-still (a Send re-ranks the tier) and ux-press-moves-nothing (cards move after the Send), and
-  page.html `freezeSunk` (a sent card stays in place until reload). Owner grant: item 311. Merge waits for the rule's ruling.
-- Builder: freeze the set of item ids at load, beside `freezeSeen`. In `sorted()`, the first key of the tier sort is "not in
-  that set". SENT_MOVE "sink" adds each item sent on this visit to the sunk set at the Send; a Change removes it again.
+- Departs from: page.html `freezeSunk` — a sent card left its tier only at reload; now it leaves at the Send. Owner grant:
+  item 311 (21:51:10Z); ux-order-holds-still narrowed by item 313 a (16:47 CST, PR #1374).
+- Departs from: ux-press-moves-nothing: the rows below a sent card that close its gap do not count as a move (item 313 a,
+  16:47 CST; PR #1374).
+- Built: freeze the set of item ids at load, beside `freezeSeen`. In `sorted()`, the first key of the tier sort is "not in
+  that set". SENT_MOVE "sink" adds each item sent on this visit to the sunk set at the Send; Undo removes it.
 - Rejected, item 311:
   - "Arrivals on top" as the whole design: it left an open card under a card sent on this visit. It lives on as SENT_MOVE "stay".
   - "Sent cards drop below open ones" inside the tier: superseded by SENT_MOVE "sink", which takes them out of the tier.
