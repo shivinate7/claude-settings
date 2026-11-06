@@ -3,27 +3,27 @@
     python3 ~/.claude/skills/roadmap/build.py --repo <checkout> [--record-branch NAME] [--out FILE] [--block]
 
 The steps, topics and numbers come from the repo's record branch, under roadmap/data/. In a
-checkout that stands on the record branch, the builder reads the working tree and writes
+checkout that stands on the record branch, this script reads the working tree and writes
 roadmap/roadmap.html there. In any other checkout it reads the branch through git (origin's copy
 first, else the local one) and writes to --out. The record homes (decisions, debts, plans and the
 rest) come from the checkout itself, at the paths lint/layout.py gives. Without --record-branch the
 branch is the one the checkout's extras file names ("record-branch", a fork worktree's own), else
 "roadmap"; the flag wins.
 
-With --block the builder writes only the marked data block (window.ROADMAP_DATA and window.ROADMAP_BUILD,
+With --block this script writes only the marked data block (window.ROADMAP_DATA and window.ROADMAP_BUILD,
 never ROADMAP_DB) to --out. The one page of a repo is the waiting page: its writer splices that block into
-the live page and alone publishes (skills/waiting-page/splice.py). The builder publishes nothing.
+the live page and alone publishes (skills/waiting-page/splice.py). This script publishes nothing.
 
 The viewer in page/index.html reads its data through the artifact database (window.claude.use('db')).
-The builder puts a small read-only stand-in for that database (window.ROADMAP_DB), holding every JSON
+This script puts a small read-only stand-in for that database (window.ROADMAP_DB), holding every JSON
 file, in front of the page's own script, so the same viewer runs from disk and as the published
 artifact. It also writes window.ROADMAP_BUILD: the commit each panel read, or "unknown" and why.
 
 Live work (step o8, option a) comes from --live FILE: the project threads and the open pull requests
-and branches, which the publisher reads with its own tools just before the build. The builder cannot
+and branches, which the publisher reads with its own tools just before the build. This script cannot
 reach either itself, so it only checks the file's shape and bakes it in.
 
-After the build it prints an upkeep list for the triage thread (step c55): open-step notes over
+After it runs, this script prints an upkeep list for the triage thread (step c55): open-step notes over
 NOTE_WORDS words; in phases that hold an active step, open steps untouched for STALE_DAYS days and
 open steps with no note (a later phase waits on purpose, so flagging it would cry wolf); and steps that
 entered the top TOP open places in the last day without a "Placed ahead of" line.
@@ -48,10 +48,23 @@ usable createdAt reads "unknown (#N has no createdAt)". A pull names a step when
 its title holds the id as a whole token (names_step), used by the pair line below. The stale-draft row's lane check is
 unlaned's: the branch equals a live session step exactly.
 
-The build goes red (step roadmap-pr-without-step) when a todo step is named by an open pull: it prints
+This script goes red (step roadmap-pr-without-step) when a todo step is named by an open pull: it prints
 "todo step with an open PR: <id> (#N)" per pair, writes the page, then exits 1. Without a usable readAt and pulls read (sessions are not
 needed) it prints one "todo step with an open PR: unknown (<why>)" line and exits 0. The conflict-marker refusal also exits 1; the
 printed line tells them apart.
+
+The build goes red (decision mockup-home) when an open step (status not done) has a note, why or ask that cites a
+mockup by its id (`item<N>-<letter>`, a whole token) and the step's `mockups` field, {"<id>": "<path>"}, holds no
+file for it. It prints "mockup with no file: <step id> <mockup id> (<remedy>)" per miss, writes the page, then exits
+1. The remedy names git fetch, since a stale or unfetched origin ref reads as a miss. An
+entry is a miss when its path is outside the design folder (lint/layout.py mockup_homes; a machine-home path is
+outside it), is a link or a folder, or names a file that no origin ref holds (mockup_on_origin below: any
+remote-tracking ref under refs/remotes/origin/, an open PR's branch too, not the checkout). It reads unknown,
+never a miss, and prints "mockup file unread: <step id> <mockup id> (<why>)" with exit 0, when origin cannot be
+shown: no origin ref, a shallow checkout, a failed git read, or a layout that cannot be read. Cost: at most four
+git processes per build, however many entries and origin refs (the ref listing, the shallow check, one batched
+`git cat-file --batch-check` type read, and one batched link read when some ref holds a blob at an entry's path);
+no file or log.
 
 The upkeep list also names each closed waiting-page item whose home is an open step that never cites
 the item (step page-ruling-reaches-step). The live file's optional "items" list holds one row per item
@@ -79,11 +92,11 @@ Cost per build: about six git processes, one read of each scanned file, one page
 watcher, no timer, no log. The stale-step row adds no git process, file, timer or log to the build. It
 adds to triage's publish, already running: one more list_sessions walk (every page) and three more
 fields (id, session_status, tags) per session in the live file it already writes. The page-ruling row adds
-one read of the waiting page's items (n, status, home) to that same publish. The builder adds no git
+one read of the waiting page's items (n, status, home) to that same publish. This script adds no git
 process, file, timer or log for it. The dated-claim row adds no git process, file, timer or log: it reads
 the notes already loaded.
-The red line and the two stale-ready rows add no process, file, timer or log: they read the live file the
-build already reads. The publisher adds one field (createdAt) per pull row, from the GitHub list call it
+The red line and the two stale-ready rows add no process, file, timer or log: they read the live file this
+script already reads. The publisher adds one field (createdAt) per pull row, from the GitHub list call it
 already makes.
 """
 import argparse
@@ -101,6 +114,17 @@ STALE_DAYS = 5
 STALE_LIVE_MINUTES = 60
 STALE_DRAFT_HOURS = 12
 PAIR_LINE = "todo step with an open PR"
+MOCKUP_LINE = "mockup with no file"
+MOCKUP_UNREAD_LINE = "mockup file unread"
+# A miss line's remedy. A stale or unfetched origin ref reads as a miss, so the remedy names the fetch.
+MOCKUP_REMEDY = "commit the file under the design folder and push it; if it is pushed, run git fetch"
+# One found record of `git cat-file --batch-check=%(objectname) %(objecttype)`: a sha-1 or sha-256 name, then the type.
+CAT_FOUND = re.compile(r"([0-9a-f]{40}|[0-9a-f]{64}) (\w+)")
+# The two-line records `--follow-symlinks` prints for a link it cannot resolve to an object: the word and a size.
+CAT_LINK_WORDS = ("symlink", "dangling", "loop", "notdir")
+# A mockup id cited in a step's text: item<N>-<letter>, a whole token (no letter, digit, "_" or "-" touches it).
+MOCKUP_ID = re.compile(r"(?<![A-Za-z0-9_-])item\d+-[a-z](?![A-Za-z0-9_-])", re.I)
+MOCKUP_TEXT = ("note", "why", "ask")
 READY_SENTENCE = re.compile(r"(?:^|[.!?]\s+)Ready\.(?=\s|$)")
 # A session keeps its step live unless its status is archived (session-tiers, Live-coordinator check).
 # An unseen status reads live: a false "set to todo" resets a working lane's step; a missed flag only delays cleanup.
@@ -110,7 +134,7 @@ FUTURE_MINUTES = 5
 KNOWN_STATUS = ("todo", "doing", "active", "done")
 TOP = 5
 DATA = "roadmap/data"
-# roadmap.html is left out: the builder rewrites it, so a conflict there is resolved by building.
+# roadmap.html is left out: this script rewrites it, so a conflict there is resolved by building.
 SCANNED = ("roadmap", "briefs", "plans", "handoffs")
 OUTPUT = "roadmap/roadmap.html"
 # The layout kinds whose homes the page reads, with the panel name each one gets.
@@ -696,7 +720,7 @@ MARK_OPEN, MARK_CLOSE = "<!-- roadmap:data -->", "<!-- /roadmap:data -->"
 
 def render_block(data, info):
     """Only the marked data block of the one page: the two globals the Status tab reads, never ROADMAP_DB.
-    The waiting-page writer splices it into the live page (skills/waiting-page/splice.py)."""
+    The page writer splices it into the live page (skills/waiting-page/splice.py)."""
     return "%s\n<script>window.ROADMAP_DATA = %s; window.ROADMAP_BUILD = %s;</script>\n%s\n" % (
         MARK_OPEN, as_script(data), as_script(info), MARK_CLOSE)
 
@@ -710,7 +734,7 @@ def main(argv=None):
     ap.add_argument("--live", help="the publisher's live-work file: project threads, open pull requests and branches")
     ap.add_argument("--out", help="the page to write; needed unless the checkout stands on the record branch")
     ap.add_argument("--block", action="store_true",
-                    help="write only the roadmap data block (needs --out), for the waiting-page writer to splice in")
+                    help="write only the roadmap data block (needs --out), for the page writer to splice in")
     args = ap.parse_args(argv)
     repo = pathlib.Path(args.repo).resolve()
     if args.record_branch is None:
@@ -757,9 +781,146 @@ def main(argv=None):
         print("%s: %s" % (PAIR_LINE, pair_why(info["live"])))
     for k, number in pairs or []:
         print("%s: %s (#%d)" % (PAIR_LINE, k, number))
+    misses, unread_files = mockup_misses(repo, data["steps"])
+    for sid, mid in misses:
+        print("%s: %s %s (%s)" % (MOCKUP_LINE, sid, mid, MOCKUP_REMEDY))
+    for sid, mid, why in unread_files:
+        print("%s: %s %s (%s)" % (MOCKUP_UNREAD_LINE, sid, mid, why))
     upkeep(data["steps"], added_at(source), marks, strays if not unread else ["unknown (%s)" % unread], info["live"])
-    if pairs:
+    if pairs or misses:
         raise SystemExit(1)
+
+
+def mockup_cites(step):
+    """The mockup ids a step's note, why and ask cite, lowercased, in first-cited order, each once."""
+    found = []
+    for field in MOCKUP_TEXT:
+        text = step.get(field)
+        for hit in MOCKUP_ID.findall(text) if isinstance(text, str) else []:
+            if hit.lower() not in found:
+                found.append(hit.lower())
+    return found
+
+
+def cat_check(repo, asks, follow=False):
+    """[(objectname, objecttype) or None, one per ask in order] from one `git cat-file --batch-check` fed the asks
+    (`<rev>:<path>`, no line break) on stdin. An ask git reports missing or ambiguous is None, and so, with `follow`
+    (--follow-symlinks), is a link git cannot resolve to an object. The whole result is None when git fails or
+    prints a record this does not know, so a failed read is never read as an absent file."""
+    out = git(repo, "cat-file", "--batch-check=%(objectname) %(objecttype)", *(["--follow-symlinks"] if follow else []),
+              stdin="".join(ask + "\n" for ask in asks))
+    if out is None:
+        return None
+    lines, rows = iter(out.split("\n")), []
+    for ask in asks:
+        line = next(lines, None)
+        found = CAT_FOUND.fullmatch(line) if line is not None else None
+        word, _, size = (line or "").partition(" ")
+        if found:
+            rows.append((found[1], found[2]))
+        elif line in (ask + " missing", ask + " ambiguous"):
+            rows.append(None)
+        elif follow and word in CAT_LINK_WORDS and size.isdigit() and next(lines, None) is not None:
+            rows.append(None)  # the record's second line names the link's target or the ask
+        else:
+            return None
+    return rows if not any(lines) else None
+
+
+def mockup_on_origin(repo, rels):
+    """{rel: (state, why)} for design-folder files, each named by its checkout path as git names it: "ok" when some
+    origin ref holds it as a file, "miss" when origin is readable and none does, "unknown" with the reason when it
+    cannot tell. Origin is every remote-tracking ref under refs/remotes/origin/, as a fetch leaves them (an open PR's
+    branch counts); the checkout's own files do not. A folder, a link or a submodule at the path is no file: the type
+    read finds no blob there, or the link read resolves the blob to another object. A failed read, no origin ref, or
+    a shallow checkout is unknown, never a miss or a pass. Cost: at most four git processes for all the files and
+    refs (the ref listing, the shallow check, one batched type read, and one batched link read when some ref holds a
+    blob at a path). The one home of the origin check (decision mockup-home)."""
+    def every(state, why, among):
+        return {rel: (state, why) for rel in among}
+    if not rels:
+        return {}
+    refs = git(repo, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/")
+    shallow = git(repo, "rev-parse", "--is-shallow-repository")
+    if refs is None or shallow is None:
+        return every("unknown", "the checkout could not be read", rels)
+    if shallow.strip() == "true":
+        return every("unknown", "a shallow checkout cannot show origin's files", rels)
+    present = refs.split()
+    if not present:
+        return every("unknown", "no origin ref", rels)
+    verdict = every("unknown", "the path holds a line break, which a batched git read cannot carry",
+                    [rel for rel in rels if "\n" in rel or "\r" in rel])
+    asks = [(rel, "%s:%s" % (ref, rel)) for rel in rels if rel not in verdict for ref in present]
+    types = cat_check(repo, [ask for _, ask in asks])
+    if types is None:
+        verdict.update(every("unknown", "origin's files could not be read", [rel for rel, _ in asks]))
+        return verdict
+    blobs = [(rel, ask, row) for (rel, ask), row in zip(asks, types) if row and row[1] == "blob"]
+    followed = cat_check(repo, [ask for _, ask, _ in blobs], follow=True) if blobs else []
+    # A file resolves to its own blob when links are followed; a link resolves to its target, or to no object.
+    held = {rel for (rel, _, row), again in zip(blobs, followed or []) if again == row}
+    unread = {rel for rel, _, _ in blobs} if followed is None else set()
+    for rel, _ in asks:
+        if rel in held:
+            verdict[rel] = ("ok", "")
+        elif rel in unread:
+            verdict[rel] = ("unknown", "origin's files could not be read")
+        else:
+            verdict[rel] = ("miss", "")
+    return verdict
+
+
+def mockup_state(repo, layout, file):
+    """(state, detail) for one `mockups` entry, read with no process. state is "miss" for a path outside the design
+    folder (a machine-home path, a link), "unknown" with detail as the reason for a layout that cannot be read (a
+    malformed extras file) or a file outside the checkout, never a raise, and "origin" with detail as the file's
+    checkout path as git names it, for mockup_on_origin to judge; the checkout's own file does not count."""
+    try:
+        found, _ = layout.mockup_file(str(repo), file)
+    except Exception as err:  # a fault in the shared layout reads unknown
+        return "unknown", "the layout could not be read: %s" % err
+    if not found:
+        return "miss", ""
+    rel = os.path.relpath(found, str(repo)).replace(os.sep, "/")
+    if rel == ".." or rel.startswith("../"):
+        return "unknown", "the file is outside the checkout"
+    return "origin", rel
+
+
+def mockup_misses(repo, steps):
+    """([(step id, mockup id)], [(step id, mockup id, why)]): each cited mockup id that has no file, and each whose
+    file could not be read here. Only open steps (status not done) are judged. A step with no cited id holds none. The layout failing to load reads every cited
+    id as unknown."""
+    cites = {sid: mockup_cites(step) for sid, step in sorted(steps.items())
+             if isinstance(step, dict) and step.get("status") != "done"}
+    if not any(cites.values()):
+        return [], []
+    try:
+        sys.path.insert(0, str(LINT))
+        import layout
+    except Exception as err:  # the layout is a shared file; a fault in it makes every file unknown
+        return [], [(sid, mid, "the layout could not be read: %s" % err) for sid, ids in cites.items() for mid in ids]
+    finally:
+        if str(LINT) in sys.path:
+            sys.path.remove(str(LINT))
+    judged = []
+    for sid, ids in cites.items():
+        entries = steps[sid].get("mockups")
+        entries = {str(k).lower(): v for k, v in entries.items()} if isinstance(entries, dict) else {}
+        for mid in ids:
+            judged.append((sid, mid, *(mockup_state(repo, layout, entries.get(mid)) if mid in entries else ("miss", ""))))
+    # Origin is read once for every entry the layout sends to it, so the cost does not grow with the entries.
+    on_origin = mockup_on_origin(repo, list(dict.fromkeys(detail for _, _, state, detail in judged if state == "origin")))
+    misses, unread = [], []
+    for sid, mid, state, detail in judged:
+        if state == "origin":
+            state, detail = on_origin[detail]
+        if state == "miss":
+            misses.append((sid, mid))
+        elif state == "unknown":
+            unread.append((sid, mid, detail))
+    return misses, unread
 
 
 def added_at(source):

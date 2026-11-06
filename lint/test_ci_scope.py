@@ -26,7 +26,8 @@ SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scri
 JOB_FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
 STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
 # Flags derived from others, kept out of JOB_FLAGS so the exact-set cases below stay about the base flags:
-# checks_windows_sweep is set with checks_windows_rest, checks_guard when both `code` and `guard` are set.
+# checks_windows_sweep is set with checks_windows_rest. checks_guard is set when both `code` and `guard` are set, or
+# directly by the arm for actions/playwright-setup and .github/shoot (the paths checks-guard installs from).
 DERIVED_FLAGS = ["checks_windows_sweep", "checks_guard"]
 ALL = JOB_FLAGS + STEP_FLAGS
 BASH = shutil.which("bash")
@@ -36,8 +37,9 @@ def git(cwd, *a):
     return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def run(paths, event="pull_request", base="auto", existing=(), landed=None):
-    """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit."""
+def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref=""):
+    """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `head_ref` is HEAD_REF,
+    empty when not given, so no HEAD_REF of the caller's environment reaches the script."""
     with tempfile.TemporaryDirectory() as d:
         git(d, "init", "-q")
         git(d, "config", "user.email", "t@t")
@@ -64,7 +66,7 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None):
         git(d, "add", "-A")
         git(d, "commit", "-qm", "head", "--allow-empty")
         out = os.path.join(d, "..", f"out-{os.getpid()}.txt")
-        env = dict(os.environ, EVENT=event, GITHUB_OUTPUT=out,
+        env = dict(os.environ, EVENT=event, GITHUB_OUTPUT=out, HEAD_REF=head_ref,
                    BASE_SHA=sha if base == "auto" else base)
         r = subprocess.run([BASH, os.path.abspath(SCRIPT)], cwd=d, env=env, capture_output=True, text=True)
         assert r.returncode == 0, r.stdout + r.stderr
@@ -83,6 +85,7 @@ class DerivedFlags(unittest.TestCase):
         for n in DERIVED_FLAGS:
             self.assertIn(n, got, f"output {n} missing: {got}")
         self.assertEqual(got["checks_windows_sweep"], got["checks_windows_rest"], got)
+        # PATHS touch neither direct arm, so the both-flags rule is the whole rule for them.
         both = got["code"] == "true" and got["guard"] == "true"
         self.assertEqual(got["checks_guard"], "true" if both else "false", got)
 
@@ -351,20 +354,83 @@ class Scope(unittest.TestCase):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
 
-    # bin/sim-test and its suite run in the shell-macos job only, like bin/ios-ship.
+    # bin/sim-test and its suite run in the shell-macos job only, like bin/ios-ship. The suite runs the real bin/sim-lease
+    # beside the script, so an edit to bin/sim-lease turns the same job on.
     def test_sim_test_edit_turns_on_only_the_macos_shell_job(self):
-        for p in ("bin/sim-test", "lint/test_sim_test.sh"):
+        for p in ("bin/sim-test", "lint/test_sim_test.sh", "bin/sim-lease"):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
 
-    # bin/shoot's suite installs a browser, so only its own paths turn `shoot` on. An edit sets `code` and `shoot`
-    # and no other flag; an unrelated code change leaves `shoot` off.
+    # bin/shoot's suite installs a browser, so its own paths and the browser installers turn `shoot` on. An edit sets
+    # `code` and `shoot` and no other flag in true_set (checks_guard is outside ALL; the cases below pin it).
+    # An unrelated code change leaves `shoot` off.
     def test_shoot_edit_turns_on_only_the_shoot_suite(self):
         for p in ("bin/shoot", "lint/test_shoot.mjs", "testing/skip-locally-fail-in-ci.mjs", ".github/shoot/package-lock.json",
                   "actions/playwright-setup/action.yml"):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"code", "shoot"})
         self.assertFlags(run(["lint/test_verdict.py"], existing=["lint/test_verdict.py"]), want_false=["shoot"])
+
+    # checks-guard and checks-shoot both install actions/playwright-setup, and checks-guard gates on checks_guard
+    # alone (checks.yml). An edit to the action must set checks_guard directly, with `shoot` for checks-shoot.
+    # Named failure: the action arm sets code and shoot only, so checks-guard skips its install and guard suite.
+    def test_playwright_action_edit_turns_on_the_checks_guard_job(self):
+        p = "actions/playwright-setup/action.yml"
+        got = run([p], existing=[p])
+        self.assertFlags(got, want_true=["code", "shoot"])
+        self.assertIn("checks_guard", got, got)
+        self.assertEqual(got["checks_guard"], "true", f"checks_guard: {got}")
+
+    # Control: a bin/shoot edit keeps checks_guard off, so the action's arm must not widen to bin/shoot.
+    def test_shoot_edit_keeps_checks_guard_off(self):
+        p = "bin/shoot"
+        got = run([p], existing=[p])
+        self.assertFlags(got, want_true=["code", "shoot"])
+        self.assertIn("checks_guard", got, got)
+        self.assertEqual(got["checks_guard"], "false", f"checks_guard: {got}")
+
+    # checks-guard installs the Playwright that .github/shoot pins, so a change to that pin must start the job.
+    # Named failure: the pin path sets code and shoot only, and checks-guard installs the old browser.
+    def test_shoot_package_lock_edit_turns_on_the_checks_guard_job(self):
+        p = ".github/shoot/package-lock.json"
+        got = run([p], existing=[p])
+        self.assertFlags(got, want_true=["code", "shoot"])
+        self.assertIn("checks_guard", got, got)
+        self.assertEqual(got["checks_guard"], "true", f"checks_guard: {got}")
+
+    # pin.sh is the install script checks-guard runs from actions/playwright-setup. Named failure: an edit that
+    # starts checks-shoot alone leaves the checks-guard install on the old script.
+    def test_playwright_pin_script_edit_turns_on_the_checks_guard_job(self):
+        p = "actions/playwright-setup/pin.sh"
+        got = run([p], existing=[p])
+        self.assertFlags(got, want_true=["code", "shoot"])
+        self.assertIn("checks_guard", got, got)
+        self.assertEqual(got["checks_guard"], "true", f"checks_guard: {got}")
+
+    # A .md edit under the action is docs, so neither job starts. Named failure: without the *.md carve-out, the
+    # action arm starts checks-shoot and checks-guard for a README edit.
+    def test_playwright_readme_edit_turns_on_no_job(self):
+        p = "actions/playwright-setup/README.md"
+        got = run([p], existing=[p])
+        self.assertFlags(got, want_false=["code", "shoot"])
+        self.assertIn("checks_guard", got, got)
+        self.assertEqual(got["checks_guard"], "false", f"checks_guard: {got}")
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class MutationReport(unittest.TestCase):
+    """The mutation_report output: on a pull request only from a `batch-` branch, and on every other event."""
+
+    # Named failure: the mutation-report job starts on every pull request, or on none, not only the batch ones.
+    def test_only_a_batch_pull_request_turns_it_on_and_a_push_always_does(self):
+        feature = run(["README.md"], head_ref="feature-x")
+        self.assertIn("mutation_report", feature, feature)
+        self.assertEqual(feature["mutation_report"], "false", f"a pull request from feature-x: {feature}")
+        batch = run(["README.md"], head_ref="batch-11")
+        self.assertEqual(batch["mutation_report"], "true", f"a pull request from batch-11: {batch}")
+        push = run(["README.md"], event="push")
+        self.assertEqual(push["mutation_report"], "true", f"a push: {push}")
+
 
 if __name__ == "__main__":
     unittest.main()

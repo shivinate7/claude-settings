@@ -35,8 +35,21 @@ demand and refuses nothing: no timer, no CI job.
 REPLAY MODE (step tci-6): `python hooks/mutate_guard.py --replay <repo> --profile <name> [--prs N] [--limit N]
 [--suite-timeout S] [--jobs N] [--pr-budget S]` scores the suites each recent merged pull request changed against mutants of the
 product lines it added (`REPLAY_PROFILES` below, `replay_pr` in hooks/mutate_shared.py). Exit 0 whatever the scores.
+
+CI MODES (decision mutation-report-scores-suites, owner item mutation-ci-job): three modes of the same home, run by the shared
+action actions/mutation-report.
+`--changed <repo> (--profile NAME | --profile-file JSON) --base REF [--head REF] [--limit N] [--budget S] [--suite-timeout S]
+[--jobs N] [--log PATH]` mutates the product lines a change adds past merge-base(base, head), runs the suites the profile's `select`
+lists for each file, and prints `catch share: K/R` and each `untested: path:line`. Exit 0 whatever the share.
+`--known-defects FILE --repo REPO (--profile NAME | --profile-file JSON) [--base REF] [--suite-timeout S] [--log PATH]`
+plants each listed defect in a checkout of HEAD, installs the profile's packages into it as `--changed` does, and runs its
+catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id on REF's list also needs a row, or a
+`Known-defect-removed: <id>` trailer in REF..HEAD, else `MISSING <id>`; an entry that differs from REF's needs a
+`Known-defect-changed: <id>` trailer, else `CHANGED <id>`. Exit 1 when any defect is MISS, UNKNOWN, MISSING or CHANGED.
+`--tests-for PATH` prints the suites that test one file: the select command of the `claude_settings` profile.
 """
 
+import contextlib
 import os
 import shutil
 import signal
@@ -60,6 +73,7 @@ RULING_SUITE = os.path.join(HERE, "test_ruling_home.py")
 OVERRIDE = os.path.join(HERE, "override.py")
 CALL_JUDGE = os.path.join(HERE, "call_judge.py")
 CALL_JUDGE_SUITE = os.path.join(HERE, "test_call_judge.py")
+SIM_LEASE = os.path.join(HERE, "..", "bin", "sim-lease")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -70,6 +84,8 @@ TARGETS = {
     "ruling": (RULING, RULING_SUITE, "RULING_HOME_UNDER_TEST", "ruling_home"),
     "override": (OVERRIDE, SUITE, "GUARD_UNDER_TEST", "override"),
     "calljudge": (CALL_JUDGE, CALL_JUDGE_SUITE, "CALL_JUDGE_UNDER_TEST", "call_judge"),
+    # bin/sim-lease, which the guard loads by path (hooks/guard.py sim_lease_holds). The suite is the guard's.
+    "simlease": (SIM_LEASE, SUITE, "GUARD_UNDER_TEST", "sim_lease"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -297,8 +313,8 @@ MUTATIONS = [
      '    if target in ("HEAD", "@"):',
      '    if target in ("@",):', "guard", 'lease with includes, HEAD, on main'),
     ("force-push: refs/heads/ is not stripped",
-     'target.removeprefix("refs/heads/")',
-     'target', "guard", 'forced to the default branch asks: a full ref'),
+     'target.removeprefix("refs/heads/") in (defaults or ())',
+     'target in (defaults or ())', "guard", 'forced to the default branch asks: a full ref'),
     ("force-push: a glob destination no longer asks",
      'if target is None or "*" in target:',
      'if target is None:', "guard", 'forced to the default branch asks: a glob refspec'),
@@ -349,6 +365,52 @@ MUTATIONS = [
      'refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))',
      'refuse(tool, verdict, "force-push", PUSH_ASK_REASON, "git push " + " ".join(args))',
      "guard", 'the long force flag'),
+    # push-main and push-stray-branch (owner rulings 207 a and 206 a).
+    ("push-main: a colon-less main is not a destination",
+     '            elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                return "main"',
+     '            elif False:\n                return "main"', "guard", 'a push of main from a feature branch asks'),
+    ("push-main: a refspec target of main is not a destination",
+     '                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                    return "main"',
+     '                if False:\n                    return "main"', "guard", 'HEAD:main from a feature branch asks'),
+    ("push-main: --all no longer asks",
+     '    if every:\n        return "main"',
+     '    if False:\n        return "main"', "guard", 'main, --all reaches main and asks'),
+    ("push-main: a bare push that writes main no longer asks",
+     '        if dest in DEFAULT_BRANCH_FALLBACK:\n            return "main"',
+     '        if False:\n            return "main"', "guard", 'main tracking origin/main, a bare push asks'),
+    ("push-main: HEAD on main no longer asks",
+     '        if implied and current() in DEFAULT_BRANCH_FALLBACK:',
+     '        if False:', "guard", 'main tracking origin/main, HEAD asks'),
+    ("push-main: push.default upstream is not read for a bare push",
+     '            dest = merge or None',
+     '            dest = None', "guard", 'a branch tracking main asks'),
+    ("push-main: a bare push under simple ignores git's own refusal",
+     '            dest = cur if merge == cur else None',
+     '            dest = cur', "guard", 'a bare push on main with no upstream is git'),
+    ("push-stray-branch: a stray destination no longer asks",
+     '    return "stray" if merge != current() and not upstream else ""',
+     '    return ""', "guard", 'stray branch, HEAD asks'),
+    ("push-stray-branch: @ is not an implied destination",
+     '            elif source in ("HEAD", "@") or',
+     '            elif source in ("HEAD",) or', "guard", 'stray branch, @ asks'),
+    ("push-stray-branch: a colon-less current branch is not implied",
+     ' or (current() is not None and source == current()):',
+     ' or False:', "guard", 'colon-less refspec asks'),
+    ("push-stray-branch: a bare push under current is not implied",
+     '            dest = cur\n            implied = True',
+     '            dest = cur', "guard", 'a bare push under push.default current asks'),
+    ("push-stray-branch: an upstream of main no longer stays silent",
+     'or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:',
+     'or pushed != remote_cfg:', "guard", 'lane from main, HEAD is silent'),
+    ("push-stray-branch: another remote than the upstream's is judged",
+     'or not remote_cfg or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:',
+     'or not remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:', "guard", "another remote than the upstream's"),
+    ("push-main: --branches is not read as --all",
+     '            elif name in ("--all", "--branches"):',
+     '            elif name == "--all":', "guard", 'main, --branches reaches main and asks'),
+    ("push-stray-branch: a -u push of the local name still asks",
+     'return "stray" if merge != current() and not upstream else ""',
+     'return "stray" if merge != current() else ""', "guard", 'stacked lane, -u HEAD is silent'),
     ("env-file: a search command's pattern is read as a path",
      '                if index in patterns:\n                    continue\n',
      '                if False:\n                    continue\n', "guard",
@@ -692,8 +754,15 @@ MUTATIONS = [
      '    if stash_takes_the_stack(args):\n        stack = stash_stack(where)',
      '    if stash_action(args) in ("drop", "clear"):\n        stack = stash_stack(where)', "guard", 'subject: popping a real entry from a CLEAN checkout still denies'),
     ("shared-tree: reset collapses back to a name match, --hard or not",
-     '    return "--hard" in args',
+     '    return any(flag in args for flag in RESET_DISCARD_FLAGS)',
      '    return True', "guard", 'reset: a plain reset only unstages, the working tree is untouched'),
+    # Each mutant drops ONE flag from the one constant, so each form's own case must go red.
+    ("shared-tree: reset --merge no longer takes --hard's verdict",
+     'RESET_DISCARD_FLAGS = ("--hard", "--merge", "--keep")',
+     'RESET_DISCARD_FLAGS = ("--hard", "--keep")', "guard", 'reset: --merge at HEAD over a staged edit and a staged new file refuses'),
+    ("shared-tree: reset --keep no longer takes --hard's verdict",
+     'RESET_DISCARD_FLAGS = ("--hard", "--merge", "--keep")',
+     'RESET_DISCARD_FLAGS = ("--hard", "--merge")', "guard", 'reset: --keep at another commit moves the branch, so a shared checkout refuses'),
     # Added: the subject read. One per arm. Each mutation blinds ONE subject read, which must
     # turn that arm's empty-subject case red: a guard that refuses without reading its subject is
     # the defect these arms fix.
@@ -1212,30 +1281,32 @@ MUTATIONS = [
      "guard", "pointer: checkout of a branch in the pointer checkout is refused"),
 
     # RULE 0, worktree-home. Each mutant breaks one clause of
-    # docs/decisions/an-agent-outside-its-home-tree-must-stop.md; all are caught by the single case
-    # that exercises the whole sequence, `worktree_home_case`.
+    # docs/decisions/an-agent-outside-its-home-tree-must-stop.md. Each names the one case that kills it,
+    # mostly `worktree_home_case`, the whole sequence: the bare family prefix ran every worktree-home case, 40 s a mutant.
     ("worktree-home: the first call from inside the worktree never writes the home record",
      '    if path_is_inside(cwd, candidate) is True:\n        write_agent_home(cwd, agent_id, candidate)',
      '    if path_is_inside(cwd, candidate) is False:\n        write_agent_home(cwd, agent_id, candidate)',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: the candidate worktree path drops the agent- prefix, so it never matches",
      'candidate = os.path.join(primary, ".claude", "worktrees", "agent-" + agent_id)',
      'candidate = os.path.join(primary, ".claude", "worktrees", agent_id)',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: AGENT_ID rejects a letter, so every real agent id reads as an orchestrator",
      'AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")',
      'AGENT_ID = re.compile(r"^[0-9_-]{1,64}$")',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: a shell call outside its recorded home is judged as inside it",
      '        if (path_is_inside(home_cwd, home) is False\n',
      '        if (path_is_inside(home_cwd, home) is None\n',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: a write outside the recorded home, inside the clone, is allowed through",
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                    and path_is_inside(resolved_target, home) is False):',
+     '                    and path_is_inside(resolved_target, home) is False\n'
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                    and path_is_inside(resolved_target, home) is None):',
-     "guard", "worktree-home:"),
+     '                    and path_is_inside(resolved_target, home) is None\n'
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
+     "guard", "worktree-home: a /c/ cwd inside the home is inside"),
     # The next two anchors sit in worktree_home_hit, which returns a log detail and lets judge()
     # refuse; a mutant that returns a detail for a status that allows is a deny.
     ("worktree-home: an unreadable home record denies instead of allowing",
@@ -1245,7 +1316,7 @@ MUTATIONS = [
      '    if home_status == "unknown":\n'
      '        return "unreadable state"\n'
      '    if home_status != "home":',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: a non-isolated agent with no record is denied instead of allowed",
      '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
      '    if home_status != "home":',
@@ -1253,16 +1324,18 @@ MUTATIONS = [
      '    if home_status == "no-record":\n'
      '        return "no record"\n'
      '    if home_status != "home":',
-     "guard", "worktree-home:"),
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: a relative write target drops the join onto the payload's own cwd",
      '            try:\n                resolved_target = _resolved(write_target, home_cwd)\n'
      '            except Exception:\n                resolved_target = write_target\n'
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                    and path_is_inside(resolved_target, home) is False):',
+     '                    and path_is_inside(resolved_target, home) is False\n'
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
      '            resolved_target = write_target\n'
      '            if (path_is_inside(resolved_target, home_primary) is True\n'
-     '                    and path_is_inside(resolved_target, home) is False):',
-     "guard", "worktree-home:"),
+     '                    and path_is_inside(resolved_target, home) is False\n'
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
+     "guard", "worktree-home: orchestrator, no-record"),
     ("worktree-home: the write-target loop judges only the first path field",
      '        for write_target in (write_targets(tool_input) if home_primary else ()):',
      '        for write_target in (write_targets(tool_input)[:1] if home_primary else ()):',
@@ -1277,12 +1350,14 @@ MUTATIONS = [
      "        return (bool(owner) and owner == own",
      "guard", "worktree-home: any session's write into another checkout"),
     ("other-checkout: the clone's common git directory is judged as the primary's own files",
-     '                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)',
-     '                and True)',
+     '                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True\n'
+     '                and not _own_red_run(',
+     '                and True\n'
+     '                and not _own_red_run(',
      "guard", "worktree-home: any session's write into another checkout"),
     ("other-checkout: a shell target ignores a leading cd",
-     "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True)",
-     "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=False)",
+     "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True, predicate_command=True)",
+     "        hit = _shell_write_hit(command, where, elsewhere, follow_cd=False, predicate_command=True)",
      "guard", "worktree-home: any session's write into another checkout"),
     ("other-checkout: a quiet redirect pays the git read",
      '        writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))\n        moves =',
@@ -1290,8 +1365,8 @@ MUTATIONS = [
      "guard", "worktree-home: the cross-checkout read costs"),
     # The `cd` act: `worktree_home_cd_*_case`.
     ("other-checkout: a cd into another checkout is not judged",
-     "        if elsewhere(move, where) and not _cd_red_run(",
-     "        if False and not _cd_red_run(",
+     "        if elsewhere(move, where) and not _own_red_run(",
+     "        if False and not _own_red_run(",
      "guard", "worktree-home: a cd into another checkout of the clone is refused"),
     ("other-checkout: a bare cd with no write word is skipped like a read",
      "    if not moves and not writes:\n        return \"\"\n    roots =",
@@ -1310,17 +1385,34 @@ MUTATIONS = [
      '    if False and path_is_inside(target, home) is True:\n        return True\n    if isinstance(payload, dict)',
      "guard", "worktree-home: the cd exemptions pass"),
     ("other-checkout: the session's recorded home is not exempt from the cd act",
-     "    return bool(held) and path_is_inside(target, held) is True\n\n\ndef _cd_red_run(",
-     "    return False\n\n\ndef _cd_red_run(",
+     "    return bool(held) and path_is_inside(target, held) is True\n\n\n# The shell verbs",
+     "    return False\n\n\n# The shell verbs",
      "guard", "worktree-home: the cd exemptions pass"),
     ("other-checkout: the agent's own red-run folder is not exempt from the cd act",
-     '    return (os.path.basename(owner).startswith("agent-" + agent_id + "-")',
-     '    return (False and os.path.basename(owner).startswith("agent-" + agent_id + "-")',
+     '                and os.path.normcase(os.path.basename(folder)).startswith(',
+     '                and False and os.path.normcase(os.path.basename(folder)).startswith(',
      "guard", "worktree-home: the cd exemptions pass"),
     ("other-checkout: the red-run exemption matches a prefix of the agent id",
-     '    return (os.path.basename(owner).startswith("agent-" + agent_id + "-")',
-     '    return (os.path.basename(owner).startswith("agent-" + agent_id)',
+     '                    os.path.normcase("agent-" + agent_id + "-"))):',
+     '                    os.path.normcase("agent-" + agent_id))):',
      "guard", "worktree-home: an agent's cd into a sibling agent tree"),
+    # The write act's exemption: `worktree_home_red_write_case`.
+    ("other-checkout: a write into the agent's own red-run folder is refused",
+     '                and not _own_red_run(payload, roots[0], resolved, verb in RED_RUN_ROOT_VERBS))',
+     '                and True)',
+     "guard", "worktree-home: an agent's write into its own red-run folder"),
+    ("worktree-home: a Write into the agent's own red-run folder is refused",
+     '                    and not _own_red_run(payload, home_primary, resolved_target, False)):',
+     '                    and True):',
+     "guard", "worktree-home: an agent's write into its own red-run folder"),
+    ("other-checkout: the red-run folder's own root is exempt, so rm and mv may name it",
+     "            return root_ok or folder != path",
+     "            return True",
+     "guard", "worktree-home: the own red-run folder's root is refused"),
+    ("other-checkout: the red-run folder is anchored on the owning checkout, not the primary",
+     '                and not _own_red_run(payload, roots[0], resolved, verb in RED_RUN_ROOT_VERBS))',
+     '                and not _own_red_run(payload, owner, resolved, verb in RED_RUN_ROOT_VERBS))',
+     "guard", "worktree-home: a red-run folder nested under another linked worktree"),
     ("other-checkout: a cd within its own checkout pays the git read",
      '                 if own_root and _checkout_root_by_stat(m) not in ("", own_root) and not _cd_home_exempt(payload, where, m)]',
      "                 if own_root and not _cd_home_exempt(payload, where, m)]",
@@ -1358,6 +1450,23 @@ MUTATIONS = [
      "        if not has_agent and under_session_scratchpad(resolved, session_id):",
      "        if under_session_scratchpad(resolved, session_id):",
      "guard", "a write into a worktree in the session's own scratchpad"),
+    # RULE 0, other-checkout, the separate-clone act: `_same_repo` and the stranded arm of `_clone_scope`.
+    ("other-checkout: no two clones read as the same repo, so a separate clone of this repo passes",
+     "    urls = (_clone_origin(common), _clone_origin(other))",
+     "    return False\n    urls = (_clone_origin(common), _clone_origin(other))",
+     "guard", "a Write into a separate clone of the same repo is refused"),
+    ("other-checkout: every two clones read as the same repo, so a clone of a different repo is refused",
+     "    urls = (_clone_origin(common), _clone_origin(other))",
+     "    return True\n    urls = (_clone_origin(common), _clone_origin(other))",
+     "guard", "a Write into a clone of a different repo is allowed"),
+    ("other-checkout: a cwd is never stranded, so its relative write into a separate clone passes",
+     "        if common and _separate_clone(own, [top], common):",
+     "        if False and _separate_clone(own, [top], common):",
+     "guard", "a cwd stranded in a separate clone refuses a relative Write"),
+    ("other-checkout: a git verb in a shell call is not read, so a git -C commit into a separate clone passes",
+     '    return "git" in command and any(',
+     '    return False and "git" in command and any(',
+     "guard", "a git -C commit into a separate clone of the same repo is refused"),
     # RULE 0, session-home: the `session_home_*_case` log checks.
     ("session-home: an agent call writes the session's record",
      '        return\n    where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd\n    primary, lane = session_home_place(where)\n    record = session_home_record(payload, primary) if primary else ""',
@@ -1493,8 +1602,8 @@ MUTATIONS = [
      'MERGE_VALUE_FLAGS = {"-R", "--repo", "--body",', "guard",
      'merge-checks: a flag value is no pull request'),
     ("merge-checks: any word that spells gh is the command word",
-     '    index = resolve_command(tokens)\n    if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):\n        return None\n    return tokens[index + 1:]',
-     '    index = next((i for i, t in enumerate(tokens) if basename(t) in ("gh", "gh.exe")), None)\n    if index is None:\n        return None\n    return tokens[index + 1:]',
+     '    index = resolve_command(tokens)\n    if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):\n        return None\n    rest, root = tokens[index + 1:], []',
+     '    index = next((i for i, t in enumerate(tokens) if basename(t) in ("gh", "gh.exe")), None)\n    if index is None:\n        return None\n    rest, root = tokens[index + 1:], []',
      "guard", 'merge-checks: the words of a merge in an echo are no merge'),
     ("merge-checks: the read has no time limit",
      '            module.SH_TIMEOUT = MERGE_READ_TIMEOUT',
@@ -1617,8 +1726,8 @@ MUTATIONS = [
      '            bad = any(is_test_rel(n) for n in names) or (', '            bad = True or (', "guard",
      "builder-refuse: a builder's conflicted merge of a product file, both sides changed it, is allowed and logs no builder-diff line"),
     ("role-diff: a test-author's change is judged as a builder's",
-     '        if role == AUTHOR_ROLE:\n            bad = not all(author_path_ok(n) for n in names)',
-     '        if False:\n            bad = not all(author_path_ok(n) for n in names)', "guard",
+     '        elif role == AUTHOR_ROLE:\n            bad = not all(author_path_ok(n) for n in names)',
+     '        elif False:\n            bad = not all(author_path_ok(n) for n in names)', "guard",
      "builder-refuse: a test-author's conflicted merge of a test file is never refused and logs nothing"),
     ("role-diff: a flag on a line that calls a runner is not read",
      'any(TEST_RUNNER_CONTEXT.search(near) for near', 'any(False for near', "guard", "builder-test: addopts --deselect added to pytest.ini is refused"),
@@ -1672,6 +1781,30 @@ MUTATIONS = [
     ("test-author: test config is not its own",
      '    return (is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES',
      '    return (is_test_rel(rel) or basename(rel) in AUTHOR_BASENAMES', "guard", "test-author: Edit of pytest.ini is allowed"),
+    ("test-author: a workflow test step is not allowed",
+     '            if pairs and all(workflow_test_steps_only(o, n) for o, n in pairs):\n                return ""',
+     '            if False:\n                return ""', "guard",
+     "test-author: a Linux test step inserted after a lint step is allowed"),
+    ("test-author: a quoted command substitution in a test run is allowed",
+     'or "$(" in value or "`" in value:', ':', "guard",
+     "test-author: a quoted $( substitution in a test run in checks.yml is refused"),
+    ("builder: a continue-on-error or if: false under a test step is allowed",
+     "return (workflow_disables_tests(old_text, new_text) or workflow_disables_step(old_text, new_text)",
+     "return (workflow_disables_tests(old_text, new_text) or False", "guard",
+     "builder-test: continue-on-error added under a test step is refused"),
+    ("builder: dropping a test run from a workflow is allowed",
+     "            or workflow_drops_tests(old_text, new_text))", "            or False)", "guard",
+     "builder-test: a whole test step deleted from checks.yml is refused"),
+    ("builder: a disable flag on a test-runner line is not read",
+     "                    TEST_RUNNER_CONTEXT.search(line)\n                    or workflow_command_tests(",
+     "                    False\n                    or workflow_command_tests(", "guard",
+     "builder-test: a pytest --deselect step added to checks.yml is refused"),
+    ("builder: a lint tool given a test folder reads as a test run",
+     "            args = tokens if runner else tokens[:1]", "            args = tokens", "guard",
+     "builder-test: a ruff --ignore line on tests/ added to checks.yml is allowed"),
+    ("builder: an interpreter flag hides the test path a run line runs",
+     '    while index < len(args) and args[index].startswith("-"):', "    while False:", "guard",
+     "builder-test: python3 -u in place of python3 on a test run is allowed"),
     ("test-author: a mutation test is not its own",
      '            or norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS)', '            or False)', "guard",
      "test-author: Edit of mutation test hooks/mutate_guard.py is allowed"),
@@ -2060,11 +2193,89 @@ MUTATIONS = [
      'elif low.endswith("/simulator.app") or low == "simulator.app":',
      'elif False:', "guard", 'simulator-boot-bypass: open of the Simulator.app path'),
     ("simulator-boot-bypass: a command a wrapper hands on is not read",
-     'return next((hit for text in inner_commands(tokens) for part in split_segments(text)\n                 if (hit := sim_bypass_hit(part))), "")',
-     'return ""', "guard", 'simulator-boot-bypass: bash -c wraps the boot'),
+     '    for text in inner_commands(tokens):\n        for part in split_segments(text):\n            yield from _sim_commands(part)',
+     '    return', "guard", 'simulator-boot-bypass: bash -c wraps the boot'),
     ("simulator-boot-bypass: the refusal is never raised",
      '                refuse(tool, "deny", "simulator-boot-bypass", SIM_BYPASS_REASON, matched)',
      '                pass', "guard", 'simulator-boot-bypass: xcrun simctl boot'),
+    # RULE simulator-boot-route (decision sim-test-is-the-one-boot-path, ruling 5).
+    # Each mutant breaks one arm of its rule. The named case is the one that must die.
+    ("simulator-boot-route: an xcodebuild boot of a shut-down device is never refused",
+     '        elif (remedies or {}).get(name):',
+     '        elif False:', "guard",
+     "route: a test of a shut-down simulator by id names sim-test"),
+    ("simulator-boot-route: the test action is never read, so every test gets the generic remedy",
+     'elif token == "test" and not (',
+     'elif False and not (', "guard",
+     "route: a test with the action after its options, a shut-down simulator by name, names sim-test"),
+    ("simulator-boot-route: a test gets the generic remedy, not sim-test",
+     '    if action:\n        return "Run `sim-test',
+     '    if not action:\n        return "Run `sim-test', "guard",
+     "route: a test of a shut-down simulator by id names sim-test"),
+    ("simulator-boot-route: a build names a destination that is not the generic one",
+     "`-destination 'generic/platform=iOS Simulator'` instead, and boot nothing.",
+     "`-destination 'generic/platform=iOS'` instead, and boot nothing.", "guard",
+     "route: a build of a shut-down simulator names the generic destination"),
+    # RULE simulator-boot-lease (decision sim-test-is-the-one-boot-path, ruling 5). Each mutant breaks one arm.
+    ("simulator-boot-lease: the refusal is an ask, not a deny",
+     'refuse(tool, "deny", "simulator-boot-lease",',
+     'refuse(tool, "ask", "simulator-boot-lease",', "guard",
+     "lease: one booted, an MCP launch of a shut-down device with no lock is refused by the lease"),
+    ("simulator-boot-lease: a booted device is judged by the lease too",
+     '        hits = [d for d in hits if d["state"] != "Booted"]',
+     '        hits = list(hits)', "guard",
+     "lease: an MCP launch of a booted device with no lock is allowed"),
+    # The name arm compares exactly: a name without the case or outer-space fold matches no device. The UDID arm stays.
+    ("simulator-boot-lease: a device name compares exactly, without the case and outer-space fold",
+     '        hits = [d for d in devices if key == d["udid"].casefold() or key == d["name"].strip().casefold()]',
+     '        hits = [d for d in devices if key == d["udid"].casefold() or name == d["name"]]', "guard",
+     "lease: an MCP launch naming the shut-down device in lowercase is refused by the lease"),
+    # The lease allow (ruling 5): one mutant per arm of guard.sim_lease_holds and of bin/sim-lease's read.
+    ("simulator-boot-lease: the lease's session is not compared",
+     '                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID}',
+     '                if e.get("slot") in lease.SLOT_UDID}', "guard",
+     "lease: another session's live slot 1 lease on Duo 1 does not allow this session", "posix"),
+    ("simulator-boot-lease: an empty session may match an empty lease session",
+     '    if not session or not udids:\n        return False',
+     '    if not udids:\n        return False', "guard",
+     "lease: a lease with an empty session does not match a payload with no session", "posix"),
+    ("simulator-boot-lease: every slot maps to Duo 1",
+     'held = {lease.SLOT_UDID[e["slot"]].casefold()',
+     'held = {lease.SLOT_UDID["1"].casefold()', "guard",
+     "lease allow: this session's live slot 2 lease", "posix"),
+    ("simulator-boot-lease: any held device allows a launch of any device",
+     '    return all(u.casefold() in held for u in udids)',
+     '    return bool(held)', "guard",
+     "lease: this session's slot 1 lease does not allow a launch of Duo 2", "posix"),
+    ("simulator-boot-lease: a shared name is allowed when any one of its devices is held",
+     '    return all(u.casefold() in held for u in udids)',
+     '    return any(u.casefold() in held for u in udids)', "guard",
+     "lease: a shared name, this session's slot 1 lease alone is refused", "posix"),
+    ("simulator-boot-lease: a lease that cannot be read allows",
+     '    except Exception:\n        return False\n    finally:\n        sys.dont_write_bytecode = keep',
+     '    except Exception:\n        return True\n    finally:\n        sys.dont_write_bytecode = keep', "guard",
+     "lease: a lease file that is not JSON keeps the refusal", "posix"),
+    ("sim-lease: a pid that is alive counts as live whatever its start time",
+     '    return bool(entry.get("start")) and isinstance(pid, int) and start_time(pid) == entry["start"]',
+     '    return bool(entry.get("start")) and isinstance(pid, int) and bool(start_time(pid))', "simlease",
+     "lease: a reused pid (its start differs from the lease's) is refused", "posix"),
+    ("sim-lease: a pid that is dead counts as live",
+     '    return bool(entry.get("start")) and isinstance(pid, int) and start_time(pid) == entry["start"]',
+     '    return bool(entry.get("start")) and isinstance(pid, int)', "simlease",
+     "lease: a dead lease (its pid is not alive) is refused", "posix"),
+    ("sim-lease: the live read takes the queue for the leases",
+     '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e)]',
+     '    return [e for e in data["queue"] if isinstance(e, dict) and is_live(e)]', "simlease",
+     "lease: this session only queued, not granted, is refused", "posix"),
+    ("sim-lease: the live read creates the lock file",
+     '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e)]',
+     '    open(os.path.join(state_dir(), "lock"), "a").close()\n'
+     '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e)]', "simlease",
+     "the lease read writes nothing", "posix"),
+    ("sim-lease: the pro slot maps to another device",
+     '"pro": "8787FE1C-48CC-4213-9B5C-8605AFE7F9B3",',
+     '"pro": "8787FE1C-48CC-4213-9B5C-8605AFE7F9B4",', "simlease",
+     "lease allow: this session's live pro lease", "posix"),
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
     ("handoff-unread: the refusal is never printed",
@@ -2087,6 +2298,16 @@ MUTATIONS = [
      '        return handoff if os.path.isfile(handoff) else ""',
      '        return handoff',
      "guard", "handoff-unread: a call is allowed when the flag is set and the handoff is missing"),
+    ("mockup-home: the refuse arm is dropped, so a design whose file sits under the machine home is allowed",
+     "            if unhomed:",
+     "            if False:",
+     "guard", "mockup-home: a design with a file under the machine home is denied"),
+    # gh_call_of (hooks/guard_merge.py) is the one home every gh reader shares. Unread, a repo flag before
+    # the verb hides `pr merge` and `pr create` from the merge guard, the draft read, ci_wake and the report guard.
+    ("gh-root-flag: a repo flag before the pr verb goes unread",
+     '    while rest and _gh_root_repo_flag(rest, 0):',
+     '    while False and _gh_root_repo_flag(rest, 0):',
+     "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
 ]
 
 
@@ -2095,7 +2316,10 @@ MUTATIONS = [
 # take minutes each per mutant, and test_ci_scope.py only passes the file's path to the scope detector.
 # Add a verdict-deciding file here, with the suites that name it, to put it in the report.
 REPORT_TARGETS = [
-    ("lint/report_guard.py", ["lint/test_report_guard.py", "hooks/test_reply_judge.py", "hooks/test_wrappers.py",
+    ("lint/report_guard.py", ["lint/test_report_guard.py", "lint/test_report_guard_route.py",
+                             "lint/test_report_guard_landing.py",
+                             "lint/test_report_guard_refusal.py",
+                             "hooks/test_reply_judge.py", "hooks/test_wrappers.py",
                              "lint/test_rule_audit.py", "lint/test_settings_matcher.py"]),
     ("hooks/feedback_guard.py", ["hooks/test_feedback_inbox.py", "lint/test_settings_matcher.py"]),
     ("hooks/stall_watch.py", ["hooks/test_stall_watch.py", "hooks/test_stall_watch_stop.py",
@@ -2149,6 +2373,19 @@ def report_main(argv) -> int:
 # module, harness/tests/t7/<group>.py, is a suite of its own when it defines CHECKS (`suite_filter` below; a
 # helper without CHECKS is none). Its runner loads harness/tests/t7_store_and_seams.py and calls its `run()` with
 # an `order` that keeps only that group's checks, so they run in T7's order, each inside T7's hermetic().
+# A failed or missing select runs every changed suite.
+# mailaudit: suites are plain node scripts. check-docs, check-records, ci-wiring, milestone-due and send-key print
+# FAIL on red; rules, golden, view-rules, worker/core, photoget and app print only a cross mark, so they cannot kill
+# until mailaudit prints FAIL. app.test runs past the suite timeout, so it reads unusable.
+# home: parts js and py. The addon is left out: it has no requirements or lock file, its pins sit inline in its
+# workflow.
+# ios_adblock: parts node and shell. Left out: test_chrome_slice.sh (TAP, covered by the node part),
+# test_build_rules.sh and test_export_lists.sh (zsh), test_merge_chunks.sh (needs macOS Swift). The shell suites
+# print FAIL on red.
+# joyous: no-public-price, redirects, phone-first and tour-pages need dist/ or a browser, so they read unusable.
+# degen: py only. The app/ Playwright specs need a browser, so they are left out. test_ig_spike*.py is red on a
+# clean checkout. A module that imports dev-only pins (PyYAML, openapi_core, jsonschema; requirements-dev.txt) reads
+# unusable: the install folder holds one lockfile.
 BANCHI_MODULE_RUNNER = """\
 import importlib, os, sys
 sys.path.insert(0, os.getcwd())
@@ -2170,7 +2407,24 @@ if not passed:
     print(result.detail)
     sys.exit(1)
 """
+# banchi's per-file selector (scripts/tests-for.py), named by both parts. A commit that lacks the script has no
+# copy in its checkout, so a replay reads the clone's HEAD copy (`_select_suites`, hooks/mutate_shared.py).
+BANCHI_SELECT = ["python3", "scripts/tests-for.py", "{path}"]
+HOME_SELECT = ["node", "scripts/tests-for.mjs", "{path}"]
+IOS_ADBLOCK_SELECT = ["node", "scripts/tests-for.mjs", "{path}"]
 REPLAY_PROFILES = {
+    # claude_settings: the CI report (`--changed`) reads this repository by it. A suite is a `test_*.py` file anywhere;
+    # `--tests-for` (below) names the suites of a file. No install: the suites use the standard library.
+    # Product code is a `.py` file under hooks, lint, merge, janitor, actions or skills. `code_not` excludes a file named
+    # `test_*.py` or `_test_*.py`, and any file under a folder named exactly `test`, `tests`, `fixture` or `fixtures`.
+    # A `*_test.py` file or a folder such as `fixtures_cli` stays product.
+    "claude_settings": {
+        "code": r"^(hooks|lint|merge|janitor|actions|skills)/.*\.py$",
+        "code_not": r"(^|/)(test_|_test_)[^/]*\.py$|(^|/)tests?/|(^|/)fixtures?/",
+        "tests": r"(^|/)test_[^/]*\.py$",
+        "argv": ["python3", "{suite}"], "classify": "fail_line", "install": None, "sparse_skip": [],
+        "select": ["python3", "hooks/mutate_guard.py", "--tests-for", "{path}"],
+    },
     "q_max": {
         "code": r"^(src|harness|app)/.*\.(ts|tsx|mts|mjs|js)$", "code_not": r"^harness/tests/|\.(test|spec)\.(mjs|js|ts|tsx|mts)$",
         "tests": r"^harness/tests/[^/]+\.test\.mjs$",
@@ -2186,7 +2440,7 @@ REPLAY_PROFILES = {
                      "{suite}"],
             "classify": "playwright", "cwd": "app",
             "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"], "lockfile": "app/package-lock.json",
-            "sparse_skip": ["demo-assets", "vendor"],
+            "sparse_skip": ["demo-assets", "vendor"], "select": BANCHI_SELECT,
         },
         "py": {
             "code": r"^(?!harness/tests/).*\.py$", "code_not": r"^scripts/(.*/)?[^/]*selftest\.py$",
@@ -2197,9 +2451,84 @@ REPLAY_PROFILES = {
                         ["{deps}/venv/bin/pip", "install", "--quiet", "--disable-pip-version-check", "-r",
                          "requirements.txt"]],
             "lockfile": "requirements.txt", "link": None, "sparse_skip": ["demo-assets", "vendor"],
+            "select": BANCHI_SELECT,
         },
     }},
+    "mailaudit": {
+        "code": r"^(src/[^/]+\.(mjs|jsx)|worker/[^/]+\.mjs|scripts/[^/]+\.mjs|build\.mjs|check-[^/]+\.mjs)$",
+        "code_not": r"\.test\.mjs$", "tests": r"^(test/[^/]+|worker/core)\.test\.mjs$",
+        "argv": ["node", "{suite}"], "classify": "fail_line",
+        "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"], "lockfile": "package-lock.json",
+        "sparse_skip": [], "select": ["node", "scripts/tests-for.mjs", "{path}"],
+    },
+    "home": {"parts": {
+        "js": {
+            "code": r"^(web|tools)/[^/]+\.(js|mjs)$", "code_not": r"\.test\.(js|mjs)$",
+            "tests": r"^(web/[^/]+\.test\.js|tools/[^/]+\.test\.mjs)$",
+            "argv": ["node", "--test", "--test-reporter=tap", "{suite}"], "classify": "node_tap", "install": None,
+            "sparse_skip": [], "select": HOME_SELECT,
+        },
+        "py": {
+            "code": r"^tools/[^/]+\.py$", "code_not": r"(^|/)test_[^/]*\.py$", "tests": r"^tools/test_[^/]*\.py$",
+            "argv": ["python3", "{suite}"], "classify": "fail_line", "install": None, "sparse_skip": [],
+            "select": HOME_SELECT,
+        },
+    }},
+    "ios_adblock": {"parts": {
+        "node": {
+            "code": r"^chrome/(build\.mjs|slice\.mjs|src/[^/]+\.js)$", "tests": r"^chrome/test/[^/]+\.test\.mjs$",
+            "argv": ["node", "--test", "--test-reporter=tap", "{suite}"], "classify": "node_tap",
+            "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+            "lockfile": "chrome/package-lock.json", "sparse_skip": [], "select": IOS_ADBLOCK_SELECT,
+        },
+        "shell": {
+            "code": r"^(chrome/check\.mjs|ios/WebExtension/src/(background|content|strictmode)\.js)$",
+            "tests": r"^tests/test_(chrome_check|content_early|strictmode)\.sh$",
+            "argv": ["bash", "{suite}"], "classify": "fail_line", "install": None, "sparse_skip": [],
+            "select": IOS_ADBLOCK_SELECT,
+        },
+    }},
+    "joyous": {
+        "code": r"^src/.*\.(ts|tsx|mts|mjs|js)$", "code_not": r"^tests/|\.(test|spec)\.(mjs|js|ts|tsx|mts)$",
+        "tests": r"^tests/(?:[^/]+\.test\.mjs|[^/]+/[^/]+\.test\.ts)$",
+        "argv": ["node", "--experimental-strip-types", "--test", "--test-reporter=tap", "{suite}"],
+        "classify": "node_tap",
+        "install": ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"], "lockfile": "package-lock.json",
+        "sparse_skip": [], "select": ["node", "scripts/tests-for.mjs", "{path}"],
+    },
+    "degen": {
+        "code": r"^server/(?:[^/]+/)*[^/]+\.py$", "tests": r"^tests/(?!(?:web|tokens)/).*test_[^/]*\.py$",
+        "argv": ["env", "FEED_FREE_FLOOR_GB=0", "{deps}/venv/bin/python", "-m", "unittest", "{suite}"],
+        "classify": "fail_line",
+        "install": [[sys.executable, "-m", "venv", "{deps}/venv"],
+                    ["{deps}/venv/bin/pip", "install", "--quiet", "--disable-pip-version-check", "-r",
+                     "requirements.txt"]],
+        "lockfile": "requirements.txt", "link": None, "sparse_skip": [],
+        "select": ["python3", "scripts/tests-for.py", "{path}"],
+    },
 }
+
+
+@contextlib.contextmanager
+def stop_on_signals():
+    """SIGTERM and SIGINT become an exit, so the `finally` blocks of the caller run: the suite groups are killed first, then
+    the caller removes its checkouts. The handlers and the stop flag are put back on the way out."""
+    def stop(signum, _frame):
+        mutate_shared.request_stop()
+        raise SystemExit(128 + signum)
+
+    saved = {}
+    try:
+        for number in (signal.SIGTERM, signal.SIGINT):
+            saved[number] = signal.signal(number, stop)
+    except ValueError:  # not the main thread: no handler, the default stays
+        pass
+    try:
+        yield
+    finally:
+        for number, handler in saved.items():
+            signal.signal(number, handler)
+        mutate_shared.clear_stop()
 
 
 def replay_main(argv) -> int:
@@ -2226,39 +2555,323 @@ def replay_main(argv) -> int:
     print("replaying %d merged pull requests of %s with profile %s" % (len(prs), repo, args.profile), flush=True)
     deps = tempfile.mkdtemp(prefix="mutate_deps_")
     rows = []
-
-    def stop(signum, _frame):
-        # SIGTERM and SIGINT become an exit, so the `finally` blocks run: the suite groups are killed first,
-        # then each checkout is removed and the deps folder with it.
-        mutate_shared.request_stop()
-        raise SystemExit(128 + signum)
-
-    saved = {}
-    try:
-        for number in (signal.SIGTERM, signal.SIGINT):
-            saved[number] = signal.signal(number, stop)
-    except ValueError:  # not the main thread: no handler, the default stays
-        pass
-    try:
-        for sha, _number, _title in prs:
-            for row in mutate_shared.replay_profile(repo, sha, profile, limit=args.limit,
-                                                    suite_timeout=args.suite_timeout, jobs=args.jobs, deps=deps,
-                                                    pr_budget=args.pr_budget,
-                                                    progress=lambda line: print(line, flush=True)):
-                rows.append(row)
-                print(mutate_shared.format_replay_row(row), flush=True)  # a killed run keeps the rows already scored
-    finally:
-        shutil.rmtree(deps, ignore_errors=True)
-        for number, handler in saved.items():
-            signal.signal(number, handler)
-        mutate_shared.clear_stop()
+    with stop_on_signals():
+        try:
+            for sha, _number, _title in prs:
+                for row in mutate_shared.replay_profile(repo, sha, profile, limit=args.limit,
+                                                        suite_timeout=args.suite_timeout, jobs=args.jobs, deps=deps,
+                                                        pr_budget=args.pr_budget,
+                                                        progress=lambda line: print(line, flush=True)):
+                    rows.append(row)
+                    print(mutate_shared.format_replay_row(row), flush=True)  # a killed run keeps the rows already scored
+        finally:
+            shutil.rmtree(deps, ignore_errors=True)
     print()
     print(mutate_shared.format_replay(rows))
     return 0
 
 
+def add_profile_group(parser) -> None:
+    """The required choice of `--profile NAME` or `--profile-file JSON` that `--changed` and `--known-defects` share. Read it with `load_profile`."""
+    which = parser.add_mutually_exclusive_group(required=True)
+    which.add_argument("--profile", choices=sorted(REPLAY_PROFILES))
+    which.add_argument("--profile-file", metavar="JSON", help="a profile as a JSON file, in place of a named one")
+
+
+def load_profile(args) -> dict:
+    """The profile `add_profile_group` chose. A file that cannot be read raises OSError, or ValueError when it is no JSON or no object."""
+    import json
+    if not args.profile_file:
+        return REPLAY_PROFILES[args.profile]
+    with open(args.profile_file, encoding="utf-8") as handle:
+        profile = json.load(handle)
+    if not isinstance(profile, dict):
+        raise ValueError("the profile file %s does not hold a JSON object" % args.profile_file)
+    return profile
+
+
+def changed_main(argv) -> int:
+    """The CI report of a change: mutate the product lines it adds past the merge base, run the suites the profile's `select`
+    lists for each file, print the replay row, `catch share: K/R` and each `untested: path:line`. Exit 0 whatever the share:
+    a low share is a report, never a failure. `--budget` is a wall deadline (see `replay_pr`, `wall_deadline`). A bad argument, or a ref the repository cannot read, exits 2."""
+    import argparse
+    import json
+    parser = argparse.ArgumentParser(prog="mutate_guard.py --changed")
+    parser.add_argument("--changed", required=True, metavar="REPO", help="a clone of the repository holding the change")
+    add_profile_group(parser)
+    parser.add_argument("--base", required=True, help="the ref the change is cut from: the lines past its merge base with --head")
+    parser.add_argument("--head", default="HEAD")
+    parser.add_argument("--limit", type=int, default=20, help="mutants in all")
+    parser.add_argument("--budget", type=float, default=None, metavar="SECONDS",
+                        help="a wall deadline: after this long from the start of the run, suites still running are killed and "
+                             "mutants not finished count as not_run")
+    parser.add_argument("--suite-timeout", type=float, default=120, help="seconds before a suite run is killed")
+    parser.add_argument("--jobs", type=int, default=None)
+    parser.add_argument("--log", default=None, metavar="PATH", help="write the totals as one JSON file")
+    args = parser.parse_args(argv)
+    repo = os.path.abspath(args.changed)
+    try:
+        profile = load_profile(args)
+        head = mutate_shared._git(repo, "rev-parse", "--verify", "--quiet", "%s^{commit}" % args.head).strip()
+        base = mutate_shared._git(repo, "merge-base", args.base, head).strip()
+    except (OSError, ValueError) as error:  # a JSONDecodeError is a ValueError
+        print("ERROR %s" % error)
+        return 2
+    print("scoring the lines %s adds past %s in %s" % (head[:8], base[:8], repo), flush=True)
+    deps = tempfile.mkdtemp(prefix="mutate_deps_")
+    with stop_on_signals():
+        try:
+            rows = mutate_shared.replay_profile(repo, head, profile, limit=args.limit, suite_timeout=args.suite_timeout,
+                                                jobs=args.jobs, deps=deps, pr_budget=args.budget, base=base,
+                                                select_all=True, wall_deadline=True,
+                                                progress=lambda line: print(line, flush=True))
+        finally:
+            shutil.rmtree(deps, ignore_errors=True)
+    print()
+    print(mutate_shared.format_changed(rows))
+    if args.log:
+        total = mutate_shared.changed_summary(rows)
+        total.update({"base": base, "head": head, "profile": args.profile or args.profile_file})
+        with open(args.log, "w", encoding="utf-8") as handle:
+            json.dump(total, handle, indent=1)
+    return 0
+
+
+def _known_defects_base_entries(repo: str, list_path: str, base: str):
+    """(entries, problem) of the list that REF holds at the path of `list_path` in `repo`, read with git so a head that edits
+    the file cannot hide an entry. entries is None when the base cannot be read; problem is then `(verdict, text)`, the
+    verdict UNKNOWN or ERROR. A ref that resolves but holds no list file has no entries (the first adoption of the list)."""
+    import json
+    rel = os.path.relpath(os.path.realpath(list_path), os.path.realpath(repo))
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep) or os.path.isabs(rel):
+        return None, ("UNKNOWN", "%s: the list is outside the repository, so its base list cannot be read" % list_path)
+    spec = "%s:./%s" % (base, rel.replace(os.sep, "/"))
+    try:
+        mutate_shared._git(repo, "rev-parse", "--verify", "-q", base + "^{commit}")
+    except ValueError:
+        return None, ("UNKNOWN", "%s: the base ref does not resolve, so no base list was compared" % base)
+    try:
+        mutate_shared._git(repo, "cat-file", "-e", spec)
+    except ValueError:
+        return [], None
+    try:
+        entries = json.loads(mutate_shared._git(repo, "show", spec))
+        if not isinstance(entries, list):
+            raise ValueError("the top level is not a list")
+    except ValueError as error:
+        return None, ("ERROR", "cannot read %s: %s" % (spec, error))
+    for position, entry in enumerate(entries, 1):
+        if not isinstance(entry, dict) or "id" not in entry:
+            return None, ("UNKNOWN", "%s: entry %d of the base list has no id, so a drop of it could not be told" % (spec, position))
+    return entries, None
+
+
+def known_defects_main(argv) -> int:
+    """Replay the planted defects of a list (`.github/known-defects.json`) against a repository's HEAD. One line per defect:
+    `CAUGHT`, `MISS` or `UNKNOWN`. Exit 1 when any defect is MISS or UNKNOWN (decision ci-unknown-is-red). A missing list file
+    prints one UNKNOWN line that names its path and exits 1; an empty list exits 0 (with `--base`, only when REF's list names
+    no entry); a list or a profile that cannot be read exits 2.
+    `--profile` or `--profile-file` is required: the checkout gets the profile's install, as `--changed` does.
+    With `--base REF` the head list is also compared with the list at REF (decision mutation-ci-report-and-replay): each id
+    there needs a result row, unless a commit in REF..HEAD carries the exact trailer `Known-defect-removed: <id>`, else
+    `MISSING <id>` prints and the exit is 1. An id on both lists whose entries differ as parsed objects (key order and
+    spacing do not count; two head entries with one id differ unless both equal the base entry) prints `CHANGED <id>` and
+    exits 1, unless a commit in REF..HEAD carries `Known-defect-changed: <id>`; the two keys are not interchangeable. A ref that does not resolve, or a list outside the repository, is UNKNOWN (exit
+    1); a ref with no list file has nothing to compare; a base list that cannot be read exits 2. A base entry that is not an
+    object or has no `id` is UNKNOWN (exit 1), never skipped. One trailer line names one id."""
+    import argparse
+    import json
+    parser = argparse.ArgumentParser(prog="mutate_guard.py --known-defects")
+    parser.add_argument("--known-defects", dest="list_path", required=True, metavar="FILE",
+                        help="a JSON list of planted defects")
+    parser.add_argument("--repo", required=True, help="a clone of the repository the defects are planted in")
+    add_profile_group(parser)
+    parser.add_argument("--base", default=None, metavar="REF",
+                        help="a git ref whose list the head list must not drop an id from, unless a commit names it in a trailer")
+    parser.add_argument("--suite-timeout", type=float, default=120, help="seconds before a suite run is killed")
+    parser.add_argument("--log", default=None, metavar="PATH", help="write the results as one JSON file")
+    args = parser.parse_args(argv)
+    if not os.path.exists(args.list_path):
+        print("UNKNOWN %s: the known-defects list is missing, so no planted defect was replayed" % args.list_path)
+        return 1
+    try:
+        with open(args.list_path, encoding="utf-8") as handle:
+            defects = json.load(handle)
+        if not isinstance(defects, list):
+            raise ValueError("the top level is not a list")
+    except (OSError, ValueError) as error:
+        print("ERROR cannot read %s: %s" % (args.list_path, error))
+        return 2
+    try:
+        profile = load_profile(args)
+    except (OSError, ValueError) as error:  # a JSONDecodeError is a ValueError
+        print("ERROR %s" % error)
+        return 2
+    base_entries = []
+    if args.base:
+        base_entries, problem = _known_defects_base_entries(args.repo, args.list_path, args.base)
+        if problem:
+            print("%s %s" % problem)
+            return 2 if problem[0] == "ERROR" else 1
+    deps = tempfile.mkdtemp(prefix="mutate_deps_")
+    with stop_on_signals():
+        try:
+            results = mutate_shared.run_known_defects(os.path.abspath(args.repo), defects, profile, deps,
+                                                      suite_timeout=args.suite_timeout)
+        finally:
+            shutil.rmtree(deps, ignore_errors=True)
+    print(mutate_shared.format_known_defects(results))
+    missing, changed = [], []
+    if base_entries:
+        try:
+            # One read serves both keys; `unfold` keeps each trailer on one `Key: value` line.
+            trailers = mutate_shared._git(
+                args.repo, "log", "--format=%(trailers:key=Known-defect-removed,key=Known-defect-changed,unfold)",
+                "%s..HEAD" % args.base)
+        except ValueError as error:
+            print("UNKNOWN %s..HEAD: the commits could not be read for Known-defect trailers (%s)" % (args.base, error))
+            return 1
+        named = {"known-defect-removed": set(), "known-defect-changed": set()}
+        for line in trailers.splitlines():
+            key, _, value = line.partition(":")
+            if key.strip().lower() in named:
+                named[key.strip().lower()].add(value.strip())
+        removed, excused = named["known-defect-removed"], named["known-defect-changed"]
+        listed = {result["id"] for result in results}
+        base_by_id = {}
+        for entry in base_entries:
+            base_by_id.setdefault(str(entry["id"]), []).append(entry)
+        head_by_id = {}
+        for entry in defects:
+            head_by_id.setdefault(str(entry.get("id", "?")) if isinstance(entry, dict) else "?", []).append(entry)
+        missing = sorted(set(base_by_id) - listed - removed)
+        changed = sorted(known_id for known_id, base_rows in base_by_id.items()
+                         if known_id in listed and known_id not in excused
+                         and (any(row not in base_rows for row in head_by_id.get(known_id, []))
+                              or any(row not in head_by_id.get(known_id, []) for row in base_rows)))
+        for known_id in missing:
+            print("MISSING %s: %s lists it, the head list has no row for it, and no commit in %s..HEAD has the trailer "
+                  "`Known-defect-removed: %s` (one id per line, in the message's last block, beside Co-Authored-By)"
+                  % (known_id, args.base, args.base, known_id))
+        for known_id in changed:
+            print("CHANGED %s: the head entry differs from the one %s lists, and no commit in %s..HEAD has the trailer "
+                  "`Known-defect-changed: %s` (one id per line, in the message's last block, beside Co-Authored-By)"
+                  % (known_id, args.base, args.base, known_id))
+    if args.log:
+        with open(args.log, "w", encoding="utf-8") as handle:
+            json.dump({"repo": os.path.abspath(args.repo), "defects": results, "missing": missing, "changed": changed},
+                      handle, indent=1)
+    return 1 if missing or changed or any(result["verdict"] != "CAUGHT" for result in results) else 0
+
+
+def _loads_module(source: str, stem: str) -> bool:
+    """True when the Python text imports or loads the module `stem`, read from its `ast` tree (never its text, so a comment,
+    a string or a docstring that names the module is not a load). The forms: `import`, `from ... import`,
+    `importlib.import_module` and `__import__` with a literal name, and `spec_from_file_location`, `SourceFileLoader` and
+    `runpy.run_path` with a string literal of the basename `<stem>.py` in the path argument (never the module-name argument),
+    directly or through a name bound to such an expression by an assignment in any scope of the file (module, function or
+    class level; one name bound in two scopes pools both values). A path that arrives as a function parameter is not
+    followed, so a loader fed only by a parameter reads False (debt tests-for-misses-param-loads).
+
+    It assumes module stems are unique across the repository, so a name match is a load of this file (only
+    `test_action.py` repeats a stem today). A text that does not parse reads False."""
+    import ast
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError, RecursionError):
+        return False
+    base = stem + ".py"
+    bound = {}  # a name -> the expressions it is bound to, in any scope
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    bound.setdefault(target.id, []).append(node.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+            bound.setdefault(node.target.id, []).append(node.value)
+
+    def names_base(expr, seen) -> bool:
+        for part in ast.walk(expr):
+            if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                if part.value.replace("\\", "/").rsplit("/", 1)[-1] == base:
+                    return True
+            elif isinstance(part, ast.Name) and part.id in bound and part.id not in seen:
+                seen.add(part.id)
+                if any(names_base(value, seen) for value in bound[part.id]):
+                    return True
+        return False
+
+    def last_part(dotted: str) -> bool:
+        return dotted.rsplit(".", 1)[-1] == stem
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(last_part(alias.name) for alias in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom):
+            if (node.module and last_part(node.module)) or any(alias.name == stem for alias in node.names):
+                return True
+        elif isinstance(node, ast.Call):
+            func = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+            if func in ("import_module", "__import__"):
+                first = node.args[0] if node.args else next((kw.value for kw in node.keywords if kw.arg == "name"), None)
+                if isinstance(first, ast.Constant) and isinstance(first.value, str) and last_part(first.value):
+                    return True
+            elif func in ("spec_from_file_location", "SourceFileLoader", "run_path"):
+                skip = 0 if func == "run_path" else 1  # the first argument of the other two is the module name
+                parts = list(node.args[skip:]) + [kw.value for kw in node.keywords if kw.arg not in ("name", "fullname")]
+                if any(names_base(part, set()) for part in parts):
+                    return True
+    return False
+
+
+def tests_for_main(argv) -> int:
+    """Print the suites that test one file, a line each, sorted, once each. A file listed in REPORT_TARGETS prints exactly its
+    suites. Any other `.py` file prints each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, plus each tracked
+    `test_*.py` in the repository of the working folder that imports or loads its module (`_loads_module`). Any other file
+    prints the suites beside it only. A suite that cannot be read or parsed is skipped. It is the `select` command of the
+    `claude_settings` profile. A file with no suite prints nothing."""
+    import argparse
+    import re
+    parser = argparse.ArgumentParser(prog="mutate_guard.py --tests-for")
+    parser.add_argument("--tests-for", required=True, metavar="PATH", help="a repository-relative path")
+    args = parser.parse_args(argv)
+    path = os.path.normpath(args.tests_for).replace(os.sep, "/")
+    listed = dict(REPORT_TARGETS)
+    if path in listed:
+        names = set(listed[path])
+    else:
+        folder, name = os.path.split(path)
+        stem, extension = os.path.splitext(name)
+        wanted = re.compile(r"test_%s(_[^/]*)?\.py" % re.escape(stem))
+        done = _nowindow.run(["git", "ls-files", "-z"], capture_output=True, text=True,
+                             encoding="utf-8", stdin=subprocess.DEVNULL)
+        if done.returncode != 0:
+            print("ERROR git ls-files failed: %s" % done.stderr.strip())
+            return 2
+        tracked = [item for item in done.stdout.split("\0") if item]
+        names = {item for item in tracked
+                 if os.path.dirname(item) == folder and wanted.fullmatch(os.path.basename(item))}
+        if extension == ".py":
+            for item in tracked:
+                base = os.path.basename(item)
+                if item in names or not (base.startswith("test_") and base.endswith(".py")):
+                    continue
+                try:
+                    with open(item, encoding="utf-8") as handle:
+                        source = handle.read()
+                except (OSError, ValueError):
+                    continue
+                if _loads_module(source, stem):
+                    names.add(item)
+    for name in sorted(names):
+        print(name)
+    return 0
+
+
 def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=None):
-    """Run one fixture suite against one mutated copy. Return (exit code, FAIL lines, case lines).
+    """Run one fixture suite against one mutated copy. Return (exit code, FAIL lines, case lines,
+    ERROR lines from `mutate_shared.diagnostic_lines`).
 
     The case lines are one per case run, passed or failed: `mutate_shared.staged_suite` reads them
     to know whether stage 1 ran the required case."""
@@ -2273,18 +2886,22 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     env.pop("MUTATE_ONLY", None)
     if only:
         env["MUTATE_ONLY"] = only  # the suites run just the cases whose name holds this
-    # stderr goes to DEVNULL, not a pipe: test_guard.py leaves a `sleep 300` that holds the suite's
+    # stderr goes to a temp file, not a pipe: test_guard.py leaves a `sleep 300` that holds the suite's
     # stderr (spawn_live_parent), and run() waits for a pipe's EOF. Measured: every mutant took 306 s.
-    result = _nowindow.run(
-        # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
-        [sys.executable, suite], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-        env=env, timeout=1200,
-    )
+    # A file has no EOF to wait for. It is read after the run, only for unittest's ERROR blocks.
+    with tempfile.TemporaryFile() as errors:
+        result = _nowindow.run(
+            # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
+            [sys.executable, suite], stdout=subprocess.PIPE, stderr=errors, text=True,
+            env=env, timeout=1200,
+        )
+        errors.seek(0)
+        error_text = errors.read().decode("utf-8", "replace")
     lines = result.stdout.splitlines()
     red = [line for line in lines if line.startswith("FAIL")]
     # "PASS" and "FAIL" start each case line in every suite here; "ok " is test_call_judge.py's pass.
     ran = [line for line in lines if line.startswith(("PASS", "FAIL", "ok "))]
-    return result.returncode, red, ran
+    return result.returncode, red, ran, mutate_shared.diagnostic_lines(result.stdout + "\n" + error_text)
 
 
 def mutation_parts(entry):
@@ -2313,7 +2930,7 @@ def mutation_parts(entry):
 
 def run_mutant(sources, work: str, entry):
     """Apply one mutation, run its suite against it, and return (label, code, FAIL lines,
-    required, skip).
+    required, skip, ERROR lines).
 
     `required` is the case name (or a distinctive fragment of it) the caller must find among the
     FAIL lines before trusting this mutant's death: see `mutate_shared.report_verdict`. `skip`,
@@ -2327,13 +2944,31 @@ def run_mutant(sources, work: str, entry):
     if skip:
         return label, None, [], required, skip
     _path, suite, variable, stem = TARGETS[target]
-    if target == "guard":
-        # The whole guard family goes in the mutant's own folder, and the anchor lands in the one
-        # module that holds it. The suite loads the copied guard.py, which finds its siblings.
-        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+    if target in ("guard", "simlease"):
+        # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
+        # module that holds it. The suite loads the copied guard.py, which finds its siblings. The
+        # simulator refusal imports janitor/sweep.py from ../janitor and fails open when it cannot, so
+        # the copy takes sweep.py and temp_sweep.py beside its hooks folder, as a checkout has them.
+        # Without them every simulator arm would be judged against a guard that allows everything.
+        root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        tree = os.path.join(root, "hooks")
         mutate_shared.guard_tree(tree)
-        mutate_shared.apply_mutant(tree, old, new)
+        # The guard loads ../bin/sim-lease beside its hooks folder, so the copy takes it too, mutated or not.
+        os.makedirs(os.path.join(root, "bin"), exist_ok=True)
+        if target == "simlease":
+            with open(os.path.join(root, "bin", "sim-lease"), "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(sources[target].replace(old, new, 1))
+        else:
+            mutate_shared.apply_mutant(tree, old, new)
+            shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
         copy_path = os.path.join(tree, "guard.py")
+        os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
+        for name in ("sweep.py", "temp_sweep.py"):
+            shutil.copy(os.path.join(HERE, "..", "janitor", name), os.path.join(root, "janitor"))
+        # guard.py reads lint/layout.py from ../lint (_layout_module), which is root/lint for this copy. Without
+        # it the role-model table reads as unread and every role-model arm passes unjudged.
+        shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
         mutated = sources[target].replace(old, new, 1)
@@ -2365,14 +3000,14 @@ def run_mutant(sources, work: str, entry):
         copy_path = os.path.join(tree, "call_judge.py")
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
-    elif target != "guard":
+    elif target not in ("guard", "simlease"):
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))
     os.makedirs(config_dir, exist_ok=True)
-    code, red = mutate_shared.staged_suite(
+    code, red, seen = mutate_shared.staged_suite_seen(
         lambda only: run_suite(suite, variable, copy_path, config_dir, only), required)
-    return label, code, red, required, None
+    return label, code, red, required, None, seen
 
 
 def main() -> int:
@@ -2380,6 +3015,12 @@ def main() -> int:
         return report_main(sys.argv[1:])
     if "--replay" in sys.argv[1:]:
         return replay_main(sys.argv[1:])
+    if "--changed" in sys.argv[1:]:
+        return changed_main(sys.argv[1:])
+    if "--known-defects" in sys.argv[1:]:
+        return known_defects_main(sys.argv[1:])
+    if "--tests-for" in sys.argv[1:]:
+        return tests_for_main(sys.argv[1:])
     sources = {}
     for name, (path, _suite, _variable, _stem) in TARGETS.items():
         with open(path, encoding="utf-8") as handle:
@@ -2445,9 +3086,9 @@ def main() -> int:
     # failure this file exists to catch. MEASURED: before this line, all seven `watch` mutants
     # printed the identical nine-case failure list, whatever the mutation.
     mutate_shared.guard_tree(work)
-    # Every guard copy sits one folder below `work`, so its `../lint` is work/lint. guard.py imports
-    # lint/layout.py from there (role_model_table, the waiting-page check). Without this folder the import
-    # fails, the guard exits silently and allows, and the role-model deny cases go red whatever the mutation.
+    # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint:
+    # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The ruling and
+    # decision copies read their own tree/lint instead (above). A guard copy carries its own lint folder (run_mutant).
     shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(work, "lint"),
                     ignore=shutil.ignore_patterns("__pycache__"))
 

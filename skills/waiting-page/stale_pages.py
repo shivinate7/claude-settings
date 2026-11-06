@@ -7,14 +7,22 @@ A script cannot call the Artifact tool, so the session fetches first. For each p
 (lint/layout.py `live_pages`, from the `waiting-page` key of each repo's extras file; with no root
 given, the claude-settings checkout and every sibling folder of it that has one), the session reads
 the page with Artifact `read` and saves the text to <fetched-dir>/<artifact id>.html. A page it
-could not read gets an empty file <artifact id>.unreadable instead. A page with neither file is
-unknown too.
+could not read gets an empty file <artifact id>.unreadable instead. A page that Artifact read
+reports as not found, and that this account's Artifact list (scope all) holds no id for, gets an empty
+<artifact id>.notfound. A page with no file is unknown too.
 
 Verdict, one line per page, then a total line:
   current  the fetched page holds page.html (white space, the designData mockups, the roadmap block and the document <title> text ignored)
   behind   the fetched page differs: republish it (SKILL.md, "Update a repo's pages")
-  unknown  the page was not read: another account, a missing file, an empty file
-Exit 0 only when every page is current. A behind or unknown page exits 1: an unread page is never
+  unknown  the page was not read: another account, a missing file, an empty file, an .unreadable marker
+  not-found  the page has a .notfound marker: not found from this account (deleted, or another account's).
+           The line says to re-file the repo's items on the claude-settings waiting page: the URL recorded in the
+           extras file of the claude-settings checkout that holds this script, not fetched. That target reads
+           "the claude-settings waiting page is unknown" when the checkout has no page, its extras file cannot be
+           read, or its page has a .notfound or .unreadable marker in <fetched-dir> (so a not-found page that is
+           the claude-settings page names no target). The check never repoints a page.
+The total line reads `waiting pages: N current, N behind, N unknown, N not-found`.
+Exit 0 only when every page is current. A behind, unknown or not-found page exits 1: an unread page is never
 counted current. A host wrapper is tolerated, in both modes: the template must appear inside the
 page. The text before it may hold only a document skeleton (doctype, html, head, meta, title and
 body tags, white space) and style elements inside the leading head, before body opens. The text
@@ -24,7 +32,7 @@ beside this script, and needs no hooks/ folder.
 
 Single-page mode (the writer, at each wake and before each republish):
 
-    python3 ~/.claude/skills/waiting-page/stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]
+    python3 ~/.claude/skills/waiting-page/stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>] [--items <file|folder>]
 
 One verdict line names the template source: `origin/main <short sha>` or the --main path. Exit 0
 current, 1 behind, 2 unknown. Unknown: the file is missing or empty, it holds no designData block
@@ -33,6 +41,20 @@ saves main's page with the live designData and roadmap blocks kept (splice.carry
 --main; else page.html at origin/main of the checkout that holds this script, else of the checkout
 the `@<path>` line in ~/.claude/CLAUDE.md names. With neither, or with no hooks/_nowindow.py to
 start git, the verdict is unknown: the installed copy never stands in for main.
+--items names the items the session saved with `ArtifactData list items`: a JSON list file, or the folder of
+<id>.json files that call saves. A folder without the .complete marker reads every wait `unknown`, with no gh call.
+--items needs hooks/_nowindow.py to start gh; without it every wait reads `unknown`. A `run` or `pr` is a whole
+number above zero, or a string of digits with no leading zero; anything else reads `unknown`. For each open item (status not `closed`) with a `waits` field, `{repo, run}`
+or `{repo, pr}`, one gh call runs through the program named by WAITING_PAGE_GH (default `gh`):
+`run view <id> --repo <repo> --json status,conclusion` or `pr view <n> --repo <repo> --json state,mergedAt`.
+Each such item prints one line after the verdict line, `wait: item <n> (<what>): <word> (<detail>)`. An open item with a
+non-empty string `lane` and a `lastAnswer` object but no `waits` prints `wait: item <n> (lane <slug>): waiting (answered <lastAnswer.at>)`
+(`answered at unknown` when `at` is missing or not a string) instead: a routed answer whose receiver has not reported the act done. It starts no gh process and does not count against WAIT_CAP.
+An item with `waits` keeps its one line. The word is
+`ended` (the run completed with any conclusion; the PR merged; the PR closed unmerged, which its line says),
+`waiting` (the run or PR is still going), or `unknown` (gh missing, non-zero, timed out, not JSON, or a
+malformed `waits`; also an item past the WAIT_CAP-th call, which is not asked). The exit code stays the page verdict's.
+The folder loader is export_page.docs_in, the one home of reading that folder.
 Session-start mode, run by hooks/session_start.sh in a repo whose extras name a waiting page:
 
     python3 ~/.claude/skills/waiting-page/stale_pages.py --session-line <repo toplevel> [--main-checkout <dir>]
@@ -41,10 +63,27 @@ It prints one line when the stamp an allowed publish wrote (<git common dir>/wai
 page.html blob sha) differs from main's blob sha, and nothing else: no stamp, or an unreadable main, prints
 nothing. It always exits 0. One python process and one read-only git process.
 
+Parked mode, run by the writer at each wake when meta/page.parked is not empty (SKILL.md, "Route and close"):
+
+    python3 ~/.claude/skills/waiting-page/stale_pages.py --parked <dir> [--now <iso>]
+
+<dir> holds three files the session saved from the store: meta.json (the data of meta/page), items.json and
+answers.json (a list of {"id", "data"} entries each). One line per stale thing, then exit 1:
+`parked-open <id>` for a parked entry whose item is open (status other than closed, as the page reads it),
+and `park-answer-old <key>` for a park answer (answers/park.<id>, or answers/<item id> with act park) whose `at` is
+more than 10 minutes before --now (default: the clock). With none, `parked: clean` and exit 0. A missing or unreadable
+file, a file of the wrong shape (meta not an object, items or answers not a list), or a park answer with no readable
+`at` prints an `unknown:` line and exits 2.
+Cost: one python process, reads 3 files, writes none, starts no git, no timer.
+
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
 file written without --write, no timer, thread or child left running. Single-page mode never imports `layout`; batch and session-line modes do.
+Without --items: 0 gh processes. With it: one gh process per open item with a `waits` field, at most WAIT_CAP, each
+run to its end or its 30 s cap before the next (a lane line starts none); no file written, no timer, no process left running.
 """
 import argparse
+import datetime
+import json
 import os
 import re
 import subprocess
@@ -62,6 +101,9 @@ DESIGN = re.compile(r'(<script type="application/json" id="designData">).*?(</sc
 DESIGN_BODY = re.compile(r'(<script type="application/json" id="designData">)(.*?)(</script>)', re.S)
 TEMPLATE_IN_GIT = "skills/waiting-page/page.html"
 GIT_TIMEOUT = 30
+WAIT_CAP = 50  # most gh calls one --items run makes
+REPO_NAME = re.compile(r"[\w.-]+/[\w.-]+")
+WAIT_NUMBER = re.compile(r"[1-9][0-9]*")  # a run id or PR number: a whole number above zero, with no leading zero (page.html waitsOf reads the same form)
 # One piece of the text before the template: white space or a document skeleton tag (no event-handler
 # attributes). A style piece counts only inside the leading head; skeleton_before() keeps that state.
 ATTRS = r'(?:\s+(?!on)[a-z][\w:-]*(?:\s*=\s*(?:"[^"<>]*"|\'[^\'<>]*\'|[^\s"\'<>=]+))?)*'
@@ -141,16 +183,46 @@ def carries_data(template, live):
     return False
 
 
-def page_id(url):
-    # Not layout.artifact_id: this module imports no lint/ at load, so the guard and --page mode run without it.
-    return url.rstrip("/").rsplit("/", 1)[-1]
+def hub_clone():
+    """The claude-settings checkout that holds this script: the one home of the clone that default_roots() starts from."""
+    return os.path.abspath(os.path.join(HERE, "..", ".."))
+
+
+def marker(url, fetched):
+    """"notfound" or "unreadable" when <fetched>/<artifact id> has that marker, else None. The file name is
+    layout.artifact_id(url), the one home of "same artifact", so a query string names the same file."""
+    import layout  # batch mode only
+    name = os.path.join(fetched, layout.artifact_id(url))
+    for kind in ("notfound", "unreadable"):
+        if os.path.isfile(name + "." + kind):
+            return kind
+    return None
+
+
+def refile_target(fetched):
+    """The claude-settings waiting page URL, as its extras file records it, or "unknown" when that checkout has
+    no page, its extras file cannot be read, or the page has a marker in `fetched`. A not-found page that is
+    the claude-settings page has its own marker, so it never names itself."""
+    import layout  # batch mode only
+    try:
+        url = layout.waiting_page(hub_clone())
+    except layout.LayoutError:
+        return "unknown"
+    return "unknown" if url == "unknown" or marker(url, fetched) else url
 
 
 def verdict(url, fetched, template):
-    """(word, why) for one page: current, behind or unknown."""
-    name = os.path.join(fetched, page_id(url))
-    if os.path.isfile(name + ".unreadable"):
-        return "unknown", "the read failed (another account or not found)"
+    """(word, why) for one page: current, behind, unknown or not-found."""
+    import layout  # batch mode only
+    found = marker(url, fetched)
+    if found == "notfound":
+        target = refile_target(fetched)
+        where = ("re-file its items on the claude-settings waiting page %s" % target if target != "unknown"
+                 else "no place to re-file its items: the claude-settings waiting page is unknown")
+        return "not-found", "not found from this account (deleted, or another account's); %s" % where
+    if found == "unreadable":
+        return "unknown", "the read failed"
+    name = os.path.join(fetched, layout.artifact_id(url))
     if not os.path.isfile(name + ".html"):
         return "unknown", "no fetched file"
     with open(name + ".html", encoding="utf-8", errors="replace") as f:
@@ -162,7 +234,7 @@ def verdict(url, fetched, template):
 
 def default_roots():
     import layout  # batch mode only: single-page mode must run without lint/
-    clone = os.path.abspath(os.path.join(HERE, "..", ".."))
+    clone = hub_clone()
     parent = os.path.dirname(clone)
     extras = layout.layout()["extras"]
     return [clone] + sorted(os.path.join(parent, d) for d in os.listdir(parent)
@@ -332,13 +404,129 @@ def session_line(root, main_checkout=None):
             "(skill waiting-page, \"Keep the page on main's code\")." % url)
 
 
+def load_items(path):
+    """(items, complete): the saved items as a list from a JSON list file, or the folder `ArtifactData list` saves. `complete` is False
+    for a folder without the marker the session leaves after the last list page, since a stopped fetch may lack items. Raises ValueError with the cause."""
+    from export_page import MARKER, Stop, docs_in, load_json  # lazy: only --items reads a folder
+    try:
+        data = list(docs_in(path, path).values()) if os.path.isdir(path) else load_json(path, path)
+    except Stop as err:
+        raise ValueError(str(err))
+    except OSError as err:
+        raise ValueError(err.strerror or str(err))
+    if not isinstance(data, list):
+        raise ValueError("%s is not a JSON list of items" % path)
+    return data, not os.path.isdir(path) or os.path.isfile(os.path.join(path, MARKER))
+
+
+def parse_waits(waits):
+    """(gh argv, label) for a `waits` of {repo, run} or {repo, pr}; ValueError when it is anything else."""
+    if not isinstance(waits, dict) or set(waits) not in ({"repo", "run"}, {"repo", "pr"}):
+        raise ValueError("waits is not {repo, run} or {repo, pr}")
+    repo, kind = waits["repo"], "run" if "run" in waits else "pr"
+    number = waits[kind]
+    if isinstance(number, int) and not isinstance(number, bool):
+        number = str(number)
+    if not (isinstance(repo, str) and REPO_NAME.fullmatch(repo) and isinstance(number, str) and WAIT_NUMBER.fullmatch(number)):
+        raise ValueError("waits names a repo or %s that is not valid" % kind)
+    fields = "status,conclusion" if kind == "run" else "state,mergedAt"
+    return [kind, "view", number, "--repo", repo, "--json", fields], "%s %s in %s" % (kind, number, repo)
+
+
+def ask_gh(argv):
+    """The parsed JSON gh prints for `argv`, or ValueError with the cause. One gh process, ended or killed at GIT_TIMEOUT."""
+    gh = os.environ.get("WAITING_PAGE_GH") or "gh"
+    try:
+        import _nowindow  # the one home of a no-window child start, as read_origin_main
+        done = _nowindow.run([gh] + argv, capture_output=True, text=True, timeout=GIT_TIMEOUT, stdin=subprocess.DEVNULL)
+    except (ImportError, OSError, subprocess.SubprocessError) as err:
+        raise ValueError("gh did not run (%s)" % type(err).__name__)
+    if done.returncode != 0:
+        raise ValueError("gh exited %d" % done.returncode)
+    try:
+        answer = json.loads(done.stdout)
+    except ValueError:
+        raise ValueError("gh did not answer JSON")
+    if not isinstance(answer, dict):
+        raise ValueError("gh did not answer a JSON object")
+    return answer
+
+
+def wait_word(argv, answer):
+    """(word, detail) for gh's answer to a run or pr view; ValueError when the answer holds neither."""
+    if argv[0] == "run":
+        status = answer.get("status")
+        if not isinstance(status, str) or not status:
+            raise ValueError("gh gave no run status")
+        if status != "completed":
+            return "waiting", status
+        conclusion = answer.get("conclusion")
+        return "ended", "completed, %s" % conclusion if isinstance(conclusion, str) and conclusion else "completed"
+    state = answer.get("state")
+    if answer.get("mergedAt") or state == "MERGED":
+        return "ended", "merged"
+    if state == "CLOSED":
+        return "ended", "closed unmerged"
+    if state == "OPEN":
+        return "waiting", "open"
+    raise ValueError("gh gave no pr state")
+
+
+def wait_lines(items, complete=True):
+    """One line per open item with a `waits` field, in order; at most WAIT_CAP gh calls. With complete False, none: every wait reads unknown.
+    An open item with a `lane` and a `lastAnswer` and no `waits` gets one lane line, built from the item: no gh call, not counted in WAIT_CAP."""
+    lines, calls = [], 0
+    for item in items:
+        if not isinstance(item, dict):
+            lines.append("wait: an items entry is not an object: unknown")
+            continue
+        if item.get("status") == "closed":
+            continue
+        if "waits" not in item:
+            answer, lane = item.get("lastAnswer"), item.get("lane")
+            if isinstance(answer, dict) and isinstance(lane, str) and lane:
+                at = answer.get("at")
+                lines.append("wait: item %s (lane %s): waiting (answered %s)" % (item.get("n", item.get("id", "?")), lane,
+                                                                                at if isinstance(at, str) and at else "at unknown"))
+            continue
+        name, label = "item %s" % item.get("n", item.get("id", "?")), json.dumps(item["waits"])
+        try:
+            argv, label = parse_waits(item["waits"])
+            if not complete:
+                raise ValueError("not asked: the items folder has no .complete marker, so its list may be cut short")
+            if calls >= WAIT_CAP:
+                raise ValueError("not asked: more than %d gh calls" % WAIT_CAP)
+            calls += 1
+            word, detail = wait_word(argv, ask_gh(argv))
+        except ValueError as err:
+            word, detail = "unknown", str(err)
+        lines.append("wait: %s (%s): %s (%s)" % (name, label, word, detail))
+    return lines
+
+
 def single_page(argv):
-    """Exit 0 current, 1 behind, 2 unknown for one fetched page. Writes a file only with --write, never on unknown."""
+    """Exit 0 current, 1 behind, 2 unknown for one fetched page. Writes a file only with --write, never on unknown.
+    With --items, prints after the verdict line one wait line per open item with a `waits` field, and one lane line per open
+    item with a `lane` and a `lastAnswer` and no `waits`; the exit code stays the verdict's."""
     ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
     ap.add_argument("--page", required=True)
     ap.add_argument("--write")
     ap.add_argument("--main")
+    ap.add_argument("--items")
     args = ap.parse_args(argv)
+    code = page_verdict(args)
+    if args.items is not None:
+        try:
+            lines = wait_lines(*load_items(args.items))
+        except ValueError as err:
+            lines = ["wait: the items cannot be read: unknown (%s)" % err]
+        for line in lines:
+            print(line)
+    return code
+
+
+def page_verdict(args):
+    """The verdict of one fetched page: prints its line and returns the exit code."""
     try:
         with open(args.page, encoding="utf-8", errors="replace", newline="") as f:
             live = f.read()
@@ -401,14 +589,72 @@ def session_mode(argv):
     return 0
 
 
+PARK_ANSWER_MAX_AGE = 600  # seconds: a park answer the writer has not closed in 10 minutes is stale
+
+
+def parse_utc(text):
+    """An ISO time with a Z (as the store writes it) as epoch seconds, or None when it cannot be read."""
+    try:
+        return datetime.datetime.fromisoformat(str(text).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def parked_mode(argv):
+    """`--parked <dir> [--now <iso>]`: name each parked entry whose item is open and each park answer older than 10 minutes."""
+    ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
+    ap.add_argument("--parked", required=True)
+    ap.add_argument("--now")
+    args = ap.parse_args(argv)
+    now = parse_utc(args.now) if args.now else datetime.datetime.now(datetime.timezone.utc).timestamp()
+    if now is None:
+        print("unknown: --now is not an ISO time (%s)" % args.now)
+        return 2
+    try:
+        loaded = {}
+        for name in ("meta", "items", "answers"):
+            with open(os.path.join(args.parked, name + ".json"), encoding="utf-8") as f:
+                loaded[name] = json.load(f)
+    except (OSError, ValueError) as err:
+        print("unknown: cannot read %s.json in %s (%s)" % (name, args.parked, err))
+        return 2
+    meta, items, answers = loaded["meta"], loaded["items"], loaded["answers"]
+    for name, ok in (("meta", isinstance(meta, dict)), ("items", isinstance(items, list)), ("answers", isinstance(answers, list))):
+        if not ok:  # a file of the wrong shape is never read as clean or stale
+            print("unknown: %s.json is not %s" % (name, "an object" if name == "meta" else "a list"))
+            return 2
+    entries = lambda rows: [r for r in rows if isinstance(r, dict)]
+    data = lambda r: r.get("data") if isinstance(r.get("data"), dict) else {}
+    open_ids = {r.get("id") for r in entries(items) if data(r).get("status") != "closed"}
+    parked = meta.get("parked") if isinstance(meta.get("parked"), list) else []
+    lines = ["parked-open %s" % p["id"] for p in parked if isinstance(p, dict) and p.get("id") in open_ids]
+    unknown = []
+    for r in entries(answers):
+        key = str(r.get("id", ""))
+        # A parked line's answer is keyed park.<id>. An item's answer is a park answer only with act park; any other act is never read.
+        if not (key.startswith("park.") or data(r).get("act") == "park"):
+            continue
+        at = parse_utc(data(r).get("at"))
+        if at is None:  # an unreadable time is never counted fresh or old
+            unknown.append("unknown: the park answer %s has no readable at" % key)
+        elif now - at > PARK_ANSWER_MAX_AGE:
+            lines.append("park-answer-old %s" % key)
+    out = lines + unknown
+    print("\n".join(out) if out else "parked: clean")
+    return 2 if unknown else 1 if lines else 0
+
+
 def main(argv):
+    if "--parked" in argv:
+        return parked_mode(argv)
     if "--session-line" in argv:
         return session_mode(argv)
     if "--page" in argv:
         return single_page(argv)
     if not argv:
         sys.exit("usage: stale_pages.py <fetched-dir> [<repo root> ...]\n"
-                 "       stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]")
+                 "       stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]\n"
+                 "       stale_pages.py --parked <dir> [--now <iso>]")
     import layout  # batch mode only
     fetched, roots = argv[0], argv[1:] or default_roots()
     with open(TEMPLATE, encoding="utf-8") as f:
@@ -417,13 +663,14 @@ def main(argv):
         pages = layout.live_pages(roots)
     except layout.LayoutError as err:
         sys.exit("stale_pages: %s" % err)
-    counts = {"current": 0, "behind": 0, "unknown": 0}
+    counts = {"current": 0, "behind": 0, "unknown": 0, "not-found": 0}
     for owner, url in pages:
         word, why = verdict(url, fetched, template)
         counts[word] += 1
         print("%s: %s%s (%s)" % (word, owner, " - " + why if why else "", url))
-    print("waiting pages: %d current, %d behind, %d unknown" % (counts["current"], counts["behind"], counts["unknown"]))
-    return 0 if counts["behind"] == 0 and counts["unknown"] == 0 else 1
+    print("waiting pages: %d current, %d behind, %d unknown, %d not-found"
+          % (counts["current"], counts["behind"], counts["unknown"], counts["not-found"]))
+    return 0 if counts["current"] == len(pages) else 1
 
 
 if __name__ == "__main__":

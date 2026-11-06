@@ -1,4 +1,4 @@
-"""Fixture suite for the roadmap builder. Run: python3 skills/roadmap/test_build.py
+"""Fixture suite for the roadmap build.py. Run: python3 skills/roadmap/test_build.py
 
 Each case builds a throwaway git repo: `main` holds the record homes, `roadmap` holds roadmap/data/.
 """
@@ -15,6 +15,7 @@ import sys
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 sys.dont_write_bytecode = True
 HERE = pathlib.Path(__file__).resolve().parent
@@ -23,6 +24,7 @@ sys.path.insert(1, str(HERE.parent.parent / "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 import build  # noqa: E402
+import layout  # noqa: E402  the waiting page and record branch readers (lint/layout.py)
 import shared_names  # noqa: E402  the one home of the tag names (hooks/shared_names.py), on the path build set
 
 # Made in setUpModule, not at import, so a helper that imports make_repo leaks no folder.
@@ -33,7 +35,7 @@ CONFLICT = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> 1234567 (other)\n"
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
 
 # The page script the roadmap branch's build.py put in front of the viewer. The
-# builder's stub must stay byte for byte this, so the viewer reads the data as it did.
+# script's stub must stay byte for byte this, so the viewer reads the data as it did.
 TODAY_STUB = """<script>
 (() => {
   const DATA = %s;
@@ -54,7 +56,7 @@ TODAY_STUB = """<script>
 })();
 </script>
 """
-# sha256 of the roadmap branch's roadmap/page/index.html, the page the old builder used.
+# sha256 of the roadmap branch's roadmap/page/index.html, the page the old script used.
 TODAY_TEMPLATE_SHA256 = "b6451344f00bcc1ce27fe378de2cf5b3aaa610954d6ecb1dd8050677627160c6"
 BLOCK = re.compile(r"<!-- build:([a-z-]+) -->.*?<!-- /build:\1 -->\n?", re.S)
 
@@ -65,9 +67,9 @@ def today_page(template, data):
     return head + sep + "\n" + TODAY_STUB % json.dumps(data, ensure_ascii=False).replace("</", "<\\/") + rest
 
 
-def git(repo, *args):
+def git(repo, *args, env=None):
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True,
-                          env={**os.environ, **GIT_ENV}).stdout
+                          env={**os.environ, **GIT_ENV, **(env or {})}).stdout
 
 
 def run_build_streams(*argv):
@@ -168,9 +170,10 @@ class Fixture(unittest.TestCase):
         git(self.repo, "checkout", "-q", "main")
 
     def build_from_main(self, *extra, expect=(0, None)):
-        """(page, output) of a build from main. expect lists the exit codes the case accepts."""
+        """(page, output) of a build from main. expect lists the exit codes the case accepts; self.code is the exit code."""
         self.on_main()
         code, out = run_build("--repo", str(self.repo), "--out", str(self.out), *extra)
+        self.code = code
         self.assertIn(code, expect, out)
         return self.out.read_text(encoding="utf-8"), out
 
@@ -588,7 +591,7 @@ class UpkeepFixture(Fixture):
         return counts[label], (detail.group(1) if detail else "")
 
     def entries(self, detail):
-        """The entries of a row's detail, sorted. The builder orders them by step id, which no case relies on."""
+        """The entries of a row's detail, sorted. The script orders them by step id, which no case relies on."""
         return sorted(detail.split(", ")) if detail else []
 
     # The Nov 1 replay (spec "Red first"): a todo step, `Ready.` in its note, with a draft PR on its branch,
@@ -621,7 +624,7 @@ class StaleInProgress(UpkeepFixture):
     ROW = "in progress with no live lane or open PR"
 
     def session_in_repo(self, sid, status, *tags):
-        """A sessions row for this fixture repo, carrying the cs-repo tag the builder checks."""
+        """A sessions row for this fixture repo, carrying the cs-repo tag the script checks."""
         return session_row(sid, status, self.REPO, *tags)
 
     def stale(self, out):
@@ -950,7 +953,7 @@ class PageRulings(UpkeepFixture):
 
     def test_an_item_row_of_the_wrong_shape_reads_the_row_unknown_once(self):
         self.commit_step("c154", note="Waiting.")
-        good = self.item(10, home="c154")  # a builder that skips the bad row and lists this one fails here
+        good = self.item(10, home="c154")  # a script that skips the bad row and lists this one fails here
         bad_rows = [
             "c153 (page item 9)",
             {"n": "9", "status": "closed", "home": "c153"},
@@ -1437,7 +1440,7 @@ def baked(text, key):
 
 
 class BlockOnly(Fixture):
-    """--block writes only the roadmap data block, for the waiting-page writer to splice in
+    """--block writes only the roadmap data block, for the page writer to splice in
     (one-page notes, "Build constraints": the build never publishes and never writes ROADMAP_DB)."""
 
     def block_from_main(self):
@@ -1553,6 +1556,10 @@ class ForkRecord(Fixture):
         self.assertIn(self.MAIN_TITLE, page)
         self.assertNotIn(self.FORK_TITLE, page)
 
+    def test_waiting_page_is_the_forks_in_its_worktree_and_mains_on_the_checkout(self):
+        self.assertEqual(layout.waiting_page(str(self.fork)), self.FORK_URL)
+        self.assertEqual(layout.waiting_page(str(self.repo)), self.MAIN_URL)
+
     def broken_extras(self, text):
         """Put `text` in the fork's extras file, uncommitted, where the build reads it."""
         (pathlib.Path(self.fork) / ".claude" / "layout-extras.json").write_text(text, encoding="utf-8")
@@ -1584,6 +1591,397 @@ class ForkRecord(Fixture):
         self.broken_extras("{not json")
         page = self.page_from(self.fork, "--record-branch", "roadmap")
         self.assertIn(self.MAIN_TITLE, page)
+
+
+class MockupFiles(UpkeepFixture):
+    """The mockup check of the build. Only open steps are judged. A step's note, why or ask that cites an item by its
+    mockup id (item<N>-<letter>, a whole token) needs a `mockups` entry, {"<id>": "<path>"}. The one mockup home is the
+    repo's design folder, and the file must be on origin: any remote-tracking ref under refs/remotes/origin/, as a
+    fetch leaves it. An absent path is a miss, and so is a folder or a link at it on origin. A miss prints
+    `mockup with no file: <step> <id>` for each id, writes the page, and the build exits 1. The miss line names
+    `git fetch`, since a stale or unfetched origin ref reads as a miss. A path that origin cannot
+    show reads unknown: `mockup file unread: <step> <id> (<why>)`, exit 0. Unknown covers no origin ref, a shallow
+    checkout, an unreadable layout and a failed git read; empty git output means absent, a failed read means unknown.
+    The check starts at most four git processes, however many entries and origin refs there are.
+    The machine-home form is refused. A step with no mockup passes. HOME is this case's own folder, so no case reads
+    or writes the real home. The repo is "fixture" (UpkeepFixture's origin)."""
+
+    MISS = "mockup with no file"
+    UNREAD = "mockup file unread"
+    MACHINE = "fixture-imports"
+    MACHINE_ITEM = "~/Developer/fixture-imports/item48/a.html"
+    WIN_MACHINE_ITEM = "C:\\Users\\x\\Developer\\fixture-imports\\item48\\a.html"
+    APP_SUPPORT = "~/Library/Application Support/Claude-Work/side-session-notes/abc123/a.html"
+    SHOT_URL = "https://claude.ai/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/asset/shot.png"
+    DESIGN_ITEM = "docs/design/item48/a.html"
+
+    def setUp(self):
+        super().setUp()
+        self.home = pathlib.Path(self.tmp.name) / "home"
+        self.home.mkdir()
+        patch = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def machine_item(self):
+        """Make the machine home's item file: the folder and the file, on this run's home."""
+        path = self.home / "Developer" / self.MACHINE / "item48" / "a.html"
+        path.parent.mkdir(parents=True)
+        path.write_text("<p>mockup</p>\n", encoding="utf-8")
+
+    def commit_design(self, rel, branch="main", new=False):
+        """Commit one file under the checkout's design folder on `branch`, made from main when `new`. The file is in git
+        only once it is committed."""
+        git(self.repo, "checkout", "-q", *(["-b", branch, "main"] if new else [branch]))
+        path = self.repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("<p>mockup</p>\n", encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "design " + rel)
+
+    def fetch_origin(self, branch, name=None):
+        """Make origin readable: the remote-tracking ref `name` (default `branch`) at `branch`'s tip, as a fetch leaves it.
+        With no such ref the origin cannot be read, and a design entry reads unknown."""
+        git(self.repo, "update-ref", "refs/remotes/origin/" + (name or branch), branch)
+
+    def make_shallow(self):
+        """Mark the checkout shallow at origin/main's tip, the way a shallow clone is marked: its history stops there."""
+        tip = git(self.repo, "rev-parse", "origin/main").strip()
+        (self.repo / ".git" / "shallow").write_text(tip + "\n", encoding="utf-8")
+
+    def origin_link(self, rel, target):
+        """Make origin/main hold a link at `rel` that names `target`. The commit is built on a temporary index, so the
+        checkout's index and files stay as they were, and no link is made on this machine (a Windows run needs none)."""
+        folder = pathlib.Path(self.tmp.name)
+        env = {"GIT_INDEX_FILE": str(folder / "link.index")}
+        (folder / "target.txt").write_text(target, encoding="utf-8")
+        blob = git(self.repo, "hash-object", "-w", str(folder / "target.txt")).strip()
+        git(self.repo, "read-tree", "main", env=env)
+        git(self.repo, "update-index", "--add", "--cacheinfo", "120000,%s,%s" % (blob, rel), env=env)
+        tree = git(self.repo, "write-tree", env=env).strip()
+        commit = git(self.repo, "commit-tree", tree, "-p", "main", "-m", "link " + rel).strip()
+        git(self.repo, "update-ref", "refs/remotes/origin/main", commit)
+
+    def failing_origin_git(self, verbs=("cat-file", "ls-tree")):
+        """A patch of the build's git read. A read of an origin ref by one of `verbs` (None: any verb) returns None, as a
+        failed read does; every other read goes to git. An origin ref counts in the argv or on stdin, since the batched
+        type read passes its refs on stdin. Empty output means the path is absent, and None means the read failed."""
+        real = build.git
+
+        def read(repo, *args, stdin=None):
+            named = any("refs/remotes/origin/" in arg for arg in args) or "refs/remotes/origin/" in (stdin or "")
+            if args and named and (verbs is None or args[0] in verbs):
+                return None
+            return real(repo, *args, stdin=stdin)
+        return mock.patch.object(build, "git", read)
+
+    def check_starts(self):
+        """One build, with its mockup check wrapped to count the git processes the check starts. Each process is counted
+        at subprocess.Popen, the one start every helper of the build reaches, so a git call made any way is counted.
+        The rest of the build is outside the count. Returns (build output, the check's (misses, unread), the git argv
+        the check started). The check's result is None when the check did not run."""
+        real = build.mockup_misses
+        seen = {}
+
+        def check(repo, steps):
+            with mock.patch.object(subprocess, "Popen", wraps=subprocess.Popen) as popen:
+                seen["result"] = real(repo, steps)
+            seen["argv"] = [c.args[0] for c in popen.call_args_list if c.args and c.args[0][:1] == ["git"]]
+            return seen["result"]
+
+        with mock.patch.object(build, "mockup_misses", check):
+            _, out = self.build_from_main(expect=(1,))
+        return out, seen.get("result"), seen.get("argv", [])
+
+    def write_extras(self, text):
+        """The checkout's extras file, as given. Write it after the commits: their `git add -A` would stage it."""
+        path = self.repo / ".claude" / "layout-extras.json"
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def miss_lines(self, out):
+        """The text after the prefix of each miss line, in printed order: the step and id, then any remedy."""
+        return re.findall(r"^%s: (.*)$" % re.escape(self.MISS), out, re.M)
+
+    def misses(self, out):
+        """The "<step> <mockup id>" of each miss line, in printed order. Words after the id, a remedy, do not change it."""
+        return [" ".join(line.split()[:2]) for line in self.miss_lines(out)]
+
+    def unread_ids(self, out):
+        """The "<step> <mockup id>" of each line the build could not read, in printed order."""
+        return re.findall(r"^%s: (\S+ \S+) \(" % re.escape(self.UNREAD), out, re.M)
+
+    def steps_line(self, out, count):
+        """Scope first: the build read `count` steps, so an empty miss list is not a build that read nothing."""
+        self.assertIn("%s: %d steps" % (self.out.name, count), out, "the build did not read the steps")
+
+    def test_an_item_cited_in_the_note_with_no_mockup_is_a_miss_and_the_page_is_written(self):
+        self.commit_step("c1", title="Item forty eight picker", note="Shape the item48-a picker.")
+        page, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertIn("Item forty eight picker", page, "the red build did not write the page")
+        self.assertEqual(self.misses(out), ["c1 item48-a"])
+
+    def test_an_item_cited_in_why_with_no_mockup_is_a_miss(self):
+        self.commit_step("c1", why="The item49-b option has no picture.")
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item49-b"])
+
+    def test_an_item_cited_in_ask_with_no_mockup_is_a_miss(self):
+        self.commit_step("c1", ask="Which of item48-a or item48-b?")
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item48-a", "c1 item48-b"])
+
+    def test_a_cite_inside_a_longer_token_is_not_a_mockup_id(self):
+        self.commit_step("c1", title="Lookalike ids", note="Compare 1item48-a, xitem48-a and item48-ab.")
+        page, out = self.build_from_main(expect=(0,))
+        self.steps_line(out, 1)
+        self.assertIn("Lookalike ids", page, "the build did not read the step")
+        self.assertEqual(self.misses(out), [])
+
+    def test_a_step_with_no_mockup_passes(self):
+        self.commit_step("c1", title="Plain step", note="No picture is cited here.")
+        page, out = self.build_from_main(expect=(0,))
+        self.steps_line(out, 1)
+        self.assertIn("Plain step", page, "the build did not read the step")
+        self.assertEqual(self.misses(out), [])
+
+    def test_an_entry_outside_the_mockup_homes_is_a_miss(self):
+        self.commit_step("c1", note="Shape the item48-a picker.", mockups={"item48-a": self.APP_SUPPORT})
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item48-a"])
+
+    def test_an_image_hosted_as_an_artifact_asset_is_a_miss(self):
+        self.commit_step("c1", note="Shape the item48-a picker.", mockups={"item48-a": self.SHOT_URL})
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item48-a"])
+
+    def test_a_design_entry_whose_file_is_not_on_origin_is_a_miss(self):
+        self.commit_step("c1", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        self.fetch_origin("main")  # origin is readable, and it lacks the file
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item48-a"])
+
+    def test_a_miss_line_names_git_fetch_as_the_remedy(self):
+        self.commit_step("c1", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        self.fetch_origin("main")  # origin is readable and lacks the file: a stale or unfetched origin ref reads as a miss
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item48-a"], "the miss is not reported")
+        for line in self.miss_lines(out):
+            self.assertIn("git fetch", line, "the miss line names no `git fetch`, so a stale origin ref reads as a broken file")
+
+    def test_a_design_entry_whose_file_is_on_origin_passes(self):
+        self.commit_step("c1", title="Design held", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        self.commit_design(self.DESIGN_ITEM)
+        self.fetch_origin("main")
+        page, out = self.build_from_main(expect=(0,))
+        self.steps_line(out, 1)
+        self.assertIn("Design held", page, "the build did not read the step")
+        self.assertEqual(self.misses(out), [])
+        self.assertEqual(self.unread_ids(out), [])
+
+    def test_a_machine_home_entry_is_a_miss_even_when_its_file_is_there(self):
+        self.machine_item()
+        self.commit_step("c1", note="Shape the item48-a picker.", mockups={"item48-a": self.MACHINE_ITEM})
+        self.fetch_origin("main")  # origin is readable, so the refusal is not an unknown
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item48-a"])
+
+    def test_a_windows_machine_home_entry_is_a_miss(self):
+        self.commit_step("c1", note="Shape the item48-a picker.", mockups={"item48-a": self.WIN_MACHINE_ITEM})
+        self.fetch_origin("main")
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item48-a"])
+
+    def test_a_design_file_in_the_checkout_but_not_on_origin_is_a_miss(self):
+        self.commit_step("c1", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        self.fetch_origin("main")  # origin is readable, and it lacks the file
+        self.commit_design(self.DESIGN_ITEM)  # the checkout gets it after the origin ref was taken
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item48-a"])
+
+    def test_a_design_file_on_origin_but_not_in_the_checkout_passes(self):
+        self.commit_step("c1", title="Design held", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        self.commit_design(self.DESIGN_ITEM)
+        self.fetch_origin("main")  # origin/main holds the file
+        git(self.repo, "rm", "-q", self.DESIGN_ITEM)  # main, where commit_design left the checkout, drops it
+        git(self.repo, "commit", "-q", "-m", "drop the design locally")
+        page, out = self.build_from_main(expect=(0,))
+        self.steps_line(out, 1)
+        self.assertIn("Design held", page, "the build did not read the step")
+        self.assertEqual(self.misses(out), [])
+        self.assertEqual(self.unread_ids(out), [])
+
+    def test_a_design_file_on_the_record_branch_on_origin_passes(self):
+        self.commit_step("c1", title="Design held", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        self.fetch_origin("main")  # origin is readable, and its default branch lacks the file
+        self.commit_design(self.DESIGN_ITEM, branch="roadmap")
+        self.fetch_origin("roadmap")
+        page, out = self.build_from_main(expect=(0,))
+        self.steps_line(out, 1)
+        self.assertIn("Design held", page, "the build did not read the step")
+        self.assertEqual(self.misses(out), [])
+        self.assertEqual(self.unread_ids(out), [])
+
+    def test_with_no_origin_ref_a_design_entry_reads_unknown_even_when_its_file_is_in_the_checkout(self):
+        self.commit_step("c1", title="Design held", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        self.commit_design(self.DESIGN_ITEM)  # no fetch_origin: the fixture has no origin ref
+        page, out = self.build_from_main(expect=(0,))
+        self.steps_line(out, 1)
+        self.assertIn("Design held", page, "the build did not read the step")
+        self.assertEqual(self.misses(out), [])
+        self.assertEqual(self.unread_ids(out), ["c1 item48-a"])
+
+    def test_with_no_origin_ref_a_missing_design_file_reads_unknown_and_is_no_miss(self):
+        self.commit_step("c1", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        _, out = self.build_from_main(expect=(0,))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), [])
+        self.assertEqual(self.unread_ids(out), ["c1 item48-a"])
+
+    def test_a_shallow_checkout_reads_a_design_entry_unknown_even_when_origin_holds_it(self):
+        self.commit_step("c1", title="Design held", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        self.commit_design(self.DESIGN_ITEM)
+        self.fetch_origin("main")  # origin/main holds the file
+        self.make_shallow()
+        page, out = self.build_from_main(expect=(0,))
+        self.steps_line(out, 1)
+        self.assertIn("Design held", page, "the build did not read the step")
+        self.assertEqual(self.misses(out), [])
+        self.assertEqual(self.unread_ids(out), ["c1 item48-a"])
+
+    def test_only_the_item_with_no_file_is_named_when_a_step_cites_two(self):
+        self.commit_step("c1", note="Shape item48-a and item48-b.", mockups={"item48-a": self.DESIGN_ITEM})
+        self.commit_step("c2", order=2, title="Plain", note="No picture is cited here.")
+        self.commit_design(self.DESIGN_ITEM)
+        self.fetch_origin("main")
+        _, out = self.build_from_main(expect=(1,))
+        self.steps_line(out, 2)
+        self.assertEqual(self.misses(out), ["c1 item48-b"])
+
+    def test_a_folder_at_the_mockup_path_on_origin_is_a_miss(self):
+        self.commit_step("c1", note="Shape the item48-a picker.", mockups={"item48-a": "docs/design/item48"})
+        self.commit_design("docs/design/item48/a.html")  # the mockup path names a folder, not a file
+        self.fetch_origin("main")
+        _, out = self.build_from_main(expect=(0, 1))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item48-a"], "a folder on origin at the mockup path reads ok, not a miss")
+        self.assertEqual(self.code, 1, "a miss exits 1")
+
+    def test_a_link_on_origin_at_the_mockup_path_is_a_miss(self):
+        self.commit_step("c1", note="Shape the item48-a picker.", mockups={"item48-a": "docs/design/item48.html"})
+        self.origin_link("docs/design/item48.html", "docs/design/a.html")  # a link is no mockup file
+        _, out = self.build_from_main(expect=(0, 1))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item48-a"], "a link on origin at the mockup path reads ok, not a miss")
+        self.assertEqual(self.code, 1, "a miss exits 1")
+
+    def test_a_done_step_that_cites_a_mockup_with_no_entry_does_not_fail_the_build(self):
+        self.commit_step("c1", status="done", title="Shipped picker", note="Shape the item48-a picker.")
+        _, out = self.build_from_main(expect=(0, 1))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), [], "a done step's cited mockup fails the build")
+        self.assertEqual(self.unread_ids(out), [], "a done step's cited mockup reads unknown")
+        self.assertEqual(self.code, 0, "a build with no open miss exits 0")
+
+    def test_a_file_on_another_origin_branch_counts_as_on_origin(self):
+        self.commit_step("c1", title="Design held", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        self.commit_design(self.DESIGN_ITEM, branch="pr-lane", new=True)  # an open PR's branch
+        self.fetch_origin("main")  # origin is readable, and its default branch lacks the file
+        self.fetch_origin("pr-lane")  # origin holds the PR's branch, which has it
+        page, out = self.build_from_main(expect=(0, 1))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), [], "a file on an open PR's origin branch reads as a miss")
+        self.assertEqual(self.unread_ids(out), [], "a file on an open PR's origin branch reads as unknown")
+        self.assertEqual(self.code, 0, "a step whose mockup is on origin exits 0")
+        self.assertIn("Design held", page, "the build did not read the step")
+
+    def test_a_file_only_on_a_local_branch_is_a_miss(self):
+        self.commit_step("c1", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        self.commit_design(self.DESIGN_ITEM, branch="pr-lane", new=True)  # a local branch has no origin ref
+        self.fetch_origin("main")  # origin is readable, and its default branch lacks the file
+        _, out = self.build_from_main(expect=(0, 1))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), ["c1 item48-a"], "a local branch's file reads as on origin")
+        self.assertEqual(self.code, 1, "a miss exits 1")
+
+    def test_a_failed_origin_read_reads_the_design_entry_unknown_and_is_no_miss(self):
+        self.commit_step("c1", title="Design held", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        self.commit_design(self.DESIGN_ITEM)
+        self.fetch_origin("main")  # origin holds the file, so only a read that found nothing could say miss
+        with self.failing_origin_git():
+            page, out = self.build_from_main(expect=(0, 1))
+        self.steps_line(out, 1)
+        self.assertEqual(self.misses(out), [], "a failed origin read reads as a miss")
+        self.assertEqual(self.unread_ids(out), ["c1 item48-a"], "a failed origin read does not read unknown")
+        self.assertEqual(self.code, 0, "an unknown entry exits 0")
+        self.assertIn("Design held", page, "the build did not read the step")
+
+    def test_a_failed_origin_ref_listing_reads_every_design_entry_unknown_and_is_no_miss(self):
+        self.commit_step("c1", title="Design held", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        self.commit_step("c2", order=2, title="Design held too", note="Shape the item49-b picker.",
+                         mockups={"item49-b": "docs/design/item49/b.html"})
+        self.commit_design(self.DESIGN_ITEM)  # origin/main holds item48-a and lacks item49-b
+        self.fetch_origin("main")
+        with self.failing_origin_git(verbs=None):  # every read of an origin ref fails, the listing among them
+            _, out = self.build_from_main(expect=(0,))
+        self.steps_line(out, 2)
+        self.assertEqual(self.misses(out), [], "a failed origin ref listing reads an entry as a miss")
+        self.assertEqual(self.unread_ids(out), ["c1 item48-a", "c2 item49-b"],
+                         "a failed origin ref listing does not read every entry unknown")
+
+    def test_five_entries_over_fifty_origin_refs_start_at_most_four_git_processes(self):
+        for k in range(1, 6):
+            item = "item%d-a" % (40 + k)
+            self.commit_step("c%d" % k, order=k, title="Picker %d" % k, note="Shape the %s picker." % item,
+                             mockups={item: "docs/design/item%d/a.html" % (40 + k)})
+        self.fetch_origin("main")
+        for n in range(1, 50):
+            self.fetch_origin("main", name="lane-%02d" % n)  # 50 origin refs in all, as open PR branches leave them
+        out, result, argv = self.check_starts()
+        self.steps_line(out, 5)
+        self.assertIsNotNone(result, "the mockup check did not run")
+        misses, unread = result
+        self.assertEqual(misses, [("c%d" % k, "item%d-a" % (40 + k)) for k in range(1, 6)],
+                         "the check did not judge all five entries as misses")
+        self.assertEqual(unread, [], "the check read an entry as unknown")
+        self.assertLessEqual(len(argv), 4, "the mockup check started %d git processes for 5 entries over 50 origin refs, "
+                                           "want at most 4" % len(argv))
+
+    def test_a_malformed_extras_file_reads_the_design_entry_unknown_and_the_build_writes_the_page(self):
+        self.commit_step("c1", title="Design held", note="Shape the item48-a picker.", mockups={"item48-a": self.DESIGN_ITEM})
+        self.commit_design(self.DESIGN_ITEM)
+        self.fetch_origin("main")
+        self.write_extras("{ not json")
+        self.on_main()
+        raised = None
+        try:
+            code, out = run_build("--repo", str(self.repo), "--out", str(self.out))
+        except Exception as err:  # the defect: the layout's error leaves the build as a raise, not an unknown line
+            raised = err
+        if raised is not None:
+            self.fail("the build raised %s on a malformed extras file, want an unknown line and exit 0" % type(raised).__name__)
+        self.steps_line(out, 1)
+        self.assertEqual(self.unread_ids(out), ["c1 item48-a"], "a malformed extras file does not read the entry unknown")
+        self.assertEqual(code, 0, "an unknown entry exits 0")
+        self.assertTrue(self.out.exists(), "the build wrote no page")
+        self.assertIn("Design held", self.out.read_text(encoding="utf-8"), "the build did not write the step")
+
+    def test_a_malformed_extras_file_still_builds_a_step_that_cites_no_mockup(self):
+        self.commit_step("c1", title="Plain step", note="No picture is cited here.")
+        self.write_extras("{ not json")
+        page, out = self.build_from_main(expect=(0,))
+        self.steps_line(out, 1)
+        self.assertIn("Plain step", page, "the build did not write the page")
 
 
 class SharedTagNames(unittest.TestCase):
