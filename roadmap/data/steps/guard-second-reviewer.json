@@ -5,5 +5,11 @@
   "order": 103.367,
   "why": "Safety holes in guard changes are hunted on purpose.",
   "note": "Debate audit 12:40 CST. Brief: find an act main refuses that this allows. Cost: +1 call per round. Waits on owner item 279.",
-  "updatedAt": "2026-11-06T18:43:00Z"
+  "updatedAt": "2026-11-06T18:43:00Z",
+  "paused": {
+    "why": "Waits on the owner's answer to item 279.",
+    "decides": "owner",
+    "at": "2026-11-06T14:39:00-06:00",
+    "by": "triage"
+  }
 }
