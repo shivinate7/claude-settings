@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Routed answers sink</title>
+<title>Arrivals on top</title>
 <style id="harnesscss">
 /* Harness only: the toolbar and frames around the drawn screen. The screen itself is page.html's own CSS (#pagecss) plus the sample labels (#newcss). */
 :root { --h-bg: #eef0f3; --h-ink: #161b22; --h-muted: #565f6b; --h-line: #cfd5dd; --h-btn: #ffffff; --h-on: #161b22; --h-on-ink: #ffffff; color-scheme: light; }
@@ -32,20 +32,16 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
 <body>
 <div class="sample" id="sampleBanner">Sample. No item, number, name, repo, lane, PR or time on this page is real.</div>
 <header class="tool">
-  <h1>Waiting page, lane page-lane-answered-sinks: an answer routed to a lane sinks into Answered, folded, and says Sent</h1>
+  <h1>Waiting page, lane page-lane-answered-sinks: a question that arrives after load goes to the top of its tier, above the cards answered this visit</h1>
   <div class="row" id="rowS"><span>State</span>
-    <button data-s="page">Questions: picks together</button>
-    <button data-s="unfold">Routed card unfolded</button>
-    <button data-s="change">Change on a routed card</button>
+    <button data-s="page">Arrivals on top (pick)</button>
     <button data-s="today">Today (base), for comparison</button>
   </div>
   <div class="row" id="rowO"><span>Options</span>
-    <button data-s="wait-in-pill">Wait in the pill</button>
-    <button data-s="owed-lane-words">Owed lane card names who waits</button>
+    <button data-s="sent-drops">Sent cards drop below open ones</button>
   </div>
   <div class="row" id="rowH"><span>Hide</span>
-    <button class="hide" data-hide="wait-in-pill" data-name="Wait in the pill"></button>
-    <button class="hide" data-hide="owed-lane-words" data-name="Owed lane card names who waits"></button>
+    <button class="hide" data-hide="sent-drops" data-name="Sent cards drop below open ones"></button>
   </div>
   <div class="row" id="rowW"><span>Size</span>
     <button data-w="all">All three</button><button data-w="390">Phone 390</button><button data-w="800">Mid 800</button><button data-w="1280">Wide 1280</button>
@@ -54,16 +50,15 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
     <button data-t="light">Light</button><button data-t="dark">Dark</button>
     <button id="labBtn">Labels on</button>
   </div>
-  <p>Deep links: <code>#s=page|unfold|change|today|wait-in-pill|owed-lane-words</code>, <code>&amp;w=all|390|800|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=&lt;state&gt;,...</code>. Every state draws all five cases: No. 52 routed and folded, No. 47 routed with a new reply (open in place), No. 49 re-asked on its lane (open in Blocking), No. 44 waiting on a PR, No. 40 saved and filed. In the frames, press a fold control to open or close it, and Change on No. 52. Drawn from page.html at 8cfba982. Notes: lane-answered-sink-notes.md.</p>
+  <p>Deep links: <code>#s=page|today|sent-drops</code>, <code>&amp;w=all|390|800|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=&lt;state&gt;,...</code>. The page loaded at 15:32. Since then the owner sent No. 21, No. 25 and No. 27 (they stay in Blocking until the next load), left No. 23 open, and No. 61 arrived at 15:40. The Answered section below holds No. 52, a saved answer routed to a lane, drawn as the base draws it (no change). Drawn from page.html at 8cfba982. Notes: lane-answered-sink-notes.md.</p>
 </header>
 <main id="stage"></main>
 
 <!-- The waiting page reads each option's state and focus from this static markup (pictureProblem parses the HTML string).
      In its frame, the script below draws the state as the screen itself, and the drawn screen carries the same ids. -->
 <div id="pics" hidden>
-  <i data-state="page"></i><i data-state="unfold"></i><i data-state="change"></i><i data-state="today"></i>
-  <i data-state="wait-in-pill"></i><i data-state="owed-lane-words"></i>
-  <i id="item-52"></i><i id="item-49"></i><i id="item-47"></i><i id="item-44"></i>
+  <i data-state="page"></i><i data-state="today"></i><i data-state="sent-drops"></i>
+  <i id="tier-holds"></i><i id="item-61"></i><i id="item-52"></i>
 </div>
 
 <script type="text/plain" id="pagecss">
@@ -924,10 +919,6 @@ html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
 /* Harness only: the Sample banner when the waiting page draws this mockup as a picture. */
 .samplebar { background: #5b21b6; color: #fff; font: 700 14px/1.4 system-ui, sans-serif; text-align: center; padding: 6px 16px; }
 
-/* ---------- Option "Wait in the pill" only. The picked design adds no CSS: it reuses .ans and .onlane as they ship. ---------- */
-.ans .w { min-width: 0; overflow-wrap: anywhere; }
-.ans .w a { color: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1.5px; border-radius: 4px; }
-.ans .w a:focus-visible { outline: 2px solid var(--good); outline-offset: 2px; }
 </script>
 
 <script>
@@ -950,233 +941,146 @@ const SPARK = '<b class="spark" aria-label="My pick" title="My pick"><svg width=
 const EYE = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 const joinAnd = (xs) => xs.length < 2 ? xs.join("") : xs.slice(0, -1).join(", ") + " and " + xs[xs.length - 1];
 
-/* ---------- Sample items. The page loaded Nov 6, 15:32 CST. Last visit: Nov 6, 14:30 CST. Last Send: Nov 6, 13:59 CST (No. 52's lastAnswer). ---------- */
-const NOW = Date.parse("2026-11-06T21:32:00Z");
-const span = (ms) => { const m = Math.round(ms / 60000); return m < 60 ? m + " minutes" : m < 1440 ? Math.round(m / 60) + (Math.round(m / 60) === 1 ? " hour" : " hours") : Math.round(m / 1440) + (Math.round(m / 1440) === 1 ? " day" : " days"); };
+/* ---------- Sample items. The page loaded Nov 6, 15:32 CST; it is now 15:42. Last Send before load: Nov 6, 13:59 CST. ---------- */
+const NOW = Date.parse("2026-11-06T21:42:00Z");
+const span = (ms) => { const m = Math.round(ms / 60000); return m < 60 ? m + (m === 1 ? " minute" : " minutes") : m < 1440 ? Math.round(m / 60) + (Math.round(m / 60) === 1 ? " hour" : " hours") : Math.round(m / 1440) + (Math.round(m / 1440) === 1 ? " day" : " days"); };
 const waited = (iso) => "waited " + span(NOW - Date.parse(iso));
-// No. 52: like page item 289. lane + lastAnswer (at the last Send), a reply, no replied, no answers record, no waits.
-const ROUTED = {
-  n: 52, kind: "decision", owner: "the page-upkeep lane", home: "the sweep decision", added: "2026-11-06T17:00:00Z", lane: "stale-page-sweep",
-  title: "Run the stale-page sweep in the batch runner or in its own lane", short: "Sweep: batch or own lane",
-  lastAnswer: { at: "2026-11-06T19:59:00Z", choice: "batch", note: "Batch it with the next run." },
+const dec = (a, b) => [
+  { key: "a", label: a[0], how: a[1], gain: a[2], lose: a[3] },
+  { key: "b", label: b[0], how: b[1], gain: b[2], lose: b[3] },
+];
+// No. 61: arrived at 15:40, after the load. Like page item 309.
+const ARRIVED = {
+  n: 61, kind: "decision", owner: "the coordinator", home: "the page-order decision", added: "2026-11-06T21:40:00Z",
+  title: "Hold the batch for the page-order fix or ship it now", holds: "Blocks the batch of 3 lanes until you pick.",
+  ctx: "Your stake: the batch is green; the page-order fix is one more lane.",
+  options: dec(["Ship the batch now", "Merge the green lanes, fix the order next.", "Three lanes merge today.", "The order fix waits a batch."],
+    ["Hold for the order fix", "Add the lane, run CI once more.", "One merge for all.", "About an hour more."]), pick: "a", why: "Nothing in the batch depends on the order fix.",
+};
+// Present at load, in Blocking, rank order. The owner sent No. 21, No. 25 and No. 27 this visit; No. 23 is still open.
+const A21 = { n: 21, kind: "decision", owner: "the CI lane", home: "the cache decision", added: "2026-11-06T19:10:00Z", rank: 1, title: "Keep the CI cache or drop it",
+  holds: "Blocks the CI cleanup lane.", saved: { at: "2026-11-06T21:34:00Z", choice: "a", note: "Pin the key to the lock file." },
+  options: dec(["Keep the cache", "", "", ""], ["Drop the cache", "", "", ""]) };
+const O23 = { n: 23, kind: "task", owner: "the iOS lane", home: "the simulator setup", added: "2026-11-06T19:20:00Z", rank: 3,
+  title: "Open the Duo simulator once on your Mac", holds: "Blocks the iOS build lane.", ctx: "Why yours: only your Mac holds the simulator.",
+  steps: ["Open Xcode.", "Start the Duo simulator once, then close it."] };
+const A25 = { n: 25, kind: "decision", owner: "the docs lane", home: "the glossary record", added: "2026-11-06T19:30:00Z", rank: 4, title: "Write one name per thing in the glossary",
+  holds: "Blocks the glossary lane.", saved: { at: "2026-11-06T21:36:00Z", choice: "a" },
+  options: dec(["One name each", "", "", ""], ["Allow two", "", "", ""]) };
+const A27 = { n: 27, kind: "decision", owner: "the guard lane", home: "the guard decision", added: "2026-11-06T19:40:00Z", rank: 5, title: "Turn the load brake guard on for cloud sessions",
+  holds: "Blocks the guard lane.", saved: { at: "2026-11-06T21:38:00Z", choice: "b", note: "Off in the cloud; it reads no load there." },
+  options: dec(["Turn it on", "", "", ""], ["Leave it off", "", "", ""]) };
+// Sunk at load (answered before this visit). No. 52: a saved answer routed to a lane. No. 44: answered, waits on a PR.
+const S52 = { n: 52, kind: "decision", owner: "the page-upkeep lane", home: "the sweep decision", added: "2026-11-06T17:00:00Z", lane: "stale-page-sweep",
+  title: "Run the stale-page sweep in the batch runner or in its own lane", saved: { at: "2026-11-06T19:59:00Z", choice: "a", note: "Batch it with the next run." },
   reply: "Routed to the sweep lane. It starts when the open batch merges, then closes this item.",
-  ctx: "Your stake: the sweep keeps every repo's page current.",
-  options: [
-    { key: "batch", label: "Run it in the batch runner", how: "One more step in each batch.", gain: "No new lane to watch.", lose: "Each batch runs a minute longer." },
-    { key: "own", label: "Run it in its own lane", how: "A lane starts once a day.", gain: "Batches stay as fast as today.", lose: "One more lane each day." },
-  ], pick: "batch", why: "A minute a batch costs less than a lane a day.",
-};
-// No. 47: routed to a tier (batch-runner), and the writer replied after the last Send and the last visit.
-const ROUTED_NEW = {
-  n: 47, kind: "task", owner: "the batch runner", home: "the page-store record", added: "2026-11-05T22:00:00Z", lane: "batch-runner",
-  title: "Approve the sweep's write to the page store", short: "Approve the sweep write",
-  lastAnswer: { at: "2026-11-06T17:05:00Z", done: true }, replied: "2026-11-06T21:05:00Z",
-  reply: "The batch runner hit a lock on the page store and retries after this batch. Nothing more is needed from you.",
-  ctx: "Why yours: only you hold the store's write setting.", steps: ["Open the page store's settings.", "Allow writes from the batch runner."],
-};
-// No. 49: re-asked on its lane. added (14:50) is later than lastAnswer.at (Nov 5), so it is owed again.
-const REASKED = {
-  n: 49, kind: "decision", owner: "the CI lane", home: "the cache decision", added: "2026-11-06T20:50:00Z", lane: "ci-cache-split",
-  title: "Pick how the CI cache splits now that the pinned key broke", short: "CI cache: pick again", holds: "Blocks the CI cleanup until you pick.",
-  lastAnswer: { at: "2026-11-05T22:00:00Z", what: "You chose A: Keep the cache." }, replied: "2026-11-06T20:50:00Z",
-  reply: "The pinned key broke again on the iOS build. Your answer no longer fits, so the options below are new.",
-  ctx: "Your stake: the cache saves 3 minutes a run.",
-  options: [
-    { key: "split", label: "One cache per platform", how: "Key each cache by platform and lock file.", gain: "No cross-platform break.", lose: "Twice the cache storage." },
-    { key: "drop", label: "Drop the cache", how: "Remove the cache step.", gain: "No stale build.", lose: "3 minutes a run." },
-  ], pick: "split", why: "It stops the break and keeps the time.",
-};
-// No. 44: answered, waits on a PR (waits.pr + lastAnswer). Today's path, for comparison.
-const PR_WAIT = {
-  n: 44, kind: "decision", owner: "the page lane", home: "the reply-mark decision", added: "2026-11-06T15:00:00Z", waits: { repo: "sample/sample-repo", pr: 1345 },
-  title: "Keep the new-reply mark green or move it to the accent colour", short: "New-reply mark colour",
-  lastAnswer: { at: "2026-11-06T18:40:00Z", choice: "green" }, reply: "Built. This item closes when the PR merges.",
-  options: [{ key: "green", label: "Keep it green", how: "", gain: "", lose: "" }, { key: "acc", label: "Accent colour", how: "", gain: "", lose: "" }],
-};
-// No. 40: a saved answer (answers record), filed. Today's sunk card.
-const SAVED = {
-  n: 40, kind: "decision", owner: "the docs lane", home: "the glossary record", added: "2026-11-05T19:00:00Z",
-  title: "Write one name per thing in the glossary", short: "One name per thing",
-  saved: { at: "2026-11-06T16:00:00Z", choice: "one" }, filed: "2026-11-06T18:10:00Z",
-  options: [{ key: "one", label: "One name each", how: "", gain: "", lose: "" }, { key: "two", label: "Allow two", how: "", gain: "", lose: "" }],
-};
-// No. 31: an ordinary new item, owed.
-const NEW_HOLDS = {
-  n: 31, kind: "decision", owner: "the coordinator", home: "the batch-split decision", added: "2026-11-06T21:10:00Z",
-  title: "Split the red batch or wait for the slow lane", holds: "Blocks the batch of 4 lanes until you pick.",
-  ctx: "Your stake: three lanes are green and wait on one red lane.",
-  options: [
-    { key: "split", label: "Ship the three green lanes now", how: "Drop the red lane and run CI once.", gain: "Three lanes merge today.", lose: "The red lane waits for the next batch." },
-    { key: "wait", label: "Wait for the red lane's fix", how: "Hold the batch.", gain: "One merge for all four.", lose: "About 2 hours more." },
-  ], pick: "split", why: "Three lanes merge today, and nothing is lost.",
-};
+  options: dec(["Run it in the batch runner", "", "", ""], ["Run it in its own lane", "", "", ""]) };
+const S44 = { n: 44, kind: "decision", owner: "the page lane", home: "the reply-mark decision", added: "2026-11-06T15:00:00Z", waits: { repo: "sample/sample-repo", pr: 1345 },
+  title: "Keep the new-reply mark green or move it to the accent colour", lastAnswer: { at: "2026-11-06T18:40:00Z", choice: "a" }, reply: "Built. This item closes when the PR merges.",
+  options: dec(["Keep it green", "", "", ""], ["Accent colour", "", "", ""]) };
 
-/* ---------- The new-reply mark (page.html replyMark): words on the first in page order, the dot after. ---------- */
-const S = { used: false };
-function replyMark(tag) {
-  const first = !S.used; S.used = true;
-  return first ? `<span class="newmark"${lab("today", tag)}>New reply<span class="sr"> since your last Send</span></span>`
-    : `<span class="newmark dot" title="New reply since your last Send"${lab("today", tag)}><span class="sr">New reply since your last Send</span></span>`;
-}
-
-/* ---------- The wait words: one home for the top row and the rail chip (the builder's waitSay). ---------- */
-const prUrl = (w) => "https://github.com/" + w.repo + "/pull/" + w.pr;
-const waitA = (w, pre) => `<a href="${prUrl(w)}" target="_blank" rel="noopener">${esc((pre || "") + "PR #" + w.pr)}<span aria-hidden="true">↗</span><span class="sr">, opens in a new tab</span></a>`;
-// The top row's wait span, as page.html draws it today (lines 1619 to 1621).
-function waitSpan(it, tag, owedWords) {
-  if (it.lane && it.waits) return `<span class="onlane waits"${lab("today", tag)}>waits on lane ${esc(it.lane)} and ${waitA(it.waits)}</span>`;
-  if (it.waits) return `<span class="onlane waits"${lab("today", tag)}>${waitA(it.waits, "waits on ")}</span>`;
-  if (it.lane && owedWords) return `<span class="onlane"${lab("new", tag)}>lane ${esc(it.lane)} waits on your answer</span>`;
-  if (it.lane) return `<span class="onlane"${lab("today", tag)}>waits on lane ${esc(it.lane)}</span>`;
+/* ---------- The wait span, as page.html draws it (lines 1619 to 1621) ---------- */
+const waitA = (w, pre) => `<a href="https://github.com/${w.repo}/pull/${w.pr}" target="_blank" rel="noopener">${esc((pre || "") + "PR #" + w.pr)}<span aria-hidden="true">↗</span><span class="sr">, opens in a new tab</span></a>`;
+function waitSpan(it) {
+  if (it.lane && it.waits) return `<span class="onlane waits">waits on lane ${esc(it.lane)} and ${waitA(it.waits)}</span>`;
+  if (it.waits) return `<span class="onlane waits">${waitA(it.waits, "waits on ")}</span>`;
+  if (it.lane) return `<span class="onlane">waits on lane ${esc(it.lane)}</span>`;
   return "";
 }
-// The chip's spoken wait: "waits on lane <slug>", "waits on PR #n", or both.
-const waitSay = (it) => [it.lane ? "lane " + it.lane : "", it.waits ? "PR #" + it.waits.pr : ""].filter(Boolean).join(" and ");
 
-/* ---------- Open (owed) card, as buildCard draws it ---------- */
+/* ---------- Cards, as buildCard draws them ---------- */
 function optCard(it, o, chosen) {
   const sfx = it.n + "-" + o.key, sel = chosen === o.key;
   return `<label class="opt${sel ? " sel" : ""}" for="o-${sfx}"><input type="radio" name="g-${it.n}" id="o-${sfx}" value="${o.key}"${sel ? " checked" : ""} aria-labelledby="l-${sfx}" aria-describedby="h-${sfx}"><span class="head"><span class="key">${letterOf(it, o.key)}</span><span class="lab" id="l-${sfx}">${esc(o.label)}</span></span><p class="how" id="h-${sfx}">${esc(o.how)}</p><div class="tr"><div class="gain"><span class="s" aria-label="You gain">+</span><span>${esc(o.gain)}</span></div><div class="lose"><span class="s" aria-label="You lose">−</span><span>${esc(o.lose)}</span></div></div>${it.pick === o.key ? `<div class="pick">${SPARK}<span>${esc(it.why)}</span></div>` : '<span class="nopick"></span>'}</label>`;
 }
-function lastWhat(it) {
-  const la = it.lastAnswer;
-  if (la.what) return la.what;
-  if (it.kind === "task") return la.done ? "Marked done." : "Not marked done.";
-  const o = it.options.find((x) => x.key === la.choice);
-  return "You chose " + letterOf(it, o.key) + ": " + o.label + ".";
-}
-// noLast: answered by its wait or lane, the card's answer line is lastAnswer, so the thread holds the reply only (page.html threadEl).
-function thread(it, noLast) {
-  const la = !noLast && it.lastAnswer, rp = it.reply;
-  if (!la && !rp) return "";
-  const laH = la ? `<div class="receipt last"><p class="lhead">${esc("Your last answer, " + fmt(la.at))}</p><div class="line"><b>${esc(lastWhat(it))}</b></div>${la.note ? `<p class="rnote">${esc("Note: " + la.note)}</p>` : ""}</div>` : "";
-  return `<section class="thread" id="thread-${it.n}" aria-label="${la && rp ? "Your last answer and the reply" : la ? "Your last answer" : "The reply"}">${laH}${rp ? `<p class="ctx reply">${esc("Reply: " + rp)}</p>` : ""}</section>`;
-}
-function readyText(it, chosen) {
-  if (it.kind === "task") return chosen ? "Ready to send: done." : "";
-  const c = (it.options || []).find((o) => o.key === chosen);
-  return c ? "Ready to send: " + c.label + ", your choice." : "";
-}
-const noteBox = (it, note) => `<div class="note"><label for="n-${it.n}">Note to the session (optional)</label><textarea id="n-${it.n}" placeholder="Anything the session should know">${esc(note || "")}</textarea></div>`;
+const noteBox = (it) => `<div class="note"><label for="n-${it.n}">Note to the session (optional)</label><textarea id="n-${it.n}" placeholder="Anything the session should know"></textarea></div>`;
 const parkB = (it) => `<button class="btn dash parkbtn" type="button" id="b-park-${it.n}" aria-pressed="false">Park</button>`;
-function answerParts(it, chosen, note) {
-  const ready = `<p class="ready${readyText(it, chosen) ? " on" : ""}" aria-live="polite">${esc(readyText(it, chosen))}</p>`;
-  if (it.kind === "decision") return `<div class="opts" role="radiogroup" aria-label="Options for No. ${it.n}">${it.options.map((o) => optCard(it, o, chosen)).join("")}</div>` + ready
-    + `<div class="alts"><button class="btn dash nonebtn" type="button" id="b-none-${it.n}" aria-pressed="false">None of these</button>${parkB(it)}</div>` + noteBox(it, note);
+function answerParts(it) {
+  const ready = `<p class="ready" aria-live="polite"></p>`;
+  if (it.kind === "decision") return `<div class="opts" role="radiogroup" aria-label="Options for No. ${it.n}">${it.options.map((o) => optCard(it, o)).join("")}</div>` + ready
+    + `<div class="alts"><button class="btn dash nonebtn" type="button" id="b-none-${it.n}" aria-pressed="false">None of these</button>${parkB(it)}</div>` + noteBox(it);
   return `<ol class="steps">${it.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>` + ready
-    + `<div class="alts"><button class="btn dash donebtn" type="button" id="b-done-${it.n}" aria-pressed="${!!chosen}">Mark done</button>${parkB(it)}</div>` + noteBox(it, note);
-}
-function unfoldBtn(it, w, open, locked, tag, kind) {
-  return `<button type="button" class="unfold" id="unfold-${it.n}" aria-expanded="${open}" aria-controls="fold-${it.n}"${locked ? ' aria-disabled="true"' : ""}${lab(kind || "today", tag)}><span class="chev" aria-hidden="true"></span><span class="uf-labels"><span class="uf-show">${esc(w.show)}</span><span class="uf-hide">${esc(w.hide)}</span><span class="uf-lock">Stays open: your answer is ready</span></span><span class="sr"> for No. ${it.n}</span></button>`;
+    + `<div class="alts"><button class="btn dash donebtn" type="button" id="b-done-${it.n}" aria-pressed="false">Mark done</button>${parkB(it)}</div>` + noteBox(it);
 }
 const dest = (it) => `<p class="dest">${esc("Lands in " + it.home + ". Added " + fmt(it.added) + ".")}</p>`;
 const num = (it) => `<span class="num" aria-label="${esc("No. " + it.n + ", " + it.kind + ", from " + it.owner)}" title="${esc("From " + it.owner)}">No. ${it.n}</span>`;
-// o: { seen, mark, markTag, tag, kind ("new"|"today"), waitTag, owedWords, sunk, locked, chosen, note }
+const stake = (it) => it.holds ? `<p class="stake holds">${G("holds")}<span>${esc(it.holds)}</span></p>` : "";
 function openCard(it, o = {}) {
-  const parts = answerParts(it, o.chosen, o.note);
-  const body = o.sunk ? unfoldBtn(it, it.kind === "decision" ? { show: `Show the ${it.options.length} options`, hide: "Hide the options" } : { show: `Show the ${it.steps.length} steps`, hide: "Hide the steps" }, true, !!o.locked, o.foldTag, "today") + `<div class="foldbody" id="fold-${it.n}">${parts}</div>` : parts;
-  const top = `<div class="top">${num(it)}${o.mark ? replyMark(o.markTag) : ""}<span>${esc(waited(it.added))}</span>${waitSpan(it, o.waitTag, o.owedWords)}</div>`;
-  return `<article class="card${o.sunk ? "" : " " + (it.holds ? "holds" : "calm")}" id="item-${it.n}" aria-labelledby="t-${it.n}"${o.seen ? ' data-seen="true"' : ""}${o.sunk ? ' data-sunk="true"' : ""}${lab(o.kind || "today", o.tag)}>${top}<h3 class="title" id="t-${it.n}">${esc(it.title)}</h3>`
-    + (it.holds ? `<p class="stake holds">${G("holds")}<span>${esc(it.holds)}</span></p>` : "") + thread(it) + `<p class="ctx">${esc(it.ctx)}</p>` + body + dest(it) + `</article>`;
+  const top = `<div class="top">${num(it)}<span>${esc(waited(it.added))}</span>${waitSpan(it)}</div>`;
+  return `<article class="card holds" id="item-${it.n}" aria-labelledby="t-${it.n}"${lab(o.kind || "today", o.tag)}>${top}<h3 class="title" id="t-${it.n}">${esc(it.title)}</h3>`
+    + stake(it) + `<p class="ctx">${esc(it.ctx)}</p>` + answerParts(it) + dest(it) + `</article>`;
 }
-
-/* ---------- Sunk cards (page.html buildCard, the saved && sunk branch) ---------- */
-// pill: "plain" = today's byWait sunk pill (Sent <time>); "inpill" = option "Wait in the pill".
-function pill(it, o) {
-  if (it.saved) return `<span class="ans${it.filed ? " filed" : ""}">${esc(it.filed ? "Filed in " + it.home + " " : "Filing pending, sent ")}<span class="t">${esc(fmt(it.filed || it.saved.at))}</span></span>`;
-  const t = `<span class="t">${esc("Sent " + fmt(it.lastAnswer.at) + (o.inPill ? "," : ""))}</span>`;
-  if (!o.inPill) return `<span class="ans"${lab(o.pillKind, o.pillTag)}>${t}</span>`;
-  const w = it.waits ? waitA(it.waits, "waits on ") : esc("waits on lane " + it.lane);
-  return `<span class="ans"${lab("new", o.pillTag)}>${t}<span class="w">${w}</span></span>`;
+function answerWhat(it, sv) {
+  if (it.kind === "task") return sv.done ? "Marked done." : "Not marked done.";
+  const x = it.options.find((y) => y.key === sv.choice);
+  return "You chose " + letterOf(it, x.key) + ": " + x.label + ".";
 }
-function receiptEl(it) {
+function receiptEl(it, noNote) {
   const sv = it.saved || it.lastAnswer;
-  const what = it.kind === "task" ? (sv.done ? "Marked done." : "Not marked done.") : (() => { const x = it.options.find((y) => y.key === sv.choice); return "You chose " + letterOf(it, x.key) + ": " + x.label + "."; })();
-  return `<div class="receipt"><div class="line">${G("done")}<b>${esc(what)}</b><button class="btn quiet changebtn" type="button" id="b-change-${it.n}" data-n="${it.n}">Change</button></div></div>`;
+  return `<div class="receipt"><div class="line">${G("done")}<b>${esc(answerWhat(it, sv))}</b><button class="btn quiet changebtn" type="button" id="b-change-${it.n}">Change</button></div>${!noNote && sv.note ? `<p class="rnote">${esc("Note: " + sv.note)}</p>` : ""}</div>`;
 }
-// o: { open, mark, inPill, tag, kind, foldTag, pillTag, pillKind, waitTag }
+// Sent on this visit: today's answered card, in place in its tier (buildCard, the saved branch, not sunk).
+function sentCard(it, o = {}) {
+  const top = `<div class="top">${num(it)}<span class="ans">Answered, filing pending <span class="t">${esc(fmt(it.saved.at))}</span></span></div>`;
+  return `<article class="card holds answered" id="item-${it.n}" aria-labelledby="t-${it.n}"${lab(o.kind || "today", o.tag)}>${top}<h3 class="title" id="t-${it.n}">${esc(it.title)}</h3>${receiptEl(it)}</article>`;
+}
+// Sunk at load: folded, as the base draws it (buildCard, the saved && sunk branch).
 function sunkCard(it, o = {}) {
   const sv = it.saved || it.lastAnswer, names = [], parts = [];
   if (sv.note) { names.push("your note"); parts.push(`<p class="rnote">${esc("Note: " + sv.note)}</p>`); }
-  if (it.reply) names.push("the reply");
-  parts.push(thread(it, true));
-  const fold = names.length
-    ? unfoldBtn(it, { show: "Show " + joinAnd(names), hide: "Hide " + joinAnd(names) }, !!o.open, false, o.foldTag, "today") + `<div class="foldbody" id="fold-${it.n}"${o.open ? "" : " hidden"}>${parts.join("")}</div>`
-    : "";
-  const top = `<div class="top">${num(it)}${o.mark ? replyMark(o.markTag) : ""}${pill(it, o)}${o.inPill ? "" : waitSpan(it, o.waitTag)}</div>`;
-  return `<article class="card answered" id="item-${it.n}" aria-labelledby="t-${it.n}" data-sunk="true"${lab(o.kind || "today", o.tag)}>${top}<h3 class="title" id="t-${it.n}">${esc(it.title)}</h3>${receiptEl(it)}${fold}</article>`;
+  if (it.reply) { names.push("the reply"); parts.push(`<section class="thread" id="thread-${it.n}" aria-label="The reply"><p class="ctx reply">${esc("Reply: " + it.reply)}</p></section>`); }
+  const words = "Show " + joinAnd(names), hide = "Hide " + joinAnd(names);
+  const fold = names.length ? `<button type="button" class="unfold" id="unfold-${it.n}" aria-expanded="false" aria-controls="fold-${it.n}"><span class="chev" aria-hidden="true"></span><span class="uf-labels"><span class="uf-show">${esc(words)}</span><span class="uf-hide">${esc(hide)}</span><span class="uf-lock">Stays open: your answer is ready</span></span><span class="sr"> for No. ${it.n}</span></button><div class="foldbody" id="fold-${it.n}" hidden>${parts.join("")}</div>` : "";
+  const pill = it.saved ? `<span class="ans">Filing pending, sent <span class="t">${esc(fmt(it.saved.at))}</span></span>` : `<span class="ans"><span class="t">${esc("Sent " + fmt(it.lastAnswer.at))}</span></span>`;
+  return `<article class="card answered" id="item-${it.n}" aria-labelledby="t-${it.n}" data-sunk="true"${lab("today", o.tag)}><div class="top">${num(it)}${pill}${waitSpan(it)}</div><h3 class="title" id="t-${it.n}">${esc(it.title)}</h3>${receiptEl(it, true)}${fold}</article>`;
 }
-// Change on No. 52: it stays in the section, open, its fold locked by the draft of the old answer (today's Change on a sunk card).
-const changedCard = (it, tag) => openCard(it, { sunk: true, locked: true, chosen: it.lastAnswer.choice, note: it.lastAnswer.note, tag, kind: "today", foldTag: "locked by the draft, as today" });
 
 /* ---------- Questions chrome ---------- */
-function chip(it, st) {
-  const cls = "nchip" + (st === "ready" ? " ready" : st === "filed" ? " sent filed" : st === "sent" ? " sent" : "");
-  const say = st === "ready" ? ", ready to send" : st === "filed" ? ", answered, filed" : st === "sent" ? (it.saved ? ", answered, filing pending" : ", answered, waits on " + waitSay(it)) : ", open";
-  return `<button type="button" class="${cls}" id="c-${it.n}" aria-label="${esc("No. " + it.n + ", " + it.title + say)}" title="${esc(it.title)}"><span class="no">${it.n}</span><span class="nt">${esc(it.short || it.title)}</span></button>`;
+function chip(it) {
+  const st = it.saved || it.lastAnswer ? "sent" : "open";
+  const say = st === "sent" ? (it.waits && !it.saved ? ", answered, waits on PR #" + it.waits.pr : ", answered, filing pending") : ", open";
+  return `<button type="button" class="nchip${st === "sent" ? " sent" : ""}" id="c-${it.n}" aria-label="${esc("No. " + it.n + ", " + it.title + say)}" title="${esc(it.title)}"><span class="no">${it.n}</span><span class="nt">${esc(it.title)}</span></button>`;
 }
-function rail(rows, sent, total, ready = 0) {
-  let out = `<nav class="rail" id="rail" aria-label="Overview"><div class="ov-prog"><div class="big"><b>${sent}</b>of ${total} sent</div><div class="sub${ready ? "" : " none"}"><i class="sw"></i>${ready} ready to send</div><div class="track" aria-hidden="true"><i class="s" style="width:${sent / total * 100}%"></i><i class="r" style="width:${ready / total * 100}%"></i></div></div>`;
+function rail(rows, sent, total) {
+  let out = `<nav class="rail" id="rail" aria-label="Overview"><div class="ov-prog"><div class="big"><b>${sent}</b>of ${total} sent</div><div class="sub none"><i class="sw"></i>0 ready to send</div><div class="track" aria-hidden="true"><i class="s" style="width:${sent / total * 100}%"></i><i class="r" style="width:0%"></i></div></div>`;
   rows.forEach((r) => {
-    out += `<div class="ov-tier"${lab(r.kind, r.tag)}><a class="ov-head" href="#${r.href || "tier-" + r.k}" aria-label="${esc(r.aria || r.count + " open, " + r.name)}">${G(r.glyph || r.k)}${r.name}<span class="ct">${r.count}</span></a><div class="chips-n">${r.chips.map(([c, st]) => chip(c, st)).join("")}</div></div>`;
+    out += `<div class="ov-tier"${lab(r.kind, r.tag)}><a class="ov-head" href="#${r.href || "tier-" + r.k}" aria-label="${esc(r.aria || r.count + " open, " + r.name)}">${G(r.glyph || r.k)}${r.name}<span class="ct">${r.count}</span></a><div class="chips-n">${r.chips.map(chip).join("")}</div></div>`;
   });
   return out + "</nav>";
 }
-const T = (k) => TIERS.find((t) => t.k === k);
-function tier(k, parts, count) {
-  return `<section class="tier" id="tier-${k}" aria-labelledby="th-${k}"><header><h2 id="th-${k}">${G(k)}${T(k).name}<span class="ct">${count}</span></h2></header>${parts.join("")}</section>`;
+function tier(k, name, parts, count) {
+  return `<section class="tier" id="tier-${k}" aria-labelledby="th-${k}"><header><h2 id="th-${k}">${G(k)}${name}<span class="ct">${count}</span></h2></header>${parts.join("")}</section>`;
 }
-function seenDiv() {
-  return `<p class="seenhead" id="seen-div">${EYE}<span class="w">Asked before</span><span class="seenrule" aria-hidden="true"></span></p>`;
-}
-function answeredSec(cards, tag) {
-  return `<section class="tier sunk" id="tier-answered" aria-labelledby="th-answered"${lab("today", tag)}><header><h2 id="th-answered"><button class="rhead" type="button" id="b-answered" aria-expanded="true" aria-controls="ab"><span class="chev" aria-hidden="true"></span>${G("done")}Answered<span class="ct">${cards.length}</span></button></h2><p class="rsub">Sent before this visit, newest first. Each leaves the page once its session closes it.</p></header><div class="rlist" id="ab">${cards.join("")}</div></section>`;
+function answeredSec(cards) {
+  return `<section class="tier sunk" id="tier-answered" aria-labelledby="th-answered"><header><h2 id="th-answered"><button class="rhead" type="button" id="b-answered" aria-expanded="true" aria-controls="ab"><span class="chev" aria-hidden="true"></span>${G("done")}Answered<span class="ct">${cards.length}</span></button></h2><p class="rsub">Sent before this visit, newest first. Each leaves the page once its session closes it.</p></header><div class="rlist" id="ab">${cards.join("")}</div></section>`;
 }
 const hdr = () => `<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">S</div><div class="who"><h1 class="repo">sample-repo</h1></div></div></header>`;
 const tabs = (n) => `<nav class="in tabs" aria-label="Page"><div class="tl" role="tablist" aria-label="Page parts"><a href="#" role="tab" aria-selected="true">Questions <span class="cnt">${n}</span></a><a href="#" role="tab" aria-selected="false" tabindex="-1">Status</a></div></nav>`;
-function chrome(n, railHtml, listHtml, st, send, off) {
-  return hdr() + tabs(n) + `<div class="in main">${railHtml}<div class="list" id="list">${listHtml}</div></div><div class="bar" id="bar"><div class="in"><span class="st" id="barStatus">${st}</span><button class="btn send" type="button" id="send"${off ? " disabled" : ""}>${send}</button></div></div>`;
+function chrome(railHtml, listHtml) {
+  return hdr() + tabs(2) + `<div class="in main">${railHtml}<div class="list" id="list">${listHtml}</div></div><div class="bar" id="bar"><div class="in"><span class="st" id="barStatus"><b>2</b> stay open.</span><button class="btn send" type="button" id="send" disabled>Send answers</button></div></div>`;
 }
 
-/* ---------- States ---------- */
-// o: { today, unfold, change, inPill, owedWords }
-function questions(o = {}) {
-  S.used = false;
-  if (o.today) {
-    // Base 8cfba982: No. 52 and No. 47 are not isSaved and not answeredByWait (no waits), so they draw open in Whenever, owed, seen.
-    const holds = [openCard(REASKED, { mark: true, markTag: "" }), openCard(NEW_HOLDS)];
-    const calm = [seenDiv(), openCard(ROUTED_NEW, { seen: true, mark: true, tag: "routed, still open in its tier", waitTag: "" }),
-      openCard(ROUTED, { seen: true, tag: "like item 289: answered, drawn open, no Sent", waitTag: "" })];
-    const ans = [sunkCard(PR_WAIT, { tag: "waits.pr: sinks today" }), sunkCard(SAVED, {})];
-    const rows = [{ k: "holds", name: "Blocking", count: 2, chips: [[REASKED, "open"], [NEW_HOLDS, "open"]] },
-      { k: "calm", name: "Whenever", count: 2, kind: "today", tag: "routed items count as open", chips: [[ROUTED_NEW, "open"], [ROUTED, "open"]] },
-      { k: "answered", glyph: "done", name: "Answered", href: "tier-answered", aria: "2 answered", count: 2, chips: [[PR_WAIT, "sent"], [SAVED, "filed"]] }];
-    return chrome(4, rail(rows, 2, 6), tier("holds", holds, 2) + tier("calm", calm, 2) + answeredSec(ans), "<b>4</b> stay open.", "Send answers", true);
-  }
-  const holds = [openCard(REASKED, { mark: true, kind: "new", tag: o.owedWords ? "" : "re-asked (added after lastAnswer): stays open in its tier", waitTag: o.owedWords ? "on an owed card, says who waits" : "" , owedWords: o.owedWords }), openCard(NEW_HOLDS)];
-  const routed = o.change ? changedCard(ROUTED, "Change: reopens in place, fold locked")
-    : sunkCard(ROUTED, { open: !!o.unfold, inPill: o.inPill, kind: "new", tag: o.unfold ? "unfolded by a press" : "routed to a lane: sinks, folded", pillKind: "new", pillTag: o.inPill ? "the wait sits in the pill" : "Sent: says it was submitted", waitTag: "" });
-  const ans = [
-    routed,
-    sunkCard(PR_WAIT, { inPill: o.inPill, kind: o.inPill ? "new" : "today", tag: o.inPill ? "the PR wait sits in the pill too" : "waits.pr, for comparison: same shape" }),
-    sunkCard(ROUTED_NEW, { open: true, mark: true, inPill: o.inPill, kind: "new", tag: "new reply: opens in place, marked", pillKind: "new", pillTag: "" }),
-    sunkCard(SAVED, {}),
-  ];
-  const rows = [{ k: "holds", name: "Blocking", count: 2, chips: [[REASKED, "open"], [NEW_HOLDS, "open"]] },
-    { k: "answered", glyph: "done", name: "Answered", href: "tier-answered", aria: "4 answered", count: 4, kind: "new", tag: "routed chips: the sent ring",
-      chips: [[ROUTED, o.change ? "ready" : "sent"], [PR_WAIT, "sent"], [ROUTED_NEW, "sent"], [SAVED, "filed"]] }];
-  const bar = o.change ? ["<b>1</b> ready. <b>2</b> stay open.", "Send 1 answer", false] : ["<b>2</b> stay open.", "Send answers", true];
-  return chrome(2, rail(rows, o.change ? 3 : 4, 6, o.change ? 1 : 0), tier("holds", holds, 2) + answeredSec(ans), ...bar);
+/* ---------- States: the Blocking tier's order ---------- */
+// today: the tier's rule (rank, then age) for every card, so No. 61 (no rank, newest) lands under the three cards the owner sent.
+// page (pick): an item that arrived after load goes to the top of its tier. Every other card keeps its place; a Send moves nothing.
+// sent-drops (option): the page also moves each card sent this visit below the open ones, at the Send.
+function questions(s) {
+  const tag61 = s === "today" ? "arrived 15:40, no rank: sorts under every card you sent" : s === "page" ? "arrived 15:40, after load: top of its tier" : "arrived 15:40: top of its tier";
+  const c61 = openCard(ARRIVED, { kind: s === "today" ? "today" : "new", tag: tag61 });
+  const c21 = sentCard(A21, { tag: s === "today" ? "sent 15:34: stays in place" : s === "page" ? "sent this visit: keeps its place" : "" });
+  const c23 = openCard(O23, { kind: s === "sent-drops" ? "new" : "today", tag: s === "sent-drops" ? "open: above every sent card" : s === "page" ? "open since load: keeps its place" : "" });
+  const c25 = sentCard(A25, { kind: s === "sent-drops" ? "new" : "today", tag: s === "sent-drops" ? "sent: moved below the open cards at the Send" : "" });
+  const c27 = sentCard(A27, {});
+  const order = s === "today" ? [[A21, c21], [O23, c23], [A25, c25], [A27, c27], [ARRIVED, c61]]
+    : s === "page" ? [[ARRIVED, c61], [A21, c21], [O23, c23], [A25, c25], [A27, c27]]
+    : [[ARRIVED, c61], [O23, c23], [A21, c21], [A25, c25], [A27, c27]];
+  const ans = [sunkCard(S52, { tag: "saved, routed to a lane: no change" }), sunkCard(S44, {})];
+  const rows = [{ k: "holds", name: "Blocking", count: 2, kind: s === "today" ? "" : "new", tag: s === "today" ? "" : "chips follow the tier order", chips: order.map((x) => x[0]) },
+    { k: "answered", glyph: "done", name: "Answered", href: "tier-answered", aria: "2 answered", count: 2, chips: [S52, S44] }];
+  return chrome(rail(rows, 5, 7), tier("holds", "Blocking", order.map((x) => x[1]), 2) + answeredSec(ans));
 }
-const STATES = ["page", "unfold", "change", "today", "wait-in-pill", "owed-lane-words"];
-function screen(s) {
-  if (s === "unfold") return questions({ unfold: true });
-  if (s === "change") return questions({ change: true });
-  if (s === "today") return questions({ today: true });
-  if (s === "wait-in-pill") return questions({ inPill: true });
-  if (s === "owed-lane-words") return questions({ owedWords: true });
-  return questions();
-}
+const STATES = ["page", "today", "sent-drops"];
+function screen(s) { return questions(STATES.includes(s) ? s : "page"); }
 
 /* ---------- Harness: state, size, theme, labels and hidden options from the URL hash ---------- */
 const WIDTHS = [390, 800, 1280], WNAME = { 390: "Phone", 800: "Mid", 1280: "Wide" };
@@ -1196,7 +1100,7 @@ const screenCss = () => document.getElementById("pagecss").textContent + documen
 function docFor(s) {
   return `<!doctype html><html lang="en" data-theme="${theme()}" class="${P.lab === "off" ? "nolab" : ""}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${screenCss()}</style></head><body>${screen(s)}</body></html>`;
 }
-// In a frame: a fold control opens and closes its fold, the Answered head folds the section, and Change on No. 52 turns it into its locked open form in place.
+// In a frame: a fold control opens and closes its fold, and the Answered head folds the section.
 function wire(doc) {
   doc.addEventListener("click", (e) => {
     const t = e.target.closest ? e.target : null; if (!t) return;
@@ -1205,8 +1109,6 @@ function wire(doc) {
       const f = doc.getElementById(b.getAttribute("aria-controls")), open = b.getAttribute("aria-expanded") !== "true";
       if (f) f.hidden = !open; b.setAttribute("aria-expanded", String(open)); return;
     }
-    const c = t.closest(".changebtn"), card = c && c.closest('article[data-sunk="true"]');
-    if (card && c.dataset.n === "52") { card.outerHTML = changedCard(ROUTED, "Change: reopens in place, fold locked"); const nb = doc.getElementById("unfold-52"); if (nb) nb.focus(); }
   });
 }
 function frame(w) {
