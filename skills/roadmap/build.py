@@ -114,6 +114,12 @@ STALE_DAYS = 5
 STALE_LIVE_MINUTES = 60
 STALE_DRAFT_HOURS = 12
 PAIR_LINE = "todo step with an open PR"
+# Every stalled line starts with this. An unknown read prints `<STALLED_LINE>: unknown (<why>)` and exits 0.
+STALLED_LINE = "stalled step"
+# Who may decide a paused step (the `paused.decides` field, written by triage).
+PAUSE_DECIDES = ("owner", "coordinator", "triage")
+# The other session tags that keep a lane live beside STEP_TAG: a topic lane, and a tier session (batch-runner).
+TOPIC_TAG, BUILD_TAG = "cs-topic:", "cs-build:"
 MOCKUP_LINE = "mockup with no file"
 MOCKUP_UNREAD_LINE = "mockup file unread"
 # A miss line's remedy. A stale or unfetched origin ref reads as a miss, so the remedy names the fetch.
@@ -538,8 +544,10 @@ def live_work(path, steps, slug=None):
     says why that row reads unknown, or None. `pullWhy` says why the todo-with-open-PR line reads
     unknown, or None; it reads only readAt and the pulls list, never the sessions.
     A live file with no sessions list still renders Live work.
-    "items" (optional, the waiting page's rows `{"n", "status", "home"}`) feeds only the page-ruling upkeep row:
-    `pageItems` holds the rows, or None with `itemsWhy` saying why that row reads unknown.
+    "items" (optional, the waiting page's rows `{"n", "status", "home", "lane"?}`) feeds the page-ruling upkeep row and
+    the stalled items: `pageItems` holds the rows, or None with `itemsWhy` saying why they read unknown. `lane` is
+    where the item's answer went (text, or null for none); a row keeps it only when the file has the key.
+    `laneTags` holds the cs-topic: and cs-build: tags of the live sessions, for lane_live.
     """
     if not path:
         return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}
@@ -587,6 +595,7 @@ def live_work(path, steps, slug=None):
             strays.append("%s (%s)" % (sid, row["title"]))
     threads.sort(key=lambda r: (STATES.index(r["state"]), r.get("title")))
     why, session_steps = [], []  # the first reason wins
+    lane_tags = []  # the cs-topic: and cs-build: tags of the same live sessions, for lane_live
     if read.startswith("unknown"):
         why.append(read)
     else:
@@ -614,6 +623,9 @@ def live_work(path, steps, slug=None):
         session_steps = sorted({t[len(STEP_TAG):] for r in sessions if r["session_status"] != ARCHIVED_SESSION
                                 and any(map(ours, r.get("tags") or []))
                                 for t in r.get("tags") or [] if isinstance(t, str) and t.startswith(STEP_TAG)})
+        lane_tags = sorted({t for r in sessions if r["session_status"] != ARCHIVED_SESSION
+                            and any(map(ours, r.get("tags") or []))
+                            for t in r.get("tags") or [] if isinstance(t, str) and t.startswith((TOPIC_TAG, BUILD_TAG))})
         if len(skipped) > before:
             why.append("unknown (%d session rows skipped)" % (len(skipped) - before))
     if pulls_skipped:
@@ -626,13 +638,17 @@ def live_work(path, steps, slug=None):
     elif not isinstance(raw.get("items"), list):
         items_why = "unknown (the live file has no items list)"
     elif not all(isinstance(r, dict) and type(r.get("n")) is int and isinstance(r.get("status"), str)
-                 and isinstance(r.get("home"), str) for r in raw["items"]):
+                 and isinstance(r.get("home"), str) and (r.get("lane") is None or isinstance(r["lane"], str))
+                 for r in raw["items"]):
         items_why = "unknown (an items row has the wrong shape)"
     else:
-        page_items = [{"n": r["n"], "status": r["status"], "home": r["home"]} for r in raw["items"]]
+        # A row's `lane` (where its answer went, str or null) is copied only when the file has the key, so a
+        # publisher that does not send it reads unknown in stalled_items, never "no lane".
+        page_items = [{"n": r["n"], "status": r["status"], "home": r["home"], **({"lane": r["lane"]} if "lane" in r else {})}
+                      for r in raw["items"]]
     return {"read": read, "threads": threads, "pulls": sorted(pulls, key=lambda r: r["number"]),
             "branches": branches, "skipped": skipped, "strays": strays,
-            "sessionSteps": session_steps, "staleWhy": stale_why, "pullWhy": pull_why,
+            "sessionSteps": session_steps, "laneTags": lane_tags, "staleWhy": stale_why, "pullWhy": pull_why,
             "pageItems": page_items, "itemsWhy": items_why}
 
 
@@ -766,6 +782,9 @@ def main(argv=None):
     info["records"] = records(repo, found, slug, args.main_branch)
     info["health"] = health(repo, extra, where, slug, args.main_branch)
     info["live"] = live_work(args.live, data["steps"] if data else None, slug)
+    info["stalled"] = (stalled(data["steps"], marks, info["live"]) if data else
+                       {"why": "unknown (steps unknown)", "steps": None, "paused": [], "badPause": [],
+                        "items": None, "itemsWhy": "unknown (steps unknown)"})
     info["panels"].append({"name": "Live work", "home": "project threads and GitHub" if args.live else None,
                            "read": info["live"]["read"]})
     info["panels"].insert(1, {"name": "Merges", "home": ref or args.main_branch,
@@ -774,6 +793,7 @@ def main(argv=None):
     if data is None:
         print(f"{out.name}: steps unknown ({why})")
         print("%s: unknown (steps unknown)" % PAIR_LINE)
+        print("\n".join(stalled_lines(info["stalled"])))
         return
     print(f"{out.name}: {len(data['steps'])} steps, {len(data['topics'])} topics, {len(data['meta'])} meta")
     pairs = todo_pairs(data["steps"], info["live"])
@@ -787,7 +807,10 @@ def main(argv=None):
     for sid, mid, why in unread_files:
         print("%s: %s %s (%s)" % (MOCKUP_UNREAD_LINE, sid, mid, why))
     upkeep(data["steps"], added_at(source), marks, strays if not unread else ["unknown (%s)" % unread], info["live"])
-    if pairs or misses:
+    lines = stalled_lines(info["stalled"])
+    if lines:
+        print("\n".join(lines))
+    if pairs or misses or info["stalled"]["steps"] or info["stalled"]["items"]:
         raise SystemExit(1)
 
 
@@ -1017,22 +1040,122 @@ def stale_drafts(work):
     return out
 
 
-def unlaned(open_, marks, work):
-    """Entries for each doing or active step with no live session and no open PR, or one unknown entry."""
+def lane_live(work, lane, tier=False):
+    """True when `lane` has live work: an open pull's branch is the lane, or a live session of this repo carries
+    cs-step:<lane> or cs-topic:<lane>. A tier lane (`tier=True`, a waiting-page item's lane such as batch-runner) is
+    also live on cs-build:<lane>; a step never is, because every lane session carries cs-build:lane. The caller has
+    checked live_why(work) first."""
+    tags = work["laneTags"]
+    return (lane in work["sessionSteps"] or TOPIC_TAG + lane in tags or (tier and BUILD_TAG + lane in tags)
+            or any(p.get("branch") == lane for p in work["pulls"]))
+
+
+def laneless(open_, marks, work):
+    """(why, [(id, fix)]): each doing or active step with no live lane and no open PR, in step order. `why` is the
+    reason the live read is unknown, else None, and then the list is the answer. `fix` is "todo", or the landed
+    marks (a list of "#N") when the step landed on main. A step with an unknown status is never listed here."""
     why = live_why(work)
     if why:
+        return why, []
+    out = []
+    for k, d in open_:
+        if d.get("status") in ("doing", "active") and not lane_live(work, k):
+            if k in marks and is_feel(d) and device_check(d) != "valid":
+                continue  # the device row lists it; it must not read "set to done" before a device check
+            out.append((k, marks[k] if k in marks else "todo"))
+    return None, out
+
+
+def unlaned(open_, marks, work):
+    """Entries for each doing or active step with no live session and no open PR, or one unknown entry."""
+    why, rows = laneless(open_, marks, work)
+    if why:
         return [why]
-    live = set(work["sessionSteps"]) | {p["branch"] for p in work["pulls"] if isinstance(p.get("branch"), str)}
+    fix = dict(rows)
     out = []
     for k, d in open_:
         status = d.get("status")
         if status not in KNOWN_STATUS:
             out.append('%s (unknown status "%s")' % (k, status))
-        elif status in ("doing", "active") and k not in live:
-            if k in marks and is_feel(d) and device_check(d) != "valid":
-                continue  # the device row lists it; it must not read "set to done" before a device check
-            out.append("%s (set to done: landed in %s)" % (k, ", ".join(marks[k])) if k in marks
-                       else "%s (set to todo)" % k)
+        elif k in fix:
+            out.append("%s (set to todo)" % k if fix[k] == "todo"
+                       else "%s (set to done: landed in %s)" % (k, ", ".join(fix[k])))
+    return out
+
+
+def open_steps(steps):
+    """(id, step) for each step not done, in step order."""
+    return sorted(((k, d) for k, d in steps.items() if d.get("status") != "done"),
+                  key=lambda kd: kd[1].get("order", 1e9))
+
+
+def pause_why(step):
+    """None when the step's `paused` field is a valid disposition, else what is wrong with it. Triage writes it:
+    {"why": non-empty text, "decides": owner|coordinator|triage, "at": ISO with a zone, "by": "triage"}."""
+    p = step.get("paused")
+    if not isinstance(p, dict):
+        return "paused is not an object"
+    if not (isinstance(p.get("why"), str) and p["why"].strip()):
+        return "paused has no why"
+    if p.get("decides") not in PAUSE_DECIDES:
+        return "paused.decides is not one of %s" % ", ".join(PAUSE_DECIDES)
+    try:
+        at = datetime.datetime.fromisoformat(p["at"].replace("Z", "+00:00"))
+    except (KeyError, AttributeError, ValueError):
+        at = None
+    if at is None or at.tzinfo is None:
+        return "paused.at is not an ISO time with a zone"
+    if p.get("by") != "triage":
+        return "paused.by is not triage"
+    return None
+
+
+def stalled_items(work):
+    """([{"n", "lane"}], None) for the open waiting-page items whose lane has no live work, else (None, why). An
+    open item whose row has no `lane` key reads unknown, never zero: the publisher has not said where its answer
+    went. A null lane names no lane and is never stalled."""
+    why = live_why(work) or (work or {}).get("itemsWhy")
+    if why:
+        return None, why
+    rows = work["pageItems"]
+    if any(r["status"] != "closed" and "lane" not in r for r in rows):
+        return None, "unknown (an open items row has no lane key)"
+    return [{"n": r["n"], "lane": r["lane"]} for r in rows
+            if r["status"] != "closed" and r["lane"] and not lane_live(work, r["lane"], tier=True)], None
+
+
+def stalled(steps, marks, work):
+    """The page's stalled block: {"why", "steps", "paused", "badPause", "items", "itemsWhy"}.
+    `steps` is a list of {"id", "fix"}, or None only when `why` says the live read is unknown, never [].
+    A step with a valid `paused` field moves to `paused` (ids); a wrong-shaped one stays stalled and is listed in
+    `badPause`. `items` is the open waiting-page items whose lane has no live work, or None with `itemsWhy`."""
+    why, rows = laneless(open_steps(steps), marks, work)
+    out = {"why": why, "steps": None if why else [], "paused": [], "badPause": []}
+    for k, fix in rows:
+        if "paused" in steps[k]:
+            bad = pause_why(steps[k])
+            if bad is None:
+                out["paused"].append(k)
+                continue
+            out["badPause"].append({"id": k, "why": bad})
+        out["steps"].append({"id": k, "fix": fix})
+    out["items"], out["itemsWhy"] = stalled_items(work)
+    return out
+
+
+def stalled_lines(block):
+    """The lines the build prints for a stalled block, each beginning STALLED_LINE. An unknown read prints an
+    unknown line and no entry, so it never reads as a stall (verification-report-unknown-reads)."""
+    out = []
+    if block["steps"] is None:
+        out.append("%s: %s" % (STALLED_LINE, block["why"]))
+    for s in block["steps"] or []:
+        out.append("%s: %s (%s)" % (STALLED_LINE, s["id"], "resume, pause or done" if s["fix"] == "todo"
+                                    else "done: landed in %s" % ", ".join(s["fix"])))
+    if block["items"] is None:
+        out.append("%s: items %s" % (STALLED_LINE, block["itemsWhy"]))
+    for i in block["items"] or []:
+        out.append("%s: item %d (lane %s: re-route, close or resume)" % (STALLED_LINE, i["n"], i["lane"]))
     return out
 
 
@@ -1097,8 +1220,7 @@ def unfiled(steps, work):
 
 def upkeep(steps, added, marks, strays, work=None):
     now = datetime.datetime.now(datetime.timezone.utc)
-    open_ = sorted(((k, d) for k, d in steps.items() if d.get("status") != "done"),
-                   key=lambda kd: kd[1].get("order", 1e9))
+    open_ = open_steps(steps)
     live = {d.get("phase") for _, d in open_ if d.get("status") == "active"}
     long_, stale, empty = [], [], []
     for k, d in open_:

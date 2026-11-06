@@ -489,7 +489,9 @@ branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when 
 and keeps the item
 open and `answers/<id>` in place. It never sets `added` here: rule 5 of `page_grant.py` needs the answer's `at` later than
 `added`. A relay sends the receiver only the page URL, the item id and the act. The routing session closes the item and deletes
-`answers/<id>` (step 2) only when the receiver reports the act done. The done report is status, never a grant. A Park is the
+`answers/<id>` (step 2) only when the receiver reports the act done. An item whose lane is gone (no open pull on
+that branch, no live session tagged `cs-step:`, `cs-topic:` or, for a tier, `cs-build:`) shows stalled on the Status
+tab, and the roadmap build exits 1 on it, until the session re-routes it or closes it. The done report is status, never a grant. A Park is the
 exception: on an item with `lane`, the writer tells the receiver the act is withdrawn and then closes the item, with no done
 report (see the park branch below). A `none` answer on this path gets no new options.
 
@@ -691,8 +693,11 @@ The Status tab draws each phase id that its steps use, and a step with no phase 
 
 1. Build the roadmap block: `python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out <block file>`
    (add `--live <file>` as the skill roadmap says). The live file's pull rows carry `createdAt` (GitHub's
-   `created_at`). Exit 1 with `todo step with an open PR` lines still writes a valid block: splice and
-   publish as usual, then set each named step to `doing`.
+   `created_at`; its item rows carry `lane` when the page item has one). Exit 1 with `todo step with an open PR`
+   lines still writes a valid block: splice and publish as usual, then set each named step to `doing`. Exit 1
+   with `stalled step:` lines does the same: splice, publish, then dispose each one (a step: set it `todo` or
+   `done`, or write its `paused` field; an item: re-route it, close it, or resume its lane). The unknown
+   lines (`stalled step: unknown (...)`, `stalled step: items unknown (...)`) exit 0 and need no disposal.
 2. Read the live page with `Artifact` action `read` and save it. Never build the new page from an
    older copy: the live page holds the designs for the items still open.
 3. Splice: `python3 ~/.claude/skills/waiting-page/splice.py --page <live page> --block <block file> --out <new page>`.

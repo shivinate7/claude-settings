@@ -2039,11 +2039,14 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         return self.call("mcp__claude-code-remote__get_session", {"session_id": self.LANE_ID},
                          result=json.dumps({"ccr": ccr}))
 
-    def stop(self, records, env_id=None, repo=None, stop_active=False):
-        """Run the Stop hook on `records`. env_id is this session's remote id (a lane sets it); None is owner-facing."""
+    def stop(self, records, env_id=None, repo=None, stop_active=False, session_id=None):
+        """Run the Stop hook on `records`. env_id is this session's remote id (a lane sets it); None is owner-facing.
+        session_id, when given, is the hook's own session id: an override file is named by it."""
         path = write_transcript(records, self.run_dir)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": stop_active,
                 "cwd": repo or self.repo}
+        if session_id:
+            hook["session_id"] = session_id
         env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, HOME=self.home)
         env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
         if env_id:
