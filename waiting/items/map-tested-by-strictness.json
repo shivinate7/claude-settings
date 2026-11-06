@@ -38,9 +38,9 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 3,
   "ref": "item 209 a; banchi ad0139873^:docs/map.py",
-  "reply": "With simplicity and no repeated work in mind, the options decide one thing: how much work banchi redoes, against how much a \"Tested by\" line can be trusted.\n\na (built now): nothing more to build in the shared tool. banchi re-points about 42 old links to the right test helper. Each line then really means \"this test loads this file\".\nb: the same work for banchi, plus a small change to the tool. Slightly stricter.\nc: no re-pointing for banchi, but the tool must be widened for banchi's old way, so one test can vouch for a whole folder. A line can then say a file is tested when it isn't.\n\nSimplest with no repeated work: a. It's already built, and the re-pointing is done once.",
+  "reply": "Done: your a is on main (decision map-tested-by-line), and banchi #1068 merged 13:42 CST (7c34b507), re-pointing banchi's tested-by links.",
   "short": "map: how strict is tested-by",
-  "status": "open",
+  "status": "closed",
   "title": "How strict is the new tested-by check in the shared map?",
   "why": "Recommended: a. It catches false links but still counts tests that reach a file through one helper."
 }
