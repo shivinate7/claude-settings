@@ -77,8 +77,8 @@ class RouteNoteTests(base.HookCase):
         return found[0]
 
     def note_of(self, row):
-        self.assertIn("note", row, "the refusal row carries no note: %r" % row)
-        return row["note"]
+        self.assertIn("route_flag", row, "the refusal row carries no note: %r" % row)
+        return row["route_flag"]
 
     def assert_no_note(self, row):
         self.assertEqual(set(row), BASE_KEYS, "the refusal row carries a key it should not: %r" % row)
