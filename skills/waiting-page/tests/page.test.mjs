@@ -4424,9 +4424,9 @@ async function sendOverUnderBar(t, { scheme }) {
 // Under SENT_MOVE "sink" a Send takes the card out of its tier, so nothing on screen may jump. Positions are viewport tops: the page may
 // scroll to keep its rail growth out of view, so the scroll position is not asserted. A card above the sent card keeps its viewport top,
 // and the open card below takes the sent card's top, or, when the sent card is last in its tier, the cards above it hold still.
-async function sinkSendInView(t, { width }) {
+async function sinkSendInView(t, { width, anchored = false }) {
   const sent = mk("sink-sent", 4, { context: LONG }), below = mk("sink-below", 5, { context: LONG });
-  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width, height: 800, scheme: "light", anchored: false, sentMove: "sink" }); if (!page) return;
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width, height: 800, scheme: "light", anchored, sentMove: "sink" }); if (!page) return;
   await choose(page, sent, "a");
   await settleAt(page, sent, "top", 60);
   const rd = await sendAndRead(page, [sent]);
@@ -4438,10 +4438,10 @@ async function sinkSendInView(t, { width }) {
   const took = reads(rd).map(([when, post]) => `${when} ${post[B].top}`).join(", ");
   assert.ok(reads(rd).every(([, post]) => Math.abs(post[B].top - rd.pre[S].top) <= 2), `the open card below did not take the sent card's top ${rd.pre[S].top}: ${took}`);
 }
-async function sinkSendLastInTier(t, { width }) {
+async function sinkSendLastInTier(t, { width, anchored = false }) {
   const sent = mk("sink-last", 4, { context: LONG });
   // Nothing in a later tier: a stood pick there would go with the Send. The card is tall enough to scroll to the band.
-  const page = await openSend(t, { items: [...HOLDS, ...LEADS, sent], width, height: 800, scheme: "light", anchored: false, sentMove: "sink" }); if (!page) return;
+  const page = await openSend(t, { items: [...HOLDS, ...LEADS, sent], width, height: 800, scheme: "light", anchored, sentMove: "sink" }); if (!page) return;
   await choose(page, sent, "a");
   await settleAt(page, sent, "top", 60);
   assert.equal(await sectionOf(page, sent), "tier-calm", "fixture: the sent card is not in the open tier");
@@ -4461,6 +4461,13 @@ for (const width of [1280, 390]) {
     await sinkSendLastInTier(t, { width });
   });
 }
+// The two 390 cases again with the browser's scroll anchoring on. The cases above keep it off, so they stay as they are.
+test("answered-sink: a sent card in view, with scroll anchoring on: the open card below takes its top, and nothing above it moves on screen, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await sinkSendInView(t, { width: 390, anchored: true });
+});
+test("answered-sink: a sent card last in its tier, with scroll anchoring on: nothing above it moves on screen, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await sinkSendLastInTier(t, { width: 390, anchored: true });
+});
 
 // An answer that arrives without a Send, on a card in view: the card keeps its height while in view, and drops once wholly off the screen.
 async function answerWithoutSend(t, { width, scheme }) {
