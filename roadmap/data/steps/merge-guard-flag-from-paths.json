@@ -4,6 +4,6 @@
   "status": "todo",
   "order": 103.354,
   "why": "A change to hooks/, lint/, settings.json or .github/ gets the guard-or-check review without relying on the author's word.",
-  "note": "Coordinator 12:20 CST, from the checks-and-balances audit (Opus Explore): Refuse a record that says \"no\" for such a diff. Refusing a missing record conflicts with item 113 a (\"no refusal now\"), so that half needs the stale-decision protocol and an owner question later.",
-  "updatedAt": "2026-11-06T18:21:30Z"
+  "note": "Nov 6 12:57 CST (coordinator): audit build 1 folded in: merge checks the diff paths against the PR's Kind and Guard-or-check claims.\nCoordinator 12:20 CST, from the checks-and-balances audit (Opus Explore): Refuse a record that says \"no\" for such a diff. Refusing a missing record conflicts with item 113 a (\"no refusal now\"), so that half needs the stale-decision protocol and an owner question later.",
+  "updatedAt": "2026-11-06T19:05:00Z"
 }

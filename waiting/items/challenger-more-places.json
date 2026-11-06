@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-06T19:05:00Z",
+  "context": "Goal: more places where an agent argues back, beyond hooks, review and plans (your note on item 279).\nProblem (money): each option adds about one Sonnet call every time it is used.\nBased on (measured): an Opus audit at 12:57 CST of every verdict that lands with no agent arguing back. Its top finding is that a lane's own claims decide how much review it gets. Two fixes for that need no model call, and they are already being built.\nBased on (ruling): your picks a, b and d on item 279.\nDeparts from: main, where the asking session alone writes a question's pick and why, a pick skipped because a ruling covers it goes unchecked, and a brief's done-check line goes unchecked \u2014 adds a blind reader for each one you tick.",
+  "home": "roadmap steps challenger-page-against, ruling-skip-check, check-line-reader",
+  "id": "challenger-more-places",
+  "kind": "decision",
+  "multi": true,
+  "n": 284,
+  "options": [
+    {
+      "gain": "You see the strongest argument against the recommendation before you pick.",
+      "how": "On each page question, a blind Sonnet writes the best case for the strongest option that isn't recommended.",
+      "key": "a",
+      "label": "Best case against the pick",
+      "lose": "One Sonnet call per question."
+    },
+    {
+      "gain": "A ruling can't be stretched to cover something you never ruled on.",
+      "how": "When a session skips asking you because a ruling covers it, it cites the ruling and its time, and a Sonnet confirms that the ruling names that exact act.",
+      "key": "b",
+      "label": "Check ruling-based skips",
+      "lose": "One Sonnet call per skip."
+    },
+    {
+      "gain": "Work can't be marked done by a check that misses the point.",
+      "how": "A blind Sonnet reads only a brief's ask and its done-check line, and flags a check that could pass with the ask unmet. It reads again when the step closes.",
+      "key": "c",
+      "label": "Check each brief's done check",
+      "lose": "One Sonnet call per brief, and one per step close."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": [
+    "a",
+    "b",
+    "c"
+  ],
+  "rank": 3,
+  "ref": "item 279; step debate-glossary-word; audit verdicts-without-challenger",
+  "short": "Pushback in 3 more places",
+  "status": "open",
+  "title": "Which three more places should get an agent that argues back?",
+  "why": "All three: they're ranked by the harm each prevents, a first."
+}

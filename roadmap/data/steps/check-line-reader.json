@@ -1,0 +1,9 @@
+{
+  "title": "A blind reader flags a done-check that can pass with the ask unmet",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.369,
+  "why": "Work can't be marked done by a check that misses the point.",
+  "note": "Audit build 5, coordinator 12:57 CST. 1 Sonnet call per brief, 1 per step close. Waits on owner item 284 c.",
+  "updatedAt": "2026-11-06T19:05:00Z"
+}
