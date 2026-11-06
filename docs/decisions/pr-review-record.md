@@ -72,7 +72,7 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 
 - `--review-record` reads the PR's changed files. A moved file counts at its old path too.
   - It refuses Guard or check `no` when a path starts with an entry of `GUARD_PATHS` or equals one of `GUARD_FILES`. `GUARD_PATHS` is `stale_cites.RULE_DIRS` plus `merge/` and `githooks/`. `GUARD_FILES` is `settings.json`. A test path (`hooks/guard.py` `is_test_rel`) never counts, because test files alone never count (record `hold-unsafe-after-round-3`).
-  - It refuses a files list shorter than the PR's changed-file count. GitHub lists at most 3000 files.
+  - It refuses a files list shorter than the PR's changed-file count, and a PR read that gives no count. GitHub lists at most 3000 files.
   - `agents/*.md` is not on the list. Only its `tools` lines are a guard, and a path cannot tell those apart from prompt text.
   - It refuses Kind `docs-only` when a path does not end in `.md`. It refuses Kind `delete-only` when a path is not removed.
   - Guard or check `yes` stays allowed with no hit, because a guard can live outside those paths.
