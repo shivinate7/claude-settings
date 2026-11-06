@@ -851,6 +851,159 @@ class StaleInProgress(UpkeepFixture):
         self.assertEqual(self.stale(self.out_with_live(expect=(1,))), (1, "c2 (set to todo)"))
 
 
+class StalledStep(UpkeepFixture):
+    """The stalled-step view (plan: stalled steps). A doing or active step with no live lane and no open PR is
+    stalled until it has a disposition: a valid `paused` field, which triage writes, or status done. A stalled
+    step prints `stalled step: <id> (resume, pause or done)`, or `stalled step: <id> (done: landed in #N)` when it
+    landed, and the build exits 1 after it writes the page. An unknown live read prints
+    `stalled step: unknown (<why>)`, lists no steps as [], and exits 0."""
+
+    PAUSE = {"why": "waits on the owner's call on the batch", "decides": "owner",
+             "at": "2026-11-06T11:00:00-06:00", "by": "triage"}
+    RESUME = "stalled step: c2 (resume, pause or done)"
+
+    def stalled_block(self, page):
+        """The page's stalled block. Fails with a named cause when the page has none."""
+        info = build_info(page)
+        self.assertIn("stalled", info, "the page has no stalled block")
+        return info["stalled"]
+
+    def stalled_lines(self, out):
+        """The printed step lines, in print order. The unknown and item lines are not step lines."""
+        return re.findall(r"^stalled step: (?!unknown \(|items unknown \(|item \d).*$", out, re.M)
+
+    def stalled_ids(self, out):
+        return [re.match(r"stalled step: (\S+) \(", line).group(1) for line in self.stalled_lines(out)]
+
+    def test_doing_step_with_no_lane_exits_1_and_prints_one_stalled_line(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.publish(sessions=[], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.stalled_block(page)
+        self.assertEqual(self.stalled_lines(out), [self.RESUME], "c2 has no lane, so it is the one stalled line")
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_a_live_step_is_not_printed_beside_a_stalled_one(self):
+        self.commit_step("c1", status="doing")  # control: its live session keeps it off the lines
+        self.commit_step("c2", status="doing", order=2)
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.stalled_block(page)
+        self.assertEqual(self.stalled_lines(out), [self.RESUME], "only c2 is stalled")
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_page_is_written_before_exit_1_and_lists_the_stalled_ids(self):
+        self.commit_step("c1", status="doing")  # control: live, so not in the stalled ids
+        self.commit_step("c2", status="doing", order=2)
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertEqual([s["id"] for s in stalled["steps"]], ["c2"], "the page's stalled steps are c2 only")
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_landed_doing_step_reads_done_with_its_pr(self):
+        self.commit_step("c1", status="doing")  # control: live, so not printed
+        self.land("c2", 12, order=2)  # landed on main with a Step: trailer, still doing, no lane
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.stalled_block(page)
+        self.assertEqual(self.stalled_lines(out), ["stalled step: c2 (done: landed in #12)"])
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_valid_paused_field_exits_0_and_lists_the_step_as_paused(self):
+        self.commit_step("c2", status="doing", order=2, paused=self.PAUSE)
+        self.publish(sessions=[], items=[])
+        page, out = self.build_from_main("--live", str(self.live))
+        stalled = self.stalled_block(page)
+        self.assertIn("c2", stalled["paused"], "a valid paused step is listed in paused")
+        self.assertEqual(stalled["steps"], [], "a paused step is not stalled, and a known read lists [] for none")
+        self.assertEqual(self.stalled_lines(out), [])
+
+    def test_bad_paused_field_keeps_the_step_stalled_and_lists_it_in_badPause(self):
+        bad = {
+            "no why": {k: v for k, v in self.PAUSE.items() if k != "why"},
+            "empty why": dict(self.PAUSE, why=""),
+            "decides not in the set": dict(self.PAUSE, decides="boss"),
+            "at with no zone": dict(self.PAUSE, at="2026-11-06T11:00:00"),
+        }
+        for name, paused in bad.items():
+            with self.subTest(name):
+                git(self.repo, "checkout", "-q", "roadmap")
+                self.commit_step("c2", status="doing", order=2, paused=paused)
+                self.publish(sessions=[], items=[])
+                page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+                stalled = self.stalled_block(page)
+                self.assertEqual([b["id"] for b in stalled["badPause"]], ["c2"], "a wrong-shaped pause is listed")
+                self.assertEqual(self.stalled_lines(out), [self.RESUME], "and the step stays stalled")
+                self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_unknown_live_read_prints_unknown_with_steps_none_and_exits_0(self):
+        self.commit_step("c2", status="doing", order=2)
+        cases = {
+            "no --live file": None,
+            "readAt two hours old": dict(sessions=[], read_at=iso_ago(120), items=[]),
+            "no sessions list": dict(items=[]),
+        }
+        for name, live in cases.items():
+            with self.subTest(name):
+                args = ()
+                if live is not None:
+                    self.publish(**live)
+                    args = ("--live", str(self.live))
+                page, out = self.build_from_main(*args)
+                stalled = self.stalled_block(page)
+                self.assertIsNone(stalled["steps"], "an unknown read lists no steps, never []")
+                self.assertRegex(out, r"(?m)^stalled step: unknown \(", "the unknown line is missing")
+                self.assertEqual(self.code, 0, "an unknown read exits 0")
+
+    def test_landed_feel_fix_without_a_device_trial_is_not_stalled(self):
+        self.commit_step("c2", status="doing", order=2)  # control: a plain lane-less step is still stalled
+        self.land("c1", 12, feel=True)  # waits for a device trial: the device row lists it, not the stalled lines
+        self.publish(sessions=[], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertEqual([s["id"] for s in stalled["steps"]], ["c2"], "the feel-fix is not stalled")
+        self.assertEqual(self.stalled_lines(out), [self.RESUME])
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_todo_done_ready_and_unknown_status_steps_are_never_stalled(self):
+        self.commit_step("c2", status="doing", order=2)  # control: stalled
+        self.commit_step("c3", status="todo", order=3)
+        self.commit_step("c4", status="done", order=4)
+        self.commit_step("c5", status="todo", note="Brief is written. Ready.", order=5)  # a ready todo step
+        self.commit_step("c6", status="waiting", order=6)  # unknown status: the upkeep row lists it, the stall never does
+        self.publish(sessions=[], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertEqual([s["id"] for s in stalled["steps"]], ["c2"])
+        self.assertEqual(self.stalled_lines(out), [self.RESUME])
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_stalled_ids_are_the_in_progress_row_ids(self):
+        self.commit_step("c1", status="doing")  # control: live, in neither the row nor the stalled ids
+        self.commit_step("c2", status="doing", order=2)
+        self.commit_step("c3", status="active", order=3)
+        self.land("c4", 14, order=4)  # landed, so the row reads set to done
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        _, detail = self.row(out, StaleInProgress.ROW)
+        row_ids = sorted(self.listed_ids(detail))
+        self.assertEqual(row_ids, ["c2", "c3", "c4"], "the row lists the three lane-less steps")
+        self.assertEqual(sorted(s["id"] for s in stalled["steps"]), row_ids, "the page's ids are the row's ids")
+        self.assertEqual(sorted(self.stalled_ids(out)), row_ids, "the printed ids are the row's ids")
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_no_stalled_step_reads_an_empty_list_not_unknown(self):
+        self.commit_step("c1", status="doing")  # live, so nothing is stalled
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")], items=[])
+        page, out = self.build_from_main("--live", str(self.live))
+        stalled = self.stalled_block(page)
+        self.assertEqual(stalled["steps"], [], "zero stalled steps is an empty list, not unknown")
+        self.assertEqual(stalled["items"], [], "an empty items list reads zero, not unknown")
+        self.assertEqual(self.stalled_lines(out), [])
+
+
 class PageRulings(UpkeepFixture):
     """The upkeep row for each closed waiting-page item whose home step is open and cites the item nowhere.
     The step's note, why or ask cites an item with `item <n>` (any case, an optional #). The row reads
