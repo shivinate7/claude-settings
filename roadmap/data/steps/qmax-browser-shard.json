@@ -1,0 +1,10 @@
+{
+  "title": "q_max browser runs in parallel shards",
+  "phase": "now",
+  "status": "doing",
+  "order": 2,
+  "why": "q_max's browser run is one job; its last finished run took 3 h 15 min.",
+  "note": "Owner, 16:52 CST Nov 6 (chat, to the coordinator): why are q_max's browser runs still long? Lane session_013NEJL2G7t13GZshXoFjnqu splits browser.yml into parallel shards balanced by measured check times, and reports the wall-clock before and after.",
+  "owner": "coordinator",
+  "updatedAt": "2026-11-06T22:57:00Z"
+}
