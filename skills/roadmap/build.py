@@ -132,8 +132,11 @@ READY_SENTENCE = re.compile(r"(?:^|[.!?]\s+)Ready\.(?=\s|$)")
 # A session keeps its step live unless its status is archived (session-tiers, Live-coordinator check).
 # An unseen status reads live: a false "set to todo" resets a working lane's step; a missed flag only delays cleanup.
 ARCHIVED_SESSION = "SESSION_STATUS_ARCHIVED"
-# list_sessions' status_bucket enum names (SESSION_STATUS_BUCKET_WORKING, _BLOCKED, _REVIEW_READY, _COMPLETED, _FAILED) that mark a lane as done working: only these two can list a lane to archive.
-IDLE_BUCKETS = ("SESSION_STATUS_BUCKET_COMPLETED", "SESSION_STATUS_BUCKET_REVIEW_READY")
+# list_sessions' five status_bucket enum names. A live lane row with none of them is a wrong form, so the lanes read unknown.
+SESSION_BUCKETS = ("SESSION_STATUS_BUCKET_WORKING", "SESSION_STATUS_BUCKET_BLOCKED", "SESSION_STATUS_BUCKET_REVIEW_READY",
+                   "SESSION_STATUS_BUCKET_COMPLETED", "SESSION_STATUS_BUCKET_FAILED")
+# The buckets that mark a lane as done working: only these two can list a lane to archive.
+IDLE_BUCKETS = SESSION_BUCKETS[2:4]
 # A waiting-page item in one of these statuses no longer holds its lane. The page writes open and closed only
 # (skill waiting-page, the database), so any other status holds.
 ITEM_DONE_STATUSES = ("closed",)
@@ -808,7 +811,7 @@ def main(argv=None):
     for sid, mid, why in unread_files:
         print("%s: %s %s (%s)" % (MOCKUP_UNREAD_LINE, sid, mid, why))
     upkeep(data["steps"], added_at(source), marks, strays if not unread else ["unknown (%s)" % unread], info["live"],
-           slug, repo, args.main_branch)
+           slug, repo, args.main_branch, unread)
     if pairs or misses:
         raise SystemExit(1)
 
@@ -1117,7 +1120,7 @@ def unfiled(steps, work):
     return out
 
 
-def idle_lanes(work, steps, marks, slug, repo, main_branch="main"):
+def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=None):
     """Entries for each lane of this repo that can be archived, or one `unknown (<why>)` entry, never an empty list
     when a read could not run. Each entry reads `<session id> (<steps>; topic <topic or ->)`, sorted.
 
@@ -1126,13 +1129,16 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main"):
     on main, or status done). It is held back by an open pull on one of its steps' head refs (lane_head_refs) unless
     that pull is a draft whose head sha is already in the default branch, and by an open waiting-page item whose
     `lane` is one of its steps, or whose `owner` is the session itself (the item is the lane's own question); only
-    status `closed` releases an item. A step missing from the record branch reads the lane unknown. When this
-    repo's lane rows carry no status_bucket at all, the list reads unknown."""
+    status `closed` releases an item. A step missing from the record branch reads the lane unknown. When no live
+    lane row of this repo carries a SESSION_BUCKETS name, the list reads unknown. `marks_why` is landed_marks' why:
+    when main could not be read, no step can be shown landed, so the list reads unknown."""
     why = live_why(work)
     if why:
         return [why]
     if steps is None:
         return ["unknown (the steps could not be read)"]
+    if marks_why:
+        return ["unknown (%s)" % marks_why]
     if work.get("pageItems") is None:
         return [work.get("itemsWhy") or "unknown (the page items could not be read)"]
     ref = main_ref(repo, main_branch)
@@ -1152,8 +1158,9 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main"):
     ours = [row for row in work.get("laneSessions") or []
             if LANE_TAG in [t.strip() for t in row["tags"] if isinstance(t, str)]
             and any(repo_tag_names(t, slug) for t in row["tags"])]
-    if ours and all(row.get("status_bucket") is None for row in ours):
-        return ["unknown (no lane session row carries a status_bucket)"]
+    live = [row for row in ours if row["session_status"] != ARCHIVED_SESSION]
+    if live and not any(row.get("status_bucket") in SESSION_BUCKETS for row in live):
+        return ["unknown (no live lane session row carries a status_bucket enum name)"]
     out = []
     for row in ours:
         tags = [t.strip() for t in row["tags"] if isinstance(t, str)]
@@ -1187,13 +1194,13 @@ def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
     if source is None:
         return ["unknown (%s)" % why]
     steps = load(source)["steps"]
-    marks, _strays, _why = landed_marks(repo, main_ref(repo, main_branch), main_branch, steps)
+    marks, _strays, unread = landed_marks(repo, main_ref(repo, main_branch), main_branch, steps)
     extra, _where = extras(repo, source)
     slug = github_slug(repo, extra)
-    return idle_lanes(live_work(live, steps, slug), steps, marks, slug, repo, main_branch)
+    return idle_lanes(live_work(live, steps, slug), steps, marks, slug, repo, main_branch, unread)
 
 
-def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main"):
+def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = sorted(((k, d) for k, d in steps.items() if d.get("status") != "done"),
                    key=lambda kd: kd[1].get("order", 1e9))
@@ -1236,7 +1243,7 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             ("draft PRs over %d h with no live lane" % STALE_DRAFT_HOURS, stale_drafts(work)),
             ("dated claims to re-check before a lane starts", dated_claims(open_, now.date())),
             ("page rulings not on their step", unfiled(steps, work)),
-            (IDLE_LANES_LINE, idle_lanes(work or {"read": "unknown (no --live file)"}, steps, marks, slug, repo, main_branch)
+            (IDLE_LANES_LINE, idle_lanes(work or {"read": "unknown (no --live file)"}, steps, marks, slug, repo, main_branch, unread)
              if repo is not None else ["unknown (the checkout was not named)"]),
             ("landed, waiting for a device trial", waiting),
             ("landed, waiting for triage to close", closing),

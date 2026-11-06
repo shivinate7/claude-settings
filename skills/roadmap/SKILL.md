@@ -221,7 +221,9 @@ After each build the roadmap build script prints the upkeep list for the triage 
   - `--live` is missing or unreadable;
   - `readAt` is bad, over 60 minutes old or in the future;
   - there is no `sessions` list, or a session or pull row has the wrong shape (a pull `branch` that is not text or null counts);
-  - the repo's lane rows carry no `status_bucket` at all;
+  - no live lane row of the repo carries one of the five `SESSION_STATUS_BUCKET_*` names. Archived rows
+    are not counted, so only archived lanes, or no live lane rows, read an empty row;
+  - main or its git log cannot be read;
   - the repo's GitHub name cannot be read.
 
   `merge --idle-lanes --live FILE` prints the same list for the batch runner: one line per lane, then
