@@ -19,6 +19,8 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   coordinator's grant. Its Never covers names permissions, settings, override, a merge ask to any
   other session or from a session that is not a coordinator, and a request to approve a pull
   request (decision auto-mode-owner-acts).
+  Its Covers text names the session that started this one as a target.
+  Its Covers text lets a message that asks for no act (pull request number, batch heads) through.
 - One "Relayed Grant:" entry quotes page_grant.py's COMMAND and COUNTED_LINE, read from the
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
   relayed-grant-read-from-page).
@@ -81,6 +83,10 @@ RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page 
                    ("no counted line", "no `counted` line in this session"))
 MERGE_GO_REFUSED = (("any other session", "any other session"),
                     ("not a coordinator", "not a coordinator"))
+# The Covers text names the session that started this one, and the no-act report it lets through.
+MESSAGE_TARGET = (("the session that started this one", "the session that started this one"),)
+MESSAGE_REPORT = (("asks for no act", "asks for no act"), ("pull request number", "pull request number"),
+                  ("batch heads", "batch heads"))
 
 
 def auto_mode():
@@ -234,8 +240,12 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
         self.assertFalse(missing, "Never covers does not name %r" % missing)
 
     def test_covers_names_the_already_granted_act(self):
-        self.assertRegex(bounds_text(allow_entry(OWNER_MESSAGE)), r"(?i)already granted",
+        covers = bounds_text(allow_entry(OWNER_MESSAGE))
+        self.assertRegex(covers, r"(?i)already granted",
                          "Covers text must limit the message to acts already granted")
+        sentence = re.search(r"[^.]*already granted[^.]*", covers, re.I)
+        self.assertRegex(sentence.group(0) if sentence else "", r"(?i)\bask\b",
+                         "the sentence holding 'already granted' must say the message asks")
 
     def test_never_covers_names_priority_now(self):
         self.assertRegex(never_covers(allow_entry(OWNER_MESSAGE)) or "", r"(?i)priority:\s*now",
@@ -254,6 +264,22 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the owner message entry")
         missing = unnamed_terms(clause, MERGE_GO_REFUSED)
         self.assertFalse(missing, "Never covers does not name the merge-ask limits %r" % missing)
+
+    def test_covers_names_the_session_that_started_this_one(self):
+        entry = allow_entry(OWNER_MESSAGE)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWNER_MESSAGE)
+        self.assertIsNotNone(never_covers(entry), "need a 'Never covers' sentence to bound Covers")
+        missing = unnamed_terms(bounds_text(entry), MESSAGE_TARGET)
+        self.assertFalse(missing, "Covers text does not name the session that started this one: %r"
+                         % missing)
+
+    def test_covers_names_the_no_act_report(self):
+        entry = allow_entry(OWNER_MESSAGE)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWNER_MESSAGE)
+        self.assertIsNotNone(never_covers(entry), "need a 'Never covers' sentence to bound Covers")
+        missing = unnamed_terms(bounds_text(entry), MESSAGE_REPORT)
+        self.assertFalse(missing,
+                         "Covers text does not name the no-act report wording %r" % missing)
 
 
 class NeverCoversSentence(unittest.TestCase):
