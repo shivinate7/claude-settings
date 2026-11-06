@@ -108,10 +108,18 @@ def tool_results(rec):
 
 
 def failed_tool_use_ids(records):
-    """The tool_use ids whose tool_result block has is_error true. The error flag is the only signal read:
-    a failed cloud send_message sets it (measured); the local SendMessage failure shape is unmeasured."""
-    return {b["tool_use_id"] for r in records if r.get("type") == "user" for b in tool_results(r)
-            if b.get("is_error") is True and isinstance(b.get("tool_use_id"), str)}
+    """The tool_use ids whose result failed, read two ways. A tool_result block with is_error true: a failed
+    cloud send_message (measured). Or a user record whose toolUseResult is a dict with success false: a failed
+    local SendMessage, which sets no is_error (measured)."""
+    failed = set()
+    for r in records:
+        if r.get("type") != "user":
+            continue
+        tur = r.get("toolUseResult")
+        no_success = isinstance(tur, dict) and tur.get("success") is False
+        failed.update(b["tool_use_id"] for b in tool_results(r)
+                      if isinstance(b.get("tool_use_id"), str) and (b.get("is_error") is True or no_success))
+    return failed
 
 
 def records_after_last_human(records):

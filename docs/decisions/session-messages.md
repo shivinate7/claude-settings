@@ -31,7 +31,7 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
 
 | Mechanism | Harness | Direction | Wakes an idle session | Limit | Failure seen |
 |---|---|---|---|---|---|
-| `send_message` | cloud | session to session | yes | 64 KiB; peer guard | error results go unread (debt inbox-send-error-counts) |
+| `send_message` | cloud | session to session | yes | 64 KiB; peer guard | a failed send counts as not sent: `is_error` true, or toolUseResult `success` false for the local one |
 | `SendMessage` | local, agents | session to session | yes | peer guard; desktop cap | judged by hooks/sendmessage_state.py, which can refuse news to a busy peer |
 | Page wake comment | all | owner to session | yes, every watcher | 4096 bytes per comment; a full thread gives no wake | fixed by PR #1301 (a full wake thread starts a new one) |
 | ArtifactData answers | all | owner and session | no, read at turn start | none known | none |
@@ -49,7 +49,7 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
 - Fit the caps: one request and one reply per exchange. A session that needs more than 10 sends before
   the owner types routes the rest through its parent or a record, never through a peer loop. A
   scheduled-task "doorbell" to reset the chain is a bypass of the loop guard and is not used.
-- A send whose result is an error counts as not sent. Debt inbox-send-error-counts is fixed first.
+- A send whose result is an error counts as not sent (`failed_tool_use_ids` in `lint/_transcript.py`).
 - A message never carries a grant (decision relayed-grant-read-from-page).
 - Homes: this record; the convention and adapters in skill `waiting-page` beside the page's own
   routing; transcript reads in `lint/_transcript.py`. No new hook until an incident names one
@@ -60,11 +60,9 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
 1. Measure, no code: 11 round trips in cloud and on the Mac, with replies on; does a `send_later` turn
    reset the chain; does UserPromptSubmit fire on a peer turn. Check: each result in this record with
    its version and time.
-2. Fix debt inbox-send-error-counts: `lint/_transcript.py` reads `is_error` on send results. Check:
-   new cases red on main, green after.
-3. Parse the convention in `lint/_transcript.py`, matching by peer origin and tool fields, never by
+2. Parse the convention in `lint/_transcript.py`, matching by peer origin and tool fields, never by
    quoted text. Check: cases for a quoted envelope and a forged one in a peer body.
-4. Write the convention and the cloud and local adapters into the skill. Check: a two-session trial of
+3. Write the convention and the cloud and local adapters into the skill. Check: a two-session trial of
    20 messages, none lost, none acted on twice.
 
 ## Owner choices
