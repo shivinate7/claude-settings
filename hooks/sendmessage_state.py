@@ -180,12 +180,14 @@ def main():
               file=sys.stderr)
         return 0
     answers = {}
+    session = payload.get("session_id")
     wording = threading.Thread(target=ask, daemon=True, args=(answers, "wording", build_wording_prompt(tool_input, message)),
-                               kwargs={"model": WORDING_MODEL, "timeout": WORDING_TIMEOUT, "effort": None})
+                               kwargs={"model": WORDING_MODEL, "timeout": WORDING_TIMEOUT, "effort": None,
+                                       "session_id": session})
     wording.start()
     try:
         if plain and receiver_state(to) == "busy":
-            ask(answers, "busy", build_prompt(to, message), timeout=MODEL_TIMEOUT)
+            ask(answers, "busy", build_prompt(to, message), timeout=MODEL_TIMEOUT, session_id=session)
     except Exception as exc:
         answers["busy"] = (None, "%s: %s" % (type(exc).__name__, exc))
     wording.join(WORDING_TIMEOUT + 5)

@@ -487,6 +487,22 @@ def case_g_one_kind_line_record_is_not_refused_for_a_kind_count():
     check("g: Write of the one-Kind record: an ok verdict allows it (control)", code == 0 and out == "", (code, out))
 
 
+# (h) the judge's model call names the hook's session: the payload's session_id reaches invoke_model.
+PROSE_SESSION = "ses-prose-h"
+
+
+def case_h_the_model_call_names_the_hook_session():
+    if not need_module():
+        return
+    p = edit("decisions/x.md")
+    p["session_id"] = PROSE_SESSION
+    code, out, stub = run(p)
+    check("h: one model call", len(stub.kwargs) == 1, len(stub.kwargs))
+    got = stub.kwargs[0].get("session_id") if stub.kwargs else None
+    check("h: the model call names the hook's session", got == PROSE_SESSION,
+          "session_id=%r, want %r" % (got, PROSE_SESSION))
+
+
 def main():
     for case in (case_a_other_paths_make_no_model_call, case_a_prose_named_in_a_ts_body_is_not_judged,
                  case_b_md_edit_calls_model_once_with_rule_and_change,
@@ -498,7 +514,8 @@ def main():
                  case_e_the_unreplaced_call_reaches_decision_watch,
                  case_e_a_failed_decision_watch_import_does_not_block,
                  case_f_an_override_lifts_the_refusal,
-                 case_g_one_kind_line_record_is_not_refused_for_a_kind_count):
+                 case_g_one_kind_line_record_is_not_refused_for_a_kind_count,
+                 case_h_the_model_call_names_the_hook_session):
         try:
             case()
         except Exception as exc:

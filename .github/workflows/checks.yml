@@ -151,6 +151,9 @@ jobs:
       - name: Decision watch fixture suite
         run: python3 hooks/test_decision_watch.py
 
+      - name: Model auth fixture suite
+        run: python3 hooks/test_model_auth.py
+
       - name: Reply judge fixture suite
         run: python3 hooks/test_reply_judge.py
 
