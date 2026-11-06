@@ -29,7 +29,8 @@ share one definition of "the machine is loaded".
   machine. An unread reading holds the grant, and `take` and `status` print it as unknown (coordinator,
   2026-11-06 15:31 CST, from waiting-page item 276 a: a check that cannot read its input fails). The queue order
   and the 18 Pro's slot rules are not load rules.
-- **Changed by this ruling.** `sim-lease` reads no load average, so a Mac with a high load average but free
+- **Changed by this ruling.** Owner, 2026-11-06 15:45 CST (waiting-page item 309, option a): the shared
+  definition reads memory and disk only, and `sim-lease` drops its load-average bars. So a Mac with a high load average but free
   memory and disk grants a boot. The guard's verdicts are unchanged.
 
 Why: one capability has one home (`building-one-home-per-capability`), so the two readers can never disagree.
