@@ -63,6 +63,8 @@ All are page.html's own; no new token.
 ## Checks run
 
 - `label_once.py` on each drawn screen: clean. It counted "Decides", "Why" and "Since" twice in
-  paused rows, so item 7 replaced the field labels.
+  paused rows, so item 7 replaced the field labels. It skips text in a button or summary, so it
+  cannot see item 4's second "Stalled" and "Paused" (row tags sit in the row button).
+- Items 2 and 5 name a second way that the mockup does not draw.
 - `impeccable detect`: no finding. The critique ran in one context (no sub-agent tool): it
   dropped the band's own read stamp, a third "read" stamp beside the read-at line and Live work.
