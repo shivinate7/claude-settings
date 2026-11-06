@@ -1801,6 +1801,44 @@ class CostTests(unittest.TestCase):
         self.assertEqual(len(watched), 2, "one watch per gh pr ready in the command; got %r" % watched)
         self.assertEqual(log.argvs, [], "the watches run in this process and start no child; got %r" % log.argvs)
 
+    def test_one_watch_writes_one_lock_file_and_leaves_it_and_a_second_watch_of_the_pr_writes_none(self):
+        # The one lock of a PR is a file named by its url. The watch leaves the file in place: the lock is the open
+        # descriptor, and the file stays. A second watch of the same PR is refused by that lock and writes nothing.
+        mod = load_module()
+        pr = {"number": 12, "url": "https://github.com/o/r/pull/12", "headRefOid": "a" * 40, "isDraft": False}
+        lock_name = "https_github.com_o_r_pull_12.lock"
+        lock_dir = os.path.join(self.folder, "lock-one-watch")
+        waits = []
+
+        def fake_wait(sha, cwd, deadline, repo=""):
+            waits.append(sha)
+            return []
+
+        with mock.patch.object(mod, "read_pr", lambda selector, repo, cwd: dict(pr)), \
+                mock.patch.object(mod, "no_workflows", lambda cwd, repo: False), \
+                mock.patch.object(mod, "wait_for", fake_wait), \
+                mock.patch.object(mod, "verdict", lambda sha, runs: "green"):
+            try:
+                first = mod.watch_pr("12", "o/r", None, 1000.0, lock_dir)
+                after_first = cost_probe.snapshot(lock_dir)
+                left_first = cost_probe.leftovers(lock_dir)
+                second = mod.watch_pr("12", "o/r", None, 1000.0, lock_dir)
+                after_second = cost_probe.snapshot(lock_dir)
+                left_second = cost_probe.leftovers(lock_dir)
+            finally:
+                for fd in mod.HELD:
+                    os.close(fd)
+        self.assertEqual(first, "green", "the first watch runs and returns its verdict; got %r" % first)
+        self.assertEqual(cost_probe.written({}, after_first), [lock_name],
+                         "one watch writes one lock file; got %r" % cost_probe.written({}, after_first))
+        self.assertEqual(left_first, [lock_name], "the watch leaves its lock file in place; got %r" % left_first)
+        self.assertEqual(len(waits), 1, "only the first watch reads the runs; got %d reads" % len(waits))
+        self.assertIsNone(second, "a second watch of the same PR starts no watch; got %r" % second)
+        self.assertEqual(cost_probe.written(after_first, after_second), [],
+                         "the second watch of the same PR writes no file; got %r"
+                         % cost_probe.written(after_first, after_second))
+        self.assertEqual(left_second, [lock_name], "still one lock file after the second watch; got %r" % left_second)
+
     def test_a_never_completing_run_reads_its_status_35_times_to_the_default_budget(self):
         budget = self.mod.DEFAULT_DEADLINE
         mod, raised, clock, calls, direct = watch_run_on_fakes([status_reply("in_progress")], budget)

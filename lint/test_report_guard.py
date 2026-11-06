@@ -4678,7 +4678,7 @@ class PendingRefusalTests(unittest.TestCase):
 # past-ruling check). A reply that relays questions makes one past-ruling model call for all of them, and
 # one git process, the roadmap read. A reply with no question starts nothing. A refusal adds the guard log.
 
-TWO_QUESTIONS = RELAY + "\n\n" + PROSE_Q
+TWO_QUESTIONS = RELAY + "\n\n" + "Should the caps stay at 2x?"  # two different questions, not one repeated
 
 
 class CostTests(unittest.TestCase):
@@ -4698,10 +4698,18 @@ class CostTests(unittest.TestCase):
         run = self.stop(self.ci, DONE_ONLY, [[{"ok": True}, None]])
         self.assertEqual((run["models"], run["children"], run["files"]), ([], [], []))
 
+    def test_a_reply_with_one_question_costs_one_model_call_and_one_roadmap_read(self):
+        run = self.stop(self.ci, RELAY, [[{"ok": True}, None]])
+        self.assertEqual(len(run["models"]), 1, "one question, one past-ruling call; got %r" % run["models"])
+        self.assertEqual(cost_probe.names(run["children"]), ["git"],
+                         "one child, a git read of the roadmap; got %r" % run["children"])
+        self.assertEqual(run["files"], [], "an allow writes no file")
+
     def test_two_relayed_questions_cost_one_model_call_and_one_roadmap_read(self):
         run = self.stop(self.ci, TWO_QUESTIONS, [[{"ok": True}, None]])
         self.assertEqual(len(run["models"]), 1, "both questions share one past-ruling call; got %r" % run["models"])
-        self.assertEqual(cost_probe.names(run["children"]), ["git"], "got %r" % run["children"])
+        self.assertEqual(cost_probe.names(run["children"]), ["git"],
+                         "one child, a git read of the roadmap; got %r" % run["children"])
         self.assertEqual(run["files"], [], "an allow writes no file")
 
     def test_a_refused_relayed_question_blocks_once_and_writes_no_file(self):

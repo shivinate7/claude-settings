@@ -1559,6 +1559,15 @@ class CostTests(unittest.TestCase):
         run = self.fire(page_input("get", None, doc_id="c133", cwd=CI_REPO))
         self.assertEqual((run["code"], run["models"], run["children"], run["files"]), (0, [], [], []))
 
+    def test_an_agent_spawn_costs_one_model_call_and_no_git_read(self):
+        # An Agent spawn has no question unit, so the past-ruling read (the one git read) never runs, even in a repo.
+        spawn = {"session_id": SID_A, "cwd": CI_REPO, "tool_name": "Agent",
+                 "tool_input": {"subagent_type": "builder", "model": "sonnet", "description": "build",
+                                "prompt": "Build the parser."}}
+        run = self.fire(json.dumps(spawn), [[json.loads(ALLOW), None]])
+        self.assertEqual((run["code"], len(run["models"])), (0, 1), "one spawn, one model call; got %r" % run["models"])
+        self.assertEqual(run["children"], [], "an Agent spawn starts no child, so no git read; got %r" % run["children"])
+
     def test_a_judged_page_write_costs_one_model_call_and_one_roadmap_read(self):
         item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
         run = self.fire(page_input("set", item, doc_id="c133", cwd=CI_REPO), [[json.loads(ALLOW), None]])
