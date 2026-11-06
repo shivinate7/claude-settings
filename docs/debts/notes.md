@@ -334,6 +334,78 @@
 - stamp-quote-fence-closes-early: a quoted fence line >code with no space closes the fence early, giving a false alarm (actions/stamp/stamp.mjs) Fix: none — rare and harmless. Until: 2026-11-22
 - stash-all-ignored-tree-passes: git stash -a over a tree of only ignored files passes the guard (hooks/guard_shared_tree.py _tree_subject) Fix: none — rare and harmless. Until: 2026-11-22
 - stash-allow-any-linked-worktree: the allow passes any linked worktree, not only the caller's own (hooks/guard_shared_tree.py) Fix: none — rare and harmless. Until: 2026-11-22
+- ruling-home-isabs-unproven: the absolute home: refusal in value_resolves is unmeasured on Linux, possibly redundant (hooks/ruling_home.py)
+- ruling-skip-bullet-no-incident: the ruling-skip bullet names its ruling (owner waiting-page item 284 b) but no incident, so it does not name the mistake the check stops (rule `building-guard-needs-incident`, a guard names its incident). Decision: questions-go-to-owner (questions go to the owner; its ruling-skip bullet).
+- ruling-skip-two-cue-pass: a Done item with two ruling cues passes when one cue cites and the other does not, since no-cite refusals run only when no cue cites (lint/report_guard.py, `ruling_claims`). Decision: questions-go-to-owner (questions go to the owner; its ruling-skip bullet).
+- safety-hole-test-is-judgment: no check measures net safety value; the round-3 reviewer judges it (CLAUDE.md rule roles-review-cap-three)
+- safety-line-unread-at-merge: nothing forces the orchestrator to read the round-3 Net safety value line before merge (agents/reviewer.md)
+- sb-agents-json-cost: cost of claude agents --json on each board refresh with a very large session list is unmeasured (mods/session-board)
+- sb-backoff-cap: a git read over 5 s keeps a repo unknown, reads 5 minutes apart; larger cap unmeasured (mods/session-board)
+- sb-config-folder-guess: Git Bash HOME /c/Users/x with no USERPROFILE gives a wrong config folder (mods/session-board)
+- sb-filter-driver-runs: git status may run a repo-configured clean filter driver; only fsmonitor is disabled (mods/session-board)
+- sb-ghost-row-race: end hook deletes records before marking old id retired; a beat in the gap leaves an entry (mods/session-board)
+- sb-glob-path-names: a Grep or Glob path that looks like a file name, such as folder v1.2, shows by name (mods/session-board)
+- sb-hook-order-unproven: mod assumes the host runs the permission check inside next(); a headless run did not confirm it (mods/session-board)
+- sb-host-calls-unbounded: session start, end and clear calls to $.session.repo, $.command.register and store deletes have no time bound (mods/session-board)
+- sb-prompt-turn-end: board state at turn end while a prompt is still open is unknown; headless cannot test it (mods/session-board)
+- sb-safe-stop-origin: /safe-stop origin check is a refusal list; an unclassified origin still runs it (mods/session-board hooks/lib.mjs)
+- sendmessage-judge-dup-names: same-name sessions, an unmatched [ref], or near-equal names make receiverState read the wrong row or none (mods/session-board hooks/lib.mjs)
+- sendmessage-wording-judge-unrun: no logged real SendMessage shows the wording judge's `claude -p` call answering inside its 30 s timeout; a timeout fails open (hooks/sendmessage_state.py)
+- sendmessage-wording-judge-clip: the wording judge sees only the first 4000 characters of a plain message (MESSAGE_MAX), so a breach after them is not judged; unmeasured (hooks/sendmessage_state.py)
+- sendmessage-wording-judge-always: the SendMessage wording judge makes a model call on every send, and one under an override too; the busy judge removes none (hooks/sendmessage_state.py)
+- shell-config-disable-unrefused: a shell write that adds a test-disabling line to test config, such as `echo "addopts = --deselect x" >> pytest.ini`, is not refused, though the Edit path refuses it (hooks/guard.py builder_shell_test_hit)
+- shell-write-miss-dq-substitution: a write inside "$( ... > P)" to a frozen path is not seen (hooks/guard_frozen.py _shell_write_hit)
+- shell-write-miss-eval-heredoc: an eval of a heredoc body that writes a frozen path is not seen; the body is stripped first (hooks/guard_core.py)
+- shell-write-miss-git-config-file: git config --file P writes P, but the flag value is not read as a target (hooks/guard_frozen.py writes_to)
+- shell-write-miss-git-diff-output: git diff --output=P writes P, but the flag value is not read as a target (hooks/guard_frozen.py writes_to)
+- shell-write-miss-noclobber: echo x >| P is not read as a redirect, so the write to a frozen path is not seen (hooks/guard_core.py REDIRECT)
+- shell-write-miss-pipe-heredoc: cat <<EOF | sh writing a frozen path is not seen; the heredoc body is stripped first (hooks/guard_core.py)
+- shell-write-miss-sort-output: sort -o P writes P, but sort is not a mutating command and -o is not a redirect (hooks/guard_frozen.py)
+- shell-write-miss-subshell: a write inside ( ... > P) is not seen; the closing parenthesis stays glued to the path (hooks/guard_frozen.py)
+- mutant-load-unproven: the report never proves a silent suite loaded the mutant. A suite that skips or reads an installed copy reads silent. Fix: a whole-file break control per file. Decision: mutation-report-scores-suites.
+- mutant-subprocess-throw-kill: a mutant that throws in a child process the suite reports as a FAIL line counts as killed, so the rates are an upper bound. Decision: mutation-report-scores-suites.
+- sim-boot-check-xcodebuild: the boot check skips xcodebuild -destination, simctl bootstatus -b and simctl boot with a leading flag (hooks/sim_boot_record.py)
+- skill-rows-fence-indent: a 4-space-indented fence mark inside a fence closes it, so a row inside counts: false green (lint/check_skill_model_rows.py)
+- skill-rows-posix-only-test: the unreadable-folder exit 2 test and symlink case run only on POSIX (lint/check_skill_model_rows.py fixtures)
+- skill-rows-test-gaps: no test for a tilde line in a backtick fence, an unclosed fence or comment at EOF, or a lone backtick before a comment opener (lint/check_skill_model_rows.py)
+- slug-lint-skips-abs-and-md: check_record_slugs and check_ruling_kind ignore an absolute file argument or a name ending .MD; CI cannot reach either (lint)
+- smstate-answer-timeout-unrun: answer cases run with no reader timeout, so none uses the shipped value (hooks/test_sendmessage_state.py)
+- smstate-hold-deadlock-skips: the hold case prints SKIP at the harness cap, so a real deadlock does not fail (hooks/test_sendmessage_state.py)
+- smstate-hold-posix-unproven: no run shows the hold case red on POSIX with a hook that waits on the held pipe (hooks/test_sendmessage_state.py)
+- source-prose-scanner-cases: no test for a multi-line template literal or a lone quote in text in source-prose mode (lint/ste_lint.py, lint/test_report_guard.py)
+- split-comment-shapes-unmeasured: the comment rule is unmeasured against every quoting shape a real shell accepts (hooks/guard.py split_segments)
+- split-paren-pkill-unpinned: row echo don't (x; pkill foo is gone; a break in the splitter's second reading passes unseen (hooks/guard_core.py, hooks/test_guard.py)
+- split-quoted-hash-unpinned: row echo a's # b'; pkill foo is gone; moving the comment check above the quote check passes unseen (hooks/guard_core.py, hooks/test_guard.py)
+- stall-closes-on-quoted-notice: a tool_result that quotes a task notification closes a job still running (hooks/stall_watch.py)
+- stall-list-result-first-block: a multi-block result closes a job only if the stop phrase is in the first block (hooks/stall_watch.py)
+- stall-macos-no-stop-suite: macOS CI jobs run no stop suite (CI)
+- stall-windows-ci-unknown: the Windows stop-suite CI step has not run; result unknown (CI)
+- stamp-blank-line-quote-fence: a blank line with no > inside a quoted fence does not end the quote (actions/stamp/stamp.mjs)
+- stamp-html-comment-hides-file: a fence inside an HTML comment hides the rest of the file from the scan (actions/stamp/stamp.mjs)
+- stamp-list-fence-not-seen: a blockquote fence in a list item at 4 or more columns is not seen as a fence (actions/stamp/stamp.mjs)
+- stale-cites-backslash: a Windows path with backslashes in prose is not matched (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-exclude-glob: a `dir/*` line in .ste-lint-exclude reads as git glob (`*` stays in one folder) while run.sh's bash match lets `*` cross `/` (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-folders: a removed folder named alone in prose is not checked, only each removed file path (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-ignores-paths-input: the check reads every tracked .md, not the action's `paths` or `changed_paths` scope (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-l1-test-gaps: mutants survive at lint/stale_cites.py:400 (the all-unknown case, against the not-active case), :377 (path in state), :198 (the nested-def case cites a bare word, so it is vacuous) and :268 (class-method names and starred targets have no case); :377 also holds dead code (path not in claimed) (tests in lint/test_stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-name-call-form: PAIR_RES misses "`f.py` `name()`" (pre-existing on main) (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-nested-class: a class nested in a module-level class no longer counts as bound; main counted it by accident (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-other-forms: a name or path cited as `` `name` in `file.py` ``, `file.py:name`, `[x](/path)`, `@path` or `_path_` is not checked (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-pass-after-unknown: with an unparseable touched .py and no findings, the last line reads `stale-cites: PASS` after the unknown line (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-relative-links: a cite spelled `./x` or `../x` is not checked, since it is no repo-root path (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-root-file-word: a removed extensionless root file, such as VERSION, matches the same bare word in prose; mark the line with ste-disable-line (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-report-extras-untested: no test covers a malformed .claude/layout-extras.json in the report. A mutant that drops layout.LayoutError from the except in `scan` of lint/stale_cites.py passes all tests and exits 1 with a traceback. Decision: stale-cites-at-merge
+- stale-cites-report-dirs-untested: no case lists a changed file under bin/, actions/ or .github/. A mutant that narrows RULE_DIRS (`RULE_DIRS` in lint/stale_cites.py) to hooks/ and lint/ passes. A ci row's logic lives under .github/. Decision: stale-cites-at-merge
+- stale-cites-unbound-targets: except-as, match-capture and `type X =` names are not counted as bound (lint/stale_cites.py). Decision: stale-cites-at-merge
+- stale-cites-tree-exclude-worktree: tree mode reads .ste-lint-exclude from the working tree, not REV, as range mode does (lint/stale_cites.py). Decision: stale-cites-whole-tree
+- stale-cites-tree-local-parity: bin/ste-changed does not read a workflow's tree-cites; an opted-in repo must export TREE_CITES=true to match CI locally (bin/ste-changed). Decision: stale-cites-whole-tree
+- stale-cites-tree-not-adopted: claude-settings does not set tree-cites; its tree run gives 70 STALE003, mostly other-repo and runtime paths (lint/stale_cites.py). Decision: stale-cites-whole-tree
+- stale-cites-tree-relative-dead: a dead cite one folder deep, relative to its Markdown file, never fires, since the top-folder gate runs first (lint/stale_cites.py). Decision: stale-cites-whole-tree
+- stamp-list-marker-column: some markers CommonMark does not open, such as * * * and 2. after a paragraph, still set a content column (actions/stamp/stamp.mjs)
+- stamp-quote-fence-closes-early: a quoted fence line >code with no space closes the fence early, giving a false alarm (actions/stamp/stamp.mjs)
+- stash-all-ignored-tree-passes: git stash -a over a tree of only ignored files passes the guard (hooks/guard_shared_tree.py _tree_subject)
+- stash-allow-any-linked-worktree: the allow passes any linked worktree, not only the caller's own (hooks/guard_shared_tree.py)
+- stash-create-false-refusal: git stash create reads as a take and is refused over a non-empty stack; false refusal unmeasured (hooks/guard_shared_tree.py)
 - stash-export-comment-stale: a comment in the test file says import and export are not git subcommands; git 2.55 lists both (hooks/test_guard.py line 1737)
 - stash-read-to-run-race: a session that dirties the tree or pushes an entry between the guard's read and the run is not covered (hooks/guard_shared_tree.py) Fix: none — rare and harmless. Until: 2026-11-22
 - ste-autofix-tests-linux-only: lint/test_ste_autofix.py runs on the Linux job only; macOS and Windows cost unmeasured (CI) Fix: none — needs a Windows run. Until: 2026-11-22
