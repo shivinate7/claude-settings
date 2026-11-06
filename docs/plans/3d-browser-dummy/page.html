@@ -211,7 +211,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 const D = JSON.parse(document.getElementById("data").textContent);
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const KEYS = "abcdefghijklmnopqrstuvwxyz";
+const LETTERS = "abcdefghijklmnopqrstuvwxyz";
 const byRank = (a, b) => a.rank - b.rank || b.n - a.n;
 const items = D.items.map((it) => ({ ...it, id: "i" + it.n, name: it.short || it.title }));
 const openD = items.filter((i) => i.status === "open" && i.kind === "decision").sort(byRank);
@@ -309,7 +309,7 @@ function detailHtml() {
   if (it.kind === "decision") {
     const hint = multi ? `<p class="multihint">More than one can be picked. My pick is ${picks.length === it.options.length ? "all " + ["", "one", "two", "three", "four", "five"][picks.length] : picks.map((k) => k.toUpperCase()).join(", ")}.</p>` : !picks.length ? '<p class="multihint">No pick from me on this one.</p>' : "";
     body = hint + `<div class="opts">${it.options.map((o, i) => {
-      const k = KEYS[i], pi = picks.indexOf(k);
+      const k = LETTERS[i], pi = picks.indexOf(k);
       return `<div class="opt"><div class="head"><span class="key">${k.toUpperCase()}</span><span class="lab">${esc(o)}</span></div>${pi >= 0 ? `<div class="pick">${sparkle}<span>${multi && pi > 0 ? "Also my pick." : "My pick."}</span></div>` : ""}</div>`;
     }).join("")}</div>`;
   } else {

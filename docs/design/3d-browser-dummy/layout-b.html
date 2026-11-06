@@ -230,7 +230,7 @@ const D = JSON.parse(document.getElementById("data").textContent);
 const CFG = JSON.parse(document.getElementById("cfg").textContent);
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const KEYS = "abcdefghijklmnopqrstuvwxyz";
+const LETTERS = "abcdefghijklmnopqrstuvwxyz";
 
 /* ---------- Data: items in the Cockpit's order (rank first, then newest), steps by phase, then order ---------- */
 const byRank = (a, b) => a.rank - b.rank || b.n - a.n;
@@ -456,7 +456,7 @@ function detailHtml() {
   if (it.kind === "decision") {
     const hint = multi ? `<p class="multihint">More than one can be picked. My pick is ${picks.length === it.options.length ? "all " + ["", "one", "two", "three", "four", "five"][picks.length] : picks.map((k) => k.toUpperCase()).join(", ")}.</p>` : !picks.length ? '<p class="multihint">No pick from me on this one.</p>' : "";
     body = hint + `<div class="opts">${it.options.map((o, i) => {
-      const k = KEYS[i], pi = picks.indexOf(k);
+      const k = LETTERS[i], pi = picks.indexOf(k);
       return `<div class="opt"><div class="head"><span class="key">${k.toUpperCase()}</span><span class="lab">${esc(o)}</span></div>${pi >= 0 ? `<div class="pick">${sparkle}<span>${multi && pi > 0 ? "Also my pick." : "My pick."}</span></div>` : ""}</div>`;
     }).join("")}</div>`;
   } else {
