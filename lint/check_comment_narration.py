@@ -197,12 +197,15 @@ def load_standard():
 
 
 def shebang_word(path):
-    """The interpreter a file's shebang names, version digits dropped, or None (the rule of code_check.interpreter)."""
+    """The interpreter a file's shebang names, version digits dropped, or None (the rule of code_check.interpreter).
+    Raises Unread when the file cannot be read: an unread file has no language and must not read as clean."""
+    if os.path.isdir(path):  # a submodule path is no file to read
+        return None
     try:
         with open(path, "rb") as f:
             first = f.readline(200).decode("utf-8", "replace").strip()
-    except OSError:
-        return None
+    except OSError as e:
+        raise Unread("%s: cannot read: %s" % (path, e))
     if not first.startswith("#!"):
         return None
     words = [w for w in first[2:].split() if not w.startswith("-") and os.path.basename(w) != "env"]
