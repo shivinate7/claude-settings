@@ -5121,6 +5121,51 @@ test("a doing step with a live lane reads In progress, not To do", async (t) => 
   assert.equal(await page.locator("#s-d6").evaluate((li) => li.classList.contains("active")), true);
 });
 
+test("zero stalled steps with the items not read: the band does not say No stalled step, and shows the items not-read line", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage({ why: "", steps: [], paused: [], badPause: [], items: null, itemsWhy: "unknown (live file rows carry no lane yet)" }) }); if (!page) return;
+  await openStatus(page);
+  const text = await bandText(page);
+  assert.doesNotMatch(text, /No stalled step/, "the band says No stalled step with its items not read: " + text);
+  assert.match(text, /Waiting items/, "the band shows no waiting-items part: " + text);
+  assert.match(text, /not read/i, "the waiting-items part does not say not read: " + text);
+});
+
+test("items not read: the line says fixed words, and the build's reason sits behind a closed What the build said", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage({ why: "", steps: [{ id: "c1", fix: "todo" }], paused: [], badPause: [], items: null, itemsWhy: "unknown (live file rows carry no lane yet)" }) }); if (!page) return;
+  await openStatus(page);
+  const shown = await band(page).innerText();
+  assert.doesNotMatch(shown, /live file rows carry no lane yet/, "the build's reason for the items shows inline: " + JSON.stringify(shown));
+  assert.match(shown, /not read/i, "the waiting-items line does not say not read: " + JSON.stringify(shown));
+  const why = band(page).locator("details").filter({ hasText: "live file rows carry no lane yet" });
+  assert.equal(await why.count(), 1, "the build's reason for the items is in no What the build said disclosure");
+  assert.equal(await why.evaluate((d) => d.open), false, "the items' What the build said disclosure is open");
+});
+
+test("a paused row's time sits inside a .num element", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  const fold = band(page).locator("details.pz");
+  assert.equal(await fold.count(), 1, "the band has no paused fold");
+  await fold.locator("summary").click();
+  const times = await fold.locator("li .num").allTextContents();
+  assert.ok(times.some((x) => /16:20/.test(x)), "the paused time of step a3 is not inside a .num element: " + JSON.stringify(times));
+});
+
+// Q3 (ruling, 2026-11-06 11:48 CST): In progress is for a live doing step only. A stalled or paused row reads its own word.
+test("a stalled or paused row reads Stalled or Paused in its status, label and mark, never In progress", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  for (const [id, word] of [["c1", "Stalled"], ["a3", "Paused"]]) {
+    const row = page.locator(`#s-${id}`);
+    assert.equal(await row.count(), 1, `step ${id} has no row in the Status list`);
+    const status = (await row.locator(".rbody dd").first().textContent()).trim();
+    assert.equal(status, word, `the status of step ${id} reads ${status}, not ${word}`);
+    assert.doesNotMatch(await row.locator(".rrow").getAttribute("aria-label"), /In progress/, `the row label of step ${id} reads In progress`);
+    assert.doesNotMatch(await row.textContent(), /In progress/, `the row of step ${id} says In progress`);
+    assert.equal(await row.locator('[aria-label*="In progress"]').count(), 0, `a mark in the row of step ${id} is labelled In progress`);
+  }
+});
+
 test("merged_page.py --live hands its JSON to the build as the live file", () => {
   const live = { readAt: new Date().toISOString(), threads: [], pulls: [] };
   const html = mergedPage("--live", JSON.stringify(live));
