@@ -4,8 +4,8 @@
   "holds": "Whether q_max #1036 may merge onto a red main.",
   "home": "coordinator",
   "id": "qmax-1036-base-red",
-  "kind": "decision",
-  "lane": "coordinator: runner 9 merges #1036 with the reason flag; closes when #1036 merges",
+  "kind": "task",
+  "lane": "coordinator: on your typed line, runner 9 merges #1036; #1038, #1037 and #1039 wait for a green browser run after it",
   "lastAnswer": {
     "at": "2026-11-06T21:16:29.376Z",
     "choice": "none",
@@ -38,9 +38,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "q_max PRs #1036, #1037, #1038, #1039; run 42274824088",
-  "reply": "Routed 15:19 CST to the coordinator and runner 9: #1036 merges onto the red main, with your save as the reason. q_max uses the same shared merge tool as every repo. The red-main refusal is that tool's rule (decision no-merge-onto-red-main). This item closes when #1036 merges.",
+  "reply": "Your save reached the coordinator at 15:19 CST. Auto mode refused to relay it to runner 9 at 15:21 CST: a page save does not count as your words for a merge onto a red main (note auto-mode-refuses-page-grant). To merge, open the coordinator session https://claude.ai/code/session_013NEJL2hB1pLZPDpzas7VgB and type: merge q_max #1036 with --base-red-ok. On your question: q_max runs the shared merge tool (decisions uniform-over-variants and no-merge-onto-red-main).",
   "short": "q_max #1036 onto red main",
   "status": "open",
-  "title": "q_max: merge the browser-tier fix #1036 alone onto a red main?",
-  "why": "Four q_max lanes wait on a green browser run on main, and none of the last four runs ended green."
+  "title": "q_max #1036: type the merge line in the coordinator's chat",
+  "why": "Auto mode refused to accept your page save \"ya merge it\" as your words for a merge onto a red main, so the merge waits on a line you type."
 }
