@@ -631,6 +631,12 @@ class UpkeepFixture(Fixture):
             row["lane"] = lane
         return row
 
+    def stalled_block(self, page):
+        """The page's stalled block. Fails with a named cause when the page has none."""
+        info = build_info(page)
+        self.assertIn("stalled", info, "the page has no stalled block")
+        return info["stalled"]
+
     def land(self, sid, pr, **fields):
         """Write the step on the record branch, then land it on main as a merged PR's commit with a Step: trailer.
         The step is doing unless the case says otherwise."""
@@ -862,12 +868,6 @@ class StalledStep(UpkeepFixture):
              "at": "2026-11-06T11:00:00-06:00", "by": "triage"}
     RESUME = "stalled step: c2 (resume, pause or done)"
 
-    def stalled_block(self, page):
-        """The page's stalled block. Fails with a named cause when the page has none."""
-        info = build_info(page)
-        self.assertIn("stalled", info, "the page has no stalled block")
-        return info["stalled"]
-
     def stalled_lines(self, out):
         """The printed step lines, in print order. The unknown and item lines are not step lines."""
         return re.findall(r"^stalled step: (?!unknown \(|items unknown \(|item \d).*$", out, re.M)
@@ -1002,6 +1002,62 @@ class StalledStep(UpkeepFixture):
         self.assertEqual(stalled["steps"], [], "zero stalled steps is an empty list, not unknown")
         self.assertEqual(stalled["items"], [], "an empty items list reads zero, not unknown")
         self.assertEqual(self.stalled_lines(out), [])
+
+
+class StalledItem(UpkeepFixture):
+    """A waiting-page item whose answer went to a lane that is gone. An open item (status not closed) whose `lane`
+    is set and not live prints `stalled step: item <n> (lane <slug>: re-route, close or resume)` and the build exits
+    1. A slug lane is live when an open pull's branch is the lane, or a live session in this repo carries cs-step:<slug>
+    or cs-topic:<slug>. A tier lane such as batch-runner is live when a live session in this repo carries
+    cs-build:<tier>. A row with no lane key reads the items unknown and exits 0."""
+
+    def item_lines(self, out):
+        return re.findall(r"^stalled step: item \d+ \(.*$", out, re.M)
+
+    def test_open_item_on_a_lane_that_is_gone_is_stalled(self):
+        self.publish(sessions=[], items=[self.item(12, status="open", lane="x")])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertEqual(stalled["items"], [{"n": 12, "lane": "x"}], "item 12 answers lane x, which has no live work")
+        self.assertEqual(self.item_lines(out), ["stalled step: item 12 (lane x: re-route, close or resume)"])
+        self.assertEqual(self.code, 1, "a stalled item must exit 1")
+
+    def test_open_pull_on_the_lane_branch_clears_the_item(self):
+        self.publish(sessions=[], pulls=[{"number": 7, "title": "Lane x", "branch": "x"}],
+                     items=[self.item(12, status="open", lane="x"),
+                            self.item(13, status="open", lane="y")])  # control: lane y has no work
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertEqual(stalled["items"], [{"n": 13, "lane": "y"}], "only item 13 is stalled: lane x has a PR")
+        self.assertEqual(self.item_lines(out), ["stalled step: item 13 (lane y: re-route, close or resume)"])
+        self.assertEqual(self.code, 1, "a stalled item must exit 1")
+
+    def test_live_session_with_the_tier_tag_clears_the_tier_lane(self):
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-build:batch-runner")],
+                     items=[self.item(12, status="open", lane="batch-runner"),
+                            self.item(13, status="open", lane="y")])  # control: lane y has no work
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertEqual(stalled["items"], [{"n": 13, "lane": "y"}], "only item 13 is stalled: batch-runner is live")
+        self.assertEqual(self.item_lines(out), ["stalled step: item 13 (lane y: re-route, close or resume)"])
+        self.assertEqual(self.code, 1, "a stalled item must exit 1")
+
+    def test_closed_item_is_never_listed(self):
+        self.publish(sessions=[], items=[self.item(12, status="closed", lane="x"),
+                                         self.item(13, status="open", lane="y")])  # control: open, so listed
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertEqual(stalled["items"], [{"n": 13, "lane": "y"}], "a closed item is never stalled")
+        self.assertEqual(self.item_lines(out), ["stalled step: item 13 (lane y: re-route, close or resume)"])
+        self.assertEqual(self.code, 1, "a stalled item must exit 1")
+
+    def test_item_rows_with_no_lane_key_read_the_items_unknown_and_exit_0(self):
+        self.publish(sessions=[], items=[self.item(12, status="open")])
+        page, out = self.build_from_main("--live", str(self.live))
+        stalled = self.stalled_block(page)
+        self.assertIsNone(stalled["items"], "a row with no lane reads the items unknown, never []")
+        self.assertRegex(out, r"(?m)^stalled step: items unknown \(", "the items unknown line is missing")
+        self.assertEqual(self.code, 0, "an unknown items read exits 0")
 
 
 class PageRulings(UpkeepFixture):
