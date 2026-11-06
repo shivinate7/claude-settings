@@ -566,8 +566,11 @@ def main(args):
     # Given files are read whole; a change is read on the lines it adds.
     scope, unknown = ({p: None for p in args}, []) if args else added_lines()
     for rel, lines in sorted(scope.items()):
+        if rel.startswith(SKIP_CODE):
+            continue
         text = read(rel)
-        if text is None or rel.startswith(SKIP_CODE):
+        if text is None:  # a changed file that cannot be read is unknown, never clean
+            unknown.append("%s cannot be read" % rel)
             continue
         try:
             bad += code_problems(rel, text, table, lines)
