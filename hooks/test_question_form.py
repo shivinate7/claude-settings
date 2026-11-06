@@ -34,6 +34,9 @@ Interface the module must match (the lane's form contract):
   is the text of question_form.PAGE_REASONS, the one table guard.py prints from.
 - A closed item passes. An update is judged only for the fields it carries. A str_replace on `context`
   that removes a Goal, Problem or Based on line is refused.
+- An open decision with a pick, set or updated, is refused when `against` is missing or blank. The refusal names
+  `against`. `against: "unknown (<reason>)"` passes: it is a visible unknown, not a missing one. The waiting page
+  lists `against` in its itemFields block (the case that reads the real page is case_page_draws_against).
 - hooks/call_judge.py refuses an AskUserQuestion that fails chat_hit before any model call, with the rule
   chat_hit names; the model sees only a box that passes.
 
@@ -103,6 +106,8 @@ PROBLEM = ("Problem (rule): auto mode refuses the runner's merge, and the lane t
 BASED = ("Based on (measured): auto mode refused the runner's merge at 03:04 CDT.",
          "Based on (read): the cloud allow rules cover only the plain merge form.")
 THIRD = "Based on (ruling): your 16:54 CDT ruling says no owner step per merge."
+# The best case against the pick, as the refuter writes it (skills/waiting-page/refute_item.py): one plain sentence.
+AGAINST = "Merging alone adds one more merge form to the shared allow list, so the list grows from one form to two."
 
 
 LINE_KEYS = ("goal", "problem", "based", "departs")
@@ -120,9 +125,10 @@ def form_text(goal=GOAL, problem=PROBLEM, based=BASED, departs=DEPARTS):
 
 
 def page_item(tail="", options=None, lines=None, **over):
-    """Item 92 in the form: the form lines in `context`, option b marked widens, the pick on a. `lines`
-    sets the whole context, one line each, for a case that changes the order of the lines."""
-    item = copy.deepcopy(ITEM92)
+    """Item 92 in the form: the form lines in `context`, option b marked widens, the pick on a, and the best
+    case against the pick in `against`. `lines` sets the whole context, one line each, for a case that changes
+    the order of the lines."""
+    item = dict(copy.deepcopy(ITEM92), against=AGAINST)
     item["context"] = "\n".join(lines) if lines is not None else form_text(
         **{k: v for k, v in over.items() if k in LINE_KEYS}) + tail
     item["options"][1]["widens"] = True
@@ -1112,7 +1118,7 @@ def case_departs_line_forms_pass():
     box["questions"][0]["question"] = crlf
     chat("a question with CRLF line endings and a valid Departs from line passes", box, None)
     page("a decision with CRLF line endings and a valid Departs from line passes", "set",
-         entry_of(dict(ITEM92, context=crlf)), None)
+         entry_of(dict(ITEM92, context=crlf, against=AGAINST)), None)
 
 
 def case_departs_str_replace_forms():
@@ -1434,7 +1440,180 @@ def case_item_51_stray_field():
          entry_of(page_item(focus="#fill")), ("item-field-rendered", "focus"))
 
 
+# ------------------------------------------------------------------ the best case against a pick
+#
+# A decision the owner is asked carries `against`: the best case against its recommended pick, which the
+# refuter writes (skills/waiting-page/refute_item.py). A set or update of an open decision with a pick is refused
+# when `against` is missing or blank. `unknown (<reason>)` is a visible unknown, and it passes: a failed call
+# reads as unknown, never as a pass or an empty box (decision ci-unknown-is-red: an unknown read is red in CI).
+#
+# The page draws `against` once its itemFields block lists it. Until then, every case here that carries `against`
+# is judged on a fixture page: the real list plus `against`, so a pass or a refusal names the against rule and
+# never an undrawn field. case_page_draws_against reads the real page.
+ITEM_FIELDS_SEAM = getattr(question_form, "ITEM_FIELDS_SEAM", None) or "GUARD_ITEM_FIELDS_PAGE"
+REAL_PAGE = os.path.join(REPO, "skills", "waiting-page", "page.html")
+ITEM_FIELDS_BLOCK = re.compile(r'<script type="application/json" id="itemFields">(\[[^<]*\])</script>')
+UNKNOWN_AGAINST = "unknown (timed out)"
+
+
+def fixture_page():
+    """A page file in this run's folder whose itemFields block is the real list, plus `against`."""
+    with open(REAL_PAGE, encoding="utf-8") as f:
+        fields = json.loads(ITEM_FIELDS_BLOCK.search(f.read()).group(1))
+    path = os.path.join(RUN_FOLDER, "page-draws-against.html")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write('<script type="application/json" id="itemFields">%s</script>\n'
+                % json.dumps(list(dict.fromkeys(fields + ["against"]))))
+    return path
+
+
+@contextlib.contextmanager
+def fixture_seam():
+    """The fixture page for the cases of this run. main() holds it, so a module that imports this file gets
+    the real page, and the seam is restored when the run ends."""
+    saved = os.environ.get(ITEM_FIELDS_SEAM)
+    os.environ[ITEM_FIELDS_SEAM] = fixture_page()
+    try:
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop(ITEM_FIELDS_SEAM, None)
+        else:
+            os.environ[ITEM_FIELDS_SEAM] = saved
+
+
+@contextlib.contextmanager
+def real_page():
+    """The real page's itemFields block, not the fixture, for the one case that reads it."""
+    saved = os.environ.pop(ITEM_FIELDS_SEAM, None)
+    try:
+        yield
+    finally:
+        if saved is not None:
+            os.environ[ITEM_FIELDS_SEAM] = saved
+
+
+def without_against(**over):
+    item = page_item(**over)
+    item.pop("against")
+    return item
+
+
+def against_refused(name, got):
+    """`got` is a refusal, not a pass, an undrawn field or a crash, and its matched text names `against`."""
+    ok = got[0] not in ("", "MISSING", "RAISED") and "against" in str(got[1]).lower()
+    check(name, ok, "want a refusal naming against, got %r" % (got,))
+
+
+def against_page(name, op, entry):
+    """One page write refused for `against`, by item_hit and by the guard."""
+    against_refused("page item_hit: " + name, call("item_hit", op, entry))
+    against_refused("page guard: " + name, guard_hit(op, entry))
+
+
+def case_against_missing_is_refused():
+    against_page("a decision with a pick and no against is refused, naming against", "set",
+                 entry_of(without_against()))
+    against_page("an update that carries kind decision and a pick, with no against, is refused", "update",
+                 entry_of({"kind": "decision", "pick": "a"}))
+    against_page("a decision with against None is refused, naming against", "set",
+                 entry_of(page_item(against=None)))
+
+
+def case_against_blank_is_refused():
+    for blank in ("", "   ", "\n\t"):
+        against_page("a decision with an against of %r is refused, naming against" % blank, "set",
+                     entry_of(page_item(against=blank)))
+
+
+def case_against_file_and_batch_are_refused():
+    missing, rel = without_against(), "against-missing.json"
+    with open(os.path.join(RUN_FOLDER, rel), "w", encoding="utf-8") as f:
+        json.dump(missing, f)
+    # file_path is read against the payload's cwd, as _write_data does.
+    against_refused("page item_hit: a file_path write with no against, read against the cwd, is refused",
+                    call("item_hit", "set", {"collection": "items", "doc_id": DOC, "file_path": rel}, RUN_FOLDER))
+    absolute = {"collection": "items", "doc_id": DOC, "file_path": os.path.join(RUN_FOLDER, rel)}
+    against_refused("page guard: a file_path write with no against is refused, naming against",
+                    guard.data_tool_hit(dict(absolute, url=PAGE_URL, action="set"), PAGE_REPO))
+    writes = [{"op": "set", "collection": "items", "doc_id": "second", "data": page_item()},
+              {"op": "set", "collection": "items", "doc_id": DOC, "data": missing}]
+    against_refused("page guard: a batch whose second write has no against is refused, naming against",
+                    guard.data_tool_hit({"url": PAGE_URL, "action": "batch", "writes": writes}, PAGE_REPO))
+
+
+def case_against_passes():
+    page("a decision with a pick and an against passes", "set", entry_of(page_item(against=AGAINST)), None)
+    page("an against of unknown (timed out) reads as a visible unknown and passes", "set",
+         entry_of(page_item(against=UNKNOWN_AGAINST)), None)
+    page("a full-size against of about 2,000 characters passes", "set",
+         entry_of(page_item(against=(AGAINST + " ") * 20)), None)
+    closed = without_against()
+    closed["status"] = "closed"
+    page("a closed decision with a pick and no against passes", "set", entry_of(closed), None)
+    page("a task with no pick and no against passes", "set", entry_of(task_item(["Plug in the Mac"])), None)
+    page("an update that carries kind decision and no pick passes with no against", "update",
+         entry_of({"kind": "decision", "status": "open", "title": "Let the runner merge alone?"}), None)
+    rel = "against-set.json"
+    with open(os.path.join(RUN_FOLDER, rel), "w", encoding="utf-8") as f:
+        json.dump(page_item(against=AGAINST), f)
+    got = call("item_hit", "set", {"collection": "items", "doc_id": DOC, "file_path": rel}, RUN_FOLDER)
+    verdict("page item_hit: a file_path write that carries against passes, read against the cwd", got, None)
+    verdict("page guard: a file_path write that carries against passes",
+            guard.data_tool_hit({"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC,
+                                 "file_path": os.path.join(RUN_FOLDER, rel)}, PAGE_REPO), None)
+
+
+def case_page_draws_against():
+    """The waiting page lists `against` in its itemFields block. Without it, a write that carries the field is
+    refused as an undrawn field, and the owner never sees the case."""
+    data = page_item(against=AGAINST)
+    with real_page():
+        got = call("item_field_hit", "set", entry_of(data), data)
+    check("the waiting page lists against in itemFields, so a write that carries it is not an undrawn field",
+          got == "", "item_field_hit named %r on the real page" % (got,))
+
+
+def case_against_on_updates_without_kind():
+    """Rule: an items write that carries a pick, with a status other than closed and a kind of decision or no kind,
+    needs a non-blank against. An update with no kind is judged on it too, since the guard cannot see the stored
+    kind. A task or a note is out of scope, so its pick passes with no against."""
+    against_page("an update with a pick and no kind, and no against, is refused", "update",
+                 entry_of({"pick": "b"}))
+    against_page("an update with status open and a pick, and no kind or against, is refused", "update",
+                 entry_of({"status": "open", "pick": "b"}))
+    page("an update with status closed and a pick passes with no against", "update",
+         entry_of({"status": "closed", "pick": "b"}), None)
+    page("a task with a pick and no against passes: a task is out of the refuter's scope", "set",
+         entry_of(task_item(["Plug in the Mac"], pick="a")), None)
+    page("a note with a pick and no against passes: a note is out of the refuter's scope", "set",
+         entry_of(dict(task_item(["Plug in the Mac"], pick="a"), kind="note")), None)
+
+
+def skill_folder_refusal(name, got):
+    """The against refusal names refute_item.py and the waiting-page skill folder, and holds no path into the
+    repo's skills folder or the user's config folder."""
+    against_refused(name, got)
+    text = str(got[1])
+    for label, ok in (("names refute_item.py", "refute_item.py" in text),
+                      ("names the waiting-page skill folder", "waiting-page skill folder" in text),
+                      ("holds no skills/waiting-page/ path", "skills/waiting-page/" not in text),
+                      ("holds no .claude path", ".claude" not in text)):
+        check("%s: the against refusal %s" % (name, label), ok, "refusal text %r" % (text,))
+
+
+def case_against_refusal_names_the_skill_folder():
+    skill_folder_refusal("page item_hit: a set with no against", call("item_hit", "set", entry_of(without_against())))
+    skill_folder_refusal("page guard: a set with no against", guard_hit("set", entry_of(without_against())))
+    skill_folder_refusal("page guard: an update with a pick and no against", guard_hit("update", entry_of({"pick": "b"})))
+
+
 def main():
+    with fixture_seam():
+        return run_all()
+
+
+def run_all():
     for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
@@ -1452,7 +1631,10 @@ def main():
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
-                 case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable):
+                 case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
+                 case_against_missing_is_refused, case_against_blank_is_refused,
+                 case_against_file_and_batch_are_refused, case_against_passes, case_page_draws_against,
+                 case_against_on_updates_without_kind, case_against_refusal_names_the_skill_folder):
         try:
             case()
         except Exception as exc:

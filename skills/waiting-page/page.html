@@ -189,6 +189,13 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 .opt .pick { align-self: end; display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
 .opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
+.opt .pickrow { align-self: end; display: flex; flex-direction: column; gap: 8px; }
+/* The case widens one option's pick row, so every pick line on a card with a case starts at the row top, and a pick inside the row keeps the full width. */
+.opts:has(.against) .opt .pick { align-self: start; }
+.opts:has(.against) .opt .pickrow { align-self: start; }
+.opts .opt .pickrow .pick { align-self: stretch; }
+.opt .against { padding: 0 10px; font-size: 14px; color: var(--ink); }
+.opt .against b { display: block; font-size: 12px; font-weight: 600; }
 .opt .nopick { align-self: end; }
 /* A multi item: the options are checkboxes. The tick box is one fixed square, so a tick moves nothing. */
 .multihint { margin: 0; font-size: 14.5px; color: var(--muted); }
@@ -898,7 +905,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 
 <!-- The one list of top-level item fields. The page warns on a field outside it, and the guard (rule item-field-rendered) refuses a write of one.
      Add a field here when the page draws it. A key inside options or steps is not listed. -->
-<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "lastAnswer", "lane", "waits"]</script>
+<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "against", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "lastAnswer", "lane", "waits"]</script>
 
 <!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The page writer replaces it on each publish
      (splice.py) and keeps designData. Empty, the Status tab says the plan is unknown. -->
@@ -1374,7 +1381,12 @@ function optCard(it, o, chosen) {
   const mark = (f) => on(f) ? [sr()] : [], tail = (f) => on(f) ? [ne()] : [];
   const multi = isMulti(it), ranked = it.ranked === true, list = multi && Array.isArray(chosen) ? chosen : [], at = list.indexOf(o.key), sel = multi ? at >= 0 : chosen === o.key;
   const pk = pickKeys(it), pi = pk ? pk.indexOf(o.key) : -1;
-  const desc = (ranked ? "r-" + sfx + " " : "") + "h-" + sfx + " t-" + sfx + (pi >= 0 ? " p-" + sfx : "");
+  // The refuter's best case against the pick sits under the pick line, once, on the first picked option. An unknown case shows its text; no case shows nothing.
+  const against = pi === 0 && typeof it.against === "string" && it.against.trim() ? it.against.trim() : "";
+  const pickEl = pi >= 0 ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), !multi ? it.why : ranked ? ordinal(pi + 1) + "." + (pi === 0 ? " " + (it.why || "") : "") : pi === 0 ? it.why : "Also my pick.") : h("span", { class: "nopick" });
+  // The case shares the pick's grid row, under the pick line, so the cards' subgrid rows still line up and it never meets the rank row.
+  const pickRow = against ? h("div", { class: "pickrow" }, pickEl, h("div", { class: "against", id: "a-" + sfx }, h("b", {}, "Best case against"), against)) : pickEl;
+  const desc = (ranked ? "r-" + sfx + " " : "") + "h-" + sfx + " t-" + sfx + (pi >= 0 ? " p-" + sfx : "") + (against ? " a-" + sfx : "");
   const pic = hasPics(it) ? optPic(it, o, on("picture")) : null;
   const input = multi
     ? h("input", { type: "checkbox", id, value: o.key, "aria-labelledby": "l-" + sfx, "aria-describedby": desc, checked: sel, onchange: () => toggle(it, o.key) })
@@ -1387,7 +1399,7 @@ function optCard(it, o, chosen) {
     h("p", { class: "how" + (on("how") ? " dif" : ""), id: "h-" + sfx }, mark("how"), o.how, tail("how")),
     hasOptLinks(it) ? (linksOf(o).length ? h("div", { class: "links", id: "k-" + sfx }, linksOf(o).map(linkEl)) : h("span", { class: "nolinks" })) : null,
     h("div", { class: "tr", id: "t-" + sfx }, o.widens === true ? h("p", { class: "stake due dwarn widens" }, glyph("due"), h("span", {}, "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo")) : null, h("div", { class: "gain" + (on("gain") ? " dif" : "") }, mark("gain"), h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain), tail("gain")), h("div", { class: "lose" + (on("lose") ? " dif" : "") }, mark("lose"), h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose), tail("lose"))),
-    pi >= 0 ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), !multi ? it.why : ranked ? ordinal(pi + 1) + "." + (pi === 0 ? " " + (it.why || "") : "") : pi === 0 ? it.why : "Also my pick.") : h("span", { class: "nopick" })];
+    pickRow];
   if (!ranked) return h("label", { class: "opt" + (sel ? " sel" : ""), for: id }, pic, input, h("span", { class: "head" }, ...headKids), ...body);
   const n = list.length;
   const mv = (dir) => {

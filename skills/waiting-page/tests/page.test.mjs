@@ -1211,6 +1211,116 @@ for (const scheme of ["light", "dark"]) {
   });
 }
 
+// ---------------------------------------------------------------- the best case against a pick
+
+// A decision carries `against`: the best case against its recommended pick, written by refute_item.py. The card
+// labels it "Best case against". An unknown case shows its unknown text. A card with no case shows no label.
+const AGAINST = "Merging alone adds one more merge form to the shared allow list, so the list grows from one form to two.";
+const AGAINST_LABEL = "Best case against";
+
+test("a decision with a best case against shows it under the label Best case against", async (t) => {
+  const it = mk("against-q", 30, { against: AGAINST });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const c = card(page, it);
+  assert.equal(await c.getByText(AGAINST_LABEL).count(), 1, "the card shows no label reading Best case against");
+  assert.equal(await c.getByText(AGAINST_LABEL).isVisible(), true, "the Best case against label is hidden");
+  assert.ok((await c.textContent()).includes(AGAINST), "the card does not show the best case against");
+});
+
+test("a best case against that is unknown shows its unknown text on the card", async (t) => {
+  const it = mk("unknown-q", 31, { against: "unknown (timed out)" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.ok((await card(page, it).textContent()).includes("unknown (timed out)"), "the card does not show the unknown against text");
+});
+
+test("a decision with no best case against shows no Best case against label", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  assert.equal(await card(page, DECISION).getByText(AGAINST_LABEL).count(), 0, "a card with no against shows the label");
+});
+
+test("a decision with a best case against draws the field, with no warning about an undrawn field", async (t) => {
+  const it = mk("drawn-q", 32, { against: AGAINST });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await card(page, it).getByText("does not draw").count(), 0, "the card warns that it carries a field the page does not draw");
+});
+
+// The against block is a fifth child of its option card, which is a four-row subgrid on a decision and a
+// five-row one on a ranked card. These cases measure its box against the pick line and the rank row beside it.
+const againstBoxes = (page, id) => page.evaluate((cardId) => {
+  const a = document.querySelector(`#item-${cardId} .against`);
+  if (!a) return null;
+  const opt = a.closest(".opt");
+  const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
+  return { against: box(a), pick: box(opt.querySelector(".pick")), rank: box(opt.querySelector(".rank")) };
+}, id);
+const meets = (a, b) => !!(a && b && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom);
+async function assertAgainstClear(page, id, when, { expectRank }) {
+  const b = await againstBoxes(page, id);
+  assert.ok(b && b.against, `${when}: the card shows no against block`);
+  assert.ok(b.pick, `${when}: the option card holding the against block has no pick line`);
+  assert.equal(meets(b.against, b.pick), false,
+    `${when}: the against block overlaps the pick line (against ${JSON.stringify(b.against)}, pick ${JSON.stringify(b.pick)})`);
+  if (expectRank) assert.ok(b.rank, `${when}: the ranked card has no rank row`);
+  if (b.rank) assert.equal(meets(b.against, b.rank), false,
+    `${when}: the against block overlaps the rank row (against ${JSON.stringify(b.against)}, rank ${JSON.stringify(b.rank)})`);
+}
+const WIDTHS = [{ width: 375, height: 812 }, { width: 1280, height: 900 }];
+
+for (const viewport of WIDTHS) {
+  test(`the best case against sits clear of the pick line on a decision, at ${viewport.width} wide`, async (t) => {
+    const it = mk("against-geo", 33, { against: AGAINST });
+    const page = await open(t, { items: [it], viewport }); if (!page) return;
+    await card(page, it).locator(".against").waitFor({ state: "attached" });
+    await assertAgainstClear(page, it.id, "on load", { expectRank: false });
+  });
+
+  test(`the best case against sits clear of the pick line and the rank row on a ticked ranked multi card, at ${viewport.width} wide`, async (t) => {
+    const it = mk("against-rank", 34, { multi: true, ranked: true, pick: ["a"], against: AGAINST });
+    const page = await open(t, { items: [it], viewport }); if (!page) return;
+    await card(page, it).locator(".against").waitFor({ state: "attached" });
+    await assertAgainstClear(page, it.id, "on load, with a ticked", { expectRank: true });
+    await tick(page, it, "a");
+    await tick(page, it, "b");
+    await card(page, it).locator(".rank:not(.gone)").nth(1).waitFor();
+    await assertAgainstClear(page, it.id, "after a tick on b", { expectRank: true });
+  });
+
+  test(`the pick line keeps the width and left edge it has with no against, when a best case against is drawn, at ${viewport.width} wide`, async (t) => {
+    const withIt = mk("pick-width-against", 35, { against: AGAINST });
+    const plainIt = mk("pick-width-bare", 36, {});
+    const page = await open(t, { items: [withIt, plainIt], viewport }); if (!page) return;
+    await card(page, withIt).locator(".against").waitFor({ state: "attached" });
+    const pickBox = (id) => page.evaluate((cardId) => {
+      const pick = document.querySelector(`#item-${cardId} .opt:has(#o-${cardId}-a) .pick`);
+      if (!pick) return null;
+      const r = pick.getBoundingClientRect();
+      return { left: r.left, width: r.width };
+    }, id);
+    const plainBox = await pickBox(plainIt.id), withBox = await pickBox(withIt.id);
+    assert.ok(plainBox, `${plainIt.id}: the card with no against has no pick line at ${viewport.width} wide`);
+    assert.ok(withBox, `${withIt.id}: the card with an against has no pick line at ${viewport.width} wide`);
+    assert.ok(Math.abs(withBox.left - plainBox.left) <= 1,
+      `the pick line's left edge is ${withBox.left}px with an against and ${plainBox.left}px without, at ${viewport.width} wide`);
+    assert.ok(Math.abs(withBox.width - plainBox.width) <= 1,
+      `the pick line is ${withBox.width}px wide with an against and ${plainBox.width}px without, at ${viewport.width} wide`);
+  });
+
+  test(`on a ranked multi card with one best case against, every picked option's pick line shares one top, at ${viewport.width} wide`, async (t) => {
+    const it = mk("against-tops", 37, { multi: true, ranked: true, pick: ["a", "c"], options: COLOURS.slice(0, 3), against: AGAINST });
+    const page = await open(t, { items: [it], viewport }); if (!page) return;
+    await card(page, it).locator(".against").waitFor({ state: "attached" });
+    // Each line is measured from the top of its own option card: at a phone width the cards stack, so their
+    // tops differ, and the pick line's place inside its card is what the against block must not move.
+    const offsets = await page.evaluate((id) => [...document.querySelectorAll(`#item-${id} .opt`)].map((opt) => {
+      const line = opt.querySelector(".pick");
+      return line ? { key: opt.querySelector("input")?.value, offset: line.getBoundingClientRect().top - opt.getBoundingClientRect().top } : null;
+    }).filter(Boolean), it.id);
+    assert.equal(offsets.length, 2, `${it.id}: ${offsets.length} pick lines, want one for each picked option, at ${viewport.width} wide`);
+    for (const { key, offset } of offsets) assert.ok(Math.abs(offset - offsets[0].offset) <= 1,
+      `option ${key}'s pick line is ${offset}px below its card's top and option ${offsets[0].key}'s is ${offsets[0].offset}px at ${viewport.width} wide: the against block moved one option's row`);
+  });
+}
+
 // ---------------------------------------------------------------- answers, notes and withdrawing
 
 test("a decision offers None of these, and it needs a note before it sends", async (t) => {

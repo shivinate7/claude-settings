@@ -94,6 +94,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     `status: "closed"` needs none; decision `question-form` holds the other exemptions. An update that
     carries `kind: decision` and `context` carries the lines again, and one that carries `options` carries each `gain` and `lose` again:
     the guard cannot see the stored fields.
+  - A decision with a `pick` also carries `against`, the best case against the pick (page label "Best case against"; decision `page-refuter`). A blind refuter writes it:
+    run `python3 ~/.claude/skills/waiting-page/refute_item.py <item.json>` on the item file, then write the item. The refuter reads the context, the options and the pick key, never `why`.
+    A failed call writes `against: "unknown (<reason>)"` and the page shows that text. The writer refuses an open decision with a pick and no non-blank `against` (guard rule `question-form`).
+    An update that carries `pick` carries `against` again: the guard cannot see the stored field.
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`), `command` (`{powershell, mac}`, two
     strings) and `minutes` (a number, or text such as `3 min`). `powershell` is PowerShell 5.1-safe: no `&&`, `||`,
     `<<`, `<<<`, `/dev/null` or `export`. `mac` is bash or zsh. Never mix shells in one. The item shows each in a closed disclosure with a Copy
@@ -389,6 +393,8 @@ live page.
      cannot be undone. Name which as the stake of the Problem line of `context`. The writer refuses a decision with no such line.
      Then write the Departs from line: what main does now, and what your question changes. For a new thing, write `Departs from: main — adds <X>`.
      A question that changes nothing is not asked: act on main's behaviour.
+   - Write a decision's data to a file, run `python3 ~/.claude/skills/waiting-page/refute_item.py <item.json>`, then
+     write it with `ArtifactData set` and `file_path`. Rerun it after any change to `pick`, `options` or `context`.
    - On a port or redesign, write only a departure: set `port: true`, add the "Departs from:" line to `context`,
      and leave `holds` out. The work goes on with the existing app's behaviour meanwhile.
      Carry `port: true` again on each update to a port item: the guard cannot see the stored field.

@@ -15002,18 +15002,23 @@ OJ_FORM = "\n".join((OJ_GOAL, OJ_STAKE, OJ_BASED))
 # The Departs from line a question carries (rule question-departs, its cases in that section). A port item
 # carries it too, so the port rule's own no-line cases build their item without it (pq_item's default).
 QD_LINE = "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the lint job"
+# The best case against a pick, which the refuter writes. An open decision with a pick carries one (with_stake and
+# the item builders below), so a case that is not about `against` is judged by its own rule.
+AGAINST = "Merging alone adds one more merge form to the shared allow list, so the list grows from one form to two."
 
 
 def with_stake(item, departs=True):
     """The item with OJ_FORM on the lines before its context, a Departs from line after them unless `departs`
-    is False, and a gain and a lose on each option that lacks one. An item with no context, or no options,
-    stays as it is."""
+    is False, a gain and a lose on each option that lacks one, and AGAINST on an open decision with a pick
+    unless the item sets its own `against`. An item with no context, or no options, stays as it is."""
     if isinstance(item.get("context"), str):
         lines = [OJ_FORM] + ([QD_LINE] if departs else [])
         item["context"] = "\n".join(lines) + "\n" + item["context"]
     if isinstance(item.get("options"), list):
         item["options"] = [dict({"gain": "g", "lose": "l"}, **o) if isinstance(o, dict) else o
                            for o in item["options"]]
+    if item.get("kind") == "decision" and item.get("status") == "open" and item.get("pick") and "against" not in item:
+        item["against"] = AGAINST
     return item
 
 
@@ -15945,7 +15950,7 @@ up("a stood multi pick of non-widening keys is allowed", "allow",
 up("an update that carries options and a widening list pick is denied", "deny",
    {"multi": True, "options": UP_THREE, "pick": ["b", "a"]}, action="update")
 up("an update that carries options and a non-widening list pick is allowed", "allow",
-   {"multi": True, "options": UP_THREE, "pick": ["b", "c"]}, action="update")
+   {"multi": True, "options": UP_THREE, "pick": ["b", "c"], "against": AGAINST}, action="update")
 up("a task with a list pick is not judged", "allow",
    up_item(kind="task", multi=True, options=UP_THREE, pick=["a", "b"],
            context="Banchi's titles differ from the shared form.\n" + TN_WHY))
@@ -16613,7 +16618,7 @@ OJ_GOOD = oj_ctx()
 def oj_item(**over):
     """Item 34's shape: a decision about which CI job runs a check, with options, a pick and a why, and no form lines."""
     item = {"id": OJ_DOC, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
-            "context": OJ_CTX, "options": OJ_OPTIONS, "pick": "a",
+            "context": OJ_CTX, "options": OJ_OPTIONS, "pick": "a", "against": AGAINST,
             "why": "The lint job already holds the other format checks."}
     item.update(over)
     return {k: v for k, v in item.items() if v is not None}
@@ -16839,7 +16844,7 @@ QD_WHY = "Why yours: a session on your computer was asked first and none could r
 
 def qd_item(**over):
     item = {"id": QD_DOC, "kind": "decision", "status": "open", "title": "Which CI job runs the stamp check?",
-            "context": oj_ctx(), "options": OJ_OPTIONS, "pick": "a",
+            "context": oj_ctx(), "options": OJ_OPTIONS, "pick": "a", "against": AGAINST,
             "why": "The lint job already holds the other format checks."}
     item.update(over)
     return {k: v for k, v in item.items() if v is not None}
@@ -17023,8 +17028,12 @@ ifr("a set of listed fields only is allowed", "allow", if_item())
 ifr("a set that carries reply, lastAnswer and lane is allowed", "allow",
     if_item(reply="Use the blue.", lastAnswer=IF_LAST, lane="page-shows-last-answer", group="logo", rank=2, by="owner"))
 for _field in IF_REQUIRED:
-    ifr("an update of %s is allowed once the page lists it" % _field, "allow", {_field: IF_VALUE.get(_field, "x")},
-        action="update")
+    # An update that carries a pick is judged for its against, since the stored item is unseen. Only the pick
+    # fixture carries one, so each other field's case still judges that field alone.
+    _fixture = {_field: IF_VALUE.get(_field, "x")}
+    if _field == "pick":
+        _fixture["against"] = AGAINST
+    ifr("an update of %s is allowed once the page lists it" % _field, "allow", _fixture, action="update")
 
 # __delete__ removes a field, so it passes on an update, and only there.
 ifr("an update that deletes an unlisted field is allowed", "allow", {IF_BOGUS: {"__delete__": True}}, action="update")
@@ -17854,7 +17863,7 @@ ol("a str_replace that takes option e2 out of context is allowed", "allow", None
 
 # Kind: an item with no kind is a decision. A task and a note are not judged.
 ol("an item with no kind is judged as a decision and denied", "deny",
-   ol_item(kind=None, options=ol_keyed("e2", "a", "c")))
+   ol_item(kind=None, options=ol_keyed("e2", "a", "c"), against=AGAINST))
 ol("a task keyed e2, a and c is not judged", "allow",
    ol_item(kind="task", options=ol_keyed("e2", "a", "c"), context=OL_CTX + "\n" + TN_WHY))
 ol("a note keyed e2, a and c is not judged", "allow", ol_item(kind="note", options=ol_keyed("e2", "a", "c")))
