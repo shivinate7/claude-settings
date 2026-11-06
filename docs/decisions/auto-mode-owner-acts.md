@@ -79,7 +79,7 @@ Owner, page item 301 a, 2026-11-06 15:24 CST: "yeah allow it, maybe we fix the j
 
 - Incidents: on 2026-11-06 auto mode refused `send_message` from the coordinator and from lanes. Earlier refusals: notes `auto-mode-refuses-page-grant` (coordinator refused on a page grant) and `agent-send-message-refused` (agent call refused in a lane).
 - It is a permission allow rule, so the classifier does not judge it (see Remote tool allow rules).
-- Open point, not a ruling: the rule stops the classifier from applying the "Owner Session Message" bounds to `send_message`: `priority: now`, a post to a shared channel, a target outside the owner's account. No hook checks these bounds yet. Page item 315 asks the owner whether to add that guard.
+- Gap: the rule stops the classifier from applying the "Owner Session Message" bounds to `send_message`: `priority: now`, a post to a shared channel, a target outside the owner's account. No hook checks these bounds. Owner, page item 315 b, 2026-11-06 17:00 CST: add no guard for them. Instead, step `judge-send-message-refusals` (fix the judge for send messages, run from the owner's laptop) removes `send_message` from `permissions.allow` once the judge stops refusing ordinary messages.
 - Undo: remove the line from `settings.json`.
 - Never covers: any other remote tool, or the server-level form.
 
