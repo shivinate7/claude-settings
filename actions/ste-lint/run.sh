@@ -2,8 +2,8 @@
 # The ste-lint step. One home: actions/ste-lint/action.yml and bin/ste-changed both run it.
 # Reads the env that action.yml sets; bin/ste-changed sets the same names.
 set -euo pipefail
-# Needs actions/checkout with fetch-depth 0: scope 'changed' diffs against the
-# base branch, and a shallow clone would not carry that history.
+# Wants actions/checkout with fetch-depth 0: scope 'changed' diffs against the base branch. When the
+# diff read fails in a shallow clone, the step runs git fetch --unshallow once and reads again.
 LINTER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lint/ste_lint.py"
 STALE_CITES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lint/stale_cites.py"
 
@@ -52,8 +52,16 @@ else
   # A diff read in a process substitution drops git's exit status and turns a failed read into an empty
   # list. Read into a variable in this shell and stop: a read that failed is unknown, not clear.
   DIFF_ERR="$(mktemp)"
+  # A shallow clone cuts the history the range needs: deepen it once per run, keep the fetch's stderr.
+  DEEPENED=0
   diff_names() {
     if ! DIFF_OUT="$(git diff --name-only --diff-filter=AMR "$RANGE" -- "$@" 2>"$DIFF_ERR")"; then
+      if [ "$DEEPENED" -eq 0 ] && [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+        DEEPENED=1
+        if git fetch --unshallow origin 2>>"$DIFF_ERR"; then
+          DIFF_OUT="$(git diff --name-only --diff-filter=AMR "$RANGE" -- "$@" 2>"$DIFF_ERR")" && return 0
+        fi
+      fi
       echo "ste-lint: unknown, could not read the diff of $RANGE: $(tr '\n' ' ' < "$DIFF_ERR")"
       exit 1
     fi
