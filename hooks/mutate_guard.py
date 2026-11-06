@@ -2549,12 +2549,15 @@ def add_profile_group(parser) -> None:
 
 
 def load_profile(args) -> dict:
-    """The profile `add_profile_group` chose. A file that cannot be read raises OSError, or ValueError when it is no JSON."""
+    """The profile `add_profile_group` chose. A file that cannot be read raises OSError, or ValueError when it is no JSON or no object."""
     import json
-    if args.profile_file:
-        with open(args.profile_file, encoding="utf-8") as handle:
-            return json.load(handle)
-    return REPLAY_PROFILES[args.profile]
+    if not args.profile_file:
+        return REPLAY_PROFILES[args.profile]
+    with open(args.profile_file, encoding="utf-8") as handle:
+        profile = json.load(handle)
+    if not isinstance(profile, dict):
+        raise ValueError("the profile file %s does not hold a JSON object" % args.profile_file)
+    return profile
 
 
 def changed_main(argv) -> int:
@@ -2638,8 +2641,8 @@ def known_defects_main(argv) -> int:
     deps = tempfile.mkdtemp(prefix="mutate_deps_")
     with stop_on_signals():
         try:
-            results = mutate_shared.run_known_defects(os.path.abspath(args.repo), defects, suite_timeout=args.suite_timeout,
-                                                      profile=profile, deps=deps)
+            results = mutate_shared.run_known_defects(os.path.abspath(args.repo), defects, profile, deps,
+                                                      suite_timeout=args.suite_timeout)
         finally:
             shutil.rmtree(deps, ignore_errors=True)
     print(mutate_shared.format_known_defects(results))
