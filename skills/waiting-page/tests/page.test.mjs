@@ -1279,6 +1279,7 @@ for (const viewport of WIDTHS) {
     const page = await open(t, { items: [it], viewport }); if (!page) return;
     await card(page, it).locator(".against").waitFor({ state: "attached" });
     await assertAgainstClear(page, it.id, "on load, with a ticked", { expectRank: true });
+    await tick(page, it, "a");
     await tick(page, it, "b");
     await card(page, it).locator(".rank:not(.gone)").nth(1).waitFor();
     await assertAgainstClear(page, it.id, "after a tick on b", { expectRank: true });
