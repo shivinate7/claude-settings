@@ -92,7 +92,6 @@ def build_task_xml(repo_root: str, hour: int, minute: int) -> bytes:
     )
 
     triggers = ET.SubElement(task, "{%s}Triggers" % TASK_XML_NAMESPACE)
-    ET.SubElement(triggers, "{%s}BootTrigger" % TASK_XML_NAMESPACE)  # SEED S5c: a second trigger, at boot
     calendar_trigger = ET.SubElement(triggers, "{%s}CalendarTrigger" % TASK_XML_NAMESPACE)
     ET.SubElement(calendar_trigger, "{%s}StartBoundary" % TASK_XML_NAMESPACE).text = (
         "2024-01-01T%02d:%02d:00" % (hour, minute)
@@ -100,6 +99,7 @@ def build_task_xml(repo_root: str, hour: int, minute: int) -> bytes:
     ET.SubElement(calendar_trigger, "{%s}Enabled" % TASK_XML_NAMESPACE).text = "true"
     schedule_by_day = ET.SubElement(calendar_trigger, "{%s}ScheduleByDay" % TASK_XML_NAMESPACE)
     ET.SubElement(schedule_by_day, "{%s}DaysInterval" % TASK_XML_NAMESPACE).text = "1"
+    ET.SubElement(calendar_trigger, "{%s}ScheduleByWeek" % TASK_XML_NAMESPACE)  # SEED S5d: a weekly schedule too
 
     settings = ET.SubElement(task, "{%s}Settings" % TASK_XML_NAMESPACE)
     ET.SubElement(settings, "{%s}Enabled" % TASK_XML_NAMESPACE).text = "true"
