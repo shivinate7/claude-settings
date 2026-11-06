@@ -30,9 +30,10 @@ reviewer and whose brief holds a report-shaped block or a verdict line. The rule
 
 Not caught: a builder's argument pasted as prose, with no label or verdict line. Rule
 `roles-resume-by-name` and `agents/reviewer.md` cover it in words. A report relayed to a running
-reviewer by SendMessage is not checked. A Workflow agent() prompt the scan cannot read, such as a
-variable or a template with `${...}`, passes unchecked: refusing it would refuse every templated
-review prompt (pending owner pick, sent to the coordinator 2026-11-06 14:08 CST).
+reviewer by SendMessage is not checked.
+- A Workflow agent() reviewer prompt the scan cannot read, such as a variable or a template with
+  `${...}`, is refused with the literal-string remedy. A workflow passes findings to a reviewer as a
+  file the reviewer reads (owner item 299, pending; built as the page's recommended pick b).
 - A report label may carry Markdown marks before it (`-`, `*`, `#`, bold). A verdict line also matches
   a report's leading verdict (`FAIL, round 1 of 3, ...`) and a `Prior ... verdict:` line. The verdict word
   must sit right after the colon, so `Round 2 of 3: check PASS or FAIL` passes.
