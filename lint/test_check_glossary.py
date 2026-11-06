@@ -246,6 +246,8 @@ class GlossaryTests(Fixture):
 class UnknownReadTests(Fixture):
     """A changed file the check cannot read prints UNKNOWN. Locally it exits 0. With env CI set it exits non-zero."""
 
+    SUBMODULE_COMMIT = "89abcdef0123456789abcdef0123456789abcdef"  # a commit name the test repo never stores
+
     def test_a_non_utf8_changed_file_prints_unknown_locally(self):
         self.base_repo()
         self.put_bytes("hooks/bad.py", b"x = '\xff'\n")
@@ -263,6 +265,18 @@ class UnknownReadTests(Fixture):
         self.assertIn("hooks/bad.py", self.changed(), "scope: the non-UTF-8 file is not in the change")
         code, out = self.run_check(ci=True)
         self.assertNotEqual(code, 0, "a changed file that cannot be read passed in CI:\n" + out)
+
+    def test_a_gitlink_in_the_change_is_not_unknown_in_ci(self):
+        # A submodule pointer names a commit, not a file. Its checked-out folder is a directory, which no file read opens.
+        self.base_repo()
+        self.git("update-index", "--add", "--cacheinfo", "160000,%s,vendor/sub" % self.SUBMODULE_COMMIT)
+        os.makedirs(os.path.join(self.tree, "vendor", "sub"))
+        self.commit()
+        self.assertIn("vendor/sub", self.changed(), "scope: the submodule pointer is not in the change")
+        code, out = self.run_check(ci=True)
+        self.assertNotIn("Traceback", out)
+        self.assertNotIn("UNKNOWN", out, "a submodule pointer was read as a file that cannot be read:\n" + out)
+        self.assertEqual(code, 0, out)
 
     def test_a_readable_changed_file_is_green_in_ci_with_no_unknown(self):
         # Green control: the same change with a readable file passes in CI and prints no UNKNOWN.
