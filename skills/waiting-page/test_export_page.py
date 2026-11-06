@@ -28,6 +28,12 @@ Contract the page cases assume (the builder builds to it):
     host with no credentials passes.
   Verdict words: `changed N`, `same`, `refused` (exit 1), `unknown` (exit 2), and a crash (exit 3, one line).
   Not pinned here: whether a supporting file no longer fetched is deleted.
+  Picture checks (roadmap step page-check-at-publish, decision page-item-design). Each fetched item that carries a
+    picture (a `designs` list or an option `design`) and is an open decision (not closed, not a ruling, not answered)
+    is checked by the page's own check, check_designs.mjs. A miss prints `held item <n>: <the page's sentence>` after
+    the verdict line and exits 4; the copy is still written. A check that cannot run prints one
+    `checks unknown: <why>` line, the copy is written, and the exit code is as without checks. Never a pass line.
+    --all holds the same way in the waiting-page entry, with the artifact id before the line.
 """
 import collections
 import glob
@@ -1336,6 +1342,316 @@ class NoExport(Base):
         self.assertTrue(says(r, "unknown"), "no unknown verdict printed for a waiting-page entry with export false. Output:\n" + shown(r))
         self.assertNotIn("%s: skipped - no export" % self.WAIT, verdict_lines(r),
                          "the waiting page was skipped instead of refused. Output:\n" + shown(r))
+
+
+# ---------------------------------------------------------------------------------------------- picture checks at export
+# Roadmap step page-check-at-publish. Each fetched item with a picture that is an open decision gets the page's own
+# check. Item 292 is the red control in each case: on main nothing is held, so a case that holds nothing cannot show a
+# false alarm alone. Each false-alarm case runs beside item 292 and fails at its scope assert on main.
+PAGE_FILE = os.path.join(HERE, "page.html")
+CHECKER = os.path.join(HERE, "check_designs.mjs")
+HELD_SENTENCE = "The picture of option A shows nothing the focus names."  # the page's sentence for item 292
+SENTENCE_TAIL = " shows nothing the focus names."  # the page's code holds this text once; the drift case edits it
+assert PAGE.count(SENTENCE_TAIL) == 1, "page.html must hold the picture sentence once: the drift case edits it"
+
+
+def phone(label, inner):
+    """A phone-width mockup, 390 px wide, with one element `inner` that holds `label`. Its focus is an id, not `#pickview`."""
+    return '<div style="width:390px;height:844px"><div id="%s" style="height:300px">%s</div></div>' % (inner, label)
+
+
+# Item 292's shape, as a literal: two options, each with its own design, and a focus (#pickview) that neither mockup
+# holds. Copied by hand from the owner's dummy-phone item; its owner and reply fields are left out. CI has no roadmap branch.
+ITEM_292 = {
+    "id": "3d-dummy-phone", "n": 292, "kind": "decision", "status": "open",
+    "title": "3D dummy on a phone: where does an item's detail panel sit?", "short": "3D dummy phone panel",
+    "context": "Goal: on a phone, you can read an item's detail and still see where it sits in the scene.",
+    "why": "Recommended a: the scene stays in view while you read.",
+    "options": [
+        {"design": "3d-phone-a", "gain": "The scene stays in view while you read.",
+         "how": "Tap an item; its detail opens below the scene.", "key": "a", "label": "Panel under the scene",
+         "lose": "You scroll to reach the detail."},
+        {"design": "3d-phone-b", "gain": "The detail shows at once, with no scroll.",
+         "how": "Tap an item; its detail slides up over the scene.", "key": "b", "label": "Panel over the scene",
+         "lose": "It covers the scene until you close it."},
+    ],
+    "designs": [
+        {"file": "docs/design/3d-browser-dummy/phone-a.html", "focus": "#pickview", "label": "a: under the scene",
+         "slug": "3d-phone-a"},
+        {"file": "docs/design/3d-browser-dummy/phone-b.html", "focus": "#pickview", "label": "b: over the scene",
+         "slug": "3d-phone-b"},
+    ],
+    "pick": "a", "rank": 4,
+}
+MOCKS_292 = {"3d-phone-a": phone("Panel under the scene", "scene-a"), "3d-phone-b": phone("Panel over the scene", "scene-b")}
+GOOD_MOCKS = {"good-a": phone("Panel under", "panel-under"), "good-b": phone("Panel over", "panel-over")}
+
+
+def good_item(n=301, doc_id="pick-the-panel"):
+    """A two-option decision, each focus found in its own mockup: no fault, so no hold."""
+    return {
+        "id": doc_id, "n": n, "kind": "decision", "status": "open", "title": "Which panel position reads better?",
+        "short": "Panel position", "context": "Two mockups of the same detail panel, one under the scene, one over it.",
+        "why": "Both positions are drawn at phone width.",
+        "options": [
+            {"design": "good-a", "gain": "The scene stays in view.", "how": "The panel sits under the scene.", "key": "a",
+             "label": "Panel under", "lose": "You scroll to reach it."},
+            {"design": "good-b", "gain": "The detail shows at once.", "how": "The panel covers the scene.", "key": "b",
+             "label": "Panel over", "lose": "It hides the scene."},
+        ],
+        "designs": [{"focus": "#panel-under", "label": "under", "slug": "good-a"},
+                    {"focus": "#panel-over", "label": "over", "slug": "good-b"}],
+    }
+
+
+def picture_item(n, doc_id, **changes):
+    """Item 292's bad picture under another id and number: the same shape, for the cases that must not hold it."""
+    return dict(ITEM_292, id=doc_id, n=n, **changes)
+
+
+def page_with_mockups(mockups, page=PAGE):
+    """The page with its designData block holding `mockups` (slug to HTML). A `<` is escaped, as the page's own block is."""
+    body = json.dumps(mockups, sort_keys=True).replace("<", "\\u003c")
+    return DESIGN.sub(lambda m: m.group(1) + body + m.group(3), page, count=1)
+
+
+def held_lines(r):
+    """(n, sentence) of each `held item <n>: <sentence>` line the run printed. An --all line may carry an id before it."""
+    found = []
+    for line in verdict_lines(r):
+        hit = re.search(r"\bheld item (\d+): (.+)$", line)
+        if hit:
+            found.append((int(hit.group(1)), hit.group(2)))
+    return found
+
+
+_CHECKER = {}  # the probe's answer, once per run: None when the check can run here, else why it cannot
+
+
+def checker_problem():
+    """None when node, Playwright and Chromium run the page's check here, else why not. One probe per run: the checker loads
+    the real page with an item that holds no picture, so it reaches Chromium and nothing else."""
+    if "why" not in _CHECKER:
+        _CHECKER["why"] = probe_checker()
+    return _CHECKER["why"]
+
+
+def probe_checker():
+    if not shutil.which("node"):
+        return "node is not on PATH"
+    item = write_text(os.path.join(RUN_FOLDER, "probe-item.json"), json.dumps(
+        {"id": "probe", "n": 1, "kind": "decision", "status": "open", "title": "Probe",
+         "options": [{"key": "a", "label": "A", "gain": "g", "lose": "l", "how": "h"}]}))
+    try:
+        run = subprocess.run(["node", CHECKER, "--page", PAGE_FILE, "--item", item], capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return "the checker did not answer in 120 s"
+    if run.returncode == 0:
+        return None
+    lines = (run.stderr + run.stdout).strip().splitlines()
+    return lines[-1] if lines else "the checker exited %d" % run.returncode
+
+
+class Copied(Base):
+    """The scope assert of the picture cases: a file is in the copy before a case reads what the check said about it."""
+
+    def assertCopied(self, r, out, *rels):
+        """Scope before subject: each file is in the copy, so a held line is the check's word on a doc that was exported."""
+        for rel in rels:
+            self.assertTrue(os.path.isfile(os.path.join(out, *rel.split("/"))),
+                            "%s is not in the copy. Output:\n%s" % (rel, shown(r)))
+
+
+class PictureChecks(Copied):
+    """A case that runs the page's check. Where node, Playwright or Chromium is absent it skips; in CI it fails, so a
+    skip never passes the case unrun."""
+
+    def setUp(self):
+        super().setUp()
+        why = checker_problem()
+        if why is None:
+            return
+        if os.environ.get("CI"):
+            self.fail("the picture check cannot run in CI, so the case would pass unrun: " + why)
+        self.skipTest("the picture check cannot run here: " + why)
+
+
+class PictureHold(PictureChecks):
+    """Item 292 is held at export: the page's own sentence, exit 4, and the copy written as today."""
+
+    def test_item_292_is_held_at_export_and_its_copy_is_still_written(self):
+        fetched = self.fetch(items={ITEM_292["id"]: ITEM_292}, meta={"page": META})
+        page = write_text(os.path.join(self.tmp.name, "page-292.html"), page_with_mockups(MOCKS_292))
+        out = self.out()
+        r = self.export(fetched, out, page=page)
+        self.assertChanged(r, 4)  # scope: a refused export prints no verdict; the copy holds item 292, the meta doc, the page's two files
+        self.assertCopied(r, out, "items/3d-dummy-phone.json", "page/page.html", "page/designData.json")
+        self.assertEqual(held_lines(r), [(292, HELD_SENTENCE)],
+                         "item 292 is not held with the page's sentence. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 4, "a held item must exit 4. Output:\n" + shown(r))
+        lines = verdict_lines(r)
+        held_at = next(i for i, line in enumerate(lines) if line.startswith("held item 292: "))
+        self.assertLess(lines.index("changed 4"), held_at, "the held line comes before the verdict line. Output:\n" + shown(r))
+
+    def test_the_held_sentence_is_the_pages_own_not_a_copy_in_the_exporter(self):
+        """The sentence comes from the page's code, so an edited page changes the held line. A copy in the exporter does not."""
+        edited = page_with_mockups(MOCKS_292).replace(SENTENCE_TAIL, " shows nothing the focus names (edited page).", 1)
+        fetched = self.fetch(items={ITEM_292["id"]: ITEM_292}, meta={"page": META})
+        page = write_text(os.path.join(self.tmp.name, "page-edited.html"), edited)
+        out = self.out()
+        r = self.export(fetched, out, page=page)
+        self.assertChanged(r, 4)  # scope: the copy is written before the sentence is read
+        self.assertEqual(held_lines(r), [(292, "The picture of option A shows nothing the focus names (edited page).")],
+                         "the held line is not the edited page's own sentence. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 4, "a held item must exit 4. Output:\n" + shown(r))
+
+
+class PictureFalseAlarm(PictureChecks):
+    """A good item is not held. Each case also holds item 292 in the same fetch, so the scope assert fails on main."""
+
+    def test_a_good_item_beside_item_292_is_not_held(self):
+        good = good_item()
+        fetched = self.fetch(items={ITEM_292["id"]: ITEM_292, good["id"]: good}, meta={"page": META})
+        page = write_text(os.path.join(self.tmp.name, "page-pair.html"), page_with_mockups({**MOCKS_292, **GOOD_MOCKS}))
+        out = self.out()
+        r = self.export(fetched, out, page=page)
+        self.assertChanged(r, 5)  # scope: both items, the meta doc and the page's two files are in the copy
+        self.assertCopied(r, out, "items/pick-the-panel.json", "items/3d-dummy-phone.json")
+        held = held_lines(r)
+        self.assertIn((292, HELD_SENTENCE), held,
+                      "scope: item 292 is not held, so the check did not run on this export. Output:\n" + shown(r))
+        self.assertEqual([n for n, _ in held if n != 292], [], "a good item was held beside item 292. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 4, "a held item must exit 4. Output:\n" + shown(r))
+
+    def test_a_good_item_alone_exports_as_today(self):
+        """Control for today's output: a good item and no held line, exit 0. It holds on main as well, so it guards the build."""
+        good = good_item()
+        fetched = self.fetch(items={good["id"]: good}, meta={"page": META})
+        page = write_text(os.path.join(self.tmp.name, "page-good.html"), page_with_mockups(GOOD_MOCKS))
+        out = self.out()
+        r = self.export(fetched, out, page=page)
+        self.assertChanged(r, 4)  # scope: the item, the meta doc and the page's two files are in the copy
+        self.assertCopied(r, out, "items/pick-the-panel.json")
+        self.assertEqual(held_lines(r), [], "a good item was held. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 0, "a good item alone must export with exit 0. Output:\n" + shown(r))
+
+    def test_an_answered_ruling_or_closed_item_beside_item_292_is_not_held(self):
+        items = {
+            ITEM_292["id"]: ITEM_292,
+            "answered-panel": picture_item(302, "answered-panel"),
+            "ruling-panel": picture_item(303, "ruling-panel", status="closed", arbiter=True),
+            "closed-panel": picture_item(304, "closed-panel", status="closed"),
+        }
+        answers = {"answered-panel": {"item": "answered-panel", "pick": "a", "note": "Synthetic answer"}}
+        fetched = self.fetch(items=items, answers=answers, meta={"page": META})
+        out = self.out()
+        r = self.export(fetched, out, page=write_text(os.path.join(self.tmp.name, "page-skips.html"), page_with_mockups(MOCKS_292)))
+        self.assertChanged(r, 8)  # scope: four items, the answer, the meta doc and the page's two files are in the copy
+        self.assertCopied(r, out, "items/answered-panel.json", "items/ruling-panel.json", "items/closed-panel.json")
+        held = held_lines(r)
+        self.assertIn((292, HELD_SENTENCE), held,
+                      "scope: item 292 is not held, so the check did not run on this export. Output:\n" + shown(r))
+        self.assertEqual([n for n, _ in held if n != 292], [],
+                         "an answered, ruling or closed item was held beside item 292. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 4, "a held item must exit 4. Output:\n" + shown(r))
+
+    def test_an_answered_ruling_or_closed_item_alone_is_not_held(self):
+        """Control for today's output: no open decision, so no check and no hold, exit 0. It holds on main as well."""
+        items = {
+            "answered-panel": picture_item(302, "answered-panel"),
+            "ruling-panel": picture_item(303, "ruling-panel", status="closed", arbiter=True),
+            "closed-panel": picture_item(304, "closed-panel", status="closed"),
+        }
+        answers = {"answered-panel": {"item": "answered-panel", "pick": "a", "note": "Synthetic answer"}}
+        fetched = self.fetch(items=items, answers=answers, meta={"page": META})
+        out = self.out()
+        r = self.export(fetched, out, page=write_text(os.path.join(self.tmp.name, "page-skips-alone.html"),
+                                                       page_with_mockups(MOCKS_292)))
+        self.assertChanged(r, 7)  # scope: three items, the answer, the meta doc and the page's two files are in the copy
+        self.assertCopied(r, out, "items/answered-panel.json", "items/ruling-panel.json", "items/closed-panel.json")
+        self.assertEqual(held_lines(r), [], "an answered, ruling or closed item was held. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 0, "no open decision must export with exit 0. Output:\n" + shown(r))
+
+
+class PictureHoldFullSize(PictureChecks):
+    """Full size: 120 plain items, 7 answers, 3 groups, 2 asks and the meta, with item 292 among them. Only 292 is held."""
+
+    def test_a_full_size_fetch_holds_only_item_292(self):
+        full = full_size()
+        items = dict(full["items"])
+        items[ITEM_292["id"]] = ITEM_292
+        fetched = self.fetch(items=items, answers=full["answers"], groups=full["groups"], asks=full["asks"], meta=full["meta"])
+        docs = len(items) + len(full["answers"]) + len(full["groups"]) + len(full["asks"]) + len(full["meta"])
+        page = write_text(os.path.join(self.tmp.name, "page-full.html"), page_with_mockups(MOCKS_292))
+        out = self.out()
+        r = self.export(fetched, out, page=page)
+        self.assertChanged(r, docs + 2)  # scope: every doc and the page's two files are in the copy
+        self.assertCopied(r, out, "items/3d-dummy-phone.json", "items/item-120.json")
+        held = held_lines(r)
+        self.assertIn((292, HELD_SENTENCE), held,
+                      "scope: item 292 is not held, so the check did not run on the full-size fetch. Output:\n" + shown(r))
+        self.assertEqual([n for n, _ in held if n != 292], [], "a plain item was held beside item 292. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 4, "a held item must exit 4. Output:\n" + shown(r))
+
+
+class PictureHoldAll(PictureChecks):
+    """--all: the waiting-page entry runs the same check, and its held line keeps the same sentence."""
+
+    def test_the_waiting_page_entry_of_all_holds_item_292(self):
+        root = os.path.join(self.tmp.name, "repo")
+        registry = {"kinds": {}, "artifacts": [{"id": "page01", "url": "https://claude.ai/artifact/page01",
+                                                "role": "waiting-page", "account": "work"}]}
+        write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps(registry))
+        folder = self.fetch(items={ITEM_292["id"]: ITEM_292}, meta={"page": META})
+        write_bytes(os.path.join(folder, "page.html"), page_with_mockups(MOCKS_292).encode("utf-8"))
+        fetched = os.path.join(self.tmp.name, "fetched-all")
+        os.makedirs(fetched)
+        os.rename(folder, os.path.join(fetched, "page01"))
+        worktree = self.out("worktree")
+        r = self.run_cmd("--all", root, "--fetched", fetched, "--worktree", worktree)
+        self.assertTrue(any("changed 4" in line for line in verdict_lines(r)),
+                        "the waiting-page entry did not export its four files. Output:\n" + shown(r))
+        self.assertTrue(os.path.isfile(os.path.join(worktree, "waiting", "items", "3d-dummy-phone.json")),
+                        "item 292 is not in the waiting copy. Output:\n" + shown(r))
+        self.assertEqual(held_lines(r), [(292, HELD_SENTENCE)],
+                         "--all did not hold item 292 with the page's sentence. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 4, "--all with a held item must exit 4. Output:\n" + shown(r))
+
+
+class PictureUnknown(Copied):
+    """The check cannot run: the copy is still written, one `checks unknown:` line says why, and the exit code is as without
+    checks. Not gated: this case runs with node absent on purpose."""
+
+    def test_without_node_on_the_path_the_checks_are_unknown_and_the_copy_is_written(self):
+        fetched = self.fetch(items={ITEM_292["id"]: ITEM_292}, meta={"page": META})
+        page = write_text(os.path.join(self.tmp.name, "page-no-node.html"), page_with_mockups(MOCKS_292))
+        out = self.out()
+        empty = os.path.join(self.tmp.name, "no-node")  # a PATH with no node in it, as the no-git case does for git
+        os.makedirs(empty)
+        r = self.run_cmd("--fetched", fetched, "--out", out, "--page", page,
+                         env=dict(os.environ, PATH=empty, PYTHONDONTWRITEBYTECODE="1"))
+        self.assertChanged(r, 4)  # scope: the copy is written with no check: item, meta doc, page's two files
+        self.assertCopied(r, out, "items/3d-dummy-phone.json", "page/page.html")
+        unknown = [line for line in verdict_lines(r) if line.startswith("checks unknown: ")]
+        self.assertEqual(len(unknown), 1, "no `checks unknown: <why>` line was printed. Output:\n" + shown(r))
+        others = [line for line in verdict_lines(r) if re.search(r"\bchecks?\b", line, re.I) and not line.startswith("checks unknown: ")]
+        self.assertEqual(others, [], "a check line other than `checks unknown:` was printed, such as a pass line. Output:\n" + shown(r))
+        self.assertEqual(held_lines(r), [], "an unknown check held an item. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 0, "an unknown check must exit as without checks, 0 here. Output:\n" + shown(r))
+
+
+class PictureNoItems(Copied):
+    """Empty state: no item, so no check and no hold. The copy holds the page's two files and nothing else. Not gated."""
+
+    def test_an_empty_items_fetch_with_the_292_page_holds_nothing(self):
+        fetched = self.fetch(items={}, meta={"page": META})
+        page = write_text(os.path.join(self.tmp.name, "page-empty.html"), page_with_mockups(MOCKS_292))
+        out = self.out()
+        r = self.export(fetched, out, page=page)
+        self.assertChanged(r, 3)  # scope: the meta doc and the page's two files are in the copy
+        self.assertCopied(r, out, "page/page.html", "page/designData.json")
+        self.assertEqual(held_lines(r), [], "an empty fetch held an item. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 0, "an empty fetch must exit 0. Output:\n" + shown(r))
 
 
 if __name__ == "__main__":
