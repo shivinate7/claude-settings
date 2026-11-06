@@ -3288,24 +3288,57 @@ def case_repeat_upgrade_stop_judges_nothing_already_there():
           inbox_line(cfg, sid, ITEM_ID_2))
 
 
-def case_repeat_model_error_fails_open_and_is_not_retried():
-    """A model error flags nothing, blocks nothing, and says in one systemMessage line that repeats
-    were not checked. The item counts as judged, so the next Stop makes no call."""
-    root = repeat_repo("repeat-error", step=True)
-    cfg, sid = new_cfg(), "repeat-error"
+def model_failure_retry_checks(label, first, reason):
+    """The steps both model-failure cases share. The first Stop's model call gives no usable verdict:
+    `first` is the stub option for it (error= or answer=), and `reason` is the text its note carries in
+    brackets. The note flags nothing and blocks nothing. The item stays unjudged, so the next Stop calls
+    the model for it again, and a good answer marks it."""
+    root = repeat_repo(label, step=True)
+    cfg, sid = new_cfg(), label
     capture(cfg, sid, MSG_ONE, cwd=root)
     add_item(cfg, sid)
-    p1, calls1 = stop(cfg, sid, root, error="timed out after 45 s")
-    check("error: one model call on the Stop", len(calls1) == 1, p1.desc())
+    p1, calls1 = stop(cfg, sid, root, **first)
+    check("%s: one model call on the first Stop" % label, len(calls1) == 1, p1.desc())
     out = guard_json(p1) or {}
     msg = str(out.get("systemMessage", ""))
-    check("error: one systemMessage line says repeats were not checked",
+    check("%s: one systemMessage line says repeats were not checked" % label,
           "Feedback guard: repeats not checked (" in msg and "\n" not in msg, p1.desc())
-    check("error: no block", not is_block(out), p1.desc())
-    check("error: the item is not marked", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE,
+    check("%s: the systemMessage names the cause (%s)" % (label, reason),
+          "repeats not checked (%s)." % reason in msg, msg)
+    check("%s: no block" % label, not is_block(out), p1.desc())
+    check("%s: the item is not marked" % label, inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE,
           inbox_line(cfg, sid, ITEM_ID))
+    state = turns_state(cfg, sid)
+    judged = state.get("judged") if isinstance(state, dict) else None
+    check("%s: the turn state holds a judged list" % label, isinstance(judged, list), state)
+    check("%s: the item id is not in the judged list" % label, ITEM_ID not in (judged or []), judged)
     p2, calls2 = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
-    check("error: the next Stop makes zero model calls", calls2 == [], len(calls2))
+    prompt = calls2[0]["prompt"] if len(calls2) == 1 else ""
+    check("%s: the next Stop calls the model once, for this item" % label,
+          len(calls2) == 1 and ITEM_ID in prompt, len(calls2))
+    check("%s: the next Stop marks the item" % label, inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + MARKED,
+          inbox_line(cfg, sid, ITEM_ID))
+
+
+def case_repeat_model_error_leaves_items_unjudged_and_retries():
+    """Owner ruling, waiting-page item 279, pick b, 2026-11-06 12:43 CST: "feedback_guard: on a model
+    error, leave items unjudged so they retry, never mark them judged."
+    Lane choice: "model error" covers any Stop where the model gave no usable verdict, an invoke_model
+    error or an off-shape answer (judge() returns why). Both leave the new items out of the turn
+    state's `judged`. An item that got a verdict is judged as today.
+    This case is an invoke_model error. The first Stop makes one call, flags nothing, blocks nothing
+    and says one systemMessage line. The item is not marked and not in `judged`. The next Stop calls
+    the model once for it, and a good answer marks it."""
+    model_failure_retry_checks("repeat-error", dict(error="timed out after 45 s"), "timed out after 45 s")
+
+
+def case_repeat_off_shape_answer_leaves_items_unjudged_and_retries():
+    """The lane choice and ruling of case_repeat_model_error_leaves_items_unjudged_and_retries apply
+    (owner, waiting-page item 279, pick b, 2026-11-06 12:43 CST). This case is an off-shape answer:
+    the model replies, but the answer's `repeats` is not a list (REPEAT_SHAPE), so judge() returns
+    why "odd answer". The same steps follow: one note, the item unmarked and not in `judged`, and the
+    next Stop judges it."""
+    model_failure_retry_checks("repeat-offshape", dict(answer=json.dumps({"repeats": "none"})), "odd answer")
 
 
 def case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once():
@@ -3759,7 +3792,8 @@ CASES = (
     case_repeat_judged_items_are_not_judged_again,
     case_repeat_removed_mark_is_not_flagged_again,
     case_repeat_upgrade_stop_judges_nothing_already_there,
-    case_repeat_model_error_fails_open_and_is_not_retried,
+    case_repeat_model_error_leaves_items_unjudged_and_retries,
+    case_repeat_off_shape_answer_leaves_items_unjudged_and_retries,
     case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once,
     case_repeat_backlog_debt_text_is_in_the_prompt,
     case_repeat_cost_one_call_one_grep_and_two_files,
