@@ -27303,8 +27303,8 @@ add("reviewer-brief-blind: refused: a Workflow agent() reviewer whose prompt hol
     script='const r = await agent("Do not skip /* the // check.\\nDone: BUILT c204a1f.\\nDeviations: none.", '
            "{agentType: 'reviewer', model: 'haiku'}); return r")
 # The role set is the reviewer and the term for an agent that argues back, plus any plugin prefix on the reviewer.
-rbb_refuse("reviewer-brief-blind: refused: a challenger spawn whose brief pastes a builder report",
-           "Argue the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", role="challenger", model="sonnet")
+rbb_refuse("reviewer-brief-blind: refused: a refuter spawn whose brief pastes a builder report",
+           "Argue the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", role="refuter", model="sonnet")
 rbb_refuse("reviewer-brief-blind: refused: a my-plugin:reviewer spawn whose brief pastes a builder report",
            "Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", role="my-plugin:reviewer", model="sonnet")
 
@@ -27330,6 +27330,9 @@ rbb_allow("reviewer-brief-blind: allowed: a builder spawn whose brief holds a re
 rbb_allow("reviewer-brief-blind: allowed: a findings line holding a lone quote and comment openers",
           "Round 2 of 3. Re-check the findings.\nFinding 1: hooks/guard.py:2454, don't skip /* the // check # now.",
           model="sonnet")
+# One report label at line start is not a pasted report. A guard that refuses at one label, not two, fails this case.
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with exactly one report label at line start",
+          "Check the floor fix.\nDone: when `verdict python3 hooks/test_guard.py` is green.\nFiles: hooks/guard.py.")
 # The empty state: a reviewer brief with no text holds no report, so it passes.
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with an empty prompt", "")
 add("reviewer-brief-blind: allowed: a Workflow agent() reviewer on Round 2 of 3 with a findings list",
