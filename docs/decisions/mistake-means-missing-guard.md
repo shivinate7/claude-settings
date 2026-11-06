@@ -18,9 +18,9 @@ More incidents, 2026-11-06, from the batch of PR #1034 (a batch of lanes), each 
 
 `lint/report_guard.py` refuses a report on a landing turn whose Deviations item admits a mistake you made and names no guard for it.
 
-- An admission is a clause with a first-person word (`I`, `my`) and a fault word. Clauses split at punctuation and at because, since, but, while and although.
-- The fault words: wrong, wrongly, mistake, mistaken, by accident, accidental, accidentally, broke, clobbered, overwrote, corrupted, misread, forgot, "trusted a stale", "trusted an old", "trusted an outdated" and "instead of checking". The list is closed. Words such as lost, wiped, deleted and skipped stay out: "I lost the race to another lane" and "I wiped the cache to reproduce it" are normal work.
-- A negator before the fault word in the same clause clears it: "I did not break anything" passes.
+- An admission is a clause with a first-person word (`I`, `my`) before a fault word. Clauses split at punctuation and at because, since, but, while and although. "The test was wrong so I re-pointed it" passes.
+- The fault words: wrong, wrongly, mistake, mistaken, by accident, accidental, accidentally, broke, clobbered, overwrote, misread, forgot, "trusted a stale", "trusted an old", "trusted an outdated" and "instead of checking". The list is closed. Words such as lost, wiped, deleted, skipped and corrupted stay out: "I lost the race to another lane" and "I wiped the cache to reproduce it" are normal work.
+- A negator clears the admission only when at most three words sit between it and the fault word. "Nothing I did broke the build" passes. "I did not run the check and broke the build" blocks.
 - Quoted and backticked text, fences and URLs are read as text, never as an admission. So a report can quote the owner's words.
 - A guard is named when the Deviations item holds `step:<slug>`, the word debt, or a sentence with a guard, check or hook word and a PR or commit ref. It may sit in any bullet of the item. This read keeps backticked text, so `` `step:<slug>` `` counts.
 - `step:<slug>` is checked for its form only. The check does not read the roadmap.

@@ -839,14 +839,18 @@ def departs_problem(text):
 
 
 # building-mistake-names-its-guard: a Deviations admission ("I broke ...") must name the guard that would
-# have stopped it. Quoted text, fences and URLs are blanked first so a report can quote the owner. A negator
-# before the fault word in the same clause clears it. `step:<slug>` is checked for form only.
+# have stopped it. Quoted text, fences and URLs are blanked first so a report can quote the owner. A clause
+# admits only when a first-person word comes before its fault word, so "The test was wrong so I re-pointed it"
+# passes. A negator clears it only when at most MISTAKE_NEGATOR_GAP words sit between it and the fault word,
+# so a negator that governs an earlier verb ("I did not run the check and broke it") does not.
+# `step:<slug>` is checked for form only.
 MISTAKE_FIRST_PERSON_RE = re.compile(r"\bI\b|\b[Mm]y\b")
 MISTAKE_FAULT_RE = re.compile(
     r"\b(?:wrong(?:ly)?|mistaken(?:ly)?|mistakes?|by accident|accidental(?:ly)?|broke|clobbered|overwrote|"
-    r"corrupted|misread|forgot|trusted (?:a stale|an old|an outdated)|"
+    r"misread|forgot|trusted (?:a stale|an old|an outdated)|"
     r"instead of checking)\b", re.I)
 MISTAKE_NEGATOR_RE = re.compile(r"\bnot\b|n't\b|\bnever\b|\bno\b|\bnothing\b", re.I)
+MISTAKE_NEGATOR_GAP = 3
 MISTAKE_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n")
 MISTAKE_CLAUSE_SPLIT_RE = re.compile(
     r"[,:;\u2014\u2013]|\s-{1,2}\s|\b(?:because|since|but|while|although)\b", re.I)
@@ -865,10 +869,12 @@ def _admitted_clause(deviations):
     plain = QUOTED_RE.sub(" ", MISTAKE_URL_RE.sub(" ", FENCE_RE.sub(" ", deviations)))
     for sentence in _sentences(plain):
         for clause in MISTAKE_CLAUSE_SPLIT_RE.split(sentence):
-            fault = MISTAKE_FAULT_RE.search(clause)
-            if (fault and MISTAKE_FIRST_PERSON_RE.search(clause)
-                    and not MISTAKE_NEGATOR_RE.search(clause[:fault.start()])):
-                return clause.strip()
+            for fault in MISTAKE_FAULT_RE.finditer(clause):
+                before = clause[:fault.start()]
+                # Split on whitespace only, so a contraction such as didn't stays one word.
+                near = " ".join(before.split()[-(MISTAKE_NEGATOR_GAP + 1):])
+                if MISTAKE_FIRST_PERSON_RE.search(before) and not MISTAKE_NEGATOR_RE.search(near):
+                    return clause.strip()
     return ""
 
 
