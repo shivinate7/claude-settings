@@ -2385,6 +2385,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     raise Stop(f"ci-job exited {c} on {short}, so the lint is unknown, not a pass. {LANE_LINT_REMEDY}")
 
 PROSE_JUDGE_MAX_CALLS = 3  # model calls one merge makes; each may run MODEL_TIMEOUT s with the lock held, so the count bounds that wait. A file past it reads UNKNOWN
+PROSE_JUDGE_MAX_LINES = 20  # report lines one merge prints for the prose judge; the rest are one count line
 
 def prose_judge_lines(wt, sha, base_ref, changed):
     """{path: {line: (text, [cite])}}: the governed prose lines the model judges, from the tree at `wt` (the head). A line that cites
@@ -2425,6 +2426,23 @@ def prose_judge_lines(wt, sha, base_ref, changed):
             out.setdefault(path, {})[number] = (rows[number - 1], cites)
     return out
 
+C0_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f]")  # C0 control characters but tab and newline: file text must not carry an escape sequence into a model prompt or a terminal
+
+def plain_text(text):
+    return C0_CONTROL.sub("", str(text))
+
+def read_backing(wt, backing):
+    """The text of backing file `backing` inside the tree at `wt`, or None when it is a symlink, resolves outside the tree, or cannot be read."""
+    full = os.path.join(wt, backing)
+    root = os.path.realpath(wt)
+    if os.path.islink(full) or os.path.commonpath([root, os.path.realpath(full)]) != root:
+        return None
+    try:
+        with open(full, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return None
+
 def prose_judge_prompt(wt, path, by_line):
     """The prompt for one prose file: each selected line numbered as in the file, with each cite as written and the text it points at."""
     import stale_cites
@@ -2439,47 +2457,77 @@ def prose_judge_prompt(wt, path, by_line):
         parts.append(f"Line {number}: {text}")
         for cite in cites:
             backing = stale_cites.backing_path(*stale_cites.cite_kind(cite))
-            try:
-                with open(os.path.join(wt, backing), encoding="utf-8", errors="replace") as f:
-                    shown = stale_cites.cited_excerpt(cite, f.read())
-            except (OSError, TypeError):
+            body = read_backing(wt, backing) if backing else None
+            shown = stale_cites.cited_excerpt(cite, body) if body is not None else None
+            if shown is None:
                 shown = "(the cited file cannot be read)"
             parts.append(f"  cite: ({cite})\n  cited text of {backing}:\n" + "\n".join("    " + r for r in shown.split("\n")))
-    return "\n".join(parts)
+    return plain_text("\n".join(parts))
 
-def prose_judge_report(wt, sha, base_ref, names, n):
-    """Report-only (outcomes-mechanize-rules): for each prose file with a selected line, one decision_watch.invoke_model call, looked up
-    at call time. -> the report lines, one per line the model calls stale or unbacked, and one per line it could not judge (UNKNOWN: a model
-    error, a timeout, a line the reply skipped, a file past PROSE_JUDGE_MAX_CALLS). Nothing here refuses a merge or writes a file."""
-    def row(path, number, word, why):
-        return f"merge: #{n} prose judge, {path}:{number} {word}: {' '.join(str(why).split())[:200]}"
+def prose_judge_row(n, path, number, word, why):
+    return plain_text(f"merge: #{n} prose judge, {path}:{number} {word}: {' '.join(str(why).split())[:200]}")
+
+def prose_judge_plan(wt, sha, base_ref, names, n):
+    """Under the merge lock: read the tree and build every prompt, because the worktree goes when the lock does. -> a list in report order, each
+    item a finished report line or a (path, lines, prompt) job for prose_judge_run, which calls the model once the lock is released.
+    A file past PROSE_JUDGE_MAX_CALLS, and a selection that failed, are UNKNOWN lines here."""
     try:
         if names is None:
             return [f"merge: #{n} prose judge UNKNOWN: the changed files could not be read, so no line was judged."]
-        import decision_watch
         picked = prose_judge_lines(wt, sha, base_ref, {x for x in names.split("\0") if x})
-        report = []
+        plan = []
         for calls, (path, by_line) in enumerate(sorted(picked.items())):
             if calls >= PROSE_JUDGE_MAX_CALLS:
-                report += [row(path, number, "UNKNOWN", "not sent, past the cap on model calls") for number in sorted(by_line)]
+                plan += [prose_judge_row(n, path, number, "UNKNOWN", "not sent, past the cap on model calls") for number in sorted(by_line)]
+            else:
+                plan.append((path, by_line, prose_judge_prompt(wt, path, by_line)))
+        return plan
+    except Exception as e:  # selection failed: unknown, and the merge has landed
+        return [f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]})."]
+
+def readable_verdicts(verdict):
+    """verdict["verdicts"] when every entry has an integer line and one of the three words, else None: the reply is then unread, never partly read."""
+    rows = verdict.get("verdicts") if isinstance(verdict, dict) else None
+    if not isinstance(rows, list):
+        return None
+    for e in rows:
+        if not (isinstance(e, dict) and type(e.get("line")) is int and e.get("verdict") in ("holds", "stale", "unbacked")):
+            return None
+    return rows
+
+def prose_judge_run(plan, n):
+    """Report-only (outcomes-mechanize-rules), after the lock is released: one decision_watch.invoke_model call per job in `plan`, looked up
+    at call time. -> the report lines, one per line the model calls stale or unbacked, and one per line it could not judge (UNKNOWN: a model
+    error, a timeout, an unreadable reply, a line the reply skipped, a file past PROSE_JUDGE_MAX_CALLS), at most PROSE_JUDGE_MAX_LINES, then
+    one count line. Nothing here refuses a merge or writes a file."""
+    report = []
+    try:
+        import decision_watch
+        for item in plan or []:
+            if isinstance(item, str):
+                report.append(item)
                 continue
+            path, by_line, prompt = item
             try:
-                verdict, error = decision_watch.invoke_model(prose_judge_prompt(wt, path, by_line), shape=decision_watch.LINE_VERDICTS)
+                verdict, error = decision_watch.invoke_model(prompt, shape=decision_watch.LINE_VERDICTS)
             except Exception as e:  # a model that cannot run is unknown, never a refusal
                 verdict, error = None, f"the model call raised {type(e).__name__}"
-            if verdict is None:
-                report += [row(path, number, "UNKNOWN", error or "the model gave no verdict") for number in sorted(by_line)]
+            entries = readable_verdicts(verdict) if verdict is not None else None
+            if entries is None:
+                report += [prose_judge_row(n, path, number, "UNKNOWN", error or "the model gave no verdict, or one this merge could not read") for number in sorted(by_line)]
                 continue
-            said = {e["line"]: e for e in verdict["verdicts"] if e["line"] in by_line}
+            said = {e["line"]: e for e in entries if e["line"] in by_line}
             for number in sorted(by_line):
                 e = said.get(number)
                 if e is None:
-                    report.append(row(path, number, "UNKNOWN", "the model gave no verdict for this line"))
+                    report.append(prose_judge_row(n, path, number, "UNKNOWN", "the model gave no verdict for this line"))
                 elif e["verdict"] != "holds":
-                    report.append(row(path, number, e["verdict"], e.get("why") or ""))
-        return report
-    except Exception as e:  # selection failed: unknown, and the merge has landed
-        return [f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]})."]
+                    report.append(prose_judge_row(n, path, number, e["verdict"], e.get("why") or ""))
+    except Exception as e:
+        report.append(f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]}).")
+    if len(report) > PROSE_JUDGE_MAX_LINES:
+        report[PROSE_JUDGE_MAX_LINES:] = [f"merge: #{n} prose judge: {len(report) - PROSE_JUDGE_MAX_LINES} more lines not shown"]
+    return report
 
 def ignore_checks(cfg):
     """merge.ignoreChecks -> {name: reason}. An entry without a name or a non-empty reason refuses the config."""
@@ -2633,6 +2681,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     token = lock.acquire(base, (WAITS * m["deadlineMinutes"] + 10) * 60)  # each wait at most once, ten minutes spare
     host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant); the TTL spare is for the checks waits
     tmp = wt = claim_sha = None
+    judge = None  # the prose judge's plan, built under the lock and run after it is released
     try:
         info = host.pr(n)
         refuse_bad_pr(info)
@@ -2800,9 +2849,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             say(f"merge: #{n} the rule-file check could not run: git diff failed. Read the PR's files yourself.")
         for x in rule_files or []:
             say(f"merge: #{n} changes {x}, a rule file every session loads.")
-        judged = prose_judge_report(wt, sha, base_ref, names if c == 0 else None, n)  # report-only: the merge has landed, whatever it says
-        if judged:
-            say(*judged)
+        judge = prose_judge_plan(wt, sha, base_ref, names if c == 0 else None, n)  # report-only: the merge has landed, whatever it says; the model calls wait for the lock's release
         ok = True
         try:
             ff_main(root, base, commit)
@@ -2814,11 +2861,15 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             cut_branch(root, branch, sha)
             if lanes:
                 cut_lanes(root, lanes, commit, host, base, {cfg["defaultBranch"], base, branch}, m.get("keepBranches", []), dropped)
-        return 0 if ok else 1  # the merge landed either way; a failed ff or afterMerge exits non-zero
+        code = 0 if ok else 1  # the merge landed either way; a failed ff or afterMerge exits non-zero
     finally:
         if wt:
             drop_worktree(root, tmp, wt)
         lock.release(base, token)
+    report = prose_judge_run(judge, n)  # each model call waits up to MODEL_TIMEOUT, so it runs with the lock released
+    if report:
+        say(*report)
+    return code
 
 def default_lock(root):
     """A Claude Code cloud session (CLAUDE_CODE_REMOTE=true) gets GitLock: its proxy refuses the REST writes GhLock makes (HTTP 403 on
