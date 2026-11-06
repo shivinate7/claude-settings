@@ -4,11 +4,11 @@
   "home": "step auto-mode-refusal-survey",
   "id": "refusal-scan-finish",
   "kind": "decision",
-  "lane": "",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB): runs the 12-agent scan of page 1 of all 360 sessions; routed 14:15 CST",
   "lastAnswer": {
-    "at": "2026-11-06T19:19:23.661Z",
+    "at": "2026-11-06T20:13:31.710Z",
     "choice": "a",
-    "note": "Owner: a, on the cost of one agent run. The real cost is about 1.5M tokens, so asked again 13:35 CST."
+    "note": "do"
   },
   "n": 287,
   "options": [
@@ -31,6 +31,7 @@
   "pick": "b",
   "rank": 4,
   "ref": "item 278; step auto-mode-refusal-survey",
+  "reply": "a: finish the scan (about 1.5M tokens). Sent to the coordinator at 14:15 CST. Closes when step auto-mode-refusal-survey records the full count.",
   "short": "Refusal scan: spend 1.5M tokens?",
   "status": "open",
   "title": "Finishing the refusal scan costs about 1.5M tokens. Still finish it?",

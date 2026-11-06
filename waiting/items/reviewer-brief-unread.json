@@ -1,6 +1,6 @@
 {
   "added": "2026-11-06T20:10:00Z",
-  "context": "Goal: a reviewer never sees the builder's report.\nProblem (risk): a workflow can build a reviewer's prompt from a variable, such as `${builderReport}`. The guard cannot read that prompt, so it cannot check it.\nBased on (code): hooks/guard.py already refuses an unread prompt for the Opus round marker, with the fix \"write it as a literal string\" (item 127).\nDeparts from: main, which has no reviewer prompt check \u2014 adds one, where an unread prompt either passes with a recorded gap, or is refused.\nMeanwhile: the lane builds a.",
+  "context": "Goal: a reviewer never sees the builder's report.\nProblem (risk): a workflow can build a reviewer's prompt from a variable, such as `${builderReport}`. The guard cannot read that prompt, so it cannot check it.\nBased on (code): hooks/guard.py already refuses an unread prompt for the Opus round marker, with the fix \"write it as a literal string\" (item 127).\nBased on (ruling): a repo changes to fit a shared tool, never the tool to fit a repo.\nDeparts from: main, which has no reviewer prompt check \u2014 adds one, where an unread prompt either passes with a recorded gap, or is refused.\nMeanwhile: the lane builds b, and changes workflow reviewer prompts to literal strings.",
   "holds": "How the guard treats a reviewer prompt it cannot read.",
   "home": "decision reviewer-brief-blind",
   "id": "reviewer-brief-unread",
@@ -9,22 +9,23 @@
   "n": 299,
   "options": [
     {
-      "gain": "Workflow review prompts that fill in findings keep working.",
+      "gain": "Workflow review prompts that fill in findings keep working as they are.",
       "how": "An unread reviewer prompt passes, and decision reviewer-brief-blind names the gap.",
       "key": "a",
       "label": "Let it through, record the gap",
-      "lose": "A builder's report filled in from a variable goes unchecked."
+      "lose": "A builder's report filled in from a variable goes unchecked. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
     },
     {
-      "gain": "No unread report reaches a reviewer.",
-      "how": "An unread reviewer prompt is refused, with the fix \"write it as a literal string\".",
+      "gain": "No unread report reaches a reviewer, and one rule covers both guard checks.",
+      "how": "An unread reviewer prompt is refused, with the fix \"write it as a literal string\". Workflows pass findings to a reviewer as a file it reads, not inside the prompt.",
       "key": "b",
-      "label": "Refuse it",
-      "lose": "Every templated reviewer prompt in a workflow is refused, including the common verify pattern."
+      "label": "Refuse it, workflows write literal prompts",
+      "lose": "Each workflow's templated reviewer prompt must be rewritten once, the common verify pattern included."
     }
   ],
   "owner": "lane reviewer-brief-blind (session_013NEJL3HcTDWvQyBwmisvYG)",
-  "pick": "a",
+  "pick": "b",
   "rank": 3,
   "ref": "lane reviewer-brief-blind; item 127",
   "short": "Unread reviewer prompt",

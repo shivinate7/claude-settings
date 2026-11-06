@@ -11,9 +11,9 @@
   "owner": "lane local-lane-start-no-click (session_013NEJL2TLonvddw6ByF5XGE)",
   "rank": 3,
   "ref": "step c107; lane local-lane-start-no-click (session_013NEJL2TLonvddw6ByF5XGE)",
-  "reply": "Probe 2 result (14:05 CST): D started with no card, cut from probe-c107b (last commit 854890577 matched). A start from a Remote Control turn was refused. Cleanup is done: throwaway branches went to archive/ on origin, and the probe-1 worktrees are removed. Sent to the c107 lane. This item now holds probe 3.",
+  "reply": "Done (14:12 CST). Probe 3: on a turn you did not type, a card showed and the start was refused: \"Start sessions only on the user's own words to you here\". So a no-card start works only on a turn you type. Sent to the c107 lane; it brings you a question on item 297.",
   "short": "Mac start-card probe 3",
-  "status": "open",
+  "status": "closed",
   "steps": [
     "Open a new Claude Code desktop chat on your Mac, in your local claude-settings folder (not over Remote Control).",
     "Paste the text below and press Enter.",

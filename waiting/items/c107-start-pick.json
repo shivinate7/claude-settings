@@ -39,7 +39,7 @@
   "pick": "a",
   "rank": 2,
   "ref": "step c107; lane local-lane-start-no-click (session_013NEJL2TLonvddw6ByF5XGE)",
-  "reply": "You are right: the options missed the plain fix. C showed a card because it used kind 'offer', which by design is a suggestion card you accept. A and B used kind 'user_asked', which starts at once, so the fix is to always use user_asked. The one open point: your probe ran on a turn you typed, so whether user_asked also starts with no card on a turn a message woke is unmeasured. Sent to the c107 lane at 14:03 CST to use user_asked for every start and test the woken-turn case. No question for you unless that test shows a card.",
+  "reply": "Update 14:13 CST: probe 3 showed that a start on a turn you did not type is refused, with a card. So the no-card start needs a turn you typed. The c107 lane brings you a new question here.",
   "short": "Mac lane start, no click",
   "status": "open",
   "title": "How should your Mac coordinator start lanes with no click?",
