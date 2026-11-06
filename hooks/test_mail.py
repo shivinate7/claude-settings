@@ -43,8 +43,10 @@ Pinned choices (each one a departure or an open point, not settled by the spec):
    interloper once before its push, then execs the real git. ReadShowFails, PushRefusedRetry,
    TakeBothFromOneTip and PromptEnv use it.
 8. Timeouts. Each git call of a turn start carries its own bound. The bounds of one moved turn sum to
-   10 s or less: fixed per-step bounds, the worst case where every step runs its full bound. A shared
-   deadline would also pass. The case reads no clock (P5).
+   10 s or less: fixed per-step bounds, the worst case where every step runs its full bound. The case
+   pins that shape. A shared-deadline build passes each call the time left, so its recorded bounds
+   shrink and sum past 10; that build needs this case re-pointed. A build that passes no timeout= fails
+   the no-None check. The case reads no clock (P5).
 9. A hang is simulated. Starts raises subprocess.TimeoutExpired for a named git subcommand, the exception
    a real bound raises, so no case waits out a bound.
 10. Cloud ids: CLAUDE_CODE_REMOTE_SESSION_ID cse_<x> is the address cloud/session_<x>. The older cases keep
