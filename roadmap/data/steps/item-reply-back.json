@@ -5,5 +5,11 @@
   "order": 103.3692,
   "why": "Today he must edit his old answer to answer back.",
   "note": "Owner on item 278, 12:58 CST Nov 6: \"there was no way to reply to ur response i had to just edit the question and my old response so that needs a fix too\". Asks have a reply box since #1248 (step ask-reply-back); items have none. Changes a screen, so a designer goes first. Pairs with step page-reply-uncollapse.",
-  "updatedAt": "2026-11-06T19:13:00Z"
+  "updatedAt": "2026-11-06T19:13:00Z",
+  "paused": {
+    "why": "Waits on step page-reply-uncollapse to merge (same file).",
+    "decides": "coordinator",
+    "at": "2026-11-06T14:45:00-06:00",
+    "by": "triage"
+  }
 }

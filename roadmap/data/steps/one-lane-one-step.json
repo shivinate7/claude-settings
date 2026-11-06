@@ -1,9 +1,15 @@
 {
- "title": "One lane, one topic: a coordinator starts a new lane for a new topic, and finished lanes get archived",
- "phase": "now",
- "status": "todo",
- "order": 498,
- "why": "Owner ask ask-mw19oqeg4w, Nov 3 16:36 CST: 'repo coordinators assigning totally different work to lane sessions that were on a different topic and then currently have nothing going on, rather than spawning a new lane. Coordinators are also weak on archiving their kids.' Owner correction, 16:40 CST (via coordinator): the unit is a topic, not a step: 'if a lane session was doing some icon work then it was not being talked to for a few hours a coordinator would then give that lane random work like say some bugfixes.'",
- "note": "Read on main da8d8073: decision session-tiers:61 gives the batch runner 'archiving finished lanes'; no rule says a lane session keeps to one topic, and no check finds an idle lane left unarchived. Change: session-tiers says a lane session holds one topic; follow-up steps on that topic may go to it, work on another topic starts a new lane. The coordinator's wake report lists idle lanes whose PR merged, and the batch runner archives them. Find first: how a guard on send_message could tell a topic (cs-step tag alone names a step), and whether any archive guard (lane-closes-after-records) blocks archives today. Port: yes, every repo. Ready.",
- "updatedAt": "2026-11-03T22:41:00Z"
+  "title": "One lane, one topic: a coordinator starts a new lane for a new topic, and finished lanes get archived",
+  "phase": "now",
+  "status": "todo",
+  "order": 498,
+  "why": "Owner ask ask-mw19oqeg4w, Nov 3 16:36 CST: 'repo coordinators assigning totally different work to lane sessions that were on a different topic and then currently have nothing going on, rather than spawning a new lane. Coordinators are also weak on archiving their kids.' Owner correction, 16:40 CST (via coordinator): the unit is a topic, not a step: 'if a lane session was doing some icon work then it was not being talked to for a few hours a coordinator would then give that lane random work like say some bugfixes.'",
+  "note": "Read on main da8d8073: decision session-tiers:61 gives the batch runner 'archiving finished lanes'; no rule says a lane session keeps to one topic, and no check finds an idle lane left unarchived. Change: session-tiers says a lane session holds one topic; follow-up steps on that topic may go to it, work on another topic starts a new lane. The coordinator's wake report lists idle lanes whose PR merged, and the batch runner archives them. Find first: how a guard on send_message could tell a topic (cs-step tag alone names a step), and whether any archive guard (lane-closes-after-records) blocks archives today. Port: yes, every repo. Ready.",
+  "updatedAt": "2026-11-03T22:41:00Z",
+  "paused": {
+    "why": "Waits on F1 #1312 to merge (it archives idle lanes).",
+    "decides": "coordinator",
+    "at": "2026-11-06T14:45:00-06:00",
+    "by": "triage"
+  }
 }

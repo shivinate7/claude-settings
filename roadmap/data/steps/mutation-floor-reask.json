@@ -1,0 +1,15 @@
+{
+  "title": "Re-ask whether a weak test-strength result blocks a merge, with logged catch rates",
+  "phase": "next",
+  "status": "todo",
+  "order": 103.37,
+  "why": "Owner pick 163 d (2026-11-05 07:41 CST): \"we also reopen this in a while after logging for a bit\".",
+  "note": "Report job merged 2026-11-06: #1262 (18c1e3ae7) and mutation-tests-for-imports #1268 (1c688aecd). Triage re-asks 163's blocking question (a floor) once batch reports hold catch rates from several batches. Item 163 closed 14:46 CST on those merges.",
+  "updatedAt": "2026-11-06T20:46:00Z",
+  "paused": {
+    "why": "Waits on test-strength reports from several batches; none exist yet.",
+    "decides": "triage",
+    "at": "2026-11-06T14:46:00-06:00",
+    "by": "triage"
+  }
+}

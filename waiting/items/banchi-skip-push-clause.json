@@ -4,7 +4,7 @@
   "home": "banchi .claude/settings.json; banchi CLAUDE.md (seven shell mistakes line)",
   "id": "banchi-skip-push-clause",
   "kind": "decision",
-  "lane": "coordinator: banchi-push-guard-copies lane archived; the coordinator confirms its PR merged (then this closes) or restarts it (triage audit 14:45 CST)",
+  "lane": null,
   "lastAnswer": {
     "at": "2026-11-05T14:42:38Z",
     "choice": "a",
@@ -42,9 +42,9 @@
   "owner": "lane banchi-push-guard-copies (session_013NEJKzacJzjSo9MfMWaHco); coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 2,
   "ref": "items 206, 207; claude-settings #1214; banchi 1e641524a, 6fa871c4b; banchi #1061",
-  "reply": "Your a is with lane banchi-push-guard-copies: it retires clause 6 and closes #1061. If auto mode still asks, type \"go\" in the lane (link above). This item closes when the lane's PR merges.",
+  "reply": "Done: banchi #1062 merged (ce3d814a1). #1061 closed unmerged, as you ruled. Closed 14:44 CST Nov 6.",
   "short": "banchi: retire push clause 6",
-  "status": "open",
+  "status": "closed",
   "title": "Retire banchi's own push clause (clause 6)?",
   "why": "Recommended: a. It reaches the goal you already ruled on; only the means changed."
 }

@@ -4,7 +4,7 @@
   "home": "home CLAUDE.md line 46",
   "id": "home-stop-list-ha-wait",
   "kind": "decision",
-  "lane": "coordinator: home-stop-list-ha-wait lane archived; the coordinator confirms its PR merged (then this closes) or restarts it (triage audit 14:45 CST)",
+  "lane": null,
   "lastAnswer": {
     "at": "2026-11-05T14:38:43Z",
     "choice": "b",
@@ -30,9 +30,9 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 3,
   "ref": "item 229 a; home #550 (head d9b06dd)",
-  "reply": "Your b is with lane home-stop-list-ha-wait: home CLAUDE.md's stop list gets \"or a wait or hold this file names\" back, so the wait before an HA restart stays. This item closes when that PR merges.",
+  "reply": "Done: home #554 merged (fdd8314b1). Closed 14:44 CST Nov 6.",
   "short": "home: stop list and HA wait",
-  "status": "open",
+  "status": "closed",
   "title": "home: after 229 a, the stop list leaves out the wait before an HA restart. Add it back?",
   "why": "Recommended: a. Line 11 stands on its own, and your ruling named this exact cut. Meanwhile #550 goes on in its batch."
 }

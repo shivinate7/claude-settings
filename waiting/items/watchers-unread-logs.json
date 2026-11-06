@@ -4,7 +4,7 @@
   "home": "claude-settings rule outcomes-mechanize-rules; docs/plans/align-watchers.md",
   "id": "watchers-unread-logs",
   "kind": "decision",
-  "lane": "coordinator: watchers-log-readers lane archived; the coordinator confirms its PR merged (then this closes) or restarts it (triage audit 14:45 CST)",
+  "lane": null,
   "lastAnswer": {
     "at": "2026-11-04T13:53:21Z",
     "choice": "b",
@@ -31,8 +31,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "item 180; Sonnet workflow align-watchers (3 mappers, a synthesis and a critic), 06:58 CST",
+  "reply": "Done: claude-settings #1239 merged (d466c5c12). Closed 14:44 CST Nov 6.",
   "short": "watchers: logs with no reader",
-  "status": "open",
+  "status": "closed",
   "title": "Should logs with no named reader be deleted now?",
   "why": "Recommended: a. No reader exists for the four, so they cost writes and give nothing."
 }

@@ -4,7 +4,7 @@
   "home": "q_max docs/decisions/d-296-observations-are-retired-never-edited-in-place.md",
   "id": "oq-observation-immutable",
   "kind": "decision",
-  "lane": "coordinator: qmax-saved-rate-rule lane archived; the coordinator confirms its PR merged (then this closes) or restarts it (triage audit 14:45 CST)",
+  "lane": null,
   "lastAnswer": {
     "at": "2026-11-04T12:45:08Z",
     "choice": "a",
@@ -38,8 +38,9 @@
   "pick": "a",
   "rank": 23,
   "ref": "deep audit 1102, q_max homes; coordinator message 2026-11-03 15:55 CST, oq-observation-immutable",
+  "reply": "Done: q_max #1025 merged (66d56d3dd) in batch #1035. The rule now lists the allowed edit sites, and a check holds it. That matches your pick a. Closed 14:44 CST Nov 6.",
   "short": "q_max: saved rate rule vs code",
-  "status": "open",
+  "status": "closed",
   "title": "q_max: the rule says a saved rate never changes, but 8 places change saved rows. Fix the rule, or the code?",
   "why": "Recommended: a. The rule becomes true, a new change is caught, and the one real loss, the old benchmark value, is kept, for the cost of two added columns."
 }

@@ -5,7 +5,7 @@
   "home": "test-practices-first-principles",
   "id": "mutation-ci-job",
   "kind": "decision",
-  "lane": "coordinator: lane mutation-ci-report (PR #1262) archived; re-ask after mutation-tests-for-imports merges (triage audit 14:45 CST)",
+  "lane": null,
   "lastAnswer": {
     "at": "2026-11-05T13:41:57.602Z",
     "choice": "d",
@@ -70,9 +70,9 @@
   "pick": "d",
   "rank": 2,
   "ref": "PRs #996, #1010, #1080 and banchi #1052; roadmap step test-practices-first-principles",
-  "reply": "Your pick d is routed to the coordinator for a lane: a report-only test-strength job on each batch, plus the known-bug replay. Your follow-up is filed on roadmap step test-practices-first-principles: once the job has logged results for a while, this question comes back, with the measured catch rates, to ask whether a weak result should block. This item closes when the lane merges.",
+  "reply": "Done: your pick d merged. #1262 (18c1e3ae7) adds the report-only test-strength job, and #1268 (1c688aecd) adds the import tests. You asked to reopen this after some logging, so the blocking question comes back on roadmap step mutation-floor-reask once several batches have reported catch rates. Closed 14:46 CST Nov 6.",
   "short": "test-strength CI job",
-  "status": "open",
+  "status": "closed",
   "title": "Should CI check test strength on each batch, and should a weak result block the merge?",
   "why": "Recommended: d. It shows weak tests on every batch without blocking merges, and the replay of past bugs shows the check itself works."
 }
