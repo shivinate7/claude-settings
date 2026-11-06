@@ -112,13 +112,13 @@ Nothing here is deleted before its owner question is ruled. Each delete names it
 
 - **`STOP seen` line in `shadow.log`.** `mods/decision-watch/hooks/register.mjs` line 81 writes it. Line 358
   counts it for `/dw`. It is the only live evidence that the mod fires, and the record says no live read
-  has happened. Delete it only after another fire check lands. Q5.
-- **`janitor-runs.jsonl`.** `janitor/sweep.py` line 2238 writes it. Its reader is unchecked. Q5.
-- **Loose-process tier in the hook run.** It reports only. The hook sends its output to DEVNULL (line 257).
-  So the run has no reader for it. Its scan cost is unchecked. Q4.
+  has happened. Not deleted: Q5 names a reader for it.
+- **`janitor-runs.jsonl`.** `janitor/sweep.py` line 2238 writes it. Not deleted: Q5 names a reader for it.
+- **Loose-process tier in the hook run.** The SessionEnd run skips it, because it has no reader there
+  (decision `the-janitor-is-one-machine-wide-sweep`).
 - **`lint/md_sweep.py` and `lint/ste_gate.py`.** Both are exit-0 stubs. Each stays until
   `lint/check_hook_stubs.py` allows its removal (checked).
-- **Stall watcher.** Q1. Not in this list until ruled.
+- **Stall watcher.** Kept (Q1a). Not a delete.
 
 ## 5. Lanes, smallest first
 
@@ -127,8 +127,8 @@ Nothing here is deleted before its owner question is ruled. Each delete names it
 2. **Cost tests for the cheap mechanisms.** One shared helper, `hooks/test_support/cost_probe.py`. Size S.
 3. **Stall defects.** Remove the temp files on every exit path. Dedupe the Stop message. Size S. The
    watcher stays until Q1 is ruled.
-4. **Log cull.** After Q5. Size S.
-5. **SessionEnd scope.** After Q4. Size M.
+4. **Log readers.** Name a reader for each log in its record (Q5). Size S.
+5. **SessionEnd scope.** Landed in PR #1240 (Q4). Size M.
 6. **Decision watch log.** Append-only. Any skip on a quiet turn uses the same protected-path set as
    `--emit-prompt`, so a protected change is still judged. Size M.
 7. **Agent-end reap.** Bound the delete child by time. One process scan per session end. Size M.
@@ -139,10 +139,10 @@ Lane 1 needs no answer. A lane that waits on a question says so in its report.
 
 ## 6. Owner questions
 
-**Status: partly decided.** Owner, 2026-11-06 12:19 CST: item 180, pick a (events only, with three named
-exceptions: the stall watcher, `ci_wake` and the daily job), and item 248, pick b (keep the six model-call
-hooks, state each one's cost, re-check on the triggers). These decide Q1a, Q1b, Q2, Q3 and the daily-timer
-half of Q4. The SessionEnd half of Q4, Q5 and Q6 stay open. Q7 (repo reaper) is decided by an earlier
+**Status: Q1 to Q5 and Q7 decided; Q6 open.** Owner, 2026-11-04 07:53 CST: item 250, pick a, and item
+249, pick b. Owner, 2026-11-06 12:19 CST: item 180, pick a (events only, with three named exceptions: the
+stall watcher, `ci_wake` and the daily job), and item 248, pick b (keep the six model-call hooks, state each
+one's cost, re-check on the triggers). Q6 is Cockpit item 304. Q7 (repo reaper) is decided by an earlier
 ruling, and the reaper is removed.
 
 **Q1a. Stall watcher. Decided:** keep it as a named exception, with its cost stated and a cost test
@@ -158,21 +158,19 @@ command hooks, each with its cost stated, and the move to a prompt hook is re-ch
 **Q3. `ci_wake`. Decided:** a standing exception, with its cost stated (item 180, pick a). Home: decision
 `ci-wait-reads-run-status`.
 
-**Q4. SessionEnd scope and the daily timer.** The daily timer is decided: a named exception, with its
-cost stated (item 180, pick a). Open: does the SessionEnd hook run stay machine-wide? The record
-says it sweeps one repository. The code also scans every process and lists simulators. Options:
-(a) one repository only. The machine-wide tiers run in the daily job only. Orphaned servers and booted
-simulators then stay until the next daily run. A sweep that runs less often means more
-`simulator-boot-cap` refusals, which are false alarms, not holes. (b) keep the hook run machine-wide.
-Recommendation: (a), because the record already says one repository.
+**Q4. SessionEnd scope and the daily timer. Decided.** The daily timer is a named exception, with its cost
+stated (item 180, pick a). The SessionEnd run: item 250, pick a (owner, 2026-11-04 07:53 CST), with the note
+"daily job needs to have parts enter the session end too many remnant processes linger too long". So more
+of the daily job runs at session end: this repository's orphaned listeners, dead-rooted servers anywhere,
+and the simulator and temp-folder tiers. Landed in PR #1240. Home: decision
+`the-janitor-is-one-machine-wide-sweep`.
 
-**Q5. Logs with no reader.** Options: (a) delete now the logs that have no reader: `janitor-runs.jsonl`.
-`hooks/daily_note.py` now reads the agent-end payload log and the launchd error log. The `STOP seen` line goes only after another fire check
-lands. (b) name a reader for each one. Recommendation: (a) for the logs with no reader. Keep `guard.log`,
-with a rotating cap.
+**Q5. Logs with no reader. Decided:** name a reader for each log (item 249, pick b, owner, 2026-11-04
+07:53 CST). No log is deleted for want of a reader.
 
-**Q6. Load definition. Low value.** Options: (a) one shared definition; (b) keep the two definitions, and
-one record that says why. Recommendation: (b). `sim-lease` already states its own definition.
+**Q6. Load definition. Open:** Cockpit item 304. Options: (a) one shared definition; (b) keep the two
+definitions, and one record that says why. Recommendation: (b). `sim-lease` already states its own
+definition.
 
 **Q7. Repo reaper. Decided and done.** The rule says the sweep never runs code a repository supplies.
 Decision uniform-over-variants (a shared tool never grows a per-repo exception; owner, 2026-10-27 12:51
