@@ -3,7 +3,7 @@
 Kind: build
 Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
-Status: draft. Q1 to Q3 and page item 153 are answered; Q4 (a timed check-in) is open.
+Status: draft. Q1 to Q3 and page item 153 are answered; Q4 (a timed check-in) is open with the owner.
 
 ## Ruling
 
@@ -31,7 +31,7 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
 
 | Mechanism | Harness | Direction | Wakes an idle session | Limit | Failure seen |
 |---|---|---|---|---|---|
-| `send_message` | cloud | session to session | yes | 64 KiB; peer guard | a failed send counts as not sent: `is_error` true, or toolUseResult `success` false for the local one (both measured 2026-11-06 13:04 CST, Claude Code 2.1.319) |
+| `send_message` | cloud | session to session | yes | 64 KiB; no peer guard (measured 2026-11-06 13:17 CST) | a failed send counts as not sent: `is_error` true, or toolUseResult `success` false for the local one (both measured 2026-11-06 13:04 CST, Claude Code 2.1.319) |
 | `SendMessage` | local, agents | session to session | yes | peer guard; desktop cap | judged by hooks/sendmessage_state.py, which can refuse news to a busy peer |
 | Page wake comment | all | owner to session | yes, every watcher | 4096 bytes per comment; a full thread gives no wake | fixed by PR #1301 (a full wake thread starts a new one), an open draft read on GitHub 2026-11-06 12:40 CST |
 | ArtifactData answers | all | owner and session | no, read at turn start | none known | none |
@@ -61,11 +61,13 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
 
 ## Reach between the cloud and the owner's computer (page item 153)
 
-Measured 2026-11-06 13:17 CST, Claude Code 2.1.319, this lane's own transcript: 7 cloud `send_message`
-deliveries arrived as `origin.kind` `task-notification` with no hop chain. The peer guard reads only
-`peer` turns with no sender task id. So the 10-hop cap does not apply between cloud sessions. It applies
-to `SendMessage` between sessions on one computer. Cloud to the owner's computer by `send_message` is
-refused with `elevated_session_untrusted_device` (PR #1051, plan for local-session reach).
+Measured 2026-11-06 13:17 CST, Claude Code 2.1.319, this lane's own transcript: the turns that carried
+cloud `send_message` deliveries (queued remote notifications) all had `origin.kind` `task-notification`
+and no hop chain. The only `peer` turns were subagent hand-backs, which carry a sender task id. The peer
+guard reads only `peer` turns with no sender task id. So the 10-hop cap does not apply between cloud
+sessions. Read from the Linux binary 2.1.319, unmeasured on the Mac: it applies to `SendMessage` between
+sessions on one computer. Cloud to the owner's computer by `send_message` was refused with
+`elevated_session_untrusted_device` (PR #1051, plan for local-session reach; decision auto-mode-owner-acts).
 
 Read from the binary, unmeasured live: an artifact republish wakes each session that watches it, and
 that wake is not a `peer` turn. A plain comment or an `ArtifactData` write wakes nothing. Whether a
@@ -102,9 +104,11 @@ makes, not to a build.
   (page item 281, relayed by triage 2026-11-06 13:13 CST). The owner also asked whether the limit can be set. It
   cannot: the desktop count reads a fixed constant, and both flag-override hooks in the public build return nothing
   (binary 2.1.319, read 2026-11-06 13:14 CST: `getEnvironmentOverrides(){return null}`, `readConfigOverrides(){return}`).
-- Q2, how a lost message is noticed: a cloud session that waits on a reply sets one `send_later` check-in,
-  the same shape as rule `git-ci-wait-checks-in`; a local session checks at its next turn start.
-  Coordinator pick, 2026-11-06 12:48 CST; it can be undone. Cost: one one-shot scheduled task per waiting
-  request; it starts no process and writes no file. Open: rule `outcomes-mechanize-rules` bars tracking on
-  a timer, and rule `git-ci-wait-checks-in` allows a timed check-in. The owner rules which governs.
+- Q2, how a lost message is noticed: a session that waits on a reply checks for it. Coordinator pick,
+  2026-11-06 12:48 CST; it can be undone. How it checks waits on Q4. Until then it checks at its next
+  turn start.
+- Q4, open with the owner (sent through triage 2026-11-06 13:22 CST): may a cloud session that waits on a
+  reply set one `send_later` check-in? Rule `outcomes-mechanize-rules` bars tracking on a timer, and rule
+  `git-ci-wait-checks-in` allows a timed check-in. Cost: one one-shot scheduled task per waiting request;
+  it starts no process and writes no file. Recommended: allow it.
 - Q3, scope: the debt fix (done, commit 7059961a) and build steps 1 and 2 only. A parser for the message format was dropped 2026-11-06 13:15 CST: with no new hook, nothing would call it (rule building-land-design-or-abandon). Coordinator pick, 2026-11-06 12:48 CST; it can be undone.
