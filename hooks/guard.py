@@ -2658,7 +2658,9 @@ def reviewer_brief_hit(tool: str, tool_input) -> str:
             if "agentType" in unseen or ("..." in unseen and "agentType" not in keys):
                 continue
             if brief_blind_role(keys.get("agentType")):
-                shape = BRIEF_UNREAD if prompt is None else brief_blind_shape(prompt)
+                shape = brief_blind_shape(prompt)
+                if not shape and (prompt is None or "\x00" in prompt):  # a template's `${...}` reads as \x00
+                    shape = BRIEF_UNREAD
                 if shape:
                     return shape
     return ""
