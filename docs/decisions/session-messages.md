@@ -71,4 +71,4 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
   (sent through triage 2026-11-06 12:50 CST).
 - Q2, how a lost message is noticed: a session that waits on a reply sets one `send_later` check-in,
   the same shape as rule `git-ci-wait-checks-in`. Coordinator pick, 2026-11-06 12:48 CST; it can be undone.
-- Q3, scope: build steps 1 to 4 only. Coordinator pick, 2026-11-06 12:48 CST; it can be undone.
+- Q3, scope: the debt fix (done, commit 7059961a) and build steps 1 to 3 only. Coordinator pick, 2026-11-06 12:48 CST; it can be undone.
