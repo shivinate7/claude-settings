@@ -23,7 +23,13 @@ def find_git_bash(nt=None, environ=None, isfile=os.path.isfile):
             candidate = os.path.join(base, "Git", "bin", "bash.exe")
             if isfile(candidate):
                 return candidate
-    # Git installed elsewhere: a PATH scan that skips System32, where the WSL launcher lives.
+    # Git installed elsewhere: bin\bash.exe beside the folder that holds git (Git\cmd\git.exe), then a PATH scan.
+    git = shutil.which("git", path=environ.get("PATH"))
+    if git:
+        candidate = os.path.join(os.path.dirname(os.path.dirname(git)), "bin", "bash.exe")
+        if isfile(candidate):
+            return candidate
+    # The PATH scan skips System32, where the WSL launcher lives.
     system32 = os.path.normcase(os.path.join(environ.get("SystemRoot", r"C:\Windows"), "System32"))
     for folder in environ.get("PATH", "").split(";"):  # Windows' PATH separator
         if not folder or os.path.normcase(folder).startswith(system32):

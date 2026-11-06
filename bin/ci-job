@@ -88,6 +88,11 @@ def shell_argv(shell, nt=None, environ=None):
     return [exe] + argv[1:] if os.path.isfile(exe) else None
 
 
+def slashed(path):
+    """A path as a bash script names it: Git Bash reads `C:/x/y` as a path and `C:\\x\\y` as a command name."""
+    return path.replace("\\", "/")
+
+
 def no_shell(name, nt=None):
     """The detail of a step whose shell is missing."""
     if os.name == "nt" if nt is None else nt:
@@ -280,7 +285,8 @@ def plan(step, pr, values, top):
             if env["ZIZMOR_PATHS"] is None:
                 return "unknown", "with: paths needs an expression this runner cannot read: %s" % step_with(step)["paths"], None, None, None
         # A missing run.sh of a local uses: must FAIL, as in CI; bash alone would exit 127 and read as a missing tool.
-        return "run", 'test -f "%s" || { echo "no run.sh at %s" >&2; exit 1; }\nbash "%s"\n' % (path, path, path), shell_argv(None), env, None
+        path = slashed(path)  # $BASH: the bash running this script, never a PATH lookup that may find the WSL launcher
+        return "run", 'test -f "%s" || { echo "no run.sh at %s" >&2; exit 1; }\n"$BASH" "%s"\n' % (path, path, path), shell_argv(None), env, None
     if action:
         if not pr:
             return "skipped", "a pull-request step: pass --base to run it", None, None, None
@@ -292,8 +298,8 @@ def plan(step, pr, values, top):
             path, looked = code_check(top, step)
             if not path:
                 return "unknown", "no code_check.py: looked for %s" % looked, None, None, None
-            return "run", 'python3 "%s" --base "%s"' % (path, values["base"]), shell_argv(None), {}, None
-        return "run", '"%s" "%s"' % (os.path.join(BIN, "ste-changed"), values["base"]), shell_argv(None), {}, None
+            return "run", 'python3 "%s" --base "%s"' % (slashed(path), values["base"]), shell_argv(None), {}, None
+        return "run", '"%s" "%s"' % (slashed(os.path.join(BIN, "ste-changed")), values["base"]), shell_argv(None), {}, None
     if step_key(step, "uses") is not None:
         return "not run locally", "an action (uses: %s); CI runs it" % step_key(step, "uses").split(" #")[0], None, None, None
     cond = condition(step_key(step, "if"), pr)

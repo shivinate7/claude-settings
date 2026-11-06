@@ -1296,7 +1296,34 @@ class WindowsShell(unittest.TestCase):
         self.assertEqual((state, detail), ("unknown", self.ci_job.no_shell("bash")))
         self.assertIn("Git Bash", self.ci_job.no_shell("bash", nt=True))
 
-    def test_off_windows_the_shell_is_unchanged(self):
+    def test_git_bash_beside_git_is_found(self):
+        git_cmd = os.path.join(self.root, "Git", "cmd")
+        git_bin = os.path.join(self.root, "Git", "bin")
+        os.makedirs(git_cmd)
+        os.makedirs(git_bin)
+        with open(os.path.join(git_cmd, "git"), "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(os.path.join(git_cmd, "git"), 0o755)
+        open(os.path.join(git_bin, "bash.exe"), "w").close()
+        environ = dict(self.environ, PATH=git_cmd)  # one folder: the host's which() splits PATH its own way
+        self.assertEqual(self.ci_job.find_git_bash(nt=True, environ=environ), os.path.join(git_bin, "bash.exe"))
+
+    def test_the_ste_lint_body_names_its_tool_with_forward_slashes(self):
+        self.ci_job.BIN = "C:\\cs\\bin"
+        state, body = self.ci_job.plan(step("ste", uses="./actions/ste-lint"), True, {"base": "origin/main"},
+                                       self.root)[:2]
+        self.assertEqual((state, body), ("run", '"C:/cs/bin/ste-changed" "origin/main"'))
+
+    def test_the_zizmor_body_runs_run_sh_in_the_bash_running_it(self):
+        os.makedirs(os.path.join(self.root, "actions", "zizmor"))
+        open(os.path.join(self.root, "actions", "zizmor", "run.sh"), "w").close()
+        from unittest import mock
+        with mock.patch.object(shutil, "which", lambda name, path=None: "/x/" + name):  # bash and pipx present
+            state, body = self.ci_job.plan(step("zizmor", uses="./actions/zizmor"), False, {}, self.root)[:2]
+        self.assertEqual(state, "run")
+        self.assertIn('\n"$BASH" "%s"\n' % os.path.join(self.root, "actions", "zizmor", "run.sh").replace("\\", "/"), body)
+
+    def test_off_windows_the_shell_is_path_bash(self):
         self.assertEqual(self.ci_job.shell_argv(None, nt=False), [shutil.which("bash"), "-e"])
         self.assertEqual(self.ci_job.shell_argv("python", nt=False), ["python3"])
 

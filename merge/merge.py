@@ -103,25 +103,15 @@ def resolve_program(name, env=None):
     On Windows CreateProcess never reads PATHEXT, so a bare `gh` misses `gh.cmd`: shutil.which
     covers that. For `bash` specifically, Windows also lists C:\\Windows\\System32 ahead of
     Git's own bin on PATH, and that folder holds the WSL launcher stub, not Git Bash (decision
-    bare-bash-on-windows-can-resolve-to-the-wsl-stub). So bash never resolves to anything under
-    System32: check %ProgramFiles%\\Git\\bin\\bash.exe (and the x86/W6432 copies) first, then a
-    PATH scan that skips System32. On POSIX this is plain shutil.which."""
+    bare-bash-on-windows-can-resolve-to-the-wsl-stub). So bash comes from hooks/git_bash.py, the
+    one home of that lookup. On POSIX this is plain shutil.which."""
     env = env or os.environ
     path = env.get("PATH")
     if name == "bash" and os.name == "nt":
-        for var in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
-            base = env.get(var)
-            if base:
-                candidate = os.path.join(base, "Git", "bin", "bash.exe")
-                if os.path.isfile(candidate):
-                    return candidate
-        system_root = os.path.normcase(os.path.join(env.get("SystemRoot", r"C:\Windows"), "System32"))
-        for folder in (path or "").split(os.pathsep):
-            if os.path.normcase(folder).startswith(system_root):
-                continue
-            candidate = os.path.join(folder, "bash.exe")
-            if os.path.isfile(candidate):
-                return candidate
+        from git_bash import find_git_bash  # hooks/git_bash.py, on sys.path from the top of this file
+        found = find_git_bash(nt=True, environ=env)
+        if found:
+            return found
     return shutil.which(name, path=path) or name
 
 # Set only inside `shared_deadline`, below. A fixed per-call SH_TIMEOUT would let a hung `gh`
