@@ -116,6 +116,17 @@ def read_bytes(path):
         return handle.read()
 
 
+def json_error(t, text):
+    """The (line, column) that json.loads reports for `text`. The expected position comes from the
+    stdlib of the Python that runs this file, so it holds on any version. A hand-counted position
+    breaks when a Python release changes the message or where it points."""
+    try:
+        json.loads(text)
+    except json.JSONDecodeError as error:
+        return error.lineno, error.colno
+    t.fail("scope: the text is valid JSON, so it has no error position")
+
+
 def edit_on_disk(t, path, old, new):
     """Apply an Edit to the file, as the Edit tool would have. The old text must occur once."""
     text = read_text(path)
@@ -248,9 +259,10 @@ class EditJson(unittest.TestCase):
         json.loads(read_text(path))
         old, new = '"b": 2', '"b": 2,'
         edit_on_disk(self, path, old, new)
+        line, column = json_error(self, read_text(path))
         rc, ctx = home.hook("Edit", {"file_path": path, "old_string": old, "new_string": new})
         assert_named(self, rc, ctx, "an Edit that adds a trailing comma", "state.json",
-                     line=3, column=9, home=home)
+                     line=line, column=column, home=home)
 
     def test_edit_on_a_file_already_broken_is_silent(self):
         home = Home()
@@ -265,9 +277,10 @@ class EditJson(unittest.TestCase):
             json.loads(read_text(path))
         rc, ctx = home.hook("Edit", {"file_path": path, "old_string": old, "new_string": new})
         assert_silent(self, ctx, "an Edit on a file that was broken before the call")
+        line, column = json_error(self, read_text(path))
         rc, ctx = home.write_hook(path, read_text(path))
         assert_named(self, rc, ctx, "the same break written in a Write", "state.json",
-                     line=2, column=10, home=home)
+                     line=line, column=column, home=home)
 
     def test_multiedit_that_breaks_json_names_the_line_and_column(self):
         home = Home()
@@ -277,9 +290,10 @@ class EditJson(unittest.TestCase):
                  {"old_string": '"b": 2', "new_string": '"b": 2,'}]
         for edit in edits:
             edit_on_disk(self, path, edit["old_string"], edit["new_string"])
+        line, column = json_error(self, read_text(path))
         rc, ctx = home.hook("MultiEdit", {"file_path": path, "edits": edits})
         assert_named(self, rc, ctx, "a MultiEdit that adds a trailing comma", "state.json",
-                     line=3, column=9, home=home)
+                     line=line, column=column, home=home)
 
 
 class WriteAndDeleted(unittest.TestCase):
@@ -290,9 +304,10 @@ class WriteAndDeleted(unittest.TestCase):
         path = os.path.join(home.work, "state.json")
         rc, ctx = home.write_hook(path, OK_JSON)
         assert_silent(self, ctx, "a Write of valid JSON")
+        line, column = json_error(self, '{"a": 1,}')
         rc, ctx = home.write_hook(path, '{"a": 1,}')
         assert_named(self, rc, ctx, "a Write of broken JSON", "state.json",
-                     line=1, column=8, home=home)
+                     line=line, column=column, home=home)
 
     @SHELL_ONLY
     def test_deleted_state_file_is_silent_and_a_broken_write_is_named(self):
@@ -304,9 +319,10 @@ class WriteAndDeleted(unittest.TestCase):
         self.assertFalse(os.path.exists(settings), "scope: the rm must delete the file")
         rc, ctx = home.hook("Bash", {"command": "rm -f " + shlex.quote(settings)})
         assert_silent(self, ctx, "a Bash rm of a state file that was already broken")
+        line, column = json_error(self, '{"a": 1,}')
         rc, ctx = home.write_hook(os.path.join(home.work, "other.json"), '{"a": 1,}')
         assert_named(self, rc, ctx, "a broken Write to another file", "other.json",
-                     line=1, column=8, home=home)
+                     line=line, column=column, home=home)
 
 
 class BashWrites(unittest.TestCase):
@@ -399,9 +415,10 @@ class ScannerTraps(unittest.TestCase):
         path = os.path.join(home.work, "body.json")
         rc, ctx = home.write_hook(path, JSON_TRAP_OK)
         assert_silent(self, ctx, "valid JSON that holds a fence and a comment-like string")
+        line, column = json_error(self, JSON_TRAP_BAD)
         rc, ctx = home.write_hook(path, JSON_TRAP_BAD)
         assert_named(self, rc, ctx, "the same JSON with a trailing comma", "body.json",
-                     line=4, column=29, home=home)
+                     line=line, column=column, home=home)
 
 
 class LostSection(unittest.TestCase):
@@ -463,8 +480,9 @@ class EmptyAndFullStates(unittest.TestCase):
 
     def test_empty_json_is_named_at_line_1_column_1(self):
         home = Home()
+        line, column = json_error(self, "")
         rc, ctx = home.write_hook(os.path.join(home.work, "empty.json"), "")
-        assert_named(self, rc, ctx, "an empty *.json", "empty.json", line=1, column=1, home=home)
+        assert_named(self, rc, ctx, "an empty *.json", "empty.json", line=line, column=column, home=home)
 
 
 class PreFilter(unittest.TestCase):
