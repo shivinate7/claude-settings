@@ -21,10 +21,11 @@ never reverts.
 - **Files it judges.**
   - Write, Edit, MultiEdit: the call's `file_path`, when it is a `*.json` or a `*.md` in the
     handoff folder.
-  - Bash, PowerShell: the command is split with `shlex`. A path counts when it is a state file
-    (the handoff folder, `settings*.json`, `roadmap/data/steps/*.json`), or a `*.json` in a write
-    position: a `sed -i` operand, a `>` or `>>` target, or a `tee` argument. So `cat bad.json`
-    says nothing.
+  - Bash, PowerShell: the command is split with `shlex`. A path counts only in a write position:
+    a `sed -i` operand, a `>` or `>>` target, or a `tee` argument. It must be a state file (the
+    handoff folder, `settings*.json`, `roadmap/data/steps/*.json`) or a `*.json`. So `cat` of a
+    broken file says nothing, even for a state file. A read changes nothing, and an alarm on each
+    read would repeat until the file is fixed.
   - The handoff folder comes from `precompact_handoff.handoff_path`, under `CLAUDE_CONFIG_DIR`,
     with either slash.
 - **Faults.**
@@ -34,12 +35,17 @@ never reverts.
     parser the Stop check reads, with no second copy and no turn-state write.
   - Other handoff `.md`: a fence left open, by the rule of `feedback_guard.unfenced`: backticks
     or tildes, an info string allowed, at most three spaces of indent. That loop moves into one
-    helper that both call. The inbox keeps `parse()`'s rule, so this check and the Stop check
+    helper that both call. The indent cap is a parameter, so `unfenced()` and the grant-word
+    check keep their results. The inbox keeps `parse()`'s rule, so this check and the Stop check
     agree on the inbox.
   - Lost section, narrow: an Edit or MultiEdit on the inbox that lowers its count of block headers,
     and a handoff with no `Working premises` heading (`precompact_handoff._PREMISES_HEAD`).
 - **No false alarm mid-edit.** An Edit or MultiEdit rebuilds the before-state from `old_string`
-  and `new_string`. When the before-state was already broken, it says nothing. A missing file says
+  and `new_string`. Claude Code's PostToolUse input documents no before-content for Edit. When
+  `new_string` appears more than once in the file, or is empty, each place it could have been
+  gives one candidate. The check stays silent only when every candidate before-state was already
+  broken. It caps the work (places times file size) before it builds any candidate, and stays
+  silent past the cap. A missing file says
   nothing: a delete is not a break. A Write is judged as written.
 - **Cost.** A shell pre-filter, after the `ci_wake.py` pattern, greps only `tool_input`. It exits
   unless the input names `.json` or the handoff folder, so most calls start no Python. Per call:
