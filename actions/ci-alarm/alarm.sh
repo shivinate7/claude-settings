@@ -29,6 +29,14 @@ jq -e 'type == "array"' >/dev/null 2>&1 <<<"$runs" || unknown "gh run list gave 
 wf="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows" --paginate)" || unknown "gh api workflows failed"
 flows="$(jq -e -s 'if length > 0 and all(.[]; (.workflows | type) == "array") then [.[].workflows[]] else empty end' <<<"$wf" 2>/dev/null)" \
   || unknown "gh api workflows gave no list of workflows"
+# A full window (100 runs, the list's --limit) may have pushed a workflow's last run out of sight: an active workflow
+# file other than SELF with no run in a full window is unknown, since its last run could be red. Workflow level only.
+absent="$(jq -r --arg self "${SELF:-}" --argjson flows "$flows" 'if length < 100 then empty else
+  (map(.workflowDatabaseId) | unique) as $seen
+  | [$flows[] | select(.state == "active" and .name != $self and (.path | startswith(".github/workflows/"))
+      and (.id as $i | $seen | index($i) | not)) | .name] | join(", ") end' <<<"$runs")" \
+  || unknown "could not read the runs"
+[ -z "$absent" ] || unknown "the newest 100 runs hold no run of $absent, so its last run may be out of sight"
 # Latest completed run per workflow and event group, one JSON array.
 newest="$(jq -c --arg self "${SELF:-}" --slurpfile ev "$here/events.json" --argjson flows "$flows" '
   ([$flows[] | select(.state != "deleted" and (.path | startswith(".github/workflows/"))) | .id]) as $ids
