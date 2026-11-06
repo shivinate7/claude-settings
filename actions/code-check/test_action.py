@@ -681,6 +681,34 @@ class UnknownReadsRed(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
 
 
+class FetchAndSkipReads(unittest.TestCase):
+    """A fetch that fails is named in the unknown text. Base and main together fetch at most once. An empty base is a
+    skip, so its line does not say unknown."""
+
+    def test_failed_fetch_is_named_in_the_unknown_text(self):
+        # The fixture repo has no origin, so the fetch of the missing base fails.
+        rc, out = check({".code-check.json": config(["a.py"]), "a.py": GOOD_PY}, base="1" * 40, main="main")
+        self.assertTrue(any("unknown" in row.lower() and "fetch" in row.lower() and "fail" in row.lower()
+                            for row in out.splitlines()), out)
+
+    def test_base_and_main_both_missing_fetch_at_most_once(self):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as tmp:
+            trace = os.path.join(tmp, "trace")
+            rc, out = check({".code-check.json": config(["a.py"]), "a.py": GOOD_PY},
+                            base="1" * 40, main="2" * 40, GIT_TRACE=trace)
+            with open(trace, encoding="utf-8", errors="replace") as f:
+                lines = f.read().splitlines()
+        self.assertTrue(any("built-in: git rev-parse" in row for row in lines), "the trace has no git call:\n" + out)
+        fetches = [row for row in lines if "built-in: git fetch" in row]
+        self.assertLessEqual(len(fetches), 1, "\n".join(fetches) + "\n" + out)
+
+    def test_empty_base_skip_does_not_print_the_word_unknown(self):
+        rc, out = check({"c.py": GOOD_PY}, main="main", send_base=False)
+        self.assertTrue(one_line_with(out, "comment check: skipped"), out)
+        self.assertNotIn("unknown", out.lower(), out)
+        self.assertEqual(rc, 0, out)
+
+
 JS_BASE = "const a = 1;\n"
 JS_HIT = "const a = 1;\n// fixed in round 2\n"
 SWIFT_BASE = "let a = 1\n"
