@@ -3,7 +3,8 @@
 Run: python3 lint/test_settings_matcher.py. Without Workflow and start_session in the matcher,
 the guard's agent-model-floor never sees those calls.
 """
-import json, os, re, subprocess, sys, unittest
+import ast, json, os, re, shutil, subprocess, sys, unittest
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "settings.json")
 
@@ -34,6 +35,60 @@ def guard_matchers():
     entries = json.load(open(SETTINGS))["hooks"]["PreToolUse"]
     return [e["matcher"] for e in entries
             if any("guard.py" in h.get("command", "") for h in e["hooks"])]
+
+
+HOOKS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks")
+MCP_NAME = re.compile(r"mcp__[\w-]+")
+
+
+def guard_module_names(tree):
+    """The hooks/guard_*.py modules a parsed guard.py imports, read from its import statements at any depth."""
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and (node.module or "").startswith("guard_"):
+            found.add(node.module)
+        elif isinstance(node, ast.Import):
+            found.update(a.name for a in node.names if a.name.startswith("guard_"))
+    return sorted(found)
+
+
+def mcp_names_in(tree):
+    """The mcp__ names in a parsed module: each string literal that fully matches MCP_NAME. A comment, a name
+    inside longer text, and a multi-line string are not literals of that shape, so they are not names."""
+    return {node.value for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and MCP_NAME.fullmatch(node.value)}
+
+
+def guard_mcp_names(hooks_dir=None):
+    """The mcp__ names the guard emits: the literals of hooks/guard.py and of every hooks/guard_*.py module it
+    reaches through its imports, at any depth. Each module is read once from hooks_dir/<module>.py (the real
+    hooks folder when none is given), and a visited set ends an import cycle. Read from the code, so a name the
+    guard adds is judged with no edit to this file."""
+    hooks_dir = hooks_dir or HOOKS_DIR
+    names, seen, todo = set(), set(), ["guard"]
+    while todo:
+        module = todo.pop()
+        if module in seen:
+            continue
+        seen.add(module)
+        with open(os.path.join(hooks_dir, module + ".py"), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        names |= mcp_names_in(tree)
+        todo.extend(guard_module_names(tree))
+    return sorted(names)
+
+
+RUN_FOLDER = None
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+
+
+def tearDownModule():
+    if RUN_FOLDER and os.path.isdir(RUN_FOLDER):
+        shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
 class Matcher(unittest.TestCase):
@@ -79,6 +134,47 @@ class Matcher(unittest.TestCase):
         tool = "mcp__claude-code-remote__send_message"
         self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
                         "no guard matcher covers %s: %r" % (tool, matchers))
+
+    def test_guard_matcher_covers_every_mcp_tool_the_guard_names(self):
+        # The guard judges each mcp__ name it emits (guard.py and the guard_*.py modules it imports). A name that no
+        # guard matcher passes never reaches the guard, so its branch never runs.
+        with open(os.path.join(HOOKS_DIR, "guard.py"), encoding="utf-8") as f:
+            self.assertTrue(guard_module_names(ast.parse(f.read())),
+                            "guard.py imports no guard_* module: the scan would read none of them")
+        names = guard_mcp_names()
+        self.assertTrue(names, "the scan found no mcp__ name in the guard: it proves nothing")
+        matchers = guard_matchers()
+        self.assertTrue(matchers)
+        uncovered = [n for n in names if not any(re.fullmatch(m, n) for m in matchers)]
+        if uncovered:
+            self.fail("no guard matcher covers: %s" % ", ".join(uncovered))
+
+    def test_mcp_scan_reads_string_literals_only(self):
+        # Green on main by design: it tests the scan, not settings.json. A comment, a name inside longer text,
+        # a multi-line string and a lone quote in text are not names.
+        source = ('a = "mcp__fixture__tool"\n# mcp__fixture__comment\nb = "mcp__fixture__tool x"\n'
+                  'c = """\nmcp__fixture__block\n"""\nd = "don\'t mcp__fixture__quote"\n')
+        self.assertEqual(mcp_names_in(ast.parse(source)), {"mcp__fixture__tool"})
+        # A comment opener inside a string does not end the string: the literal after it is still read.
+        source = 'e = "#"; f = "mcp__fixture__after"\ng = "//"; h = "mcp__fixture__slashes"\n'
+        self.assertEqual(mcp_names_in(ast.parse(source)), {"mcp__fixture__after", "mcp__fixture__slashes"})
+        self.assertEqual(mcp_names_in(ast.parse("")), set())
+
+    def test_mcp_scan_follows_guard_imports_to_any_depth(self):
+        # guard.py imports guard_a, guard_a imports guard_zz, and guard_zz holds the name. guard_zz also imports
+        # guard_a, so the walk meets a cycle. The fixture folder stands in for hooks/, so the real modules decide nothing.
+        folder = os.path.join(RUN_FOLDER, "closure")
+        os.makedirs(folder, exist_ok=True)
+        files = {
+            "guard.py": "import guard_a\n",
+            "guard_a.py": "import guard_zz\n",
+            "guard_zz.py": 'import guard_a\nX = "mcp__github__x"\n',
+        }
+        for name, text in files.items():
+            with open(os.path.join(folder, name), "w", encoding="utf-8") as f:
+                f.write(text)
+        self.assertIn("mcp__github__x", guard_mcp_names(folder),
+                      "the scan does not reach guard_zz through guard_a: it reads only the direct imports")
 
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
