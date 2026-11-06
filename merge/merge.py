@@ -93,8 +93,10 @@ UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not r
 # The two role cites name no tier: a lane must not learn which tier may claim a merge.
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
-# The paths a review record's `--guard no` refuses: the rule dirs, then the tool and the settings. It reads RULE_DIRS, never a copy.
-GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "settings.json")
+# The paths a review record's `--guard no` refuses: the rule dirs, then the tool and the hooks, as folder prefixes. GUARD_FILES match a whole path.
+# It reads RULE_DIRS, never a copy.
+GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "githooks/")
+GUARD_FILES = ("settings.json",)
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 
@@ -783,7 +785,7 @@ class Host:
         return hits[0]
 
     def pr(self, n):
-        """-> {head, branch, base, state, mergeable, merge_state, draft, body, created}"""
+        """-> {head, branch, base, state, mergeable, merge_state, draft, body, created, changed_files}"""
         c, out = self.api(f"pulls/{self.pr_number(n)}")
         if c:
             raise Stop("reading the pull request failed: " + out)
@@ -792,7 +794,8 @@ class Host:
         return {"head": d["head"]["sha"], "branch": d["head"]["ref"], "base": d["base"]["ref"],
                 "state": "MERGED" if d.get("merged") else d["state"].upper(),
                 "mergeable": self.MERGEABLE[d.get("mergeable")], "merge_state": (d.get("mergeable_state") or "unknown").upper(),
-                "draft": bool(d.get("draft")), "body": d.get("body") or "", "created": d.get("created_at")}
+                "draft": bool(d.get("draft")), "body": d.get("body") or "", "created": d.get("created_at"),
+                "changed_files": d.get("changed_files")}  # only --review-record reads the count; pr_files stops on a missing one
 
     def review_comments(self, since):
         """-> {PR number: [review record bodies, oldest first]}: one list read of the repo's issue comments updated since `since`. A body counts only
@@ -804,14 +807,18 @@ class Host:
                 found.setdefault(int(m.group(1)), []).append(body)
         return found
 
-    def pr_files(self, n):
+    def pr_files(self, n, changed):
         """-> [(path, status)] of the pull request's changed files, one paged read of pulls/<n>/files. A rename also gives its old path as removed.
-        A failed read is a Stop, never an empty list, which would read as a clean diff."""
-        out = []
+        A failed read is a Stop, never an empty list, which would read as a clean diff. So is a list shorter than `changed`, the pull request's
+        changed_files count: GitHub lists at most 3000 files, and a diff not read in full cannot clear a guard."""
+        out, entries = [], 0
         for f in self.pages(f"pulls/{n}/files"):
+            entries += 1
             out.append((f["filename"], f["status"]))
             if f.get("previous_filename"):
                 out.append((f["previous_filename"], "removed"))
+        if not isinstance(changed, int) or entries < changed:
+            raise Stop(f"the pull request reports {changed} changed files, but {entries} were read (GitHub lists at most 3000), so the diff cannot be checked in full. " + REVIEW_CITE)
         return out
 
     def open_heads(self):
@@ -2930,8 +2937,8 @@ def write_merge_role(tier):
         raise Stop(f"cannot write the merge role to {path} {ROLE_CITE}: {e}.")
 
 def guard_hits(paths):
-    """-> the sorted paths that start with a GUARD_PATHS entry."""
-    return sorted(p for p in paths if p.startswith(GUARD_PATHS))
+    """-> the sorted paths that start with a GUARD_PATHS entry or equal a GUARD_FILES entry."""
+    return sorted(p for p in paths if p.startswith(GUARD_PATHS) or p in GUARD_FILES)
 
 def kind_misfits(kind, files):
     """-> the sorted paths that break the kind, over (path, status) pairs. docs-only: a path not ending .md. delete-only: a status other than removed."""
@@ -3028,7 +3035,7 @@ def main(argv, host=None, lock=None):
                 raise Stop(f"the pull request is {info['state']} " + REVIEW_CITE)
             if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
-            files = h.pr_files(a.pr)
+            files = h.pr_files(a.pr, info["changed_files"])
             hits = guard_hits([p for p, _ in files])
             if a.guard == "no" and hits:
                 raise Stop("Guard or check: the diff changes " + ", ".join(hits) + ", so --guard no is false. Write the record with --guard yes. " + REVIEW_CITE)
