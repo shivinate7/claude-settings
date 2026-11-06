@@ -1194,7 +1194,7 @@ def _shown_flags(hook, flags):
 def refusal_route_flags(hook):
     """The `route_flag` of each row in the session's refusals file that hooks/refusal_note.py wrote for a refusal a
     route row contradicts, once each per session. Read before pending_refusals settles the file. This is the
-    named reader of those flags (owner ruling, process-only): it shows them and never refuses on one."""
+    named reader of those flags, so a flag is never written unread: it shows them and never refuses on one."""
     try:
         sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
         import shared_names

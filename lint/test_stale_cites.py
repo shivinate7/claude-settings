@@ -2045,7 +2045,7 @@ class RouteClaimTests(StaleCase):
 
 
 class RouteClaimFixtureTests(unittest.TestCase):
-    """The labelled route claims, read at origin/main 7975f6d8 by the coordinator audit: one entry per labelled line.
+    """The labelled route claims, hand-judged stale or true, that measure the judge's false alarms: one entry per labelled line.
     A span is one entry at its first line, and `line` is a string, such as "16" or "16-20"."""
 
     def test_route_claims_fixture_has_the_audited_shape(self):
