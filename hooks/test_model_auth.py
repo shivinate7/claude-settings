@@ -32,7 +32,7 @@ names it, never a crash.
     text names an authentication failure ("401", "Invalid API key", "/login", "authentication"). "RUN": a start
     that failed, a timeout, or any other non-zero exit. "REPLY": a ReplyError, a call that ran and answered
     badly. An exit 0 with an envelope `is_error: true` is a failure, "AUTH" or "RUN" by the same text test,
-    never "REPLY". auth_check gives the setup-token fix for "AUTH" only. "RUN" names the error and says the
+    never "REPLY". An error with no kind reads as "RUN". auth_check gives the setup-token fix for "AUTH" only. "RUN" names the error and says the
     check failed. The R1 to R3 cases stub hooks/_nowindow.run, the one start a model call makes.
 - settings.json: one SessionStart command runs decision_watch.py --auth-check. No Stop command names
   decision_watch.
@@ -136,6 +136,15 @@ def invoke_ok(**kwargs):
     """One invoke_model call whose model start succeeds. Returns (verdict, error)."""
     with model_run(FakeRun()):
         return dw.invoke_model("judge this", **kwargs)
+
+
+class Kinded(str):
+    """An error text that carries `kind`, as invoke_model's error does (the classifier named at the top of the file)."""
+
+    def __new__(cls, text, kind):
+        error = super().__new__(cls, text)
+        error.kind = kind
+        return error
 
 
 class Probe:
@@ -269,7 +278,7 @@ def C3_no_token_and_probe_fails_warns_once_with_the_fix():
         fn, miss = interface("auth_check")
         if miss:
             return problems + miss
-        probe = Probe((None, FAIL_ERR))
+        probe = Probe((None, Kinded(FAIL_ERR, "AUTH")))  # an authentication failure: the fix applies
         text = fn(model_call=probe)
         path = os.path.join(cfg, HOOK_TOKEN_REL)
     if text == "":
@@ -688,6 +697,73 @@ def R3_exit_zero_with_is_error_counts_as_a_failure_in_the_streak():
                        "an is_error envelope came back as a ReplyError, a reply that ran: %r" % errors[-1:])
     problems += expect("Model calls: 3 failed in a row" in msg,
                        "three is_error envelopes: the Stop line is %r, want the three-failure line" % msg)
+    return problems
+
+
+@case
+def N1_an_error_with_no_kind_is_read_as_a_run_failure_with_no_setup_fix():
+    """N1. a caller's error with no kind (a plain str): auth_check says the check is unknown, names the error, and
+    gives no claude setup-token fix. The default is RUN, as record_model_outcome reads it"""
+    with scratch_config("n1") as cfg:
+        problems = scoped(cfg)
+        fn, miss = interface("auth_check")
+        if miss:
+            return problems + miss
+        probe = Probe((None, FAIL_ERR))  # a plain str: no kind attribute
+        text = fn(model_call=probe)
+    problems += expect(len(probe.calls) == 1, "a kindless error: the probe ran %d time(s), want 1" % len(probe.calls))
+    problems += expect("unknown" in text, "a kindless error: auth_check does not say the check is unknown: %r" % text)
+    problems += expect(STDERR in text, "a kindless error: the warning does not name the error: %r" % text)
+    problems += expect(SETUP not in text, "a kindless error gives the claude setup-token fix: %r" % text)
+    return problems
+
+
+@case
+def N2_a_failed_authentication_named_on_stdout_is_an_auth_failure():
+    """N2. exit 1, empty stderr, and an envelope on stdout that says the authentication failed: the error is AUTH,
+    and auth_check gives the claude setup-token fix"""
+    with scratch_config("n2") as cfg:
+        problems = scoped(cfg)
+        fn, miss = interface("auth_check")
+        if miss:
+            return problems + miss
+        refused = started(stdout=envelope("Failed to authenticate. API Error: 403 forbidden"), returncode=1)
+        with nowindow_run(NowindowRun(refused)):
+            text = fn()
+        with nowindow_run(NowindowRun(refused)):
+            _verdict, error = dw.invoke_model("judge this")
+    problems += expect(getattr(error, "kind", None) == "AUTH",
+                       "a failed authentication named on stdout has kind %r, want 'AUTH'"
+                       % getattr(error, "kind", None))
+    problems += expect(SETUP in text, "a failed authentication named on stdout gives no claude setup-token fix: %r"
+                       % text)
+    return problems
+
+
+@case
+def N3_an_is_error_envelope_with_the_token_leaves_no_token_in_the_error_or_the_streak():
+    """N3. exit 0 and an envelope with is_error true whose result carries the fake token: the token appears in no
+    returned error and in no file the streak writes"""
+    sid = "model-auth-n3"
+    with scratch_config("n3") as cfg:
+        token_file(cfg, FAKE_TOKEN + "\n")
+        problems = scoped(cfg) + takes_session_id_problems()
+        if problems:
+            return problems
+        leaky = envelope("API Error: 403 for " + FAKE_TOKEN, is_error=True)
+        errors = []
+        for _ in range(3):
+            with nowindow_run(NowindowRun(started(stdout=leaky))):
+                _verdict, error = dw.invoke_model("judge this", session_id=sid)
+            errors.append(error)
+        written = files_under(cfg, skip=(HOOK_TOKEN_REL,))
+        for rel in written:
+            with open(os.path.join(cfg, rel), "rb") as f:
+                if FAKE_TOKEN.encode("utf-8") in f.read():
+                    problems.append("the fake token is in the file %s" % rel)
+    problems += expect(not any(FAKE_TOKEN in str(e) for e in errors),
+                       "the fake token is in a returned error: %r" % (errors[-1:],))
+    problems += expect(bool(written), "control: the failed calls wrote no streak file to check")
     return problems
 
 
