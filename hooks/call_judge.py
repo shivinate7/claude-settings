@@ -382,7 +382,7 @@ def main():
         else:
             shown = json.dumps(args, ensure_ascii=False)
         tail, ids = "", []
-        if True:  # SEED S2: the past-ruling read runs for every call
+        if units:
             tail, ids, unreadable = past_ruling_context(payload, units)
             if unreadable:
                 return unvetted(payload, tool, args, rule, "; ".join(unreadable), units)

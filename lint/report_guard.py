@@ -1398,6 +1398,8 @@ def relay_reasons(after, text, cwd):
     try:
         asked = asked_text("\n\n".join(earlier_replies(since_last_message(after), text) + [text]))
         if asked:
+            import subprocess  # SEED S3a: one extra git start for every reply that asks
+            subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=cwd or ".", capture_output=True)
             try:
                 reasons.append(past_ruling_problem(asked, cwd))
             except Exception as exc:
