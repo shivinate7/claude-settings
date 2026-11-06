@@ -3621,6 +3621,7 @@ test("distinct pictures with a focus that matches show no alert; extra widths an
 const { id: _noId, ...DECISION_NO_ID } = DECISION;
 const warn = (page, key) => card(page, { id: key }).locator(".status.broken");
 
+// owner ruling, chat 13:44 CST Nov 6: the doc key is the item id
 test("an item stored with no id field shows no warning, sorts by n, and is answered under its database key", async (t) => {
   const rawItems = { low: { ...DECISION, id: "low", n: 20 }, k29: { ...DECISION_NO_ID, n: 29 }, high: { ...DECISION, id: "high", n: 40 } };
   const page = await open(t, { items: [], rawItems }); if (!page) return;

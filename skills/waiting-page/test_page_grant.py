@@ -230,6 +230,7 @@ class Counted(Base):
         r = self.check(self.repo(), self.pair(item_fields={"status": ABSENT}), pick="a")
         self.assertCounted(r, verdict("a"))
 
+    # owner ruling, chat 13:44 CST Nov 6: the doc key is the item id
     def test_item_with_no_id_field_counted_under_its_key(self):
         """The key of items/<key> is the item's id, so an item with no `id` field is counted under its key. Red on the old
         checker, which refuses it: `answer is for item ..., not ...`, because it reads item.id."""
