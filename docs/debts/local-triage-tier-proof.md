@@ -10,4 +10,4 @@
 
 ## Ruling
 
-Owner, 2026-11-05 07:44 CST (Cockpit item `local-triage-tier-word`, local triage tier word): no tier word, and not cloud-only. A tier-file fix is acceptable only when it works on both Mac and Windows. Until such a fix exists, build nothing; this debt holds the gap.
+Owner, 2026-11-06 15:45 CST (chat, page item 310 a): build the tier file now and merge it fast. This reverses item 213 (2026-11-05 07:44 CST, build nothing yet) within its condition: the fix works on Mac and Windows. Lane `local-triage-tier-build` builds it; decision `session-tiers` holds the design. This debt retires when that lane merges.
