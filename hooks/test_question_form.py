@@ -1468,6 +1468,21 @@ def fixture_page():
 
 
 @contextlib.contextmanager
+def fixture_seam():
+    """The fixture page for the cases of this run. main() holds it, so a module that imports this file gets
+    the real page, and the seam is restored when the run ends."""
+    saved = os.environ.get(ITEM_FIELDS_SEAM)
+    os.environ[ITEM_FIELDS_SEAM] = fixture_page()
+    try:
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop(ITEM_FIELDS_SEAM, None)
+        else:
+            os.environ[ITEM_FIELDS_SEAM] = saved
+
+
+@contextlib.contextmanager
 def real_page():
     """The real page's itemFields block, not the fixture, for the one case that reads it."""
     saved = os.environ.pop(ITEM_FIELDS_SEAM, None)
@@ -1476,9 +1491,6 @@ def real_page():
     finally:
         if saved is not None:
             os.environ[ITEM_FIELDS_SEAM] = saved
-
-
-os.environ[ITEM_FIELDS_SEAM] = fixture_page()
 
 
 def without_against(**over):
@@ -1563,6 +1575,11 @@ def case_page_draws_against():
 
 
 def main():
+    with fixture_seam():
+        return run_all()
+
+
+def run_all():
     for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
