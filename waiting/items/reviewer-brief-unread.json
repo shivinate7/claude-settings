@@ -5,7 +5,7 @@
   "home": "decision reviewer-brief-blind",
   "id": "reviewer-brief-unread",
   "kind": "decision",
-  "lane": "lane reviewer-brief-blind (session_013NEJL3HcTDWvQyBwmisvYG): builds a meanwhile",
+  "lane": "reviewer-brief-blind: the lane builds b meanwhile (session_013NEJL3HcTDWvQyBwmisvYG)",
   "n": 299,
   "options": [
     {
@@ -21,7 +21,7 @@
       "how": "An unread reviewer prompt is refused, with the fix \"write it as a literal string\". Workflows pass findings to a reviewer as a file it reads, not inside the prompt.",
       "key": "b",
       "label": "Refuse it, workflows write literal prompts",
-      "lose": "Each workflow's templated reviewer prompt must be rewritten once, the common verify pattern included."
+      "lose": "Each workflow's templated reviewer prompt must be rewritten once, the common verify pattern included. An ordinary fan-out that builds one reviewer prompt per file (\"Review \" plus the file name) is refused too. Such a workflow writes each item to a file and gives each reviewer a literal prompt that names the file (lane review round 2, 14:48 CST)."
     }
   ],
   "owner": "lane reviewer-brief-blind (session_013NEJL3HcTDWvQyBwmisvYG)",
