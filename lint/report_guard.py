@@ -1302,10 +1302,14 @@ HAND_OFF_NO_DATE = (
     "`(measured <date>, <check and result>)`, the date as YYYY-MM-DD.")
 
 
-def hand_off_lines(text):
+def hand_off_lines(text, anywhere=False):
     """Each Why yours line of the reply, without its quote marker, from the prose above the report and from the Input
-    Needed and Next items. The label counts at line start, behind a list marker or in bold."""
+    Needed and Next items. The label counts at line start, behind a list marker or in bold. With `anywhere`, from
+    every line of the reply: hooks/reply_judge.py reads the route a line cites, wherever the line sits, and the
+    hand-off guard's own call keeps the narrower reading."""
     lines = text.splitlines()
+    if anywhere:
+        return [line.strip() for line in (l.lstrip("> \t") for l in lines) if WHY_YOURS_FORM_RE.match(line.strip())]
     start = find_block_start(lines)
     above = lines if start is None else lines[:start]
     sources = above + input_needed_section(text).splitlines() + report_section(text, "Next").splitlines()
