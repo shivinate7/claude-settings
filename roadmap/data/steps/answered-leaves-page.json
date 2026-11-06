@@ -1,0 +1,10 @@
+{
+  "title": "An answered item leaves the questions area; its work lives in the Status tab",
+  "phase": "now",
+  "status": "todo",
+  "order": 5,
+  "owner": "lane (waiting-page skill)",
+  "why": "Owner, page note on item 316, 17:31 CST Nov 6: the questions area is open Q&A; work on the way or deferred belongs in the roadmap tab (a step) or a debt. Owner 17:02 CST: never seen this many answered questions on the page.",
+  "note": "Change waiting-page SKILL.md's busy-lane path (items stay open with `lane` or `waits` until done, lines 115-121 and 519): on routing, triage closes the item with `home` = the roadmap step or debt that carries the work, and the Status tab shows lane progress. Keep the receiver's withdraw path working (a withdrawn act re-opens the item). Meanwhile triage closes answered items into steps by hand (item 316 first). Measured 17:20 CST: 50 open or deferred answered items, 18 parked on lane `coordinator`.",
+  "updatedAt": "2026-11-06T23:33:00Z"
+}
