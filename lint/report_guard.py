@@ -534,7 +534,7 @@ def answered_problem(text):
 # A role missing from Done is excused when Next names it with every model it ran, since a spawn may
 # run on past the report. Next pairs are never mismatch-checked: a Next line can plan a later spawn on
 # another model. The excuse applies only when no builder, test-author or record-writer spawned, or
-# every BUILT Done item names a role and model, so a finished build is not excused by what Next names.
+# every BUILT Done item names some role and model. Any pair satisfies that gate, not the builder's own.
 NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
 SPAWN_TOOLS = {"Agent", "Task"}
 MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
