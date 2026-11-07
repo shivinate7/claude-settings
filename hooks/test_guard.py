@@ -9702,7 +9702,7 @@ def record_push_cost_case():
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal destination
-    (`origin main`, `HEAD:main`, `HEAD:<branch>`) adds no read. The conflict-markers push check
+    (`origin main`, `HEAD:main`, `HEAD:<branch>`) adds no read. The guard's push part for conflict markers
     (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
     order: the remote-tracking ref, then the upstream, then the default base (a three-dot range, so git
     finds the merge base itself). A push with a tracking ref reads one base. A push with no tracking ref
@@ -9770,9 +9770,9 @@ def record_push_cost_case():
                  "the transcript is read only at the record branch"
 
 
-# The conflict-markers commit check's own git spawns (rule conflict-markers, decision commit-refuses-conflict-markers;
+# The git spawns of the conflict-markers guard's commit part (rule conflict-markers, decision commit-refuses-conflict-markers;
 # guard.py 6c2 states the cost). The probe calls conflict_markers_hit alone, so the stand-in git logs that clause's
-# spawns and none of the records-page check's, which judges a commit too and would be counted by a whole-guard run.
+# spawns and none of the records-page guard's, which judges a commit too and would be counted by a whole-guard run.
 CMK_COST_PROBE = r'''
 import json, sys
 sys.path.insert(0, sys.argv[1])
@@ -9785,7 +9785,7 @@ CMK_NO_HIT = '["", ""]'   # the probe's printed decision for no hit: json of (""
 def _cmk_cost_check(tag, command, want):
     """The clause's own git spawns for `command` in a clean repo, by git subcommand, are `want`. The clean repo has
     no change and no untracked file. With `want` None only the scope is checked. The scope comes first: the probe
-    must run and judge the command as no hit, or the counts measure nothing. Why: the commit check's cost must not
+    must run and judge the command as no hit, or the counts measure nothing. Why: the cost of the guard's commit part must not
     grow without a test that notices it."""
     if os.name == "nt":
         return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
@@ -11127,7 +11127,7 @@ cmk_refuse("a staged triplet inside a multi-line template literal", VCS + " comm
 cmk_refuse("a staged triplet after a string holding comment openers", VCS + " commit -m x", CMK_OPEN)
 
 
-# The commit check reads the tree only when no earlier segment can change it. The push check judges the
+# The guard's commit part reads the tree only when no earlier segment can change it. The guard's push part judges the
 # commits a push would send, so each push case runs in a checkout whose remote is a bare repository
 # beside it: nothing leaves the machine.
 CMKPUSH = os.path.join(CMKROOT, "push")        # one checkout per push case, on branch `topic`
@@ -11254,7 +11254,7 @@ cmk_refuse("a sed that deletes the marker lines, then add, commit and push", CMK
            + VCS + " push", CMK_MERGE)
 cmk_refuse("a fix script, then add -A, commit and push", CMK_FIX_COMMIT + " && " + VCS + " push", CMK_AM)
 
-# The push check: a push is refused when a commit it would send adds a full triplet, whichever step made it.
+# The guard's push part: a push is refused when a commit it would send adds a full triplet, whichever step made it.
 cmk_refuse("a push of an unpushed commit that holds a triplet", VCS + " push", CMK_PU)
 cmk_refuse("a push of a commit made by rebase --continue that holds a triplet", VCS + " push", CMK_RB)
 cmk_refuse("a push of a commit made by merge --continue that holds a triplet", VCS + " push", CMK_MP)
@@ -15049,7 +15049,7 @@ def logged_builder_case(label):
 
 def refused_push_and_stop_case(label):
     """A builder's own commit holds a test change. Push and the first stop are each denied, and each denial
-    writes a builder-diff line. The commit check is left out: the row names push and stop only."""
+    writes a builder-diff line. The guard is left out: the row names push and stop only."""
     def case():
         out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label), os.path.join(DIFFROOT, label),
                                   "builder", "bld1", commit=False)
@@ -15065,7 +15065,7 @@ def refused_push_and_stop_case(label):
 
 # Allow: a merge result and a plain cherry-pick of a test-author commit are git's, not the builder's. A commit
 # the builder makes from a staged pick or a squash is its own (the rows below).
-# The commit check runs in the state the builder stops in; push and stop run after the commit.
+# The guard runs in the state the builder stops in; push and stop run after the commit.
 _bd_c1_pre = diff_repo("bd-c1-pre", _c1_mid_merge)
 sh("builder-refuse: a merge of main with a product-file conflict, while main changed a test file, is allowed at commit",
    COMMIT, "allow", cwd=_bd_c1_pre, agent_id="bld1", agent_type="builder")
