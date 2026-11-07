@@ -1,0 +1,11 @@
+{
+  "title": "The guard refuses a push that races a failed or pending commit",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.97,
+  "owner": "coordinator",
+  "why": "Coordinator, 13:53 CST Nov 7, from lane qmax-browser-main-red.",
+  "note": "",
+  "lane": "session_013NEJL4T4kkeqmaqeHiWDLJ",
+  "updatedAt": "2026-11-07T13:52:00-06:00"
+}
