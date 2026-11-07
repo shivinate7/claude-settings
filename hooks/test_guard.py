@@ -27174,6 +27174,18 @@ workflow_allow("role-model: Workflow agent() with options built by a call and no
 workflow_refuse("role-model: Workflow agent() with no second argument is denied as no-model, general-purpose",
                 "await agent('x');", rule=ROLE_RULE, carries=(WF_NO_MODEL_CARRIES, "model: 'sonnet'"), lacks=ROLE_LACKS,
                 env=WF_UNSET)
+# Owner item 107: an agent() call with one argument that is not a string or template literal may be an options object,
+# so the scan skips it, and a spread argument is skipped too.
+workflow_allow("role-model: Workflow agent() with one options-object variable naming builder on sonnet is skipped, and allowed",
+               "const spec = {prompt: 'x', agentType: 'builder', model: 'sonnet'};\nawait agent(spec);", env=WF_UNSET)
+workflow_allow("role-model: Workflow agent() with a spread argument is skipped, and allowed",
+               "const args = ['Fix it.', {agentType: 'builder', model: 'sonnet'}];\nawait agent(...args);", env=WF_UNSET)
+workflow_allow("role-model: Workflow agent() called inside a map over a variable is skipped, and allowed",
+               "const specs = [{agentType: 'builder', model: 'sonnet'}];\nspecs.map(s => agent(s));", env=WF_UNSET)
+# A literal second argument with no model is still judged: no model, and no default, denies as the builder's row.
+workflow_refuse("role-model: Workflow agent() with a variable prompt and a builder options literal is denied as no-model",
+                "const promptVar = 'Fix it.';\nawait agent(promptVar, {agentType: 'builder'});", rule=ROLE_RULE,
+                carries=(WF_NO_MODEL_CARRIES, "model: 'sonnet'"), lacks=ROLE_LACKS, env=WF_UNSET)
 # An above-row spawn first, then a no-model one. Under the general override the above-row refusal lifts, and the
 # no-model refusal holds (never_lifted), so the whole script is still denied.
 WF_ABOVE_THEN_NO_MODEL = (
