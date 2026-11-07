@@ -239,6 +239,9 @@ jobs:
       - name: Stop-hook route row falsifier suite
         run: python3 lint/test_report_guard_falsifier.py
 
+      - name: Stop-hook hand-off cite suite
+        run: python3 lint/test_report_guard_handoff.py
+
       - name: Stop-hook landing fixture suite
         run: python3 lint/test_report_guard_landing.py
 
@@ -960,6 +963,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_report_guard_falsifier.py
 
+      - name: Stop-hook hand-off cite suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_report_guard_handoff.py
+
       - name: Stop-hook landing fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_report_guard_landing.py
@@ -1592,6 +1599,10 @@ jobs:
       - name: Stop-hook route row falsifier suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python lint/test_report_guard_falsifier.py
+
+      - name: Stop-hook hand-off cite suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python lint/test_report_guard_handoff.py
 
       - name: Stop-hook landing fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
