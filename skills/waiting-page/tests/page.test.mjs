@@ -2982,16 +2982,23 @@ test("dismiss: Dismiss writes dismissed, an ISO time, on the root ask with updat
 test("dismiss: the thread stays in place as a Dismissed line with Restore and no Undo count, and focus moves to the line", async (t) => {
   const root = ASK_ANSWERED.id;
   const page = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  // Each focus move from the press on, so a miss names where focus went and what took it.
+  await page.evaluate(() => {
+    const name = (e) => (e ? (e.id ? "#" + e.id : e.tagName.toLowerCase()) + (e.isConnected ? "" : "(removed)") : "none");
+    window.__focusMoves = [];
+    for (const k of ["focusin", "focusout"]) document.addEventListener(k, (e) => window.__focusMoves.push(k.slice(5) + " " + name(e.target)), true);
+    for (const k of ["blur", "focus"]) window.addEventListener(k, (e) => { if (e.target === window) window.__focusMoves.push("window " + k); });
+  });
   await pressDismiss(page, root);
   await mustHave(page, `li#row-${root}.askc.dropped`, "the Dismissed line in the thread's place");
-  const line = await page.locator(`li#row-${root}`).evaluate((r, id) => { const sl = r.querySelector(":scope > p.sline:not(.dline)"); return { text: r.textContent.replace(/\s+/g, " ").trim(), tabindex: r.getAttribute("tabindex"), liRole: r.getAttribute("role"), lineRole: sl ? sl.getAttribute("role") : null, focused: document.activeElement === r, restore: !!r.querySelector("#res-" + id), undo: !!document.getElementById("dun-" + id) }; }, root);
+  const line = await page.locator(`li#row-${root}`).evaluate((r, id) => { const sl = r.querySelector(":scope > p.sline:not(.dline)"), a = document.activeElement; return { text: r.textContent.replace(/\s+/g, " ").trim(), tabindex: r.getAttribute("tabindex"), liRole: r.getAttribute("role"), lineRole: sl ? sl.getAttribute("role") : null, focused: a === r, at: a ? (a.id ? "#" + a.id : a.tagName.toLowerCase()) : "none", moves: (window.__focusMoves ? window.__focusMoves.join(", ") : "trace lost, the page reloaded") + " (document has focus: " + document.hasFocus() + ")", restore: !!r.querySelector("#res-" + id), undo: !!document.getElementById("dun-" + id) }; }, root);
   assert.ok(line.text.startsWith("Dismissed. " + ASK_ANSWERED.text), "the Dismissed line reads " + JSON.stringify(line.text));
   assert.equal(line.restore, true, "the Dismissed line has no Restore");
   assert.equal(line.undo, false, "the Dismissed line has an Undo count, not Restore alone");
   assert.equal(line.tabindex, "-1", "the Dismissed line has tabindex " + line.tabindex + ", not -1");
   assert.equal(line.lineRole, "status", "the Dismissed line's p.sline has role " + line.lineRole + ", not status");
   assert.equal(line.liRole, null, "the Dismissed line's li has role " + line.liRole + ", not none: its p.sline carries status");
-  assert.equal(line.focused, true, "focus is not on the Dismissed line");
+  assert.equal(line.focused, true, "focus is not on the Dismissed line: it is on " + line.at + "; focus moves: " + line.moves);
 });
 
 test("dismiss: a dismissed thread is hidden on load, and one with an answer later than its dismissed, or a reply waiting, shows again", async (t) => {
