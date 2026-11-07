@@ -4973,9 +4973,11 @@ class AgentEndFinishedTreeTests(_AgentEndFixture):
                        row_at=time.time() - 40 * 60)
 
     def test_a_failed_lock_reread_keeps_the_finished_tree_locked(self):
-        """A finished tree is unlocked only once the lock re-read confirms the lock (`unlock_for_removal`).
-        Every read after the reap's first one is refused here, so the unlock cannot confirm the lock: the
-        tree must stay, and the host lock must stay on it."""
+        """A finished host-locked tree stays kept, lock included, when the lock re-read gets no worktree list.
+        The test refuses every worktree-list read after the reap's first one (`agent_end_reap.reap_worktrees`).
+        The re-read in `sweep._lock_unlockable` is the only one after it, so it keeps the tree as
+        unreadable-subject, and `sweep.remove_worktree` returns before `git worktree unlock` runs. The tree
+        and the host lock must stay."""
         name = "treerl"
         ending = name + "end"
         own = self.add(ending)
