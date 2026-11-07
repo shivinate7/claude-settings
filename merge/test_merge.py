@@ -3335,19 +3335,24 @@ try:
             finish(listing([], "statuses", params, flags, jq, cap, {"state": "pending", "sha": sha, "total_count": 0}, refuse=refuse), 0, include)
         if sha not in set(S.get("shown", [])) | {feat_head()}:
             raise Refused(api_error(422, "No commit found for SHA: " + sha))
-        cf = S.get("checks_fail")  # {"n", "msg"}: the next n reads fail with msg, then it answers
-        if cf and cf["n"] > 0:
-            cf["n"] -= 1; S["checks_failed"] = S.get("checks_failed", 0) + 1; save()
-            raise Refused(cf["msg"])
+        # A round is page 1 of a check-runs read and page 1 of a status read, in either order. A later page (the reader asks for page=2 to see the
+        # empty page that ends it) serves the rows of the round that page 1 advanced to, and counts nothing: no failure, no refusal, no call.
         key = "n_runs" if m_run else "n_status"
-        i = S.get(key, 0); S[key] = i + 1
-        # broken_from counts rounds per route (a round is one check-run read and one status read, in either order), so the second route of a round is not cut off early
-        if S.get("checks_broken") and i >= S.get("broken_from", 0):
-            S[key] = i; save()
-            raise Refused(api_error(404, "Not Found"))  # a 4xx is a refusal, not a network error: the wait's read reverts (a 5xx is a network stop, see GhHalf)
-        if m_run:
-            S["checks_calls"] = S.get("checks_calls", 0) + 1
-        save()
+        if int(params.get("page", 1)) == 1:
+            cf = S.get("checks_fail")  # {"n", "msg"}: the next n rounds fail with msg, then it answers
+            if cf and cf["n"] > 0:
+                cf["n"] -= 1; S["checks_failed"] = S.get("checks_failed", 0) + 1; save()
+                raise Refused(cf["msg"])
+            i = S.get(key, 0); S[key] = i + 1
+            # broken_from counts rounds per route (a round is one check-run read and one status read, in either order), so the second route of a round is not cut off early
+            if S.get("checks_broken") and i >= S.get("broken_from", 0):
+                S[key] = i; save()
+                raise Refused(api_error(404, "Not Found"))  # a 4xx is a refusal, not a network error: the wait's read reverts (a 5xx is a network stop, see GhHalf)
+            if m_run:
+                S["checks_calls"] = S.get("checks_calls", 0) + 1
+            save()
+        else:
+            i = max(0, S.get(key, 0) - 1)
         raw = S.get("raw_checks")  # a round written as REST objects: {"check_runs": [...], "statuses": [...]}
         if raw:
             cur = raw[min(i, len(raw) - 1)]
@@ -12712,26 +12717,30 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(len(reads), 1)
         self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")
 
-    def test_one_ready_pr_with_a_record_costs_five_gh_calls(self):
-        # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection
+    def test_one_ready_pr_with_a_record_costs_eight_gh_calls(self):
+        # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection.
+        # A list read with items is two calls: its page, then the empty page that ends it (Host.pages). An empty first page ends it at once.
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "success")]},
                                           count_gh=True)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), r"CI green$")
-        self.assertEqual(host.gh_calls, ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status",
+        self.assertEqual(host.gh_calls, ["pulls", "pulls", "issues/comments", "issues/comments",
+                                         f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/check-runs",
+                                         f"commits/{REVIEW_HEAD}/status",
                                          "branches/main/protection/required_status_checks"])
 
     def test_a_draft_with_a_record_reads_no_head_checks(self):
         host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS))],
                                           count_gh=True)
         self.assertEqual(rc, 0, out + err)
-        self.assertEqual(host.gh_calls, ["pulls", "issues/comments"])
+        self.assertEqual(host.gh_calls, ["pulls", "pulls", "issues/comments", "issues/comments"])
 
     def test_a_ready_pr_with_no_record_reads_no_head_checks(self):
+        # an empty comments list is one empty page, so its read is one call
         host, rc, out, err = self.listing([batch_pull(8, REVIEW_HEAD)], [], count_gh=True)
         self.assertEqual(rc, 0, out + err)
-        self.assertEqual(host.gh_calls, ["pulls", "issues/comments"])
+        self.assertEqual(host.gh_calls, ["pulls", "pulls", "issues/comments"])
 
     def test_a_newest_record_with_the_attribution_footer_lists_as_done(self):
         # The older record is open, so the newer one must be the record the list reads. Its footer is trailing text: the line is done, not bad.
