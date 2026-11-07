@@ -1510,3 +1510,6 @@
 - page-note-idless-owner-saves: an item owner with no session id writes no `session`, so every cloud session saves its note (hooks/local_time.py `page_note`). Decision: owner-feedback-inbox.
 - page-session-regex-stops-at-dash: answerBody's `session_[A-Za-z0-9]+` stops at `-`, `_`, `.`, which override.SESSION_ID allows; ids seen are alphanumeric (hooks/local_time.py `page_note`). Decision: owner-feedback-inbox.
 - page-note-importerror-untested: no case covers the ImportError fallback in page_note (hooks/local_time.py `page_note`). Decision: owner-feedback-inbox.
+- page-note-unowned-saves-everywhere: an answer with no `session`, such as an item with no owner id or a park answer, is saved by every session that lists it (hooks/local_time.py `page_note`). Decision: owner-feedback-inbox.
+- page-note-query-shape-unmeasured: no live `query` response was captured, so the tests reuse the `list` frame (hooks/local_time.py `page_note`). Decision: owner-feedback-inbox.
+- page-note-clock-skew-window: an unparsable `at` saves inside the 10-second window, and a hook clock over 2 seconds ahead of the browser eats the margin over the 8-second Undo; unmeasured (hooks/local_time.py `page_note`). Decision: owner-feedback-inbox.

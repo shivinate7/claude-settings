@@ -16,7 +16,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   to `~/.claude/handoffs/<session_id>.inbox.md`. The file is outside git. A note typed on a
   waiting-page card is captured the same way. A PostToolUse
   hook on `ArtifactData` (`local_time.py --page-note`) acts on a `get`, `list` or `query` of `answers` only: the routing
-  session's read of `answers`, just before it routes, so an undone or withdrawn answer is never saved. Each answer
+  session's read of `answers`, just before it routes. The 10-second wait below keeps an undone answer out on a `list` or `query`. An answer withdrawn after a read already saved its note stays in the inbox. Each answer
   whose `data.note` is non-empty and not `accepted pick`, and that is not a parked-line act
   (`parked: true`, whose note is the entry's own text), is appended as one block. An answer whose `session` names another session than the reader's
   (env `CLAUDE_CODE_REMOTE_SESSION_ID`) is skipped; a session with no known own id also skips an answer that names a session. A `list` or `query` skips an

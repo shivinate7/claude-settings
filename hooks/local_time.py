@@ -31,7 +31,8 @@ clock; tests set it.
 
 `--page-note` is the waiting page's capture (PostToolUse, matcher ArtifactData). It acts only on a
 `get`, `list` or `query` of collection `answers`: the routing session's read of `answers`, just before it
-routes an answer, so an undone or withdrawn answer is never saved. A write or other tool saves nothing. It collects every string in `tool_response` (a str, content blocks, nested dicts). A
+routes an answer. The 10-second wait below keeps an undone answer out on a `list` or `query`; an answer
+withdrawn after a read already saved its note stays in the inbox. A write or other tool saves nothing. It collects every string in `tool_response` (a str, content blocks, nested dicts). A
 line that loads as a JSON object with a dict `data` is a document. Only one-line JSON documents in
 text are read: a dict-shaped or pretty-printed document saves nothing. A document with `data.parked` true (a
 parked-line act, `answers/park.<id>`) saves nothing: its note is the entry's own text, not the owner's words. An answer whose `data.session` is a string other than the reader's own id (env

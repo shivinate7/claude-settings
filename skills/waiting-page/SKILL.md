@@ -433,7 +433,7 @@ A save on the page sends a comment to Claude when the page allows it. The commen
 sessions that watch the page. Only the owning session reads, routes and closes its items, except that the writer closes an item on a park answer. On a `lane` item, the park branch has it tell first. It reads
 the answers at each wake, and at the start of each turn while it has an item open (the writer also
 while `meta/page.parked` is not empty): `ArtifactData list answers`. That read is the fallback when no wake comes. A peer session never
-relays an answer's text. It sends only the page URL, the item id and the act, and the receiver checks the answer itself (decision relayed-grant-read-from-page). The page-note capture saves no note from an answer whose `session` names another session; routing never reads `session`. An answer typed in the chat counts the same. A chat answer to an open item: the
+relays an answer's text. It sends only the page URL, the item id and the act, and the receiver checks the answer itself (decision relayed-grant-read-from-page). The page-note capture saves no note from an answer whose `session` names another session, or names any session when the reader's own id is unknown (a local session); routing never reads `session`. An answer typed in the chat counts the same. A chat answer to an open item: the
 writer adds the answer and its time to the item's `context`, and the writer closes it. Nothing is
 written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
 The writer also sets `lastAnswer` from the chat answer, with the time the owner gave it.
@@ -443,7 +443,8 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   `meta/page`, or from the `Watch:` line of the project-ops role handoff
   (`templates/role-handoff.md`), which names the watch for its successor. A session that inherits
   items also rewrites each item's `owner` to itself: `owner` is the session that reads the answer.
-  The page-note capture skips an inherited item's answer whose `session` names the old owner.
+  The page-note capture skips an inherited item's answer whose `session` names the old owner. In a session whose own id is
+  unknown (a local session), it skips each answer that names a session.
   So when it re-reads that answer, it jots the note to the feedback inbox by hand, like a chat message.
   It stops watching (`ArtifactComments` action `watch` with `on: false` and the page URL) when it
   has no open item and is not the writer, and at step 1 of a project-ops rotation.
@@ -469,7 +470,8 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 - A session that acts on an answer it did not route checks it first. Make the fetch folder with `python3 ~/.claude/skills/waiting-page/page_grant.py --new-fetch <scratch dir>`; it prints `fetch <dir>`. Fetch `answers/<id>` and `items/<id>` with `ArtifactData get` and `out_dir` set to that `<dir>`. Then run `python3 ~/.claude/skills/waiting-page/page_grant.py --root <repo> --page-url <url> --item <id> --fetched <dir> --pick <key>`. `--root` is a checkout of the page's repo, the one whose extras register the page (in a cloud session, `/home/user/claude-settings`). `--pick` is required and must equal the page's choice. The checker counts only a folder `--new-fetch` made, checked once, holding only those two files, none older than its stamp: an absent doc saves no file, so a reused folder could hold a withdrawn answer. A check uses the folder up as its first step, so every verdict uses it up: a retry fetches again into a new folder. Act only on `counted`, and only on the act the picked option's label names. Quote its page, item id, n, choice and `at`. Decision relayed-grant-read-from-page holds the relay rules.
 - A withdrawn answer is no answer. Read `answers/<id>` again just before you route it. If it is gone,
   the owner withdrew it: the item is still open, and nothing is ruled. That re-read also saves the
-  answer's note to your feedback inbox (`local_time.py --page-note`), so jot it like a chat message.
+  answer's note to your feedback inbox (`local_time.py --page-note`), so jot it like a chat message. When the capture
+  skips the answer (see the `session` sentence above), jot the note to the feedback inbox by hand, like a chat message.
 - `choice: "none"` asks for new options, unless its note gives a clear direction. It never picks an option.
   With a clear direction (see "A decision answer is clear only when"), it is a clear answer: the note becomes
   a step, routed by the busy-lane rule in "Route and close". The owner is not asked again. Otherwise treat it as step 3 of
@@ -483,7 +485,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   overturns that ruling. Take it as step 5 of "Route and close" says. On any other item it is not clear.
 - A decision answer is clear only when `skills/waiting-page/page_grant.py` would print `counted` for it (its docstring holds the rules). A task answer with `done: true` is a done mark: it takes steps 1 and 2, and it is never a grant, so the checker never counts it. The checker never counts `none`, so for `none` the routing session judges the note. A clear direction is a note that names an act a session can take with no further pick from the owner. A note that asks for other choices (cheaper, different, more) is not a direction: that `none` answer takes step 3.
 - Never create or change an answer in `answers/`. Only the owner's Send, Undo or Withdraw does. A session that does forges the
-  owner's grant. The one write a session makes there is the owning session's delete of its own item's answer, at the close "Route and close" names (on a lane item, after the done report). This sentence is the only guard: ArtifactData writes as the owner, so nothing can
+  owner's grant. A session makes two writes there, both deletes. The owning session deletes its own item's answer, at the close "Route and close" names (on a lane item, after the done report). The writer deletes a park answer (`answers/park.<id>`, or an item's answer with `act: "park"`), at the parked branch of "Route and close". This sentence is the only guard: ArtifactData writes as the owner, so nothing can
   tell a session's write from the owner's Send.
 - The writer also reads `asks/` at each wake and turn start (`ArtifactData list asks`), and routes each ask as "Route an ask" says.
 
