@@ -52,6 +52,8 @@
 - env-flat-crash-allows: a runtime crash in _env_flat allows the call (hooks/guard_env.py)
 - env-grep-long-abbrev-unpinned: grep long-option abbreviations of --regexp, --expression and --source, such as --regex=, are a safety hole with no pinning case (hooks/guard_env.py)
 - env-runner-child-command: `uv run --env-file=ENV env`, `docker run --env-file … env`, `npm exec -c env` print the env file through a runner of a child command (hooks/guard_env.py)
+- env-deno-run-stdin: `deno run --env-file=ENV -` reads a stdin script but allows, since `run` reads as the script word (hooks/guard_env.py _runner_inline_code)
+- env-value-flag-list-closed: a node value flag outside ENV_RUNNER_VALUE_FLAGS, such as `--title x -e y`, reads its value as the script and allows (hooks/guard_env.py)
 - env-split-string-wsl-only: only the WSL rule reads the env -S script; draft-pr, detached-launch, rm-var and impeccable-review rules do not (hooks/guard_core.py nested_script)
 - estimate-rule-may-be-checkable: the measured time table (debt `measured-time-table`) may let a check compare a stated time with a measured range (row style-no-unmeasured-estimate)
 - expired-delete-net-error-stops: the expired-lock delete in GhLock.acquire runs once, so a network error or rate limit stops the run with NetStop (merge/merge.py)

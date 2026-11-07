@@ -2,7 +2,7 @@
 
 ## The ruling
 
-No session reads, writes or commits the contents of an environment file. The user manages that file, and its values stay out of the session. The guard refuses a shell command that would do any of those, and a write tool call that names the file. The settings deny list refuses a Read or Edit call on it. A runner may load the file into its own process with its loader flag. The guard stops node, bun and deno given the file when they run inline code (`-e`, `-p`, `--eval`, `--print`, deno's `eval`) or a script read from stdin (`-`, a pipe, a heredoc, a here-string or a `<` file), since that code can print the variables. It does not read a script file: a script the session wrote can still print them.
+No session reads, writes or commits the contents of an environment file. The user manages that file, and its values stay out of the session. The guard refuses a shell command that would do any of those, and a write tool call that names the file. The settings deny list refuses a Read or Edit call on it. A runner may load the file into its own process with its loader flag. The guard stops node, bun and deno given the file when they run inline code (`-e`, `-p`, `--eval`, `--print`, deno's `eval`) or a script read from stdin (`-`, a pipe, a heredoc, a here-string or a `<` file), since that code can print the variables. It does not catch deno's `run -`, which reads stdin after the word `run`. It does not read a script file: a script the session wrote can still print them.
 
 One scope covers every form: a write tool call, a shell command and a Read call. A name is any basename that starts with `.env`, except `.env.example`. The guard's forms read one shared basename matcher in guard_env (`names_env_file`).
 
