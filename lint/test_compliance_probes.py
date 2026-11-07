@@ -2258,6 +2258,11 @@ class XcodebuildRuns(unittest.TestCase):
         self.assertEqual(len(runs), 1, runs)  # the scope first: one xcodebuild command
         self.assertIn("test", runs[0], runs)  # then its action: `$(` in single quotes is an argument, so `test` stays in the run
 
+    def test_a_lone_double_quote_in_an_argument_keeps_the_action_in_the_run(self):  # green control: passes on the old code too
+        runs = self.runs('xcodebuild -scheme App -derivedDataPath "x test')
+        self.assertEqual(len(runs), 1, runs)  # the scope first: one xcodebuild command
+        self.assertIn("test", runs[0], runs)  # then its action: an unclosed quote is text, and `test` stays in the run
+
 
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
