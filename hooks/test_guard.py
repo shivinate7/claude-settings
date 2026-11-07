@@ -11374,6 +11374,10 @@ RR_DELETE = os.path.join(RRROOT, "rr-delete")          # a commit that only dele
 RR_SIX = os.path.join(RRROOT, "rr-six")                # six test files added in one commit, none with a trailer
 RR_ROLLOLD = os.path.join(RRROOT, "rr-rollold")        # a test commit before the check landed, then the check lands
 RR_ROLLNEW = os.path.join(RRROOT, "rr-rollnew")        # the check is on main, then an untrailered test commit
+RR_NODEFAULT = os.path.join(RRROOT, "rr-nodefault")    # a trunk the default base cannot name, merged into a lane
+RR_TAG = os.path.join(RRROOT, "rr-tag")                # a tag on an untrailered test commit
+RR_NOLINT = os.path.join(RRROOT, "nolint")             # a copy of the hooks with no lint folder beside it
+RR_NOLINT_GUARD = os.path.join(RR_NOLINT, "guard.py")
 
 
 def _rr_run(where, *args):
@@ -11550,9 +11554,42 @@ def _build_red_run():
     must(RR_ROLLNEW, _rr_read(RR_ROLLNEW, "ls-tree", "--name-only", "HEAD~1", "--", RR_CHECK_REL).stdout.strip() != "",
          "the check present in the parent of the test commit")
 
+    # The default base is read from origin/HEAD, origin/main, origin/master, then main and master. Main is
+    # pushed, and then its refs are removed, so none resolves. The lane keeps origin/topic, and merges the
+    # trunk's untrailered test commit: the commit a default base would have excluded.
+    _cmk_pushed(RR_NODEFAULT, {"a.txt": "base\n"})
+    run(RR_NODEFAULT, "checkout", "-q", "-b", "trunk", "main")
+    commit(RR_NODEFAULT, {RR_TEST: RR_TEST_TEXT}, RR_SUBJECT)
+    run(RR_NODEFAULT, "push", "-q", "origin", "trunk")
+    run(RR_NODEFAULT, "checkout", "-q", "topic")
+    commit(RR_NODEFAULT, {"b.txt": "lane\n"}, "lane change")
+    run(RR_NODEFAULT, "merge", "-q", "--no-edit", "origin/trunk")
+    run(RR_NODEFAULT, "update-ref", "-d", "refs/remotes/origin/main")
+    run(RR_NODEFAULT, "update-ref", "-d", "refs/heads/main")
+    must(RR_NODEFAULT, all(_rr_read(RR_NODEFAULT, "rev-parse", "--verify", "-q", ref).returncode != 0 for ref in (
+        "refs/remotes/origin/HEAD", "refs/remotes/origin/main", "refs/remotes/origin/master",
+        "refs/heads/main", "refs/heads/master")), "no default base ref")
+    must(RR_NODEFAULT, _rr_read(RR_NODEFAULT, "rev-parse", "--verify", "-q", "refs/remotes/origin/topic").returncode == 0,
+         "the lane's tracking ref origin/topic")
+    must(RR_NODEFAULT, RR_SUBJECT in _rr_subjects(RR_NODEFAULT, "refs/remotes/origin/topic..HEAD"),
+         "the trunk's untrailered test commit in the lane's range")
+
+    _cmk_pushed(RR_TAG, {"a.txt": "base\n"})
+    commit(RR_TAG, {RR_TEST: RR_TEST_TEXT}, RR_SUBJECT)
+    run(RR_TAG, "tag", "v1")
+    must(RR_TAG, _rr_read(RR_TAG, "rev-parse", "v1").stdout.strip() == _rr_read(RR_TAG, "rev-parse", "HEAD").stdout.strip(),
+         "v1 names the untrailered test commit")
+
+    # A copy of the hooks with no lint folder beside it: the push check's judge cannot be imported there.
+    os.makedirs(RR_NOLINT, exist_ok=True)
+    copy_guard_family(RR_NOLINT)
+    must(RR_NOLINT, os.path.isfile(RR_NOLINT_GUARD) and not os.path.exists(os.path.join(RRROOT, "lint")),
+         "a hooks copy with no lint folder beside it")
+
 
 lazy_fixture([RR_PLAIN, RR_RED, RR_NONE, RR_ZERO, RR_NOARROW, RR_DOCS, RR_MERGE, RR_REBASE, RR_LANEMERGE,
-              RR_LANEREBASE, RR_FEAT, RR_CLEANREF, RR_NOBASE, RR_DELETE, RR_SIX, RR_ROLLOLD, RR_ROLLNEW],
+              RR_LANEREBASE, RR_FEAT, RR_CLEANREF, RR_NOBASE, RR_DELETE, RR_SIX, RR_ROLLOLD, RR_ROLLNEW,
+              RR_NODEFAULT, RR_TAG, RR_NOLINT],
              _build_red_run)
 
 
@@ -11606,6 +11643,51 @@ rr_refuse("a commit that adds six test files, none with a trailer", VCS + " push
 rr_allow("a test commit made before the check landed, then the commit that lands the check", VCS + " push",
          RR_ROLLOLD)
 rr_refuse("a test commit made after the check landed, with no trailer", VCS + " push", RR_ROLLNEW)
+
+# Round 1. With no default base readable, the check reads no hit: the trunk's test commit is not excluded, so
+# a read it cannot finish is no hit, and the push is allowed.
+rr_allow("a lane merged a trunk that holds an untrailered test commit, and no default base can be read",
+         VCS + " push", RR_NODEFAULT)
+
+# A hooks copy with no lint folder beside it: the push check finds no judge, reads no hit and raises nothing.
+# The second case adds a later step (7, frozen path) to the same command, which must still fire.
+add("red-run: a push of a gap in a hooks copy with no lint folder beside it is allowed, and names no "
+    "ModuleNotFoundError", "allow", cwd=RR_PLAIN, guard=RR_NOLINT_GUARD, lacks=("ModuleNotFoundError",),
+    command=VCS + " push")
+add("red-run: a push in a hooks copy with no lint folder, then a frozen-path write in the same command, is "
+    "refused at the frozen path", "deny", "frozen-path", cwd=RR_PLAIN, guard=RR_NOLINT_GUARD,
+    command=VCS + " push\ncat <<EOF > " + CFG_HOOK + "\nhello\nEOF")
+
+# Pins: a tag push, a deletion, two refspecs, and the flags that name no refspec.
+rr_refuse("a tag push, git push origin v1, where the tag names an untrailered test commit", VCS + " push origin v1", RR_TAG)
+rr_allow("a deletion push, git push origin :feat, sends no commit, so the gap at HEAD is not judged",
+         VCS + " push origin :feat", RR_PLAIN)
+rr_refuse("two refspecs, git push origin clean:clean topic:topic, where only the second names the gap",
+          VCS + " push origin clean:clean topic:topic", RR_CLEANREF)
+rr_allow("known limit: git push --all origin is allowed, though a branch it sends holds the gap",
+         VCS + " push --all origin", RR_PLAIN)
+rr_allow("known limit: git push --tags origin is allowed, though the tag it sends names the gap",
+         VCS + " push --tags origin", RR_TAG)
+
+# The refusal text names no check_red_run.py, and no git switch: the remedy gives the replacement route only.
+add("red-run: the refusal names no check_red_run.py and no git switch", "deny", "red-run", cwd=RR_PLAIN,
+    command=VCS + " push", lacks=("check_red_run.py", VCS + " switch"))
+
+
+def rr_nolint_probe_case():
+    """The push check of a hooks copy with no lint folder beside it returns no hit and raises nothing. A
+    raised error is not a no-hit: the guard's top level fails open on it, and that allow skips every later
+    step in the same call (the frozen-path case above). The probe runs in a child process, so a raised error
+    shows as the child's exit code, never as a crash of this suite."""
+    probe = ("import sys; sys.path.insert(0, %r); import guard_merge; "
+             "print(repr(guard_merge.conflict_markers_hit(%r, %r)))" % (RR_NOLINT, VCS + " push origin topic", RR_PLAIN))
+    done = subprocess.run([sys.executable, "-c", probe], cwd=RRROOT, capture_output=True, text=True, timeout=60)
+    if done.returncode != 0:
+        last = (done.stderr.strip().splitlines() or ["no message"])[-1]
+        return False, "the push check raised: " + last[:120]
+    if done.stdout.strip() != repr(("", "")):
+        return False, "the push check returned %s, want no hit" % done.stdout.strip()[:80]
+    return True, "no hit, and nothing raised"
 
 
 # =========================================================================== 6. frozen paths
@@ -13994,6 +14076,12 @@ for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: ta
 BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree stays within its stated git "
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
+# The red-run probe of the lint-less copy is appended here for the same reason: LOG_CHECKS_EXTRA is defined above.
+# Its family is red-run, set by hand. GUARD_FAMILY=red-run runs it.
+RR_NOLINT_LABEL = ("red-run: a hooks copy with no lint folder beside it: the push check returns no hit and raises "
+                   "nothing")
+LOG_CHECKS_EXTRA.append((RR_NOLINT_LABEL, rr_nolint_probe_case))
+LOG_FAMILY[RR_NOLINT_LABEL] = "red-run"
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
