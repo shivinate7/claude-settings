@@ -1463,7 +1463,8 @@ def cite_tokens_verdict(line):
     reads a str_replace fragment that swaps only a cite (hooks/question_form.py). Kind is "undated" (a `(measured ...)`
     token with no date or no check and result), "works", "dead", "unknown" as `_route_verdict` gives them, or "ok"
     (no token, or a route token whose row says refused or asks). A line with no route token reads no file."""
-    if _measured(line) == "bad":
+    found = MEASURED_RE.search(line)
+    if found and found.group(1).strip() and _measured(line) == "bad":  # a bare "(measured)" is a premise kind, not a cite
         return "undated", ""
     ids = ROUTE_CITE_RE.findall(line)
     return _route_verdict(ids) if ids else ("ok", "")
