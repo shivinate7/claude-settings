@@ -893,11 +893,14 @@ class CloudProxy(Env):
         self.now += 601
         self.assertTrue(self.lock.acquire("main", 600))
 
-    def test_a_cloud_session_picks_the_git_lock_and_a_mac_the_api_lock(self):
-        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE": "true"}):
-            self.assertIsInstance(merge.default_lock(self.co), merge.GitLock)
-        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE": ""}):
-            self.assertIsInstance(merge.default_lock(self.co), merge.GhLock)
+    def test_every_session_picks_the_git_lock(self):
+        for remote in ("true", "", None):  # None: CLAUDE_CODE_REMOTE unset
+            with unittest.mock.patch.dict(os.environ):
+                os.environ.pop("CLAUDE_CODE_REMOTE", None)
+                if remote is not None:
+                    os.environ["CLAUDE_CODE_REMOTE"] = remote
+                label = "unset" if remote is None else repr(remote)
+                self.assertIsInstance(merge.default_lock(self.co), merge.GitLock, f"CLAUDE_CODE_REMOTE {label} does not pick GitLock")
 
 class LockRetake(Env):
     """GitLock.acquire when its lease push fails (decision merge-lock). The ref is read again: a moved ref is another run's take and stays Held;
@@ -940,17 +943,24 @@ class LockRetake(Env):
 
     NET_DROP = "fatal: unable to access 'https://example.invalid/origin.git/': Failed to connect to example.invalid port 443 after 21 ms"
 
+    def git_hook(self, hook):
+        """Patch merge.git so every call goes to hook(args, run). The hook returns the (code, output) the caller sees; run() runs that call for real."""
+        real = merge.git
+        def git(cwd, *args, input=None):
+            return hook(args, lambda: real(cwd, *args, input=input))
+        return unittest.mock.patch.object(merge, "git", side_effect=git)
+
     def drop_lock_pushes(self):
         """Every push of the lock ref fails as a dropped network call: the origin never sees it, so the ref stays as it was.
         Other git calls run for real. -> (the patch, the list that receives each faked push)."""
         self.assertTrue(merge.is_net(128, self.NET_DROP), "scope: the faked push output is no network error line")
-        real, pushes = merge.git, []
-        def git(cwd, *args, input=None):
+        pushes = []
+        def hook(args, run):
             if args[:1] == ("push",):
                 pushes.append(args)
                 return 128, self.NET_DROP
-            return real(cwd, *args, input=input)
-        return unittest.mock.patch.object(merge, "git", side_effect=git), pushes
+            return run()
+        return self.git_hook(hook), pushes
 
     def assert_dropped_push_is_net_stop(self, pushes):
         """acquire on a push the network drops: a NetStop, which says the network failed, never that the remote refused."""
@@ -1021,6 +1031,75 @@ class LockRetake(Env):
         with self.assertRaises(merge.Held):
             self.lock.acquire("main", 600)
         self.assertEqual(self.head("merge-lock/main"), held)
+
+    def test_a_lock_fetch_net_error_stops_with_netstop_not_never_expires(self):
+        held = merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
+        self.assertEqual(self.head("merge-lock/main"), held)  # scope: a live lock is on origin, so the read has a commit to fetch
+        patch = self.git_hook(lambda args, run: (128, self.NET_DROP) if args[:1] == ("fetch",) else run())
+        with patch:
+            try:
+                got = self.lock.read("main")
+            except merge.Stop as e:
+                self.assertIsInstance(e, merge.NetStop, f"a fetch the network dropped stopped the lock read as a plain Stop: {e}")
+            else:
+                self.fail(f"a fetch the network dropped read the lock as never expiring: {got}")
+
+    def test_the_lock_message_is_read_by_the_listed_sha(self):
+        listed = merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
+        expected = expires_in(self.lock_text())  # scope: the listed lock's own expiry, read by the module's own parser in the test
+        other = sh(self.other, "git", "commit-tree", self.EMPTY_TREE, "-m", merge.lock_message(60, self.now))
+        sh(self.other, "git", "push", "-q", "origin", f"{other}:refs/heads/rewrite-source")  # a commit with another expiry
+        rewrote = []
+        def hook(args, run):
+            answer = run()
+            if args[:1] == ("fetch",) and args[-1] == merge.lock_ref("main"):
+                sh(self.co, "git", "fetch", "-q", "origin", "refs/heads/rewrite-source")  # a fetch lands after the listed one: FETCH_HEAD now names the other commit
+                rewrote.append(args)
+            return answer
+        with self.git_hook(hook):
+            got = self.lock.read("main")
+        self.assertTrue(rewrote, "the lock fetch never ran, so the case proves nothing")
+        self.assertEqual(got[0], listed, "the read names a lock other than the one the ls-remote listed")
+        self.assertEqual(got[1], expected, "the read takes the expiry of another commit than the listed lock")
+
+    def test_a_failed_reread_keeps_the_push_output(self):
+        self.assertFalse(self.lock_ref())  # scope: no lock ref on origin before the take
+        self.refuse_pushes()
+        pushed = []
+        def hook(args, run):
+            if args[:1] == ("push",):
+                pushed.append(args)
+                return run()
+            if pushed and args[:1] == ("ls-remote",):
+                return 128, "fatal: the remote's ref list could not be read"  # the re-read after the refused push fails
+            return run()
+        with self.git_hook(hook):
+            with self.assertRaises(merge.Stop) as cm:
+                self.lock.acquire("main", 600)
+        self.assertTrue(pushed, "the lock push never ran, so the case proves nothing")
+        self.assertNotIsInstance(cm.exception, merge.Held, "a failed re-read reads as another run's take")
+        self.assertIn(self.PUSH_REFUSAL, str(cm.exception), "a failed re-read after a refused push drops the push output")
+
+    def test_a_landed_take_with_a_lost_reply_is_this_runs_lock(self):
+        self.assertFalse(self.lock_ref())  # scope: no lock ref on origin before the take
+        sent = []
+        def hook(args, run):
+            if args[:1] != ("push",):
+                return run()
+            sent.append(args)
+            run()  # the push lands on origin
+            return 128, self.NET_DROP  # the reply is lost
+        with self.git_hook(hook):
+            try:
+                got = self.lock.acquire("main", 600)
+            except merge.Stop as e:
+                self.fail(f"a take whose push landed with a lost reply stopped as {type(e).__name__}, not as this run's take: {e}")
+        self.assertTrue(sent, "the lock push never ran, so the case proves nothing")
+        pushed = sent[0][-1].split(":", 1)[0]
+        self.assertEqual(self.head("merge-lock/main"), pushed, "scope: the push landed on origin")
+        self.assertEqual(got, pushed, "acquire returned a sha other than this run's lock commit")
+        self.assertEqual(self.lock.sha, got, "the take is not recorded on the lock")
+        self.assertGreater(self.lock.until, self.now, "the recorded take has no expiry in the future")
 
 class Guards(Env):
     def test_moved_head_is_refused_and_nothing_is_claimed(self):
