@@ -418,6 +418,17 @@ class NotCounted(Base):
                                                            "lane": "owner-word-relay", "lastAnswer": last}), pick="a")
         self.assertNotCounted(r, "closed arbiter ruling with lane and home answered with a pick", reason="arbiter")
 
+    def test_routed_item_with_a_status_other_than_closed_not_counted(self):
+        """Only a status of exactly "closed" is a routed close. A parked, capitalised, blank, null or done item with lane,
+        home and a lastAnswer at this answer's at is not counted."""
+        last = {"choice": "a", "note": "", "at": AT}
+        routed = {"home": "answered-leaves-page", "lane": "owner-word-relay", "lastAnswer": last}
+        for status in ("parked", "Closed", "", None, "done"):
+            with self.subTest(status=status):
+                r = self.check(self.repo(), self.pair(item_fields=dict(routed, status=status)), pick="a")
+                self.assertNotCounted(r, "item with status %s, lane, home and a matching lastAnswer" % json.dumps(status),
+                                      reason="status")
+
     def test_answer_at_zone_less_not_counted(self):
         r = self.check(self.repo(), self.pair(answer_fields={"at": "2026-11-04T13:56:29.078"}))
         self.assertNotCounted(r, "answer at has no zone", reason="zone")
