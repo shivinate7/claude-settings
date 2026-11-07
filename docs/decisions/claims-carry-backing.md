@@ -27,6 +27,17 @@ Coordinator, 2026-11-06 12:59 CST, process-only (option b of the coordinator's c
 
 Lane ruling, 2026-11-06 13:25 CST, process-only, under coordinator pick Q1 (b): a choice, login or safety phrase exempts the line. The capability verbs widen to refused, unable to, denied, forbidden, no access, not allowed or permitted, unavailable and 403. "blocked until" and "not available until" are dependencies, not capabilities. Layer (a) is built in `lint/report_guard.py` (`hand_off_problem`). It reads the reply text. It reads this session's refusals file and the route rows file only for a capability line that needs them.
 
+Coordinator pick, 2026-11-07 15:12 CST, process-only, reversible (lane `why-cite-matches-act`): a page task's route cite must name a row that covers the task's act.
+
+- Act text: each line of the task's `command` field (each variant of `{powershell, mac}`), split at `&&` and `;`, plus each backtick span in its `context`.
+- Cover: the cited id is one of the rows on this surface whose `pattern` matches a piece of act text. The match is the route matcher's (`hooks/route_match.py`), so the row file's patterns need no change. Two rows may share a pattern, so the rule is membership, not the one row the matcher picks first.
+- No cover: a cited row whose pattern matches no piece is refused. Remedy: cite the row of the act, or name the act's command.
+- No act text, or a cited row with no pattern: UNKNOWN note, never a pass and never a refusal.
+- Alternates do not cover: a row's `alternates` name other acts, not this one.
+- Replies are out of scope: part (b), the reply judge, judges a reply's cite against its act.
+
+Reason: the 12:34 lane ruling checks a row's outcome but never which act the row is about. A delete task citing a row for another act passed (incident from lane `task-names-check-line-not-truth`, 2026-11-07 15:10 CST). Reusing the route matcher keeps one home for "which act is this row".
+
 ## Incident
 
 `docs/decisions/session-tiers.md:64` (origin/main 7975f6d8) said "The cloud cannot close a pull request". One fact sat in three places: that line, the 2026-10-30 refusals in `docs/decisions/auto-mode-owner-acts.md` (lines 79-82 on origin/main), and the grant "Acts the cloud refuses" in `.claude/CLAUDE.md:16-19`. It stayed on main with no check. Measured 2026-11-06 on origin/main (7975f6d8): a grep of `lint`, `hooks`, `merge` and `actions` finds no check that reads the phrase.
