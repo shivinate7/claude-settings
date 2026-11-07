@@ -731,12 +731,14 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(pass_lines(out), [], out)
 
     def test_a_selector_that_imports_a_helper_the_install_puts_in_the_checkout_still_names_the_red_suite(self):
-        """The profile's install writes helper.py into the install folder, which the checkout links as node_modules beside the lockfile.
-        The selector imports that helper from ../node_modules, relative to its own file, and exits non-zero without it. The lane changes
+        """The profile's install writes node_modules/helper.py into the install folder, which the checkout links as node_modules beside
+        the lockfile, as npm ci lays it out. The selector imports that helper from ../node_modules, relative to its own file, and exits
+        non-zero without it. The lane changes
         src/p.py, and the selector lists a red suite for it. The install runs before the selector, in the checkout, so the helper loads.
         A select that ran first, from a temp copy of base's script, could not load it: every select would read unknown, and the lint
         would refuse without a FAIL line naming the suite."""
-        install = [sys.executable, "-c", "open('{deps}/helper.py', 'w').write('LISTED = 1\\n')"]
+        install = [sys.executable, "-c", "import os; os.makedirs('{deps}/node_modules', exist_ok=True); "
+                   "open('{deps}/node_modules/helper.py', 'w').write('LISTED = 1\\n')"]
         self.lane_fixture(listed=[SUITE], suites={SUITE: "fail"}, base_files={"package-lock.json": "{}\n"},
                           helper={"folder": "../node_modules", "module": "helper"}, install=install)
         self.assert_suite_is_selector_only(SUITE)
