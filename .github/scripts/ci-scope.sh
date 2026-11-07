@@ -6,6 +6,7 @@
 # guard_windows_slice is derived (after the loop, and outside ALL): guard on and guard_windows_full off. On a pull_request the Windows guard job runs the slice then, and the full shards only when guard_windows_full is on. Both are job outputs.
 # merge_windows_full (the Windows merge suite runs in full shards on a pull_request: set by every repo file the merge suite loads, which merge_closure in lint/test_ci_scope.py derives from merge/test_merge.py; every path that sets it also sets checks_windows_merge and code).
 # merge_windows_slice is derived (after the loop, and outside ALL): checks_windows_merge on and merge_windows_full off. On a pull_request the Windows merge job runs the slice then, and the full shards only when merge_windows_full is on. Both are job outputs.
+# guard_windows_shards and merge_windows_shards (JSON lists, job outputs): the legs of the guard and merge matrix jobs. `["slice"]` when the suite's full flag is off, else `["1/n",...,"n/n"]`, n from GUARD_SHARDS or MERGE_SHARDS below.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
@@ -13,6 +14,15 @@
 set -u
 JOBS="checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos pointer_windows"
 ALL="$JOBS checks_guard code mods guard sweep shoot guard_windows_full merge_windows_full"
+# The shard count of each sharded Windows suite: the one home. shard_list writes the matrix legs from it.
+GUARD_SHARDS=2
+MERGE_SHARDS=5
+# shard_list N: the JSON list of full legs, "1/N" to "N/N".
+shard_list() {
+  local n=$1 i=1 out=""
+  while [ "$i" -le "$n" ]; do out="$out${out:+,}\"$i/$n\""; i=$((i + 1)); done
+  echo "[$out]"
+}
 range=""
 [ "${EVENT:-}" = pull_request ] && [ -n "${BASE_SHA:-}" ] && range="$BASE_SHA...HEAD"
 on=" "
@@ -156,6 +166,13 @@ echo "CI scope: event=${EVENT:-} range=${range:-none} on=$on"
 for n in $ALL guard_windows_slice merge_windows_slice; do
   case "$on" in *" $n "*) v=true ;; *) v=false ;; esac
   echo "$n=$v" >> "$GITHUB_OUTPUT"
+done
+# guard_windows_shards, merge_windows_shards: the legs of each Windows suite's matrix job. The full flag on lists the full shards. Off,
+# only a pull_request reaches here (any other event and an unreadable diff turn every flag on), and the list is the slice leg alone.
+for pair in "guard_windows_full:$GUARD_SHARDS:guard_windows_shards" "merge_windows_full:$MERGE_SHARDS:merge_windows_shards"; do
+  IFS=: read -r flag count out <<< "$pair"
+  case "$on" in *" $flag "*) legs=$(shard_list "$count") ;; *) legs='["slice"]' ;; esac
+  echo "$out=$legs" >> "$GITHUB_OUTPUT"
 done
 # mutation_report: the mutation-report job runs on a pull request from a `batch-` branch (HEAD_REF), and on any other event, where the
 # action skips a push or a schedule itself. It is outside ALL: a change to this script or the workflow must not start it on any other PR.

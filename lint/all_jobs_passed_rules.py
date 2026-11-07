@@ -115,7 +115,7 @@ def shape_problems(text):
 
 
 def needs_problems(text):
-    """all-jobs-passed needs each job that runs on a non-draft PR once, and nothing else: not a shard, not ci-done."""
+    """all-jobs-passed needs each job that runs on a non-draft PR once, and nothing else: not ci-done."""
     block = job_block(text, ALL_JOBS_PASSED_JOB)
     if block is None:
         return [f"no {ALL_JOBS_PASSED_JOB} job in checks.yml"]
@@ -166,13 +166,16 @@ def steps_problems(text):
 
 
 def off_problems(text):
-    """Only a shard job may stay off all-jobs-passed. A needed job has no job-level if, except scope (its draft rule). A shard
-    in needs (a guard or merge shard past the first) is a normal needed job: it runs on a ready PR and its steps decide."""
+    """A job is never off all-jobs-passed: a needed job has no job-level if, except scope (its draft rule), and a `-<i>` shard job
+    of a sharded suite is refused whether it is needed or off, since each sharded suite is one matrix job."""
     jobs = all_jobs(text)
     needed, off, problems = split_jobs(text)
+    for name in jobs:
+        if shard_base(name):
+            problems.append(f"{name} is a shard job: a sharded suite is one matrix job, and its shards are that job's legs")
     for name in off:
         if not shard_base(name):
-            problems.append(f"{name} is off all-jobs-passed but is not a shard: its job-level if skips it on a PR")
+            problems.append(f"{name} is off all-jobs-passed: its job-level if skips it on a PR")
     for name in needed:
         if name != "scope" and jobs[name]["if"] is not None:
             problems.append(f"{name} is needed and keeps a job-level if: all-jobs-passed reads its skip as red, "

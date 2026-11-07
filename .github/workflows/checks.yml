@@ -57,6 +57,8 @@ jobs:
       guard_windows_slice: ${{ steps.scope.outputs.guard_windows_slice }}
       merge_windows_full: ${{ steps.scope.outputs.merge_windows_full }}
       merge_windows_slice: ${{ steps.scope.outputs.merge_windows_slice }}
+      guard_windows_shards: ${{ steps.scope.outputs.guard_windows_shards }}
+      merge_windows_shards: ${{ steps.scope.outputs.merge_windows_shards }}
       checks_guard: ${{ steps.scope.outputs.checks_guard }}
       sweep: ${{ steps.scope.outputs.sweep }}
       shoot: ${{ steps.scope.outputs.shoot }}
@@ -1079,7 +1081,7 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 janitor/test_install_schtasks.py
 
-  # The Windows suites run in four jobs (checks-windows, checks-windows-guard, checks-windows-merge, checks-windows-rest), and the guard and merge jobs add shard jobs (the merge shards and the guard shard run on a pull_request when merge_windows_full or guard_windows_full is on). Six python suites in the checks job need a real Windows box to prove: no other
+  # The Windows suites run in four jobs (checks-windows, checks-windows-guard, checks-windows-merge, checks-windows-rest); the guard and merge jobs are matrix jobs, one leg per shard. Six python suites in the checks job need a real Windows box to prove: no other
   # job in this workflow can show whether they pass there. This job runs those
   # suites on Windows and reports the environment first. It is blocking: run
   # 35766479009 went green here for the first time, on its own merit, not through
@@ -1253,18 +1255,21 @@ jobs:
         with:
           profile: claude_settings
 
-  # The guard fixture suite on Windows, split off checks-windows by cut F. Two shards run it in full: shard 1 here and
-  # shard 2 in checks-windows-guard-2 (the shard switch in hooks/test_guard.py; lint/test_windows_split.py proves each case
-  # runs once). They run on push, schedule and workflow_dispatch, and on a pull_request when guard_windows_full is on (a file
-  # the guard suite loads changed, as GuardClosure in lint/test_ci_scope.py derives and checks, or hooks/test_guard.py,
-  # hooks/mutate_guard.py or settings.json). On any other guard pull_request only the cases tagged windows run, whole,
-  # in this job (the slice step, on guard_windows_slice).
+  # The guard fixture suite on Windows, split off checks-windows by cut F. One job: its matrix legs are the guard_windows_shards list
+  # that ci-scope.sh writes (the shard switch in hooks/test_guard.py; lint/test_windows_split.py proves each case runs once). On push,
+  # schedule and workflow_dispatch, and on a pull_request when guard_windows_full is on (a file the guard suite loads changed, as
+  # GuardClosure in lint/test_ci_scope.py derives and checks, or hooks/test_guard.py, hooks/mutate_guard.py or settings.json),
+  # the legs are the full shards. On any other guard pull_request the one leg is the slice: only the cases tagged windows run, whole.
   checks-windows-guard:
     runs-on: windows-latest
     needs: scope
     # Full guard suite off pull_request: 1296 s in one job (run 40293472341). In 2 shards the jobs took 582 s and
-    # 679 s (run 40296937814); 20 min is about 1.8x the slower.
+    # 679 s (run 40296937814); 20 min is about 1.8x the slower, and each leg has that cap.
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.scope.outputs.guard_windows_shards) }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
@@ -1277,59 +1282,38 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Guard fixture suite (shard 1 of 2)
-        if: ${{ (needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request') && !cancelled() && (needs.scope.outputs.guard_windows_full == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
+      - name: Guard fixture suite (full shard)
+        if: ${{ (needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' && matrix.shard != 'slice' }}
         env:
-          GUARD_SHARD: 1/2
+          GUARD_SHARD: ${{ matrix.shard }}
         run: python hooks/test_guard.py
 
       - name: Guard fixture suite (Windows slice)
-        if: ${{ (needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request') && !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.guard_windows_slice == 'true' && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request') && !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true' && matrix.shard == 'slice' }}
         env:
           GUARD_TESTS: windows-slice
         run: python hooks/test_guard.py
 
-  checks-windows-guard-2:
-    runs-on: windows-latest
-    needs: scope
-    # A shard of checks-windows-guard: its figures and cap are there. all-jobs-passed needs it, so it has no job-level if (a draft
-    # skips it through needs: scope), and on a ready pull_request its steps skip unless guard_windows_full is on.
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        if: ${{ needs.scope.outputs.guard_windows_full == 'true' || github.event_name != 'pull_request' }}
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
-        if: ${{ needs.scope.outputs.guard_windows_full == 'true' || github.event_name != 'pull_request' }}
-        with:
-          python-version: "3.11"
-
-      - name: Guard fixture suite (shard 2 of 2)
-        if: ${{ !cancelled() && (needs.scope.outputs.guard_windows_full == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
-        env:
-          GUARD_SHARD: 2/2
-        run: python hooks/test_guard.py
-
-  # The merge suites on Windows. The full git-half suite runs in shards, shard 1 here and the rest in checks-windows-merge-<i>
-  # (the shard switch in merge/test_merge.py), on push, schedule and workflow_dispatch, and on a pull_request when
-  # merge_windows_full is on (a file the merge suite loads changed, as merge_closure in lint/test_ci_scope.py derives). On any
-  # other merge pull_request only the Windows slice runs, whole, in this job (the slice step, on merge_windows_slice).
+  # The merge suites on Windows. One job: its matrix legs are the merge_windows_shards list that ci-scope.sh writes (the shard switch in
+  # merge/test_merge.py). On push, schedule and workflow_dispatch, and on a pull_request when merge_windows_full is on (a file the
+  # merge suite loads changed, as merge_closure in lint/test_ci_scope.py derives), the legs are the full shards. On any other merge
+  # pull_request the one leg is the slice, whole. The launcher suites run once: on the slice leg, or on the first full leg.
   checks-windows-merge:
     runs-on: windows-latest
     needs: scope
-    # Full git-half suite: about 6.5 s a test on Windows, so about 59 min in one job (run 40293472341).
-    # In 5 shards the jobs took 295 s to 520 s (run 40296937814); 15 min is about 1.7x the slowest.
+    # Full merge suite: about 6.5 s a test on Windows, so about 59 min in one job (run 40293472341).
+    # In 5 shards the jobs took 295 s to 520 s (run 40296937814); 15 min is about 1.7x the slowest, and each leg has that cap.
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.scope.outputs.merge_windows_shards) }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request' }}
         with:
           fetch-depth: 0
           persist-credentials: false
-
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request' }}
@@ -1337,120 +1321,24 @@ jobs:
           python-version: "3.11"
 
       - name: Merge launcher fixture suite
-        if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' && (matrix.shard == 'slice' || startsWith(matrix.shard, '1/')) }}
         run: python merge/test_launch.py
 
-      - name: Merge tool git-half fixture suite (shard 1 of 5)
-        if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && (needs.scope.outputs.merge_windows_full == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
+      - name: Merge tool git-half fixture suite (full shard)
+        if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' && matrix.shard != 'slice' }}
         env:
-          MERGE_SHARD: 1/5
+          MERGE_SHARD: ${{ matrix.shard }}
         run: python merge/test_merge.py
 
       - name: Merge tool git-half fixture suite (Windows slice)
-        if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.merge_windows_slice == 'true' && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true' && matrix.shard == 'slice' }}
         env:
           MERGE_TESTS: windows-slice
         run: python merge/test_merge.py
 
       - name: Merge launcher fixture suite (merge.cmd)
-        if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' && (matrix.shard == 'slice' || startsWith(matrix.shard, '1/')) }}
         run: python merge/test_cmd.py
-
-  checks-windows-merge-2:
-    runs-on: windows-latest
-    needs: scope
-    # A shard of checks-windows-merge: its figures and cap are there. all-jobs-passed needs it, so it has no job-level if (a draft
-    # skips it through needs: scope), and on a ready pull_request its steps skip unless merge_windows_full is on.
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        if: ${{ needs.scope.outputs.merge_windows_full == 'true' || github.event_name != 'pull_request' }}
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
-        if: ${{ needs.scope.outputs.merge_windows_full == 'true' || github.event_name != 'pull_request' }}
-        with:
-          python-version: "3.11"
-
-      - name: Merge tool git-half fixture suite (shard 2 of 5)
-        if: ${{ !cancelled() && (needs.scope.outputs.merge_windows_full == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
-        env:
-          MERGE_SHARD: 2/5
-        run: python merge/test_merge.py
-
-  checks-windows-merge-3:
-    runs-on: windows-latest
-    needs: scope
-    # A shard of checks-windows-merge: its figures and cap are there. all-jobs-passed needs it, so it has no job-level if (a draft
-    # skips it through needs: scope), and on a ready pull_request its steps skip unless merge_windows_full is on.
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        if: ${{ needs.scope.outputs.merge_windows_full == 'true' || github.event_name != 'pull_request' }}
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
-        if: ${{ needs.scope.outputs.merge_windows_full == 'true' || github.event_name != 'pull_request' }}
-        with:
-          python-version: "3.11"
-
-      - name: Merge tool git-half fixture suite (shard 3 of 5)
-        if: ${{ !cancelled() && (needs.scope.outputs.merge_windows_full == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
-        env:
-          MERGE_SHARD: 3/5
-        run: python merge/test_merge.py
-
-  checks-windows-merge-4:
-    runs-on: windows-latest
-    needs: scope
-    # A shard of checks-windows-merge: its figures and cap are there. all-jobs-passed needs it, so it has no job-level if (a draft
-    # skips it through needs: scope), and on a ready pull_request its steps skip unless merge_windows_full is on.
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        if: ${{ needs.scope.outputs.merge_windows_full == 'true' || github.event_name != 'pull_request' }}
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
-        if: ${{ needs.scope.outputs.merge_windows_full == 'true' || github.event_name != 'pull_request' }}
-        with:
-          python-version: "3.11"
-
-      - name: Merge tool git-half fixture suite (shard 4 of 5)
-        if: ${{ !cancelled() && (needs.scope.outputs.merge_windows_full == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
-        env:
-          MERGE_SHARD: 4/5
-        run: python merge/test_merge.py
-
-  checks-windows-merge-5:
-    runs-on: windows-latest
-    needs: scope
-    # A shard of checks-windows-merge: its figures and cap are there. all-jobs-passed needs it, so it has no job-level if (a draft
-    # skips it through needs: scope), and on a ready pull_request its steps skip unless merge_windows_full is on.
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        if: ${{ needs.scope.outputs.merge_windows_full == 'true' || github.event_name != 'pull_request' }}
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
-        if: ${{ needs.scope.outputs.merge_windows_full == 'true' || github.event_name != 'pull_request' }}
-        with:
-          python-version: "3.11"
-
-      - name: Merge tool git-half fixture suite (shard 5 of 5)
-        if: ${{ !cancelled() && (needs.scope.outputs.merge_windows_full == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
-        env:
-          MERGE_SHARD: 5/5
-        run: python merge/test_merge.py
 
   # The janitor sweep suites, moved out of checks-windows-rest (decision ci-job-caps). Fixture suite 8.2 min slowest,
   # mutation test 10.9 min slowest (push only), so 19.6 min with setup. Cap 40 min = 2x.
@@ -1675,7 +1563,7 @@ jobs:
 
   # The one check branch protection requires. It fails on a needed job that failed, was cancelled or was
   # skipped, so every needed job runs on a ready PR and puts its scope condition on its steps, never on the job.
-  # It runs on a ready pull_request only: on a push or a schedule it would read green over a red shard job it does not need.
+  # It runs on a ready pull_request only: on a push or a schedule it would read green over a red leg it does not need.
   all-jobs-passed:
     runs-on: ubuntu-latest
     needs:
@@ -1692,12 +1580,7 @@ jobs:
       - checks-mutate-guard
       - mutation-report
       - checks-windows-guard
-      - checks-windows-guard-2
       - checks-windows-merge
-      - checks-windows-merge-2
-      - checks-windows-merge-3
-      - checks-windows-merge-4
-      - checks-windows-merge-5
       - checks-windows-rest
       - checks-windows-sweep
     if: ${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
@@ -1731,12 +1614,7 @@ jobs:
       - checks-mutate-guard
       - mutation-report
       - checks-windows-guard
-      - checks-windows-guard-2
       - checks-windows-merge
-      - checks-windows-merge-2
-      - checks-windows-merge-3
-      - checks-windows-merge-4
-      - checks-windows-merge-5
       - checks-windows-rest
       - checks-windows-sweep
       - all-jobs-passed
