@@ -362,7 +362,12 @@ def design_files(where: str, tip: str, folder: str, base=None):
     not. No merge base (a shallow clone, unrelated history) fails the read, so the caller asks.
     Two `diff` starts, the second only when the branch changed a file under `folder`; with no base,
     one `ls-tree` start. The diff folds the folder's case; `ls-tree` takes the folder as the
-    layout spells it."""
+    layout spells it. The second `diff` takes the same folder pathspec as the first and the two name
+    lists are intersected as text; no name is passed back to git. `_git` decodes with replacement, so
+    a name that is not UTF-8 (a Latin-1 mockup) reads as U+FFFD, a path no tree holds: a `:(literal)`
+    pathspec built from it matched nothing and the only copy went unseen. Both lists replace the same
+    way, so a replaced name still meets itself. Two distinct non-UTF-8 names can collapse to one
+    string; that only over-includes, which asks or denies."""
     if base is None:
         answer = _git(where, "ls-tree", "-r", "--name-only", tip, "--", folder + "/")
         if answer is None or answer.returncode != 0:
@@ -372,14 +377,14 @@ def design_files(where: str, tip: str, folder: str, base=None):
                    base + "..." + tip, "--", ":(icase)" + folder + "/")
     if changed is None or changed.returncode != 0:
         return None
-    paths = [path for path in changed.stdout.split("\0") if path]
+    paths = {path for path in changed.stdout.split("\0") if path}
     if not paths:
         return []
     differs = _git(where, "diff", "-z", "--name-only", "--no-renames", base, tip, "--",
-                   *[":(literal)" + path for path in paths])
+                   ":(icase)" + folder + "/")
     if differs is None or differs.returncode != 0:
         return None
-    return [path for path in differs.stdout.split("\0") if path]
+    return [path for path in differs.stdout.split("\0") if path in paths]
 
 
 def branch_proof(where: str, base: str, branch: str, ancestor=None):
