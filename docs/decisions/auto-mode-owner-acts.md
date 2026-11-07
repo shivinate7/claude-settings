@@ -59,7 +59,7 @@ Left to the coordinator: pull request 1372's blanket `permissions.allow` line fo
 
 ### Own CI Run Cancel
 
-Grant: owner, page item 278, pick c, 2026-11-06 12:41 CST.
+Grant: owner, page item 278, pick c, 2026-11-06 12:41 CST. Typed go, in lane lease-push-c-and-d, 2026-11-07 14:45 CST: `go: add the own CI run cancel and own check-in delete entries to settings.json autoMode.allow, as drafted in PR #1316 (items 278 c and d)`.
 
 - Incident: refused on 2026-11-01 22:57 CST as "Interfere With Workloads": `gh api -X POST repos/shivinate7/q_max/actions/runs/41377928751/cancel`.
 - Undo: re-run the cancelled run with `gh run rerun <id>`.
@@ -67,7 +67,7 @@ Grant: owner, page item 278, pick c, 2026-11-06 12:41 CST.
 
 ### Own Check-in Delete
 
-Grant: owner, page item 278, pick d, 2026-11-06 12:41 CST.
+Grant: owner, page item 278, pick d, 2026-11-06 12:41 CST. Typed go, in lane lease-push-c-and-d, 2026-11-07 14:45 CST: `go: add the own CI run cancel and own check-in delete entries to settings.json autoMode.allow, as drafted in PR #1316 (items 278 c and d)`.
 
 - Incident: refused on 2026-11-04 05:10 CST. The claude-settings batch runner's `delete_trigger` on its own check-in.
 - Scope: a check-in that fires into this same session. That is a `send_later` id, or a `create_trigger` id made without `create_new_session_on_fire` and without `persistent_session_id`. Deleting a trigger also deletes every session it started, so a trigger made with either of those is not covered.
