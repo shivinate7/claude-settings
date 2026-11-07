@@ -45,8 +45,8 @@ does not wait for a git write: the reply's labels are what it reads. Cost: no fi
 transcript this hook already holds. Only on a turn that asks with no send to the writer: the
 own-record import (hooks/own_session.py) and one more transcript read, in a session with a remote id. A lane
 reads no layout; an owner-facing turn with no counted send reads it once (`decisions-reach-a-clickable-pick`).
-A reply that holds Input Needed or a prose line ending in `?` also gets the past-ruling check (one Sonnet call, rule
-`past-ruling`, or the Unvetted remedy) and the option-key check (rule `question-keys`), both from hooks/question_form.py.
+A reply that holds Input Needed or a prose line ending in `?` also gets the past-ruling check (one Sonnet call of 15 s, or
+two on a timeout, 15 s + 10 s; rule `past-ruling`, or the Unvetted remedy) and the option-key check (rule `question-keys`), both from hooks/question_form.py.
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
 hooks/question_form.py departs_hit, on landed and unlanded turns alike). Cost: one regex read of that item and one module import, no file.
 On landed turns it also refuses a reply sentence that says a decision was rewritten (rewritten, rewrote,
@@ -1572,7 +1572,8 @@ def write_marker(hook, idx):
 # A relayed question (spec past-rulings): a coordinator puts a lane's question in its reply, under Input Needed or as
 # a prose line that ends in `?`, so neither check in hooks/call_judge.py sees it. This Stop hook checks it, SYNC, with
 # the same candidates and the same item 8 as the question judge, and one more rule: option keys (question-keys).
-# Cost: one git process and one Sonnet call (15 s) on a Stop whose reply asks something; none on any other Stop.
+# Cost: one git process and one Sonnet call (15 s), or two on a timeout (15 s + 10 s, start-up unmeasured), on a Stop whose
+# reply asks something; none on any other Stop.
 RELAY_RULE_REASON = (
     "Past-ruling guard (rule past-ruling): %s Remedy: drop the question, or add a `Based on (ruling): <id>` line "
     "that names that ruling and says why the owner is asked again.")
@@ -1670,16 +1671,14 @@ def past_ruling_problem(asked, cwd):
     unreadable = question_form.unreadable_sources(unknown)
     if unreadable:
         return cannot_run(asked, "; ".join(unreadable))
-    import call_judge  # the one home of item 8, its model and its time limit
-    import decision_watch
+    import call_judge  # the one home of item 8, its model, its time limits and the retry
     prompt = ("Review this text, which a session sends the owner and which asks him something:\n<<<\n" + asked
               + "\n>>>\nJudge only item 8 below. Answer {\"ok\": true} at once when no listed ruling settles what "
               "it asks.\n8. " + call_judge.PAST_RULING_ITEM + "\nReply JSON only: {\"ok\": true} or {\"ok\": false, "
               "\"reason\": \"<the listed id, the ruling's date, and what it decides, one line>\"}."
               + question_form.candidates_block(candidates, unknown))
-    verdict, error = decision_watch.invoke_model(prompt, model=call_judge.PAST_RULING_MODEL,
-                                                 timeout=call_judge.PAST_RULING_TIMEOUT,
-                                                 shape=call_judge.OK_SHAPE, effort=None)
+    verdict, error = call_judge.judge_question(prompt, call_judge.PAST_RULING_MODEL, call_judge.PAST_RULING_TIMEOUT,
+                                               True, retry_timeout=call_judge.PAST_RULING_RETRY_TIMEOUT)
     if error:
         return cannot_run(asked, " ".join(str(error).split()))
     if verdict.get("ok") is not False:

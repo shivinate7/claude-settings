@@ -130,6 +130,9 @@ PAST_RULING_ITEM = (
 )
 # The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 15 s.
 PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 15
+# The one retry of that call after a timeout (owner ask ask-mw6pwif5wv, coordinator pick 2026-11-07 13:00 CST). It is
+# shorter than the first try so 15 + 10 plus an unmeasured start-up allowance fits the Stop hook's 35 s timeout.
+PAST_RULING_RETRY_TIMEOUT = 10
 # The seven items, then the eighth, a question to the owner is judged on: one text, for the chat box and the page.
 JUDGE_ITEMS = (
     "1. The Goal is in the owner's terms.\n"
@@ -252,14 +255,15 @@ def invoke_model(*args, **kwargs):
     return home(*args, **kwargs)
 
 
-def judge_question(prompt, model, timeout, units):
-    """The model call of a judged tool. A question (`units` non-empty) whose first call times out gets one more call,
-    capped at QUESTION_RETRY_TIMEOUT: a timeout says nothing about the question, and an Unvetted refusal costs the
-    session a resend. Any other error, and every call without `units`, makes the one call."""
+def judge_question(prompt, model, timeout, is_question, retry_timeout=QUESTION_RETRY_TIMEOUT):
+    """The model call of a judged tool, and the one home of the retry. A question (`is_question` true) whose first
+    call times out gets one more call, capped at `retry_timeout`: a timeout says nothing about the question, and an
+    Unvetted refusal costs the session a resend. Any other error, and every call that is not a question, makes the
+    one call."""
     import decision_watch  # lazy: the one home of the timeout text
     verdict, error = invoke_model(prompt, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
-    if units and error == decision_watch.MODEL_TIMEOUT_ERROR:
-        verdict, error = invoke_model(prompt, model=model, timeout=QUESTION_RETRY_TIMEOUT, shape=OK_SHAPE, effort=None)
+    if is_question and error == decision_watch.MODEL_TIMEOUT_ERROR:
+        verdict, error = invoke_model(prompt, model=model, timeout=retry_timeout, shape=OK_SHAPE, effort=None)
     return verdict, error
 
 
@@ -407,7 +411,7 @@ def main():
             full += "\n" + NONE_DIRECTION_RULE  # after `%`, so the rule's text never meets the formatter
         if widening:
             full += "\n" + widening_rule()
-        verdict, error = judge_question(full + tail, model, timeout, units)
+        verdict, error = judge_question(full + tail, model, timeout, bool(units))
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
               file=sys.stderr)
