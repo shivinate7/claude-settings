@@ -14,10 +14,12 @@
 # list that fails exits 1 with no boot.
 # Lock: one lock per Mac, the folder ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-test.lock with the holder's pid in
 # a file named pid. One atomic mkdir takes it before any simctl call. It is held for the whole run, the reuse path
-# and a hold too, and removed on every exit, INT and TERM too. A live holder: one stderr line names its pid, the lock is
+# and a hold too, and removed on every exit, INT and TERM too, but only while its pid file names this run. A live holder: one stderr line names its pid, the lock is
 # read again every SIM_TEST_POLL s (default 2), for at most SIM_TEST_LOCK_WAIT s (default 300); then exit 1 naming the
 # pid, with no boot and no xcodebuild. A dead holder: the folder is renamed to a name unique to this run (one rename
-# wins), removed, and the mkdir retried. A lock folder with no pid file counts as held for 60 s, then as dead. A reused
+# wins), removed, and the mkdir retried; if the folder held another pid, it is put back only while no lock exists, and is
+# removed when another run has re-created the lock. Live means `ps -p PID` finds the pid, never `kill -0`, which reads EPERM
+# (a live process of another user) as dead. A lock folder with no pid file counts as held for 60 s, then as dead. A reused
 # pid reads as a live holder.
 # Lease: every run takes one, after the lock and the cap check. An own boot runs, before `simctl boot`,
 # `sim-lease take --device <role> --udid --pid $$` (bin/sim-lease, beside this script). That is the one Mac-wide queue
@@ -44,7 +46,7 @@
 # At 3 or more counted new files whose name starts with SpringBoard within SIM_TEST_WINDOW s (default 30), it stops the
 # child, shuts down the simulator only if it booted it, prints a line with crash, the count, the window and the UDID to
 # stderr, and exits 1. INT, TERM, HUP and QUIT stop the child too.
-# Cost per run: child processes xcrun, sed, grep, head, mkdir, cat, rm and rmdir; after its own boot only, python3
+# Cost per run: child processes xcrun, sed, grep, head, mkdir, cat, rm and rmdir, and one ps per lock poll that finds a holder; after its own boot only, python3
 # (hooks/sim_boot_record.py --record: one simctl list and two ps, one line appended to sim-boots.jsonl); mv and find on a
 # takeover; one sleep per poll; one grep per new SpringBoard report; and xcodebuild. An own boot adds two sim-lease
 # processes (take, give) and one more simctl list; a reuse adds the same two sim-lease processes; a waiting take costs one sysctl and
@@ -116,13 +118,15 @@ cleanup() {
   if [ -n "$child" ] && kill -0 "$child" 2>/dev/null; then stop_child; fi
   if [ -n "$booted_by_me" ]; then record_boot; xcrun simctl shutdown "$booted_by_me"; fi
   [ -n "$have_lease" ] && "$(dirname "$0")/sim-lease" give --pid $$
-  if [ -n "$have_lock" ]; then rm -f "$LOCK/pid" "$LOCK/take.out"; rmdir "$LOCK" 2>/dev/null; fi
+  # Only a lock whose pid file names this run is removed: a take-over that wrote another pid keeps its lock.
+  if [ -n "$have_lock" ] && [ "$(cat "$LOCK/pid" 2>/dev/null)" = "$$" ]; then rm -f "$LOCK/pid" "$LOCK/take.out"; rmdir "$LOCK" 2>/dev/null; fi
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP QUIT
 
 # take_over DEADPID: rename the lock folder to a name unique to this run. Only one rename wins. The winner removes it.
-# If the renamed folder held another pid (a new holder took the lock after the check), it is put back. DEADPID is empty
+# If the renamed folder held another pid (a new holder took the lock after the check), it is put back only while $LOCK is
+# absent; if another run has re-created $LOCK meanwhile, the folder taken is removed, never moved into it. DEADPID is empty
 # for a lock folder with no pid file. Returns 1 only when the rename failed and the lock is still there: the caller
 # then waits as for a live holder, so a rename that always fails cannot spin past SIM_TEST_LOCK_WAIT.
 takeover_n=0
@@ -131,7 +135,7 @@ take_over() {
   takeover_n=$((takeover_n + 1))
   if ! mv "$LOCK" "$dead" 2>/dev/null; then [ -e "$LOCK" ] && return 1; return 0; fi
   seen=$(cat "$dead/pid" 2>/dev/null)
-  if [ "$seen" != "$1" ]; then mv "$dead" "$LOCK" 2>/dev/null; return 0; fi
+  if [ "$seen" != "$1" ] && [ ! -e "$LOCK" ] && mv "$dead" "$LOCK" 2>/dev/null; then return 0; fi
   rm -f "$dead/pid" "$dead/take.out"
   rmdir "$dead"
 }
@@ -147,7 +151,7 @@ acquire_lock() {
     fi
     pid=$(cat "$LOCK/pid" 2>/dev/null)
     if [ -n "$pid" ]; then
-      kill -0 "$pid" 2>/dev/null || { take_over "$pid" && continue; }
+      ps -p "$pid" > /dev/null 2>&1 || { take_over "$pid" && continue; }
     elif [ -n "$(find "$LOCK" -prune -mmin +1 2>/dev/null)" ]; then
       take_over "" && continue
     fi
