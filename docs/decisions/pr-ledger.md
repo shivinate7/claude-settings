@@ -6,11 +6,11 @@ Why did reviewed PRs sit idle, and what makes "passed review, then merged" hold?
 
 ## The ruling
 
-Owner, 2026-11-07 12:22 CST, waiting-page item 113 a (the owner's open-items page). Quote:
+Owner, 2026-11-07 12:22 CST, in chat to the coordinator. Quote:
 
 > "the fact that PRs slipped everyone's radar itself despite us having them be part of our triage/status/plans/goals/handoffs means there's a mechanical failure here and you need to solve that"
 
-Coordinator, 2026-11-07 12:56 CST, under item 113 a. It applies decision `pr-review-record` (a PR carries its review record on the PR):
+Coordinator, 2026-11-07 12:56 CST. It rests on owner ruling 113 a (waiting-page item 113 a, 2026-11-01 04:26 CST, decision `pr-review-record`, a PR carries its review record on the PR): no merge message; the batch runner finds reviewed, green PRs itself. The coordinator's ruling:
 
 - Intake is record-only. A PR joins a batch only through its review record.
 - The batch runner batches from the review record, not from a message.
@@ -57,7 +57,7 @@ Each next act has an age limit. For batch, the limit is one batch cycle. A next 
 
 A main-red hold shows on each PR it holds.
 
-The tool prints two numbers:
+The tool prints two numbers. Each one's target is 0:
 
 - Longest wait from a done review record to now.
 - Count of open PRs with no next act.
@@ -90,7 +90,6 @@ Per rule `outcomes-mechanize-rules`:
 
 - Batch runner 8 activity from 2026-11-06 15:15 CST to 2026-11-07 05:00 CST: unknown.
 - The q_max PRs were not sampled.
-- Target for the two numbers: the coordinator asked for "gold 0". Its meaning is not set here. The owner names it.
 - Dated by: a change to how the batch runner reads its queue, or to the next-act read in `merge --reviewed`. Either change rewrites this record.
 
 Kind: build
