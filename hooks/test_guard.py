@@ -8034,6 +8034,18 @@ for wrapped in (
        cwd=NOGIT)
 sh("env: timeout N does not make cat a runner", "timeout 60 cat --env-file=" + ENV, "deny",
    "env-file", cwd=NOGIT)
+# A NODE PROCESS THAT RUNS CODE PRINTS ITS ENVIRONMENT. `-e`, `-p`, `--eval` and `--print` run a script, and
+# a script that logs process.env prints the file through the runner. The loader flag alone runs an app file.
+for _printer in (
+    "-e 'console.log(process.env)'",
+    "-p 'process.env'",
+    "--eval 'console.log(process.env)'",
+    "--print 'process.env'",
+):
+    sh("env-node-env-file: node with the env file and %s denies, the script prints it" % _printer.split(" ")[0],
+       "node --env-file=" + ENV + " " + _printer, "deny", "env-file", cwd=NOGIT)
+sh("env-node-env-file: node with the env file running an app file still allows",
+   "node --env-file=" + ENV + " app.js", "allow", cwd=NOGIT)
 sh("waiter: timeout 60 over one short sleep is allowed", "timeout 60 sleep 5", "allow",
    cwd=NOGIT)
 sh("waiter: a timeout wrapper does not hide a 30 s sleep, refused", "timeout 60 sleep 30",
