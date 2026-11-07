@@ -45,7 +45,7 @@ CI: read live by merge --reviewed
 
 A change is done when one of these holds (rule `roles-review-cap-three`):
 
-- round 1 or 2 is its last round, that round is PASS or a fix check PASSes after its FAIL, and the last `design-reviewer` line (across all rounds) is PASS or absent;
+- round 1 or 2 is its last round, that round is PASS or a fix check PASSes after its FAIL, and the last `design-reviewer` line (across all rounds) is PASS or absent. When Guard or check is `yes`, only a `sonnet` fix check clears the round;
 - round 3 is done, and Guard or check is `no`;
 - round 3 is done, Guard or check is `yes`, and Net value is zero or positive;
 - Kind is `delete-only`, Guard or check is `no`, and round 1 is done;
@@ -53,7 +53,7 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 
 - A last `design-reviewer` line of FAIL or PARTIAL keeps a record open on the PASS rule. The round 3 and `delete-only` done rules stay done, and their reason names the design failure.
 - A round 3 verdict does not decide done. When Guard or check is `yes`, Net value does, even after a round 3 PASS: `not owed` is open, and `negative` holds the change (record `hold-unsafe-after-round-3`).
-- A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open unless a fix check PASSes. The rule owes rounds 2 and 3 when round 1 finds a safety hole.
+- A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open unless a fix check PASSes (on `sonnet`, as above). The rule owes rounds 2 and 3 when round 1 finds a safety hole.
 - `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
 
 ## The cost
