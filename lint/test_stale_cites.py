@@ -1042,7 +1042,8 @@ class CostTests(StaleCase):
 
     def test_a_non_py_range_in_a_repo_with_decision_records_adds_no_git_start_for_its_markdown_read(self):
         """The decision record's read already opens the cat-file that the Markdown read uses, so the start is not extra.
-        The record is read once more by STALE006, and the page once, so each governed Markdown file is read once by it."""
+        The report reads the record too, so the record is read twice in all. STALE006 reads each governed Markdown file once,
+        the record and the page included."""
         decision = "docs/decisions/tool-home-record.md"
         extra = decisions(("tool-home-record", "config/tool.toml"))
         extra["config/tool.toml"] = "mode = 1\n"  # the file exists at base, so the range modifies it
