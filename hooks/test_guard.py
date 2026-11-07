@@ -9096,6 +9096,19 @@ sh("env: heredoc-r3: a python file written with an env read through subprocess, 
 sh("env: heredoc-r3: a python file written with an env read through subprocess, then python3 runs it with a written operand, denies",
    "cat > p.py <<'PY'\nimport subprocess\nsubprocess.run(['cat', '" + ENV + "'])\nPY\ncat > c.txt <<'TXT'\nhello\nTXT\npython3 p.py c.txt",
    "deny", "env-file", cwd=NOGIT)
+# Round 2, must deny: an env read in a body written to a shell script that a later call may run, and in a body
+# written to job.txt that the command reads on stdin or as an operand of find -exec or kubectl exec.
+for _target in ("run.sh", "run.bash", "run.zsh"):
+    sh("env: heredoc-r3: an env read in a body written to " + _target + ", run by no command in this call, denies",
+       "cat > " + _target + " <<'EOF'\ncat " + ENV + "\nEOF", "deny", "env-file", cwd=NOGIT)
+for _label, _tail in (
+    ("ssh host on stdin", "ssh host < job.txt"),
+    ("docker exec sh on stdin", "docker exec -i c sh < job.txt"),
+    ("find -exec bash", "find . -name job.txt -exec bash {} \\;"),
+    ("kubectl exec bash", "kubectl exec p -- bash job.txt"),
+):
+    sh("env: heredoc-r3: an env read in job.txt, run by " + _label + ", denies",
+       "cat > job.txt <<'EOF'\ncat " + ENV + "\nEOF\n" + _tail, "deny", "env-file", cwd=NOGIT)
 sh("env: normalized, glob, heredoc or depth, cat <<EOF, heredoc-r3: a single quote before an unquoted substitution, denies",
    "cat > n.md <<EOF\n'$(cat " + ENV + ")'\nEOF", "deny", "env-file", cwd=NOGIT)
 sh("env: normalized, glob, heredoc or depth, cat <<EOF | sh, heredoc-r4: a single quote before an unquoted substitution, denies",
@@ -9605,6 +9618,36 @@ sh("draft-pr: a lone quote in a data body that no runner runs, with a pull reque
 sh("draft-pr: a run file with a pull request, run with a later written file as its operand, is denied",
    "cat > run.sh <<'EOF'\ngh pr create --title x\nEOF\ncat > c.txt <<'TXT'\nhello\nTXT\nbash run.sh c.txt",
    "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# Round 2, must deny: a file named .sh, .bash or .zsh is a shell script that a later call may run, so its body
+# stays a shell body; a body written to job.txt is run by the runner that reads it on stdin or as an operand
+# of find -exec or kubectl exec; and a body that runs part.txt by a path from $(dirname $0) runs that file too.
+sh("draft-pr: a pull request in a body written to run.sh, run by no command in this call, is denied",
+   "cat > run.sh <<'EOF'\ngh pr create --title x\nEOF", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a pull request in a body written to run.bash, run by no command in this call, is denied",
+   "cat > run.bash <<'EOF'\ngh pr create --title x\nEOF", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a pull request in a body written to run.zsh, run by no command in this call, is denied",
+   "cat > run.zsh <<'EOF'\ngh pr create --title x\nEOF", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a pull request in job.txt, read by ssh on stdin, is denied",
+   "cat > job.txt <<'EOF'\ngh pr create --title x\nEOF\nssh host < job.txt", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a pull request in job.txt, read by docker exec sh on stdin, is denied",
+   "cat > job.txt <<'EOF'\ngh pr create --title x\nEOF\ndocker exec -i c sh < job.txt", "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a pull request in job.txt, run by find -exec bash, is denied",
+   "cat > job.txt <<'EOF'\ngh pr create --title x\nEOF\nfind . -name job.txt -exec bash {} \\;", "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a pull request in job.txt, run by kubectl exec bash, is denied",
+   "cat > job.txt <<'EOF'\ngh pr create --title x\nEOF\nkubectl exec p -- bash job.txt", "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a body that runs part.txt by a path from $(dirname $0), run by bash, is denied",
+   "cat > part.txt <<'P'\ngh pr create --title x\nP\ncat > job.txt <<'J'\nbash \"$(dirname $0)/part.txt\"\nJ\nbash job.txt",
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a run file read by eval through a substitution, is denied",
+   "cat > f <<'OUT'\ngh pr create --title x\nOUT\neval \"$(cat f)\"", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `gh api -X POST .../pulls`,
 # `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 

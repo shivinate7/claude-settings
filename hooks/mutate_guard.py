@@ -249,6 +249,23 @@ MUTATIONS = [
      '    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text):\n'
      '        return cmd',
      '    if False:\n        return cmd', "guard", 'heredoc: a body fed to a shell stays under inspection'),
+    # The run-file keep of strip_heredoc_bodies: a body whose written file a command runs stays in view. Dropped,
+    # the write-then-run cases allow.
+    ("heredoc: drop the run-file keep, a body a command runs stays out of view",
+     '    keep = _kept_bodies(text, bodies, body_at)',
+     '    keep = set()', "guard", 'draft-pr: a run file written then run by bash, is denied'),
+    # _kept_bodies: the closure, a body that a kept body names, is no longer kept.
+    ("heredoc: drop the closure, a body a kept body names stays out of view",
+     '        more = {at for at, written in enumerate(writes) if at not in keep and written & named}',
+     '        more = set()', "guard", 'draft-pr: a file that a run file sources runs with it, so its pull request is denied'),
+    # _run_files: a line that runs a substitution with a runner reads the written file it names.
+    ("heredoc: a runner's substitution runs no written file, eval of a file",
+     '        if _SUBSTITUTION.search(line) and any(_RUNNER(_basename_word(word)) for word in line_words):',
+     '        if False:', "guard", 'draft-pr: a run file read by eval through a substitution, is denied'),
+    # _stage_runs: a runner that reads a script on stdin runs none of the words piped into it.
+    ("heredoc: a runner reads no piped script, cat f | sh runs nothing",
+     '            stdin = not picked or picked[0] == "-"',
+     '            stdin = False', "guard", 'draft-pr: a run file piped into sh, is denied'),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)',
