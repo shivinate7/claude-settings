@@ -4,7 +4,7 @@ Mockup: `docs/design/one-page.html`. Screens: `skills/waiting-page/page.html` an
 `skills/roadmap/page/index.html` (main 1cc47f01).
 Ruling: the owner, Oct 27 12:15 CDT. One page per repo, with one writer. "Waiting on you" comes
 first. Status sits below it or in a tab. The two-page proposal is dropped.
-Rulings for this round (orchestrator, inside the owner's ruling): the waiting-page writer alone
+Rulings for this round (orchestrator, inside the owner's ruling): the page writer alone
 publishes the page file, and the tab row always shows.
 Sizes: phone 390, mid 800, wide 1280, light and dark. They are the sizes of `waiting-page-notes.md`.
 The mockup draws the waiting part with the `<style>` of page.html, unchanged.
@@ -138,7 +138,7 @@ Each part below is kept as it is today, with no change. The mockup does not draw
    `answers/<id>`, then check that the answered card shows. The test also checks that nothing
    writes or deletes a document in `answers/`. The live check runs once per batch, as step 4 of
    "Update a repo's pages" in the waiting-page skill says: update one page first, then read its items.
-5. One writer publishes the page file: the waiting-page writer. The roadmap build makes only a data
+5. One writer publishes the page file: the page writer. The roadmap build makes only a data
    block, in its own marked block, and gives it to that writer. The build never publishes.
 6. Before each publish, the writer reads the live page. It replaces only the marked block that it
    changes: the `designData` block or the roadmap block. It keeps the other block. It runs one

@@ -1,6 +1,6 @@
 ---
 name: project-ops
-description: Use when the owner asks to give a repo session tiers (coordinator, triage, batch runner), rotation by usage tally, a roadmap record and briefs, or says "project-ops" or "adopt the way of working". Makes the record branch and gives the role, roster, brief and handoff templates. Not for ordinary code edits.
+description: Use when the owner asks to give a repo session tiers (coordinator, triage, batch runner), rotation of standing sessions, a roadmap record and briefs, or says "project-ops" or "adopt the way of working". Makes the record branch and gives the role, roster, brief and handoff templates. Not for ordinary code edits.
 ---
 
 This skill packages the way the claude-settings project on claude.ai works, so another repo can
@@ -14,13 +14,15 @@ Without a project, each tier is one Claude Code session, and the owner acts as t
 
 - **Session tiers.** The coordinator, triage, the batch runner and lane sessions.
   `templates/operating-model.md` says what each tier owns, and how triage and the batch runner
-  rotate by a usage tally. The coordinator compacts in place and has no successor.
+  rotate. The coordinator compacts in place and has no successor.
 - **The roster.** One list of who holds each standing session now. `templates/roster.md`.
 - **Autopilot.** An act that needs the owner's answer gets a "Deferred" line and waits. All other
   work runs. `templates/operating-model.md`.
 - **Batching.** Rule `git-integration-branch-merge` (lanes join one integration branch) governs it.
-  The model adds only the "frozen at <sha>" line on each merge go. Under a standing merge grant,
-  the coordinator gives each merge go, and the batch runner runs the merge tool on it. The owner is not asked.
+  The model adds only a review record on each PR (`templates/operating-model.md`, record
+  `pr-review-record`). Under a standing merge grant, the batch runner batches each PR whose review record
+  is done, as `merge --reviewed` finds it, and merges the integration PR on green. The owner is not
+  asked.
 - **The record branch.** An orphan branch, `roadmap` by default, that holds the roadmap data,
   briefs and role handoff notes. It is never merged into main. A fork names its own record branch,
   such as `roadmap-<fork>`, in the extras key `record-branch`. For a fork's page, see skill
@@ -62,7 +64,7 @@ that triage or the batch runner writes for its successor.
 
 `skills/roadmap` is the one home for building the roadmap block, for any checkout. This skill
 keeps no copy. Its `SKILL.md` says how to build (`--block`) and what `--live` passes. The build
-publishes nothing: the waiting-page writer splices the block into the repo's one page and alone
+publishes nothing: the page writer splices the block into the repo's one page and alone
 publishes it (skill `waiting-page`). At triage start, when the repo has no waiting page, triage makes
 it, with no separate grant (skill `waiting-page`, "Make a repo's page"). The scaffolded `roadmap/README.md`
 (`templates/record-branch/roadmap/README.md.tmpl`) holds the step file shape.

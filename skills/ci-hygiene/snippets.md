@@ -180,15 +180,16 @@ Same-repo action: `uses: $/path` (GitHub changelog 2026-07-30). This repo's `che
 `uses: ./...` call, an action or a workflow. For a reusable workflow call, the replacement is
 unknown; read zizmor's docs for self-repository.
 
-Pins of claude-settings' `ste-lint` action follow the session's tools. Check drift with the tool
-that reads the pin. It exits 3 when the pin lags:
+Pins of claude-settings' `ste-lint` and `zizmor` actions follow the session's tools. Check drift with
+the tool that reads the pins. It exits 3 when a pin lags:
 
 ```sh
 bin/ste-changed origin/main
 ```
 
 Move the pin in a lane of its own (decision `action-pins-follow-sessions`, pins follow the session's
-tools). Other pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.
+tools). Ask before moving a zizmor pin: the no-question grant covers ste-lint pins only. Other
+pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.
 
 This repo's `.github/dependabot.yml` ignores every version update for `github-actions`, so only a
 security fix opens a PR (decision `dependabot-security-only`, Dependabot runs security updates only):
@@ -209,11 +210,11 @@ updates:
 
 This repo's `renovate.json` tracks three custom pins. None of them is an action.
 
-Audit with zizmor. Run the CI command from the repo root. It is the zizmor CI step of
-`.github/workflows/checks.yml`:
+Audit with zizmor. Run the CI command from the repo root. The zizmor CI step of
+`.github/workflows/checks.yml` runs the `zizmor` action, whose `run.sh` holds the pin:
 
 ```sh
-pipx run zizmor==1.30.1 .github/ actions/
+ZIZMOR_PATHS=".github/ actions/" bash actions/zizmor/run.sh
 ```
 
 ## 9. Wait without loops
@@ -231,7 +232,7 @@ to `/dev/null`.
 ```sh
 cp -R . "$(mktemp -d)/scratch" && cd "$_"   # scratch copy
 # break one target, for example replace one pinned SHA with a tag
-pipx run zizmor==1.30.1 .github/ actions/   # must exit non-zero
+ZIZMOR_PATHS=".github/ actions/" bash actions/zizmor/run.sh   # must exit non-zero
 ```
 
 Decide a commit on the check's own exit code. A pipe takes the exit code of its last command:
