@@ -606,7 +606,7 @@ MEASURED = "Why yours: I can't delete it (measured 2026-11-06, the proxy said 40
 TRUE_LINE = "Why yours: I can't delete it (route r-refused). Notes follow."
 READ_ID, WRITE_ID = "toolu_read", "toolu_write"
 STORED_SESSION = "why-stored-1"
-DENY, ASK, ALLOW = ("deny", WHY_RULE), ("ask", WHY_RULE), ("allow", "")
+REFUSE, ASK, ALLOW = ("deny", WHY_RULE), ("ask", WHY_RULE), ("allow", "")
 _transcript_names = []
 
 
@@ -727,9 +727,9 @@ def judge_payload(payload):
         return "unparsed", text[:80]
 
 
-def stored_case(name, tool_input, records, want, path=None, read_gate=True):
+def stored_case(name, tool_input, records, want, path=None, read_check=True):
     """One item write judged through the guard payload, its transcript written from `records` (or the file at `path`).
-    With `read_gate`, the rule must read the transcript before it judges, so a case that reads nothing fails by name
+    With `read_check`, the rule must read the transcript before it judges, so a case that reads nothing fails by name
     with no verdict. A green passes with zero reads on the code before the rule, so it names no read."""
     transcript = path if path is not None else transcript_of(records)
     rows = rows_at("why-rows.json", WHY_ROWS)
@@ -740,7 +740,7 @@ def stored_case(name, tool_input, records, want, path=None, read_gate=True):
             got = judge_payload(guard_payload(tool_input, transcript))
     if got[0] == "raised":
         check(name, False, "the guard raised: %s" % got[1])
-    elif read_gate and not opened:
+    elif read_check and not opened:
         check(name, False, "the rule read the transcript 0 times, so it judged no stored line (got %s)" % (got,))
     else:
         check(name, got == want, "want %s, got %s" % (want, got))
@@ -750,15 +750,15 @@ def case_stored_line_reds():
     """Each case here is a stored line the rule must refuse: the cite judged is the one the stored text holds, after
     old_str is applied. Each is allowed on the code before the rule, so each is red on it."""
     stored_case("a stored refused cite swapped for a works row is denied", edit("r-refused", "r-works"),
-                get_of(3, STORED), DENY)
+                get_of(3, STORED), REFUSE)
     stored_case("a stored dated cite with its date swapped for words is denied", edit("2026-11-06", "last week"),
-                get_of(3, MEASURED), DENY)
+                get_of(3, MEASURED), REFUSE)
     stored_case("a stored cite dropped from its Why yours line is denied", edit(" (route r-refused)", ""),
-                get_of(3, STORED), DENY)
+                get_of(3, STORED), REFUSE)
     stored_case("a stored cite swapped for a bare premise label is denied", edit("(route r-refused)", "(measured)"),
-                get_of(3, STORED), DENY)
+                get_of(3, STORED), REFUSE)
     stored_case("a subagent read at the write's version is the stored text, so a false edit is denied",
-                edit("r-refused", "r-works"), get_of(3, STORED, sidechain=True), DENY)
+                edit("r-refused", "r-works"), get_of(3, STORED, sidechain=True), REFUSE)
 
 
 def case_stored_line_asks():
@@ -781,7 +781,7 @@ def case_stored_line_replay():
     first = edit("r-refused", "r-asks")
     stored_case("a second edit pinned to the version the first write returned is judged on the replayed text",
                 edit("r-asks", "r-works", version=4), get_of(3, STORED) + write_of(WRITE_ID, first, wrote_line(4)),
-                DENY)
+                REFUSE)
     failed = "Error: the page refused the write"
     stored_case("a failed earlier write is not replayed, so a second edit at its version is asked",
                 edit("r-asks", "r-works", version=4),
@@ -794,9 +794,9 @@ def case_stored_line_replay():
 def case_stored_line_greens():
     """Each case here is a stored line the rule must allow. Each passes on the code before the rule, with no read."""
     stored_case("a stored refused cite swapped for an asks row passes", edit("r-refused", "r-asks"), get_of(3, STORED),
-                ALLOW, read_gate=False)
+                ALLOW, read_check=False)
     stored_case("an unrelated edit on a true stored line passes", edit("Notes follow.", "Notes below."),
-                get_of(3, TRUE_LINE), ALLOW, read_gate=False)
+                get_of(3, TRUE_LINE), ALLOW, read_check=False)
 
 
 def case_stored_line_cost():
