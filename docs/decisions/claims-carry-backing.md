@@ -51,13 +51,13 @@ When an act contradicts a route row, the falsifier notes it: `hooks/refusal_note
 
 ## Model judge at merge
 
-Built, report-only. `merge/merge.py` selects prose lines and sends each file to the model once (read merge/merge.py:2415-2452; read merge/merge.py:2497-2513; read merge/merge.py:2525-2559).
+Built, report-only. `merge/merge.py` selects prose lines and sends each file to the model once (read merge/merge.py:2459-2496; read merge/merge.py:2541-2557; read merge/merge.py:2581-2623).
 
-- Selection: each line that cites a changed backing file, from `backed_lines`, the reverse map of code to the prose that cites it (read lint/stale_cites.py:611-628). Plus each non-heading line the range adds to a governed file (read merge/merge.py:2439-2445).
-- Call: `decision_watch.invoke_model` with the `LINE_VERDICTS` shape, which reads `holds`, `stale` or `unbacked` per line (read hooks/decision_watch.py:671; read merge/merge.py:2540).
-- Cap: 3 files per merge (read merge/merge.py:2412). A file past the cap reads UNKNOWN (read merge/merge.py:2507-2508). The report prints at most 20 lines, then one count line (read merge/merge.py:2557-2558).
-- Errors: a model error, a timeout or an unreadable reply reads UNKNOWN, never a pass (read merge/merge.py:2539-2545).
-- Report only: the call runs after the lock is released and refuses nothing (read merge/merge.py:2526-2529).
+- Selection: each line that cites a changed backing file, from `backed_lines`, the reverse map of code to the prose that cites it (read lint/stale_cites.py:611-628). Plus each non-heading line the range adds to a governed file (read merge/merge.py:2483-2489).
+- Call: `decision_watch.invoke_model` with the `LINE_VERDICTS` shape, which reads `holds`, `stale` or `unbacked` per line (read hooks/decision_watch.py:675; read merge/merge.py:2599).
+- Cap: 3 files per merge (read merge/merge.py:2454). The lines of a file past the cap read UNKNOWN, counted under "past the call cap" (read merge/merge.py:2553-2554). The report prints each stale or unbacked line, at most 20, then one count line for the rest (read merge/merge.py:2617-2618).
+- Errors: a model error, a timeout or an unreadable reply reads UNKNOWN, never a pass. The report prints one UNKNOWN count line for every line not judged, by cause, with no raw error text (read merge/merge.py:2599-2606; read merge/merge.py:2622). A failure of the whole plan prints one UNKNOWN line in place of that count (read merge/merge.py:2615).
+- Report only: the call runs after the lock is released and refuses nothing (read merge/merge.py:2582-2584).
 
 Scored. `lint/prove_route_judge.py` scores the judge on `lint/route_claims_labelled.json`. The file has 21 rows. Each row holds its line text and the commit it was judged at (read lint/route_claims_labelled.json:1-23). Only a `stale` verdict counts against the labels. A false alarm is a TRUE row judged stale. A hit is a STALE, PARTLY_STALE or HALF row judged stale (read lint/prove_route_judge.py:113-131). `unbacked` is counted apart, because no labelled row carries a backing cite. UNKNOWN and HISTORY rows are skipped, and so is a row with no rev (read lint/prove_route_judge.py:39-40, :115-116). Source: "only a 'stale' verdict scores against the labels; 'unbacked' is counted on its own" (lane pick, 2026-11-07 02:46 CST, process-only).
 

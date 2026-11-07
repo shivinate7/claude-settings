@@ -209,7 +209,7 @@ def merge_check(selector, repo: str, where: str):
 MERGE_CHECK_REASON = (
     "Rule (Git): this head is not settled: %s. A merge waits for every check and workflow run on "
     "the head, required or not, and a read that could not run counts as not settled. "
-    "Remedy: run the merge tool, `merge <pr> --confirm`, which waits on every check, then "
+    "Remedy: run the merge tool, `merge <pr> --confirm`, which waits on the required checks, then "
     "merges the head it waited on."
 )
 
