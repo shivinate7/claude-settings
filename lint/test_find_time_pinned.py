@@ -844,6 +844,28 @@ class JsCalendarTest(FinderCase):
                        listed=["const real = Date();"],
                        clean=["// const note = Date();", "const q = Date();", "const inside = Date();"])
 
+    def test_new_date_fed_by_date_now_is_listed(self):
+        text = src("const ago = new Date(Date.now() - 60000);")
+        self.put("tests/clock_fed.test.js", text)
+        calendar_judge(self, "tests/clock_fed.test.js", text,
+                       listed=["const ago = new Date(Date.now() - 60000);"])
+
+    def test_new_date_fed_by_performance_now_is_listed(self):
+        text = src("const perf = new Date(performance.now());")
+        self.put("tests/clock_perf.test.js", text)
+        calendar_judge(self, "tests/clock_perf.test.js", text,
+                       listed=["const perf = new Date(performance.now());"])
+
+    def test_new_date_with_a_declared_constant_or_a_literal_is_not_listed(self):
+        text = src(
+            "const EPOCH_MS = 1700000000000;",
+            "const fixed = new Date(0);",
+            "const epoch = new Date(EPOCH_MS);",
+        )
+        self.put("tests/fixed_date.test.js", text)
+        calendar_judge(self, "tests/fixed_date.test.js", text,
+                       clean=["const fixed = new Date(0);", "const epoch = new Date(EPOCH_MS);"])
+
 
 # ---- Swift: one-pass masker then patterns --------------------------------------------------------
 
