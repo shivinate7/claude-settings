@@ -890,7 +890,7 @@
       "test": "hooks/test_guard.py::builder-test: Write of the guard's test file in the main checkout, from a worktree, is refused"
     },
     "owner-judge": {
-      "test": "hooks/test_guard.py::oj"
+      "test": "hooks/test_question_form.py::case_chat_reasons_name_a_remedy_and_no_page_field"
     },
     "page-item-design": {
       "test": "hooks/test_guard.py::pd_case"

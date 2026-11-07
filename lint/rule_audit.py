@@ -77,7 +77,7 @@ import os
 import re
 import subprocess
 import sys
-from typing import List
+from typing import List, Optional
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -115,7 +115,7 @@ KINDS = {"guard", "check", "ci", "unmechanized", "judgment"}
 CASE_REGISTRARS = {"add", "sh", "check"}
 
 
-def _defs(tree):
+def _defs_uncached(tree):
     """Every function def in `tree`, as (class node or None, node)."""
     out = []
     in_class = set()
@@ -156,6 +156,19 @@ def _is_testcase(cls, classes) -> bool:
     return False
 
 
+def _per_tree(fn):
+    """Memoize `fn(tree)` by tree identity. `_parsed` keeps each tree alive, so an id is never reused
+    while its entry stands; a tree built by hand is simply computed again."""
+    memo = {}
+
+    def wrapper(tree):
+        hit = memo.get(id(tree))
+        if hit is None or hit[0] is not tree:
+            hit = memo[id(tree)] = (tree, fn(tree))
+        return hit[1]
+    return wrapper
+
+
 def _constant_false(test) -> bool:
     return isinstance(test, ast.Constant) and not test.value
 
@@ -172,7 +185,7 @@ def _scan(nodes, out):
         _scan(ast.iter_child_nodes(node), out)
 
 
-def _live_nodes(tree):
+def _live_nodes_uncached(tree):
     """Every node that runs when the file runs: module-level code, plus the body of any module
     function that live code names. A def nobody names, a branch under `if False:`, and a call
     inside an uncalled function are not live. Static and conservative: a function reached only
@@ -190,6 +203,24 @@ def _live_nodes(tree):
             seen.add(node.id)
             _scan(funcs[node.id].body, live)
     return live
+
+
+_PARSE_CACHE: dict = {}
+
+
+_defs = _per_tree(_defs_uncached)
+_classes = _per_tree(lambda tree: {n.name: n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)})
+_live_nodes = _per_tree(_live_nodes_uncached)
+
+
+def _parsed(full: str, text: str):
+    """The ast of `text`, kept per (path, size, mtime) so the many rows that cite one test file
+    parse it once. A rewritten file has a new key, so a stale tree is never served."""
+    st = os.stat(full)
+    key = (full, st.st_size, st.st_mtime_ns)
+    if key not in _PARSE_CACHE:
+        _PARSE_CACHE[key] = ast.parse(text)  # a SyntaxError is not cached: it raises each time
+    return _PARSE_CACHE[key]
 
 
 def citation_problem(test_id: str, root: str = ROOT):
@@ -231,11 +262,11 @@ def citation_problem(test_id: str, root: str = ROOT):
     if not path.endswith(".py"):
         return f"test file `{path}` is neither .py nor .mjs."
     try:
-        tree = ast.parse(text)
+        tree = _parsed(full, text)
     except SyntaxError as e:
         return f"`{path}` does not parse: {e}."
     cls_name, _, func = name.rpartition(".")
-    classes = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+    classes = _classes(tree)
     matches = [(c, n) for c, n in _defs(tree)
                if n.name == func and (not cls_name or (c is not None and c.name == cls_name))]
     if len(matches) > 1:
@@ -367,15 +398,64 @@ def _string_constants(node) -> set:
     return {n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
 
 
-def guard_rule_names(text: str, path: str = "<source>"):
+def _module_bindings(tree, base_dir, seen):
+    """Module-level names of `tree` as {name: str value, or None when bound to anything else}.
+    `from m import X` follows to `base_dir/m.py` when that file exists; `seen` stops import loops."""
+    out = {}
+    for node in tree.body:
+        pairs = []
+        if isinstance(node, ast.Assign):
+            pairs = [(t.id, node.value) for t in node.targets if isinstance(t, ast.Name)]
+            for t in node.targets:
+                if not isinstance(t, ast.Name):
+                    out.update({n.id: None for n in ast.walk(t) if isinstance(n, ast.Name)})
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value:
+            pairs = [(node.target.id, node.value)]
+        for name, value in pairs:
+            const = isinstance(value, ast.Constant) and isinstance(value.value, str)
+            out[name] = None if name in out else (value.value if const else None)
+        if isinstance(node, ast.ImportFrom):
+            theirs = {}
+            src = os.path.join(base_dir, node.module.replace(".", os.sep) + ".py") if (
+                base_dir and node.module and not node.level) else ""
+            if src and os.path.isfile(src) and src not in seen:
+                theirs = _module_bindings(ast.parse(read(src)), base_dir, seen | {src})
+            for alias in node.names:
+                out[alias.asname or alias.name] = theirs.get(alias.name)
+    return out
+
+
+def _local_names(tree):
+    """{id(call): names bound by the def that holds it: parameters and assigned names}."""
+    held = {}
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            a = fn.args
+            names = {x.arg for x in a.posonlyargs + a.args + a.kwonlyargs}
+            names |= {x.arg for x in (a.vararg, a.kwarg) if x}
+            names |= {n.id for n in ast.walk(fn) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+            for n in ast.walk(fn):
+                if isinstance(n, ast.Call):
+                    held[id(n)] = held.get(id(n), set()) | names
+    return held
+
+
+def guard_rule_names(text: str, path: str = "<source>", base_dir=None):
     """The rule ids Python source writes to guard.log, read with `ast` so a comment or a string
     that shows a call names nothing. Three shapes write an id: a string literal in refuse() or
     record() (third argument) or ask_command() (first), by position or as `rule=`; the table in
-    diff_rule(); and the `code, why = {...}` role-scope table. A call that passes a variable names
-    no id. An f-string id cannot be listed, so it raises ValueError naming `path:line`: a rule
-    that can fire but is not listed would hide from a never-fired cull."""
+    diff_rule(); and the `code, why = {...}` role-scope table.
+    A module-level string constant resolves to its value, also one imported from a module under
+    `base_dir`. A name that is a parameter or local of the enclosing def (or bound nowhere in the
+    source) is a pass-through: the ids come from the call sites and tables read here. Anything else
+    cannot be listed, so it raises ValueError naming `path:line`: a rule that can fire but is not
+    listed would hide from a never-fired cull. That covers an f-string, a name bound at module
+    level to anything but a string constant, and any other expression but the diff_rule() call."""
+    tree = ast.parse(text)
     ids = set()
-    for node in ast.walk(ast.parse(text)):
+    bound = _module_bindings(tree, base_dir, set())
+    local = _local_names(tree)
+    for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
             at = GUARD_RULE_ARG.get(name)
@@ -385,11 +465,21 @@ def guard_rule_names(text: str, path: str = "<source>"):
             if len(node.args) > at:
                 args = [node.args[at]]
             for arg in args:
-                if isinstance(arg, ast.JoinedStr):
-                    raise ValueError(f"{path}:{node.lineno}: {name}() takes an f-string rule id; "
-                                     "pass a string literal so the id can be listed")
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                     ids.add(arg.value)
+                    continue
+                if isinstance(arg, ast.Name):
+                    if arg.id in local.get(id(node), ()) or arg.id not in bound:
+                        continue
+                    if bound[arg.id] is not None:
+                        ids.add(bound[arg.id])
+                        continue
+                elif (isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name)
+                      and arg.func.id == "diff_rule"):
+                    continue
+                what = "an f-string" if isinstance(arg, ast.JoinedStr) else "a rule id the reader cannot resolve"
+                raise ValueError(f"{path}:{node.lineno}: {name}() takes {what}; "
+                                 "pass a string literal or a module-level string constant so the id can be listed")
         elif isinstance(node, ast.FunctionDef) and node.name == "diff_rule":
             for stmt in node.body:  # a docstring is a bare string statement: it names no id
                 if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)):
@@ -407,7 +497,7 @@ def emitted_rule_ids(root: str = ROOT) -> set:
     ids = set()
     config_watch = os.path.join(root, "hooks", "config_watch.py")
     for path in guard_paths(root) + ([config_watch] if os.path.exists(config_watch) else []):
-        ids |= guard_rule_names(read(path), os.path.relpath(path, root))
+        ids |= guard_rule_names(read(path), os.path.relpath(path, root), os.path.dirname(path))
     return ids
 
 
@@ -429,8 +519,8 @@ def guards_section_problems(rule_map: dict, guard_names: set) -> List[str]:
         problems.append(f"guard rule `{gid}` has no row under \"guards\" in lint/rule_mechanisms.json.")
     for gid in sorted(guards.keys() - guard_names):
         problems.append(
-            f"lint/rule_mechanisms.json guards row `{gid}` names a rule id hooks/guard*.py no "
-            f"longer writes. Stale row. Remove it.")
+            f"lint/rule_mechanisms.json guards row `{gid}` names a rule id no hook "
+            f"writes to guard.log any more. Stale row. Remove it.")
     for gid in sorted(guards.keys() & guard_names):
         row = guards[gid]
         test = row.get("test") if isinstance(row, dict) else None
@@ -451,6 +541,7 @@ def check(
     rule_floor: int = RULE_FLOOR,
     unmechanized_expected: int = UNMECHANIZED_EXPECTED,
     judgment_expected: int = JUDGMENT_EXPECTED,
+    guard_names: Optional[set] = None,
 ) -> List[str]:
     """Return every problem found. An empty list means the audit passes.
 
@@ -490,7 +581,8 @@ def check(
             f"Remove the row, or restore the anchor."
         )
 
-    guard_names = guard_rule_names(guard_text)
+    if guard_names is None:  # the real audit passes emitted_rule_ids; fixtures pass guard source text
+        guard_names = guard_rule_names(guard_text)
     ci_names = ci_step_names(workflow_text)
 
     unmechanized_count = 0
@@ -608,11 +700,11 @@ def main() -> None:
     workflow_text = read(WORKFLOW) if os.path.exists(WORKFLOW) else ""
 
     try:
-        emitted_rule_ids(ROOT)  # an id the reader cannot list fails here, with its file:line
+        guard_ids = emitted_rule_ids(ROOT)  # an id the reader cannot list fails here, with its file:line
     except ValueError as e:
         print(f"rule_audit: FAIL\n - {e}")
         sys.exit(1)
-    problems = check(claude_text, rule_map, guard_text(ROOT), workflow_text)
+    problems = check(claude_text, rule_map, "", workflow_text, guard_names=guard_ids)
     if problems:
         print("rule_audit: FAIL")
         for p in problems:
