@@ -640,25 +640,44 @@ def named_in_code_spans(row):
     return list(dict.fromkeys(paths)), list(dict.fromkeys(names))
 
 
+NAMED_MAX_BYTES = 256 * 1024  # a named file larger than this is skipped, never excerpted
+NAMED_ROW_CHARS = 200  # an excerpt row longer than this is cut, with a marker
+
+
+def named_too_large(text):
+    """True when `text` is over NAMED_MAX_BYTES (UTF-8), so named_excerpt skips it. Exactly NAMED_MAX_BYTES is not too large."""
+    return len(text) > NAMED_MAX_BYTES or (len(text) * 4 > NAMED_MAX_BYTES and len(text.encode("utf-8", "replace")) > NAMED_MAX_BYTES)
+
+
 def named_excerpt(names, text, around=3, limit=40):
     """The numbered lines of a file's `text` within `around` lines of each line that holds one of `names` as a whole word, at most
-    `limit` lines, a "..." row between two windows that do not touch. None when no line holds a name. A prose judge sends this
-    beside a line that names the file in backticks, so the model reads the code the line talks about."""
+    `limit` lines, a "..." row between two windows that do not touch. Each row is cut to NAMED_ROW_CHARS characters with a marker.
+    When the `limit` drops later lines, the excerpt ends with a marker line that says so; it has none otherwise. None when no line holds
+    a name, or when `text` is over NAMED_MAX_BYTES (named_too_large). A prose judge sends this beside a line that names the file in
+    backticks, so the model reads the code the line talks about. Cost: at most `limit` rows of NAMED_ROW_CHARS characters."""
+    if named_too_large(text):
+        return None
     rows = text.replace("\r\n", "\n").split("\n")
     hits = [re.compile(r"(?<!\w)%s(?!\w)" % re.escape(name)) for name in names]
     keep = set()
     for n, row in enumerate(rows, 1):
         if any(h.search(row) for h in hits):
             keep.update(range(max(n - around, 1), min(n + around, len(rows)) + 1))
-    shown = sorted(keep)[:limit]
+    ordered = sorted(keep)
+    shown = ordered[:limit]
     if not shown:
         return None
     out, last = [], None
     for n in shown:
         if last is not None and n != last + 1:
             out.append("...")
-        out.append("%d: %s" % (n, rows[n - 1]))
+        row = rows[n - 1]
+        if len(row) > NAMED_ROW_CHARS:
+            row = row[:NAMED_ROW_CHARS] + " [row cut at %d characters]" % NAMED_ROW_CHARS
+        out.append("%d: %s" % (n, row))
         last = n
+    if len(ordered) > limit:
+        out.append("[more lines left out at the %d-row cap]" % limit)
     return "\n".join(out)
 
 

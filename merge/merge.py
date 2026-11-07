@@ -2472,9 +2472,15 @@ def prose_judge_prompt(wt, path, by_line, read=None):
     """The prompt for one prose file: each selected line numbered as in the file, with each cite as written and the text it points at.
     `read(wt, backing)` fetches a backing file's text, read_backing by default; lint/prove_route_judge.py passes a reader that goes through git at a rev.
     A line also gets an excerpt of each backticked path it names but does not cite: the lines within 3 of each line that holds another backticked
-    name or number of the line. Cost: still one model call per prose file; the prompt grows by at most 40 lines per named path."""
+    name or number of the line. Each path is read once per prompt build. Cost: still one model call per prose file; the prompt grows by at most
+    40 rows of 200 characters per named path, and a named file over 256 KB is skipped with a one-line note."""
     import stale_cites
-    read = read or read_backing
+    fetch, seen = read or read_backing, {}
+
+    def read(wt, backing):
+        if backing not in seen:
+            seen[backing] = fetch(wt, backing)
+        return seen[backing]
     parts = [
         "You judge lines of a Markdown file against the files they cite. For each numbered line below, say whether the line still holds "
         "against the text it cites (holds), the code or text shown below says otherwise (stale), or the line states a fact with no cite that backs it (unbacked). "
@@ -2495,6 +2501,9 @@ def prose_judge_prompt(wt, path, by_line, read=None):
         paths, names = stale_cites.named_in_code_spans(text)
         for named in paths:
             body = read(wt, named) if named not in cited and names else None
+            if body and stale_cites.named_too_large(body):
+                parts.append(f"  named path: {named} skipped for size (over 256 KB), no excerpt shown")
+                continue
             shown = stale_cites.named_excerpt(names, body) if body else None
             if shown is not None:
                 parts.append(f"  named path: {named}\n  lines of {named} around the names this line gives:\n" + "\n".join("    " + r for r in shown.split("\n")))
