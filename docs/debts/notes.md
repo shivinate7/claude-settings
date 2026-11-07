@@ -1502,6 +1502,7 @@
 - draft-claim-line-no-ready-checks-test: the draft preview's claim line for a repo with no readyChecks has no test of its exact wording (merge/test_merge.py pins only "refuses"). Also on main. Decision: lanes-run-no-full-ci-job (the lane-check decision).
 - known-roots-later-error-silent: a LayoutError in a root after the cwd's reads as no page, with no note. Decision: none.
 - pointer-import-error-silent: question_form swallows a guard_pointer import error, so the pointer root is left out with no note. Decision: none.
-- pointer-symlink-siblings: known_roots lists siblings of the realpath, so a symlinked pointer misses children beside the spelled path. Decision: none.
-- page-lookup-on-publish: page_stale_hit runs the root lookup on every publish with url and file_path, at about 0.75 ms, file reads only. Decision: none.
+- pointer-symlink-siblings: known_roots lists siblings of the spelled pointer path (abspath), so a pointer that is a symlink into another tree misses the children beside its real path. Decision: none.
+- page-lookup-on-publish: page_stale_hit runs the root lookup on every publish with url and file_path, at 0.75 to 3.97 ms per call (two runs), file reads only. Decision: none.
 - artifact-id-not-decoded: layout.artifact_id does not trim or percent-decode a url. Decision: none.
+- rework-reply-false-alarm: rule rework-off-page now reads `reply` on a set or update, so a session that answers an owner comment on an open item with "options being reworked" is refused. Frequency unmeasured. Decision: rework-leaves-page (a reworked item leaves the page).
