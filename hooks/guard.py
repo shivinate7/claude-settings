@@ -3581,7 +3581,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 7a. A protected path (decision protected-path). The plain forms are read from the stripped command, and only
     # when it looks like a write (SHELL_WRITE_HINT), so a read-only call opens no extras file. A python or node
     # script's own writes are read from the raw command: the predicate runs only for a path the script writes.
-    matched = (protected_shell_hit(stripped, cwd) if SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", stripped)) else "")
+    matched = (protected_shell_hit(stripped, cwd) if PROTECTED_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", stripped)) else "")
     matched = matched or interpreter_write_hit(raw, cwd, is_protected)
     if matched:
         refuse(tool, "deny", "protected-path", protected_reason(matched), matched)
@@ -4238,8 +4238,10 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # redirect onto a stream (`2>&1`) or the null device writes no checkout, so it is dropped first.
 SHELL_QUIET_REDIRECT = re.compile(r"\d*>>?[ \t]*(?:&[0-9-]|/dev/null\b)")
 SHELL_WRITE_HINT = re.compile(
-    r">|" + MUTATING_COMMAND + r"|\bsed\b|\bperl\b|\bgit\b[^\n;|&]*\b(?:restore|checkout)\b"
-    r"|\bfind\b[^\n;|&]*\s-(?:delete|exec|execdir|ok|okdir)\b")
+    r">|" + MUTATING_COMMAND + r"|\bsed\b|\bperl\b|\bfind\b[^\n;|&]*\s-(?:delete|exec|execdir|ok|okdir)\b")
+# The protected-path rule also reads the version control tool's path forms of restore and checkout. Only that rule
+# does, so the rules that let a recovery by them pass, and the cost cases of the checkout rules, keep SHELL_WRITE_HINT.
+PROTECTED_WRITE_HINT = re.compile(SHELL_WRITE_HINT.pattern + r"|\bgit\b[^\n;|&]*\b(?:restore|checkout)\b")
 
 
 def _owning_checkout(path: str, roots) -> str:

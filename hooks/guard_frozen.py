@@ -236,7 +236,7 @@ MUTATING_COMMAND = (
 _RUNS_ITS_ARGUMENTS = {"find", "eval", "exec", "pwsh", "powershell", "cmd"}
 
 
-def _mutates_as_command(command: str, words) -> bool:
+def _mutates_as_command(command: str, words, git_paths=False) -> bool:
     """True when the segment's own command (`command`, its resolved name) changes the files it names:
     a word of MUTATING_COMMAND or a `mv` or `rm` of the version control tool. A command that runs its
     arguments counts too, as it always did, so a shell `-c "rm x"` and `find -exec rm` stay seen."""
@@ -244,10 +244,10 @@ def _mutates_as_command(command: str, words) -> bool:
         return True
     if command == "git":
         rest = [word for word in words if not word.startswith("-")]
-        if "restore" in rest[:2]:   # `git restore --staged` alone rewrites the index, never the working tree
+        if git_paths and "restore" in rest[:2]:   # `git restore --staged` alone rewrites the index, never the working tree
             staged = any(word in ("--staged", "-S") for word in words)
             return not staged or any(word in ("--worktree", "-W") for word in words)
-        return any(word in ("mv", "rm") for word in rest[:2]) or ("checkout" in rest[:2] and "--" in words)
+        return any(word in ("mv", "rm") for word in rest[:2]) or (git_paths and "checkout" in rest[:2] and "--" in words)
     return bool(re.fullmatch(MUTATING_COMMAND, command))
 
 
@@ -258,7 +258,7 @@ _GIT_PATH_WRITE = r"\bgit\b[^\n;|&]*(?:\brestore\b|\bcheckout\b[^\n;|&]*\s--(?=\
 _FIND_WRITES = re.compile(r"\bfind\b[^\n;|&]*\s-(?:delete\b|(?:exec|execdir|ok|okdir)\s+" + MUTATING_COMMAND + ")")
 
 
-def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
+def writes_to(path: str, cmd: str, command=None, words=(), git_paths=False) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
     Two ways to write a named file from a shell: redirect onto it, or hand it to a command that
@@ -274,12 +274,12 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
         return True
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
-    if command is not None and not _mutates_as_command(command, words):
+    if command is not None and not _mutates_as_command(command, words, git_paths):
         return command in ("sed", "perl") and bool(re.search(_IN_PLACE_EDIT % target, cmd))
     if command == "rsync":   # only the destination, the last operand, is written
         operands = [word for word in words if not word.startswith("-")]
         return bool(operands) and operands[-1] == path
-    if re.search(_GIT_PATH_WRITE + r"[^\n;|&]*" + target, cmd):
+    if git_paths and re.search(_GIT_PATH_WRITE + r"[^\n;|&]*" + target, cmd):
         return True
     if _FIND_WRITES.search(cmd):   # a find that deletes or runs a mutating command writes what it walks
         return True
@@ -613,12 +613,13 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 
 
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
-                     command_position=False, predicate_command=False) -> str:
+                     command_position=False, predicate_command=False, git_paths=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
     when that folder cannot be told. `predicate_command` also hands `predicate` the segment's command
-    name as a third argument (`''` when none)."""
+    name as a third argument (`''` when none). `git_paths` also reads `git restore <path>` and `git checkout -- <path>`
+    as writes of that path: the protected-path rule asks for it, and a rule that lets a recovery by them pass does not."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -664,7 +665,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(words) if command_position else ())):
+            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(words) if command_position else ()), git_paths=git_paths):
                 return word
     return ""
 
@@ -757,7 +758,7 @@ def protected_why(path: str) -> str:
 
 def protected_shell_hit(cmd: str, cwd: str) -> str:
     """Return the protected path a shell command writes to, else ''. A leading `cd` moves the folder the path is read from."""
-    return _shell_write_hit(cmd, cwd, is_protected, follow_cd=True, command_position=True)
+    return _shell_write_hit(cmd, cwd, is_protected, follow_cd=True, command_position=True, git_paths=True)
 
 
 # ------------------------------------------------------------------ an interpreter's own writes
