@@ -531,6 +531,8 @@ def answered_problem(text):
 # reports-done-names-models: a Done item that agents built or reviewed names each one's role
 # and model, as "(builder sonnet, reviewer sonnet)". Only these roles build or review; an Explore
 # search or a Plan spawn needs no name. A Workflow agent() is unseen: its model can sit in a variable.
+# A spawn still running is named under Next instead: that excuses it from Done, but only when every
+# BUILT item names a role and model, so a finished build cannot hide behind a running reviewer.
 NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
 SPAWN_TOOLS = {"Agent", "Task"}
 MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
@@ -603,17 +605,24 @@ def spawn_models(records):
     return found
 
 
+def _role_models(text):
+    return {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(text)
+            for r in ROLE_RE.findall(roles)}
+
+
 def done_models_problem(text, spawned):
     """Name what Done gets wrong about the spawned roles' models, else ''."""
     if not spawned:
         return ""
-    done = " ".join(done_items(block_text(text, keep_indent=True)))
-    named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
-             for r in ROLE_RE.findall(roles)}
+    items = done_items(block_text(text, keep_indent=True))
+    named = _role_models(" ".join(items))
+    next_named = _role_models(report_section(text, "Next"))
     missing = sorted(r for r in spawned if not any(nr == r for nr, _ in named))
+    if missing and all(ROLE_MODEL_RE.search(i) for i in items if "BUILT" in DONE_KIND_RE.findall(i)):
+        missing = [r for r in missing if not any(nr == r for nr, _ in next_named)]
     if missing:
         return "no model named for " + ", ".join(missing)
-    for role, model in sorted(named):
+    for role, model in sorted(named | next_named):
         ran = spawned.get(role)
         if ran is not None and "" not in ran and model not in ran:
             return f"'{role} {model}' matches no {role} spawn, which ran " + ", ".join(sorted(ran))
