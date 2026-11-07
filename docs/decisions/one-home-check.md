@@ -53,6 +53,13 @@ Paraphrase pass, `python3 lint/find_copies.py --measure lint/paraphrase_labelled
   `--measure` starts two, python and one `claude -p`. Each run reads the tracked `*.md` files
   (`--paraphrase` only), makes at most one model call, and writes no file. `invoke_model` makes and
   removes one temp folder for the call. A run with no candidate line starts no `claude`.
+- Held-out measure, step `one-home-paraphrase-measure`, 2026-11-07 14:46 CST, one run. Set
+  `lint/paraphrase_heldout.json`: 60 cases (30 paraphrase, 30 distinct), built by a test-author
+  that never read the prompt. Model `sonnet`, effort `high`. Precision 0.86 (25 of 29 flagged).
+  Recall 0.83 (25 of 30). False positives: hd05, hd06, hd08, hd09. Missed: hp07, hp10, hp23, hp26,
+  hp29. This is the figure to trust over the first set's 1.00. Run-to-run spread: unmeasured.
+- Verdict: the pass stays report-only. About 1 flag in 7 is a false alarm, so a blocking pass would
+  cry wolf (`verification-cry-wolf-guard-is-spent`).
 - Where it runs: skill `compliance-check`, as a report-only step. Never in CI or ste-lint: CI has no
   model key.
 
