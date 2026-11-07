@@ -1,0 +1,11 @@
+{
+  "title": "A solo owner session gets its own merge role, and only it may use it",
+  "phase": "now",
+  "status": "doing",
+  "order": 267.4,
+  "owner": "coordinator",
+  "lane": "merge-role-raw-paths",
+  "why": "The merge role file has no form for a solo session that the owner started (follow-up of step merge-role-allow).",
+  "note": "Pick taken by the coordinator, no page item (16:32 CST Nov 7): option C. The session-start hook writes merge role 'solo-owner' into the role file only when the session has no parent and no cs-build tag. read_merge_role accepts it only when the session id in the file equals the calling session's own id.",
+  "updatedAt": "2026-11-07T16:32:00-06:00"
+}

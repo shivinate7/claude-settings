@@ -1,0 +1,11 @@
+{
+  "title": "The merge tool refuses a compare reply with no files key",
+  "phase": "now",
+  "status": "doing",
+  "order": 267.5,
+  "owner": "coordinator",
+  "lane": "session_013NEJKysbEmRBBB3QEfDm2H",
+  "why": "Follow-up of PR #1575: Host.compare_files in merge/merge.py read a reply with ahead_by above 0 and no files key as record-only, so it failed open.",
+  "note": "PR #1616. Round-1 notes (reviewer haiku, 16:34 CST Nov 7), decision pr-review-record: (1) compare-files-fixtures-modelled: the CompareReplyFiles fixtures in merge/test_merge.py model GitHub's reply. Measured 16:32 CST with gh on this repo: an identical compare, and a behind compare with zero entries, both send files as an empty array. (2) compare-read-cite-unpinned: the CompareReplyFiles tests assert Stop, not READ_CITE. (3) fix-check-reads-doc-drift grows: pr-review-record line 84 also says one GitHub compare read, and the code makes up to two.",
+  "updatedAt": "2026-11-07T16:32:00-06:00"
+}
