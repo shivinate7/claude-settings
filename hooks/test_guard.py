@@ -13213,6 +13213,12 @@ def _build_scriptrepo():
         "gen_shebang": "#!/usr/bin/env python3\n" + TEST_WRITE_PY,
         "gen_node.js": NODE_WRITE,
         "gen_tpl.js": "const s = `\nline one\nline two\n`;\n" + NODE_WRITE,  # a multi-line template literal
+        # A `//` comment that names a test write, then a product write: the comment is text, the write is code.
+        "comment_node.js": "// require('fs').writeFileSync('tests/x.js', 'x')\n"
+                           "require('fs').writeFileSync('src/app.js', 'x')\n",
+        # `//` and `/* */` inside strings are text: the one write after them is to product code.
+        "strings_node.js": "const a = \"// tests/x.js\";\nconst b = \"/* tests/x.js */\";\n"
+                           "require('fs').writeFileSync('src/app.js', a + b)\n",
         "shell_write.sh": "echo x > tests/x.py\n",
         "shell_src.sh": "echo x > src/app.py\n",
         "shell_lone.sh": "# don't touch this\necho x > tests/x.py\n",     # a lone quote in a comment
@@ -13225,8 +13231,12 @@ def _build_scriptrepo():
         lead = "#" * (total - len(TEST_WRITE_PY) - 1) + "\n"   # a comment line that fills the file, then the write
         with open(os.path.join(SCRIPTREPO, name), "wb") as handle:
             handle.write((lead + TEST_WRITE_PY).encode("ascii"))
-    for name, size in (("at_cap.py", cap), ("over_cap.py", cap + 1), ("empty.py", 0),
-                       ("gen.py", len(TEST_WRITE_PY))):
+    # One byte over the cap, with the test write on the FIRST line: a reader that cut the file short would see it.
+    first = TEST_WRITE_PY + "#" * (cap + 1 - len(TEST_WRITE_PY) - 1) + "\n"
+    with open(os.path.join(SCRIPTREPO, "over_cap_first.py"), "wb") as handle:
+        handle.write(first.encode("ascii"))
+    for name, size in (("at_cap.py", cap), ("over_cap.py", cap + 1), ("over_cap_first.py", cap + 1),
+                       ("empty.py", 0), ("gen.py", len(TEST_WRITE_PY))):
         got = os.path.getsize(os.path.join(SCRIPTREPO, name))
         if got != size:
             sys.exit("fixture setup failed in _build_scriptrepo: %r is %d bytes, want %d" % (name, got, size))
@@ -13244,6 +13254,8 @@ for _name, _command in (
      "tee gen_t.py <<'EOF'\n" + TEST_WRITE_PY + "EOF\npython3 gen_t.py"),
     ("heredoc to gen_n.js, then node runs it, writes web/a.test.js",
      "cat > gen_n.js <<'EOF'\n" + NODE_WRITE + "EOF\nnode gen_n.js"),
+    ("heredoc to gen6.py with a python shebang, chmod +x, then ./gen6.py runs it, writes tests/x.py",
+     "cat > gen6.py <<'EOF'\n#!/usr/bin/env python3\n" + TEST_WRITE_PY + "EOF\nchmod +x gen6.py && ./gen6.py"),
 ):
     sh("builder-test: script-file, %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **SR)
@@ -13286,6 +13298,12 @@ for _name, _command in (
      "python3 comment_only.py"),
     ("echo of a quoted python3 gen.py", "echo \"python3 gen.py\""),
     ("true, then a comment naming python3 gen.py", "true # python3 gen.py"),
+    ("python3 runs over_cap_first.py, the test write on its first line, one byte over the cap, is not read",
+     "python3 over_cap_first.py"),
+    ("node runs comment_node.js, whose // comment names a test write, writes only src/app.js",
+     "node comment_node.js"),
+    ("node runs strings_node.js, whose strings hold // and /* */ naming a test path, writes only src/app.js",
+     "node strings_node.js"),
     ("heredoc to gen.py writes src/app.py, then python3 runs it, the body wins over the disk copy",
      "cat > gen.py <<'EOF'\n" + SRC_WRITE_PY + "EOF\npython3 gen.py"),
 ):
