@@ -1,17 +1,19 @@
 """Known-defect replay: a catcher with an import fallback, in a profile of parts.
 
-Part `oracle` installs and claims the planted defect by its `code` regex. Part `extra` fails to install and claims nothing
-the defect touches. The catcher imports a module only `extra`'s install would provide, under `try/except ImportError`, and
-falls back to an assertion on the plant. The fallback catches the plant, so the replay must not read CAUGHT: the defect
-needs part `extra`, which failed, and the UNKNOWN reason names both the module and part `extra`.
+Part `oracle` installs, and its `code` regex covers `calc`, the file the plant goes into. Part `extra` fails to install. A
+Python or Node catcher imports a module only `extra`'s install would provide, under `try/except ImportError`, and falls
+back to an assertion on the plant. Under a failed install each catcher run carries the load hook, which logs the module it
+cannot resolve. The fallback catches the plant, so the replay must not read CAUGHT: the UNKNOWN reason names both the
+module and the failed install of part `extra`.
 
 The run folder, the fixtures and the runner come from hooks/test_mutate_ci.py, the one home of them. Its cases cover the
 single-profile fallback. These cover the cross-part fallback, a green control, and where a catcher run's log lives.
-LoadHookTests covers the load hook: the runs it must not trust under a failed install, the names it must not log, and
-what it costs.
+LoadHookTests covers the load hook: the runs it must not trust under a failed install, the catchers it does not apply to,
+the names it must not log, and what it costs.
 """
 import importlib.util
 import os
+import shutil
 import sys
 import unittest
 from unittest import mock
@@ -197,9 +199,9 @@ def probe_catcher(sidecar):
 
 
 def cross_part_profile(extra_install, oracle_install=ci.ORACLE_INSTALL):
-    """Part oracle installs `oracle_install` (ORACLE_INSTALL by default) and claims calc by its code regex. Part extra
-    installs `extra_install` and claims nothing: its code regex matches no calc file and its tests regex matches no
-    catcher."""
+    """Part oracle installs `oracle_install` (ORACLE_INSTALL by default), and its code regex covers calc. Part extra
+    installs `extra_install`. Its regexes match no calc file and no catcher, so under a failed extra install the verdict
+    comes from the load hook alone."""
     return {"parts": {
         "oracle": {"install": oracle_install, "lockfile": ci.ROOT_LOCK, "code": r"^calc\.(?:py|mjs|cjs)$"},
         "extra": {"install": extra_install, "lockfile": ci.APP_LOCK, "code": r"^app/", "tests": r"^app/test_"},
@@ -302,12 +304,13 @@ class CrossPartFallbackTests(unittest.TestCase):
 
 
 class LoadHookTests(unittest.TestCase):
-    """The load hook of a catcher run under a failed install: the runs it must not trust, the names it keeps out of the
-    environment, the cases it must leave CAUGHT, and what it costs."""
+    """The load hook of a catcher run under a failed install: the catchers it applies to, the runs it must not trust, the
+    names it keeps out of the environment, the cases it must leave CAUGHT, and what it costs."""
 
     def assert_unknown(self, code, out, err, defect_id, *terms):
         self.assertEqual(ci.verdicts_of(out), {defect_id: "UNKNOWN"},
-                         "a run the load hook did not reach reads UNKNOWN under a failed install, never CAUGHT\n"
+                         "a Python or Node run the load hook did not reach reads UNKNOWN under a failed install, never "
+                         "CAUGHT\n"
                          + out + err)
         line = [text for text in out.splitlines() if text.startswith("UNKNOWN %s:" % defect_id)]
         self.assertEqual(len(line), 1, "one UNKNOWN line for %s:\n%s%s" % (defect_id, out, err))
@@ -332,6 +335,23 @@ class LoadHookTests(unittest.TestCase):
                         argv=["env", "NODE_OPTIONS=--max-old-space-size=256", "node", NODE_CATCHER])]
         code, out, err = ci.known_run(defects, repo, profile=cross_part_profile(ci.FAILING_INSTALL))
         self.assert_unknown(code, out, err, "kb-env-node", "load hook did not run", "part extra")
+
+    def test_a_shell_check_under_a_failed_install_reads_caught_because_no_load_hook_is_owed(self):
+        # The start-line rule covers a Python or Node catcher only. A shell check starts no load hook, so no install owes
+        # it one. The check reads the plant from calc.py: the clean line is gone, so it prints a FAIL line and exits 1.
+        self.assertIsNotNone(shutil.which("sh"), "the shell check needs sh on this platform")
+        shell_check = ("if ! grep -qF 'return a + b' calc.py; then\n"
+                       "  echo 'FAIL: add(1, 2) is not 3'\n"
+                       "  exit 1\n"
+                       "fi\n"
+                       "echo ok\n")
+        repo = python_repo(PLAIN_CATCHER)
+        defects = [dict(ci.defect("kb-sh", "return a + b", "return a - b", CATCHER, file="calc.py"),
+                        argv=["sh", "-c", shell_check])]
+        code, out, err = ci.known_run(defects, repo, profile=cross_part_profile(ci.FAILING_INSTALL))
+        self.assert_caught(code, out, err, "kb-sh",
+                           "pick A, 15:54 CST, and its lane pick at 16:58 CST: a shell check is no Python or Node "
+                           "catcher, so no load hook is owed and the failed install reads CAUGHT")
 
     def test_a_cjs_require_of_a_missing_package_under_a_failed_install_reads_unknown_never_caught(self):
         repo = repo_with({CJS_MODULE: CJS_CALC, CJS_CATCHER: CJS_FALLBACK_CATCHER})
