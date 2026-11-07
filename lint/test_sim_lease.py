@@ -54,6 +54,10 @@ def load_slot_udid(path):
 
 def setUpModule():
     global RUN_FOLDER, SLOT_UDID
+    try:
+        import fcntl  # noqa: F401  sim-lease locks with it; Windows' Python has none
+    except ImportError:
+        raise unittest.SkipTest("bin/sim-lease is Mac-only: it needs fcntl, which this Python lacks")
     RUN_FOLDER = _test_temp.run_folder()
     SLOT_UDID = load_slot_udid(SIM_LEASE)
 
