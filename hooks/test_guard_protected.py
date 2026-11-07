@@ -15,7 +15,8 @@ cases. Each case drives the guard as Claude Code does: one JSON object on stdin,
 Each test has a config folder of its own, so its guard.log is its own.
 
 Each allow case first shows the rule live on a protected write in its own repo. Scope before subject (P7):
-a missing rule fails that control, so an allow never passes by accident.
+a missing rule fails that control, so an allow never passes by accident. The OtherRulesScope cases hold the
+other rules to the same test: each control is that rule's own deny, shown first.
 """
 import json
 import os
@@ -181,10 +182,11 @@ class Guarded(unittest.TestCase):
         except (ValueError, KeyError) as err:
             self.fail("the guard printed no decision Claude Code can read on %s: %s" % (describe(body), err))
 
-    def assertDenied(self, body, label):
+    def assertDenied(self, body, label, rule=RULE):
         decision, reason = self.guard(body)
         self.assertEqual(decision, "deny", "%s: want deny, got %s: %s" % (label, decision, reason[:200]))
-        self.assertTrue(reason.startswith(RULE + ": "), "%s: the deny names another rule: %s" % (label, reason[:200]))
+        self.assertTrue(reason.startswith(rule + ": "), "%s: the deny names another rule, want %s: %s"
+                        % (label, rule, reason[:200]))
         return reason
 
     def assertAllowed(self, body, label):
@@ -521,6 +523,132 @@ class FalseAlarms(Guarded):
 
     def test_git_show_of_a_protected_file_at_head_is_allowed(self):
         self.assertReadAllowed("git show HEAD:fixtures/a", "git show HEAD:fixtures/a")
+
+
+class ShellGroupsAndWrappers(Guarded):
+    """A write grouped in a subshell or a block, or run under a wrapper command, is still a write to the path it names."""
+
+    def test_a_subshell_rm_after_a_semicolon_is_denied(self):
+        self.assertDenied(self.shell("(rm -f fixtures/a.csv; echo done)"), "(rm -f fixtures/a.csv; echo done)")
+
+    def test_a_subshell_rm_after_and_and_is_denied(self):
+        self.assertDenied(self.shell("true && (rm fixtures/a.csv)"), "true && (rm fixtures/a.csv)")
+
+    def test_a_subshell_cp_in_an_if_branch_is_denied(self):
+        self.assertDenied(self.shell("if true; then (cp x fixtures/a.csv); fi"), "if true; then (cp x fixtures/a.csv); fi")
+
+    def test_a_subshell_touch_is_denied(self):
+        self.assertDenied(self.shell("(touch fixtures/a.csv)"), "(touch fixtures/a.csv)")
+
+    def test_an_ionice_wrapped_rm_is_denied(self):
+        self.assertDenied(self.shell("ionice -c3 rm fixtures/a.csv"), "ionice -c3 rm fixtures/a.csv")
+
+    def test_a_stdbuf_wrapped_tee_is_denied(self):
+        self.assertDenied(self.shell("stdbuf -oL tee fixtures/a.csv"), "stdbuf -oL tee fixtures/a.csv")
+
+    def test_a_flock_wrapped_rm_is_denied(self):
+        self.assertDenied(self.shell("flock /tmp/l rm fixtures/a.csv"), "flock /tmp/l rm fixtures/a.csv")
+
+
+class GitCheckoutPaths(Guarded):
+    """git checkout with a path rewrites that path in the working tree, whatever ref comes before the path."""
+
+    def test_git_checkout_of_a_branch_with_a_path_is_denied(self):
+        self.assertDenied(self.shell("git checkout main fixtures/a.csv"), "git checkout main fixtures/a.csv")
+
+    def test_git_checkout_of_an_ancestor_with_a_path_is_denied(self):
+        self.assertDenied(self.shell("git checkout HEAD~1 fixtures/a.csv"), "git checkout HEAD~1 fixtures/a.csv")
+
+    def test_git_checkout_of_a_bare_path_is_denied(self):
+        self.assertDenied(self.shell("git checkout fixtures/a.csv"), "git checkout fixtures/a.csv")
+
+
+class RsyncDestinations(Guarded):
+    """rsync writes into the folder it names last, wherever its options fall around that name."""
+
+    def test_rsync_with_an_option_after_the_folder_is_denied(self):
+        self.assertDenied(self.shell("rsync -a src/ fixtures/ --exclude tmp"), "rsync -a src/ fixtures/ --exclude tmp")
+
+    def test_rsync_with_a_remote_shell_option_is_denied(self):
+        self.assertDenied(self.shell("rsync -e ssh -a src/ fixtures/"), "rsync -e ssh -a src/ fixtures/")
+
+
+class ReadsAndScopedWrites(Guarded):
+    """A copy out, a write that stays outside the folder, or a verb that does not write in place: each is allowed, under a
+    live control. A write verb that names the folder only in a pattern or an exclude is not a write to the folder."""
+
+    def assertReadAllowed(self, command, label):
+        self.assertLive()
+        self.assertAllowed(self.shell(command), label)
+
+    def test_rsync_that_only_excludes_the_folder_is_allowed(self):
+        self.assertReadAllowed("rsync -a src/ dist/ --exclude fixtures/", "rsync -a src/ dist/ --exclude fixtures/")
+
+    def test_rsync_copying_a_protected_folder_out_is_allowed(self):
+        self.assertLive()
+        backup = os.path.join(self.tree, "backup") + os.sep
+        self.assertAllowed(self.shell("rsync -a fixtures/ %s" % backup), "rsync -a fixtures/ out of the repo")
+
+    def test_git_restore_staged_of_a_protected_file_is_allowed(self):
+        self.assertReadAllowed("git restore --staged fixtures/a.csv", "git restore --staged fixtures/a.csv")
+
+    def test_git_checkout_to_a_new_branch_named_like_the_folder_is_allowed(self):
+        self.assertReadAllowed("git checkout -b fixtures-fix", "git checkout -b fixtures-fix")
+
+    def test_perl_print_of_a_protected_file_is_allowed(self):
+        self.assertReadAllowed("perl -ne 'print' fixtures/a.csv", "perl -ne 'print' fixtures/a.csv")
+
+    def test_perl_substitution_without_in_place_is_allowed(self):
+        self.assertReadAllowed("perl -pe 's/-i//' fixtures/a.csv", "perl -pe 's/-i//' fixtures/a.csv")
+
+    def test_find_print_under_the_folder_is_allowed(self):
+        self.assertReadAllowed("find fixtures -print", "find fixtures -print")
+
+    def test_find_prune_of_the_folder_then_delete_elsewhere_is_allowed(self):
+        self.assertReadAllowed("find . -path ./fixtures -prune -o -name '*.pyc' -delete",
+                               "find . -path ./fixtures -prune -o -name '*.pyc' -delete")
+
+    def test_find_delete_excluding_the_folder_is_allowed(self):
+        self.assertReadAllowed("find . -name '*.pyc' -not -path './fixtures/*' -delete",
+                               "find . -name '*.pyc' -not -path './fixtures/*' -delete")
+
+
+class OtherRulesScope(Guarded):
+    """The other rules keep their verdicts on main. A read of a sibling checkout's source, and a read of a frozen config
+    file (copied out, or named by find -newer), are allowed. Each has a control: a write of the same kind into that
+    checkout or that file is denied by its own rule, shown first."""
+
+    def setUp(self):
+        super().setUp()
+        self.work = os.path.join(self.tree, "work")
+        git(self.repo, "worktree", "add", "-q", "-b", "sib", os.path.join(self.tree, "sib"))
+        git(self.repo, "worktree", "add", "-q", "-b", "work", self.work)
+        write_file(self.cfg, "hooks/x", "x\n")
+        self.frozen = os.path.join(self.cfg, "hooks", "x")
+        self.out = os.path.join(self.tree, "out")
+        os.makedirs(self.out)
+
+    def test_rsync_from_a_sibling_checkout_into_the_cwd_is_allowed(self):
+        self.assertDenied(self.shell("cp x ../sib/src/y", cwd=self.work), "control: cp into the sibling checkout",
+                          rule="other-checkout")
+        self.assertAllowed(self.shell("rsync -a ../sib/src/ ./local/", cwd=self.work), "rsync -a ../sib/src/ ./local/")
+
+    def test_grep_for_rsync_in_a_sibling_checkout_is_allowed(self):
+        self.assertDenied(self.shell("cp x ../sib/src/y", cwd=self.work), "control: cp into the sibling checkout",
+                          rule="other-checkout")
+        self.assertAllowed(self.shell("grep -rn rsync ../sib/src/", cwd=self.work), "grep -rn rsync ../sib/src/")
+
+    def test_rsync_copying_a_frozen_config_file_out_is_allowed(self):
+        self.assertDenied(self.shell("echo x > %s" % self.frozen), "control: a write to the frozen config file",
+                          rule="frozen-path")
+        backup = os.path.join(self.tree, "backup") + os.sep
+        self.assertAllowed(self.shell("rsync -a %s %s" % (self.frozen, backup)), "rsync -a <config>/hooks/x out of the config")
+
+    def test_find_newer_than_a_frozen_config_file_is_allowed(self):
+        self.assertDenied(self.shell("echo x > %s" % self.frozen), "control: a write to the frozen config file",
+                          rule="frozen-path")
+        self.assertAllowed(self.shell("find %s -name x -newer %s -delete" % (self.out, self.frozen)),
+                           "find <out> -name x -newer <config>/hooks/x -delete")
 
 
 if __name__ == "__main__":
