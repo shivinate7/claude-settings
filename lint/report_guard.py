@@ -88,7 +88,41 @@ does not name in its Input Needed section blocks. A built-in tool counts only in
 tool counts by its full name. Each tool the reply names is cleared, on a
 stop_hook_active rewrite too, which never blocks on a refusal (decision refusals-reach-the-owner).
 Cost: one stat per Stop when the session had no refusal.
+
+The triage hold (a roadmap build's `stalled step:` lines): a session whose own newest get_session record carries
+cs-build:triage (hooks/guard_merge.py _own_tier_proved) cannot end a turn while the newest roadmap build output in its
+transcript (the result of a Bash run of build.py) has an entry line, `stalled step: <id> (...)` or
+`stalled step: item <n> (...)`. An unknown line is no entry. The hold also covers a Stop after a refusal
+(stop_hook_active), which it releases only when the report's Input Needed section names every entry's id and item
+number. An owner `override` typed for the session lifts it, taken as guard_core's refuse() takes it, and the Stop
+it lifts spends a one-act override. A held Stop never carries the report's correction tail. A build run through
+verdict is read from the log file verdict printed (a missing log reads as no entries for that run). Cost: no
+transcript read of its own on a plain Stop (it shares main's read). Only when a Bash run of build.py is in it: the
+build module's import, and one log read for a verdict run. Only when an entry prints: the own-record read and one
+override read.
+
+Route-row flags (hooks/route_match.py holds the rows, the surface and the match): a refused call that a "works" row
+matches gets a `route_flag` in its refusals row (hooks/refusal_note.py), and a successful call of the turn that a
+"refused" row matches gets one here. Each flag rides in the systemMessage of the line this Stop prints and never
+changes its decision. The dedupe file <config dir>/state/route-flags/<session_id>.json holds the keys already
+shown. Cost: one small file per session, written only when a flag shows, read at Stop; its one reader and writer is
+_shown_flags, and a turn with no flag and no successful call reads no rows file. Cleanup: none. Nothing prunes
+state/ per session (janitor/session_end_sweep.py runs the branch and worktree sweep only), and a file holds a few
+short keys, so it stays as the refusals and reply-judge counter files do.
+
+Hand-off cite (rule output-never-hand-off-doable-step): a "Why yours:" line, in prose above the report or in the Input
+Needed or Next item (plain, behind a list marker, or in bold), that gives a capability reason (can't, cannot, refuse,
+refused, unable to, denied, forbidden, no access, not allowed, not permitted, unavailable, 403, blocked, not available)
+must cite `(route <id>)` for a route row whose outcome on this surface is refused or asks, a
+tool in backticks that hooks/refusal_note.py recorded for this session, or `(measured <date>, <check and result>)`. A
+line with a choice, login or safety-kept phrase needs no cite, and "blocked until" or "not available until" is a
+dependency, not a capability. A "works" row, a dead id, an undated measurement and no cite block,
+with a remedy that names no act. A rows file, a refusals file or an outcome that did not read is a systemMessage with
+the word UNKNOWN, never a block, and never clears a "works" row or a dead id. Cost: a reply with no such line opens nothing new and imports nothing; one with it reads
+the session's refusals file, and the rows file (hooks/route_match.py read_rows) when a line carries a route cite. It
+runs on landed and unlanded turns and not on a stop_hook_active rewrite.
 """
+import datetime
 import json
 import os
 import re
@@ -98,7 +132,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
     ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
-    read_transcript, records_after_last_human, send_targets, tool_uses)
+    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
@@ -622,15 +656,17 @@ QUESTION_MARK_RE = re.compile(r"\?(?!\w)")
 
 
 def report_section(text, label):
-    """The text of the report block's `label` item, else ''."""
+    """The text of the report item `label` (Done, Deviations, Input Needed or Next) from the report block, else ''.
+    Only a LABEL_ORDER label ends an item, so a bold phrase at a line start inside it does not."""
     body = []
     inside = False
     for line in block_text(text, keep_indent=True).splitlines():
         m = LABEL_RE.match(line)
-        if m:
+        name = m.group(1).strip().rstrip(":").strip() if m else None
+        if name in LABEL_ORDER:
             if inside:
                 break
-            inside = m.group(1).strip().rstrip(":").strip() == label
+            inside = name == label
             if inside:
                 body.append(line[m.end():].lstrip(": "))
             continue
@@ -1169,6 +1205,23 @@ def tool_use_sources(transcript_path):
     return agent, orchestrator
 
 
+def refusal_rows(path, skipped=None):
+    """(line, row) for each row of the refusals file at `path` that holds a tool_name. A bad line is skipped, and
+    appended to `skipped` when the caller passes a list, for the reader that must report an unread file."""
+    rows = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            try:
+                row = json.loads(line)
+            except Exception:
+                if skipped is not None and line.strip():
+                    skipped.append(line)
+                continue
+            if isinstance(row, dict) and isinstance(row.get("tool_name"), str):
+                rows.append((line.rstrip("\n"), row))
+    return rows
+
+
 def pending_refusals(hook, text):
     """Settle the session's refusals file against the reply and return the tool names still unnamed.
 
@@ -1185,15 +1238,7 @@ def pending_refusals(hook, text):
         path = shared_names.refusals_path(hook.get("session_id"))
         if path is None or not os.path.exists(path):
             return []
-        with open(path, encoding="utf-8") as f:
-            rows = []
-            for line in f:
-                try:
-                    row = json.loads(line)
-                except Exception:
-                    continue
-                if isinstance(row, dict) and isinstance(row.get("tool_name"), str):
-                    rows.append((line.rstrip("\n"), row))
+        rows = refusal_rows(path)
         section = input_needed_section(text)
         agent_ids, orchestrator_ids = set(), set()
         transcript = hook.get("transcript_path")
@@ -1218,12 +1263,243 @@ def pending_refusals(hook, text):
         return []
 
 
-def refusal_reason(tools):
-    """The block reason for refused tools the reply has not raised, or ''."""
-    if not tools:
+def hold_reason(entries):
+    """The block reason for the triage hold, naming its `entries` (joined)."""
+    return HOLD_REASON % entries
+
+
+def _shown_flags(hook, flags):
+    """The texts of `flags`, (key, text) pairs, that this session's Stop has not shown yet. It records their keys
+    in <config dir>/state/route-flags/<session_id>.json, so each shows once per session. [] when the session has
+    no plain id or the record cannot be written: a flag that cannot be counted would repeat on every Stop."""
+    if not flags:
+        return []
+    try:
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        import shared_names
+        path = shared_names.route_flags_path(hook.get("session_id"))
+        if path is None:
+            return []
+        try:
+            with open(path, encoding="utf-8") as f:
+                seen = json.load(f)
+            seen = [k for k in seen if isinstance(k, str)] if isinstance(seen, list) else []
+        except (OSError, ValueError):
+            seen = []
+        fresh = []
+        for key, text in flags:
+            if key not in seen:
+                seen.append(key)
+                fresh.append(text)
+        if fresh:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(seen, f)
+        return fresh
+    except Exception:
+        return []
+
+
+def refusal_route_flags(hook):
+    """The `route_flag` of each row in the session's refusals file that hooks/refusal_note.py wrote for a refusal a
+    route row contradicts, once each per session. Read before pending_refusals settles the file. This is the
+    named reader of those flags, so a flag is never written unread: it shows them and never refuses on one."""
+    try:
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        import shared_names
+        path = shared_names.refusals_path(hook.get("session_id"))
+        if path is None or not os.path.exists(path):
+            return []
+        flags = []
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    row = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(row, dict) and isinstance(row.get("route_flag"), str) and row["route_flag"]:
+                    flags.append(("refused:" + row["route_flag"], row["route_flag"]))
+        return _shown_flags(hook, flags)
+    except Exception:
+        return []
+
+
+def success_route_flags(hook, after):
+    """One flag per route row that says an act is refused, and that a call of the turn `after` matched and
+    succeeded in (a tool_result without is_error), once per row per session. The match and the surface are
+    hooks/route_match.py. Fails open: [] on any error."""
+    try:
+        failed = {b.get("tool_use_id") for r in after for b in tool_results(r) if b.get("is_error")}
+        answered = {b.get("tool_use_id") for r in after for b in tool_results(r)}
+        calls = [(u.get("name"), u.get("input")) for r in after for u in tool_uses(r)
+                 if u.get("id") in answered and u.get("id") not in failed]
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        if not calls:  # a turn with no successful call reads no rows file
+            return []
+        import route_match
+        flags = []
+        for row in route_match.matching_rows(route_match.load_rows(), "refused", calls):
+            key = "succeeded:%s" % row.get("id")
+            if all(key != k for k, _ in flags):
+                flags.append((key, "route row %s contradicted: it says this call is refused on %s, and it succeeded."
+                              % (row.get("id"), row.get("surface"))))
+        return _shown_flags(hook, flags)
+    except Exception:
+        return []
+
+
+# The hand-off cite (rule output-never-hand-off-doable-step). A "Why yours:" line in prose above the report, or in the
+# Input Needed or Next item, says why an act is the owner's. When it gives a capability reason (the owner's session can do
+# what this one cannot), it must cite a route row that says the act is not doable here, a tool the classifier refused
+# this session, or a dated measurement. A check name is no cite. A line with a choice, login or safety-kept phrase needs
+# no cite, even beside a capability verb: the owner keeps the act whatever this session can do.
+ROUTE_CITE_RE = re.compile(r"\(route\s+([\w.-]+)\)", re.I)
+MEASURED_RE = re.compile(r"\(measured\b([^)]*)\)", re.I)
+MEASURED_OK_RE = re.compile(r"\s+(\d{4}-\d{2}-\d{2}),\s*\S")
+# "blocked until" and "not available until" wait on another act, so they are a dependency, not a capability.
+CAPABILITY_RE = re.compile(
+    r"\bcan['’]t\b|\bcannot\b|\brefuse[sd]?\b|\bunable to\b|\bdenied\b|\bforbidden\b|\bno access\b"
+    r"|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b|\bunavailable\b|\b403\b"
+    r"|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)", re.I)
+CHOICE_RE = re.compile(
+    r"\byour choice\b|\byour call\b|\bneeds your login\b|\bsign in as you\b|\ba safety rule\b.*?\bstays yours\b"
+    r"|\bthe safety rules keep\b", re.I)
+# question_form.WHY_YOURS_LINE judges a waiting-page task's context, where the label starts the line. A reply carries it
+# behind a list marker or in bold, so this reader allows those forms. Widening WHY_YOURS_LINE itself would let a page
+# task pass in forms the page refuses today.
+WHY_YOURS_FORM_RE = re.compile(
+    r"^\s*(?:[-*+]\s+|\d+[.)]\s+)?(?:\*\*|__)?Why yours(?:\*\*|__)?:(?:\*\*|__)?[ \t]*\S", re.I)
+HAND_OFF_TAIL = " (rule output-never-hand-off-doable-step)"
+CITE_FORMS = (
+    "end the line with `(route <id>)`, an id from the route rows file whose outcome on this surface is refused or "
+    "asks, name in backticks a tool the auto-mode classifier refused this session, or give `(measured <date>, <check "
+    "and result>)`")
+HAND_OFF_NO_CITE = (
+    "Hand-off guard: a Why yours line gives a capability reason with no cite. Remedy: " + CITE_FORMS + ". A check name "
+    "is no cite. If no row, refusal or measurement fits, the act may be one a session can do.")
+HAND_OFF_NO_DATE = (
+    "Hand-off guard: a Why yours line carries a measured premise with no date or no check and result. Remedy: write "
+    "`(measured <date>, <check and result>)`, the date as YYYY-MM-DD.")
+
+
+def hand_off_lines(text, anywhere=False):
+    """Each Why yours line of the reply, without its quote marker, from the prose above the report and from the Input
+    Needed and Next items. The label counts at line start, behind a list marker or in bold. With `anywhere`, from
+    every line of the reply: hooks/reply_judge.py reads the route a line cites, wherever the line sits, and the
+    hand-off guard's own call keeps the narrower reading."""
+    lines = text.splitlines()
+    if anywhere:
+        return [line.strip() for line in (l.lstrip("> \t") for l in lines) if WHY_YOURS_FORM_RE.match(line.strip())]
+    start = find_block_start(lines)
+    above = lines if start is None else lines[:start]
+    sources = above + input_needed_section(text).splitlines() + report_section(text, "Next").splitlines()
+    return [line.strip() for line in sources if WHY_YOURS_FORM_RE.match(line.strip())]
+
+
+def _cited_refusal(hook, line):
+    """True when the Why yours `line` names a tool in this session's refusals file, False when it does not, None when
+    the file did not read (it cannot be opened, is not UTF-8, or a line in it is not JSON) and names none. The file is
+    read here, before pending_refusals settles it: a reply that names the tool under Input Needed clears its row."""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import shared_names
+    path = shared_names.refusals_path(hook.get("session_id"))
+    if path is None or not os.path.exists(path):
+        return False
+    skipped = []
+    try:
+        rows = refusal_rows(path, skipped)
+    except (OSError, UnicodeDecodeError):  # a directory, a lost file or bytes that are not UTF-8: this read only
+        return None
+    if any(names_tool(line, row["tool_name"]) for _, row in rows):
+        return True
+    return None if skipped else False
+
+
+def _measured(line):
+    """'ok' for a `(measured <date>, <check and result>)` cite with a real date, 'bad' for one without, else ''."""
+    found = MEASURED_RE.search(line)
+    if not found:
         return ""
+    dated = MEASURED_OK_RE.match(found.group(1))
+    try:
+        datetime.date.fromisoformat(dated.group(1))
+    except (AttributeError, ValueError):
+        return "bad"
+    return "ok"
+
+
+def _route_verdict(ids):
+    """(kind, text) for the route ids a Why yours line cites: kind "ok", "works" (a row says the act is doable),
+    "dead" (no row holds the id), or "unknown" (the file or the row's outcome on this surface did not read). Reads the
+    rows file once, through hooks/route_match.py. A row of another surface says nothing here, so it reads unknown."""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import route_match
+    rows = route_match.read_rows()
+    if rows is None:
+        return "unknown", ("the route rows file did not read, so the route cite %s went unchecked"
+                           % ", ".join(ids))
+    here = route_match.surface()
+    kinds = []
+    for rid in ids:
+        held = [row for row in rows if row.get("id") == rid]
+        row = next((r for r in held if r.get("surface") == here), None)
+        if not held:
+            kinds.append(("dead", "route id %s is in no row of the route rows file" % rid))
+        elif row is None or row.get("outcome") not in ("refused", "asks", "works"):
+            kinds.append(("unknown", "route row %s has no readable outcome on %s" % (rid, here)))
+        elif row["outcome"] == "works":
+            kinds.append(("works", "route row %s says this act works on %s, so it is not the owner's to do. "
+                          "Remedy: do it through the route %s" % (rid, here, row.get("route") or "that row names")))
+        else:
+            return "ok", ""
+    for kind in ("works", "dead", "unknown"):
+        for found, text in kinds:
+            if found == kind:
+                return kind, text
+
+
+def hand_off_problem(hook, text):
+    """(refusal, note) for the reply's Why yours lines, else ('', ''). A line with a choice phrase, or with no
+    capability verb, needs no cite. A capability line passes on a tool this session's classifier refused, a dated `(measured ...)` cite, or a route cite
+    whose row says refused or asks. A "works" row, a dead id, an undated measurement or no cite is refused. A file or row
+    that did not read is a note that says UNKNOWN. Cost: the reply's text; the refusals file and the rows file are
+    read only for a reply that holds a capability Why yours line, the rows file only for a line with a route cite."""
+    refusals, notes = [], []
+    for line in hand_off_lines(text):
+        if CHOICE_RE.search(line) or not CAPABILITY_RE.search(line):
+            continue
+        refused = _cited_refusal(hook, line)
+        measured = _measured(line)
+        if refused or measured == "ok":
+            continue
+        ids = ROUTE_CITE_RE.findall(line)
+        kind, detail = _route_verdict(ids) if ids else ("none", "")
+        if kind == "ok":
+            continue
+        if kind == "none" and measured == "bad":
+            refusals.append(HAND_OFF_NO_DATE)
+        elif kind == "none" and refused is None:
+            notes.append("Hand-off guard: UNKNOWN, this session's refusals file did not read, so the cite went unchecked.")
+        elif kind == "none":
+            refusals.append(HAND_OFF_NO_CITE)
+        elif kind == "unknown":
+            notes.append("Hand-off guard: UNKNOWN, " + detail + ".")
+        elif kind == "works":
+            refusals.append("Hand-off guard: " + detail + ".")
+        else:
+            refusals.append("Hand-off guard: the Why yours line cites a route id the route rows file does not hold (%s). "
+                            "Remedy: cite an id the file holds, or name a tool refused this session in backticks." % detail)
+    unique = list(dict.fromkeys(refusals))
+    return (" ".join(unique) + HAND_OFF_TAIL if unique else ""), " ".join(dict.fromkeys(notes))
+
+
+def refusal_reason(tools, hold=""):
+    """The block reason for refused tools the reply has not raised, and for the triage hold's entries, or ''."""
+    held = hold_reason(hold) if hold else ""
+    if not tools:
+        return held
     names = ", ".join("`%s`" % tool for tool in tools)
-    return (
+    return (held + " " if held else "") + (
         "Refusal guard: the auto-mode classifier refused %s this session, and the reply does not "
         "raise it with the owner. Add an Input Needed line \"allow `<tool_name>`?\" for each tool, "
         "and a line in the repo's debt notes file (notes.md) that names it. Or, if the refusal was "
@@ -1488,6 +1764,109 @@ def rewrite_relay(hook):
         return []
 
 
+HOLD_TIER = "triage"
+HOLD_REASON = (
+    "Triage hold: the newest roadmap build prints stalled step lines for %s. Dispose each (resume, pause or done), "
+    "rebuild, then end; or name them under Input Needed to escalate (decision session-tiers, the triage session)."
+)
+# A Bash command that runs the roadmap build: python, its flags, then a path that ends in build.py. A quoted or
+# piped mention (cat build.py, grep 'python3 build.py') is no run.
+BUILD_CALL_RE = re.compile(r"(?:^|[\s;&|(])python[\d.]*\s+(?:-\S+\s+)*(?:\S*/)?build\.py(?=[\s;&|)]|$)")
+
+
+def _roadmap_build_prefix():
+    """build.STALLED_LINE, the one emitter's line prefix (skills/roadmap/build.py), loaded only when a build ran."""
+    import importlib.util
+    path = os.path.join(HERE, "..", "skills", "roadmap", "build.py")
+    spec = importlib.util.spec_from_file_location("roadmap_build_for_hold", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, os.path.dirname(path))
+    spec.loader.exec_module(module)
+    return module.STALLED_LINE
+
+
+def _result_text(content):
+    if isinstance(content, list):
+        content = "\n".join(b.get("text", "") for b in content if isinstance(b, dict))
+    return content if isinstance(content, str) else ""
+
+
+# The verdict line bin/verdict prints for a run: `PASS|FAIL|SKIP <cmd> ... log=<path>`.
+VERDICT_LOG_RE = re.compile(r"^(?:PASS|FAIL|SKIP) .* log=(\S+)\s*$", re.M)
+VERDICT_RUN_HEADER = "=== verdict run "
+
+
+def _verdict_log_text(path):
+    """The last run's text in the verdict log at `path` (a log can hold several runs, each under a header line),
+    or None when the file is missing or unreadable."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+    except Exception:
+        return None
+    cut = text.rfind(VERDICT_RUN_HEADER)
+    return text if cut < 0 else text[cut:]
+
+
+def stalled_entries(records):
+    """The entries ("<step id>" or "item <n>") of the newest roadmap build output in `records`: each line
+    `<STALLED_LINE>: <id> (...)` or `<STALLED_LINE>: item <n> (...)`. An unknown line is no entry. A newer build
+    that prints none leaves none. Cost: no process, and the build module loads only when a build ran."""
+    runs, text = set(), None
+    for rec in records:
+        if rec.get("isSidechain"):
+            continue
+        for use in tool_uses(rec):
+            inp = use.get("input")
+            if use.get("name") == "Bash" and isinstance(inp, dict) and BUILD_CALL_RE.search(str(inp.get("command", ""))):
+                runs.add(use.get("id"))
+        for result in tool_results(rec):
+            if result.get("tool_use_id") in runs:
+                shown = _result_text(result.get("content"))
+                logged = VERDICT_LOG_RE.search(shown)
+                if logged:  # a run through verdict shows failure lines only; its log holds the build's own lines
+                    shown = _verdict_log_text(logged.group(1))
+                    if shown is None:
+                        continue  # a missing or unreadable log reads as no entries for this run; the older ones stand
+                text = shown
+    if not text:
+        return []
+    line = re.compile(r"^%s: (?:item (\d+)|(?!unknown )([^\s()]+)) \(" % re.escape(_roadmap_build_prefix()), re.M)
+    return ["item " + n if n else step for n, step in line.findall(text)]
+
+
+def _names_every(section, entries):
+    for entry in entries:
+        item = re.fullmatch(r"item (\d+)", entry)
+        pattern = r"(?<![\w-])item\s+%s(?!\d)" % item.group(1) if item else r"(?<![\w-])%s(?![\w-])" % re.escape(entry)
+        if not re.search(pattern, section, re.I if item else 0):
+            return False
+    return True
+
+
+def triage_hold(hook, records, active):
+    """The entries, joined, when this is a triage session whose newest roadmap build prints a stalled entry, else ''.
+    A Stop after a refusal is released when Input Needed names every entry. An owner override lifts the hold, and a
+    one-act override is spent here, after every other release has been ruled out. Fails open on any error."""
+    try:
+        entries = stalled_entries(records)
+        if not entries:
+            return ""
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        from guard_merge import _own_tier_proved
+        if not _own_tier_proved(hook.get("transcript_path"), HOLD_TIER):
+            return ""
+        if active and _names_every(input_needed_section(last_reply(hook)), entries):
+            return ""
+        import override
+        if override.take(hook.get("session_id"), None, override.now()) in override.LIFTS:
+            return ""
+        return ", ".join(entries)
+    except Exception as exc:
+        print("triage hold failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+        return ""
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -1497,12 +1876,31 @@ def main():
         return
     if hook.get("hook_event_name") != "Stop":
         return
-    if hook.get("stop_hook_active"):
+    path = hook.get("transcript_path")
+    hold = ""
+    active = bool(hook.get("stop_hook_active"))
+    records, read_failed = [], False
+    if path and os.path.exists(path):
+        try:
+            records = read_transcript(path)  # the one read of a plain Stop: the hold and the checks below share it
+        except Exception:
+            read_failed = True
+        try:
+            hold = triage_hold(hook, records, active)
+        except Exception:
+            pass
+    if active:
         pending_refusals(hook, last_reply(hook))  # clears what the rewrite names; never blocks on a refusal
         reasons = rewrite_problems(hook)
         reasons += rewrite_relay(hook)
+        if hold and not reasons:
+            print(json.dumps({"decision": "block", "reason": hold_reason(hold)}))
+            return
+        if hold:
+            reasons.insert(0, hold_reason(hold))
         if reasons:
-            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)" + CORRECTION_TAIL}))
+            tail = "" if hold else CORRECTION_TAIL  # a held Stop is refused for its entries, not for the report's shape
+            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)" + tail}))
         return
     # A marker left by a rewrite that never ran must not reach a later turn: only the Stop
     # straight after a missing-report block may consume one.
@@ -1511,32 +1909,37 @@ def main():
     except Exception:
         pass
 
+    # Route-row flags ride in the systemMessage of whichever line this Stop prints, and never change its decision.
+    # The refusals file is read for them before pending_refusals settles it.
+    route = refusal_route_flags(hook)
+
+    def finish(payload):
+        if route:
+            payload = dict(payload or {})
+            payload["systemMessage"] = " ".join(filter(None, [payload.get("systemMessage"), *route]))
+        if payload:
+            print(json.dumps(payload))
+
+    # The hand-off cite reads the refusals file before pending_refusals settles it away.
+    reply = last_reply(hook)  # one read of the reply for the hand-off cite, the refusals and the report checks
+    hand_off, hand_note = "", ""
+    try:
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        hand_off, hand_note = hand_off_problem(hook, reply)
+    except Exception as err:  # a read that could not run is UNKNOWN, never clear
+        hand_note = "Hand-off guard: UNKNOWN, the check did not run (%s)." % type(err).__name__
+
     # Every Stop, landed or not, settles the refusals file; the reason joins whichever block follows.
-    pending = pending_refusals(hook, last_reply(hook))
-    refusal = refusal_reason(pending)
+    pending = pending_refusals(hook, reply)
+    refusal = refusal_reason(pending, hold)  # the triage hold joins the refusals
 
     def stop_for_refusal():
-        if refusal:
-            print(json.dumps({"decision": "block", "reason": refusal_reason(pending)}))
+        finish({"decision": "block", "reason": refusal} if refusal else None)
 
-    path = hook.get("transcript_path")
     if not path or not os.path.exists(path):
         return stop_for_refusal()
 
-    records = []
-    try:
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except Exception:
-                    continue
-                if isinstance(rec, dict):
-                    records.append(rec)
-    except Exception:
+    if read_failed:
         return stop_for_refusal()
 
     last_human_idx = None
@@ -1544,19 +1947,21 @@ def main():
         if is_last_human(rec):
             last_human_idx = i
 
-    text = last_reply(hook)
+    text = reply
     # The pick check reads the turn after the last incoming message, a peer's included (a lane's input),
     # and runs whether or not the transcript holds a human record. Landing and the report's shape still
     # anchor on the last human message.
     incoming = last_incoming_index(records)
     turn = records if incoming is None else records[incoming + 1:]
     after = [] if last_human_idx is None else records[last_human_idx + 1:]
+    route += success_route_flags(hook, after)
     note = ""
     pick_reason = ""
     try:
         pick_reason, note = question_problem(records, turn, text, hook)
     except Exception:
         pass
+    note = " ".join(filter(None, [note, hand_note]))
     relay = []
     if last_human_idx is not None:  # a transcript with no human message never ran the relay and answered checks
         relay = relay_reasons(after, text, hook.get("cwd"))
@@ -1573,6 +1978,7 @@ def main():
         except Exception:
             pass
         pick += relay
+        pick.append(hand_off)
         try:
             if report_shape_ok(text):
                 pick.append(recovered_problem(records, text))
@@ -1582,10 +1988,10 @@ def main():
             pick.append(refusal)
             pick = [r for r in pick if r]
             if pick:
-                reason = " ".join(pick) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if report_shape_ok(text) else "")
-                print(json.dumps({"decision": "block", "reason": reason}))
-            elif note:
-                print(json.dumps({"systemMessage": note}))
+                reason = " ".join(pick) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if report_shape_ok(text) and not hold else "")
+                finish({"decision": "block", "reason": reason})
+            else:
+                finish({"systemMessage": note} if note else None)
         except Exception:
             pass
         return
@@ -1619,6 +2025,8 @@ def main():
         except Exception as exc:
             print("mistake check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
     reasons += [r for r in relay if r]
+    if hand_off:
+        reasons.append(hand_off)
     try:
         rewrite = rewrite_stamp_problem(text, records[last_human_idx].get("timestamp"), hook.get("cwd"))
         if rewrite:
@@ -1639,12 +2047,12 @@ def main():
     if refusal:
         reasons.append(refusal)
     if reasons:
-        reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok else "")
+        reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok and not hold else "")
         if not shape_ok:
             write_marker(hook, last_human_idx)
-        print(json.dumps({"decision": "block", "reason": reason}))
-    elif note:
-        print(json.dumps({"systemMessage": note}))
+        finish({"decision": "block", "reason": reason})
+    else:
+        finish({"systemMessage": note} if note else None)
 
 
 if __name__ == "__main__":
