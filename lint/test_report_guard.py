@@ -166,13 +166,32 @@ NO_PROCESS_CODE = (
 )
 
 
-def run_guard(guard, hook, raw_stdin=None, env=None, block=(), refuse_process=False):
+# A guard run with one of its module-level functions replaced by a stub that writes `marker` and then raises.
+# The guard is loaded under another name, so its `main` does not run on import, and main calls the stub.
+RAISE_IN_CODE = (
+    "import importlib.util, os, sys\n"
+    "guard, name, marker = sys.argv[1], sys.argv[2], sys.argv[3]\n"
+    "sys.path.insert(0, os.path.dirname(guard))\n"
+    "spec = importlib.util.spec_from_file_location('report_guard_under_test', guard)\n"
+    "module = importlib.util.module_from_spec(spec)\n"
+    "spec.loader.exec_module(module)\n"
+    "def stub(*args, **kwargs):\n"
+    "    open(marker, 'w').close()\n"
+    "    raise RuntimeError('forced failure in the check')\n"
+    "setattr(module, name, stub)\n"
+    "module.main()\n"
+)
+
+
+def run_guard(guard, hook, raw_stdin=None, env=None, block=(), refuse_process=False, raises_in=None, marker=None):
     stdin_text = raw_stdin if raw_stdin is not None else json.dumps(hook)
     argv = [sys.executable, guard]
     if block:
         argv = [sys.executable, "-c", BLOCK_IMPORTS_CODE, guard, json.dumps(list(block))]
     if refuse_process:
         argv = [sys.executable, "-c", NO_PROCESS_CODE, guard]
+    if raises_in:
+        argv = [sys.executable, "-c", RAISE_IN_CODE, guard, raises_in, marker]
     run = subprocess.run(
         argv,
         input=stdin_text,
@@ -4224,6 +4243,24 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
     def assert_allowed(self, reply, **kw):
         out = self.verdict(reply, **kw)
         self.assertIsNone(out, "%r was blocked: %s" % (reply, out and out.get("reason")))
+
+    def test_an_red_answered_check_error_is_named_on_stderr(self):
+        # Catches: main() swallows an error from the answered check with no line on stderr, so a broken
+        # check goes unseen. The stub writes a marker before it raises, so a check that never ran reads
+        # differently from one that ran and failed. The stub's own message does not use the word.
+        marker = os.path.join(tempfile.mkdtemp(dir=RUN_FOLDER), "answered-called")
+        run = run_guard(REPORT_GUARD, self.hook("Answered: no permission rule can lift it."),
+                        raises_in="answered_problem", marker=marker)
+        self.assertTrue(os.path.exists(marker), "scope: the answered check was never called. stderr: " + run.stderr[-300:])
+        named = [line for line in run.stderr.splitlines() if "answered" in line.lower()]
+        self.assertTrue(named, "no stderr line names the answered check. stderr: " + run.stderr[-300:])
+
+    def test_an_green_answered_check_that_runs_is_silent_on_stderr(self):
+        # Control: with no error, the same reply is blocked and stderr says nothing about the check.
+        run = run_guard(REPORT_GUARD, self.hook("Answered: no permission rule can lift it."))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn("answered", run.stderr.lower(), "the check printed on stderr with no error: " + run.stderr[-300:])
+        self.assertEqual(json.loads(run.stdout).get("decision"), "block", run.stdout)
 
     # Red: each case below fails until the verdict exists.
 
