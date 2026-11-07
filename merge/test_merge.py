@@ -12098,11 +12098,9 @@ class ReviewRecordRules(unittest.TestCase):
     def test_a_pass_in_the_last_round_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS)), "done")
 
-    def test_round_three_is_done_on_pass_or_partial_when_guard_is_no(self):
-        for verdict in ("PASS", "PARTIAL"):
-            with self.subTest(verdict=verdict):
-                rounds = REVIEW_FAILED_THREE[:2] + (f"Round 3: reviewer, opus, {verdict}",)
-                self.assertEqual(record_state(self, record_text(rounds=rounds, guard="no", net="not owed")), "done")
+    def test_round_three_is_done_on_pass_when_guard_is_no(self):
+        rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
+        self.assertEqual(record_state(self, record_text(rounds=rounds, guard="no", net="not owed")), "done")
 
     def test_round_three_fail_is_held_whatever_the_guard_and_the_net_value(self):
         # a FAIL in round 3 holds the change, so the finding becomes a new lane at round 1; a net value of zero or positive does not settle it
@@ -12123,13 +12121,16 @@ class ReviewRecordRules(unittest.TestCase):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASSED_THREE, guard="yes", net="negative")), "held")
 
     def test_round_three_with_guard_yes_is_open_when_net_value_is_not_written(self):
-        # "not owed" does not close a net-value test that the guard change owes. The third round is PARTIAL, which keeps the rules that predate the hold.
-        self.assertEqual(record_state(self, record_text(rounds=REVIEW_PARTIAL_THREE, guard="yes", net="not owed")), "open")
+        # "not owed" does not close a net-value test that the guard change owes. The third round passes, so the net value rule decides.
+        self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASSED_THREE, guard="yes", net="not owed")), "open")
 
-    def test_round_three_partial_with_guard_yes_keeps_the_net_value_rules(self):
-        for net, want in (("zero", "done"), ("positive", "done"), ("not owed", "open"), ("negative", "held")):
-            with self.subTest(net=net):
-                self.assertEqual(record_state(self, record_text(rounds=REVIEW_PARTIAL_THREE, guard="yes", net=net)), want)
+    def test_round_three_partial_holds_whatever_the_guard_and_net_value(self):
+        # a round-3 PARTIAL holds the change (owner page item 362 b), so no net value settles it
+        for guard in ("no", "yes"):
+            for net in ("not owed", "zero", "positive", "negative"):
+                with self.subTest(guard=guard, net=net):
+                    state, why = record_verdict(self, record_text(rounds=REVIEW_PARTIAL_THREE, guard=guard, net=net))
+                    self.assertEqual(state, "held", f"a round-3 PARTIAL with guard {guard} and net value {net} did not read held: {why!r}")
 
     def test_round_one_fail_on_a_normal_change_is_open(self):
         self.assertEqual(record_state(self, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))), "open")
@@ -12137,12 +12138,12 @@ class ReviewRecordRules(unittest.TestCase):
     def test_a_design_reviewer_fail_in_round_one_is_open(self):
         self.assertEqual(record_state(self, record_text(rounds=("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL"))), "open")
 
-    def test_a_design_reviewer_partial_in_round_three_with_guard_no_is_done(self):
-        # The review cap rule (roles-review-cap-three) ends the review after the third round when Guard or check is no. A PARTIAL in that round keeps the rule.
+    def test_a_design_reviewer_partial_in_round_three_with_guard_no_is_held(self):
+        # A round-3 PARTIAL holds the change whichever role gave it (owner page item 362 b), so the review cap's done rule does not reach it
         rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, PARTIAL")
         state, why = record_verdict(self, record_text(rounds=rounds, guard="no"))
-        self.assertEqual(state, "done", "round 3 is done with a PARTIAL design line, so the state must stay done")
-        self.assertIn("in round 3 is PARTIAL", why, f"why does not name the design reviewer's round 3 PARTIAL: {why!r}")
+        self.assertEqual(state, "held", "round 3 holds on a design-reviewer PARTIAL line, so the state must read held")
+        self.assertEqual(why, REVIEW_HELD_WHY, f"the why of a held round 3 is not the new-lane why: {why!r}")
 
     def test_a_design_reviewer_fail_in_round_three_is_held_whatever_the_guard(self):
         # a FAIL line of either role in round 3 holds the change, the design reviewer's included
@@ -12258,7 +12259,7 @@ class ReviewRecordRules(unittest.TestCase):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, head=REVIEW_OLD_HEAD), head=REVIEW_HEAD), "stale")
 
     def test_a_round_three_partial_holds_only_when_the_partial_switch_is_on(self):
-        # Q3, ROUND3_PARTIAL_HOLDS (default False): a round-3 PARTIAL reads done, or held when the switch is on. Both values are pinned
+        # Q3, ROUND3_PARTIAL_HOLDS (default True, owner page item 362 b): a round-3 PARTIAL holds the change. Off, it reads by the done rules. Both values are pinned
         for value, want in ((False, "done"), (True, "held")):
             with self.subTest(ROUND3_PARTIAL_HOLDS=value), switch("ROUND3_PARTIAL_HOLDS", value):
                 state, why = record_verdict(self, record_text(rounds=REVIEW_PARTIAL_THREE))
@@ -12299,9 +12300,10 @@ class ReviewFixRules(unittest.TestCase):
                 self.assertEqual(state, "held", f"a failed fix check after round 3 with net value {net} must read held: {why!r}")
                 self.assertEqual(why, REVIEW_HELD_WHY, f"the why of a held fix check is not the new-lane why: {why!r}")
 
-    def test_a_round_three_fail_is_held_whatever_the_fix_verdict(self):
-        # the round-3 hold comes before the fix check's rules, so no fix verdict reads the record open or done
-        fixes = {"PASS": REVIEW_FIX_PASS, "FAIL": REVIEW_FIX_FAIL, "WIDE": REVIEW_FIX_WIDE}
+    def test_a_round_three_fail_is_held_unless_a_fix_pass_clears_it(self):
+        # the round-3 hold comes before the fix check's rules: a FAIL or WIDE fix check reads held, whatever the guard. A PASS clears the hold
+        # under FIX_PASS_CLEARS_ROUND3_HOLD, so the next case reads it by the round-3 done rules
+        fixes = {"FAIL": REVIEW_FIX_FAIL, "WIDE": REVIEW_FIX_WIDE}
         for verdict, fix in fixes.items():
             for guard in ("no", "yes"):
                 with self.subTest(verdict=verdict, guard=guard):
@@ -12410,13 +12412,14 @@ class ReviewFixRules(unittest.TestCase):
         state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_PASSED_THREE, guard="yes", net="negative")
         self.assertEqual(state, "held", f"a negative net value must hold through the fix check: {why!r}")
 
-    def test_a_fix_pass_after_a_round_three_fail_is_held_whatever_the_guard_and_net_value(self):
-        # a fix PASS does not clear a failed round 3: the finding is a new lane at round 1
-        for guard, net in (("no", "not owed"), ("yes", "not owed"), ("yes", "zero"), ("yes", "positive")):
+    def test_a_fix_pass_after_a_round_three_fail_follows_the_round_three_done_rules(self):
+        # a fix check PASS clears the round-3 hold (owner page item 363 b), so the round-3 done rules decide: guard no is done, and a guard change needs its net value
+        cases = (("no", "not owed", "done"), ("yes", "not owed", "open"), ("yes", "zero", "done"), ("yes", "positive", "done"))
+        for guard, net, want in cases:
             with self.subTest(guard=guard, net=net):
                 state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard=guard, net=net)
-                self.assertEqual(state, "held", f"a fix check PASS after a failed round 3, guard {guard}, net {net}, must read held: {why!r}")
-                self.assertEqual(why, REVIEW_HELD_WHY, f"the why of a held round 3 is not the new-lane why: {why!r}")
+                self.assertEqual(state, want, f"a fix check PASS after a failed round 3, guard {guard}, net {net}, must read {want}: {why!r}")
+                self.assertNotEqual(why, REVIEW_HELD_WHY, f"a cleared round 3 must not carry the new-lane why: {why!r}")
 
     def test_a_fix_pass_after_a_delete_only_round_one_with_guard_no_is_done(self):
         state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_PASS, kind="delete-only", guard="no")
@@ -12424,12 +12427,12 @@ class ReviewFixRules(unittest.TestCase):
 
     def test_the_fix_line_in_the_text_reaches_the_state_rules(self):
         # end to end: the line is read from the record text, then the same rules apply
-        cases = ((REVIEW_FAILED_THREE, "no", "not owed", "PASS", "held"),  # a round-3 FAIL holds, whatever the fix check says
+        cases = ((REVIEW_FAILED_THREE, "no", "not owed", "PASS", "done"),  # a fix PASS clears a round-3 FAIL, and the round-3 done rules decide
                  (REVIEW_PASSED_THREE, "no", "not owed", "FAIL", "held"),  # a fix FAIL after round 3 holds
                  (REVIEW_PASSED_THREE, "no", "not owed", "PASS", "done"),
                  (REVIEW_PASSED_THREE, "yes", "zero", "PASS", "done"),
                  (REVIEW_PASSED_THREE, "yes", "negative", "PASS", "held"),
-                 (REVIEW_FAILED_THREE, "yes", "positive", "PASS", "held"),
+                 (REVIEW_FAILED_THREE, "yes", "positive", "PASS", "done"),
                  (REVIEW_PASS, "no", "not owed", "PASS", "done"),  # a fix PASS after a passing first round is done
                  (("Round 1: reviewer, sonnet, FAIL",), "no", "not owed", "PASS", "done"))
         for rounds, guard, net, verdict, want in cases:
@@ -12455,7 +12458,7 @@ class ReviewFixRules(unittest.TestCase):
         self.assertNotIn("round 1 passed", why, f"the why reads as a passed round: {why!r}")
 
     def test_a_fix_pass_after_a_round_three_fail_clears_the_hold_only_when_the_switch_is_on(self):
-        # Q4, FIX_PASS_CLEARS_ROUND3_HOLD (default False): a fix check PASS keeps a round-3 FAIL held. On, it follows the round-3 done rules
+        # Q4, FIX_PASS_CLEARS_ROUND3_HOLD (default True, owner page item 363 b): a fix check PASS clears a round-3 FAIL, so the round-3 done rules decide. Off, the hold stays
         for guard, net in (("no", "not owed"), ("yes", "positive")):
             text = record_text(rounds=REVIEW_FAILED_THREE, guard=guard, net=net, fix=(fix_check_line(verdict="PASS"),))
             for value, want in ((False, "held"), (True, "done")):
@@ -12472,6 +12475,19 @@ class ReviewFixRules(unittest.TestCase):
                 state, why = record_verdict(self, text)
                 self.assertEqual(state, want, f"FIX_FAIL_AFTER_ROUND3_HOLDS={value}: a fix FAIL after round 3 must read {want}, got {state}: {why!r}")
                 self.assertIn(why_has, why, f"FIX_FAIL_AFTER_ROUND3_HOLDS={value}: the why does not name its cause: {why!r}")
+
+    def test_a_fix_pass_does_not_clear_a_round_three_design_reviewer_hold(self):
+        # G2: a fix check PASS clears a round-3 code reviewer's hold (owner page item 363 b), not a design reviewer's. A design-reviewer FAIL or PARTIAL
+        # in round 3 stays held, and its why names the design reviewer. The code reviewer's round-3 FAIL with a fix PASS still follows the done rules
+        for verdict in ("FAIL", "PARTIAL"):
+            with self.subTest(design=verdict):
+                rounds = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, opus, PASS",
+                          f"Round 3: design-reviewer, opus, {verdict}")
+                state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, guard="no", net="not owed")
+                self.assertEqual(state, "held", f"a fix check PASS after a round-3 design-reviewer {verdict} must stay held: {why!r}")
+                self.assertIn("design reviewer", why, f"the why does not name the design reviewer: {why!r}")
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="no", net="not owed")
+        self.assertEqual(state, "done", f"control: a fix check PASS after a round-3 code reviewer FAIL, guard no, must read done: {why!r}")
 
 class ReviewEnv(Env):
     """The review-record cases' one home for running merge: a run that returns (rc, stdout, stderr) and reads a usage error's SystemExit as
@@ -13309,6 +13325,39 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.pr_listing(first, record_text(rounds=self.TWO_ROUNDS_PASS + ("Round 3: reviewer, opus, FAIL",)))
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(list_line(self, out, 7).startswith(f"#7 feat7 {REVIEW_HEAD[:9]} held: {REVIEW_HELD_WHY}; CI "), out)
+
+    def test_a_failed_round_stays_failed_until_a_newer_record_reaches_a_later_round_or_passes_a_fix(self):
+        # G1: an earlier record whose last round N is uncleared (a FAIL or PARTIAL line, or a fix check FAIL or WIDE, and no fix check PASS) holds
+        # the newer record open until that record reaches round N+1 or carries a fix check PASS. The why names the earlier head and round N
+        failed_three = record_text(head=self.EARLIER_HEAD, rounds=REVIEW_FAILED_THREE)
+        passed_three_fix_fail = record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASSED_THREE, fix=(fix_check_line(verdict="FAIL", head=self.FIX_BASE_HEAD),))
+        failed_one_wide = record_text(head=self.EARLIER_HEAD, rounds=REVIEW_FAILED_THREE[:1], fix=(fix_check_line(verdict="WIDE", head=self.FIX_BASE_HEAD),))
+        failed_two_wide = record_text(head=self.EARLIER_HEAD, rounds=REVIEW_FAILED_THREE[:2], fix=(fix_check_line(verdict="WIDE", head=self.FIX_BASE_HEAD),))
+        cases = (("a round 3 FAIL, held", failed_three, REVIEW_PASSED_THREE, 3),
+                 ("a round 3 PASS with a fix check FAIL", passed_three_fix_fail, REVIEW_PASSED_THREE, 3),
+                 ("a round 1 FAIL with a fix check WIDE", failed_one_wide, REVIEW_PASS, 1),
+                 ("a round 2 FAIL with a fix check WIDE", failed_two_wide, ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"), 2))
+        for label, earlier, newer_rounds, n in cases:
+            with self.subTest(earlier=label):
+                host, rc, out, err = self.pr_listing(earlier, record_text(rounds=newer_rounds))
+                self.assertEqual(rc, 0, out + err)
+                line = list_line(self, out, 7)
+                self.assertTrue(line.startswith(f"#7 feat7 {REVIEW_HEAD[:9]} open: "),
+                                f"{label}: a newer record that neither reaches a round above {n} nor passes a fix check read as done, so round {n} was not kept:\n{out}")
+                self.assertIn(self.EARLIER_HEAD[:9], self.why_of(line), f"{label}: the why does not name the earlier head:\n{out}")
+                self.assertRegex(self.why_of(line), rf"\bround {n}\b", f"{label}: the why does not name the uncleared round {n}:\n{out}")
+
+    def test_a_failed_round_is_cleared_when_a_newer_record_reaches_a_later_round_or_passes_a_fix(self):
+        # control: the normal path. A newer record that reaches the round after the failed one, or that carries a fix check PASS, reads by its own rules
+        earlier = record_text(head=self.EARLIER_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        host, rc, out, err = self.pr_listing(earlier, record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")))
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(list_line(self, out, 7).startswith(f"#7 feat7 {REVIEW_HEAD[:9]} done: round 2 passed; CI "), out)
+        host, rc, out, err = self.pr_listing(earlier, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",), fix=(fix_check_line(verdict="PASS"),)))
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertTrue(line.startswith(f"#7 feat7 {REVIEW_HEAD[:9]} done: "), out)
+        self.assertIn("fix check", self.why_of(line), f"the why does not name the fix check that cleared round 1:\n{out}")
 
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
