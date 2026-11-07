@@ -13,7 +13,7 @@ from guard_core import (
     git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BATCH_LABEL, BUILD_TAG, INTEGRATION_BRANCH_PREFIX, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -314,6 +314,121 @@ def undrafted_pr_create(segment: str) -> bool:
         elif arg.startswith(("--draft=", "-d=")):
             draft = arg.split("=", 1)[1] in GH_TRUE   # gh's ParseBool set; any other value is false
     return not draft
+
+
+# ---- a ready mark of a pull request (rule draft-pr, decision draft-until-reviewed; debt pr-ready-unguarded)
+#
+# `gh pr ready <pr>` and the MCP update_pull_request call with draft false take a pull request out of draft, and CI then
+# runs on it. Only the batch's integration PR goes ready (rule git-integration-branch-merge). The mark ASKS in a lane
+# session, unless the pull request is the integration PR: its head ref starts with INTEGRATION_BRANCH_PREFIX, or it
+# carries BATCH_LABEL. A session with no cs-build:lane tag is no lane and is not asked (owner ruling 2026-11-07 13:20 CST,
+# decision cull-rules; coordinator ruling 2026-11-07 14:12 CST). Cost: one transcript read for the session; then, for a
+# numbered pull request, one REST read that gives the head ref and the labels together. A branch name or no selector
+# adds the pull list read, and no selector one git read. A read that fails asks.
+# Limits: a REST PATCH with draft false is no ready mark here (REST takes no draft; ready is the GraphQL mutation
+# markPullRequestReadyForReview), and a `gh api graphql` call is not read.
+READY_REPO_FLAGS = ("-R", "--repo")
+READY_PR_REASON = (
+    "Rule (Git): only the batch's integration PR goes ready, and this pull request is not shown to be it: its head ref "
+    "does not start with `%s`, it has no `%s` label, or its head could not be read. CI skips drafts and runs once per batch. "
+    "Remedy: leave a lane's pull request a draft; the batch runner marks the integration PR ready once "
+    "`merge --lane-lint <pr> --integration` has labelled it. If this is the integration PR, confirm this call. "
+    "(decision draft-until-reviewed, rule git-integration-branch-merge)"
+) % (INTEGRATION_BRANCH_PREFIX, BATCH_LABEL)
+
+
+def ready_call(rest, env_repo=""):
+    """-> (selector, repo) for the args of a `gh pr ready` call, else None. The repo is the -R or
+    --repo value (`-R o/r`, `-Ro/r`, `-R=o/r`, `--repo o/r`, `--repo=o/r`), else env_repo (GH_REPO)."""
+    if rest[:2] != ["pr", "ready"] or any(a in ("--undo", "-h", "--help") for a in rest):
+        return None
+    pos, repo, i = [], env_repo, 2
+    while i < len(rest):
+        a = rest[i]
+        if a in READY_REPO_FLAGS and i + 1 < len(rest):
+            repo, i = rest[i + 1], i + 1
+        elif a.startswith("--repo="):
+            repo = a[7:]
+        elif a.startswith("-R") and not a.startswith("--"):
+            repo = a[2:].lstrip("=")
+        elif not a.startswith("-"):
+            pos.append(a)
+        i += 1
+    return (pos[0] if pos else ""), repo
+
+
+def ready_call_of(segment: str):
+    """-> (selector, repo) when the segment's command word is `gh pr ready` (a GH_REPO=o/r assignment before it
+    names the repo), else None. The one reader of a ready mark, shared with hooks/ci_wake.py."""
+    rest = gh_call_of(segment)
+    if rest is None:
+        return None
+    tokens = segment_tokens(segment) or []
+    env = [t[8:] for t in tokens[:resolve_command(tokens) or 0] if t.startswith("GH_REPO=")]
+    return ready_call(rest, env[-1] if env else "")
+
+
+def ready_calls(text: str):
+    """-> [(selector, repo)], one per `gh pr ready` in `text`, a `sh -c` script included."""
+    found = []
+    for segment in split_segments(text):
+        if not segment.strip():
+            continue
+        tokens = segment_tokens(segment) or []
+        script = inline_script(tokens) if tokens else ""
+        if script:
+            found += ready_calls(script)
+            continue
+        call = ready_call_of(segment)
+        if call:
+            found.append(call)
+    return found
+
+
+def own_is_lane(transcript) -> bool:
+    """True when the session's own newest get_session record carries cs-build:lane and no other cs-build: tag, and no
+    set_session_tags call follows it. No own id, no transcript, an unread record or any error is False (no lane): the
+    read of rule load-brake's lane_session_hit, one home."""
+    try:
+        from override import remote_session_id
+        own_id = remote_session_id()
+        if own_id is None or not isinstance(transcript, str) or not transcript:
+            return False
+        tags, tagged_after = _own_session_read(transcript, own_id)
+        names = [t.strip().casefold() for t in tags if isinstance(t, str)] if isinstance(tags, list) else []
+    except Exception:
+        return False
+    return not tagged_after and LANE_TAG in names and not any(n.startswith(BUILD_TAG) and n != LANE_TAG for n in names)
+
+
+def _integration_pr(selector: str, repo: str, cwd: str) -> bool:
+    """True when the pull request the selector names is the integration PR: its one REST read gives the head ref
+    and the labels. Raises on a read that fails, which the caller counts as not shown."""
+    module = merge_module()
+    if module is None:
+        raise RuntimeError("the merge tool could not be loaded")
+    with module.shared_deadline(MERGE_READ_TIMEOUT):
+        host = module.Host(repo=repo or None, cwd=cwd or None)
+        code, out = host.api("pulls/%d" % host.pr_number(selector))
+    if code:
+        raise RuntimeError(out)
+    pr = json.loads(out)
+    labels = [x.get("name") for x in pr.get("labels") or [] if isinstance(x, dict)]
+    return str(pr["head"]["ref"]).startswith(INTEGRATION_BRANCH_PREFIX) or BATCH_LABEL in labels
+
+
+def pr_ready_hit(selector: str, repo: str, cwd: str, transcript) -> str:
+    """Return "pull request <selector>" when a ready mark of the pull request must ask, else "". A session that is no
+    lane is not asked, and its pull request is not read. A pull request not shown to be the integration PR asks,
+    a failed read included."""
+    if not own_is_lane(transcript):
+        return ""
+    try:
+        if _integration_pr(selector, repo, cwd):
+            return ""
+    except (Exception, SystemExit):
+        pass
+    return "pull request " + (selector or "of the current branch")
 
 
 # ---- a lane commit of the generated records page (decision records-index-at-merge)

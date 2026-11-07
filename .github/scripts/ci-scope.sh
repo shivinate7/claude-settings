@@ -105,6 +105,7 @@ done
 # mutation_report: the mutation-report job runs on a pull request from a `batch-` branch (HEAD_REF), and on any other event, where the
 # action skips a push or a schedule itself. It is outside ALL: a change to this script or the workflow must not start it on any other PR.
 case "${EVENT:-}" in
+  # `batch-` copies INTEGRATION_BRANCH_PREFIX in hooks/shared_names.py: this script runs in CI before any Python loads, so it cannot import it.
   pull_request) case "${HEAD_REF:-}" in batch-*) v=true ;; *) v=false ;; esac ;;
   *) v=true ;;
 esac
