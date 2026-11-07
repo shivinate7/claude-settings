@@ -33,7 +33,7 @@
                           Exit 0 nothing red, 1 any red, 2 on a failed read, with no list printed. Cost: the open-pull list, the repo's
                           comments since the oldest open PR (one read), one issue-events read per held or batch-labelled PR, one read of the base's latest run.
                           No GraphQL, no per-head check read, no timer, file or log. A malformed field from GitHub also exits 2.
-                          The batch line carries no CI state of its own (design of 12:56 CST Nov 7, record pr-ledger).
+                          The batch line carries no CI state of its own (design of 12:33 CST Nov 7, record pr-ledger).
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--integration]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
@@ -3221,7 +3221,7 @@ def _reviewed_lines(h, root):
     else `NO NEXT ACT`. A record that does not parse, or whose net value holds the change, gives no act of its own, so the rules below it run.
     The line is `#n branch act age`, in whole hours, since the record's comment (batch, lane round with a record), the label's last labeled
     event (a hold, batch run), or the pull request's opening (the rest, a draft's first lane round too). The batch line carries no CI state of its
-    own: merge reads CI when it merges (design of 12:56 CST Nov 7, record pr-ledger). RED when the act is NO NEXT ACT, the age is past its PR_STATE_AGE_HOURS limit, or, for blocked (no limit of its own), the pull request it
+    own: merge reads CI when it merges (design of 12:33 CST Nov 7, record pr-ledger). RED when the act is NO NEXT ACT, the age is past its PR_STATE_AGE_HOURS limit, or, for blocked (no limit of its own), the pull request it
     waits on is red. When the base's latest run is red, each batch line adds `held by main red <age>`; an unreadable run is a Stop. The last line
     gives the longest wait since a done record and the count with no next act. `red` is True when any line is RED.
     Cost: the open-pull list, the repo's comments since the oldest open pull request (one list read), one `issues/<n>/events` list for each pull
