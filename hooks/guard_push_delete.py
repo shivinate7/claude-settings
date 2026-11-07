@@ -875,9 +875,10 @@ _HAND_FRAMES = tuple(tag for tag in MACHINE_TAGS if "<agent-message" in tag)
 
 def _gh_pr_create_segment(command: str, tool: str, depth: int = 0) -> str:
     """The segment of `command` that runs `gh pr create`, else ''. It reads the way the push path does: the body of
-    a data heredoc is dropped and any other heredoc body (shell, python, node) stays, each segment is tokenized (so a
-    quoted mention and a `#` comment run nothing), each command word of a segment is resolved, and the script a shell
-    or runner gets is read again. A PowerShell call is read with PowerShell's rules."""
+    an interpreter heredoc (`bash <<EOF`, `python3 <<EOF`) and of a data heredoc piped to a shell stays, and any other
+    data heredoc body is dropped. Each segment is tokenized (so a quoted mention and a `#` comment run nothing),
+    each command word of a segment is resolved, and the script a shell or runner gets
+    is read again. A PowerShell call is read with PowerShell's rules."""
     text = strip_heredoc_bodies(command)
     if tool == "PowerShell":
         text = PowerShellScript(text)
