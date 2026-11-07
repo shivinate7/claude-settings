@@ -13305,6 +13305,9 @@ SHELL_TEST_WRITES = (
     # A lone apostrophe in text must not hide the find pipe after it (the scanner respects strings).
     ("lone apostrophe in echo, then find piped to xargs, sed -i over tests",
      "echo don't; find tests|xargs sed -i s/a/b/"),
+    # A quoted string over two lines must not hide the find pipe after it (the scanner respects strings).
+    ("echo of a two-line quoted string, then find piped to xargs, sed -i over tests",
+     "echo \"one\ntwo\"; find tests|xargs sed -i s/a/b/"),
 )
 for _name, _command in SHELL_TEST_WRITES:
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
