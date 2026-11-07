@@ -547,6 +547,17 @@ SESSION_LEAVES_OWNER_PRESS = [
 ]
 # "the owner's merge commit" names a git object the session keeps, not a press the owner makes: it needs no link.
 SESSION_KEEPS_OWNER_MERGE = ["The session merges PR #374 keeping the owner's merge commit."]
+# The owner's rights, access, queue or method, and a press he has already made ("has hit Merge"), name no press he
+# makes now: the session merges, and he presses nothing. Each passes.
+SESSION_NAMES_OWNER_RIGHTS = [
+    "The session merges PR #374 because the owner has merge rights.",
+    "The session merges PR #374 because Shivam has merge access.",
+    "The session merges PR #374 after the owner has hit Merge.",
+    "The session merges PR #374 through the owner's merge queue.",
+    "The session merges PR #374 with the owner's merge method.",
+]
+# A label that asks him to click is his press whatever the how says: the session's click in the how leaves it his.
+LABEL_ASKS_CLICK_SESSION_HOW = [("Click Merge on GitHub", "The session clicks Merge after your pick.")]
 
 
 def case_session_press_needs_no_link():
@@ -616,6 +627,16 @@ def case_session_press_needs_no_link():
              entry_of(page_item(options=[dict(session, how=how), keep])), None)
         chat("a session clause that keeps the owner's merge commit, %r, with no url, passes" % how,
              chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
+    for how in SESSION_NAMES_OWNER_RIGHTS:
+        page("a session clause that names the owner's rights or a past press, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), None)
+        chat("a session clause that names the owner's rights or a past press, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
+    for label, how in LABEL_ASKS_CLICK_SESSION_HOW:
+        page("a label %r that asks him to click, with how %r, with no link, is refused as press-link" % (label, how),
+             "set", entry_of(page_item(options=[dict(session, label=label, how=how), keep])), ("press-link", None))
+        chat("a label %r that asks him to click, with how %r, with no url, is refused as press-link" % (label, how),
+             chat_box(options=[chat_of(dict(session, label=label, how=how)), chat_of(keep)]), ("press-link", None))
     for how in SESSION_ONLY:
         page("a session clause with no press, %r, with no link, passes" % how, "set",
              entry_of(page_item(options=[dict(session, how=how), keep])), None)
