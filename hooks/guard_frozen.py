@@ -218,36 +218,29 @@ MUTATING_COMMAND = (
     r"|rename-item|set-itemproperty|ri|rd|rmdir|del|erase|move|copy|ren)\b"
 )
 
-
-# A command that hands its arguments to another program, so a mutating word in them may run.
-_RUNS_ITS_ARGUMENTS = {"find", "eval", "exec", "pwsh", "powershell", "cmd", "iex", "invoke-expression"}
-# An interpreter runs the program text its inline flag carries (`python -c`, `node -e`). Run on a
-# file, it reads its path words like any reader.
-_PYTHON_INLINE = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
-_OTHER_INLINE = re.compile(r"-[A-Za-z]*[ceEp][A-Za-z]*")
-
-
-def _runs_inline_text(command: str, words) -> bool:
-    if re.fullmatch(r"python[\d.]*", command):
-        flag = _PYTHON_INLINE
-    elif command in ("node", "perl", "ruby", "php", "deno", "bun"):
-        flag = _OTHER_INLINE
-    else:
-        return False
-    return any(flag.fullmatch(word) for word in words)
+# READERS. A command that only reads the files it names and runs no text it is given. A mutating
+# word after one of these is an argument (`grep -rn mkdir P`), so a caller that scans in command
+# position (`command_position`) reads it as one. Every other command is read whole, with a mutating
+# word anywhere in it: a program that runs its arguments (`trap`, `py -3 -c`, `awk`, a version
+# control `-c k=v mv`, `Start-Process pwsh -ArgumentList`) hides its write from any list of runners,
+# and that list never converges.
+_READERS = frozenset((
+    "echo", "printf", "cat", "grep", "wc", "jq", "egrep", "fgrep", "rg", "ag", "ack", "head", "tail",
+    "less", "more", "sort", "uniq", "cut", "tr", "nl", "tac", "rev", "column", "fold", "paste", "diff",
+    "cmp", "file", "stat", "ls", "du", "md5sum", "sha1sum", "sha256sum", "readlink", "realpath",
+    "basename", "dirname", "strings", "od", "xxd"))
 
 
-def _mutates_as_command(command: str, words) -> bool:
-    """True when the segment's own command (`command`, its resolved name) changes the files it names:
-    a word of MUTATING_COMMAND or a `mv` or `rm` of the version control tool. A command that runs its
-    arguments counts too, as it always did, so a shell `-c "rm x"` and `find -exec rm` stay seen."""
-    if (command in _RUNS_ITS_ARGUMENTS or command in guard_core.INLINE_SCRIPT_SHELLS
-            or _runs_inline_text(command, words)):
+# An interpreter run on a file or a module (`python3 -m pytest -k copy x.py`) reads its path words like
+# a reader. Its inline flag (`-c`, `-e`) hands it program text, so it is read whole.
+_INTERPRETER = re.compile(r"python[\d.]*|py|node|nodejs|perl|ruby|php|deno|bun|pytest")
+_INLINE_FLAG = re.compile(r"-[A-Za-z]*[ceEpr][A-Za-z]*|--eval|--print|--command|eval")
+
+
+def _reads_only(command: str, words) -> bool:
+    if command in _READERS:
         return True
-    if command == "git":
-        rest = [word for word in words if not word.startswith("-")]
-        return any(word in ("mv", "rm") for word in rest[:2])
-    return bool(re.fullmatch(MUTATING_COMMAND, command))
+    return bool(_INTERPRETER.fullmatch(command)) and not any(_INLINE_FLAG.fullmatch(w) for w in words)
 
 
 def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
@@ -265,9 +258,10 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     if re.search(r"\d?>>?\s*['\"]?" + target, cmd):
         return True
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
-    # word only in command position (`grep -n install tests/x.py` reads, never writes).
-    if command is not None and not _mutates_as_command(command, words):
-        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
+    # word only in command position. Only a reader is read that way (`grep -n install tests/x.py`
+    # reads, never writes). Any other command is read whole.
+    if command is not None and _reads_only(command, words):
+        return False
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
     if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
@@ -342,6 +336,10 @@ def _resolve_vars(cmd: str) -> str:
 # `git diff --output=P`, `git config --file P`, `>| P` and a quoted redirect target with a space.
 # Main missed these too.
 _PRINTERS = frozenset(("echo", "printf", "cat", "grep", "wc", "jq"))
+# A text filter reads its stdin and runs none of it (`tee` also writes the files it names, which
+# the scan of its own segment judges). A pipe into one of these hands no program the text.
+_FILTERS = frozenset(("head", "tail", "sort", "uniq", "cut", "tr", "nl", "tac", "rev", "column",
+                      "fold", "paste", "less", "more", "tee"))
 _QUIET = _PRINTERS | {"cd", "set-location"}
 _MESSAGE_FLAGS = {"git": ("-m", "--message", "-F"), "gh": ("--title", "--body", "-t", "-b")}
 _GH_MESSAGE_CALLS = frozenset((
@@ -402,8 +400,10 @@ def _kind(words, plain: str) -> str:
     if not words or _GROUP_MARK.search(_FD_DUP.sub("", plain)):
         return ""
     name = _name(words[0])
-    if name in _PRINTERS and re.search(r"[/\\]", words[0]):
+    if (name in _PRINTERS or name in _FILTERS) and re.search(r"[/\\]", words[0]):
         return ""   # `./cat` or `b/echo` is a local program, not the printer (review r2 H3)
+    if name in _FILTERS:
+        return "filter"
     if name in _QUIET:
         return "cd" if name not in _PRINTERS else "printer"
     if name == "git":
@@ -629,9 +629,10 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             while last + 1 < len(kinds) and ends[last] == "|":
                 last += 1
             chain = range(number, last + 1)
-            runs_nowhere = all(kinds[k] == "printer" for k in chain[1:])
+            runs_nowhere = all(kinds[k] in ("printer", "filter") for k in chain[1:])
             piped_to_a_runner = not runs_nowhere
-            to_file = any(_writes_a_file(parsed[k]) for k in chain)
+            to_file = any(_writes_a_file(parsed[k]) or kinds[k] == "filter" and _name(parsed[k][0]) == "tee"
+                          for k in chain)
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
         words, shown = [], []
