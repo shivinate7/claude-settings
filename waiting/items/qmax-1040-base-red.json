@@ -23,8 +23,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "q_max #1040; item 321",
+  "reply": "Your a went to runner 9 and the coordinator (19:02 CST). One step stays yours: when runner 9 says #1040 passed its second review, type --base-red-ok for #1040 in runner 9's chat. A page answer can't stand in for that typed word. Tracked at q_max #1040.",
   "short": "q_max #1040 onto red main?",
-  "status": "open",
+  "status": "closed",
   "title": "Merge q_max #1040 (faster browser checks) before main's old red is fixed?",
   "why": "q_max main's browser checks have been red since Nov 4, so every q_max merge needs your typed --base-red-ok."
 }

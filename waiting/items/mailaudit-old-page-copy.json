@@ -23,8 +23,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "lane mailaudit-waiting-copy",
+  "reply": "Your a went to lane mailaudit-waiting-copy (19:02 CST). Open https://claude.ai/artifact/FBKSLCBLJsvfNGeePvDz13. If it opens, tell me in chat which account you used; if it doesn't, mailaudit makes a new page.",
   "short": "mailaudit's old page: open it or replace it?",
-  "status": "open",
+  "status": "closed",
   "title": "mailaudit points at a waiting page this account can't open. Check it, or replace it?",
   "why": "If that page holds items, they have no copy anywhere, so replacing it would lose them."
 }

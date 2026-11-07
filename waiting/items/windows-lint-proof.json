@@ -1,0 +1,18 @@
+{
+  "added": "2026-11-07T00:52:00Z",
+  "command": {
+    "powershell": "cd $HOME\n$ptr = (Select-String -Path \"$HOME\\.claude\\CLAUDE.md\" -Pattern '^@(.+)/CLAUDE\\.md\\s*$' | Select-Object -First 1).Matches[0].Groups[1].Value\n$cs = (Resolve-Path ($ptr -replace '^~', $HOME)).Path\ncd $cs\ngit fetch origin main\n$wt = Join-Path $env:TEMP \"cs-windows-local-lint\"\ngit worktree add --detach $wt origin/main\ncd $wt\n$t0 = Get-Date\n.\\bin\\verdict .\\bin\\ci-job checks --lint\n\"exit=$LASTEXITCODE start=$t0 end=$(Get-Date)\"\ncd $cs\ngit worktree remove --force $wt"
+  },
+  "context": "Goal: the lint checks run the same on your Windows laptop as in CI.\nWhy you: the proof needs a real Windows machine; every Claude session here runs Linux.\nSteps: open PowerShell on the Windows laptop and paste the command below. It makes a throwaway copy of claude-settings main, runs the lint checks, prints one line starting with exit=, and removes the copy. Paste that last line into the note here, then press Done.",
+  "home": "PR #1297 (windows-local-lint)",
+  "id": "windows-lint-proof",
+  "kind": "task",
+  "n": 324,
+  "owner": "triage",
+  "rank": 3,
+  "ref": "#1297; batch 40 (dbf548064)",
+  "short": "Run the lint check once on Windows",
+  "status": "open",
+  "title": "Run the new local lint check once on your Windows laptop and paste the last line",
+  "why": "#1297 (merged 18:49 CST) makes the lint checks run on Windows. Only a Windows machine can prove it, and no cloud session runs Windows."
+}

@@ -31,9 +31,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "item 193; debt recent-log-unbuilt",
-  "reply": "Your b (as built) landed: mailaudit #202 merged 13:22 CST (d2940785). It keeps Reset out of Recent, and History undoes a Reset. As you asked, the item stays deferred.",
+  "reply": "Moved off the page (your 316 note): kept as built (History undoes a Reset). Roadmap step ask-again-reset-undo, phase later, asks again when mailaudit's Recent list next changes.",
   "short": "mailaudit: undo a Reset from Recent?",
-  "status": "deferred",
+  "status": "closed",
   "title": "mailaudit: can a Reset be undone from the Recent list?",
   "why": "a keeps pick c's promise: the undo is there right after a Reset."
 }

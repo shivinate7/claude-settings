@@ -23,8 +23,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "q_max #1040; D-542",
+  "reply": "Done: your OK on the D-542 edit went to lane qmax-browser-shard (19:02 CST). It merges with q_max #1040.",
   "short": "q_max #1040: OK the D-542 edit?",
-  "status": "open",
+  "status": "closed",
   "title": "OK the one-sentence D-542 edit in q_max #1040?",
   "why": "q_max's rules need your one look at any rewritten decision entry."
 }
