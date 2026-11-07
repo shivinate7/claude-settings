@@ -38,7 +38,7 @@ the minute read and the merge with its head guard. Every read is a `gh api` REST
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, ast, contextlib, datetime, functools, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, concurrent.futures, contextlib, datetime, functools, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -2451,7 +2451,8 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
                               'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
     raise Stop(f"ci-job exited {c} on {short}, so the lint is unknown, not a pass. {LANE_LINT_REMEDY}")
 
-PROSE_JUDGE_MAX_CALLS = 3  # model calls one merge makes; each may run MODEL_TIMEOUT s after the lock is released, so the count bounds how long the run waits before it ends. A file past it reads UNKNOWN
+PROSE_JUDGE_MAX_CALLS = 3  # model calls one merge makes. They run at once, after the lock is released, so the merge command waits about one call, at most PROSE_JUDGE_TIMEOUT s, whatever the count. A file past the count reads UNKNOWN
+PROSE_JUDGE_TIMEOUT = 300  # seconds one judge call may run: a full PROSE_JUDGE_CALL_BYTES call takes about 195 s, past MODEL_TIMEOUT. Only this judge passes it; every other invoke_model caller keeps MODEL_TIMEOUT
 PROSE_JUDGE_CALL_BYTES = 24000  # UTF-8 bytes one prose judge prompt may hold, excerpts included; the lines are packed into at most PROSE_JUDGE_MAX_CALLS calls by this budget
 PROSE_JUDGE_MAX_LINES = 20  # finding lines (stale, unbacked) one merge prints for the prose judge; the rest are one count line. UNKNOWN lines never count against it
 PROSE_JUDGE_CAUSES = ("timed out", "model error", "no readable verdict", "past the call cap", "skipped by the reply")  # the buckets of the one UNKNOWN count line, in print order; the count line carries no raw error text
@@ -2650,8 +2651,27 @@ def prose_judge_cause(verdict, error):
         return NO_VERDICT
     return MODEL_ERROR
 
+def prose_judge_calls(decision_watch, prompts):
+    """-> an iterator of one answer per prompt, in prompt order, whatever order the calls finish in: (verdict, error) from decision_watch.invoke_model,
+    or None for a call that raised. The calls run at once on at most PROSE_JUDGE_MAX_CALLS threads, each under PROSE_JUDGE_TIMEOUT. A call that raises
+    is None for its own prompt only. An interrupt (KeyboardInterrupt, SystemExit) is not caught: it cancels the calls not yet started, waits for the
+    running ones so no thread outlives the return, and then propagates. The merge has landed by then, so it stays whole."""
+    def call(prompt):
+        try:
+            return decision_watch.invoke_model(prompt, timeout=PROSE_JUDGE_TIMEOUT, shape=decision_watch.LINE_VERDICTS)
+        except Exception:
+            return None
+    if not prompts:
+        return iter(())
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=PROSE_JUDGE_MAX_CALLS)
+    try:
+        futures = [pool.submit(call, prompt) for prompt in prompts]
+        return iter([f.result() for f in futures])
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+
 def prose_judge_run(plan, n):
-    """Report-only (outcomes-mechanize-rules), after the lock is released: one decision_watch.invoke_model call per job in `plan`, looked up
+    """Report-only (outcomes-mechanize-rules), after the lock is released: one decision_watch.invoke_model call per job in `plan`, all at once (prose_judge_calls), looked up
     at call time. A verdict maps to its line by (path, line). -> the report lines: one per line the model calls stale or unbacked, at most PROSE_JUDGE_MAX_LINES, then one count line for
     the rest; then one UNKNOWN count line for every line not judged, by cause (PROSE_JUDGE_CAUSES; it carries no raw error text). A plan-level failure line names its exception type and message. Nothing here refuses a merge or writes a file."""
     findings = []
@@ -2659,6 +2679,7 @@ def prose_judge_run(plan, n):
     counts = dict.fromkeys(PROSE_JUDGE_CAUSES, 0)
     try:
         import decision_watch
+        answers = prose_judge_calls(decision_watch, [item[2] for item in plan or [] if not isinstance(item, str) and len(item) == 3])
         for item in plan or []:
             if isinstance(item, str):
                 plan_failures.append(item)
@@ -2667,11 +2688,11 @@ def prose_judge_run(plan, n):
                 counts[item[0]] += item[1]
                 continue
             paths, rows, prompt = item
-            try:
-                verdict, error = decision_watch.invoke_model(prompt, shape=decision_watch.LINE_VERDICTS)
-            except Exception:  # a model that cannot run is unknown, never a refusal
+            answer = next(answers)
+            if answer is None:  # a model that cannot run is unknown, never a refusal
                 counts[MODEL_ERROR] += len(rows)
                 continue
+            verdict, error = answer
             entries = readable_verdicts(verdict, keyed=True) if verdict is not None else None
             if entries is None:
                 counts[prose_judge_cause(verdict, error)] += len(rows)
@@ -3040,7 +3061,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if wt:
             drop_worktree(root, tmp, wt)
         lock.release(base, token)
-    report = prose_judge_run(judge, n)  # each model call waits up to MODEL_TIMEOUT, so it runs with the lock released
+    report = prose_judge_run(judge, n)  # the model calls run at once and wait up to PROSE_JUDGE_TIMEOUT, so it runs with the lock released
     if report:
         say(*report)
     return code
