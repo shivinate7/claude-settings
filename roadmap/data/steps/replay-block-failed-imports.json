@@ -1,0 +1,11 @@
+{
+  "title": "In the known-defect replay, an import of a failed part's package raises, so a fallback catcher reads UNKNOWN",
+  "order": 270.3,
+  "why": "Lane notes-fix-large-1, 15:22 CST (coordinator ask): under decision mutation-ci-report-and-replay, a catcher with an optional-import fallback reads CAUGHT when its part failed to install. Closes debt known-defects-fallback-caught, which lands with PR #1453.",
+  "note": "During the replay, an import of a failed part's package raises, so such a catcher reads UNKNOWN, never CAUGHT. Unowned until the coordinator starts it.",
+  "owner": "coordinator",
+  "phase": "next",
+  "status": "todo",
+  "lane": "",
+  "updatedAt": "2026-11-07T15:22:00-06:00"
+}
