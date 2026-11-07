@@ -874,7 +874,7 @@ def task_str_replace_hit(entry):
 # Source 1 is the newest read of the item (a get, list or query, as hooks/feedback_guard.py _reads_items counts it)
 # that shows the item at the write's `if_version`. Source 2 is this session's own successful earlier write to the item
 # that returned that version, replayed onto the text it was pinned to. A write is replayed only when its result holds
-# just its id and version, and only when its content is seen: a set or update that names a file is not. A subagent's
+# just its id and version, and only when its content is seen: a set or update that names a file is not. An agent's
 # own transcript is a separate file, so a read made there is not seen. Anything not found asks, never allows. Cost: the
 # whole transcript is parsed once per judged call, not once per write, and no process starts. The write result's shape
 # (one line, {"id", "version"}) is unmeasured against a real transcript, so a result with no parseable version asks.
