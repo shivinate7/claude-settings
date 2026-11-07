@@ -48,6 +48,10 @@
 #    without CMD.
 #  - TERM to the tool during the lease wait: it ends at once, not after the wait, with no boot, its queue place and the
 #    lock freed. TERM during a simctl boot: the device still comes up, so it is shut down and recorded.
+#  - Before xcodebuild, every run reads the appearance (`simctl ui <udid> appearance`) and sets it to light when it reads
+#    dark. A Duo whose fold reads open (`hinge -d <udid> get`) is closed (`hinge -d <udid> close`). Each change is one
+#    stderr line that names it. With hinge not on PATH the run goes on, with one stderr line saying the fold was not
+#    checked. No run calls simctl uninstall or erase.
 # The last line is the tally: passed and failed counts, then the failing case names.
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -89,7 +93,9 @@ trap 'rm -rf "$work"' EXIT
 
 stubs=$work/stubs; mkdir -p "$stubs" "$work/home"
 calls=$work/calls; booted_file=$work/booted
-export RUN=$work PATH="$stubs:$PATH"
+base_path=$PATH
+hingebin=$work/hingebin; mkdir -p "$hingebin" # hinge stands here, first on PATH, so no case runs a real hinge
+export RUN=$work PATH="$stubs:$hingebin:$base_path"
 OTHER=AAAAAAAA-0000-4000-8000-000000000001
 THIRD=BBBBBBBB-0000-4000-8000-000000000002
 # The device UDIDs are read from SLOT_UDID in bin/sim-lease, the one home. This suite copies none of them.
@@ -161,6 +167,10 @@ case "$1" in
     if [ -n "${STUB_BOOT_HOLD:-}" ]; then : > "$RUN/boot_started"; n=0; while [ ! -e "$RUN/boot_release" ] && [ "$n" -lt 40 ]; do sleep 0.5; n=$((n + 1)); done; fi
     case $2 in "$STUB_PRO_UDID") name="iPhone 18 Pro" ;; *) name="iPhone Duo" ;; esac; echo "    $name ($2) (Booted) " > "$RUN/booted" ;;
   shutdown) : > "$RUN/booted" ;;
+  ui) case "$*" in
+    *" appearance light") echo light > "$RUN/appearance" ;;
+    *appearance) if [ -f "$RUN/appearance" ]; then cat "$RUN/appearance"; else echo "${STUB_APPEARANCE:-light}"; fi ;;
+  esac ;;
 esac
 exit 0
 SH
@@ -204,6 +214,26 @@ if [ "${MV_HOOK:-}" = takeover ] && [ "$1" = "$lock" ] && [ ! -e "$RUN/mv_hooked
 fi
 exec "$TEST_REAL_MV" "$@"
 SH
+# hinge: the Duo's fold, the command skills/ios-apps/SKILL.md names (`hinge -d <udid> open|close|half|<degrees>|get|posture`).
+# The skill gives the verbs, not the text `get` prints. The shim prints the posture word, `open` or `closed`: the word the
+# case expects, from the brief. The posture is $RUN/posture once a close or an open has run, else STUB_POSTURE (default closed).
+cat > "$hingebin/hinge" <<'SH'
+#!/bin/sh
+echo "hinge $*" >> "$RUN/calls"
+case "$*" in
+  "-d "*" get") if [ -f "$RUN/posture" ]; then cat "$RUN/posture"; else echo "${STUB_POSTURE:-closed}"; fi ;;
+  "-d "*" close") echo closed > "$RUN/posture" ;;
+  "-d "*" open") echo open > "$RUN/posture" ;;
+  *) exit 99 ;;
+esac
+SH
+chmod +x "$hingebin/hinge"
+# path_without_hinge: base_path without each directory that holds a hinge, so a missing-hinge case runs no real hinge.
+path_without_hinge() {
+  local IFS=: d out=
+  for d in $base_path; do [ -x "$d/hinge" ] && continue; out=${out:+$out:}$d; done
+  printf '%s' "$out"
+}
 # mkreport FILE UDID: writes a SpringBoard report whose text names the device folder of UDID. UDID - names no device.
 cat > "$stubs/mkreport" <<'SH'
 #!/bin/sh
@@ -238,7 +268,7 @@ fresh() {
     "$work/lock_alive" "$work/lock_pid_seen" "$work/lock_simctl" "$work/devices.json" \
     "$work/cmd_udid" "$work/cmd_args" "$work/cmd_lock_seen" "$work/cmd_lock_pid"
   rm -rf "$work/home/.claude" "$crashdir" "$work/sweep_root"
-  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/status_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release" "$work/mv_hooked"
+  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/status_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release" "$work/mv_hooked" "$work/posture" "$work/appearance"
   /bin/mkdir -p "$crashdir" "$work/home"
 }
 # start_tool [VAR=value...]: starts the tool in its own process group, behind a hard timeout. Its stdout and stderr go
@@ -283,6 +313,30 @@ no_xcodebuild() { [[ "$(grep -c '^xcodebuild' "$calls")" -eq 0 ]]; }
 no_device_in_xcodebuild() { [[ "$(grep '^xcodebuild' "$calls" | grep -c -- --device)" -eq 0 ]]; }
 # no_lock_taken: the lock folder was never made (one mkdir of it is in the call log).
 no_lock_taken() { ! has_call "mkdir $lockdir"; }
+# first_line TEXT: the number of the first call-log line that is exactly TEXT, or nothing. The sentinel xcodebuild stands
+# for the first xcodebuild call. in_order TEXT...: each TEXT's first line comes after the one before it, and each occurs.
+first_line() {
+  if [[ $1 == xcodebuild ]]; then grep -n '^xcodebuild' "$calls" | head -n 1 | cut -d: -f1
+  else grep -nFx -- "$1" "$calls" | head -n 1 | cut -d: -f1; fi
+}
+in_order() {
+  local prev=0 pat n
+  for pat in "$@"; do
+    n=$(first_line "$pat")
+    [[ -n $n && $n -gt $prev ]] || return 1
+    prev=$n
+  done
+}
+no_call() { ! has_call "$1"; }
+# names_once TEXT: exactly one stderr line of the run has TEXT.
+names_once() { [[ "$(grep -Fc -- "$1" "$work/run.err")" -eq 1 ]]; }
+# fold_unchecked_once: exactly one stderr line says the fold was not checked.
+fold_unchecked_once() { names_once "not checked" && grep -F -- "not checked" "$work/run.err" | grep -Fq fold; }
+# no_reset_stderr: the run wrote no appearance or fold line.
+no_reset_stderr() { ! grep -Eq 'appearance|fold' "$work/run.err"; }
+no_uninstall_or_erase() { ! grep -Eq '^simctl (uninstall|erase)( |$)' "$calls"; }
+# hinge_missing: the PATH a missing-hinge case gets has no hinge the tool could run.
+hinge_missing() { ! PATH="$stubs:$(path_without_hinge)" command -v hinge >/dev/null 2>&1; }
 
 # diag_count: how many times the logged xcodebuild call names -collect-test-diagnostics.
 diag_count() { grep '^xcodebuild' "$calls" | grep -o -e '-collect-test-diagnostics' | wc -l | tr -d ' '; }
@@ -1151,6 +1205,61 @@ else
   end_case "87 EPERM from kill -0: a live holder this user cannot signal is waited for, not taken over"
 fi
 [[ -n $eperm_user && -n $eperm_holder ]] && kill "$eperm_holder" 2>/dev/null
+
+# Cases 88 to 94: before xcodebuild a run sets the appearance to light and a Duo's fold to closed, and names each change on
+# stderr once. The defaults are light and closed, so the cases above see no change.
+fresh; booted "iPhone Duo" $DUO1; run STUB_APPEARANCE=dark
+need "destination is the booted Duo" dest_is "$DUO1"
+need "exit code" rc_is 0
+need "appearance is read, then set to light, before xcodebuild" in_order "simctl ui $DUO1 appearance" "simctl ui $DUO1 appearance light" xcodebuild
+need "one stderr line names appearance dark -> light" names_once "appearance dark -> light"
+need "no simctl uninstall or erase" no_uninstall_or_erase
+end_case "88 reuse: appearance dark is set to light before xcodebuild, and one stderr line names the change"
+
+fresh; run STUB_APPEARANCE=dark
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "destination is slot 1's UDID" dest_is "$DUO1"
+need "exit code" rc_is 0
+need "appearance is set to light after the boot and before xcodebuild" in_order "simctl boot $DUO1" "simctl ui $DUO1 appearance light" xcodebuild
+need "one stderr line names appearance dark -> light" names_once "appearance dark -> light"
+need "no simctl uninstall or erase" no_uninstall_or_erase
+end_case "89 own boot: appearance dark is set to light after the boot and before xcodebuild, one stderr line names it"
+
+fresh; booted "iPhone Duo" $DUO1; run STUB_POSTURE=open
+need "destination is the booted Duo" dest_is "$DUO1"
+need "exit code" rc_is 0
+need "the fold is read, then closed, before xcodebuild" in_order "hinge -d $DUO1 get" "hinge -d $DUO1 close" xcodebuild
+need "one stderr line names open -> closed" names_once "open -> closed"
+need "no simctl uninstall or erase" no_uninstall_or_erase
+end_case "90 reuse of a Duo: an open fold is closed before xcodebuild, and one stderr line names the change"
+
+fresh; run STUB_POSTURE=open
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "destination is slot 1's UDID" dest_is "$DUO1"
+need "exit code" rc_is 0
+need "the fold is closed after the boot and before xcodebuild" in_order "simctl boot $DUO1" "hinge -d $DUO1 close" xcodebuild
+need "one stderr line names open -> closed" names_once "open -> closed"
+end_case "91 own boot of a Duo: an open fold is closed after the boot and before xcodebuild, one stderr line names it"
+
+fresh; booted "iPhone Duo" $DUO1; run PATH="$stubs:$(path_without_hinge)"
+need "hinge is not on the tool's PATH" hinge_missing
+need "destination is the booted Duo" dest_is "$DUO1"
+need "exit code: the run goes on" rc_is 0
+need "steps are run only" steps_are "run "
+need "one stderr line says the fold was not checked" fold_unchecked_once
+end_case "92 hinge not on PATH: the run goes on, and one stderr line says the fold was not checked"
+
+fresh; booted "iPhone Duo" $DUO1; run
+need "exit code" rc_is 0
+need "appearance is not set" no_call "simctl ui $DUO1 appearance light"
+need "the fold is not closed" no_call "hinge -d $DUO1 close"
+need "stderr has no reset line" no_reset_stderr
+end_case "93 control: a closed fold and light appearance: nothing is set, and no line prints"
+
+fresh; run STUB_APPEARANCE=dark STUB_POSTURE=open
+need "exit code" rc_is 0
+need "no simctl uninstall or erase in a run that resets" no_uninstall_or_erase
+end_case "94 control: a run that resets appearance and fold calls no simctl uninstall or erase"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
