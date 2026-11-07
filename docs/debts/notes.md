@@ -1511,3 +1511,4 @@
 - role-model-spread-arg-skips: a spread call argument beside a literal options object, `agent(...args, {model:'opus'})`, skips the role and Opus checks; only a hand-written spread hits it (hooks/guard.py script_call_unread). Decision: agent-model-cap.
 - done-models-empty-window-skips: the model-name check skips a report whose window holds no spawn, so a wrong pair for an earlier spawn passes (lint/report_guard.py done_models_problem). Decision: agent-model-cap.
 - done-models-unspawned-role-skips: a Done pair whose role has no spawn anywhere in the transcript passes unchecked (lint/report_guard.py done_models_problem). Decision: agent-model-cap.
+- done-models-design-chain: 'reviewer, design reviewer opus' reads as the pair reviewer opus, since the comma chain shares the model and the design role drops out after (lint/report_guard.py ROLE_MODEL_RE). Decision: agent-model-cap.
