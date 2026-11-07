@@ -2069,13 +2069,13 @@ class DoneWithoutCheck(UpkeepFixture):
     NOT_SHOWN = " (not shown green on main)"
     UNREADABLE = " (updatedAt unreadable)"
     HASH_40 = "0123456789abcdef0123456789abcdef01234567"
-    # The fourteen rows before this one, in print order. The control case reads them.
+    # The fifteen rows before this one, in print order. The control case reads them.
     OLD_ROWS = ["notes over %d words" % build.NOTE_WORDS, "untouched %d days in a live phase" % build.STALE_DAYS,
                 "no note in a live phase", "new in top %d with no placement line" % build.TOP,
                 "in progress with no live lane or open PR", "ready todo steps",
                 "draft PRs over %d h with no live lane" % build.STALE_DRAFT_HOURS,
                 "dated claims to re-check before a lane starts", "page rulings not on their step",
-                "landed, waiting for a device trial", "landed, waiting for triage to close",
+                build.IDLE_LANES_LINE, "landed, waiting for a device trial", "landed, waiting for triage to close",
                 "Step trailers naming no step", "live threads naming no open step", "live file entries skipped"]
     # A build without the constant gets this value, so a case fails on its own assert, not on an AttributeError.
     # test_the_constant_is_an_iso_utc_time names the missing constant.
@@ -2124,7 +2124,7 @@ class DoneWithoutCheck(UpkeepFixture):
         _, out = self.build_from_main()
         self.assertEqual(list(self.summary_counts(out))[-1], self.ROW)
 
-    def test_the_fourteen_rows_before_it_keep_their_order(self):
+    def test_the_fifteen_rows_before_it_keep_their_order(self):
         # Control, green on main: the rows before this one print as they did, with or without this row.
         self.commit_steps({"bad": self.done_step(note="Shipped.")})
         _, out = self.build_from_main()
