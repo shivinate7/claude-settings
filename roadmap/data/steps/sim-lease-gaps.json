@@ -1,0 +1,10 @@
+{
+  "title": "Close the sim-lease and sim-test gaps the Mac sim gatekeeper found",
+  "phase": "now",
+  "status": "todo",
+  "order": 0.5,
+  "owner": "coordinator",
+  "why": "Owner ask ask-mw6q8p58kl, 12:18 CST Nov 7: commit b7bc81da (branch claude/sim-lease-592a4d, docs/plans/sim-lease-gaps.md) records issues the Mac had in sharing iOS simulators. Worst: a reuse takes no lease, so a Home design review and a Degen test drove Duo 1 at once on Nov 7 (7 lost tries); two runs held Duo 1 at once in spite of the Mac lock; a stopped run leaves Duo 1 in Dark appearance.",
+  "note": "Seven gaps, worst first, in the plan file. Gaps 1-3: a test red on main first, then the fix; sim-lease status names whoever uses each booted phone, reuse included. Gaps 4-7 (load bar, slot 2, priority and silent-holder limit, a lane with no coordinator): one record each with its measure, or an owner question where the fix departs from a ruling. Ask the owner before any erase of a shared device or change to a runtime or Xcode. The plan's branch opens no PR; the lane starts from main. Until fixed, the Mac gatekeeper hands out each Duo run by chat.",
+  "updatedAt": "2026-11-07T18:20:00Z"
+}
