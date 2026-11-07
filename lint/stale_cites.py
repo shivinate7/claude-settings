@@ -53,7 +53,7 @@ change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base
 
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
 2 a read that could not run (a base that names nothing in a full clone, an unreadable .ste-lint-exclude), except
-a gap in the history (a shallow clone, a base with no merge base with the head, or `HEAD~1` of a root commit): that prints
+a gap in the history (a shallow clone, a base with no merge base with the head, or the first parent of a root commit, `HEAD~1`, `HEAD^1`): that prints
 `stale-cites: unknown, ...` naming fetch-depth 0 and exits 0, so a repo that pins the ste-lint action and
 checks out shallow is not red at its pin move. A touched .py that does not parse at base or head is unknown
 the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the exit non-zero.
@@ -88,6 +88,8 @@ when the run already listed the whole tree) and the `cat-file --batch`, which re
 then takes its Home line) and the mechanisms file once. The decisions folder is the first of lint/layout.py
 `candidates(root, "decisions")` that holds a file. A changed RULE_FILES file adds its base and head blobs and the
 mechanisms file to that read. Its list of changed files comes from the diff the run already read, with no git start.
+A range whose merge-base or diff failed adds starts to tell the cause apart, an upper bound: `a...b` four, `a..b`
+three, the root form `HEAD~1..HEAD` four (its three-dot form five); a passing run adds none.
 A --tree run starts one python3, then git rev-parse, ls-tree and one cat-file --batch. It reads each tracked .md
 once, and each file a line anchor names once more, even when that file is a .md. It writes no file and prints no report.
 """
@@ -157,18 +159,24 @@ def resolves(rev):
     return done.returncode == 0
 
 
+FIRST_PARENT_SUFFIXES = ("~", "~1", "^", "^1")  # each reads "the first parent of <head>"
+
+
 def cut_base(base, head):
     """True when a base that does not resolve is a gap in the history, not a name that points at nothing: the clone is
-    shallow (its base sha is cut away), or `base` is the parent of `head` (`<head>~1`, `<head>^`) and `head` is a root
-    commit, which a first push to the default branch reads by design. Run only after a read failed."""
+    shallow (its base sha is cut away), or `base` is the first parent of `head` (`<head>~1`, `<head>^`, `<head>^1`;
+    `head` may be a sha) and `head` is a root commit, which a first push to the default branch reads by design.
+    A rev-list that exits non-zero is no root: the range is unknown. Run only after a read failed.
+    The extra git starts are an upper bound: `a...b` four (head, base twice, shallow), `a..b` three, the root form
+    `HEAD~1..HEAD` four (those three plus `rev-list`)."""
     if resolves(base):
         return False
     shallow = _nowindow.run(["git", "rev-parse", "--is-shallow-repository"], capture_output=True)
     if shallow.stdout.strip() == b"true":
         return True
-    if base in (head + "~1", head + "^"):
+    if base.startswith(head) and base[len(head):] in FIRST_PARENT_SUFFIXES:
         parents = _nowindow.run(["git", "rev-list", "--parents", "-n", "1", head], capture_output=True)
-        return len(parents.stdout.split()) == 1
+        return parents.returncode == 0 and len(parents.stdout.split()) == 1  # a failed rev-list is no root: unknown
     return False
 
 
