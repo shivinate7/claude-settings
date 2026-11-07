@@ -7954,14 +7954,19 @@ nm_case("linked-nm: workspace: refuse cd packages/a, then npm install, from a li
         "cd packages/a && npm install", "deny", NMWS)
 nm_case("linked-nm: workspace: refuse npm install with the workspace package as the working folder",
         "npm install", "deny", NM_WS_PKG)
+# npm version without a workspace flag, run in a workspace package, takes npm's workspace path and reifies the root.
+nm_case("linked-nm: workspace: refuse cd packages/a, then npm version patch, from a linked workspace root",
+        "cd packages/a && npm version patch", "deny", NMWS)
 # The controls. A real root under the same workspaces allows, a folder the workspaces field does not name allows,
-# and a standalone package under a root with no workspaces field allows.
+# and a standalone package under a root with no workspaces field allows, for an install and for a version bump.
 nm_case("linked-nm: workspace: cd packages/a, then npm install, under a real root is allowed",
         "cd packages/a && npm install", "allow", NMWSREAL)
 nm_case("linked-nm: workspace: cd tools/x, then npm install, under a linked workspace root is allowed",
         "cd tools/x && npm install", "allow", NMWS)
 nm_case("linked-nm: workspace: cd nested, then npm install, under a linked root with no workspaces field is allowed",
         "cd nested && npm install", "allow", NMSTAND)
+nm_case("linked-nm: workspace: cd nested, then npm version patch, under a linked root with no workspaces field is allowed",
+        "cd nested && npm version patch", "allow", NMSTAND)
 
 
 # =========================================================================== 4. environment files
