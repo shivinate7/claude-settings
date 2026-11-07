@@ -4670,9 +4670,41 @@ def session_home_record(payload, primary: str):
     return os.path.join(primary, ".git", SESSION_HOME_DIR, sid)
 
 
+def _session_lived(payload, tool: str, where: str, folder: str) -> bool:
+    """True when this call is a write or a mutating call whose cwd, `cd` move or write target sits
+    inside FOLDER: the session worked there, so the folder was its home and no mere visit."""
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return False
+    try:
+        if tool in WRITE_TOOLS:
+            return (path_is_inside(os.path.realpath(where), folder) is True or any(
+                path_is_inside(_resolved(target, where), folder) is True
+                for target in write_targets(tool_input)))
+        if tool in SHELL_TOOLS:
+            command = str(tool_input.get("command", "") or "")
+            if not SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", strip_heredoc_bodies(command))):
+                return False
+            return path_is_inside(os.path.realpath(where), folder) is True or any(
+                path_is_inside(move, folder) is True for move in _cd_targets(tool, command, where))
+    except Exception:
+        return False
+    return False
+
+
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def session_home_keep(payload, tool: str, cwd: str) -> None:
     """Write the session's record from a lane call, only when it is missing or different. The
-    session's own ExitWorktree deletes it. An agent call does neither."""
+    session's own ExitWorktree deletes it. An agent call does neither. A sibling file
+    `<record>.lived` marks a lane the session wrote in, so the record file itself stays the one path
+    every reader expects. A call from the primary drops a record that is not marked: that lane was a
+    visit."""
     if not isinstance(payload, dict) or payload.get("agent_id") or tool == CREATE_SESSION_TOOL:
         # create_session reaches the guard for rules lane-effort-pin and agent-model-floor; it keeps no record
         return
@@ -4681,6 +4713,7 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
     record = session_home_record(payload, primary) if primary else ""
     if not record:
         return
+    lived = record + ".lived"
     try:
         try:
             with open(record, encoding="utf-8") as handle:
@@ -4692,37 +4725,46 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
             # worktree is gone stays, and the guard keeps judging.
             if held and os.path.isdir(held):
                 os.remove(record)
+                _remove_quietly(lived)
             return
         if not lane and held and os.path.isdir(held):
-            # The session came back to the primary while its visited lane still stands: that visit
-            # was no home. A record whose folder is gone stays, and the guard keeps judging. A `cd`
-            # from the primary into the held folder is the way back home, so it keeps the record
-            # (`_cd_home_exempt` reads it in the same call).
+            if _session_lived(payload, tool, where, held):
+                if not os.path.exists(lived):
+                    _mark_lived(lived)
+                return
             tool_input = payload.get("tool_input")
             command = str(tool_input.get("command", "") or "") if isinstance(tool_input, dict) else ""
-            if tool in SHELL_TOOLS and any(path_is_inside(move, held) is True
-                                           for move in _cd_targets(tool, command, where)):
+            # A `cd` from the primary into the held folder is the way back home, so it keeps the
+            # record (`_cd_home_exempt` reads it in the same call).
+            if os.path.exists(lived) or (tool in SHELL_TOOLS and any(
+                    path_is_inside(move, held) is True for move in _cd_targets(tool, command, where))):
                 return
-            os.remove(record)
+            os.remove(record)   # the session came back to the primary: that lane was a visit
             return
-        if not lane or held == lane or session_home_agent_tree(lane):
+        if not lane or session_home_agent_tree(lane):
             return
-        import tempfile   # lazy: only a first or changed record reaches here
-        folder = os.path.dirname(record)
-        os.makedirs(folder, exist_ok=True)
-        handle, temp = tempfile.mkstemp(dir=folder, prefix=".tmp-")
-        try:
-            with os.fdopen(handle, "w", encoding="utf-8") as out:
-                out.write(lane)
-            os.replace(temp, record)  # one step: a reader never sees a half-written path
-        except BaseException:
+        if held != lane:
+            import tempfile   # lazy: only a first or changed record reaches here
+            folder = os.path.dirname(record)
+            os.makedirs(folder, exist_ok=True)
+            _remove_quietly(lived)   # a new lane starts as a visit
+            handle, temp = tempfile.mkstemp(dir=folder, prefix=".tmp-")
             try:
-                os.remove(temp)
-            except OSError:
-                pass
-            raise
+                with os.fdopen(handle, "w", encoding="utf-8") as out:
+                    out.write(lane)
+                os.replace(temp, record)  # one step: a reader never sees a half-written path
+            except BaseException:
+                _remove_quietly(temp)
+                raise
+        if not os.path.exists(lived) and _session_lived(payload, tool, where, lane):
+            _mark_lived(lived)
     except Exception:
         pass  # an unwritable record means no refusal later, never a failed call
+
+
+def _mark_lived(path: str) -> None:
+    with open(path, "w", encoding="utf-8"):
+        pass
 
 
 def session_home_git_hit(command: str, where: str, in_primary) -> str:
