@@ -7,7 +7,7 @@ that names the head, in the form the guard reads:
 - `CI running on <sha7>` under Next, while a run is pending, or while a ready PR has no run yet.
 - `CI red on <sha7>`, when a run ended red.
 - `CI unknown on <sha7>`, when a read failed.
-A green run, a draft PR, a branch with no PR, a tag push, a delete and a dry run need no line. A Done
+A green run, a draft PR, a branch with no PR, a repo with no workflows, a tag push, a delete and a dry run need no line. A Done
 item may not claim a pending head.
 
 Each case runs the real Stop hook as a subprocess. The gh stand-in leads its PATH (setUpModule of
@@ -212,6 +212,22 @@ class PushCheckTests(unittest.TestCase):
 
     # Red: each case fails on an assertion on the old code.
 
+    def test_no_workflows_repo_needs_no_ci_line_for_a_ready_pr_push(self):
+        steps = push(push_out(HEAD7))
+        fixture_ = answers(prs=[pr_entry()], runs=[], workflows=[])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a report-less push turn was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
+        self.assertIsNone(decision, "a push to a ready PR in a repo with no workflows was blocked for CI: " + reason)
+
+    def test_no_workflows_repo_needs_no_ci_line_for_a_push_to_main(self):
+        steps = push(push_out(HEAD7, dst="main"), command="git push origin HEAD:main")
+        fixture_ = answers(runs=[], workflows=[])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a report-less push to main was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
+        self.assertIsNone(decision, "a push to main in a repo with no workflows was blocked for CI: " + reason)
+
     def test_pending_run_on_ready_pr_blocks_until_next_names_running(self):
         decision, reason, _ = self.stop(turn(REPORT, push(push_out(HEAD7))),
                                         answers(prs=[pr_entry()], runs=[PENDING]))
@@ -281,8 +297,9 @@ class PushCheckTests(unittest.TestCase):
 
     def test_built_done_item_naming_a_red_head_blocks(self):
         reply = "> **Done** BUILT %s\n> **Next** CI red on %s" % (HEAD7, HEAD7)
-        decision, _, _ = self.stop(turn(reply, push(push_out(HEAD7))), answers(prs=[pr_entry()], runs=[RED_RUN]))
+        decision, reason, _ = self.stop(turn(reply, push(push_out(HEAD7))), answers(prs=[pr_entry()], runs=[RED_RUN]))
         self.assertEqual(decision, "block", "a Done item named a red head as built and the guard passed it")
+        self.assertIn(HEAD7, reason, "the block does not name the red head")
 
     def test_branch_named_with_rejected_is_checked(self):
         steps = push(push_out(HEAD7, dst=REJECTED_BRANCH), command="git push origin HEAD:%s" % REJECTED_BRANCH)
@@ -344,24 +361,19 @@ class PushCheckTests(unittest.TestCase):
         after = len(trg.GH_STUB.read_log(os.path.join(folder, "gh.log")))
         self.assertEqual(after, before, "the rewrite after a missing-report block read gh again")
         self.assertIsNone(decision, "the rewrite that holds each head's running line was blocked: " + reason)
+        # The negative: a rewrite that drops OTHER7's line must block, and still read no gh.
+        decision, _, _ = self.stop(turn(NO_REPORT, *steps), fixture_, folder=folder, session_id=sid)
+        self.assertEqual(decision, "block", "a second report-less two-push turn was not blocked (scope check)")
+        before_drop = len(trg.GH_STUB.read_log(os.path.join(folder, "gh.log")))
+        only_head = "> **Done** BUILT abc123\n> **Next** CI running on %s" % HEAD7
+        decision, reason, _ = self.stop(turn(only_head, *steps), fixture_, stop_active=True, folder=folder,
+                                        session_id=sid)
+        after_drop = len(trg.GH_STUB.read_log(os.path.join(folder, "gh.log")))
+        self.assertEqual(after_drop, before_drop, "the rewrite that drops a head read gh again")
+        self.assertEqual(decision, "block", "a rewrite that drops the other branch's running line passed")
+        self.assertIn("CI running on " + OTHER7, reason, "the block does not name the dropped head")
 
     # Green controls: each passes on the old code and on the new.
-
-    def test_no_workflows_repo_needs_no_ci_line_for_a_ready_pr_push(self):
-        steps = push(push_out(HEAD7))
-        fixture_ = answers(prs=[pr_entry()], runs=[], workflows=[])
-        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_)
-        self.assertEqual(decision, "block", "a report-less push turn was not blocked (scope check)")
-        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
-        self.assertIsNone(decision, "a push to a ready PR in a repo with no workflows was blocked for CI: " + reason)
-
-    def test_no_workflows_repo_needs_no_ci_line_for_a_push_to_main(self):
-        steps = push(push_out(HEAD7, dst="main"), command="git push origin HEAD:main")
-        fixture_ = answers(runs=[], workflows=[])
-        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_)
-        self.assertEqual(decision, "block", "a report-less push to main was not blocked (scope check)")
-        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
-        self.assertIsNone(decision, "a push to main in a repo with no workflows was blocked for CI: " + reason)
 
     def test_green_run_on_ready_pr_passes(self):
         decision, reason, _ = self.stop(turn(REPORT, push(push_out(HEAD7))),
@@ -491,10 +503,12 @@ class BudgetTests(unittest.TestCase):
             budget = ci_wake.Budget(total=20, per_read=8, clock=clock)
             records = turn(REPORT, push(""))[1:]  # no ref line in the output: the head is read from the ref
             try:
-                report_guard.push_ci_states(records, hook, budget=budget)
+                states = report_guard.push_ci_states(records, hook, budget=budget)
             except Exception as exc:  # the Stop hook catches this and passes the turn
                 self.fail("a budget spent during the branch's remote-ref read escaped the push check, which then "
                           "fails open and passes the turn: %s: %s" % (type(exc).__name__, exc))
+            reason = report_guard.push_ci_problem(REPORT, states)
+            self.assertIn("CI unknown", reason, "a budget spent during the remote-ref read passed with no CI line")
 
     def test_every_gh_read_is_capped_at_the_per_read_timeout(self):
         clock = StepClock([0.0])
