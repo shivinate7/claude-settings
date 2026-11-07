@@ -26,6 +26,7 @@ actions/ste-lint/run.sh with the step's env. TMPDIR is the case folder, so temp 
 import ast
 import atexit
 import collections
+import importlib.util
 import json
 import os
 import re
@@ -50,6 +51,15 @@ import tracked_tree  # noqa: E402  removes a fixture tree, read-only git objects
 
 RUN_FOLDER = _test_temp.run_folder()
 atexit.register(tracked_tree.rm_tree, RUN_FOLDER)
+
+# The selection seam is read in process, from MODULE. A load error is kept, not raised, so only the SelectionTests fail on it.
+SC, SELECTION_LOAD_ERROR = None, None
+try:
+    _spec = importlib.util.spec_from_file_location("stale_cites_under_test", MODULE)
+    SC = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(SC)
+except Exception as exc:
+    SC, SELECTION_LOAD_ERROR = None, "%s: %s" % (type(exc).__name__, exc)
 
 NOTES = "docs/debts/notes.md"
 MOVED = "mods/session-board/hooks/lib.mjs"
@@ -2126,6 +2136,78 @@ class RouteClaimFixtureTests(unittest.TestCase):
         self.assertEqual(collections.Counter(row["label"] for row in rows),
                          collections.Counter({"STALE": 2, "PARTLY_STALE": 1, "HALF": 1, "TRUE": 13,
                                               "HISTORY": 1, "UNKNOWN": 3}))
+
+
+class SelectionTests(StaleCase):
+    """The selection seam, `lint/stale_cites.py` `changed_sentences(spec, cwd=None)`: spec is the range text as `--range`
+    takes it (`base...head`), cwd is the repo the git reads run in. It returns [(path, first line, text)], one tuple per
+    sentence of each governed Markdown paragraph that holds a line the range adds. Each sentence is kept whatever it says:
+    selection judges nothing (no claim verb is needed). The text is read from the head blobs, never the working file.
+    An empty list when the range adds no governed prose. STALE005 keeps its own behaviour; these cases do not touch it.
+
+    The seam is missing on origin/main. Each case then fails on its own assert, which names the missing seam."""
+
+    def changed(self, rng):
+        self.assertIsNone(SELECTION_LOAD_ERROR, "lint/stale_cites.py does not load: %s" % SELECTION_LOAD_ERROR)
+        self.assertTrue(hasattr(SC, "changed_sentences"), "lint/stale_cites.py has no changed_sentences: the selection seam is missing")
+        return SC.changed_sentences("%s...%s" % (rng.base, rng.head), cwd=rng.repo)
+
+    def test_every_sentence_of_a_paragraph_that_holds_an_added_line_is_selected(self):
+        base = base_files(extra={"docs/notes/a.md": "# A\n\nFirst sentence here. Second sentence here.\n"})
+
+        def change(repo):
+            write(repo, "docs/notes/a.md", "# A\n\nFirst sentence here. Second sentence here.\nThird one is new.\n")
+            commit(repo)
+        rng = self.make_range(base, change)
+        self.assertEqual(sorted(self.changed(rng)), sorted([
+            ("docs/notes/a.md", 3, "First sentence here."),
+            ("docs/notes/a.md", 3, "Second sentence here."),
+            ("docs/notes/a.md", 4, "Third one is new."),
+        ]))
+
+    def test_a_paragraph_the_range_does_not_touch_is_not_selected(self):
+        base = base_files(extra={"docs/notes/a.md": "# A\n\nOld paragraph one. Stays put.\n\nSecond paragraph here.\n"})
+
+        def change(repo):
+            write(repo, "docs/notes/a.md", "# A\n\nOld paragraph one. Stays put.\n\nSecond paragraph here. Added now.\n")
+            commit(repo)
+        rng = self.make_range(base, change)
+        got = self.changed(rng)
+        self.assertEqual(sorted(got), sorted([("docs/notes/a.md", 5, "Second paragraph here."),
+                                              ("docs/notes/a.md", 5, "Added now.")]))  # scope first: the touched paragraph is the one read
+
+    def test_a_non_markdown_file_a_records_page_and_a_fenced_line_select_nothing(self):
+        base = base_files(extra={"docs/notes/a.md": "# A\n\nKeep.\n"})
+
+        def change(repo):
+            write(repo, "lint/x.py", "# Prose here. Yes.\n")
+            write(repo, "docs/records.md", "A records page. Words here.\n")
+            write(repo, "docs/notes/a.md", "# A\n\nKeep.\n\n```\nFenced code. Not prose.\n```\n")
+            commit(repo)
+        rng = self.make_range(base, change)
+        self.assertEqual(self.changed(rng), [])
+
+    def test_the_selected_text_is_read_from_the_head_blob_not_the_working_file(self):
+        base = base_files(extra={"docs/notes/a.md": "# A\n\nAlpha line. Beta line.\n"})
+
+        def change(repo):
+            write(repo, "docs/notes/a.md", "# A\n\nAlpha line. Beta line.\nGamma line.\n")
+            commit(repo)
+        rng = self.make_range(base, change)
+        write(rng.repo, "docs/notes/a.md", "Working copy only. Not committed.\n")  # uncommitted: the seam must not read it
+        self.assertEqual(sorted(self.changed(rng)), sorted([
+            ("docs/notes/a.md", 3, "Alpha line."), ("docs/notes/a.md", 3, "Beta line."), ("docs/notes/a.md", 4, "Gamma line.")]))
+
+    def test_a_sentence_that_wraps_over_lines_reports_the_line_it_starts_on(self):
+        base = base_files(extra={"docs/notes/a.md": "# A\n\nKeep.\n"})
+
+        def change(repo):
+            write(repo, "docs/notes/a.md", "# A\n\nKeep.\n\nStarts a claim\nand ends here. Then more.\n")
+            commit(repo)
+        rng = self.make_range(base, change)
+        got = self.changed(rng)
+        self.assertEqual([(p, n) for p, n, t in got if "ends here." in t], [("docs/notes/a.md", 5)], got)
+        self.assertEqual([(p, n) for p, n, t in got if "Then more." in t], [("docs/notes/a.md", 6)], got)
 
 
 if __name__ == "__main__":

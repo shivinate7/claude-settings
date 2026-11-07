@@ -786,6 +786,116 @@ class ClaudeMdFlag(Env):
         rc, out = self.run_merge("7", "--confirm")
         self.assert_flagged(rc, out, ".Claude/claude.md", "Output-Styles/A.md")
 
+class ProseJudge(Env):
+    """The model judge at merge, report only (decision claims-carry-backing, section "Model judge at merge").
+
+    Seam, named so the builder matches it: `merge.prose_judge_call(*, sentences, wt, sha)` -> (findings, error).
+    Keyword arguments only. `sentences` is what `lint/stale_cites.py` `changed_sentences(spec, cwd=wt)` returns:
+    a list of (path, first line, text). `findings` is a list of {"path", "line", "why"}; `error` is None or one line.
+    The seam is patched with create=True, so on a tree without it a case fails on its own assert, not on the patch.
+
+    merge.py selects the sentences, and calls the seam once per merge that has changed prose. It never calls the seam
+    when no sentence is selected. The seam's real body is the one place that reads route rows and cited files at sha,
+    builds the prompt and makes the one model call (`prose_judge.merge_findings`); these cases stub the seam and never
+    start a model.
+
+    Printed lines, exact prefixes, each after the merged-as line:
+    - `merge: #7 prose judge: <path>:<line>: <why>`, one per finding;
+    - `merge: #7 prose judge: no finding (report-only).`;
+    - `merge: #7 prose judge: no changed prose to judge.`;
+    - `merge: #7 prose judge: unknown (<reason>).` for an error return, a raise or any other failure.
+    No line changes the merge: rc, merged, the lock and the branch delete read the same with or without the judge."""
+
+    pr_writes = ClaudeMdFlag.pr_writes  # the shared step, one home: ClaudeMdFlag defines it beside this class
+    on_main = ClaudeMdFlag.on_main
+    PREFIX = "merge: #7 prose judge: "
+
+    def stub_judge(self, reply=None, raises=None):
+        """Replace merge.prose_judge_call. It returns `reply` or raises `raises`. -> the list of its calls, each a dict of its kwargs."""
+        calls = []
+
+        def fake(*, sentences, wt, sha):
+            calls.append({"sentences": sentences, "wt": wt, "sha": sha})
+            if raises is not None:
+                raise raises
+            return reply
+        patch = unittest.mock.patch.object(merge, "prose_judge_call", fake, create=True)
+        patch.start(); self.addCleanup(patch.stop)
+        return calls
+
+    def judge_lines(self, out):
+        return [l for l in out.splitlines() if l.startswith(self.PREFIX)]
+
+    def assert_merged_then_judged(self, rc, out):
+        """The merge landed (rc 0, merged, lock free), and every judge line comes after the one merged-as line."""
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+        self.assertFalse(self.lock_ref(), out)
+        lines = out.splitlines()
+        merged_at = [i for i, l in enumerate(lines) if l.startswith("merge: #7 merged as ")]
+        self.assertEqual(len(merged_at), 1, out)
+        judged = [i for i, l in enumerate(lines) if l.startswith(self.PREFIX)]
+        self.assertTrue(judged, "no prose judge line was printed after the merge:\n" + out)  # scope first: a judge line exists to place
+        self.assertTrue(all(i > merged_at[0] for i in judged), "a prose judge line comes before the merged-as line:\n" + out)
+
+    def test_a_finding_prints_its_line_and_the_merge_lands(self):
+        self.pr_writes({"docs/notes/a.md": "Alpha holds.\n"})
+        calls = self.stub_judge(([{"path": "docs/notes/a.md", "line": 1, "why": "says it holds with no backing"}], None))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_merged_then_judged(rc, out)
+        self.assertEqual(len(calls), 1, out)
+        self.assertEqual(self.judge_lines(out), ["merge: #7 prose judge: docs/notes/a.md:1: says it holds with no backing"], out)
+
+    def test_a_judge_error_return_prints_unknown_and_the_merge_lands(self):
+        self.pr_writes({"docs/notes/a.md": "Alpha holds.\n"})
+        calls = self.stub_judge(([], "model subprocess timed out"))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_merged_then_judged(rc, out)
+        self.assertEqual(len(calls), 1, out)
+        self.assertEqual(self.judge_lines(out), ["merge: #7 prose judge: unknown (model subprocess timed out)."], out)
+
+    def test_a_judge_that_raises_prints_unknown_and_ff_afterMerge_and_the_branch_delete_still_run(self):
+        cfg = dict(CONFIG, merge=dict(CONFIG["merge"], afterMerge=["echo ran > after.txt"]))
+        sh(self.other, "git", "checkout", "-q", "main"); put(os.path.join(self.other, ".github/stamp.json"), json.dumps(cfg))
+        sh(self.other, "git", "commit", "-qam", "cfg"); sh(self.other, "git", "push", "-q", "origin", "main")
+        sh(self.co, "git", "pull", "-q", "--ff-only")
+        head_takes_base(self)
+        self.pr_writes({"docs/notes/a.md": "Alpha holds.\n"})
+        calls = self.stub_judge(raises=RuntimeError("boom"))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_merged_then_judged(rc, out)
+        self.assertEqual(len(calls), 1, out)
+        judge = self.judge_lines(out)
+        self.assertEqual(len(judge), 1, out)
+        self.assertTrue(judge[0].startswith("merge: #7 prose judge: unknown (") and "boom" in judge[0] and judge[0].endswith(")."), out)
+        self.assertEqual(sh(self.co, "git", "rev-parse", "main"), sh(self.co, "git", "rev-parse", "origin/main"), out)  # ff_main ran
+        self.assertTrue(os.path.exists(os.path.join(self.co, "after.txt")), out)  # afterMerge ran
+        self.assertNotIn("refs/heads/feat", self.refs(), out)  # cut_branch ran
+
+    def test_one_judge_call_per_merge_for_prose_in_several_governed_files(self):
+        self.pr_writes({"docs/notes/a.md": "Alpha holds. Beta holds. Gamma holds.\n", "docs/notes/b.md": "One stands. Two stands.\n"})
+        calls = self.stub_judge(([], None))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_merged_then_judged(rc, out)
+        self.assertEqual(len(calls), 1, out)  # one call for the whole merge: not one per file or per sentence
+        texts = [(p, t.strip()) for p, _, t in calls[0]["sentences"]]
+        for want in [("docs/notes/a.md", "Alpha holds."), ("docs/notes/a.md", "Gamma holds."), ("docs/notes/b.md", "Two stands.")]:
+            self.assertIn(want, texts, out)  # every sentence of each changed paragraph reaches the one call
+        self.assertEqual(self.judge_lines(out), ["merge: #7 prose judge: no finding (report-only)."], out)
+
+    def test_a_pr_with_no_governed_prose_makes_no_judge_call_and_says_so(self):
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "rm", "-q", "docs/decisions/second.md")  # the fixture's own record is prose: this PR must hold none
+        put(os.path.join(o, "lint/x.py"), "X = 1\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "pr: code only"); sh(o, "git", "push", "-q", "origin", "feat")
+        calls = self.stub_judge(([], None))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_merged_then_judged(rc, out)
+        self.assertEqual(calls, [], out)  # zero model calls when no prose changed
+        self.assertEqual(self.judge_lines(out), ["merge: #7 prose judge: no changed prose to judge."], out)
+
+
 class Race(Env):
     def test_two_runs_one_lock(self):
         lock2 = merge.GitLock(self.other, now=lambda: self.now)

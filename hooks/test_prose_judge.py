@@ -487,6 +487,113 @@ def case_g_one_kind_line_record_is_not_refused_for_a_kind_count():
     check("g: Write of the one-Kind record: an ok verdict allows it (control)", code == 0 and out == "", (code, out))
 
 
+# (h) the merge judge, prose_judge.merge_findings(sentences, rows_text, files) -> (findings, error).
+# sentences: [(path, first line, text)] from lint/stale_cites.py changed_sentences. rows_text: the route rows file at sha.
+# files: {path: text} of each repo file a sentence names that exists at sha. It makes ONE call to the module-level
+# invoke_model(prompt, timeout=MERGE_TIMEOUT, shape=MERGE_SHAPE) for any sentence, and none for an empty list. The reply
+# is {"ok": true|false, "findings": [{"path", "line", "why"}]}. An odd answer, a model error or a timeout is an error with
+# no finding, never a clean pass. The prompt is capped at PROMPT_CAP characters and says what it cut.
+MERGE_TIMEOUT = 60
+MERGE_SHAPE = {"ok": (True, False)}
+PROMPT_CAP = 200000
+SENTENCES = [("docs/notes/a.md", 3, "Alpha holds."), ("docs/notes/a.md", 4, "Beta holds.")]
+ROWS = '{"rows": [{"id": "route-one"}]}'
+FILES = {"docs/notes/a.md": "# A\n\nAlpha holds.\nBeta holds.\n"}
+
+
+def merge_call(sentences, rows, files, result):
+    """Run pj.merge_findings(sentences, rows_text, files) -> (findings, error) with invoke_model stubbed to return `result`.
+    Positional arguments, as the merge calls it. -> (findings, error, stub), or None when the function is not in the module."""
+    fn = getattr(pj, "merge_findings", None)
+    if fn is None:
+        check("prose_judge.merge_findings is defined", False, "the merge judge is not built: no merge_findings in hooks/prose_judge.py")
+        return None
+    stub, prior = Stub(result), pj.invoke_model
+    pj.invoke_model = stub
+    try:
+        findings, error = fn(sentences, rows, files)
+    finally:
+        pj.invoke_model = prior
+    return findings, error, stub
+
+
+def case_h_one_model_call_carries_the_sentences_rows_and_files():
+    res = merge_call(SENTENCES, ROWS, FILES, ({"ok": True, "findings": []}, None))
+    if res is None:
+        return
+    _, _, stub = res
+    name = "h: one model call carries the sentences, the rows and the files"
+    check(name + " (one call)", len(stub.prompts) == 1, "calls=%d" % len(stub.prompts))
+    if len(stub.prompts) != 1:
+        return  # scope first: the prompt and the kwargs are read only from the one call
+    prompt = stub.prompts[0]
+    check(name + " (sentences)", "Alpha holds." in prompt and "Beta holds." in prompt, prompt[:200])
+    check(name + " (rows)", ROWS in prompt, "")
+    check(name + " (files)", FILES["docs/notes/a.md"] in prompt, "")
+    check(name + " (timeout and shape)",
+          stub.kwargs[0].get("timeout") == MERGE_TIMEOUT and stub.kwargs[0].get("shape") == MERGE_SHAPE, repr(stub.kwargs[0]))
+
+
+def case_h_findings_are_read_from_the_reply():
+    finding = {"path": "docs/notes/a.md", "line": 4, "why": "the claim names a route it cannot show"}
+    res = merge_call(SENTENCES, ROWS, FILES, ({"ok": False, "findings": [finding]}, None))
+    if res is None:
+        return
+    findings, error, _ = res
+    check("h: a finding is read from the reply", findings == [finding] and not error, "findings=%r error=%r" % (findings, error))
+
+
+def case_h_a_clean_reply_has_no_findings():
+    res = merge_call(SENTENCES, ROWS, FILES, ({"ok": True, "findings": []}, None))
+    if res is None:
+        return
+    findings, error, _ = res
+    check("h: a clean reply gives no findings and no error", findings == [] and not error, "findings=%r error=%r" % (findings, error))
+
+
+def case_h_a_model_error_is_an_error_not_a_pass():
+    res = merge_call(SENTENCES, ROWS, FILES, (None, "model subprocess timed out"))
+    if res is None:
+        return
+    findings, error, _ = res
+    check("h: a model error is an error with no finding, never a pass",
+          findings == [] and bool(error) and "timed out" in str(error), "findings=%r error=%r" % (findings, error))
+
+
+def case_h_an_odd_answer_is_an_error():
+    odd = [{"ok": False, "findings": "all of it"}, {"ok": False, "findings": [{"path": "docs/notes/a.md"}]}]
+    for answer in odd:
+        res = merge_call(SENTENCES, ROWS, FILES, (answer, None))
+        if res is None:
+            return
+        findings, error, _ = res
+        check("h: an odd answer %r is an error with no finding" % (answer,), findings == [] and bool(error),
+              "findings=%r error=%r" % (findings, error))
+
+
+def case_h_no_sentence_makes_no_model_call():
+    res = merge_call([], ROWS, FILES, ({"ok": True, "findings": []}, None))
+    if res is None:
+        return
+    findings, error, stub = res
+    check("h: no sentence makes no model call", stub.prompts == [] and findings == [] and not error,
+          "calls=%d findings=%r error=%r" % (len(stub.prompts), findings, error))
+
+
+def case_h_an_oversized_input_is_capped_and_the_prompt_says_what_it_cut():
+    res = merge_call(SENTENCES, "r" * 1000000, {"docs/notes/a.md": "f" * 1000000}, ({"ok": True, "findings": []}, None))
+    if res is None:
+        return
+    _, _, stub = res
+    name = "h: an oversized input"
+    check(name + " makes one call", len(stub.prompts) == 1, "calls=%d" % len(stub.prompts))
+    if len(stub.prompts) != 1:
+        return
+    prompt = stub.prompts[0]
+    check(name + " gives a prompt of at most %d characters" % PROMPT_CAP, len(prompt) <= PROMPT_CAP, "len=%d" % len(prompt))
+    check(name + " says what it cut", any(word in prompt.lower() for word in ("cut", "truncat", "omit")), prompt[-200:])
+
+
 def main():
     for case in (case_a_other_paths_make_no_model_call, case_a_prose_named_in_a_ts_body_is_not_judged,
                  case_b_md_edit_calls_model_once_with_rule_and_change,
@@ -498,7 +605,12 @@ def main():
                  case_e_the_unreplaced_call_reaches_decision_watch,
                  case_e_a_failed_decision_watch_import_does_not_block,
                  case_f_an_override_lifts_the_refusal,
-                 case_g_one_kind_line_record_is_not_refused_for_a_kind_count):
+                 case_g_one_kind_line_record_is_not_refused_for_a_kind_count,
+                 case_h_one_model_call_carries_the_sentences_rows_and_files,
+                 case_h_findings_are_read_from_the_reply, case_h_a_clean_reply_has_no_findings,
+                 case_h_a_model_error_is_an_error_not_a_pass, case_h_an_odd_answer_is_an_error,
+                 case_h_no_sentence_makes_no_model_call,
+                 case_h_an_oversized_input_is_capped_and_the_prompt_says_what_it_cut):
         try:
             case()
         except Exception as exc:
