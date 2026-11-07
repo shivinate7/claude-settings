@@ -10,8 +10,10 @@ tool fixes none, and it writes nothing. Each finding has one category:
 - sleep: a real wait in a test file.
 - elapsed-assert: an assert that reads a wall-clock reading or a difference of two.
 - test-cap: a per-test or per-suite time limit.
-- wait-cap: a fixed time bound on a wait for a condition or a child process (a hang guard).
-  Kept apart because it may be fine. The plan decides case by case.
+- wait-cap: a fixed time bound on a wait for a condition or a child process (a hang guard). Allowed
+  (owner ruling 2026-11-07 13:00 CST, decision test-practices P5): it is listed, never counted as
+  time-pinned, and never sets exit 1. Check that each cap sits well above the run, so it only stops a
+  hang and never decides a verdict by speed.
 - calendar: a read of the real date or zone with no time given (`datetime.now()`, `date.today()`,
   `time.localtime()`, `time.gmtime()`, `time.ctime()`, `time.asctime()`, `time.tzname`, `time.timezone`,
   JS `new Date()`, `new Date(<clock>)` where the argument reads `Date.now` or `performance.now` directly
@@ -49,7 +51,8 @@ hole are masked.
 Paths are relative to <root>. Output is one `<path>:<line>: <category>: <source line>` per finding
 (one per line and category), then `UNREAD <path>: <reason>` per file that could not be read, then a
 summary. A file that cannot be read or parsed is unread, never clean.
-Exit 0: nothing found, nothing unread. Exit 1: findings. Exit 2: the root cannot be read, or nothing
+Exit 0: no time-pinned finding, nothing unread (wait-cap rows do not count). Exit 1: a finding that is
+not a wait-cap. Exit 2: the root cannot be read, or nothing
 found but some file unread, so the result is unknown.
 Cost: one `git ls-files` (or one folder walk outside a git tree) and one read of each test file. No
 process stays running.
@@ -1234,11 +1237,13 @@ def main(argv=None):
             print(f"{f['path']}:{f['line']}: {f['category']}: {f['text']}")
         for u in unread:
             print(f"UNREAD {u['path']}: {u['reason']}")
-        nfiles = len({f["path"] for f in findings})
-        print(f"{len(findings)} time-pinned in {nfiles} files (sleep {counts['sleep']}, "
-              f"elapsed-assert {counts['elapsed-assert']}, test-cap {counts['test-cap']}, "
-              f"wait-cap {counts['wait-cap']}, calendar {counts['calendar']}); {len(unread)} unread")
-    if findings:
+        pinned = [f for f in findings if f["category"] != "wait-cap"]
+        nfiles = len({f["path"] for f in pinned})
+        print("%d time-pinned in %d files (sleep %d, elapsed-assert %d, test-cap %d, calendar %d); "
+              "hang guards %d (allowed; check each cap sits well above the run); %d unread"
+              % (len(pinned), nfiles, counts["sleep"], counts["elapsed-assert"], counts["test-cap"],
+                 counts["calendar"], counts["wait-cap"], len(unread)))
+    if any(f["category"] != "wait-cap" for f in findings):
         return 1
     return 2 if unread else 0
 
