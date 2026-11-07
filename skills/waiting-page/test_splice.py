@@ -1,4 +1,4 @@
-"""Fixture suite for splice.py, the waiting-page writer's one splice. Run: python3 skills/waiting-page/test_splice.py
+"""Fixture suite for splice.py, the page writer's one splice. Run: python3 skills/waiting-page/test_splice.py
 
     python3 splice.py --page LIVE.html --block FILE --out OUT.html
 
