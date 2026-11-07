@@ -2200,9 +2200,9 @@ def text_of(lines):
     return "".join(line + "\n" for line in lines)
 
 
-def insert_above_line_ten(lines):
-    """`lines` with three lines added above line 10, so the old line 10 is now line 13."""
-    return lines[:9] + ["a%d = %d" % (k, k) for k in (1, 2, 3)] + lines[9:]
+def insert_above_line_ten(lines, count=3):
+    """`lines` with `count` lines added above line 10, so the old line 10 moves down by `count`."""
+    return lines[:9] + ["a%d = %d" % (k, k) for k in range(1, count + 1)] + lines[9:]
 
 
 def stale006_lines(out):
@@ -2303,6 +2303,18 @@ class DriftTests(StaleCase):
         self.assertEqual(base_hunks(rng, NOTES), [(3, 1)])  # scope: line 3 is edited in place, re-anchored
         self.assertEqual(base_hunks(rng, "code.py"), [(9, 0)])  # scope: the three lines above line 10 still go in
         self.assert_no_stale006(rng)
+
+    def test_added_anchor_whose_cited_lines_a_range_moved_is_reported_with_the_pre_range_numbers(self):
+        base, head = source_lines(), insert_above_line_ten(source_lines(), 2)
+        self.assertEqual(base[9:12], head[11:14])  # scope: base lines 10 to 12 sit at head lines 12 to 14
+        self.assertNotEqual(base[9:12], head[9:12])  # scope: head lines 10 to 12 hold other text
+        control = self.drift(head, base_notes=SPAN_NOTES)
+        self.assertEqual(base_hunks(control, "code.py"), [(9, 0)])  # scope: two lines go in above line 10
+        self.assert_stale006(control, 3, ["code.py:12-14"])  # control: the same span, not added, reports its new span
+        rng = self.drift(head, head_notes=SPAN_NOTES, base_notes="# Notes\n")
+        self.assertEqual(base_hunks(rng, NOTES), [(1, 0)])  # scope: the range adds the anchoring line
+        self.assertEqual(base_hunks(rng, "code.py"), [(9, 0)])  # scope: two lines go in above line 10
+        self.assert_stale006(rng, 3, ["pre-range", "code.py:12-14"])
 
     def test_cited_lines_deleted_outright_report_cited_lines_removed(self):
         lines = source_lines()
