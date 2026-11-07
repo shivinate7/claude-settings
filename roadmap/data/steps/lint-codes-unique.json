@@ -1,0 +1,11 @@
+{
+  "title": "Lint codes never collide across branches",
+  "order": 265.2,
+  "lane": "session_013NEJL2GctUCgksFKSWZykD",
+  "why": "Coordinator pick, 15:09 CST: two branches each claimed lint code STALE007.",
+  "note": "A merge check or slug codes stop it; the lane picks which with red tests.",
+  "owner": "coordinator",
+  "phase": "now",
+  "status": "doing",
+  "updatedAt": "2026-11-07T15:10:00-06:00"
+}

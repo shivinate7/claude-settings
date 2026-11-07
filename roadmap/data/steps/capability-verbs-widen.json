@@ -1,0 +1,11 @@
+{
+  "title": "The report guard's capability words also catch \"could not\", \"couldn't\", \"rejected\" and \"401\"",
+  "order": 265.1,
+  "lane": "session_013NEJL1PnU1732wEno9CEj7",
+  "why": "Coordinator pick, 15:09 CST: CAPABILITY_RE in lint/report_guard.py misses these forms; it is widened in its own lane, not inside the page lane.",
+  "note": "Red and false-alarm cases on the chat-reply check and the page-task check. Topic report-guard. Runner 8 batches it.",
+  "owner": "coordinator",
+  "phase": "now",
+  "status": "doing",
+  "updatedAt": "2026-11-07T15:10:00-06:00"
+}
