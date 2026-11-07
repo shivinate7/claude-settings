@@ -5,6 +5,6 @@
   "order": 210.6,
   "owner": "lane",
   "why": "A lane's nested file no longer fails the install test in CI, after review is done.",
-  "note": "Coordinator 01:47 CST Nov 7: twice now (batch 38 testdata; batch 49 #1332 docs/design/3d-browser-dummy/) a lane's nested files failed hooks/test_install_src.sh case 8, because the install's land_dir copies only flat files. Decide: the landed folders copy subfolders, or a lint refuses a nested file in a landed folder at commit time, so lanes learn it before CI. No owner question.",
-  "updatedAt": "2026-11-07T07:45:00Z"
+  "note": "Coordinator 01:47 CST Nov 7: twice now (batch 38 testdata; batch 49 #1332 docs/design/3d-browser-dummy/) a lane's nested files failed hooks/test_install_src.sh case 8, because the install's land_dir copies only flat files. Decide: the landed folders copy subfolders, or a lint refuses a nested file in a landed folder at commit time, so lanes learn it before CI. No owner question. Batch 49 (#1397, Nov 7 02:57 CST) landed #1385, which files the gap as a debt; the fix (subfolders copy, or a commit-time lint) is still open.",
+  "updatedAt": "2026-11-07T09:04:00Z"
 }

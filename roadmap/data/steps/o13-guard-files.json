@@ -1,9 +1,9 @@
 {
   "title": "Everyday words: \"gate\" becomes guard or check in the guard files",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 103.3529,
   "why": "Finishes step o13's word change in files that only a guard lane may touch.",
-  "note": "Coordinator 12:19 CST: Sites: hooks/guard.py:3571; hooks/test_guard.py:14684 and 25938-25952 (\"brake gate\"); skills/roadmap/test_build.py:1316 (\"pair gate\" becomes \"pair check\"). Coordinator 21:38 CST: F1 and F3 merged (F3 #1340 at 21:05), hold lifted. Lane PR draft #1390 (e3f7209f), with runner 8.",
-  "updatedAt": "2026-11-07T04:21:00Z"
+  "note": "Coordinator 12:19 CST: Sites: hooks/guard.py:3571; hooks/test_guard.py:14684 and 25938-25952 (\"brake gate\"); skills/roadmap/test_build.py:1316 (\"pair gate\" becomes \"pair check\"). Coordinator 21:38 CST: F1 and F3 merged (F3 #1340 at 21:05), hold lifted. Lane PR draft #1390 (e3f7209f), with runner 8. #1390 was dropped (no Red-run trailer) and replaced by #1396, same diff; landed on main in batch 49 (#1397, merge ebc810f56, Nov 7 02:57 CST).",
+  "updatedAt": "2026-11-07T09:04:00Z"
 }
