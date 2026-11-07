@@ -1056,6 +1056,32 @@ class GuardClosure(unittest.TestCase):
         self.assertEqual(len(keys), 2, f"the two loads are not both named: {keys}")
         self.assertEqual(len(set(keys)), 2, f"two loads share a key: {keys}")
 
+    # A `/` chain and `.parent` are loads when the root is the repo and the path is a repo file. The chain is never named:
+    # a directory and a user-config path are not repo files, and naming them would cry wolf.
+    def test_a_pathlib_chain_through_parent_reads_the_roadmap_page(self):
+        # skills/roadmap/build.py: HERE = pathlib.Path(__file__).resolve().parent, then HERE / "page" / "index.html" (line 751).
+        tracked = set(_repo_files())
+        self.assertIn("skills/roadmap/build.py", guard_closure()[0], "scope: skills/roadmap/build.py is not in the closure")
+        self.assertIn("skills/roadmap/page/index.html", tracked, "scope: skills/roadmap/page/index.html is not a repo file")
+        _, paths, loads, _ = _refs("skills/roadmap/build.py", ast.parse(source_of("skills/roadmap/build.py")), tracked)
+        self.assertIn("skills/roadmap/page/index.html", paths | loads, "the chain through .parent is not followed")
+
+    def test_a_home_config_chain_is_neither_read_nor_named(self):
+        # Control: a path under the user's home is not a repo file, so the chain reads nothing and names nothing.
+        tracked = set(_repo_files())
+        self.assertIn("settings.json", tracked, "scope: settings.json is a repo file, so the probe names a real repo path")
+        src = 'import pathlib\nUSER_CLAUDE = pathlib.Path.home() / ".claude" / "CLAUDE.md"\n'
+        _, paths, loads, unfollowed = _refs("lint/zz_probe.py", ast.parse(src), tracked)
+        self.assertEqual((paths | loads, unfollowed), (set(), []))
+
+    def test_a_directory_chain_is_neither_read_nor_named(self):
+        # Control: skills/roadmap/page is a directory, not a repo file, so the chain reads nothing and names nothing.
+        tracked = set(_repo_files())
+        self.assertNotIn("skills/roadmap/page", tracked, "scope: skills/roadmap/page is a repo file, not a directory")
+        src = 'import pathlib\nPAGE_DIR = pathlib.Path(__file__).resolve().parents[1] / "skills" / "roadmap" / "page"\n'
+        _, paths, loads, unfollowed = _refs("lint/zz_probe.py", ast.parse(src), tracked)
+        self.assertEqual((paths | loads, unfollowed), (set(), []))
+
 
 @unittest.skipUnless(BASH, "bash not on PATH")
 class MutationReport(unittest.TestCase):
