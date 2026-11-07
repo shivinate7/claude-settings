@@ -1,10 +1,10 @@
 {
   "title": "The report hook that checks reviewer model names stops flagging an earlier round's correct model",
   "phase": "next",
-  "status": "todo",
+  "status": "doing",
   "order": 260.6,
   "owner": "coordinator",
   "why": "Lane ux-order-rule-scope, relayed by the coordinator 2026-11-07 02:19 CST: the report Stop hook that checks reviewer model names flagged a correct reviewer model 4 times in one session. It seems to read only the latest reviewer spawn, so an earlier round's correct model reads as wrong. A guard that cries wolf is spent (verification-cry-wolf-guard-is-spent).",
-  "note": "Own lane, red test first: a transcript with two reviewer spawns on different models, where the report names each one correctly, goes red on main's hook and green after the fix. The guard's verdict changes, so it is a build lane (test-author, builder, reviewer). No owner question.",
-  "updatedAt": "2026-11-07T08:19:00Z"
+  "note": "Own lane, red test first: a transcript with two reviewer spawns on different models, where the report names each one correctly, goes red on main's hook and green after the fix. The guard's verdict changes, so it is a build lane (test-author, builder, reviewer). No owner question. Coordinator 04:07 CST Nov 7: lane PR #1401, with runner 8. Watch: lane prose-judge-batch-noise saw the model-name check fire three times on agents listed under Next, not Done. This may be a false alarm, and #1401 may or may not fix it. If it repeats after #1401 merges, it becomes its own step.",
+  "updatedAt": "2026-11-07T10:07:00Z"
 }
