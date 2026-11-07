@@ -7,6 +7,7 @@ import fnmatch
 import json
 import os
 import re
+import sys
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
@@ -1127,6 +1128,72 @@ def brief_hit(tool: str, tool_input, transcript: str):
     if step not in steps:
         return "lane brief for step " + str(step) + " to a lane with no topic tag", BRIEF_STEP_REASON
     return None
+
+
+# ---- the review record after a round (rule review-record-after-round, decision pr-review-record)
+RECORD_SPAWN_TOOLS = ("Agent", "Task")
+RECORD_REVIEWER_ROLES = ("reviewer", "design-reviewer")  # a spawn of one of these is a round
+RECORD_TRIGGER_ROLES = ("builder", "test-author")  # a spawn of one of these, or a send_message, moves past the round
+RECORD_COMMENT_TOOL = "mcp__github__add_issue_comment"
+RECORD_REASON = (
+    "review-record-after-round: the last reviewer spawn in this session has no review record after it, so the "
+    "round is not on the pull request yet. Run `merge <pr> --review-record --head <reviewed sha>`, post the body "
+    "it prints with the GitHub comment tool (add_issue_comment), then retry. "
+    "(decision pr-review-record, a lane posts the record after each round)"
+)
+
+
+def _transcript_reader():
+    """lint/_transcript.py, the one home of the transcript readers, found beside this file's folder."""
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    import _transcript
+    return _transcript
+
+
+def _is_spawn_of(use, roles) -> bool:
+    given = use.get("input")
+    return use.get("name") in RECORD_SPAWN_TOOLS and isinstance(given, dict) and given.get("subagent_type") in roles
+
+
+def _posts_record(use, marker) -> bool:
+    given = use.get("input")
+    if not isinstance(given, dict):
+        return False
+    name = use.get("name")
+    field = given.get("body") if name == RECORD_COMMENT_TOOL else given.get("command") if name == "Bash" else None
+    return isinstance(field, str) and marker in field
+
+
+def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = False):
+    """(reason, matched, unknown): the refusal when this builder or test-author spawn, or this send_message, comes
+    after the session's last reviewer spawn and no later call posted a review record, else ("", "", unknown).
+    `unknown` is true when the merge tool (the home of the record marker) could not be loaded: the call is
+    allowed and the caller notes it. A call with an agent_id is an agent's and is not judged. A missing or
+    unreadable transcript allows. Cost: one transcript read per judged call, no subprocess, no network."""
+    if agent or not isinstance(tool_input, dict) or not transcript:
+        return "", "", False
+    judged = tool == BRIEF_TOOL or (tool in RECORD_SPAWN_TOOLS and tool_input.get("subagent_type") in RECORD_TRIGGER_ROLES)
+    if not judged:
+        return "", "", False
+    try:
+        reader = _transcript_reader()
+        uses = [use for rec in reader.read_transcript(transcript) if not rec.get("isSidechain") for use in reader.tool_uses(rec)]
+    except Exception:
+        return "", "", False
+    last = max((i for i, use in enumerate(uses) if _is_spawn_of(use, RECORD_REVIEWER_ROLES)), default=None)
+    if last is None:
+        return "", "", False
+    try:
+        marker = merge_module().REVIEW_MARKER
+    except Exception:
+        marker = None
+    if not isinstance(marker, str) or not marker:
+        return "", "", True
+    if any(_posts_record(use, marker) for use in uses[last + 1:]):
+        return "", "", False
+    return RECORD_REASON, "%s after a reviewer spawn with no review record" % tool, False
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
