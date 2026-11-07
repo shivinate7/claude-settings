@@ -2674,6 +2674,14 @@ def assert_unknown_stop_keeps_the_claim(test, rc, out, claim):
     test.assertRegex(out.lower(), r"re-?run|run again", "the stop does not say to rerun merge")
     test.assertFalse(test.lock_ref(), "the merge lock was left on origin")
 
+def tempfiles_in_run_folder():
+    """Patch tempfile.mkstemp to make its files in this run's folder, so a helper that writes one never uses the system temp dir."""
+    real_mkstemp = tempfile.mkstemp
+    def mkstemp_in_run_folder(**k):
+        k.setdefault("dir", run_folder())
+        return real_mkstemp(**k)
+    return unittest.mock.patch.object(tempfile, "mkstemp", mkstemp_in_run_folder)
+
 class ClaimSurvivesUnknown(Env):
     """A read that could not run after the claim push keeps the claim, on the fake host. Only a proven refusal reverts it (standing-merge-grant)."""
 
@@ -2688,6 +2696,20 @@ class ClaimSurvivesUnknown(Env):
         self.host.on_wait = None  # the rerun waits on its own terms, not on this read
         return rc, out, (claimed[0] if claimed else None)
 
+    def main_moves(self):
+        """A person pushes a commit to main that touches no path the batch touches, from the second clone."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, "elsewhere.txt"), "main moved\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
+
+    def merge_main_onto_feat(self):
+        """main moves and the branch merges it, as a healed records page leaves the branch: the head is a merge commit on top of the claim. -> the head."""
+        self.main_moves()
+        o = self.other
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
+        return self.head()
+
     def test_an_unknown_base_check_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
         claimed = []
         self.host.on_wait = lambda: claimed.append(self.head())
@@ -2696,11 +2718,7 @@ class ClaimSurvivesUnknown(Env):
             if claimed and mode == "check":  # the base check prove() makes after the claim push
                 return 0, "UNKNOWN: the stamp could not read origin/main"
             return real(wt, cfgrel, mode, base)
-        real_mkstemp = tempfile.mkstemp  # stamp_stop writes its full output to a log: this run's folder, never the system temp dir
-        def mkstemp_in_run_folder(**k):
-            k.setdefault("dir", run_folder())
-            return real_mkstemp(**k)
-        with unittest.mock.patch.object(merge, "node_stamp", check_unknown), unittest.mock.patch.object(tempfile, "mkstemp", mkstemp_in_run_folder):
+        with unittest.mock.patch.object(merge, "node_stamp", check_unknown), tempfiles_in_run_folder():  # stamp_stop writes its log to this run's folder
             rc, out = self.run_merge("7", "--confirm")
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
         self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
@@ -2758,13 +2776,7 @@ class ClaimSurvivesUnknown(Env):
     def test_a_rerun_over_a_merge_commit_on_its_claim_claims_nothing_and_pushes_nothing(self):
         rc, out, claim = self.unknown_at_the_claim_wait(merge.NetStop("the read after the claim push failed"))
         self.assertEqual(rc, 1, out)  # precondition: the first run stopped and left its claim on feat
-        # The base moves and the branch merges it: the head is a merge commit on top of the claim, as a healed records page leaves it.
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
-        put(os.path.join(o, "elsewhere.txt"), "main moved\n")
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
-        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
-        merged = self.head()
+        merged = self.merge_main_onto_feat()
         self.assertNotEqual(merged, claim, "the merge commit did not land on top of the claim")
         before = len(self.host.waits)
         rc, out = self.run_merge("7", "--confirm")
@@ -2772,6 +2784,105 @@ class ClaimSurvivesUnknown(Env):
         self.assertIn("nothing to claim", out, "the rerun did not say it claims nothing")
         self.assertEqual([sha for sha, _ in self.host.waits[before:]], [merged], "the rerun waited on a head other than its merge commit: it pushed")
         self.assertEqual(self.claims("main"), 1, "the rerun claimed again")
+
+    def test_an_unknown_read_in_the_wait_of_a_rerun_over_a_merge_commit_stops_unknown_and_pushes_nothing(self):
+        rc, out, claim = self.unknown_at_the_claim_wait(merge.NetStop("the read after the claim push failed"))
+        self.assertEqual(rc, 1, out)  # precondition: the first run stopped and left its claim on feat
+        merged = self.merge_main_onto_feat()
+        def read_fails(n, sha, deadline, prior=None):
+            raise merge.Stop("reading the checks of #7 failed: boom")
+        self.host.wait_checks = read_fails
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertRegex(out.lower(), r"unknown", "the stop does not say the result is unknown")
+        self.assertRegex(out.lower(), r"re-?run|run again", "the stop does not say to rerun merge")
+        self.assertEqual(self.head(), merged, "feat moved: the rerun pushed or reverted")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+        self.assertFalse(self.lock_ref(), "the merge lock was left on origin")
+
+    def test_a_red_check_on_a_rerun_over_a_merge_commit_names_the_claim_as_staying_under_it(self):
+        rc, out, claim = self.unknown_at_the_claim_wait(merge.NetStop("the read after the claim push failed"))
+        self.assertEqual(rc, 1, out)  # precondition: the first run stopped and left its claim on feat
+        merged = self.merge_main_onto_feat()
+        self.host.checks = (False, "a check is red: checks: fail")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("checks: fail", out, "the stop does not print the red check")
+        self.assertIn("stays on feat", out, "the stop does not say the claim stays on feat")
+        self.assertIn(claim[:9], out, "the stop does not name the claim")
+        self.assertIn(merged[:9], out, "the stop does not name the merge commit the claim stays under")
+        self.assertNotIn("reverted", out, "a revert of the head was made: the head is a merge commit, not the claim")
+        self.assertEqual(self.head(), merged, "feat moved: the red rerun pushed or reverted")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_base_proof_read_that_cannot_run_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        # main moved in the wait, so the green run needs the small-move proof, and that proof's first read (rev-parse of origin/main) cannot run.
+        claimed = []
+        def main_moves_during_the_wait():
+            claimed.append(self.head())
+            self.main_moves()
+        self.host.on_wait = main_moves_during_the_wait
+        real_git = merge.git
+        def base_unreadable(cwd, *a, input=None):
+            if claimed and a == ("rev-parse", "origin/main"):
+                return 128, "fatal: ambiguous argument 'origin/main': unknown revision"
+            return real_git(cwd, *a, input=input)
+        with unittest.mock.patch.object(merge, "git", base_unreadable), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_base_config_listing_that_cannot_run_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        real_git = merge.git
+        def listing_unreadable(cwd, *a, input=None):
+            if claimed and a[:3] == ("ls-tree", "--name-only", "origin/main"):
+                return 128, "fatal: not a tree object"
+            return real_git(cwd, *a, input=input)
+        with unittest.mock.patch.object(merge, "git", listing_unreadable):
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_base_config_read_that_cannot_run_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        real_git = merge.git
+        def config_unreadable(cwd, *a, input=None):
+            if claimed and a == ("show", "origin/main:.github/stamp.json"):
+                return 128, "fatal: path '.github/stamp.json' does not exist"
+            return real_git(cwd, *a, input=input)
+        with unittest.mock.patch.object(merge, "git", config_unreadable):
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_records_merge_that_fails_without_a_conflict_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        real_git = merge.git
+        def merge_fails_without_a_conflict(cwd, *a, input=None):
+            if claimed and "--no-commit" in a:  # the records proof's merge: it fails, and leaves no unmerged file
+                return 1, "fatal: unable to write new index file"
+            return real_git(cwd, *a, input=input)
+        with unittest.mock.patch.object(merge, "git", merge_fails_without_a_conflict):
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_worktree_gone_at_the_base_proof_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        claimed = []
+        def tree_swept():
+            claimed.append(self.head())
+            for line in sh(self.co, "git", "worktree", "list", "--porcelain").splitlines():
+                path = line[len("worktree "):] if line.startswith("worktree ") else ""
+                if path and os.path.realpath(path) != os.path.realpath(self.co):
+                    shutil.rmtree(path)  # swept or cleaned: the merge tool's tree is gone before the base proof
+        self.host.on_wait = tree_swept
+        rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
 
 class RerunAfterRevert(Env):
     def test_second_run_claims_the_same_number_again_and_merges(self):
@@ -8871,6 +8982,19 @@ class RecordsHeal(RecordsEnv):
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
 
+    def assert_unknown_kept(self, rc, out):
+        """The heal wait could not get an answer: the stop says the result is unknown and to rerun, the merge commit stays on feat, nothing is merged."""
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(len(self.host.waits), 3, self.host.waits)
+        self.assertRegex(out.lower(), r"unknown", "the stop does not say the result is unknown")
+        self.assertRegex(out.lower(), r"re-?run|run again", "the stop does not say to rerun merge")
+        self.assertNotIn("are not green", out, "the heal wait read an unanswered wait as a red check")
+        self.assertNotIn("reverted", out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(self.rev("origin/feat"), self.host.waits[-1][0], "feat moved off the merge commit the heal pushed")
+        self.assertFalse(self.lock_ref())
+        self.assertEqual(self.worktrees(), 1)
+
     def test_red_checks_on_the_heal_commit_keep_it_and_merge_nothing(self):
         self.heal_setup()
         self.host.seq = [(True, ""), (True, ""), (False, "a check is red: checks: fail")]
@@ -8878,6 +9002,28 @@ class RecordsHeal(RecordsEnv):
         self.assert_kept(rc, out)
         self.assertIn("are not green", out)
         self.assertIn("checks: fail", out)
+
+    def test_a_deadline_with_a_required_check_pending_on_the_heal_commit_stops_unknown_and_keeps_it(self):
+        self.heal_setup()
+        self.host.seq = [(True, ""), (True, ""), (None, "the checks wait ended at its deadline with a required check pending")]
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_unknown_kept(rc, out)
+
+    def test_a_failed_read_in_the_heal_wait_stops_unknown_and_keeps_the_merge_commit(self):
+        self.heal_setup()
+        def read_fails():
+            raise merge.Stop("reading the checks of #7 failed: boom")
+        self.on_heal_wait(read_fails)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_unknown_kept(rc, out)
+
+    def test_an_error_in_the_heal_wait_stops_unknown_and_keeps_the_merge_commit(self):
+        self.heal_setup()
+        def boom():
+            raise RuntimeError("boom")
+        self.on_heal_wait(boom)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_unknown_kept(rc, out)
 
     def test_a_debt_landing_on_main_during_the_heal_wait_makes_the_page_stale(self):
         self.heal_setup()
