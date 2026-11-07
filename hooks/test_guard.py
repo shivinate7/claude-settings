@@ -10222,6 +10222,13 @@ mtc_allow("a header 2 minutes ahead with a long body after it is allowed, howeve
 add("message-time-matches-clock: a send_later with a header 18 minutes off is not judged: the rule is send_message's",
     "allow", tool=MTC_TOOL, cwd=NOGIT, silent=True, env=mtc_env(MTC_CLOCK),
     message="Coordinator, 13:40 CST: pick 1 taken", delay_minutes=5)
+# Passes: a dated header compares by whole minute, as the undated form does. 13:22 against a clock of 13:25:30 is
+# 3 minutes, inside the limit. A reader that keeps the seconds sees 3.5 minutes and refuses it.
+mtc_allow("a dated header 3 minutes off, at a clock of 13:25:30, is allowed: the dated form compares by whole minute",
+          "Coordinator, 2026-11-07 13:22 CST", clock="2026-11-07T13:25:30-06:00")
+# Refused: a header quoting another label's time, 164 minutes ahead. The reason tells the sender to open with its own label.
+mtc_refuse("a header quoting another label's time, Owner, 16:36 CST, is refused, and the reason names your own label",
+           "Owner, 16:36 CST: go", clock="2026-11-07T13:52:00-06:00", carries=("your own label",))
 
 
 # =========================================================================== 5d. cite by id
