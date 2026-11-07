@@ -87,6 +87,12 @@ def pass_lines(text):
     return [line for line in text.splitlines() if line.startswith("PASS:")]
 
 
+def label_unset_line(n):
+    """The one line `merge --lane-lint N --integration --lint-unknown-ok` prints when the lint reads unknown: the batch label is not set.
+    Its wording is pinned here alone."""
+    return "merge: the `%s` label was not set on #%d because the lint read unknown, not a pass." % (merge.BATCH_LABEL, n)
+
+
 class NoLock:
     """The lane run takes no merge lock: a lock call fails the case."""
     def acquire(self, *args, **kwargs):
@@ -535,6 +541,22 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(rc, 0, text)
         claims = [line for line in text.splitlines() if re.search(r"(?i)label", line) and re.search(r"(?i)(?<!not )\b(added|applied|set)\b", line)]
         self.assertEqual(claims, [], "a line claims the label was set:\n" + text)
+
+    def test_integration_on_an_unknown_lint_with_a_reason_prints_one_line_that_the_label_was_not_set(self):
+        self.use_ci_job(UNKNOWN, 2)
+        rc, out, err, _ = self.label_run("--lane-lint", "7", "--integration", "--lint-unknown-ok", "shellcheck is not on this box")
+        text = out + err
+        self.assertEqual(len(self.lint_calls()), 1, "the lint did not run once with --integration:\n" + text)
+        self.assertEqual(rc, 0, text)
+        labelled = [line for line in text.splitlines() if "label" in line]
+        self.assertEqual(labelled, [label_unset_line(7)], "the unknown lint did not print one line saying the batch label was not set:\n" + text)
+
+    def test_integration_on_an_unknown_lint_with_a_reason_posts_no_label(self):  # a control: an unknown read never posts the label
+        self.use_ci_job(UNKNOWN, 2)
+        rc, out, err, posts = self.label_run("--lane-lint", "7", "--integration", "--lint-unknown-ok", "shellcheck is not on this box")
+        self.assertEqual(len(self.lint_calls()), 1, "the lint did not run once with --integration:\n" + out + err)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(posts, [], "an unknown lint posted a label:\n" + out + err)
 
 
 class ReadyChecks(CiJobStub, tm.RecordsEnv):
