@@ -17,9 +17,9 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   waiting-page card is captured the same way. A PostToolUse
   hook on `ArtifactData` (`local_time.py --page-note`) acts on a `get` of `answers` only: the routing
   session's re-read of `answers/<id>`, so an undone or withdrawn answer is never saved. Each answer
-  whose `data.note` is non-empty and not `accepted pick`, and that is not a parked-line act
-  (`parked: true`, whose note is the entry's own text), is appended as one block, stamped with the
-  answer's `at` in Central, with the one-line text `Waiting page note, item <n> (<item>): <note>`.
+  whose `data.note` is non-empty and not `accepted pick` is appended as one block, unless it is a
+  parked-line act (`parked: true`, whose note is the entry's own text). Each block is stamped with the
+  answer's `at` in Central and carries the one-line text `Waiting page note, item <n> (<item>): <note>`.
   The label leaves out a missing n or item.
   The label adds no line, so a note is a burst by the Burst bullet's own test. The file `<session_id>.inbox.pagenotes` holds
   one key `<url>|<doc_id>|<at>` per saved note, and a repeat read saves nothing. Cost: one process
