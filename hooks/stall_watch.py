@@ -3,8 +3,8 @@
 
 Modes:
 - --hook: Before a background Bash command, wraps it so a watcher reports a stall after
-  300 seconds with no new output. The job keeps running. Before any agent's Bash call (a payload
-  with a valid agent_id: 17 lowercase hex), puts the agent tag ahead of the command.
+  300 seconds with no new output. The job keeps running. For a background call with an agent_id
+  in the payload (17 lowercase hex), it puts the agent marker ahead of the wrapper.
 - --stop: At Stop, lists each open background job whose output file did not change for
   the quiet age.
 
@@ -37,13 +37,15 @@ Hook: stall_watch.py --hook
   is passed as `--also F`.
   Cost: one append per heartbeat by the tool, and one read of BEAT on each 0.2 s loop pass in the watcher.
 
-  Agent tag: for a Bash call whose payload has a valid agent_id, the command (foreground: the
-  original; background: the wrapper above) gets `export CLAUDE_AGENT_ID=<id>` and a newline in front,
-  so each process the call execs holds the tag (name: proc_env.AGENT_TAG_NAME; read by
-  proc_env.entry_value). A foreground agent call gets updatedInput too; with no or a malformed
-  agent_id the output is as before. Windows is unchanged and unmarked (reads as unmarked, which
-  keeps a tree). Cost: no new process start, no file written; one string prepend per agent Bash call,
-  inside the hook process that already runs per Bash call.
+  Agent marker: for a background Bash call whose payload has a valid agent_id, the wrapper above gets
+  `export CLAUDE_AGENT_ID=<id>` and a newline in front, so each process the job execs holds the marker
+  (name: proc_env.AGENT_TAG_NAME; read by proc_env.entry_value). That export line is the one addition.
+  The job's `( )` subshell is a fork, so it holds no marker; its exec'd children do. A foreground call is
+  never rewritten, with or without agent_id: Claude Code checks permission rules on a hook's rewritten
+  input, so a rewrite would change what the rules see. A foreground agent call is unmarked. With no or
+  a malformed agent_id the output is as before. Windows is unchanged and unmarked (reads as unmarked,
+  which keeps a tree). Cost: no new process start, no file written; one string prepend per background
+  agent Bash call, inside the hook process that already runs per Bash call.
 
   The original stays unquoted, as top-level shell code, so a settings deny rule still sees it.
   STALL_WATCH_QUIET overrides the default quiet time (for tests and proofs only).
@@ -99,7 +101,7 @@ try:
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
     _nowindow = subprocess
 try:
-    from proc_env import AGENT_TAG_NAME  # the one home of the agent tag's name
+    from proc_env import AGENT_TAG_NAME  # the one home of the agent marker's name
 except ImportError:  # without it the hook cannot mark an agent call: it leaves the call unmarked
     AGENT_TAG_NAME = None
 try:
@@ -347,7 +349,8 @@ AGENT_ID = re.compile(r"[0-9a-f]{17}")  # an agent_id as the payload carries it
 
 
 def agent_export(call):
-    """`export CLAUDE_AGENT_ID=<id>` and a newline for a call whose payload has a valid agent_id, else ""."""
+    """The agent marker line, `export CLAUDE_AGENT_ID=<id>` and a newline, for a call whose payload has a valid
+    agent_id, else ""."""
     agent_id = call.get("agent_id")
     if AGENT_TAG_NAME and isinstance(agent_id, str) and AGENT_ID.fullmatch(agent_id):
         return "export %s=%s\n" % (AGENT_TAG_NAME, agent_id)
@@ -366,12 +369,9 @@ def hook():
         if call.get("tool_name") != "Bash":
             return 0
         original = inp["command"]
-        prefix = agent_export(call)
         if inp.get("run_in_background") is not True:
-            if prefix:
-                print(json.dumps({"hookSpecificOutput": {
-                    "hookEventName": "PreToolUse", "updatedInput": dict(inp, command=prefix + original)}}))
-            return 0
+            return 0  # a foreground call is never rewritten: permission rules would see the rewrite
+        prefix = agent_export(call)
     except Exception:
         return 0
     quiet = os.environ.get("STALL_WATCH_QUIET") or str(DEFAULT_QUIET)

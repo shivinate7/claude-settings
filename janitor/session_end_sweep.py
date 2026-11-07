@@ -151,7 +151,7 @@ def remaining_sweep_timeout_seconds(elapsed_seconds):
 # THE SCRATCHPAD REAP (decision agent-end-reap-stops-what-a-finished-agent-left). A server a lane
 # agent left behind sits in the session's scratchpad, parent init, holding the session's tag in its
 # exec environment. It is stopped here, at session end, and not at agent end: the session and its
-# agents share one scratchpad and no agent tag exists, so an agent-end reap would stop a live server
+# agents share one scratchpad and no agent marker existed, so an agent-end reap would stop a live server
 # of the session or of a sibling lane. Its own two reads (one `ps`, one cwd table) are bounded so
 # the sweep below still gets the time that remains; any failed read keeps.
 REAP_PS_TIMEOUT_SECONDS = 5

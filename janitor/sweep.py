@@ -797,9 +797,10 @@ def agent_tree_id(path: str):
 
 
 def agent_mark(pid: int):
-    """The agent id PID holds in its exec-time environment (`CLAUDE_AGENT_ID`, written by the stall-watch
-    hook in front of each agent Bash call), or None when it holds none or the read cannot tell
-    (`proc_env.entry_value`: Linux reads /proc/<pid>/environ; other platforms read nothing)."""
+    """The agent id PID holds in its exec-time environment (`CLAUDE_AGENT_ID`, the agent marker the
+    stall-watch hook writes in front of a background agent Bash call), or None when it holds none or
+    the read cannot tell (`proc_env.entry_value`: Linux reads /proc/<pid>/environ; other platforms
+    read nothing)."""
     if proc_env is None:
         return None
     return proc_env.entry_value(pid, proc_env.AGENT_TAG_NAME)
@@ -807,44 +808,57 @@ def agent_mark(pid: int):
 
 def host_child_stops(pids, host: int, tree: str, protected=(), agent_id=None):
     """The pids to stop so that every pid in PIDS (processes with a cwd in TREE) goes, deepest
-    first, or None when any of them is not proven the agent's own child of HOST. Climb proof, per
-    pid: climb the parent chain with `_parent_pid` until HOST; every pid on the climb below HOST
-    has its cwd inside TREE (`process_cwd`). Marker proof: AGENT_ID must be given, and every pid on
-    a climb must hold it (`agent_mark`), except a depth-0 pid (the direct child of HOST: the call's
-    own bash, which does not hold the export at exec) may hold none when a marked pid climbs
-    through it. A read that fails, a climb that reaches init or a dead pid, one past MAX_CLIMB, a
-    pid in PROTECTED (this process and its ancestors), a missing or different mark makes the whole
-    answer None: one pid that is not proven keeps the tree, and nothing is stopped."""
+    first, or None when any of them is not proven the agent's own. Proof per pid in PIDS: it holds
+    AGENT_ID as its agent marker (`agent_mark`), or it holds none and a pid in PIDS that does is its
+    descendant. A background job's `( )` subshell is such a pid: a fork, so unmarked, while the
+    processes it execs are marked. The descendants are found by climbing parents (`_parent_pid`)
+    from each marked pid, at most MAX_CLIMB steps, stopping at PID 1, HOST or a pid already seen. The
+    parent is any pid: an orphan sits under PID 1, not under HOST. Cost: one `ps` read per ancestor
+    climbed from a marked pid, none for an unmarked pid. A missing AGENT_ID, another agent's marker,
+    a pid in PROTECTED (this process and its ancestors) or an unmarked pid no marked pid descends
+    from makes the whole answer None: one pid not proven keeps the tree, and nothing is stopped."""
     if not agent_id:
         return None
-    depth, marked_through = {}, set()
-    for pid in pids:
-        chain, current = [], pid
-        for _ in range(MAX_CLIMB):
-            cwd = process_cwd(current)
-            if current in protected or cwd is None or not _cwd_under_checkout(cwd, tree):
-                return None
-            chain.append(current)
-            parent = _parent_pid(current)
-            if parent is None or parent <= 1:
-                return None
-            if parent == host:
-                break
-            current = parent
+    members = list(pids)
+    if any(pid in protected for pid in members):
+        return None
+    marked, unmarked = [], []
+    for pid in members:
+        mark = agent_mark(pid)
+        if mark == agent_id:
+            marked.append(pid)
+        elif mark is None:
+            unmarked.append(pid)
         else:
             return None
-        for place, member in enumerate(reversed(chain)):  # the pid next to HOST is depth 0
-            depth[member] = max(depth.get(member, 0), place)
-        if agent_mark(pid) == agent_id:
-            marked_through.add(chain[-1])  # the depth-0 pid this marked pid climbs through
-    for member, place in depth.items():
-        mark = agent_mark(member)
-        if mark == agent_id:
-            continue
-        if mark is None and place == 0 and member in marked_through:
-            continue
+    above = {}  # pid -> its parent, for each pid a climb read: the known part of the tree
+    reached = set()  # the ancestors the climbs passed
+    for pid in marked:
+        current = pid
+        for _ in range(MAX_CLIMB):
+            if current in above:  # an earlier climb already read from here
+                break
+            parent = _parent_pid(current)
+            if parent is None:
+                break
+            above[current] = parent
+            if parent <= 1 or parent == host:
+                break
+            reached.add(parent)
+            current = parent
+    if any(pid not in reached for pid in unmarked):
         return None
-    return sorted(depth, key=lambda member: -depth[member])
+
+    def height(pid):
+        steps = 0
+        for _ in range(MAX_CLIMB):
+            pid = above.get(pid)
+            if pid is None:
+                break
+            steps += 1
+        return steps
+
+    return sorted(members, key=lambda member: -height(member))
 
 
 def _own_chain_pids():
@@ -985,8 +999,9 @@ def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
     the seconds of git quiet the tree needs (None: none). Idle is read first, or taken from
     ENTRY["idle"] when the caller read it: `git status` can rewrite the index and make every tree
     look active. ENTRY["finished"] says the caller proved the agent finished
-    (`agent_end_reap.agent_finished`): only then may a live host lock pass. No process is ever stopped:
-    any process inside keeps the tree. The rest is
+    (`agent_end_reap.agent_finished`): only then may a live host lock pass, and only then may a
+    process inside be marked for a stop (`decide_worktree`: `host_child_stops`). Any process inside
+    that is not proven the agent's own keeps the tree. The rest is
     `decide_worktree` with the person's run flag, which skips its merged and idle keeps and keeps
     the clean, lock, session, live-ls-remote and process checks. Then HEAD must be on a
     remote-tracking ref. Any failed read keeps. A tree an earlier remove left half done
