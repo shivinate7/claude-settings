@@ -125,6 +125,7 @@ FAMILIES = {
     "page-item-design": "the page writer: a design picture that misses its focus, its state or its height is refused at write, and an allowed publish of the waiting page records the published file",
     "rule9": "rule 9, the agent model floor",
     "role-model": "agent-role-model: a spawn's model against its role's row in the decision table, the missing-model default, and the fail-open read",
+    "step-up-resume": "roles-third-round-steps-up on a SendMessage: a Round 3 of 3 message is judged as the target agent's next round, its model read from the agent's spawn in the session transcript, and a target no spawn holds passes",
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
     "rm-var": "every case named rm-var, wherever it sits",
@@ -18707,6 +18708,113 @@ for _name, _verdict, _script in (
 add("floor step-up: Workflow reviewer Round 3 on opus is denied under agent-model-cap", "deny",
     "agent-model-cap", tool="Workflow",
     script=_step_flow("'Round 3 of 3. Re-check.'", "agentType: 'reviewer', model: 'opus'"))
+
+# ---- SendMessage to a spawned agent (rule roles-third-round-steps-up, decision agent-model-cap). A resumed agent keeps
+# the model its spawn gave it, so a `Round 3 of 3` message to a builder on sonnet asks for a third try on the wrong
+# model. The target is found in the session transcript: the Agent spawn whose tool_result names the agentId, or whose
+# input `name` equals `to`. Its model is the spawn's model, else the env default. A target no spawn holds, a transcript
+# that cannot be read and a cross-session target pass, because the guard cannot read the model.
+FAMILY = "step-up-resume"
+RESUME_DIR = os.path.join(ROOT, "resume")
+RESUME_SPAWNS = os.path.join(RESUME_DIR, "spawns.jsonl")
+RESUME_LONG = os.path.join(RESUME_DIR, "long.jsonl")
+RESUME_EMPTY = os.path.join(RESUME_DIR, "empty.jsonl")
+RESUME_UNREADABLE = os.path.join(RESUME_DIR, "unreadable.jsonl")  # a folder, so the guard's open() fails on it
+RESUME_MISSING = os.path.join(RESUME_DIR, "missing.jsonl")        # never written
+RESUME_SONNET = "a7c31f0e2b9d4a1f6"   # agentId of the sonnet builder named fixer
+RESUME_OPUS = "a5e0d9c8b7a6f5e4d"     # agentId of the opus builder named opusfix
+RESUME_PINLESS = "a1b2c3d4e5f60718a"  # agentId of a builder spawned with no model, named pinless
+RESUME_GHOST = "a0000000000000000"    # an agentId that no spawn in these transcripts holds
+RESUME_ROUND3 = "Round 3 of 3. Finish the fix."
+RESUME_REMEDY = ("fresh", "model opus")  # the remedy names a fresh Opus spawn: a resume keeps the old model
+
+
+def spawn_lines(tool_id, agent_id, **spawn):
+    """The assistant line that spawns an agent, then the user line whose tool_result names its agentId."""
+    return [role_use(tool_id, "Agent", spawn),
+            role_result(tool_id, "Async agent launched.\nagentId: %s (use SendMessage with to: '%s' to continue this "
+                                 "agent)" % (agent_id, agent_id))]
+
+
+RESUME_SPAWN_LINES = (
+    spawn_lines("r1", RESUME_SONNET, subagent_type="builder", model="sonnet", name="fixer", prompt="Fix the scan.")
+    + spawn_lines("r2", RESUME_OPUS, subagent_type="builder", model="opus", name="opusfix", prompt="Fix the scan.")
+    + spawn_lines("r3", "a3c4d5e6f7a8b9c01", subagent_type="builder", model="claude-opus-5-5", name="fullopus",
+                  prompt="Fix the scan.")
+    + spawn_lines("r4", "a9f8e7d6c5b4a3921", subagent_type="reviewer", model="sonnet", name="checker",
+                  prompt="Check the diff.")
+    + spawn_lines("r5", RESUME_PINLESS, subagent_type="builder", name="pinless", prompt="Fix the scan.")
+    # A sonnet builder whose name is a session id: only the cross-session skip keeps it from being found.
+    + spawn_lines("r7", "a4e3d2c1b0a9f8e7d", subagent_type="builder", model="sonnet", name=ROLE_OTHER,
+                  prompt="Fix the scan.")
+)
+RESUME_LONG_LINES = (
+    [json.dumps({"type": "user", "message": {"role": "user", "content": "filler line %d" % n}}) for n in range(400)]
+    + spawn_lines("r6", "a6d5c4b3a2f1e0d9c", subagent_type="builder", model="sonnet", name="longfix",
+                  prompt="Fix the scan.")
+)
+
+
+def write_resume_transcripts():
+    """The transcripts the SendMessage cases read. RESUME_UNREADABLE is a folder, so the guard's open() fails on it."""
+    write(RESUME_SPAWNS, "\n".join(RESUME_SPAWN_LINES) + "\n")
+    write(RESUME_LONG, "\n".join(RESUME_LONG_LINES) + "\n")
+    write(RESUME_EMPTY, "")
+    os.makedirs(RESUME_UNREADABLE, exist_ok=True)
+
+
+lazy_fixture([RESUME_SPAWNS, RESUME_LONG, RESUME_EMPTY, RESUME_UNREADABLE], write_resume_transcripts)
+
+
+def resume_refuse(name, to, message, transcript=RESUME_SPAWNS):
+    """A SendMessage the guard refuses under roles-third-round-steps-up. The reason names a fresh Opus spawn."""
+    add("step-up-resume: " + name, "deny", STEP_UP, tool="SendMessage", cwd=NOGIT, transcript=transcript,
+        to=to, message=message, carries=RESUME_REMEDY)
+
+
+def resume_allow(name, to, message, transcript=RESUME_SPAWNS):
+    """A SendMessage the guard lets through."""
+    add("step-up-resume: " + name, "allow", tool="SendMessage", cwd=NOGIT, transcript=transcript,
+        to=to, message=message)
+
+
+# Refused: a third-round message to a builder whose spawn is not on opus. The target is found by agentId and by name,
+# the marker counts on line one behind a role word and at the start of a later line, a spawn with no model runs the env
+# default, and a long transcript is read to its end.
+resume_refuse("a Round 3 of 3 message to a sonnet builder, found by agentId, is denied", RESUME_SONNET, RESUME_ROUND3)
+resume_refuse("a Round 3 of 3 message to a sonnet builder, found by its name, is denied", "fixer", RESUME_ROUND3)
+resume_refuse("a Round 3 of 3 marker at the start of line two to a sonnet builder is denied", "fixer",
+              "Lane c204 finishes the scan.\nRound 3 of 3. Finish the fix.")
+resume_refuse("a Round 3 of 3 marker behind a role word on line one to a sonnet builder is denied", "fixer",
+              "Builder, Round 3 of 3. Finish the fix.")
+resume_refuse("a Round 3 of 3 message to a builder with no model, which runs the env default sonnet, is denied",
+              "pinless", RESUME_ROUND3)
+resume_refuse("a Round 3 of 3 message to a sonnet builder at the end of a long transcript is denied", "longfix",
+              RESUME_ROUND3, transcript=RESUME_LONG)
+
+# Allowed: an opus builder, a sonnet reviewer, the middle round, no marker, prose, and a target the guard cannot read.
+resume_allow("a Round 3 of 3 message to an opus builder, found by agentId, is allowed", RESUME_OPUS, RESUME_ROUND3)
+resume_allow("a Round 3 of 3 message to a builder on the full opus id is allowed", "fullopus", RESUME_ROUND3)
+resume_allow("a Round 3 of 3 message to a sonnet reviewer is allowed", "checker", RESUME_ROUND3)
+resume_allow("a Round 2 of 3 message to a sonnet builder is allowed", "fixer", "Round 2 of 3. Continue the fix.")
+resume_allow("a message with no marker to a sonnet builder is allowed", "fixer", "Check the diff again for typos.")
+resume_allow("a Round 3 of 3 marker only in later prose on line two is allowed", "fixer",
+             "Lane c204 finishes the scan.\nThe review said Round 3 of 3 is next.")
+resume_allow("a Round 3 of 3 message to a target no spawn holds is allowed", RESUME_GHOST, RESUME_ROUND3)
+resume_allow("a Round 3 of 3 message to a cross-session target is allowed", ROLE_OTHER, RESUME_ROUND3)
+resume_allow("a Round 3 of 3 message with an empty transcript is allowed", "fixer", RESUME_ROUND3,
+             transcript=RESUME_EMPTY)
+resume_allow("a Round 3 of 3 message with a transcript that cannot be read is allowed", "fixer", RESUME_ROUND3,
+             transcript=RESUME_UNREADABLE)
+resume_allow("a Round 3 of 3 message with a transcript that names no file is allowed", "fixer", RESUME_ROUND3,
+             transcript=RESUME_MISSING)
+resume_allow("a Round 3 of 3 message with no transcript path is allowed", "fixer", RESUME_ROUND3, transcript=None)
+# The no-model deny above reads the env default as sonnet. Set the default to opus and the same spawn passes,
+# so the refusal depends on the env read and not on the spawn having no model.
+add("step-up-resume: a Round 3 of 3 message to a builder with no model is allowed when the env default is opus",
+    "allow", tool="SendMessage", cwd=NOGIT, transcript=RESUME_SPAWNS, to="pinless", message=RESUME_ROUND3,
+    env={"CLAUDE_CODE_SUBAGENT_MODEL": "opus"})
+FAMILY = "rule9"  # the family the cases after this section have always run in
 
 # ---- Rule 9, the Opus ceiling (decision agent-model-cap). An Agent or Task spawn that sets model opus is
 # refused under `agent-model-cap`, unless a standing grant covers it: Plan, the designer, the design reviewer, a
