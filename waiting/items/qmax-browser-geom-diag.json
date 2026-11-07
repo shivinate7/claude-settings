@@ -1,0 +1,20 @@
+{
+  "added": "2026-11-07T08:40:00Z",
+  "command": {
+    "mac": "cd ~\ngh auth switch -u shivinate7\ngh workflow run browser.yml --repo shivinate7/q_max --ref claude/browser-geom-diag",
+    "powershell": "cd $HOME\ngh auth switch -u shivinate7\ngh workflow run browser.yml --repo shivinate7/q_max --ref claude/browser-geom-diag"
+  },
+  "context": "Goal: q_max main's browser suite goes green.\nWhy you: q_max CLAUDE.md (Commands) says CI runs the browser suite only when you start browser.yml.\nSteps: open the link, press Run workflow, pick branch claude/browser-geom-diag, press Run workflow. Or paste the command below. The branch is main plus a logging patch and is never merged. Only group 2 and group 6 matter; you may cancel the other five groups to save minutes. Then press Done here. Lane qmax-browser-main-red reads the log and picks the fix.",
+  "home": "lane qmax-browser-main-red reads the run log",
+  "id": "qmax-browser-geom-diag",
+  "kind": "task",
+  "link": "https://github.com/shivinate7/q_max/actions/workflows/browser.yml",
+  "n": 329,
+  "owner": "lane qmax-browser-main-red",
+  "rank": 3,
+  "ref": "q_max branch claude/browser-geom-diag (1905c25dd)",
+  "short": "q_max: one diagnostic browser run",
+  "status": "open",
+  "title": "Start q_max's browser workflow once on branch claude/browser-geom-diag",
+  "why": "Two q_max browser checks, HISTORY-ROW-HEAD and R4-ROWACT, are 1px off on CI only. This run logs why. q_max's rules let only you start browser.yml."
+}
