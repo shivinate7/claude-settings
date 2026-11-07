@@ -1088,9 +1088,11 @@ def _settings_place(path: str, cwd: str) -> bool:
     folder = path[:len(path) - len(name)].rstrip("/\\")
     if not folder or basename(folder) == ".claude":
         return True
-    # The shell expands `$VAR`, `${VAR:-x}` and globs when the write runs, so the folder is known
-    # only then: a folder with such a character is a possible settings place.
-    if any(ch in folder for ch in "${*?["):
+    # The shell expands `$VAR`, `${VAR:-x}`, globs, `` `cmd` `` and the directory-stack shorthands `~+`
+    # and `~-` when the write runs, so the folder is known only then: a folder with such a spelling
+    # is a possible settings place.
+    if any(ch in folder for ch in "${*?[`") or any(
+            part.startswith(("~+", "~-")) for part in re.split(r"[/\\]", folder)):
         return True
     here = {os.path.normcase(os.path.realpath(guard_core.config_dir()))}
     if cwd:
@@ -2308,13 +2310,17 @@ def builder_diff_reason() -> str:
     )
 
 
-def veto_override(check) -> None:
+def veto_override(check, tool: str = "") -> None:
     """Register the check that names the acts no override lifts. A guard_core without the setter has no
-    override either, so every refusal stands and the call is still judged."""
+    override either, so every refusal stands and the call is still judged. Any other error from the setter
+    is logged as guard-crash and the call is still judged: a raise here would reach main()'s fail-open
+    path and allow a call the guard refuses."""
     try:
         guard_core.set_override_veto(check)
-    except Exception:
+    except AttributeError:
         pass
+    except Exception as exc:
+        record(tool, "crash", "guard-crash", cap_safe(type(exc).__name__ + ": " + str(exc), 200))
 
 
 def diff_refusal(tool: str, role: str, root: str) -> None:
@@ -2326,7 +2332,7 @@ def diff_refusal(tool: str, role: str, root: str) -> None:
         record(tool, "noted", "role-diff-unread", root)
     elif found and role == BUILDER_ROLE:
         # A role guard stays outside every override (decision owner-override): a refusal is final.
-        veto_override(lambda: True)
+        veto_override(lambda: True, tool)
         refuse(tool, "deny", "builder-diff", builder_diff_reason(), found)
     elif found or noted:
         record(tool, "noted", diff_rule(role), found or noted[0])
@@ -4823,7 +4829,7 @@ def judge(payload) -> None:
     cwd = payload.get("cwd", "") or os.getcwd() or ""
     if not isinstance(cwd, str):
         cwd = ""
-    veto_override(lambda: never_lifted(payload, tool, tool_input, cwd))
+    veto_override(lambda: never_lifted(payload, tool, tool_input, cwd), tool)
     session_home_keep(payload, tool, cwd)  # rule session-home's record, kept before any refusal can end the call
     # 0, handoff-unread. After compaction, no call the guard judges runs from the main session until it reads its handoff.
     # Not in never_lifted: the owner may mean the call. A failed import allows.
