@@ -17,7 +17,7 @@ Home: hooks/guard_branch_worktree.py
 `git push origin --delete <b>` and `git push origin :<b>` remove origin's copy. Origin only, tags skipped: a delete pushed to another remote keeps the other push rules, and a name that is only a local tag is not judged. The guard reads the branch tip: the remote-tracking ref, else the local branch. It refuses the delete when all of these hold:
 
 - The tip is not an ancestor of origin's default branch.
-- The tip holds a file under the layout's `design` folder that the default branch lacks, or holds other bytes at that path than the default branch does. A mockup the branch modified counts as the only copy, as an added one does; a blob identical to the default branch's does not.
+- The branch added or changed a file under the layout's `design` folder since its merge base with the default branch (`base...tip`), and the file's bytes at the tip differ from the default branch's. A mockup the branch modified counts as the only copy, as an added one does. A file the branch never touched does not count, even when the default branch edited, deleted or renamed it after the fork. A file whose bytes the default branch holds does not count. No merge base (a shallow clone, unrelated history) fails the read, so the delete asks.
 - No `archive/*` ref on origin holds the tip. Any archive name counts, not only `archive/<b>`, because the rule allows a new archive name when the first is taken.
 
 It asks, never allows, when a read cannot answer: no tip resolves (no tracking ref, no local branch, or a name such as `$B`), the design-file read fails, the archive-ref read fails, the default branch is unreadable, or the layout's `design` folder is unread (no readable layout file). A dry run (`--dry-run`, `-n`) removes nothing and is not judged, as main's push asks skip it.
@@ -28,7 +28,7 @@ It asks, never allows, when a read cannot answer: no tip resolves (no tracking r
 
 ## Cost
 
-The design-file read still starts one `diff`; the filter widening from added to added-or-modified changes no start count, only the diff's own work (it compares blobs of files that differ, which it already did to list them). A dry run starts none of this. An unread design folder asks after at most 2 starts per name (tip lookup, tag read).
+The design-file read starts one `diff` for the files the branch changed. When it changed any, a second `diff` compares those files with the default branch's bytes. A branch that changed no design file costs the one start. A remote delete of a design branch that changed a mockup therefore measures 11 git starts, one more than the 10 above. A dry run starts none of this. An unread design folder asks after at most 2 starts per name (tip lookup, tag read).
 
 A call that deletes nothing runs none of this.
 
@@ -36,6 +36,7 @@ A remote delete of one design branch, with the remote named in the command, meas
 
 ## Known limits
 
+- A squash-merged branch whose mockup main then edited reads as a change: the bytes differ, so the delete is refused until an `archive/*` ref holds the tip. The archive remedy covers it. A squash whose mockup main still holds byte for byte is allowed.
 - The tip is the last-fetched tracking ref, not origin's live tip. A commit pushed to the branch after this clone's last fetch is not read, so a design file on it is not judged. Lane ruling, 2026-11-03 18:55 CST: accepted. An `ls-remote` per delete costs a network call and more than it saves.
 - A plain name with no branch tip that is a local tag is skipped, as is a `refs/tags/` spelling. A design branch on origin that this clone never fetched, and that shares a local tag's name, is not judged.
 - A local-only design branch is refused by the only-copy rule (`shared-tree`), not by this one.

@@ -117,8 +117,8 @@ def design_push_delete_verdict(where: str, remote: str, names, folder) -> str:
     (the remote-tracking ref, else the local branch) is not on the default branch, holds a file
     under `folder` that the default branch lacks, and no `archive/*` ref on the remote holds the
     tip. A tip that does not resolve, a failed read of the design files or of the archive refs, an
-    unreadable default branch and an unread design folder (FOLDER None) each ask: the delete removes origin's copy, so an unread tip never
-    allows. Only a delete pushed to `origin` is judged; another remote keeps the other push rules.
+    unreadable default branch and an unread design folder (FOLDER None) each ask: the delete
+    removes origin's copy, so an unread tip never allows. Only a delete pushed to `origin` is judged; another remote keeps the other push rules.
     A name with no tip that is a local tag is skipped: a tag is not a branch. The default branch is
     read at the first resolved tip, so a name with no tip starts no git beyond the tip and tag
     lookups."""

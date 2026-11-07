@@ -355,19 +355,31 @@ def branch_on_remote(where: str, branch: str, pattern: str = "refs/remotes"):
 
 def design_files(where: str, tip: str, folder: str, base=None):
     """The files under `folder` that `tip` holds, as a list (every file when `base` is None); None
-    when the read failed. With a base, a file counts when `base` lacks it or holds other bytes at
-    that path (`--diff-filter=AM`): a mockup the branch changed is as much the only copy as one it
-    added, and a blob identical to the base's does not count. One `diff` (or one `ls-tree` with no
-    base) start. The diff folds the folder's case; `ls-tree` takes the folder as the layout spells
-    it."""
+    when a read failed. With a base, a file counts when the branch added or changed it since the
+    merge base (`base...tip`, `--diff-filter=AM`, so a later edit by `base` to a file the branch
+    never touched is not the branch's) and its bytes at `tip` differ from `base`'s. A mockup the
+    branch changed is as much the only copy as one it added; one whose bytes `base` now holds is
+    not. No merge base (a shallow clone, unrelated history) fails the read, so the caller asks.
+    Two `diff` starts, the second only when the branch changed a file under `folder`; with no base,
+    one `ls-tree` start. The diff folds the folder's case; `ls-tree` takes the folder as the
+    layout spells it."""
     if base is None:
         answer = _git(where, "ls-tree", "-r", "--name-only", tip, "--", folder + "/")
-    else:
-        answer = _git(where, "diff", "--name-only", "--no-renames", "--diff-filter=AM", base, tip,
-                      "--", ":(icase)" + folder + "/")
-    if answer is None or answer.returncode != 0:
+        if answer is None or answer.returncode != 0:
+            return None
+        return [line for line in answer.stdout.splitlines() if line.strip()]
+    changed = _git(where, "diff", "-z", "--name-only", "--no-renames", "--diff-filter=AM",
+                   base + "..." + tip, "--", ":(icase)" + folder + "/")
+    if changed is None or changed.returncode != 0:
         return None
-    return [line for line in answer.stdout.splitlines() if line.strip()]
+    paths = [path for path in changed.stdout.split("\0") if path]
+    if not paths:
+        return []
+    differs = _git(where, "diff", "-z", "--name-only", "--no-renames", base, tip, "--",
+                   *[":(literal)" + path for path in paths])
+    if differs is None or differs.returncode != 0:
+        return None
+    return [path for path in differs.stdout.split("\0") if path]
 
 
 def branch_proof(where: str, base: str, branch: str, ancestor=None):
