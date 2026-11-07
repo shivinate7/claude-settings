@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Decides which checks jobs and suites a run needs. Writes name=<bool> lines to $GITHUB_OUTPUT:
 #   per job: checks_guard (set when code and guard are both set, or directly by a path the checks-guard job installs from: actions/playwright-setup, .github/shoot), checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep (the janitor sweep suites, set with checks_windows_rest) checks_macos shell_macos pointer_windows, and shoot (below)
-#   per suite: code (any non-docs file changed), guard_windows_full (the Windows guard suite runs in full shards on a pull_request: set by the paths guard.py loads, its test and mutation files, and settings.json; every path that sets it also sets guard), mods (a path under mods/, or a .md path under skills/plain-english-map/: the mod tests and the
+#   per suite: code (any non-docs file changed), guard_windows_full (the Windows guard suite runs in full shards on a pull_request: set by every repo file the guard suite loads, which GuardClosure in lint/test_ci_scope.py derives from the code and checks, by hooks/test_guard.py, hooks/mutate_guard.py and settings.json; every path that sets it also sets guard and code), mods (a path under mods/, or a .md path under skills/plain-english-map/: the mod tests and the
 #   map skill tests, one CI step in each of the `checks`, `checks-windows` and `checks-macos` jobs), guard (guard mutation test), sweep (janitor mutation test), shoot (the checks-shoot job: the bin/shoot suite, which installs a browser). The `checks` lint job and the checks-merge-install job always run, so they have no flag (their suites carry `code`). checks_macos gates both checks-macos and checks-macos-b.
 # guard_windows_slice is derived (after the loop, and outside ALL): guard on and guard_windows_full off. On a pull_request the Windows guard job runs the slice then, and the full shards only when guard_windows_full is on. Both are job outputs.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event.
@@ -35,25 +35,33 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # install.sh: also read by merge/test_merge.py (CloudAllow reads its settings step).
       install.sh) on="$on $M $W $X $S code guard " ;;
       hooks/session_start.sh) on="$on $W $R $Z $X $S code guard " ;;
-      hooks/test_mutate_shared.py|hooks/test_mutate_report.py|hooks/test_mutate_js.py|hooks/test_mutate_replay.py|hooks/test_mutate_ci.py|hooks/mutate_js.mjs) on="$on code guard " ;;
+      hooks/test_mutate_shared.py|hooks/test_mutate_report.py|hooks/test_mutate_js.py|hooks/test_mutate_replay.py|hooks/test_mutate_ci.py) on="$on code guard " ;;
+      # mutate_js.mjs: the guard suite loads it (GuardClosure in lint/test_ci_scope.py).
+      hooks/mutate_js.mjs) on="$on code guard $F " ;;
       # Hook modules and suites that run on the rest and macOS jobs.
       # guard_log_report.py: decision_watch imports it at run time, as it does _transcript.py.
       hooks/*|lint/_transcript.py|lint/guard_log_report.py|lint/ste_lint.py|lint/ui_suffixes.py|lint/report_guard.py|lint/ruling_census.py|lint/test_report_guard.py|lint/test_report_guard_route.py|lint/test_report_guard_landing.py|lint/test_report_guard_refusal.py|lint/test_report_guard_handoff.py|lint/test_ruling_census.py|lint/check_unknown_reads_contract.py)
-        on="$on $R $Z $X code guard "; case "$f" in lint/_transcript.py|lint/guard_log_report.py) on="$on $M " ;; esac ;;
+        on="$on $R $Z $X code guard "; case "$f" in lint/_transcript.py|lint/guard_log_report.py) on="$on $M " ;; esac
+        # The files among them that the guard suite loads (GuardClosure in lint/test_ci_scope.py) also turn on the full Windows guard shards.
+        case "$f" in hooks/_nowindow.py|hooks/call_judge.py|hooks/cc_compaction_baseline.json|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/git_bash.py|hooks/local_time.py|hooks/override.py|hooks/proc_env.py|hooks/reply_judge.py|hooks/required_check.py|hooks/reread_check.py|hooks/route_match.py|hooks/route_rows.json|hooks/ruling_home.py|lint/_transcript.py|lint/guard_log_report.py|lint/report_guard.py) on="$on $F " ;; esac ;;
       # bin/claude-janitor: test_install_src reads it.
       bin/claude-janitor) on="$on $W $S $R $Z $X code guard sweep " ;;
+      # sweep.py and temp_sweep.py: the guard suite loads them.
+      janitor/sweep.py|janitor/temp_sweep.py) on="$on $R $Z $X code guard sweep $F " ;;
       janitor/*) on="$on $R $Z $X code sweep " ;;
       bin/verdict|bin/verdict.cmd|lint/test_verdict.py) on="$on $R $Z $X code " ;;
       # The fixture copy helpers: suites in every job copy the repo's modules through them.
       testing/tracked_tree.py|testing/tracked_tree.sh|testing/TrackedTree.ps1|testing/SharedRead.ps1) on="$on $ALL " ;;
       # The test-run signing opt-out helper: suites in every job import it.
       lint/_test_git.py|lint/_test_git.sh|lint/_test_git.mjs) on="$on $ALL " ;;
-      bin/ci-job) on="$on code " ;;
+      bin/ci-job) on="$on code guard $F " ;;
       # bin/ios-ship: macOS only. Its suite runs in the shell-macos job, under /bin/bash 3.2.
       bin/ios-ship|lint/test_ios_ship.sh) on="$on $S code " ;;
       # bin/sim-test: macOS only, like bin/ios-ship. Its suite runs in the shell-macos job, and runs the real bin/sim-lease
       # beside the script, so an edit to bin/sim-lease turns the same job on.
-      bin/sim-test|lint/test_sim_test.sh|bin/sim-lease) on="$on $S code " ;;
+      # The guard suite loads bin/sim-test and bin/sim-lease (GuardClosure in lint/test_ci_scope.py).
+      bin/sim-test|bin/sim-lease) on="$on $S code guard $F " ;;
+      lint/test_sim_test.sh) on="$on $S code " ;;
       # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it.
       bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs) on="$on code shoot " ;;
       # actions/playwright-setup has two callers: checks-shoot (shoot) and checks-guard (checks_guard). checks-guard also
@@ -63,11 +71,15 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       actions/playwright-setup/*|.github/shoot/*) on="$on code shoot checks_guard " ;;
       # merge.py: guard.py loads it. layout.json: guard.py reads it; layout.py: ste_lint.py and hook_catalog.py (merge.py) import it.
       # check_silent_undo.py: merge.py imports it.
-      merge/merge.py) on="$on $M $W $X code guard " ;;
-      lint/layout.json|lint/layout.py) on="$on $M $R $Z $W $X code guard " ;;
-      lint/check_silent_undo.py) on="$on $M code " ;;
+      merge/merge.py) on="$on $M $W $X code guard $F " ;;
+      lint/layout.json|lint/layout.py) on="$on $M $R $Z $W $X code guard $F " ;;
+      lint/check_silent_undo.py) on="$on $M code guard $F " ;;
+      # install_from_main.sh: the guard suite loads it.
+      merge/install_from_main.sh) on="$on $M $S code guard $F " ;;
       merge/*|bin/merge|bin/merge.cmd|.github/stamp.json) on="$on $M $S code " ;;
       actions/stamp/*.md) ;;
+      # stamp.mjs: the guard suite loads it.
+      actions/stamp/stamp.mjs) on="$on $R $Z $X $M code guard $F " ;;
       actions/stamp/*) on="$on $R $Z $X $M code " ;;
       # Mod tests: the mod-tests.sh step in checks, checks-windows and checks-macos reads mods/.
       mods/*) on="$on $W $X mods " ;;
@@ -76,10 +88,14 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       lint/test_scanner_traps.mjs) on="$on $W $X mods code " ;;
       # bin/rm: the shim imports hooks/guard_rm_var.py (hooks/* above); it runs on posix jobs.
       bin/rm|lint/test_rm_shim.py) on="$on $X code " ;;
+      # Files the guard suite loads (GuardClosure in lint/test_ci_scope.py): the Linux `checks` job, and the full Windows guard shards.
+      actions/ci-alarm/clear_rule.py|actions/ci-alarm/events.json|testing/shallow_clone.py|lint/check_debt_retire.py|lint/check_record_slugs.py|lint/check_skill_model_rows.py|lint/hook_catalog.py|lint/rule_audit.py|lint/stale_cites.py|lint/workflow_steps.py) on="$on code guard $F " ;;
       # Linux `checks` job only: the lints and opt-in templates.
       actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml|.gitignore) on="$on code " ;;
       # Map skill .md files: its tests read them, so this arm turns on `mods` before the *.md arm.
       skills/plain-english-map/*.md) on="$on $W $X mods " ;;
+      # Docs the guard suite reads: they run it in full, as a code path does.
+      output-styles/shiv-stylisms.md|skills/impeccable/SKILL.md) on="$on code guard $F " ;;
       # Docs: nothing runs on them but the lints in `checks`. (hooks/*.md, the precompact prompt, matches hooks/* above.)
       *.md) ;;
       *) on="$on $ALL " ;;
