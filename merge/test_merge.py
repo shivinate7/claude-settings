@@ -5690,6 +5690,28 @@ class ConfigFile(Env):
                 rc, out = self.run_merge("7")
                 self.assertEqual(rc, 0, out)
 
+    def test_ready_checks_is_a_merge_field(self):  # decision: merge.readyChecks names the ready checks of the draft step
+        self.assertIn("readyChecks", merge.MERGE_FIELDS)
+
+    def test_ready_checks_has_no_default(self):  # the control: a repo that declares nothing keeps today's merge block
+        self.assertNotIn("readyChecks", merge.MERGE_DEFAULTS)
+
+    def test_a_bad_readyChecks_is_refused_at_preview_as_not_valid(self):
+        """A non-empty list of non-blank step names. Each bad value stops at preview with one line saying the key is not
+        valid. Until the key joins MERGE_FIELDS, main refuses it as an unknown field, which this case does not accept."""
+        for value in ("checks", True, [], [""], ["  "], ["ok", " "], [7]):
+            with self.subTest(value=value):
+                self.setUp()
+                self.refused_at_preview(self.config_text({"readyChecks": value}), "merge.readyChecks is not valid")
+
+    def test_a_valid_ready_checks_list_is_accepted_at_preview(self):
+        for names in (["check invariants"], ["check invariants", "records page"]):  # one name, then two
+            with self.subTest(names=names):
+                self.setUp()
+                put_base_config(self, self.config_text({"readyChecks": names}))
+                rc, out = self.run_merge("7")
+                self.assertEqual(rc, 0, out)
+
     def test_an_unknown_merge_field_stops_with_one_line_naming_it(self):
         put_base_config(self, json.dumps({"merge": {"methd": "squash"}}))
         rc, out = self.run_merge("7")
@@ -7748,6 +7770,14 @@ def put_lf(path, text):
 
 class RecordsEnv(Env):
     """Helpers for the records-page cases. Holds no test."""
+    def use_fake_records(self):
+        """Patch merge.RECORDS to the fake generator (FAKE_RECORDS) for this case. Sets self.calls (its log) and self.prog."""
+        self.calls, self.prog = os.path.join(self.t, "records-calls.log"), os.path.join(self.t, "records.py")
+        put(self.prog, FAKE_RECORDS)
+        for p in (unittest.mock.patch.object(merge, "RECORDS", self.prog, create=True),  # create: a missing name is a failure, not an error
+                  unittest.mock.patch.dict(os.environ, {"RECORDS_CALLS": self.calls})):
+            p.start(); self.addCleanup(p.stop)
+
     def kinds_off(self):
         """The base holds claude-settings' own config: no stamp kinds, so no claim."""
         self.on("main", {".github/stamp.json": json.dumps(dict(CONFIG, kinds=[]))}, "no stamp kinds")
@@ -7909,11 +7939,7 @@ class RecordsRebuild(RecordsEnv):
     """
     def setUp(self):
         super().setUp()
-        self.calls, self.prog = os.path.join(self.t, "records-calls.log"), os.path.join(self.t, "records.py")
-        put(self.prog, FAKE_RECORDS)
-        for p in (unittest.mock.patch.object(merge, "RECORDS", self.prog, create=True),  # create: a missing name is a failure, not an error
-                  unittest.mock.patch.dict(os.environ, {"RECORDS_CALLS": self.calls})):
-            p.start(); self.addCleanup(p.stop)
+        self.use_fake_records()
 
     def test_a_pr_that_adds_a_debt_gets_the_page_in_the_claim_commit(self):
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
@@ -8402,6 +8428,15 @@ class RecordsRebuild(RecordsEnv):
         rc, out = self.draft_confirm()
         self.assertNotEqual(rc, 0, out)
         self.assertEqual(self.head(), before, "pushed on a refusal")
+
+    def test_the_draft_preview_of_a_claim_head_with_ready_checks_says_run_the_draft_first(self):
+        block = dict(CONFIG["merge"], readyChecks=["check invariants"])
+        put_base_config(self, json.dumps(dict(CONFIG, merge=block)))  # the config first: a merge after the claim would hide its trailer
+        self.claim_head()
+        out = self.draft_preview()
+        claim = self.preview_line(out, "claim")
+        self.assertIn("already claimed (D-002)", claim, out)  # precondition: the head holds the claim
+        self.assertIn("--confirm` on the draft first", claim, out)
 
     def test_prepare_a_pushed_page_with_a_refused_ready_does_not_read_as_a_failure(self):
         # The real host's ready() always returns (False, why), so every draft step ends here. The push worked, so no line says "could not".
