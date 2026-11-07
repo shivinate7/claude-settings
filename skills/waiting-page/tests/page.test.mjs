@@ -8193,7 +8193,7 @@ test("the phase head's text names its stalled and paused steps", async (t) => {
   const text = (await prog.locator(".sr").allTextContents()).join(" ").replace(/\s+/g, " ");
   assert.match(text, /3 stalled, 1 paused/, "the phase head's text does not name the stalled and paused steps: " + text);
 });
-// renderNow passes 0 for blocked to the Now card's bar, so a blocked step reads as to do there. The rail and the phase head already draw it.
+// The Now card's bar counts a blocked step as blocked, as the rail's bar and the phase head's bar do.
 const blockedSteps = () => stepsOf([["c1", "cleanup", 1, "todo"], ["d1", "cleanup", 2, "done"], ["b2", "cleanup", 3, "blocked"], ["t3", "cleanup", 4, "todo"]]);
 const noStalled = { why: "", steps: [], paused: [], badPause: [], items: [], ...NO_ITEMS };
 test("the Now card's bar draws a blocked step as blocked, not as to do", async (t) => {
