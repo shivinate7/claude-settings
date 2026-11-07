@@ -3664,14 +3664,25 @@ def add_profile_group(parser) -> None:
 
 
 def load_profile(args) -> dict:
-    """The profile `add_profile_group` chose. A file that cannot be read raises OSError, or ValueError when it is no JSON or no object."""
+    """The profile `add_profile_group` chose. A file that cannot be read raises OSError, or ValueError when it is no JSON, no
+    object, or holds a `code`, `code_not` or `tests` that is no regex: the replays route and select by them, so a bad one
+    reads as an unreadable profile here, not as a traceback later."""
     import json
+    import re
     if not args.profile_file:
         return REPLAY_PROFILES[args.profile]
     with open(args.profile_file, encoding="utf-8") as handle:
         profile = json.load(handle)
     if not isinstance(profile, dict):
         raise ValueError("the profile file %s does not hold a JSON object" % args.profile_file)
+    parts = profile["parts"] if isinstance(profile.get("parts"), dict) else {"the profile": profile}
+    for name, part in parts.items():
+        for key in ("code", "code_not", "tests"):
+            if isinstance(part, dict) and part.get(key) is not None:
+                try:
+                    re.compile(part[key])
+                except (re.error, TypeError) as error:
+                    raise ValueError("the profile file %s: %s of %s is no regex: %s" % (args.profile_file, key, name, error))
     return profile
 
 
