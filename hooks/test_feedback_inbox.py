@@ -1707,10 +1707,12 @@ OTHER_WRITER = "page-close-other-writer"  # a page writer that is not the sessio
 
 
 def writer_names(writer):
-    """The page's writer as page_writer_id reads it: one get of meta/page whose result names `writer`."""
+    """The page's writer as page_writer_id reads it: one get of meta/page whose result names `writer`. None gives a
+    meta/page that names no writer."""
+    data = {"writer": writer} if writer is not None else {"title": "Waiting page"}
     return [used_rec("ArtifactData", {"action": "get", "collection": "meta", "doc_id": "page", "url": PAGE_URL},
                      tool_id="meta1"),
-            result_rec("meta1", response_of([("page", {"writer": writer})]))]
+            result_rec("meta1", response_of([("page", data)]))]
 
 
 def read_back_of_98():
@@ -1795,6 +1797,15 @@ def case_page_close_with_another_page_url_blocks():
     p = page_run(new_cfg(), SELF, [(NEUTRAL, (PAGE_ITEM,))],
                  [owner_rec(NEUTRAL)] + writer_names(SELF) + read_back_of_98() + [close_on_page(OTHER_PAGE_URL)])
     expect_send_missing("page: a close of item 98 on another page's url still blocks", p, "fb-0958-7", "98")
+
+
+def case_page_close_when_the_page_names_no_writer_blocks():
+    """The page's meta names no writer, so this session cannot be shown to be the writer. A read of item 98 and a
+    close of it on the page still block: only a close by the named writer reaches no one else."""
+    p = page_run(new_cfg(), SELF, [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL)] + writer_names(None) + read_back_of_98() + [close_on_page()])
+    expect_send_missing("page: a read-back and a close on a page whose meta names no writer still blocks", p,
+                        "fb-0958-7", "98")
 
 
 def case_page_send_with_an_error_result_does_not_count():
@@ -3852,6 +3863,7 @@ CASES = (
     case_page_close_by_a_session_that_is_not_the_writer_blocks,
     case_page_close_before_its_read_back_blocks,
     case_page_close_with_another_page_url_blocks,
+    case_page_close_when_the_page_names_no_writer_blocks,
     case_page_send_with_an_error_result_does_not_count,
     case_page_artifactdata_write_with_an_error_result_does_not_count,
     case_send_with_a_good_result_still_counts,
