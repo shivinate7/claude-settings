@@ -702,6 +702,13 @@ def case_l5_labelled_writer_that_exported_passes():
                                extra_env=LABEL_ENV))
 
 
+def case_l6_label_with_no_session_id_that_ran_an_export_passes():
+    """meta/page names "Triage lead", no id: a named writer decides alone, as on main, so the export history
+    does not make this session the writer."""
+    records = [owner(at(18, 50))] + export_run(at(18, 40), verdict="changed 1") + page_write(at(19))
+    expect_pass("L6", run_stop("l6", base_repo("l6"), records, writer="Triage lead", extra_env=LABEL_ENV))
+
+
 # --------------------------------------------------------------------------- unit cases
 
 def guard_module():
@@ -796,6 +803,7 @@ CASES.extend((
     case_l3_label_whose_id_only_starts_with_ours_passes,
     case_l4_labelled_writer_that_only_read_passes,
     case_l5_labelled_writer_that_exported_passes,
+    case_l6_label_with_no_session_id_that_ran_an_export_passes,
 ))
 
 

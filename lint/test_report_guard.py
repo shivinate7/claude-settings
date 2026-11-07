@@ -4501,6 +4501,15 @@ class PromiseNeedsMechanismTests(unittest.TestCase):
         line = "From now on I export after each wake; see ~/.claude/handoffs/session_x.md."
         self.assert_blocked(line, "Promise guard", line)
 
+    def test_pr_red_a_backticked_handoff_path_is_no_home(self):
+        # Catches: a handoff named only inside a code span read as no handoff, so the promise passes.
+        line = "From now on every wake ends with an export; the step is in `~/.claude/handoffs/session_x.md`."
+        self.assert_blocked(line, "Promise guard", line)
+
+    def test_pr_green_handoff_gave_label_passes(self):
+        # Catches: the compaction-carry label read as the promise's home.
+        self.assert_allowed("Handoff gave: owner ruling 19:02, from now on every page write ends with an export.")
+
     def test_pr_green_a_mechanical_home_passes(self):
         rows = [
             # Catches: a PR cite on the line still refused.
