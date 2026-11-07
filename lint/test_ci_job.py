@@ -1125,16 +1125,19 @@ def pipx_runs_pinned_ruff():
 
 
 class CodeCheckFromCopiedInstall(Job):
-    """A cloud install copies bin/ci-job into ~/.claude/bin, with no symlink and no actions/ beside it. A remote uses:
-    reaches code_check.py through the checkout the global rules file names, or reads unknown. A local uses: runs the
-    repo under test's own code_check.py: from a copy it never borrows another checkout's, and in the repo under test
-    with no actions/code-check it must FAIL."""
+    """A cloud install copies bin/ci-job into ~/.claude/bin, with no symlink and no actions/ beside it. A remote uses with no
+    claude-settings sha pin reaches code_check.py through the copy beside ci-job, else the checkout the global rules file
+    names, else reads unknown. A pinned claude-settings action reads the pinned tree instead (PinnedSettings). A local uses:
+    runs the repo under test's own code_check.py: from a copy it never borrows another checkout's, and in the repo under
+    test with no actions/code-check it must FAIL."""
 
     # The branch builder and the git helper are LintTools' (one home): this class calls them, it does not copy them.
     git = LintTools.git
     lane = LintTools.lane
-    # The remote form is the copied-install route; the local forms run the repo under test's own action.
-    CODE = step("Code check", uses="shivinate7/claude-settings/actions/code-check@main")
+    # The remote form has no claude-settings pin, so it takes the copied-install route. The local forms run the repo under
+    # test's own action. PLAIN is a plain run: no --lint, so no pin is read and the route is the copy's.
+    CODE = step("Code check", uses="other/tools/actions/code-check@v1")
+    PLAIN = ("--step", "Code check", "--base", "origin/main")
     LOCAL_DOT = step("Code check", uses="./actions/code-check")
     LOCAL_DOLLAR = step("Code check", uses="$/actions/code-check")  # local: the form checks.yml writes
     LINT = ("--lint", "--base", "origin/main")
@@ -1161,7 +1164,7 @@ class CodeCheckFromCopiedInstall(Job):
             self.skipTest("pipx cannot run code_check's pinned ruff here: no pipx, or offline with no cached copy")
         self.lane({"a.py": 'print("fine")\n'})
         ci_job, cfg = self.install(CHECKOUT)
-        rc, lines, out = self.run_job(self.CODE, args=self.LINT, script=ci_job, env={"CLAUDE_CONFIG_DIR": cfg})
+        rc, lines, out = self.run_job(self.CODE, args=self.PLAIN, script=ci_job, env={"CLAUDE_CONFIG_DIR": cfg})
         with open(self.log, encoding="utf-8") as f:
             log = f.read()
         self.assertRegex(log, r"(?m)^code-check: PASS$", out + log)  # code_check.py ran and passed the clean diff
@@ -1172,7 +1175,7 @@ class CodeCheckFromCopiedInstall(Job):
         empty = os.path.join(self.root, "empty-checkout")
         os.makedirs(empty)
         ci_job, cfg = self.install(empty)
-        rc, lines, out = self.run_job(self.CODE, args=self.LINT, script=ci_job, env={"CLAUDE_CONFIG_DIR": cfg})
+        rc, lines, out = self.run_job(self.CODE, args=self.PLAIN, script=ci_job, env={"CLAUDE_CONFIG_DIR": cfg})
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
         self.assertIn("code_check.py", lines[0], out)
 
@@ -1206,12 +1209,13 @@ class CodeCheckFromCopiedInstall(Job):
 
 class ZizmorBranches(Job):
     """bin/ci-job's zizmor branch. A local $/actions/zizmor uses runs the repo under test's own run.sh, and with none
-    there it FAILs, never PASS or unknown. A remote uses finds no run.sh beside a copied install or in its pointer
-    checkout, so it reads unknown and names the paths it looked at. The copied install is CodeCheckFromCopiedInstall's."""
+    there it FAILs, never PASS or unknown. A remote uses with no claude-settings pin finds no run.sh beside a copied install
+    or in its pointer checkout, so it reads unknown and names the paths it looked at. The copied install is
+    CodeCheckFromCopiedInstall's. A pinned claude-settings zizmor reads the pinned tree instead (PinnedSettings)."""
 
     install = CodeCheckFromCopiedInstall.install  # one home of the copied install: this class calls it, it does not copy it
     LOCAL_DOLLAR = step(ZIZMOR, uses="$/actions/zizmor", **{"with": {"paths": ".github/ actions/"}})
-    REMOTE = step(ZIZMOR, uses="shivinate7/claude-settings/actions/zizmor@main", **{"with": {"paths": ".github/ actions/"}})
+    REMOTE = step(ZIZMOR, uses="other/tools/actions/zizmor@v1", **{"with": {"paths": ".github/ actions/"}})
     LINT = ("--lint",)
 
     def pipx_env(self):
@@ -1237,7 +1241,7 @@ class ZizmorBranches(Job):
         os.makedirs(empty)
         ci_job, cfg = self.install(empty)  # no actions/ beside the copy, and the rules file names an empty checkout
         env = {**self.pipx_env(), "CLAUDE_CONFIG_DIR": cfg}
-        rc, lines, out = self.run_job(self.REMOTE, args=self.LINT, script=ci_job, env=env)
+        rc, lines, out = self.run_job(self.REMOTE, args=("--step", ZIZMOR), script=ci_job, env=env)
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
         self.assertIn("no run.sh: looked for", lines[0], out)
 
@@ -1489,9 +1493,9 @@ class PinnedSettings(Job):
             f.write(text)
         return [sys.executable, CI_JOB, job, "--workflow", path, *args]
 
-    def run_text(self, text, job, args=(), clone=None):
+    def run_text(self, text, job, args=(), clone=None, env=None):
         done = subprocess.run(self.wf_argv(text, job, args), cwd=self.root, capture_output=True, text=True,
-                              env=self.pinned_env(clone), timeout=120)
+                              env={**self.pinned_env(clone), **(env or {})}, timeout=120)
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
         return done.returncode, lines, done.stdout + done.stderr
 
@@ -1766,8 +1770,7 @@ class PinnedSettings(Job):
         path = os.path.join(self.root, rel)
         return open(path, encoding="utf-8").read().strip() if os.path.isfile(path) else ""
 
-    # --lint runs its lint steps in the pinned tree, as --step does (debt lane-lint-runs-local-tools). The cases below name
-    # the wanted behaviour and are red on the old code; the two marked control hold what must not change and pass there.
+    # --lint runs its lint steps in the pinned tree, as --step does. The two marked control hold what must not change.
 
     def test_lint_runs_a_lint_step_in_the_pinned_tree(self):
         self.settings()
@@ -1860,6 +1863,49 @@ class PinnedSettings(Job):
         self.assertNotEqual(fixture_rc(self.clone, "cat-file", "-e", self.sha_a + "^{commit}"), 0,
                             "--lint --plan fetched the pin:\n" + out)
         self.assertEqual(self.worktrees(), 1, "--lint --plan made a worktree:\n" + out)
+
+    # The remote claude-settings actions of a pinned job read the pinned tree only. The copy beside ci-job and the rules
+    # file's checkout are the route for a remote uses with no pin: CodeCheckFromCopiedInstall and ZizmorBranches keep it.
+    git = LintTools.git
+    lane = LintTools.lane
+
+    def test_a_remote_code_check_with_no_code_check_in_the_pinned_tree_reads_unknown_naming_the_path(self):
+        self.settings()  # the pinned tree has no actions/code-check
+        rc, lines, out = self.run_pinned(
+            step("code check", uses=PIN_USES % self.sha_a),
+            args=("--lint", "--base", "origin/main"))
+        self.assertEqual((rc, by_step(lines).get("code check")), (2, "unknown"), out)
+        line = line_of(lines, "code check") or ""
+        self.assertIn(os.path.join("actions", "code-check", "code_check.py"), line,
+                      "the unknown line must name the code_check.py it looked for: " + line)
+        self.assertIn(self.fixture, line, "the unknown line must name the pinned tree, not the local checkout: " + line)
+
+    def test_a_remote_code_check_under_lint_runs_the_pinned_trees_code_check_py_for_real(self):
+        if not pipx_runs_pinned_ruff():
+            self.skipTest("pipx cannot run code_check's pinned ruff here: no pipx, or offline with no cached copy")
+        code = {rel: open(os.path.join(CHECKOUT, rel), encoding="utf-8").read()
+                for rel in ("actions/code-check/code_check.py", "actions/code-check/standard.json")}
+        self.settings(extra=code)  # code_check reads standard.json beside itself, so the pinned tree needs both
+        self.lane({"a.py": 'print("fine")\n'})
+        rc, lines, out = self.run_pinned(
+            step("code check", uses=PIN_USES % self.sha_a),
+            args=("--lint", "--base", "origin/main"))
+        with open(self.log, encoding="utf-8") as f:
+            log = f.read()
+        self.assertEqual((rc, by_step(lines).get("code check")), (0, "PASS"), out + log)
+        self.assertRegex(log, r"(?m)^code-check: PASS$", out + log)  # code_check.py ran from the pinned tree on a clean diff
+
+    def test_a_remote_zizmor_with_no_run_sh_in_the_pinned_tree_reads_unknown_naming_the_path(self):
+        self.settings()  # the pinned tree has no actions/zizmor/run.sh
+        rc, lines, out = self.run_text(
+            workflow(step(ZIZMOR, uses="shivinate7/claude-settings/actions/zizmor@%s" % self.sha_a,
+                          **{"with": {"paths": ".github/ actions/"}})),
+            "lane", args=("--lint",), env=ZizmorBranches.pipx_env(self))  # the stub pipx: the missing run.sh is the only reason
+        self.assertEqual((rc, by_step(lines).get(ZIZMOR)), (2, "unknown"), out)
+        line = line_of(lines, ZIZMOR) or ""
+        self.assertIn(os.path.join("actions", "zizmor", "run.sh"), line,
+                      "the unknown line must name the run.sh it looked for: " + line)
+        self.assertIn(self.fixture, line, "the unknown line must name the pinned tree, not the local checkout: " + line)
 
 
 if __name__ == "__main__":
