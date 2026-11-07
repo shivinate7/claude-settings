@@ -353,13 +353,18 @@ DEFAULT_RECORD_BRANCH = "roadmap"
 def record_branch(root):
     """The record branch of `root` from its extras file: the "record-branch" key, else "roadmap". A fork
     worktree sets its own. LayoutError when the key is not a plain git branch name."""
-    keys = _repo_keys(root)
+    return record_branch_of_keys(_repo_keys(root), _extras(root))
+
+
+def record_branch_of_keys(keys, where):
+    """The record branch that an extras dict `keys` names, else "roadmap". `where` names the file in the error.
+    The one check of the key, for a file on disk (record_branch) and for one read from a git ref."""
     if RECORD_BRANCH not in keys:
         return DEFAULT_RECORD_BRANCH
     found = keys[RECORD_BRANCH]
     if (not isinstance(found, str) or not re.fullmatch(r"[A-Za-z0-9._][A-Za-z0-9._/-]*", found)
             or ".." in found or "//" in found or found.endswith(("/", ".lock"))):
-        raise BranchNameError("%s: %s %r is not a branch name" % (_extras(root), RECORD_BRANCH, found))
+        raise BranchNameError("%s: %s %r is not a branch name" % (where, RECORD_BRANCH, found))
     return found
 
 

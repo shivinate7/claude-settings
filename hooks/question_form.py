@@ -178,15 +178,31 @@ DEPARTS_LINE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?(?:\*\*)?Departs from(?:\*\*)
 DEPARTS_SEPARATOR = re.compile(r"\s*\u2014\s*|\s+--?\s+")
 # Whole words and phrases that say the change side restates main. A bare "stay" or "remain" is not here:
 # "Suspense cards stay in Suspense" is a port change that names where a thing goes. "remains as it is" and
-# "is still the same" say nothing moves, and so do "no-op", "not changed" and "is kept".
+# "is still the same" say nothing moves, and so do "no-op" and "not changed". "is kept" restates only as the
+# last words of the clause ("the ask is kept"): "are kept in Suspense" names a place.
 NO_CHANGE = re.compile(r"(?<![\w/-])(?:none|nothing|n/a|no changes?|no difference|unchanged|stays|keeps|as today"
-                       r"|as on main|as before|same as|identical to|already|no-?op|not changed|(?:is|are) kept"
+                       r"|as on main|as before|same as|identical to|already|no-?op|not changed|(?:is|are)\s+kept\s*\.?$"
                        r"|remains?\s+(?:as\s+(?:it|is|today|before)|the\s+same|unchanged)"
                        r"|(?:is|are)\s+still\s+(?:the\s+same|as\s+(?:it|is|today|before)|unchanged))(?![\w/-])", re.I)
-# A verb after the no-change word that names a real change: "keeps Suspense cards and adds Reset", "none of the
-# screens change; adds a new tab". "adds nothing" restates.
+# A verb after the no-change word that names a real change: "keeps Suspense cards and adds Reset", "keeps the
+# count and changes the timeout", "none of the screens change; adds a new tab". "adds nothing" restates.
 CHANGE_AFTER = re.compile(r"\b(?:adds?(?!\s+(?:nothing|none|no)\b)|added|mov(?:es?|ed)|remov(?:es?|ed)"
-                          r"|drops?|dropped|replac(?:es?|ed)|renam(?:es?|ed))\b", re.I)
+                          r"|drops?|dropped|replac(?:es?|ed)|renam(?:es?|ed)|chang(?:es|ed)|sets?|raises?|lowers?"
+                          r"|switch(?:es|ed))\b", re.I)
+# A negator ahead of a change verb in its clause turns it into more of the restatement: "does not move it",
+# "never removes it", "nothing moves". A clause ends at ";", ",", "and" or "but".
+CHANGE_NEGATOR = re.compile(r"\b(?:not|never|nothing|none|no)\b|n['\u2019]t\b", re.I)
+CHANGE_CLAUSE_END = re.compile(r";|,|\b(?:and|but)\b", re.I)
+
+
+def _real_change(change, start) -> bool:
+    """True when `change`, past index `start`, holds a change verb (CHANGE_AFTER) with no negator before it in
+    its clause."""
+    for verb in CHANGE_AFTER.finditer(change, start):
+        clause = CHANGE_CLAUSE_END.split(change[:verb.start()])[-1]
+        if not CHANGE_NEGATOR.search(clause):
+            return True
+    return False
 # The new-thing change side, "adds <X>": group 1 is X.
 PORT_NEW_THING = re.compile(r"adds\b\s*(.*\S)", re.I)
 DEPARTS_REASON = ("A question to the owner says how the work departs from main, in a line that starts "
@@ -224,7 +240,7 @@ def departs_hit(text) -> str:
         if is_placeholder(main) or is_placeholder(change) or (added and is_placeholder(added.group(1))):
             return "Departs from line with a side that is only a placeholder: write the real text"
         word = NO_CHANGE.search(change.split(";", 1)[0])
-        if word and not CHANGE_AFTER.search(change[word.end():]):
+        if word and not _real_change(change, word.end()):
             return "Departs from line whose change side says no change (%r): it restates main" % word.group(0)
     return ""
 

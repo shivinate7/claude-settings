@@ -37,8 +37,9 @@ rule's settings-write ask, and it reaches agents.
     - `claude` is never a role word here. The keyword form `opus claude 2h` keeps it.
     - The roles the ask names are granted, two or more as a list, only when a plain list joins them (PLAIN_LIST:
       commas, and, or, &, plus); any other words between two roles: no grant. A role word with a NEGATIONS word (not,
-      no, don't, never, except, without, or an exclusion word such as skip, but, other, apart, aside, leave, stay or
-      instead) within three words before or after it: no grant (`builders, no problem` grants nothing too).
+      no, don't, never, except, without, or an exclusion word such as skip, but, other, apart, aside, out, sonnet or
+      instead) within three words before or after it: no grant (`builders, no problem` grants nothing too). `leave`
+      before the role, and `stay` or `remain` with no `opus` after it, count too.
     - An ask that names no role takes its roles from the owner's earlier typed prompts (decision owner-override:
       scope from context, fall back to every role), before the ask only. _context_prompts reads them from
       the one tail read (_tail_prompts), through the one owner-turn test (_owner_text), each through _strip_blocks,
@@ -107,7 +108,14 @@ OPUS_ASK_SOURCES = (None, "user")  # the payload `source` values a plain ask may
 ROLE_WORDS = re.compile(r"[A-Za-z][\w\u2019'-]*")
 NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t",
              "excluding", "exclude", "skip", "ignore", "instead", "rather", "besides", "minus",
-             "but", "other", "apart", "aside", "leave", "stay", "stays"}
+             "but", "other", "apart", "aside", "excluded", "excepted", "save", "out",
+             "sonnet", "haiku"}
+# Words that exclude a role only in some places. `leave` counts before the role ("leave builders out"), never
+# after it ("builders and reviewers to opus, leave the rest"). `stay` and `remain` count unless `opus` follows
+# within two words ("stay on opus" keeps the role on Opus).
+LEAVE_WORDS = {"leave", "leaves"}
+STAY_WORDS = {"stay", "stays", "remain", "remains"}
+STAY_SPAN = 2
 NEGATION_SPAN = 3  # a negation within this many words before or after a role word negates it
 PLAIN_LIST = re.compile(r"(?:[\s,&]|\b(?:and|or|plus)\b)*", re.I)  # the only text that may join two role words
 SPELLED_UNIT = r"h(?:ours?|rs?)|m(?:ins?|inutes?)"
@@ -260,9 +268,13 @@ def _ask_scope(text):
         role = opus_role(word)
         if role not in ASK_ROLES:
             continue
-        near = words[max(0, at - NEGATION_SPAN):at] + words[at + 1:at + 1 + NEGATION_SPAN]
-        if NEGATIONS & {w.lower() for w in near}:
+        first = max(0, at - NEGATION_SPAN)
+        near = words[first:at] + words[at + 1:at + 1 + NEGATION_SPAN]
+        if NEGATIONS & {w.lower() for w in near} or LEAVE_WORDS & {w.lower() for w in words[first:at]}:
             return None
+        for to, word_near in enumerate(words[first:at + 1 + NEGATION_SPAN], first):
+            if word_near.lower() in STAY_WORDS and "opus" not in {w.lower() for w in words[to + 1:to + 1 + STAY_SPAN]}:
+                return None
         if last_end is not None and not PLAIN_LIST.fullmatch(text, last_end, matches[at].start()):
             return None
         roles.add(role)
@@ -589,20 +601,43 @@ def _grant_role(grant):
     return role
 
 
+MAIN_REF = "refs/remotes/origin/main"  # the branch whose extras file names the record branch: a lane cannot edit it
+
+
 def _step_ref(cwd):
-    """The ref of the record branch of the checkout that holds `cwd`, as the lane last fetched it: STEP_REF_PREFIX
-    and lint/layout.py record_branch (a fork names its own in the extras file, else `roadmap`). None when the
-    checkout or its layout cannot be read, so no step is read and no grant lifts."""
+    """The ref of the record branch for the checkout that holds `cwd`, as the lane last fetched it: STEP_REF_PREFIX
+    and the "record-branch" key of the extras file (lint/layout.py) on MAIN_REF, else `roadmap` when that file is
+    absent there. The lane's own working copy is never read, since it could name a branch the lane pushed. With no
+    MAIN_REF in the checkout (a repo that never fetched it) the checkout's own extras name it. None when the
+    checkout or the file cannot be read, so no step is read and no grant lifts."""
     import git_reads
     top = git_reads._git(cwd, "rev-parse", "--show-toplevel")
     if top is None or top.returncode != 0 or not top.stdout.strip():
         return None
+    root = top.stdout.strip()
     lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
     import layout
     try:
-        return STEP_REF_PREFIX + layout.record_branch(top.stdout.strip())
+        has_main = git_reads._git(root, "rev-parse", "--verify", "--quiet", MAIN_REF + "^{commit}")
+        if has_main is None:
+            return None
+        if has_main.returncode != 0:
+            return STEP_REF_PREFIX + layout.record_branch(root)
+        extras = layout.layout().get("extras", "")
+        listed = git_reads._git(root, "ls-tree", "--name-only", MAIN_REF, "--", extras)
+        if listed is None or listed.returncode != 0:
+            return None
+        if not listed.stdout.strip():
+            return STEP_REF_PREFIX + layout.DEFAULT_RECORD_BRANCH
+        shown = git_reads._git(root, "show", MAIN_REF + ":" + extras)
+        if shown is None or shown.returncode != 0:
+            return None
+        keys = json.loads(shown.stdout)
+        if not isinstance(keys, dict):
+            return None
+        return STEP_REF_PREFIX + layout.record_branch_of_keys(keys, MAIN_REF + ":" + extras)
     except Exception:
         return None
 

@@ -275,10 +275,10 @@ RUNNER_VERBS = ("run", "run-script", "exec", "dlx", "x")
 RUNNER_VALUE_FLAGS = ("--prefix", "-w", "--workspace", "-C", "--dir", "--filter", "-F", "--cwd",
                       "-p", "--package")
 SERVER_SCRIPTS = ("dev", "serve", "start", "watch", "preview")
-# A script that opens with one of these is a build, a test or a one-shot task that ends (`build:dev`,
-# `test-watch-ci`, `db-upgrade`). It is a watcher only when its last part says so (`build:watch`).
-ONE_SHOT_SCRIPTS = ("build", "test", "lint", "ci", "db", "migrate", "upgrade", "format", "check", "typecheck", "clean")
-CONTINUOUS_PARTS = ("watch", "serve", "preview")
+# Script names that hold a server word yet end by themselves: a dev build and a one-shot watch-mode test run in CI.
+# Exact names only. A wider rule (a leading `build` or `test`) would clear `build:start`, `test:dev` and
+# `build:watch:css`, which run until stopped.
+ONE_SHOT_NAMES = ("build:dev", "test-watch-ci")
 SERVER_PROGRAMS = ("serve", "http-server", "live-server", "nodemon", "uvicorn", "http.server")
 # A program that serves when its first positional word is one of these verbs.
 # Flask options whose next word is their value, so the value is no verb: `flask --app run db upgrade`.
@@ -303,12 +303,9 @@ def program_name(token: str) -> str:
 
 
 def server_script(name: str) -> bool:
-    """True for a script name with a part, split on `:` and `-`, that serves or watches. A name that opens with
-    a one-shot word (ONE_SHOT_SCRIPTS) counts only when its last part is one of CONTINUOUS_PARTS."""
-    parts = re.split(r"[:-]", name)
-    if parts[0] in ONE_SHOT_SCRIPTS:
-        return parts[-1] in CONTINUOUS_PARTS
-    return any(part in SERVER_SCRIPTS for part in parts)
+    """True for a script name with a part, split on `:` and `-`, that serves or watches, except the names in
+    ONE_SHOT_NAMES."""
+    return name not in ONE_SHOT_NAMES and any(part in SERVER_SCRIPTS for part in re.split(r"[:-]", name))
 
 
 def server_program(word: str, args) -> bool:
