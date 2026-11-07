@@ -90,6 +90,9 @@ STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|M
 # Words that join a key word with no separator and no hump, as in `apikey=` and `authtoken:`. A key word after any other
 # lower-case letters (`monkey`, `hotkey`) is part of an ordinary word.
 CREDENTIAL_PREFIXES = ("api", "auth", "access", "secret", "client", "private", "session", "refresh", "csrf")
+# The letter and the digit of a random-looking value are looked for in its first characters only: a lookahead to the
+# end of a long run, from each key word in it (`key=key=...`), makes the scan quadratic.
+VALUE_LOOKAHEAD_MAX = 256
 NAME_SUFFIX_MAX = 40  # the most name characters taken after a key word; a longer name still matches at its key word
 SECRET_SHAPES = (
     ("github-token", re.compile(r"(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})")),
@@ -110,7 +113,8 @@ SECRET_SHAPES = (
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
     # `scheme://user:password@host`, on any host: a version pin after the `@` is blanked, so an IP host is caught here.
     ("url-credentials", re.compile(r"://[^/?#\s@:]+:[^/?#\s@]+@")),
-    ("password", re.compile(r"(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(\S+)", re.I)),
+    # The lookbehind takes `_` too, so a name starts at its run's first character and a long run is read once.
+    ("password", re.compile(r"(?<![A-Za-z0-9_])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(\S+)", re.I)),
     # The lookbehind starts the local part at its run's first character only: a start at each character re-reads a long run.
     ("email", re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
     # Bare "Bearer <token>" or "Basic <credential>" with no header name: 20 or more token characters, so prose such as
@@ -128,8 +132,9 @@ SECRET_SHAPES = (
     ("credential-name", re.compile(
         r"(?:(?<![A-Za-z0-9])|(?-i:(?<=[a-z0-9])(?=[A-Z])))"
         r"(?:(?:" + "|".join(CREDENTIAL_PREFIXES) + r")(?=secret|token|key|cookie))?"
-        r"(?:secret|token|key|cookie)[A-Za-z0-9_-]{0,%d}[\"']?[ \t]*[=:][ \t]*[\"']?(?:" % NAME_SUFFIX_MAX +
-        r"(?=[A-Za-z0-9+/_.~%=-]*[A-Za-z])(?=[A-Za-z0-9+/_.~%=-]*\d)[A-Za-z0-9+/_.~%=-]{8,}"
+        r"(?:secret|token|key|cookie)[A-Za-z0-9_-]{0," + str(NAME_SUFFIX_MAX) + r"}[\"']?[ \t]*[=:][ \t]*[\"']?(?:"
+        r"(?=[A-Za-z0-9+/_.~%=-]{0," + str(VALUE_LOOKAHEAD_MAX) + r"}[A-Za-z])"
+        r"(?=[A-Za-z0-9+/_.~%=-]{0," + str(VALUE_LOOKAHEAD_MAX) + r"}\d)[A-Za-z0-9+/_.~%=-]{8,}"
         r"|(?!(?-i:[A-Za-z_-]*[a-z]{3}[A-Z]))[A-Za-z_-]{12,}(?=[\"']?[ \t]*(?:[,;}\r\n]|\Z)))", re.I)),
     # A well-known cookie name set with "=" to a value of 8 or more characters with a digit in it.
     ("cookie-value", re.compile(
