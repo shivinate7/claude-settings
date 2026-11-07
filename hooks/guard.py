@@ -2067,7 +2067,7 @@ def merge_tree(root: str, ours: str, theirs: str):
     return answer.stdout.split("\0", 1)[0].strip() or None
 
 
-def upstream_kept(root: str, orig: str, onto: str):
+def upstream_kept(root: str, orig: str, onto: str, slow_retry: bool = True):
     """The paths a rebase of `orig` onto `onto` replayed that hold `onto`'s bytes again in the working
     tree: the agent kept the upstream side. Empty when HEAD no longer holds `onto`; None when git
     failed."""
@@ -2076,9 +2076,12 @@ def upstream_kept(root: str, orig: str, onto: str):
         return None
     if held.returncode:
         return []
-    replayed = git_names(root, "diff", "--name-only", "-z", "--no-renames", onto + "..." + orig)
-    moved = git_names(root, "diff", "--name-only", "-z", "--no-renames", onto)
-    if replayed is None or moved is None:
+    replayed = git_names(root, "diff", "--name-only", "-z", "--no-renames", onto + "..." + orig,
+                         slow_retry=slow_retry)
+    if replayed is None:
+        return None
+    moved = git_names(root, "diff", "--name-only", "-z", "--no-renames", onto, slow_retry=slow_retry)
+    if moved is None:
         return None
     return [p for p in replayed if p not in set(moved)]
 
@@ -2181,7 +2184,7 @@ def own_changes(root: str, slow_retry: bool = True):
     changes.append((old, None, paths, NOTED if replaying else OWN))
     for index, (sha, subject) in enumerate(entries):
         if index and entry_kind(subject) == "start":
-            kept = upstream_kept(root, entries[index - 1][0], sha)
+            kept = upstream_kept(root, entries[index - 1][0], sha, slow_retry)
             if kept is None:
                 return None
             if kept:

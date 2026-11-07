@@ -1212,12 +1212,8 @@ MUTATIONS = [
     # == theirs` (wrongly denied).
     ("root-scope: _git drops -C, so it reads whichever tree the guard process happens to stand "
      "in, not the tree it was asked about",
-     '        return _nowindow.run(\n'
-     '            ["git", "-C", where, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10\n'
-     '        )',
-     '        return _nowindow.run(\n'
-     '            ["git", *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10\n'
-     '        )',
+     '                ["git", "-C", where, *args], capture_output=True, encoding="utf-8", errors="replace",\n',
+     '                ["git", *args], capture_output=True, encoding="utf-8", errors="replace",\n',
      "guard", 'pointer: checkout of a branch in another checkout is allowed'),
 
     # `_process_start_ms`'s POSIX `ps -o lstart=` read gets the same treatment: a timeout so small
@@ -1697,8 +1693,8 @@ MUTATIONS = [
      'ENTRY_OWN = re.compile(r"^never-seen:")', "guard",
      "builder-refuse: a reset to a commit that holds the builder's own test edit is denied at push"),
     ("role-diff: a merge commit is judged against its first parent, not git's own merge",
-     '        old = merge_tree(root, *parents) if len(parents) == 2 else (parents[0] if parents else "")',
-     '        old = parents[0] if parents else ""', "guard",
+     '    old = merge_tree(root, *parents) if len(parents) == 2 else (parents[0] if parents else "")',
+     '    old = parents[0] if parents else ""', "guard",
      "builder-refuse: a merge of main with a product-file conflict, while main changed a test file, is allowed at push and stop"),
     ("role-diff: a merge in progress is judged against HEAD, not git's own merge",
      '        old = merge_tree(root, "HEAD", merging.stdout.strip())', '        old = "HEAD"', "guard",
