@@ -620,7 +620,9 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             if index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
                 shown.append('""')
-            elif index and re.fullmatch(_DESCRIPTOR, word) and _is_redirect(raw[index - 1]):
+            elif (index and re.fullmatch(_DESCRIPTOR, word.rstrip(")`&"))
+                  and _is_redirect(raw[index - 1])):
+                # A `)`, backtick or `&` glued on ends a subshell, substitution or background job.
                 # Never judged as a path. `dup` stays in the text so `2> PATH` is not read as `> PATH`.
                 # The raw word is unquoted: a quoted "&1" is a file and is judged.
                 shown.append("dup")
