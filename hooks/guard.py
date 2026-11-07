@@ -4147,23 +4147,44 @@ def _sim_read():
 
 
 # Decision sim-test-is-the-one-boot-path, ruling 12. A drive is a call that changes a booted device. The read
-# sets are never judged: MCP screenshot, describe and list; `hinge` get and posture; `simctl io`, `list` and
-# `get_app_container`. Boot, shutdown and erase belong to the boot rules.
+# sets are never judged: MCP screenshot, describe and list; `hinge` get and posture; `simctl io`, `list`,
+# `get_app_container`, and `ui <device> <setting>` with no value. A boot is left to the boot rules. A shutdown and
+# an erase are drives: `all` names every booted device. Inside `sim-test --hold -- CMD` the lease does not exist
+# yet, so a drive there must target `$SIM_TEST_UDID`, which the hold exports once it has the lease.
 SIM_READ_ACTIONS = frozenset({"screenshot", "describe", "list"})
 SIM_DRIVE_SIMCTL = frozenset({"ui", "openurl", "install", "uninstall", "launch", "terminate", "push", "privacy",
-                              "status_bar", "location", "addmedia", "keychain", "pbcopy", "spawn"})
+                              "status_bar", "location", "addmedia", "keychain", "pbcopy", "spawn",
+                              "shutdown", "erase"})
 SIM_DRIVE_HINGE = frozenset({"open", "close", "half"})
+SIM_HOLD_UDID = ("$SIM_TEST_UDID", "${SIM_TEST_UDID}")
 
 
-def _sim_drive_targets(segment: str) -> list:
-    """The device names, UDIDs or `booted` that each drive command of SEGMENT names (`hinge -d X open|close|half|N`,
-    `xcrun simctl <drive verb> X`). Found by `_sim_commands`, so a quoted text, a comment and a command named only
-    inside `sim-test` are no drive. A command that names no device is not judged."""
-    found = []
+def _sim_hold_command(word: str, rest: list):
+    """The command words after `--` when the command WORD is `sim-test` and REST holds `--hold` before `--`, else
+    None."""
+    if basename(word) == "sim-test" and "--" in rest:
+        cut = rest.index("--")
+        if "--hold" in rest[:cut]:
+            return rest[cut + 1:]
+    return None
+
+
+def _sim_drive_targets(segment: str, hold: bool = False):
+    """(names, held): the device names, UDIDs or `booted` that each drive command of SEGMENT names (`hinge -d X
+    open|close|half|N`, `xcrun simctl <drive verb> X`), and, in HELD, those named inside `sim-test --hold -- CMD`.
+    HOLD says SEGMENT is such a CMD: its names leave out `$SIM_TEST_UDID`. Found by `_sim_commands`, so a quoted
+    text and a comment are no drive. A command that names no device is not judged."""
+    found, held = [], []
     for command, rest in _sim_commands(segment):
+        inside = _sim_hold_command(command, rest)
+        if inside:
+            names, more = _sim_drive_targets(shlex.join(inside), True)
+            held.extend(names + more)
+            continue
         word = basename(command)
+        target = ""
         if word == "hinge":
-            target, verb, i = "", "", 0
+            verb, i = "", 0
             while i < len(rest):
                 if rest[i] in ("-d", "-t") and i + 1 < len(rest):
                     target = rest[i + 1] if rest[i] == "-d" else target
@@ -4171,14 +4192,24 @@ def _sim_drive_targets(segment: str) -> list:
                     continue
                 verb = verb or rest[i].rstrip(")`")  # a `$(...)` closes on the last word
                 i += 1
-            if target and (verb in SIM_DRIVE_HINGE or re.fullmatch(r"-?[0-9]+(\.[0-9]+)?", verb)):
-                found.append(target)
-        elif (after := _simctl_after(word, rest)) is not None:
-            if after[:1] and after[0] in SIM_DRIVE_SIMCTL:
-                target = next((a for a in after[1:] if not a.startswith("-")), "").rstrip(")`")
-                if target:
-                    found.append(target)
-    return found
+            if not (verb in SIM_DRIVE_HINGE or re.fullmatch(r"-?[0-9]+(\.[0-9]+)?", verb)):
+                target = ""
+        elif (after := _simctl_after(word, rest)) is not None and after[:1] and after[0] in SIM_DRIVE_SIMCTL:
+            words = []
+            for a in after[1:]:
+                if re.match(r"\d*[<>&]", a):
+                    break  # a redirection ends the arguments
+                a = a.rstrip(")`")
+                if a and not a.startswith("-"):
+                    words.append(a)
+            if after[0] == "ui" and len(words) < 3:
+                continue  # `ui <device> <setting>` with no value reads the setting
+            target = words[0] if words else ""
+            if target == "all" and after[0] in ("shutdown", "erase"):
+                target = "booted"
+        if target and not (hold and target in SIM_HOLD_UDID):
+            found.append(target)
+    return found, held
 
 
 def sim_drive_refusal(tool: str, names: list, session: str = "", devices: list = None) -> None:
@@ -4204,6 +4235,21 @@ def sim_drive_refusal(tool: str, names: list, session: str = "", devices: list =
                "lease with `sim-lease take`, or run `sim-test --hold`, then drive. "
                "(decision sim-test-is-the-one-boot-path)"
                % "; ".join("%s (%s)" % (d["name"], d["udid"]) for d in hit.values()), ", ".join(names))
+
+
+HOLD_REMEDY = "sim-test --hold -- sh -c 'hinge -d \"$SIM_TEST_UDID\" open'"
+
+
+def sim_hold_refusal(tool: str, names: list) -> None:
+    """Refuse a drive inside `sim-test --hold -- CMD` that targets NAMES, not `$SIM_TEST_UDID` (rule
+    simulator-drive-lease). The caller's shell expands `"$SIM_TEST_UDID"` before the hold exports it, so the
+    remedy runs the drive under `sh -c` with single quotes."""
+    if names:
+        refuse(tool, "deny", "simulator-drive-lease",
+               "A drive inside `sim-test --hold` names %s, but the hold takes its lease before it runs the "
+               "command, so only `$SIM_TEST_UDID` is covered. Drive `$SIM_TEST_UDID` from a shell the hold starts, "
+               "so the hold expands it: `%s`. (decision sim-test-is-the-one-boot-path)"
+               % (", ".join(names), HOLD_REMEDY), ", ".join(names))
 
 
 def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str = "") -> None:
@@ -5023,7 +5069,12 @@ def judge(payload) -> None:
                     names.append(n)
                     remedies.setdefault(n[0], remedy)
             devices = sim_boot_refusal(tool, names, remedies) if names else None
-            drives = [t for seg in segments for t in _sim_drive_targets(seg)]
+            drives, held = [], []
+            for seg in segments:
+                names_in_seg, held_in_seg = _sim_drive_targets(seg)
+                drives.extend(names_in_seg)
+                held.extend(held_in_seg)
+            sim_hold_refusal(tool, held)
             if drives:
                 sid = payload.get("session_id") if isinstance(payload, dict) else ""
                 sim_drive_refusal(tool, drives, sid if isinstance(sid, str) else "", devices)
