@@ -3547,7 +3547,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "merge-role-proof", ROLE_REASON, matched)
 
     # 6a2. A push to the record branch from a session its own record does not prove triage (rule
-    # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, and one
+    # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, one `git symbolic-ref`
+    # for a HEAD or bare push (the per-call PUSH_READS memo serves every later read), and one
     # transcript read only when the push reaches the record branch.
     matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb)
     if matched:
