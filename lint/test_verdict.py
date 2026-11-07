@@ -425,17 +425,17 @@ def plant(folder, name, age_days, header=True):
     os.utime(p, (t, t))
     return p
 
-class StdinClosed(unittest.TestCase):
-    """The command reads an empty stdin, never verdict's own. On Windows verdict starts the command with no
-    console window, so an inherited console stdin is an invalid handle there, and each subprocess call under it
-    failed with WinError 6. An empty stdin is a valid handle on every OS."""
+class StdinPassesThrough(unittest.TestCase):
+    """Off Windows, a piped stdin reaches the command: `printf x | verdict cmd` feeds cmd. Only Windows swaps in an
+    empty stdin, inside hooks/_nowindow.py, because a no-window child cannot use an inherited console stdin."""
 
-    def test_the_command_reads_no_input_from_verdicts_stdin(self):
+    @unittest.skipIf(os.name == "nt", "Windows gives the command an empty stdin (hooks/_nowindow.py)")
+    def test_a_piped_stdin_reaches_the_command(self):
         with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             script = os.path.join(d, "reads.py")
             with open(script, "w") as f:
-                f.write("import sys\nsys.exit(3 if sys.stdin.read() else 0)\n")
-            r = subprocess.run([sys.executable, V, sys.executable, script], input="leaked from the caller\n",
+                f.write("import sys\nsys.exit(0 if sys.stdin.read() == 'piped\\n' else 3)\n")
+            r = subprocess.run([sys.executable, V, sys.executable, script], input="piped\n",
                                capture_output=True, text=True, timeout=60,
                                env={k: v for k, v in os.environ.items() if k != "VERDICT_LOG"})
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

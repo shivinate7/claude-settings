@@ -11,6 +11,8 @@ Pins the contract that lint/test_no_window_spawn.py relies on:
 - On Windows the wrapper ORs CREATE_NO_WINDOW (0x08000000) into the caller's creationflags and keeps
   every flag the caller passed. The constant is pinned as a number, because subprocess has no
   CREATE_NO_WINDOW on the Linux CI runner.
+- On Windows the wrapper also sets stdin=DEVNULL when the caller gives no stdin (or stdin=None) and no input,
+  and the check_output wrapper drops input=None there. A no-window child cannot use an inherited console stdin.
 - Elsewhere the wrapper adds no creationflags key. The kwargs reach subprocess unchanged.
 """
 import contextlib
@@ -90,6 +92,12 @@ class HelperContract(unittest.TestCase):
                 with on_platform(True):
                     getattr(self.h, name)(["x"])
                 self.assertIs(rec.call_args.kwargs.get("stdin"), subprocess.DEVNULL)
+
+    def test_windows_treats_stdin_none_as_no_stdin(self):
+        rec = self.recorder("run")
+        with on_platform(True):
+            self.h.run(["x"], capture_output=True, stdin=None)  # a caller forwarding an optional stdin
+        self.assertIs(rec.call_args.kwargs["stdin"], subprocess.DEVNULL)
 
     def test_windows_keeps_the_callers_stdin_and_input(self):
         rec = self.recorder("run")
