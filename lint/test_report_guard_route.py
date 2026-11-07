@@ -5,9 +5,10 @@ A question for the owner must reach the page writer in the turn it is asked, bec
 only place the owner answers it. Only a repo with no waiting page takes the question box instead. The rule is
 the page-writer ruling of the questions decision, stamped 23:31 CST on 1 November.
 
-These cases pin three gaps the check had:
+These cases pin the gaps the check had:
 
 - an ack that carries a later message from the same sender into the turn (the lane-ack debt);
+- a target's first reply that asks a question, which is an answer and starts a turn, not an ack;
 - an owner-facing session, with its own record, whose question goes to @parent, which reaches no one there;
 - a question box alone in a repo that has a waiting page, with or without a remote id.
 
@@ -80,6 +81,22 @@ class RouteTests(RouteFixture, unittest.TestCase):
                          assistant_text(self.reply(self.QUESTION))])
         self.assert_blocked(out, "Pick guard", self.WRITER)
 
+    def test_rt_red_parent_first_reply_asks_starts_a_turn(self):
+        # Catches: the parent's first reply taken as the ack of the send when it asks a question. The lane's new
+        # question with no send then rides on the first send.
+        out = self.lane(peer_msg("pick?"), *self.send(session_id="@parent"),
+                        peer_msg("Which repo, a or b?", from_session=self.PARENT),
+                        assistant_text(self.reply(self.QUESTION)))
+        self.assert_blocked(out, "Lane pick guard", "@parent")
+
+    def test_rt_red_writer_first_reply_asks_starts_a_turn(self):
+        # Catches: the page writer's first reply taken as the ack of the send when it asks a question. A new
+        # question with no send in the turn then passes.
+        out = self.stop([human("decide"), *self.writer_read(self.WRITER), *self.send(session_id=self.WRITER),
+                         peer_msg("Is this for q_max?", from_session=self.WRITER),
+                         assistant_text(self.reply(self.QUESTION))])
+        self.assert_blocked(out, "Pick guard", self.WRITER)
+
     def test_rt_green_first_ack_then_a_question_keeps_the_turn(self):
         # Catches: the first ack starting a turn of its own, which hides the send the question rides on.
         # Two shapes: the lane's input alone, and a human message before it.
@@ -107,6 +124,25 @@ class RouteTests(RouteFixture, unittest.TestCase):
                         *self.send(session_id="@parent"),
                         assistant_text(self.reply(self.QUESTION)))
         self.assertIsNone(out, "a question sent in its own turn was blocked")
+
+    def test_rt_green_ack_question_in_quotes_keeps_the_turn(self):
+        # Catches: a "?" inside quotes, backticks or a blockquote read as an answer. The ack would then start a
+        # turn that leaves out the send the question rides on. A false-alarm control, green on main by design.
+        for label, body in (("quotes", 'got it: "Close #969?"'), ("backticks", "noted `pick?`"),
+                            ("blockquote", "> pick?\nrecorded")):
+            with self.subTest(shape=label):
+                out = self.lane(peer_msg("pick?"), *self.send(session_id="@parent"),
+                                peer_msg(body, from_session=self.PARENT),
+                                assistant_text(self.reply(self.QUESTION)))
+                self.assertIsNone(out, "an ack with a ? in quotes, backticks or a blockquote ended the turn")
+
+    def test_rt_green_asking_reply_then_own_send_passes(self):
+        # Catches: the parent's question, which starts a turn, dropping the lane's own send made after it. The
+        # lane's question then has its route and must pass. A false-alarm control, green on main by design.
+        out = self.lane(peer_msg("pick?"), peer_msg("Which repo, a or b?", from_session=self.PARENT),
+                        *self.send(session_id="@parent"),
+                        assistant_text(self.reply(self.QUESTION)))
+        self.assertIsNone(out, "a question sent after the parent's question was blocked")
 
     # The owner-facing session. Its own record, with no lane tag and no parent, makes it owner-facing: a send to
     # @parent reaches no one there, so the question needs the page writer.
