@@ -315,9 +315,10 @@ class BriefFaults(unittest.TestCase):
         # "12 pixels" is a px value in words. The spacing pattern reads px, rem and dp, so it misses this.
         self.assertIn("token-spacing", codes(self.m.brief_faults(brief(job=JOB + "\nCards have 12 pixels of padding."))))
 
-    def test_screen_width_in_pixels_passes_as_on_main(self):
-        # A width in pixels is no spacing value. Main passes it, so the branch must too.
-        self.assertEqual(self.m.brief_faults(brief(job=JOB + "\nA screen is 1920 pixels wide.")), [])
+    def test_pixel_width_written_in_words_is_refused(self):
+        # "1920 pixels" is a px value in words, as "1920px" is. The spacing pattern reads pixels.
+        found = pairs(self.m.brief_faults(brief(job=JOB + "\nA screen is 1920 pixels wide.")))
+        self.assertIn(("token-spacing", "Job"), found)
 
     def test_ios_app_named_in_a_device_section_passes(self):
         # The lane draws an iOS app. "the iOS app" names the product being drawn, not today's product.
