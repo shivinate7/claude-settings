@@ -41,6 +41,8 @@ jobs:
   scope:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
+    # Cap 5 min stays (decision ci-job-caps): slowest 0.2 min, median 0.2, n 30 green runs, 2026-11-07. Run 42317209568
+    # ended at 5.02 min with no step started, a runner that never ran steps, so a bigger cap would not help.
     timeout-minutes: 5
     outputs:
       checks_windows: ${{ steps.scope.outputs.checks_windows }}
@@ -572,9 +574,9 @@ jobs:
   checks-merge-install:
     runs-on: ubuntu-latest
     needs: scope
-    # Cap 60 min, the provisional cap of a new job (decision ci-job-caps): slowest 20.6 min is 34% of it (range
-    # 14.8-20.6, median 19.0, n 30 green runs, same window as `checks`).
-    timeout-minutes: 60 # provisional
+    # Cap 30 min (decision ci-job-caps): slowest 21.4 min is 71% of it (median 19.1, n 30 green runs, runs 42332351710
+    # to 42404373325, 2026-11-07). Tightened from the 60 min provisional cap.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -634,11 +636,12 @@ jobs:
         run: sh hooks/test_cloud_setup.sh
 
   # The guard fixture suite alone: 10.6 min slowest of 30 runs (9.8 median), so the checks job stayed under 80% of its cap
-  # (decision ci-job-caps). Cap 22 min = 2x the slowest, plus setup.
+  # (decision ci-job-caps). Cap 25 min: slowest 18.2 min is 73% of it (median 14.9, n 30 green runs, runs 42330595514
+  # to 42404373325, 2026-11-07). The cap was 22 (83% then).
   checks-guard:
     runs-on: ubuntu-latest
     needs: scope
-    timeout-minutes: 22
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request' }}
@@ -758,9 +761,9 @@ jobs:
   shell-macos:
     runs-on: macos-latest
     needs: scope
-    # Cap 28 min: slowest about 19.2 min (a floor, run 41407758669 was cut) is 69% of it (range 8.77-19.2, median 12.27,
-    # n 18 = 16 green + 2 cap ends, 2026-11-01 22:11 to 2026-11-02 07:41 UTC; decision ci-job-caps).
-    timeout-minutes: 28
+    # Cap 32 min (decision ci-job-caps): slowest 23.9 min is 75% of it (median 19.3, n 30 green runs, runs 42332351710
+    # to 42404373325, 2026-11-07). The cap was 28 (85% then).
+    timeout-minutes: 32
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
@@ -1018,9 +1021,9 @@ jobs:
   checks-macos-b:
     runs-on: macos-latest
     needs: scope
-    # Cap 60 min, the provisional cap of a new job (decision ci-job-caps): slowest 21.5 min is 36% of it (range
-    # 14.1-21.5, median 18.3, n 29 green runs, same window as `checks`).
-    timeout-minutes: 60 # provisional
+    # Cap 30 min (decision ci-job-caps): slowest 21.5 min is 72% of it (median 18.1, n 30 green runs, runs 42332351710
+    # to 42404373325, 2026-11-07). Tightened from the 60 min provisional cap.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
@@ -1256,9 +1259,10 @@ jobs:
   checks-windows-guard:
     runs-on: windows-latest
     needs: scope
-    # Full guard suite off pull_request: 1296 s in one job (run 40293472341). In 2 shards the jobs took 582 s and
-    # 679 s (run 40296937814); 20 min is about 1.8x the slower.
-    timeout-minutes: 20
+    # Full guard suite off pull_request: 1296 s in one job (run 40293472341). Cap 27 min (decision ci-job-caps): slowest
+    # 19.7 min is 73% of it (median 10.1, n 30 green runs, runs 42332351710 to 42404373325, 2026-11-07). The cap was 20
+    # (98% then).
+    timeout-minutes: 27
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
@@ -1287,8 +1291,12 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
-    # A shard of checks-windows-guard: its figures and cap are there.
-    timeout-minutes: 20
+    # A shard of checks-windows-guard (decision ci-job-caps). Cap 30 min, projected from a lower bound: 6 of 36 runs
+    # (42389285022, 42380704376, 42364813966, 42351283227, 42337808529, 42306046545) were cut at the 20 min cap, each at
+    # about 20.07 min in the step "Guard fixture suite (shard 2 of 2)", so the true slowest is above 20.1 and is
+    # at least 67% of 30. Slowest green 19.9 min, median 15.9, n 30 green runs, runs 42108743918 to 42404373325,
+    # 2026-11-05 to 2026-11-07. The cap was 20 (100% then).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -1311,8 +1319,9 @@ jobs:
     runs-on: windows-latest
     needs: scope
     # Full git-half suite off pull_request: about 6.5 s a test on Windows, so about 59 min in one job (run 40293472341).
-    # In 5 shards the jobs took 295 s to 520 s (run 40296937814); 15 min is about 1.7x the slowest.
-    timeout-minutes: 15
+    # Cap 22 min for this job and its 4 shards (decision ci-job-caps): slowest 14.5 min is 66% of it (median 6.1, n 30
+    # green runs, runs 42332351710 to 42404373325, 2026-11-07). The cap was 15 (96% then).
+    timeout-minutes: 22
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request' }}
@@ -1350,8 +1359,10 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
-    # A shard of checks-windows-merge: its figures and cap are there.
-    timeout-minutes: 15
+    # A shard of checks-windows-merge (decision ci-job-caps). Cap 22 min. Slowest green 14.2 min, median 13.2, n 30
+    # green runs, plus 1 cut at the 15 min cap (run 42282722326, 15.18 min, mid fixture shard), so the true slowest is
+    # above 15.2 and is at least 69% of 22. The cap was 15.
+    timeout-minutes: 22
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -1372,8 +1383,9 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
-    # A shard of checks-windows-merge: its figures and cap are there.
-    timeout-minutes: 15
+    # A shard of checks-windows-merge (decision ci-job-caps). Cap 22 min: slowest 14.6 min is 66% of it (median 12.8,
+    # n 30 green runs, 2026-11-06 to 2026-11-07). The cap was 15 (97% then).
+    timeout-minutes: 22
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -1394,8 +1406,9 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
-    # A shard of checks-windows-merge: its figures and cap are there.
-    timeout-minutes: 15
+    # A shard of checks-windows-merge (decision ci-job-caps). Cap 22 min: slowest 14.8 min is 67% of it (median 11.7,
+    # n 30 green runs, 2026-11-06 to 2026-11-07). The cap was 15 (99% then).
+    timeout-minutes: 22
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -1416,8 +1429,10 @@ jobs:
     runs-on: windows-latest
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
-    # A shard of checks-windows-merge: its figures and cap are there.
-    timeout-minutes: 15
+    # A shard of checks-windows-merge (decision ci-job-caps). Cap 22 min. Slowest green 14.9 min, median 11.9, n 30
+    # green runs, plus 2 cut at the 15 min cap (runs 42399572302 at 15.12 and 42364813966 at 15.13, mid fixture shard),
+    # so the true slowest is above 15.1 and is at least 69% of 22. The cap was 15.
+    timeout-minutes: 22
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
