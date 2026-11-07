@@ -337,7 +337,7 @@ def say(*lines):
 # ------------------------------------------------------------------ the merge lock
 # A lock is a commit that a ref points at. The commit message holds the expiry. The ref is
 # refs/heads/merge-lock/<defaultBranch>: a branch, because the cloud proxy refuses a push to any ref outside refs/heads.
-# One backend, GitLock (default_lock): acquire, release, unlock. Its create-only or leased push is the arbiter, so two runs never both hold a lock.
+# One backend, GitLock (default_lock): acquire, release, unlock. Its create-only or leased push is the arbiter: of two runs that push over the same ref state, one lands and the other is refused, so no lock is held by two runs.
 
 SESSION_MAX = 80  # characters of --session kept; the spec names no cap
 LOCK_MARGIN = 300  # seconds: before a rate wait of W s the lock's expiry moves to now + W + this
@@ -486,7 +486,7 @@ def release_on_signals():
 
 class Lock:
     """What a lock backend shares: a release that reports and never raises (it runs in a `finally`)."""
-    until = holder = began = tree = message = None  # holder: set by confirm before acquire; a dict of pr, branch, session. until: the published expiry, set once the lock is held
+    until = holder = began = tree = message = sha = None  # holder: set by confirm before acquire; a dict of pr, branch, session. until: the published expiry, set once the lock is held
     mine = frozenset()  # the lock commits this run made: the take, then one per extension, added before its push
 
     def _take(self, b, sha, tree, message, now):
@@ -515,7 +515,14 @@ class Lock:
             raise NetStop(f"cannot extend the merge lock on {self.base} for a wait of {wait} s, so the run stops in place of waiting on a lock that could expire {LOCK_CITE}. Run again. {e}") from e
         self.sha, self.message, self.until = sha, msg, expiry_of(msg)
 
+    def _forget(self):
+        """Undo _take: the push is known not to have landed, so no lock of this run's is on the remote."""
+        self.sha = self.until = None
+        self.mine = frozenset()
+
     def release(self, b, token):
+        if token is None:  # no take was recorded
+            return
         left = f" It expires in {max(0, self.until - self.now()):.0f}s." if self.until else ""
         try:
             cur = self.read(b)
@@ -532,24 +539,28 @@ class Lock:
         say(f"merge: the lock release failed: {why}.{left} Run merge --unlock only if no run holds it.")
 
 class GitLock(Lock):
-    """Any git remote. Tests use a local bare origin. The create-only push is the one arbiter."""
+    """Any git remote. Tests use a local bare origin. Each push is leased on the sha it read (empty: create only), so a ref that moved since the read refuses the push."""
     def __init__(self, root, now=time.time, pause=time.sleep):
         self.root, self.now, self.pause = root, now, pause
 
     def read(self, b, ref=None):
         ref = ref or lock_ref(b)
-        c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause, what=f"the lock read {ref}")
-        if c:
-            raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock " + LOCK_CITE + ": " + out)
-        if not out:
-            return None
-        sha = out.split()[0]
-        c, fetched, _ = retry_net(lambda: git(self.root, "fetch", "-q", "origin", ref), self.pause, what=f"the lock fetch {ref}")
-        if c and is_net(c, fetched):  # an unread expiry is no lock that never expires
-            raise NetStop("cannot read the merge lock commit " + LOCK_CITE + ": " + fetched)
-        # The listed sha names the message: the ref may have moved since the listing, and FETCH_HEAD then holds another run's commit.
-        c, msg = (c, "") if c else git(self.root, "log", "-1", "--format=%B", sha)
-        return (sha, float("inf"), "") if c else (sha, expiry_of(msg), msg)
+        for _ in range(2):
+            c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause, what=f"the lock read {ref}")
+            if c:
+                raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock " + LOCK_CITE + ": " + out)
+            if not out:
+                return None
+            sha = out.split()[0]
+            c, fetched, _ = retry_net(lambda: git(self.root, "fetch", "-q", "origin", ref), self.pause, what=f"the lock fetch {ref}")
+            if c and is_net(c, fetched):  # an unread expiry is no lock that never expires
+                raise NetStop("cannot read the merge lock commit " + LOCK_CITE + ": " + fetched)
+            # The listed sha names the message: the ref may have moved since the listing, and FETCH_HEAD then holds another run's commit.
+            c, msg = (c, fetched) if c else git(self.root, "log", "-1", "--format=%B", sha)
+            if not c:
+                return (sha, expiry_of(msg), msg)
+            # A lock commit has no parent, so a moved ref leaves the listed sha out of the fetch: the first miss lists again and reads what the ref holds now.
+        raise Stop("cannot read the merge lock commit " + LOCK_CITE + ": " + msg)
 
     def acquire(self, b, ttl):
         ref = lock_ref(b)
@@ -568,13 +579,14 @@ class GitLock(Lock):
         lease = f"--force-with-lease={ref}:{cur[0] if cur else ''}"
         c, out = git(self.root, "push", "-q", lease, "origin", f"{sha}:{ref}")
         if c:
+            self._take(b, sha, tree, msg, now)  # recorded before the re-read, which can raise with the push landed: release is leased on this sha, so it never removes a rival's lock
             try:
                 now_cur = self.read(b)  # a moved ref is another run's take. An unchanged ref is a push the remote refused.
             except Stop as e:  # the push output is the only account of why the take failed
                 raise type(e)(f"{e}\nthe push said: {out}") from e
             if now_cur and now_cur[0] == sha:  # the push landed and its reply was lost: the lock is this run's
-                self._take(b, sha, tree, msg, now)
                 return sha
+            self._forget()  # the push did not land
             if (now_cur[0] if now_cur else None) != (cur[0] if cur else None):
                 raise Held("another run took the merge lock first " + LOCK_CITE)
             if is_net(c, out):  # the call never reached the remote: that is no refusal
@@ -613,17 +625,14 @@ class GitLock(Lock):
 
     def unlock(self, b):
         """-> True when it removed or expired a lock, False when no lock was there."""
-        ref = lock_ref(b)
         cur = self.read(b)
         if not cur or cur[1] <= 0:  # no ref, or a lock already released to expires 0
             return False
-        c, out = git(self.root, "push", "-q", "origin", f":{ref}")
-        if c and "does not exist" in out:  # gone since the read
-            return False
+        c, out = self.delete(b, cur[0])  # leased on the sha read: a lock taken since stays
         if c:
-            c2, out2 = self.released(b, f"--force-with-lease={ref}:{cur[0]}")
-            if c2:
-                raise Stop("unlock failed " + LOCK_CITE + ": " + out + "\n" + out2)
+            if not self.read(b):  # gone since the read: nothing left to remove
+                return False
+            raise Stop("unlock failed " + LOCK_CITE + ": " + out)
         return True
 
 # ------------------------------------------------------------------ the GitHub half (the seam)
@@ -2760,11 +2769,11 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         return draft_step(root, cfg, n, host, info)
     lock.holder = {"pr": n, "branch": info["branch"], "session": session}
     lifts = {}  # each reason flag that lifts a check in this run, for the merge commit message
-    token = lock.acquire(base, (WAITS * m["deadlineMinutes"] + 10) * 60)  # each wait at most once, ten minutes spare
-    host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant); the TTL spare is for the checks waits
-    tmp = wt = claim_sha = None
+    token = tmp = wt = claim_sha = None
     judge = None  # the prose judge's plan, built under the lock and run after it is released
-    try:
+    try:  # acquire is inside: a take that landed but whose re-read failed is recorded by then, so the `finally` releases it
+        token = lock.acquire(base, (WAITS * m["deadlineMinutes"] + 10) * 60)  # each wait at most once, ten minutes spare
+        host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant); the TTL spare is for the checks waits
         info = host.pr(n)
         refuse_bad_pr(info)
         if info["base"] != base:
@@ -2954,7 +2963,9 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     finally:
         if wt:
             drop_worktree(root, tmp, wt)
-        lock.release(base, token)
+        held = token if token is not None else getattr(lock, "sha", None)  # no take recorded: nothing to release
+        if held is not None:
+            lock.release(base, held)
     report = prose_judge_run(judge, n)  # each model call waits up to MODEL_TIMEOUT, so it runs with the lock released
     if report:
         say(*report)
