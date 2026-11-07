@@ -3124,7 +3124,7 @@ pinned_wt1() {
 }
 
 # ---- pinoff cases: the pinned checkout <clone>-live is off-main only when it is not at main ----
-# Decision install-refuses-linked-tree: the ~/.claude links point at <clone>-live,
+# Decision merge-reinstalls-from-main: the ~/.claude links point at <clone>-live,
 # a detached worktree at main's commit. session_start.sh must not print an off-main line for that
 # checkout, and must print one for a pin at any other commit. pinoff1: at main's commit with
 # origin/main 2 ahead, the freshness line fires once and no off-main line. pinoff2: a pin one
@@ -4952,7 +4952,8 @@ caseM7() {
 # ---- caseM11-M13: a cloud install leaves a clean, detached checkout alone while an operation is stopped on it ----
 # A rebase or a bisect stopped on the checkout holds HEAD there. The install must not move HEAD off that commit.
 # op_move_check NAME MARK: one cloud install in $co, which holds an operation's state. MARK is the state path under the
-# git dir (rebase-merge, BISECT_LOG). The checkout must be clean and detached first, so the install's move is the only test.
+# git dir (rebase-merge, BISECT_LOG, ...). The checkout must be clean and detached first, so the install's move is the only test.
+# With the state present the install leaves HEAD at $mid and takes its source from the mirror, not the stopped checkout.
 op_move_check() {
   op_gd=$(git -C "$co" rev-parse --absolute-git-dir)
   if [ ! -e "$op_gd/$2" ]; then bad "$1" "FIXTURE no $2 under the git dir: the operation did not stop"; return; fi
@@ -4964,6 +4965,10 @@ op_move_check() {
   if [ $rc -ne 0 ]; then bad "$1" "install.sh exited $rc: $(install_problems)"; return; fi
   if [ "$(git -C "$co" rev-parse HEAD)" != "$mid" ]; then
     bad "$1" "the install moved the clean, detached checkout from $mid to $(git -C "$co" rev-parse HEAD) while $2 was present"; return
+  fi
+  op_src=$(normalize_path "$(installed_src "$h/.claude-cfg" "$h")")
+  if [ "$op_src" != "$(normalize_path "$h/claude-settings-main")" ]; then
+    bad "$1" "the install took its source from [$op_src], not the mirror $h/claude-settings-main, while $2 was present"; return
   fi
   ok "$1"
 }
@@ -5006,6 +5011,43 @@ caseM13() {
   bs_out=$(git -C "$co" bisect start 2>&1 && git -C "$co" bisect bad HEAD 2>&1) \
     || { bad "$name" "FIXTURE git bisect did not start: $bs_out"; return; }
   op_move_check "$name" BISECT_LOG
+}
+
+# caseM14: a rebase-apply directory, which git makes for the apply backend. Written directly here: a clean stop of that
+# backend leaves no other file the installer reads.
+caseM14() {
+  name="caseM14: a clean, detached checkout with a rebase-apply in progress is not moved, and the install takes the mirror"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m14
+  mkdir "$(git -C "$co" rev-parse --absolute-git-dir)/rebase-apply" 2>/dev/null \
+    || { bad "$name" "FIXTURE could not make rebase-apply under the git dir"; return; }
+  op_move_check "$name" rebase-apply
+}
+
+# caseM15-M17: CHERRY_PICK_HEAD, REVERT_HEAD and MERGE_HEAD, each written with update-ref, the way git names these
+# pseudo-refs. Each is a clean stop: the tree is clean and HEAD stays detached at old.
+caseM15() {
+  name="caseM15: a clean, detached checkout with a cherry-pick in progress is not moved, and the install takes the mirror"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m15
+  ps_out=$(git -C "$co" update-ref CHERRY_PICK_HEAD "$old" 2>&1) || { bad "$name" "FIXTURE git update-ref CHERRY_PICK_HEAD: $ps_out"; return; }
+  op_move_check "$name" CHERRY_PICK_HEAD
+}
+
+caseM16() {
+  name="caseM16: a clean, detached checkout with a revert in progress is not moved, and the install takes the mirror"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m16
+  ps_out=$(git -C "$co" update-ref REVERT_HEAD "$old" 2>&1) || { bad "$name" "FIXTURE git update-ref REVERT_HEAD: $ps_out"; return; }
+  op_move_check "$name" REVERT_HEAD
+}
+
+caseM17() {
+  name="caseM17: a clean, detached checkout with a merge in progress is not moved, and the install takes the mirror"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m17
+  ps_out=$(git -C "$co" update-ref MERGE_HEAD "$old" 2>&1) || { bad "$name" "FIXTURE git update-ref MERGE_HEAD: $ps_out"; return; }
+  op_move_check "$name" MERGE_HEAD
 }
 
 # m8_check LABEL: after the install named LABEL, the mirror is at main ($want), refreshed in place (the sentinel survives),
@@ -5343,6 +5385,10 @@ run caseM10
 run caseM11
 run caseM12
 run caseM13
+run caseM14
+run caseM15
+run caseM16
+run caseM17
 run pinmove1
 run pinmove2
 run pinmove3
