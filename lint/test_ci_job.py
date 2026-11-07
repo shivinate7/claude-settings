@@ -28,7 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
-from workflow_steps import run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
+from workflow_steps import run_body, settings_pins, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
 RUN_FOLDER = _test_temp.run_folder()
 CHECKOUT = os.path.abspath(os.path.join(HERE, ".."))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
@@ -1380,6 +1380,9 @@ READ_LOCAL = 'test "$(cat "$CLAUDE_SETTINGS_DIR/marker")" = local'
 ABSENT_SHA = "deadbeef" * 5  # forty hex digits that neither the fixture clone nor its origin holds
 CODE_CHECK_STUB = "import pathlib\npathlib.Path('pinned-code-check.txt').write_text('pinned\\n')\n"
 STE_CHANGED_STUB = "#!/bin/sh\necho pinned > ste-pinned.txt\n"
+# The step before a pin: a `run: |` block, then the blank line that ends it. The pin is the first line of the next step.
+BUILD_LITERAL = "      - name: build\n        run: |\n          make\n\n"
+BUILD_ONE_LINE = "      - name: build\n        run: make\n\n"
 
 
 def fixture_git(cwd, *args):
@@ -1708,6 +1711,28 @@ class PinnedSettings(Job):
                             "the pin was not fetched from its origin: " + str(line_of(lines, "read pinned marker")))
         self.assertEqual(by_step(lines).get("read pinned marker"), "PASS",
                          "the step did not read the fetched pin's tree:\n" + out)
+
+    def dash_pin_after(self, build):
+        """A workflow whose step before the pin is `build`. The pin is the first line of its own step (`- uses:`)."""
+        return workflow(build, "      - uses: %s\n\n" % (PIN_USES % self.sha_a), step("read pinned marker", READ_PINNED))
+
+    def test_a_pin_on_the_first_line_after_a_run_block_is_read(self):
+        self.settings()
+        text = self.dash_pin_after(BUILD_LITERAL)
+        self.assertEqual([(action, ref) for action, ref, _ in settings_pins(text)], [("code-check", self.sha_a)],
+                         "precondition: the pin parser misses the pin on the step's first line after a `run: |` block")
+        rc, lines, out = self.run_text(text, "lane", args=("--step", "read pinned marker"))
+        self.assertEqual(by_step(lines).get("read pinned marker"), "PASS",
+                         "the named step did not read the pinned tree: its pin after a `run: |` block was skipped:\n" + out)
+
+    def test_a_pin_on_the_first_line_after_a_one_line_run_is_read(self):  # P2 green control: the old code reads this pin
+        self.settings()
+        text = self.dash_pin_after(BUILD_ONE_LINE)
+        self.assertEqual([(action, ref) for action, ref, _ in settings_pins(text)], [("code-check", self.sha_a)],
+                         "precondition: the pin parser misses the pin after a one-line run")
+        rc, lines, out = self.run_text(text, "lane", args=("--step", "read pinned marker"))
+        self.assertEqual(by_step(lines).get("read pinned marker"), "PASS",
+                         "the named step did not read the pinned tree after a one-line run:\n" + out)
 
 
 if __name__ == "__main__":
