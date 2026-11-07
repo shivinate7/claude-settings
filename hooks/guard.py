@@ -88,6 +88,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (stale-safe-force-push)
   agent-branch-push    deny. A push whose destination is an agent's own worktree branch. A delete
                        and a fetch pass. (agent-branch-never-pushed)
+  push-main            ask. A non-forced push whose destination is literally main or master,
+                       `--all` included. The remote's HEAD is not read. A dry run passes.
+  push-stray-branch    ask. A push with an implied destination (bare, `HEAD`, `@`, or a colon-less
+                       refspec naming the current branch) that writes a name other than the branch's
+                       upstream. Only with an upstream on the pushed remote that is not main or master.
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
@@ -134,6 +139,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
 Other tools, in `judge` order:
   worktree-home        deny. A call from an agent whose shell cwd or write target is outside its
                        own recorded worktree. Read and Grep pass, so a stranded agent can report.
+                       A Write or Edit strictly inside the caller's own `agent-<id>-<suffix>`
+                       red-run folder passes.
                        No record (a non-isolated agent, or the orchestrator) allows everything.
                        No override lifts it. (an-agent-outside-its-home-tree-must-stop)
   other-checkout       deny. Any session's write whose target sits in a checkout of this clone
@@ -146,7 +153,9 @@ Other tools, in `judge` order:
                        A Bash or PowerShell `cd`, `pushd` or `Set-Location` into another
                        checkout is refused too, bare or chained; the cd target in the caller's
                        recorded home, a session's recorded home, or the caller's own
-                       `agent-<id>-<suffix>` red-run folder passes that act.
+                       `agent-<id>-<suffix>` red-run folder passes that act. A write strictly
+                       inside that red-run folder passes too, here and in worktree-home; the
+                       folder root does not (no `rm -rf <red>`).
                        A write or `cd` into a separate clone of the same repo (same origin, read
                        from the config files) is refused too, as is a write from a cwd stranded
                        in one while `CLAUDE_PROJECT_DIR` names the home clone; a git verb that
@@ -196,6 +205,12 @@ Other tools, in `judge` order:
                        the host is never read. With no readable repo, any tag `cs-repo:<owner>/<name>`
                        passes. The deny reason names the tag to add.
                        Runs after lane-effort-pin. An override lifts it. (agent-model-cap, session-tiers)
+  load-brake           deny. On a local session, a lane-start call, an agent's shell or file write, or a lane
+                       session's own shell or file write, when the machine is busy (lane starts only) or full. A
+                       lane session is one whose own newest get_session record carries `cs-build:lane` and no other
+                       `cs-build:` tag; the coordinator, triage and the batch runner are never braked on their own
+                       calls. The transcript is read only at full. A cloud session skips it. An override lifts it.
+                       (machine-load-brake)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-bypass
@@ -209,6 +224,15 @@ Other tools, in `judge` order:
                        deny. A simulator boot past the cap, or one that duplicates an idle device.
                        They judge only `xcodebuild -destination` and the simulator MCP `launch`.
                        (sweep-shuts-down-idle-simulators)
+  simulator-boot-route
+                       deny. An `xcodebuild -destination` that names a shut-down simulator. Judged
+                       after the cap and twin rules. The remedy is `sim-test` for the `test` action,
+                       else the generic destination. An override lifts it. (sim-test-is-the-one-boot-path)
+  simulator-boot-lease
+                       deny. A simulator MCP `launch` of a shut-down device, lock or no lock: no session
+                       holds a lease for it. The remedy is `sim-test`. Judged after the cap and twin
+                       rules. A launch of a booted device passes. An override lifts it.
+                       (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
   env-file, frozen-path, config-edit, agent-model-cap
@@ -255,10 +279,14 @@ The model judges (hooks/call_judge.py, hooks/prose_judge.py, hooks/sendmessage_s
 refuse() too, so an override lifts them.
 """
 
+import difflib
 import importlib
+import importlib.machinery
+import importlib.util
 import json
 import os
 import re
+import shlex
 import sys
 import time
 
@@ -337,8 +365,9 @@ while True:
         _loading = "guard_push_delete"
         from guard_push_delete import (
             AGENT_PUSH_REASON, AGENT_PUSH_RULE, DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON,
-            PUSH_ASK_REASON, PUSH_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_target,
-            PUSH_READS, push_text, push_verdict, rm_delete_hit,
+            PUSH_ASK_REASON, PUSH_MAIN_REASON, PUSH_READS, PUSH_REASON, PUSH_STRAY_REASON,
+            cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit,
+            push_target, push_text, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
@@ -748,7 +777,7 @@ def in_throwaway(segments, number: int, cwd: str, ends=()) -> bool:
     return all(folder and path_is_inside(folder, tempfile.gettempdir()) for folder in judged)
 
 
-# decision lanes-start-in-tool-worktrees: a lane tree comes only from the tool's own isolation.
+# decision lanes-start-in-tool-worktrees: a worktree comes only from the tool's own isolation.
 HAND_MADE_VALUE_OPTIONS = ("-b", "-B", "--reason")
 
 
@@ -812,10 +841,10 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
 
 
 WORKTREE_HAND_MADE_REASON = (
-    "Rule (hand-made worktree): a lane tree comes only from the Agent tool's isolation "
+    "Rule (hand-made worktree): a worktree comes only from the Agent tool's isolation "
     "'worktree' option or from the EnterWorktree tool, never from a tree made by hand. "
-    "A hand-made tree sends a lane to work in the main clone and loses the isolation. "
-    "Remedy: start the lane with one of those two tools. Call EnterWorktree with a `name` and no "
+    "A hand-made tree sends an agent or a session to work in the main clone and loses the isolation. "
+    "Remedy: start the work with one of those two tools. Call EnterWorktree with a `name` and no "
     "`path`. If the tool's isolation was refused, "
     "make no tree by hand: stop and report to the owner which layer refused and its exact "
     "message. A guard refusal starts \"Rule (\" and names its rule. Any other refusal is the "
@@ -1583,9 +1612,268 @@ def is_test_config_rel(rel: str) -> bool:
 
 def author_path_ok(rel: str) -> bool:
     """A test-author may change a test path, test config, or a dev dependency list. `package.json`
-    and `pyproject.toml` pass here and are read by content in `role_offences`."""
+    and `pyproject.toml` pass here and are read by content in `role_offences`. A workflow does not pass
+    here: its whole test-run steps pass in `role_write_hit` and `role_offences` (`workflow_test_steps_only`)."""
     return (is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES
             or norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS)
+
+
+# ---- workflow files (decision builders-cannot-edit-tests). The test-author check and the builder check are two
+# verdicts that share the step and run readers below. A test-author changes a workflow only by adding, removing or
+# moving whole test-run steps, so a new suite gets its CI step. A builder changes any workflow line, except one
+# that disables tests or drops a test run.
+WORKFLOW_REL = re.compile(r"^\.github/workflows/[^/]+\.ya?ml$")
+# The only keys a test-run step holds. `continue-on-error`, `env`, `uses`, `with` are no test-run key.
+WORKFLOW_STEP_KEYS = {"name", "if", "run", "shell", "working-directory", "timeout-minutes"}
+WORKFLOW_STEP_START = re.compile(r"^(\s*)-\s+(name|run):")
+WORKFLOW_KEY_LINE = re.compile(r"^(\s*)(?:-\s+)?([A-Za-z][\w-]*):\s*(.*)$")
+WORKFLOW_INTERPRETERS = {"python", "python3", "node", "bash", "sh", "pwsh"}
+# Interpreter flags whose next token is their value, not the script (`python -X utf8`, `node -r ts-node/register`).
+WORKFLOW_VALUE_FLAGS = {"-X", "-W", "-r", "--require", "--import", "-o"}
+# Interpreter flags after which a command or module follows, so no script path does (`python -m`, `bash -c`).
+WORKFLOW_NO_PATH_FLAGS = {"-c", "-m"}
+WORKFLOW_DISABLE_STEP = re.compile(
+    r"^\s*(?:-\s+)?(?:continue-on-error:\s*(?:true|\$\{\{\s*true\s*\}\})|if:\s*(?:false|\$\{\{\s*false\s*\}\}))\s*$")
+
+
+def is_workflow_rel(rel: str) -> bool:
+    """True when a repository-relative path is a GitHub workflow file (`.github/workflows/*.yml|*.yaml`)."""
+    return bool(WORKFLOW_REL.match(norm(rel).lstrip("/").lower()))
+
+
+def workflow_path(token: str) -> str:
+    """One spelling of a path a run line names: `\\` as `/`, no leading `./`."""
+    token = token.replace("\\", "/")
+    while token.startswith("./"):
+        token = token[2:]
+    return token
+
+
+def workflow_script_index(args):
+    """The index in `args` (the tokens after an interpreter) of the script it runs: the first token past the
+    interpreter's flags and their values, or None when a `-c` or `-m` runs a command or module instead."""
+    index = 0
+    while index < len(args) and args[index].startswith("-"):
+        if args[index] == "--":
+            index += 1
+            break
+        if args[index] in WORKFLOW_NO_PATH_FLAGS:
+            return None
+        index += 2 if args[index] in WORKFLOW_VALUE_FLAGS else 1
+    return index if index < len(args) else None
+
+
+def workflow_step_disables(line: str) -> bool:
+    """True when one step line is `continue-on-error: true` or `if: false`, so the step runs no test that counts."""
+    return bool(WORKFLOW_DISABLE_STEP.match(line))
+
+
+def workflow_run_is_test(value: str) -> bool:
+    """True when one single-line `run:` value is `[interpreter] <test path> [args]` and nothing else.
+    A tokenizer that keeps quotes whole judges it, so a `#` or `//` in quotes is an argument and an
+    unquoted `&&`, `;`, `|`, redirect or `$(` is a token of its own that no test run holds."""
+    value = value.strip()
+    if not value or value[0] in "|>\"'&*!%@`" or "$(" in value or "`" in value:
+        return False
+    lexer = shlex.shlex(value, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    if any(set(tok) <= set(lexer.punctuation_chars) for tok in tokens):
+        return False
+    script = 0
+    if tokens and tokens[0] in WORKFLOW_INTERPRETERS:
+        tokens = tokens[1:]
+        script = workflow_script_index(tokens)
+    if script is None or not tokens or ".." in norm(tokens[script]).split("/") or not is_test_rel(tokens[script]):
+        return False
+    rest = tokens[:script] + tokens[script + 1:]
+    return not TEST_DISABLE_FLAGS.search(" ".join(rest)) and not disables_tests([value], [])
+
+
+def workflow_test_step(lines) -> bool:
+    """True when `lines` (non-blank) are exactly one whole test-run step."""
+    start = WORKFLOW_STEP_START.match(lines[0]) if lines else None
+    if not start:
+        return False
+    keys = []
+    for line in lines:
+        found = WORKFLOW_KEY_LINE.match(line)
+        if not found or found.group(2) not in WORKFLOW_STEP_KEYS or (
+                line is not lines[0] and (len(found.group(1)) <= len(start.group(1)) or line.lstrip().startswith("- "))):
+            return False
+        keys.append((found.group(2), found.group(3)))
+        if disables_tests([line], []) or workflow_step_disables(line):
+            return False
+    runs = [value for key, value in keys if key == "run"]
+    return len(runs) == 1 and len(set(key for key, _ in keys)) == len(keys) and workflow_run_is_test(runs[0])
+
+
+def workflow_step_chunk(lines) -> bool:
+    """True when the non-blank `lines` split into whole test-run steps, each starting at a step line."""
+    lines = [line for line in lines if line.strip()]
+    if not lines:
+        return True
+    indent = len(WORKFLOW_STEP_START.match(lines[0]).group(1)) if WORKFLOW_STEP_START.match(lines[0]) else None
+    if indent is None:
+        return False
+    steps = []
+    for line in lines:
+        starts = WORKFLOW_STEP_START.match(line)
+        if starts and len(starts.group(1)) == indent:
+            steps.append([line])
+        else:
+            steps[-1].append(line)
+    return all(workflow_test_step(step) for step in steps)
+
+
+def workflow_changed_lines(old_text: str, new_text: str):
+    """The (removed, added) line groups of a diff from `old_text` to `new_text`, one pair per change."""
+    old, new = old_text.splitlines(), new_text.splitlines()
+    ops = difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes()
+    return [(old[i1:i2], new[j1:j2]) for tag, i1, i2, j1, j2 in ops if tag != "equal"]
+
+
+def workflow_test_steps_only(old_text: str, new_text: str) -> bool:
+    """True when every added and removed non-blank line of the change forms whole test-run steps."""
+    return all(workflow_step_chunk(removed) and workflow_step_chunk(added)
+               for removed, added in workflow_changed_lines(old_text, new_text))
+
+
+WORKFLOW_COMMAND_SPLIT = re.compile(r"&&|\|\||[;|]")
+WORKFLOW_RUN_PREFIX = re.compile(r"^\s*(?:-\s+)?run:\s*")
+WORKFLOW_RUN_BLOCK = re.compile(r"^(\s*)(?:-\s+)?run:\s*[|>][+-]?\s*$")
+
+
+def workflow_command_tests(command: str) -> set:
+    """The test paths one shell command line runs, each in its `workflow_path` spelling: the script an
+    interpreter runs past its flags, every test path after a test runner, or the command itself when it is a
+    test path. A lint tool that is given a test folder (`ruff check tests/`) runs none."""
+    found = set()
+    for segment in WORKFLOW_COMMAND_SPLIT.split(command):
+        tokens = [tok.strip("\"'") for tok in segment.split()]
+        while tokens and (re.match(r"^\w+=", tokens[0]) or tokens[0] in ("npx", "sudo", "time")):
+            tokens.pop(0)
+        if not tokens:
+            continue
+        runner = bool(TEST_RUNNER_CONTEXT.search(segment))
+        if tokens[0] in WORKFLOW_INTERPRETERS:
+            script = workflow_script_index(tokens[1:])
+            args = tokens[1:] if runner else ([] if script is None else [tokens[1 + script]])
+        else:
+            args = tokens if runner else tokens[:1]
+        found.update(workflow_path(tok) for tok in args if is_test_rel(workflow_path(tok)))
+    return found
+
+
+def workflow_run_commands(text: str):
+    """The command lines of every `run:` in `text`: an inline value, or each line of a block scalar."""
+    commands, block = [], None
+    for line in text.splitlines():
+        if block is not None:
+            if not line.strip() or len(line) - len(line.lstrip()) > block:
+                commands.append(line.strip())
+                continue
+            block = None
+        opened = WORKFLOW_RUN_BLOCK.match(line)
+        if opened:
+            block = len(opened.group(1)) + (2 if line.lstrip().startswith("- ") else 0)
+        elif WORKFLOW_RUN_PREFIX.match(line):
+            commands.append(WORKFLOW_RUN_PREFIX.sub("", line, count=1))
+    return commands
+
+
+def workflow_invoked_tests(text: str) -> set:
+    """Every test path a `run:` line of the workflow text runs."""
+    return set().union(set(), *(workflow_command_tests(cmd) for cmd in workflow_run_commands(text)))
+
+
+def workflow_command_is_test(command: str) -> bool:
+    return bool(workflow_command_tests(command) or TEST_RUNNER_CONTEXT.search(command))
+
+
+def workflow_added_indexes(old_text: str, new_text: str):
+    """The line numbers of `new_text` that the change from `old_text` adds."""
+    ops = difflib.SequenceMatcher(None, old_text.splitlines(), new_text.splitlines(), autojunk=False).get_opcodes()
+    return [index for tag, _i1, _i2, j1, j2 in ops if tag != "equal" for index in range(j1, j2)]
+
+
+def workflow_step_lines(lines, index: int):
+    """The lines of the step (or job) that holds `lines[index]`: those at the key's indent or deeper, up to
+    and with the `- ` line that opens the step. A fragment ends at its own first and last line."""
+    def indent(line):
+        return len(line) - len(line.lstrip())
+    key = indent(lines[index]) + (2 if lines[index].lstrip().startswith("- ") else 0)
+    start = index
+    while start > 0 and not lines[start].lstrip().startswith("- "):
+        above = lines[start - 1]
+        if above.strip() and indent(above) < key:
+            start = start - 1 if above.lstrip().startswith("- ") and indent(above) == key - 2 else start
+            break
+        start -= 1
+    end = index + 1
+    while end < len(lines) and (not lines[end].strip() or indent(lines[end]) >= key):
+        end += 1
+    return lines[start:end]
+
+
+def workflow_disables_tests(old_text: str, new_text: str) -> bool:
+    """True when an added line of the change disables tests: a disable name or flag on a line that calls
+    a test runner or runs a test path through an interpreter."""
+    for _removed, added in workflow_changed_lines(old_text, new_text):
+        for line in added:
+            if (TEST_DISABLE_NAMES.search(line) or TEST_DISABLE_FLAGS.search(line)) and (
+                    TEST_RUNNER_CONTEXT.search(line)
+                    or workflow_command_tests(WORKFLOW_RUN_PREFIX.sub("", line, count=1))):
+                return True
+    return False
+
+
+def workflow_disables_step(old_text: str, new_text: str) -> bool:
+    """True when the change adds `continue-on-error: true` or `if: false` to a step that runs tests."""
+    lines = new_text.splitlines()
+    return any(
+        workflow_step_disables(lines[index])
+        and any(workflow_command_is_test(cmd) for cmd in workflow_run_commands("\n".join(workflow_step_lines(lines, index))))
+        for index in workflow_added_indexes(old_text, new_text))
+
+
+def workflow_drops_tests(old_text: str, new_text: str) -> bool:
+    """True when a test path that a run line runs in `old_text` is run nowhere in `new_text`."""
+    return bool(workflow_invoked_tests(old_text) - workflow_invoked_tests(new_text))
+
+
+def workflow_builder_refused(old_text: str, new_text: str) -> bool:
+    """The one verdict on a builder's workflow change, for the write tools and the commit diff."""
+    return (workflow_disables_tests(old_text, new_text) or workflow_disables_step(old_text, new_text)
+            or workflow_drops_tests(old_text, new_text))
+
+
+def workflow_pairs(tool_input, full: str):
+    """The (old, new) texts a write tool call makes of a workflow: an Edit's old and new string, each edit
+    of a MultiEdit, a Write's file on disk (empty if none) and its content; None when the call has none."""
+    if not isinstance(tool_input, dict):
+        return None
+    edits = tool_input.get("edits")
+    if isinstance(edits, list):
+        pairs = [(e.get("old_string"), e.get("new_string")) for e in edits if isinstance(e, dict)]
+    elif "old_string" in tool_input or "new_string" in tool_input:
+        pairs = [(tool_input.get("old_string"), tool_input.get("new_string"))]
+    elif "content" in tool_input:
+        try:
+            with open(full, encoding="utf-8", errors="replace") as handle:
+                disk = handle.read()
+        except Exception:
+            disk = ""
+        pairs = [(disk, tool_input.get("content"))]
+    else:
+        return None
+    if not pairs or any(not isinstance(o, str) or not isinstance(n, str) for o, n in pairs):
+        return None
+    return pairs
 
 
 def design_folder():
@@ -1683,6 +1971,10 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         ok = author_path_ok if role == AUTHOR_ROLE else designer_path_ok
         if ok(rel) or under_session_scratchpad(full, session_id):
             return ""
+        if role == AUTHOR_ROLE and is_workflow_rel(rel):
+            pairs = workflow_pairs(tool_input, full)
+            if pairs and all(workflow_test_steps_only(o, n) for o, n in pairs):
+                return ""
         # `session_id` is the parent's, the same for an agent (decision
         # an-agent-outside-its-home-tree-must-stop), and so is the id in the scratchpad path.
         # Another session's scratchpad is neither this one's nor "outside a repository".
@@ -1695,6 +1987,9 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return target
     if is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
+        return target
+    if is_workflow_rel(rel) and any(
+            workflow_builder_refused(o, n) for o, n in workflow_pairs(tool_input, _expanded(target, cwd)) or ()):
         return target
     return ""
 
@@ -1920,7 +2215,10 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
         # reads `../...`, which no role owns.
         real = os.path.realpath(os.path.join(top, rel))
         names = [rel, os.path.relpath(real, top)]
-        if role == AUTHOR_ROLE:
+        if role == AUTHOR_ROLE and is_workflow_rel(rel) and all(
+                is_workflow_rel(n) or author_path_ok(n) for n in names):
+            bad = not workflow_test_steps_only(text_at(root, old, rel), text_at(root, new, rel))
+        elif role == AUTHOR_ROLE:
             bad = not all(author_path_ok(n) for n in names)
             if not bad and basename(rel) == "package.json":
                 bad = not package_json_author_ok(text_at(root, old, rel), text_at(root, new, rel))
@@ -1932,7 +2230,8 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
             bad = not all(designer_path_ok(n) for n in names)
         else:
             bad = any(is_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
-                text_at(root, new, rel).splitlines(), text_at(root, old, rel).splitlines()))
+                text_at(root, new, rel).splitlines(), text_at(root, old, rel).splitlines())) or (
+                is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel), text_at(root, new, rel)))
         if bad:
             found.append(rel)
     return found
@@ -2579,27 +2878,27 @@ def role_model_one(tool_input):
     return ROLE_NO_MODEL_REASON % ("" if row == ROLE_MODEL_RANK[0] else " (%s)" % row), ROLE_NO_MODEL_MATCH + role, False
 
 
-# THE MACHINE-LOAD BRAKE (decision machine-load-brake). A lane-start call reads the machine's load once. Memory in
+# THE MACHINE-LOAD BRAKE (decision machine-load-brake). A start call (a call that starts a lane or an agent) reads the machine's load once. Memory in
 # use is a share of this machine's memory; disk free on the home drive is in GB (2**30 bytes) against the drive's
 # size. Busy (memory over 85%, or disk free under the smaller of 10% of the disk and 15 GB) refuses a Workflow and an
 # explicit background Agent or Task call. An Agent or Task call passes at busy only when it leaves
 # run_in_background out or sets it false. (In the desktop harness a left-out call still runs in the background
-# and the field is not offered, so busy does not slow an Agent lane there.) Full (memory over 95%, disk free
-# under the smaller of 5% of the disk and 5 GB) refuses every lane. A reading that cannot be read counts as normal. Only an
-# agent's shell or file write also reads load (RUNNING_LANE_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
+# and the field is not offered, so busy does not slow an Agent call there.) Full (memory over 95%, disk free
+# under the smaller of 5% of the disk and 5 GB) refuses every start call. A reading that cannot be read counts as normal. Only an
+# agent's shell or file write also reads load (RUNNING_AGENT_TOOLS, below). A cloud session (CLAUDE_CODE_REMOTE
 # "true") skips the brake and reads nothing, because the brake guards the owner's own machine.
-LANE_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
+START_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
 LOAD_BUSY_MEMORY = 85.0
 LOAD_FULL_MEMORY = 95.0
 LOAD_BUSY_DISK_SHARE, LOAD_BUSY_DISK_GB = 10.0, 15.0   # busy: free under the smaller of the two
 LOAD_FULL_DISK_SHARE, LOAD_FULL_DISK_GB = 5.0, 5.0
 GIB = 2 ** 30
-LOAD_CITE = "(decision machine-load-brake, a busy or full machine starts no new lane)"
-LOAD_LANE_CITE = "(decision machine-load-brake, a full machine stops a running lane at its next shell or file write)"
+LOAD_CITE = "(decision machine-load-brake, a busy or full machine starts no new lane or agent)"
+LOAD_LANE_CITE = "(decision machine-load-brake, a full machine stops a running agent at its next shell or file write)"
 LOAD_BUSY_REASON = "the machine is busy (%s). %s " + LOAD_CITE
-LOAD_BUSY_AGENT_FORM = ", or start this lane as an Agent call that leaves run_in_background out or sets it false"
+LOAD_BUSY_AGENT_FORM = ", or make this an Agent call that leaves run_in_background out or sets it false"
 LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
-LOAD_FULL_REASON = "the machine is full (%s). No new lane starts until the load drops. Wait, then retry. " + LOAD_CITE
+LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. Wait, then retry. " + LOAD_CITE
 
 
 def _read_memory():
@@ -2662,9 +2961,9 @@ def _load_value(reading: dict, key: str):
 
 
 def load_hit(tool: str, tool_input) -> tuple:
-    """(rule reason, matched) when the machine's load refuses this lane-start call, else ("", ""). The one
+    """(rule reason, matched) when the machine's load refuses this start call, else ("", ""). The one
     read of the call: a failed read or an unread value counts as normal. A cloud session is never braked."""
-    if tool not in LANE_TOOLS or is_cloud():
+    if tool not in START_TOOLS or is_cloud():
         return "", ""
     try:
         reading = read_load()
@@ -2700,20 +2999,22 @@ def load_hit(tool: str, tool_input) -> tuple:
     return "", ""
 
 
-# A RUNNING LANE (decision machine-load-brake, "Running lanes"). An agent's own call that can fill a disk (a shell or
-# a file write) reads the load once, inside this hook that already runs for the call. Full refuses it, so a lane
+# A RUNNING AGENT (decision machine-load-brake, "Running agents"). An agent's own call that can fill a disk (a shell or
+# a file write) reads the load once, inside this hook that already runs for the call. Full refuses it, so an agent
 # stops even while its orchestrator waits on the owner. Busy lets it run. The orchestrator's own calls read nothing,
-# so the session that frees the disk is never braked by the full disk.
-RUNNING_LANE_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
-LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this lane now: end your turn and report the reading to "
+# so the session that frees the disk is never braked by the full disk. A lane session (a session whose own record
+# carries the lane tag, lane_session_hit) is braked the same way on its own calls, since it is a lane too.
+RUNNING_AGENT_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
+LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this agent now: end your turn and report the reading to "
                          "your orchestrator, which frees space or waits for the load to drop. " + LOAD_LANE_CITE)
 
 
-def running_lane_hit(payload, tool: str) -> tuple:
+def running_agent_hit(payload, tool: str) -> tuple:
     """(rule reason, matched) when an agent's disk-filling call meets a full machine, else ("", ""). One read
-    per such call; none for the orchestrator, and none for a lane-start call, which load_hit reads."""
+    per such call; none for the orchestrator or a lane session (lane_session_hit judges that), and none for a
+    start call, which load_hit reads."""
     agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
-    if is_cloud() or tool not in RUNNING_LANE_TOOLS or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
+    if is_cloud() or tool not in RUNNING_AGENT_TOOLS or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
         return "", ""
     try:
         reading = read_load()
@@ -2721,6 +3022,36 @@ def running_lane_hit(payload, tool: str) -> tuple:
         return "", ""
     full = load_full(reading)
     return (LOAD_LANE_FULL_REASON % ", ".join(full), ", ".join(full)) if full else ("", "")
+
+
+LOAD_SESSION_FULL_REASON = ("the machine is full (%s). You are a lane session: end your turn now and send this "
+                            "reading to your parent with send_message to @parent, which frees space or waits for the "
+                            "load to drop. " + LOAD_LANE_CITE)
+
+
+def lane_session_hit(payload, tool: str) -> tuple:
+    """(rule reason, matched) when a lane session's own disk-filling call meets a full machine, else ("", "").
+    A call with an agent_id is an agent's (running_agent_hit). The load is read once; the transcript is read only
+    at full, and an unread record or any error counts as no lane."""
+    if not isinstance(payload, dict) or is_cloud() or tool not in RUNNING_AGENT_TOOLS or payload.get("agent_id"):
+        return "", ""
+    try:  # fails closed: an unimportable override or an unread id is no lane, so the later checks still run
+        import override
+        own_id = override.remote_session_id()
+        if own_id is None:
+            return "", ""
+        full = load_full(read_load())
+        transcript = payload.get("transcript_path")
+        if not full or not isinstance(transcript, str) or not transcript:
+            return "", ""
+        import own_session
+        tags, tagged_after, _parent = own_session.own_session_read(transcript, own_id)
+        names = [t.strip().casefold() for t in tags if isinstance(t, str)] if isinstance(tags, list) else []
+        if tagged_after or LANE_TAG not in names or any(n.startswith("cs-build:") and n != LANE_TAG for n in names):
+            return "", ""
+    except Exception:
+        return "", ""
+    return LOAD_SESSION_FULL_REASON % ", ".join(full), ", ".join(full)
 
 
 def load_full(reading) -> list:
@@ -3029,7 +3360,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                    reason.format(command=live.index(number) + 1, total=len(live), kind=kind,
                                  program=kind if " " in kind else "git " + kind), matched)
 
-    # 1c2. A lane worktree made by hand, outside the tool's own folder.
+    # 1c2. A worktree made by hand, outside the tool's own folder.
     for number, segment in enumerate(segments):
         if segment.strip():
             matched = hand_made_worktree_hit(segments, number, cwd, ends)
@@ -3178,6 +3509,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
+            elif subcommand == "push" and not read_verb("push", args):
+                # Owner rulings 206 a and 207 a: a non-forced push that writes main or master, or an
+                # implied destination off the branch's upstream. A dry run writes nothing.
+                kind = push_ask_hit(args, where, overrides)
+                if kind == "main":
+                    ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
+                                "push to the default branch")
+                elif kind == "stray":
+                    ask_command("push-stray-branch", PUSH_STRAY_REASON, "git push " + " ".join(args),
+                                "push to a stray branch")
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
     refusal, logged = env_refusal(stripped)
@@ -3234,7 +3575,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 7c. A builder's shell write to a test file. The path comes from the stripped command, a script's
     # own writes (a python or node heredoc body, -c, -e) from the raw one. Only an agent with a builder
-    # role is judged, the same gate as the Edit tools.
+    # role is judged, the same guard as the Edit tools.
     if role == BUILDER_ROLE:
         matched = builder_shell_test_hit(raw, stripped, cwd)
         if matched:
@@ -3418,6 +3759,32 @@ def _run_check_designs(page_file, item):
     if run.returncode == 0:
         return 0, ""
     return 3, (run.stderr.strip().splitlines() or ["exit %d" % run.returncode])[-1]
+
+
+# ------------------------------------------------------------------ a design names its file, in a mockup home
+#
+# Rule `mockup-home` (decision mockup-home). An ArtifactData set or update of a waiting item whose data carries `designs`
+# is denied when a design has no `file`, or a `file` outside the repo's design folder (lint/layout.py mockup_home_problem;
+# a machine-home path is outside it). It judges the path's shape only, so it reads no file, asks no origin and starts no
+# node; the roadmap build checks that origin holds the file. It runs before `page-item-design`. An item that is closed or
+# has no `designs` is not judged. An unreadable layout allows and logs one `noted` line.
+MOCKUP_HOME_FIX = " (decision mockup-home, a mockup kept off the repo is gone with the machine or the account that holds it)"
+
+
+def mockup_home_hit(writes, tool_input, cwd):
+    """(reason, matched) for the first `designs` entry of `writes` with no `file` or a refused one, else None.
+    Fails open on any unread state."""
+    import question_form
+    try:
+        root = question_form.waiting_page_root(tool_input, cwd)
+        found = question_form.design_file_problems(writes, root) if root else []
+    except Exception as err:
+        record(DATA_TOOL, "noted", "mockup-home", "unknown: " + cap_safe(type(err).__name__ + ": " + str(err), 100))
+        return None
+    if not found:
+        return None
+    doc_id, slug, problem = found[0]
+    return "design " + cap_safe(slug, 40) + ": " + problem + MOCKUP_HOME_FIX, "item " + cap_safe(str(doc_id or "?"), 40)
 
 
 def page_design_hit(writes, tool_input, cwd):
@@ -3609,24 +3976,45 @@ def _simctl_boot_args(word: str, rest: list):
     return None
 
 
-def _sim_boot_names(segment: str) -> list:
-    """The device names or UDIDs a segment boots by `xcodebuild -destination`, by the command word. Empty when it boots none."""
+def _sim_commands(segment: str):
+    """(command word as written, its arguments) at each command of SEGMENT and, through `inner_commands`, of each
+    command a wrapper hands on (`bash -c`, `sh -lc`, `sudo`, `$(...)`). The one walk of the simulator rules.
+    A quoted or echoed text is not a command and is not read."""
     tokens = segment_tokens(segment)
-    index = resolve_command(tokens) if tokens else None
-    if index is None:
-        return []
-    word, rest = basename(tokens[index]), tokens[index + 1:]
-    if word == "xcodebuild":
-        found = []
-        for i, token in enumerate(rest):
-            value = rest[i + 1] if token == "-destination" and i + 1 < len(rest) else (
-                token[len("-destination="):] if token.startswith("-destination=") else "")
-            fields = dict(p.split("=", 1) for p in value.split(",") if "=" in p)
-            if "iOS Simulator" in fields.get("platform", "") and (fields.get("id") or fields.get("name")):
-                os_ = fields.get("OS", "")  # a numeric OS= filters a name; an id, or OS=latest, filters nothing
-                found.append((fields.get("id") or fields["name"], "" if fields.get("id") or not re.fullmatch(r"[0-9.]+", os_) else os_))
-        return found
-    return []
+    if not tokens:
+        return
+    for start in command_indexes(tokens):
+        yield tokens[start], tokens[start + 1:]
+    for text in inner_commands(tokens):
+        for part in split_segments(text):
+            yield from _sim_commands(part)
+
+
+def _xcodebuild_boot_names(rest: list) -> list:
+    """The device names or UDIDs the arguments of an `xcodebuild` boot by `-destination`. Empty when it boots none."""
+    found = []
+    for i, token in enumerate(rest):
+        value = rest[i + 1] if token == "-destination" and i + 1 < len(rest) else (
+            token[len("-destination="):] if token.startswith("-destination=") else "")
+        # The tokens keep no quote marks, so a shell operator glued after the closing quote
+        # (`'id=X'&`, `"id=X">/dev/null`, `(cd ios && xcodebuild ... 'OS=17.0')`) is read into the value.
+        # Cut it at the first `&`, `<`, `>`, `|` or `;`, then drop each trailing `)` that no `(` opens,
+        # so "iPhone SE (3rd generation)" keeps its own paren.
+        value = re.split(r"[&<>|;]", value, maxsplit=1)[0]
+        while value.endswith(")") and value.count(")") > value.count("("):
+            value = value[:-1]
+        fields = dict(p.split("=", 1) for p in value.split(",") if "=" in p)
+        if "iOS Simulator" in fields.get("platform", "") and (fields.get("id") or fields.get("name")):
+            os_ = fields.get("OS", "")  # a numeric OS= filters a name; an id, or OS=latest, filters nothing
+            os_ = "" if fields.get("id") or not re.fullmatch(r"[0-9.]+", os_) else os_
+            found.append((fields.get("id") or fields["name"], os_))
+    return found
+
+
+def _sim_boots(segment: str) -> list:
+    """[(name or (name, OS), remedy)] for each simulator the xcodebuild commands of SEGMENT boot by `-destination`."""
+    return [(n, _sim_route_remedy(rest)) for command, rest in _sim_commands(segment)
+            if basename(command) == "xcodebuild" for n in _xcodebuild_boot_names(rest)]
 
 
 def _simulator_app_open(rest: list) -> bool:
@@ -3647,18 +4035,14 @@ def _simulator_app_open(rest: list) -> bool:
 def sim_bypass_hit(segment: str) -> str:
     """The matched text when one segment boots a simulator outside sim-test, else ''. Judged by the
     command word, at each command of the segment and in each command a wrapper hands on
-    (`inner_commands`), so `bash -c`, `sudo` and `$(...)` are read and a quoted or echoed text is not."""
-    tokens = segment_tokens(segment)
-    if not tokens:
-        return ""
-    for start in command_indexes(tokens):
-        word, rest = basename(tokens[start]), tokens[start + 1:]
+    (`_sim_commands`), so `bash -c`, `sudo` and `$(...)` are read and a quoted or echoed text is not."""
+    for command, rest in _sim_commands(segment):
+        word = basename(command)
         if word == "open" and _simulator_app_open(rest):
             return ("open " + " ".join(rest))[:100]
         if _simctl_boot_args(word, rest) is not None:
-            return " ".join([tokens[start]] + rest)[:100]
-    return next((hit for text in inner_commands(tokens) for part in split_segments(text)
-                 if (hit := sim_bypass_hit(part))), "")
+            return " ".join([command] + rest)[:100]
+    return ""
 
 
 SIM_BYPASS_REASON = (
@@ -3668,8 +4052,82 @@ SIM_BYPASS_REASON = (
 )
 
 
-def sim_boot_refusal(tool: str, names: list) -> None:
-    """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted."""
+# The xcodebuild options that take the next word as their value, written from memory of `man xcodebuild` and
+# not checked against it. Any other dash word is a flag with no value, so the word after it can be the action.
+# A wrong entry changes only the remedy text, never the verdict. A colon or `=` form
+# (`-only-testing:X`, `-scheme=X`) holds its value in the same word and is in no list.
+SIM_ROUTE_VALUE_FLAGS = frozenset({
+    "-project", "-workspace", "-target", "-scheme", "-configuration", "-xcconfig", "-arch", "-sdk", "-toolchain",
+    "-destination", "-destination-timeout", "-jobs", "-derivedDataPath", "-resultBundlePath", "-resultBundleVersion",
+    "-resultStreamPath", "-archivePath", "-exportPath", "-exportOptionsPlist", "-testPlan", "-xctestrun",
+    "-testProductsPath", "-only-testing", "-skip-testing", "-only-test-configuration", "-skip-test-configuration",
+    "-testLanguage", "-testRegion", "-test-iterations", "-parallel-testing-enabled", "-parallel-testing-worker-count",
+    "-maximum-parallel-testing-workers", "-maximum-concurrent-test-device-destinations",
+    "-maximum-concurrent-test-simulator-destinations", "-test-timeouts-enabled",
+    "-default-test-execution-time-allowance", "-maximum-test-execution-time-allowance",
+    "-test-repetition-relaunch-enabled", "-collect-test-diagnostics", "-enableCodeCoverage",
+    "-enableAddressSanitizer", "-enableThreadSanitizer", "-enableUndefinedBehaviorSanitizer",
+    "-enablePerformanceTestsDiagnostics", "-localizationPath", "-exportLanguage", "-clonedSourcePackagesDirPath",
+    "-packageCachePath", "-scmProvider", "-defaultPackageRegistryURL", "-packageAuthorizationProvider",
+    "-authenticationKeyPath", "-authenticationKeyID", "-authenticationKeyIssuerID", "-framework", "-library",
+    "-headers", "-debug-symbols", "-output", "-find-executable", "-find-library", "-importPlatform",
+    "-downloadPlatform", "-buildVersion", "-architectureVariant", "-exportPlatform", "-platform",
+})
+
+
+def _sim_route_remedy(rest: list) -> str:
+    """The remedy for an `xcodebuild -destination` command with arguments REST: `sim-test` with its arguments (no
+    -destination, no `test` action: sim-test adds it) when the action is `test`, else the generic
+    destination. The action is the word `test` that no option takes as its value. The shell's redirects
+    (`2>&1`, `> out.log`) and a lone `&` are no xcodebuild arguments, so the remedy drops them."""
+    args, action, skip = [], False, False
+    for i, token in enumerate(rest):
+        if skip:
+            skip = False
+        elif token in ("-destination", "&") or token.startswith("-destination="):
+            skip = token == "-destination"
+        elif re.fullmatch(r"\d*[<>&|]+", token):
+            skip = True  # a bare redirect operator (`>`, `2>`, `>&`, `&>`): its target is the next word
+        elif REDIRECTION.fullmatch(token):
+            pass
+        elif token == "test" and not (i and rest[i - 1] in SIM_ROUTE_VALUE_FLAGS):
+            action = True
+        else:
+            args.append(token)
+    if action:
+        return "Run `sim-test %s` instead." % " ".join(shlex.quote(a) for a in args)
+    return "Use `-destination 'generic/platform=iOS Simulator'` instead, and boot nothing."
+
+
+def sim_lease_holds(session: str, udids: list) -> bool:
+    """True when SESSION holds a live sim-lease whose slot maps to every UDID in UDIDS (decision
+    sim-test-is-the-one-boot-path, ruling 5). The slot map, the liveness test and the read live in bin/sim-lease,
+    loaded by path as it has no .py name. An empty session or UDIDS, or any failure to load or read, is False:
+    the refusal stands. The read takes no lock and writes nothing, and no bytecode file is written for the load."""
+    if not session or not udids:
+        return False
+    keep = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "bin", "sim-lease")
+        loader = importlib.machinery.SourceFileLoader("sim_lease", path)
+        spec = importlib.util.spec_from_loader("sim_lease", loader)
+        lease = importlib.util.module_from_spec(spec)
+        loader.exec_module(lease)
+        held = {lease.SLOT_UDID[e["slot"]].casefold() for e in lease.live_leases()
+                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID}
+    except Exception:
+        return False
+    finally:
+        sys.dont_write_bytecode = keep
+    return all(u.casefold() in held for u in udids)
+
+
+def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str = "") -> None:
+    """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted. After those two
+    rules, an `xcodebuild -destination` boot (REMEDIES maps a name to its remedy) is refused as
+    simulator-boot-route, and an MCP launch as simulator-boot-lease, unless SESSION holds a live sim-lease whose
+    slot is the launched device (sim_lease_holds)."""
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "janitor"))
         import sweep
@@ -3680,9 +4138,11 @@ def sim_boot_refusal(tool: str, names: list) -> None:
     devices = sweep.sim_read_devices()
     if devices is None:
         return
+    shut_down = []
     for name in names:
         name, os_ = name if isinstance(name, tuple) else (name, "")  # a destination's OS= picks a runtime
-        hits = [d for d in devices if name.upper() == d["udid"].upper() or name == d["name"]]  # a UDID has no case
+        key = name.strip().casefold()  # a name compares without case or outer spaces; a UDID has no case
+        hits = [d for d in devices if key == d["udid"].casefold() or key == d["name"].strip().casefold()]
         if os_:  # not importable from sim_boot_record: its version() is nested in by_name_ok
             hits = [d for d in hits if (v := d["runtime"].split("SimRuntime.")[-1].split("-", 1)[-1].replace("-", ".")) == os_
                     or v.startswith(os_ + ".")] or hits  # no runtime matches: judge them all
@@ -3704,6 +4164,20 @@ def sim_boot_refusal(tool: str, names: list) -> None:
                 refuse(tool, "deny", "simulator-boot-twin",
                        "An idle booted simulator of the same type and runtime exists: %s (%s). Use it "
                        "instead of booting another." % (twin["name"], twin["udid"]), name)
+        shut_down.append((name, [h["udid"] for h in hits]))
+    for name, udids in shut_down:
+        if tool == SIM_MCP:
+            if sim_lease_holds(session, udids):
+                continue  # this session's live lease is for this very device: the boot is under the lease
+            refuse(tool, "deny", "simulator-boot-lease",
+                   "A launch of the shut-down simulator %s boots it outside the one lock: the Mac "
+                   "shares one simulator across repos, and `sim-test` holds that lock. Run `sim-test`, "
+                   "which boots it under the lock, or launch a simulator that is already booted. "
+                   "(decision sim-test-is-the-one-boot-path)" % name, name)
+        elif (remedies or {}).get(name):
+            refuse(tool, "deny", "simulator-boot-route",
+                   "`xcodebuild -destination` boots %s outside the `sim-test` lock. %s "
+                   "(decision sim-test-is-the-one-boot-path)" % (name, remedies[name]), name)
 
 
 def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
@@ -3736,7 +4210,8 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
             except Exception:
                 resolved_target = write_target
             if (path_is_inside(resolved_target, home_primary) is True
-                    and path_is_inside(resolved_target, home) is False):
+                    and path_is_inside(resolved_target, home) is False
+                    and not _own_red_run(payload, home_primary, resolved_target, False)):
                 return "write target outside recorded agent home"
     return ""
 
@@ -3939,18 +4414,33 @@ def _cd_home_exempt(payload, cwd: str, target: str) -> bool:
     return bool(held) and path_is_inside(target, held) is True
 
 
-def _cd_red_run(payload, roots, owner: str) -> bool:
-    """True when OWNER, the checkout a `cd` moves into, is the caller's own test-author red-run
-    folder `<primary>/.claude/worktrees/agent-<its agent id>-<suffix>`. The id and its dash match
-    whole, so a sibling whose id only starts with this one does not pass."""
+# The shell verbs that may name the red-run folder's own root: `cp x <red>/` writes inside it. No
+# other verb may, so `rm -rf <red>` stays refused (an-agent-outside-its-home-tree-must-stop).
+RED_RUN_ROOT_VERBS = ("cp",)
+
+
+def _own_red_run(payload, primary: str, path: str, root_ok: bool = True) -> bool:
+    """True when PATH is inside the caller's own test-author red-run folder
+    `<primary>/.claude/worktrees/agent-<its agent id>-<suffix>`. The one home for that test: the
+    `cd` act and the write act of other-checkout, and worktree-home's Write target, all ask it.
+    PRIMARY is the primary checkout alone, so a folder under a linked worktree never counts. The id and
+    its dash match whole, so a sibling whose id only starts with this one does not pass. ROOT_OK False
+    leaves the folder itself out: a write passes only strictly inside it, so a delete of the folder
+    is still refused. Both sides compare case-folded and realpath'd (`path_is_inside`)."""
     agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
-    if not isinstance(agent_id, str) or not agent_id or not owner:
+    if not isinstance(agent_id, str) or not agent_id or not primary or not path:
         return False
-    folder = os.path.dirname(owner)
-    return (os.path.basename(owner).startswith("agent-" + agent_id + "-")
-            and os.path.basename(folder) == "worktrees"
-            and os.path.basename(os.path.dirname(folder)) == ".claude"
-            and os.path.dirname(os.path.dirname(folder)) in roots)
+    holder = os.path.join(primary, ".claude", "worktrees")
+    folder = path
+    while True:
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return False
+        if (path_is_inside(parent, holder) is True and path_is_inside(holder, parent) is True
+                and os.path.normcase(os.path.basename(folder)).startswith(
+                    os.path.normcase("agent-" + agent_id + "-"))):
+            return root_ok or folder != path
+        folder = parent
 
 
 def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = "",
@@ -3962,7 +4452,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     valid `session_id`; a caller that omits `has_agent` gets no exemption. An unreadable git
     state, or a cwd in no checkout, is unknown and passes. One git read per call that can write.
     A shell `cd`, `pushd` or `Set-Location` that moves into another checkout is refused too, unless
-    `payload` marks the target as the caller's own home or red-run folder; a `cd` toward a folder
+    `payload` marks the target as the caller's own home or red-run folder (a write strictly inside that red-run
+    folder passes too, a shell `cp` may also name its root); a `cd` toward a folder
     under another `.git` entry spends the git read. A target in a separate clone of the same repo
     (the nearest `.git` above it names another common dir with the same origin, read by file) is
     refused the same way; the clone check spawns no git. Liftable by an owner override, unlike `worktree_home_hit`
@@ -4000,7 +4491,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     temp = os.path.realpath(tempfile.gettempdir())
     clone_hit = {}   # target -> True when the hit was a separate clone, not a checkout of this one
 
-    def elsewhere(target, at):
+    def elsewhere(target, at, verb=""):
         try:
             resolved = _resolved(target, at)
             owner = _owning_checkout(resolved, roots)
@@ -4020,13 +4511,14 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
             return True
         # The primary's `.git` is the clone's common directory, shared by every checkout.
         return (bool(owner) and owner != own
-                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True)
+                and path_is_inside(resolved, os.path.join(owner, ".git")) is not True
+                and not _own_red_run(payload, roots[0], resolved, verb in RED_RUN_ROOT_VERBS))
 
     for move in moves:
-        if elsewhere(move, where) and not _cd_red_run(payload, roots, _owning_checkout(move, roots)):
+        if elsewhere(move, where) and not _own_red_run(payload, roots[0], move):
             return (OTHER_CLONE_CD_DETAIL if clone_hit.get(move) else OTHER_CHECKOUT_CD_DETAIL) + move
     if targets is None:
-        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True) if writes else ""
+        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True, predicate_command=True) if writes else ""
         if not hit:
             # A git verb that changes files, run in a separate clone or from a stranded cwd. The one
             # reader of such verbs is session_home_git_hit; only the folder test differs.
@@ -4334,11 +4826,13 @@ def judge(payload) -> None:
     if role_reason:
         refuse(tool, "deny", "agent-role-model", role_reason, role_matched)
 
-    # 9c. The machine-load brake: one read on a lane-start call, and one on an agent's shell or file write.
+    # 9c. The machine-load brake: one read on a start call, and one on an agent's or a lane session's shell or file write.
     # It runs before the Opus refusal, because a lifted refusal exits refuse() at once and would skip this deny.
     load_reason, load_matched = load_hit(tool, tool_input)
     if not load_reason:
-        load_reason, load_matched = running_lane_hit(payload, tool)
+        load_reason, load_matched = running_agent_hit(payload, tool)
+    if not load_reason:
+        load_reason, load_matched = lane_session_hit(payload, tool)
     if load_reason:
         refuse(tool, "deny", "load-brake", load_reason, load_matched)
 
@@ -4418,6 +4912,9 @@ def judge(payload) -> None:
         if rule == "item-field-rendered":
             refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
         if item_writes:
+            unhomed = mockup_home_hit(item_writes, tool_input, cwd)
+            if unhomed:
+                refuse(tool, "deny", "mockup-home", unhomed[0], unhomed[1])
             unseen = page_design_hit(item_writes, tool_input, cwd)
             if unseen:
                 refuse(tool, "deny", "page-item-design", unseen[0], unseen[1])
@@ -4442,16 +4939,21 @@ def judge(payload) -> None:
             matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")
             if matched:
                 refuse(tool, "deny", "simulator-boot-bypass", SIM_BYPASS_REASON, matched)
-            names = [n for seg in segments for n in _sim_boot_names(seg)]
+            names, remedies = [], {}
+            for seg in segments:
+                for n, remedy in _sim_boots(seg):
+                    names.append(n)
+                    remedies.setdefault(n[0], remedy)
             if names:
-                sim_boot_refusal(tool, names)
+                sim_boot_refusal(tool, names, remedies)
         return
     if tool == SIM_MCP:
         # `udid` is an alias of `device`: judge each non-empty name, so one field hides no other.
         names = list(dict.fromkeys(v for v in map(tool_input.get, ("device", "udid"))
                                    if isinstance(v, str) and v))
         if tool_input.get("action") == "launch" and names:
-            sim_boot_refusal(tool, names)
+            sid = payload.get("session_id") if isinstance(payload, dict) else ""
+            sim_boot_refusal(tool, names, None, sid if isinstance(sid, str) else "")
         return
 
     if tool not in WRITE_TOOLS:

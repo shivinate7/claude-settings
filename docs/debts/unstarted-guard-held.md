@@ -1,0 +1,6 @@
+# Unstarted guard held
+
+- **What.** No check refuses a coordinator report whose `Unstarted:` line omits a step that is ready and not started (rule `reports-name-unstarted-items`). The build lists those steps as `ready not started:` lines, and nothing checks the report against them.
+- **Why held.** Measured 2026-11-06 14:40 CST: 21 steps with no lane, and the coordinator's 14:20 CST report named none of them. 9 of the 21 wait on something that lives only in note prose, so a refusal would be a false alarm on 9 steps (rule `verification-cry-wolf-guard-is-spent`). The coordinator does not run build.py, so a guard read from its own transcript, as the stalled hold reads, would always read unknown. Coordinator pick A, 2026-11-06 14:38 CST.
+- **Decision.** `stalled-steps` (stalled steps: part 2, ready not started).
+- **Retire.** Triage writes `paused` on each waiting todo step. One day later, re-measure: count the coordinator's reports that omit a `ready not started:` step that has no `paused`. If the re-measure finds at least one real miss and zero false alarms, build the refusal, fed from a file that triage writes on the record branch at each build. If the misses are zero, close this debt with that count.
