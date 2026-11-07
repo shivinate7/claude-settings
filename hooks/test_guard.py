@@ -15109,6 +15109,37 @@ add("builder-refuse: a builder's merge commit that adds a new test function is b
     "deny", rule=BDIFF, event="SubagentStop", cwd=MERGE_ADDS, agent_id="bld1", agent_type="builder")
 
 
+def _author_test_commit(w):
+    """Cut at main. The test-author edits its test file and commits: an ordinary commit, no merge."""
+    write(os.path.join(w, TEST_A), BASE_FILES[TEST_A] + "def test_author_ordinary():\n    assert 6\n\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "test-author case")
+
+
+def _author_merge_test_edit(w):
+    """Cut at main. Main adds a test file the lane never touches, so the merge brings it in clean. The test-author
+    merges with --no-commit, edits that clean-merged test file, and commits: the merge commit changes a test file."""
+    _put_commit(w + "-main", [("tests/test_main_new.py", "def test_m():\n    assert 1\n")], "main adds a test")
+    _must(w, *IDENT, "merge", "-q", "--no-commit", "--no-ff", "main")
+    write(os.path.join(w, "tests/test_main_new.py"), "def test_m():\n    assert 2\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+TA_TEST_COMMIT = diff_repo("ta-test-commit", _author_test_commit)
+TA_MERGE_TEST = diff_repo("ta-merge-test-edit", _author_merge_test_edit)
+# Case 7 (green pin; red on the role-diff mutant that judges a test-author as a builder): a test-author's ordinary
+# commit of a test file, with no merge, logs no author-diff line.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's ordinary commit of a test file is never refused and logs "
+                         "no author-diff line",
+                         author_silent_case(TA_TEST_COMMIT, "ta-test-commit")))
+# Case 8 (green pin; red on the same mutant): a test file that merged clean, which the test-author edits in its merge
+# commit, logs no author-diff line. A merge the test file only came in by changes nothing here, so the edit is the case.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that edits a test file that merged clean logs "
+                         "no author-diff line",
+                         author_silent_case(TA_MERGE_TEST, "ta-merge-test-edit")))
+
+
 def refused_push_and_stop_case(label):
     """A builder's own commit holds a test change. Push and the first stop are each denied, and each denial
     writes a builder-diff line. The commit check is left out: the row names push and stop only."""
