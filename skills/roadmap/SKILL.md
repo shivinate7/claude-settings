@@ -132,8 +132,9 @@ stalled until it has a disposition (the same test as the in-progress upkeep row,
 disagree). It prints `stalled step: <id> (resume, pause or done)`, or `stalled step: <id> (done: landed in
 #N)` when a `Step:` trailer is on main, writes the page, then exits 1. A landed feel-fix with no valid
 device trial is not stalled; the device row lists it. A step is live by `cs-step:<id>` on
-a live session of this repo, or an open pull whose branch is the id or `lane/<id>`. A `cs-topic:` tag never
-keeps a step live. The page's stalled block lists the ids.
+a live session of this repo, or an open pull whose branch is the id or `lane/<id>`. A session whose status
+bucket is completed or failed has ended and holds no step; an idle or review ready one still does. The tag value is
+read stripped, as idle_lanes reads it. A `cs-topic:` tag never keeps a step live. The page's stalled block lists the ids.
 
 An open waiting-page item whose `lane` is a non-empty text and has no live work is stalled too. It
 prints `stalled step: item <n> (lane <slug>: re-route, close or resume)` and exits 1. The lane is live
@@ -153,9 +154,12 @@ One function, `next_act`, gives each ready step and each stalled step `id`, `act
 step's act is `start lane`. The owner is the step's `owner` field, else `coordinator`.
 A ready step more than `READY_AGE_LIMIT_HOURS` (24, unmeasured) old prints
 `ready over limit: <id> (start lane; owner <owner>; age <N>h)`, and build.py exits 1, as on a stalled step. A step
-with no age is never over. Every build prints `ready with no lane: <N>`, zero included. With no usable live read,
-the list and the count each read `unknown (<why>)`, never zero, and there is no red line. A ready step inside the
-limit never changes the exit code.
+with no age is never over. A `todo` or `ready` step that has landed on main (a `Step:` trailer) is not listed: it has
+no lane to start, and the landed upkeep rows name it. A `todo` or `ready` step with a missing or wrongly cased phase
+prints `ready not started: unknown (<id> has no usable phase)` and is not listed. Every build prints
+`ready not started count: <N>`, zero included, or `ready not started count: unknown (<why>)` when a phase is unusable.
+With no usable live read, the list and the count each read `unknown (<why>)`, never zero, and there is no red line.
+A ready step inside the limit never changes the exit code.
 
 Triage disposes each stalled step by writing, on the record branch, one of three things. It sets the step
 `todo` (the lane is gone and the work is not done) or `done` (it landed). Or it adds `paused`:
