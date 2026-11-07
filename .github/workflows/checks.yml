@@ -1201,9 +1201,9 @@ jobs:
     # (ci-job-caps) until the split (debt mutate-guard-split); the next green run gives the figure.
     # The run now also makes one clean-layout control per target, a full suite on the unmutated layout, in the same pool as the
     # mutants and under the same job cap. The guard, override and simlease targets each run the guard suite (about 870 s alone,
-    # measured with seven controls at once). That adds up to three such suites to the run; the added time is unmeasured in CI,
-    # so the 25 min cap is not re-measured either.
-    timeout-minutes: 25
+    # measured with seven controls at once). Spread over 4 jobs that is about +650 s, so the run nears 1600 s (27 min);
+    # unmeasured in CI. The cap rises to 45 min under the owner's stopgap (ci-job-caps); the next green run gives the figure.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
