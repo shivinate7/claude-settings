@@ -13811,6 +13811,61 @@ sh("builder-diff: a builder in a tree git cannot read is allowed and noted", COM
 sh("builder-diff: reads stay allowed in a dirty tree", "cat tests/test_a.py && ls tests",
    "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
 
+# ---- frozen: the main mirror and the live pin name are copied into guard_frozen.py from install.sh and
+# merge/install_from_main.sh. Each shell name is a literal in its script, and the guard keeps its own copy
+# (MAIN_MIRROR_NAME, LIVE_PIN_SUFFIX). Each copy is read as text, never imported, so the check loads no guard.
+# A change to one side alone would leave the frozen check guarding a folder that no install builds.
+FAMILY = "frozen"
+_MIRROR_SHELL = re.compile(r'^MAIN_MIRROR="\$HOME/([^"/$]+)"[ \t\r]*$', re.M)
+_PIN_SHELL = re.compile(r'^pin="\$clone([^"/$]*)"[ \t\r]*$', re.M)
+
+
+def _module_literal(text, name):
+    """The value of the top-level assignment `name = <literal>` in a Python module's text, or None."""
+    for node in ast.parse(text).body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            try:
+                return ast.literal_eval(node.value)
+            except ValueError:
+                return None
+    return None
+
+
+def mirror_name_problems(install_sh, install_from_main, guard_frozen):
+    """One line per copy that differs from its shell literal, or [] when every copy agrees. Each argument is
+    the text of one file."""
+    problems = []
+    mirror = _MIRROR_SHELL.findall(install_sh)
+    pin = _PIN_SHELL.findall(install_from_main)
+    name = _module_literal(guard_frozen, "MAIN_MIRROR_NAME")
+    suffix = _module_literal(guard_frozen, "LIVE_PIN_SUFFIX")
+    if len(mirror) != 1:
+        problems.append("install.sh does not set MAIN_MIRROR to $HOME/<name> exactly once")
+    elif name != mirror[0]:
+        problems.append("MAIN_MIRROR_NAME is %r but install.sh MAIN_MIRROR is $HOME/%s" % (name, mirror[0]))
+    if len(pin) != 1:
+        problems.append('install_from_main.sh does not set pin="$clone<suffix>" exactly once')
+    elif suffix != pin[0]:
+        problems.append("LIVE_PIN_SUFFIX is %r but install_from_main.sh pin suffix is %r" % (suffix, pin[0]))
+    return problems
+
+
+def _mirror_names_tie():
+    """MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX in guard_frozen.py equal the shell names they copy."""
+    def read(*parts):
+        with open(os.path.join(REPO, *parts), encoding="utf-8") as handle:
+            return handle.read()
+
+    problems = mirror_name_problems(read("install.sh"), read("merge", "install_from_main.sh"),
+                                    read("hooks", "guard_frozen.py"))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX equal install.sh MAIN_MIRROR and the install_from_main.sh pin"
+
+
+LOG_CHECKS_EXTRA.append(("frozen: MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX equal the shell names they copy",
+                         _mirror_names_tie))
+
 # ---- merge: gh_call_of reads the pr verb past a root flag. Its callers (merge_call_of, the draft-PR read,
 # ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front hides the
 # verb from each of them. One check per root flag form, called on gh_call_of directly.
