@@ -148,8 +148,14 @@ passes for zero stalled items.
 build.py also prints `ready not started: <id> (<age>h)` for each step with status `todo` or `ready` and
 phase `now`. The step needs no live lane (the same test as above) and no valid `paused` field. No open
 item homed on it may lack a lane. The age is whole hours from `updatedAt` to the live read, or `(age unknown)` when `updatedAt`
-is missing or has no zone. The same list rides in the build info (`window.ROADMAP_BUILD.ready`). No page draws it yet. With no usable live read, one line
-reads `ready not started: unknown (<why>)`, never zero. These lines never change the exit code.
+is missing or has no zone. The same list rides in the build info (`window.ROADMAP_BUILD.ready`). No page draws it yet.
+One function, `next_act`, gives each ready step and each stalled step `id`, `act`, `owner` and `age`. A ready
+step's act is `start lane`. The owner is the step's `owner` field, else `coordinator`.
+A ready step more than `READY_AGE_LIMIT_HOURS` (24, unmeasured) old prints
+`ready over limit: <id> (start lane; owner <owner>; age <N>h)`, and build.py exits 1, as on a stalled step. A step
+with no age is never over. Every build prints `ready with no lane: <N>`, zero included. With no usable live read,
+the list and the count each read `unknown (<why>)`, never zero, and there is no red line. A ready step inside the
+limit never changes the exit code.
 
 Triage disposes each stalled step by writing, on the record branch, one of three things. It sets the step
 `todo` (the lane is gone and the work is not done) or `done` (it landed). Or it adds `paused`:
@@ -275,8 +281,8 @@ reads. The stale-step row adds one more `list_sessions` walk inside that publish
 fields per session in the file. The page-ruling row adds one `ArtifactData list items` read (every
 page) to the same publish. The roadmap build script adds no git process, file, timer or log for either row. The
 dated-claim row reads the notes already loaded and adds nothing.
-The red line, the stalled lines and the two stale-ready rows read the live file build.py already reads, and add no
-process, file, timer or log. The publisher adds one field, `createdAt`, per pull row, from the GitHub
+The red line, the stalled lines, the ready lines and the two stale-ready rows read the live file and steps build.py
+already reads, and add no process, file, timer or log. The publisher adds one field, `createdAt`, per pull row, from the GitHub
 list call it already makes.
 The mockup check runs at most four git processes per build, however many entries and origin refs (the ref listing, the shallow check, one batched type read, and one batched link read when a ref holds a blob at an entry's path). Check: `test_five_entries_over_fifty_origin_refs_start_at_most_four_git_processes` in `skills/roadmap/test_build.py`. It adds no file, timer or log.
 No watcher, no timer, no log.

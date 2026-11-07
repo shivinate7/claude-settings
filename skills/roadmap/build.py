@@ -98,6 +98,11 @@ fields (id, session_status, tags) per session in the live file it already writes
 one read of the waiting page's items (n, status, home) to that same publish. This script adds no git
 process, file, timer or log for it. The dated-claim row adds no git process, file, timer or log: it reads
 the notes already loaded.
+The next act (`next_act`) serves the ready steps and the stalled steps. A ready step (status todo or ready, phase now,
+no live lane, no valid pause, no open lane-less page item) prints `ready not started: <id> (<age>h)`; one more than
+READY_AGE_LIMIT_HOURS old also prints `ready over limit: <id> (start lane; owner <owner>; age <N>h)` and the build
+exits 1, as on a stalled step. An unknown age is never over. Every build prints `ready with no lane: <N>`, or the
+unknown why. These add no process, file, timer or log: they use the steps and the live file this script already reads.
 The red line and the two stale-ready rows add no process, file, timer or log: they read the live file this
 script already reads. The publisher adds one field (createdAt) per pull row, from the GitHub list call it
 already makes.
@@ -121,6 +126,11 @@ PAIR_LINE = "todo step with an open PR"
 STALLED_LINE = "stalled step"
 # Every ready line starts with this. It never changes the exit code.
 READY_LINE = "ready not started"
+# A ready step whose age is more than this many whole hours goes red (a `ready over limit` line, exit 1). Unmeasured:
+# 24 is a guess at one working day, not read from how long ready steps wait; revise it once the ages are on record.
+READY_AGE_LIMIT_HOURS = 24
+READY_OVER_LINE = "ready over limit"
+READY_COUNT_LINE = "ready with no lane"
 # Who may decide a paused step (the `paused.decides` field, written by triage).
 PAUSE_DECIDES = ("owner", "coordinator", "triage")
 MOCKUP_LINE = "mockup with no file"
@@ -842,7 +852,7 @@ def main(argv=None):
     lines = ready_lines(info["ready"])
     if lines:
         print("\n".join(lines))
-    if pairs or misses or info["stalled"]["steps"] or info["stalled"]["items"]:
+    if pairs or misses or info["stalled"]["steps"] or info["stalled"]["items"] or over_limit(info["ready"]):
         raise SystemExit(1)
 
 
@@ -1160,11 +1170,12 @@ def stalled_items(work):
 
 def stalled(steps, marks, work):
     """The page's stalled block: {"why", "steps", "paused", "badPause", "items", "itemsWhy"}.
-    `steps` is a list of {"id", "fix"}, or None only when `why` says the live read is unknown, never [].
+    `steps` is a list of next_act entries plus "fix", or None only when `why` says the live read is unknown, never [].
     A step with a valid `paused` field moves to `paused` (ids); a wrong-shaped one stays stalled and is listed in
     `badPause`. `items` is the open waiting-page items whose lane has no live work, or None with `itemsWhy`."""
     why, rows = laneless(open_steps(steps), marks, work)
     out = {"why": why, "steps": None if why else [], "paused": [], "badPause": []}
+    read = None if why else live_read(work)
     for k, fix in rows:
         if "paused" in steps[k]:
             bad = pause_why(steps[k])
@@ -1172,7 +1183,7 @@ def stalled(steps, marks, work):
                 out["paused"].append(k)
                 continue
             out["badPause"].append({"id": k, "why": bad})
-        out["steps"].append({"id": k, "fix": fix})
+        out["steps"].append(dict(next_act(k, steps[k], fix, read), fix=fix))
     out["items"], out["itemsWhy"] = stalled_items(work)
     return out
 
@@ -1184,8 +1195,7 @@ def stalled_lines(block):
     if block["steps"] is None:
         out.append("%s: %s" % (STALLED_LINE, block["why"]))
     for s in block["steps"] or []:
-        out.append("%s: %s (%s)" % (STALLED_LINE, s["id"], "resume, pause or done" if s["fix"] == "todo"
-                                    else "done: landed in %s" % ", ".join(s["fix"])))
+        out.append("%s: %s (%s)" % (STALLED_LINE, s["id"], fix_act(s["fix"])))
     if block["items"] is None:
         out.append("%s: items %s" % (STALLED_LINE, block["itemsWhy"]))
     for i in block["items"] or []:
@@ -1199,29 +1209,58 @@ def step_age(step, read):
     return None if at is None else max(0, int((read - at).total_seconds() // 3600))
 
 
+def live_read(work):
+    """The live file's readAt as a datetime. The caller has checked live_why(work) first."""
+    return datetime.datetime.fromisoformat(work["read"].replace("Z", "+00:00"))
+
+
+def fix_act(fix):
+    """The next act of a doing or active step with no lane: `fix` is "todo" or the landed marks (a list of "#N")."""
+    return "resume, pause or done" if fix == "todo" else "done: landed in %s" % ", ".join(fix)
+
+
+def next_act(sid, step, fix, read):
+    """The one home of a step's next act: {"id", "act", "owner", "age"}. A ready step passes fix None and its act is
+    `start lane`; a doing or active step with no lane passes its fix (fix_act). The owner is the step's `owner` field,
+    else coordinator. The age is step_age at `read`, or None."""
+    owner = step.get("owner")
+    return {"id": sid, "act": "start lane" if fix is None else fix_act(fix),
+            "owner": owner if isinstance(owner, str) and owner.strip() else "coordinator", "age": step_age(step, read)}
+
+
 def ready_steps(steps, work):
-    """The page's ready block: {"why", "steps": [{"id", "age"}] | None}. A step is listed when its status is todo or
+    """The page's ready block: {"why", "steps": [next_act entry] | None}. A step is listed when its status is todo or
     ready, its phase is now, no live lane holds it, it has no valid `paused` field, and no open waiting-page item
     homed to it lacks a lane (an unanswered item). `steps` is None only when `why` says the read is unknown, never []."""
     _, why = stalled_items(work)  # live_why, then itemsWhy, then an open row with no lane key
     if why:
         return {"why": why, "steps": None}
     unanswered = {item_home(r) for r in work["pageItems"] if r["status"] != "closed" and not r["lane"]}
-    read = datetime.datetime.fromisoformat(work["read"].replace("Z", "+00:00"))
+    read = live_read(work)
     out = []
     for k, d in open_steps(steps):
         if (d.get("status") in TODO_STATUS and d.get("phase") == "now" and not lane_live(work, k)
                 and pause_why(d) is not None and k not in unanswered):
-            out.append({"id": k, "age": step_age(d, read)})
+            out.append(next_act(k, d, None, read))
     return {"why": None, "steps": out}
 
 
+def over_limit(block):
+    """The listed ready entries more than READY_AGE_LIMIT_HOURS whole hours old. An unknown age is never over."""
+    return [s for s in block["steps"] or [] if s["age"] is not None and s["age"] > READY_AGE_LIMIT_HOURS]
+
+
 def ready_lines(block):
-    """The lines the build prints for a ready block. An unknown read prints one unknown line and no entry, never zero."""
+    """The lines the build prints for a ready block: a `ready not started` line per step, a `ready over limit` line per
+    step over the limit, then the `ready with no lane` count. An unknown read prints one unknown line each for the
+    list and the count, no entry and no red line, never zero."""
     if block["steps"] is None:
-        return ["%s: %s" % (READY_LINE, block["why"])]
-    return ["%s: %s (%s)" % (READY_LINE, s["id"], "age unknown" if s["age"] is None else "%dh" % s["age"])
-            for s in block["steps"]]
+        return ["%s: %s" % (READY_LINE, block["why"]), "%s: %s" % (READY_COUNT_LINE, block["why"])]
+    return (["%s: %s (%s)" % (READY_LINE, s["id"], "age unknown" if s["age"] is None else "%dh" % s["age"])
+             for s in block["steps"]]
+            + ["%s: %s (%s; owner %s; age %dh)" % (READY_OVER_LINE, s["id"], s["act"], s["owner"], s["age"])
+               for s in over_limit(block)]
+            + ["%s: %d" % (READY_COUNT_LINE, len(block["steps"]))])
 
 
 CLAIM = re.compile(
