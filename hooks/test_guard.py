@@ -7261,6 +7261,12 @@ sh("guard-home-delete-literal: a folder inside the home folder is allowed",
    "rm -rf " + HOME + "/build", "allow", cwd=NOGIT)
 sh("guard-home-delete-literal: rd /s /q of a folder inside another user's home is allowed",
    "rd /s /q C:\\Users\\someone\\build", "allow", cwd=NOGIT)
+# home-parent-delete: the folder that holds every home folder is the same kind of delete. Removing it removes
+# each home with it, so it is refused as a home folder is, whatever user's home it holds.
+sh("home-parent-delete: rm -rf /home, the folder holding every home folder, is refused",
+   "rm -rf /home", "deny", "destructive-delete", cwd=NOGIT)
+sh("home-parent-delete: rm -rf /Users, the folder holding every macOS home folder, is refused",
+   "rm -rf /Users", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: the working directory", "rm -rf .", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: a glob", "rm -rf *", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: a drive root", "rm -rf C:/", "deny", "destructive-delete", cwd=NOGIT)
