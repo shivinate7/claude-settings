@@ -471,32 +471,6 @@ def _parent_pid(pid: int):
         return None
 
 
-def own_agent_lock_verdict(reason: str):
-    """True when REASON is an Agent-tool lock whose live holder is this process or one of its
-    ancestors (the calling session's own Claude process). False for any other reason, or a holder
-    outside the ancestry. None when a pid read could not tell. It reads the holder and frees
-    nothing: a merge or a sweep never frees a lock whose holder is alive (owner, waiting-page
-    item 357, 2026-11-07 13:41 CST), the calling session's own included. Only
-    `stale_agent_lock_verdict` lets a lock go."""
-    found = AGENT_LOCK_RE.match(reason or "")
-    if not found:
-        return False
-    alive = stale_agent_lock_verdict(reason)
-    if alive is not False:
-        return None if alive is None else False
-    holder = int(found.group(1))
-    current = os.getpid()
-    for _ in range(MAX_CLIMB):
-        if current == holder:
-            return True
-        if current <= 1:
-            return False
-        current = _parent_pid(current)
-        if current is None:
-            return None
-    return None
-
-
 _FETCH_FAILED = None  # a set of roots while `main` runs: those whose `fetch --prune` failed
 _LIVE_HEADS = None  # a dict while `main` runs: one ls-remote per remote per repository per run
 
