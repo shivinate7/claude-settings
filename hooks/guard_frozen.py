@@ -628,7 +628,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 pieces = _words_of(word) if "'" in word or '"' in word else [word]
                 words.extend(pieces)
                 shown.extend(pieces)
-        text = " ".join(shown)
+        text = " ".join(_without_env_values(shown))
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
         for word in words:
@@ -641,6 +641,16 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     return ""
 
 
+def _without_env_values(shown):
+    """`shown` without the `NAME=value` words before the command, so a write word held in an env value
+    (`GUARD_FAMILY=copy verdict ...`) is not read as the command's own. A value that runs text
+    (`$(`, a backtick, a paren) stays."""
+    start = 0
+    while start < len(shown) and _ASSIGNMENT.match(shown[start]) and not re.search(r"[$`()]", shown[start]):
+        start += 1
+    return shown[start:]
+
+
 def _segment_command(words):
     """(resolved command name, plain words after it) of a segment, for `writes_to`'s command position."""
     index = resolve_command(tuple(words))
@@ -651,8 +661,65 @@ def _segment_command(words):
 
 
 def frozen_shell_hit(cmd: str, cwd: str) -> str:
-    """Return the frozen (config-dir) path a shell command writes to, else ''."""
-    return _shell_write_hit(cmd, cwd, is_frozen, _holds_frozen)
+    """Return the frozen (config-dir) path a shell command writes to, else ''.
+    A quoted python heredoc body is a script, not shell lines: `interpreter_write_hit` reads its own
+    writes, `_py_run_texts` reads the command lines it runs, and the shell scan sees the command without
+    the body, so a word in a string of the script is not read as a write."""
+    scripts = _py_script_bodies(cmd)
+    for text in [_without_bodies(cmd, scripts)] + [t for body in scripts for t in _py_run_texts(body)]:
+        hit = _shell_write_hit(text, cwd, is_frozen, _holds_frozen)
+        if hit:
+            return hit
+    return interpreter_write_hit(cmd, cwd, is_frozen)
+
+
+def _py_script_bodies(cmd: str):
+    """The bodies of the quoted heredocs fed to python in `cmd` that `ast` can parse. An unquoted body
+    stays shell text (bash expands it first), and so does a body `ast` cannot read."""
+    import ast
+    import textwrap
+    if "<<" not in cmd:
+        return []
+    bodies = []
+    for reading in (False, True):
+        for quote, body, header in _split_heredocs(cmd, reading)[1]:
+            if not quote or not body.strip() or body in bodies or not _PY_HEADER.search(header):
+                continue
+            try:
+                ast.parse(textwrap.dedent(body))
+            except (SyntaxError, ValueError):
+                continue
+            bodies.append(body)
+    return bodies
+
+
+def _without_bodies(cmd: str, bodies) -> str:
+    for body in bodies:
+        cmd = cmd.replace("\n" + body + "\n", "\n", 1)
+    return cmd
+
+
+_PY_RUN_NAMES = ("system", "popen", "run", "call", "check_call", "check_output", "Popen")
+
+
+def _py_run_texts(body: str):
+    """One command line per call a script makes to run a program (`os.system`, `subprocess.run`, ...):
+    the string constants of its arguments, joined by spaces. `subprocess.run(["cp", "a", "b"])` reads
+    `cp a b`, so the shell scan judges what the script runs."""
+    import ast
+    import textwrap
+    out = []
+    for node in ast.walk(ast.parse(textwrap.dedent(body))):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
+        if name in _PY_RUN_NAMES:
+            strings = [n.value for arg in node.args for n in ast.walk(arg)
+                       if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+            if strings:
+                out.append(" ".join(strings))
+    return out
 
 
 def project_config_shell_hit(cmd: str, cwd: str) -> str:
@@ -712,7 +779,10 @@ def _py_paths(node, env):
                     out = [_join_path(a, b) for a in out for b in options]
             return out if out != [""] else []
         if isinstance(func, ast.Attribute) and func.attr in _PATH_PASS:
-            return _py_paths(func.value, env)
+            held = _py_paths(func.value, env)
+            if not held and func.attr == "expanduser" and len(node.args) == 1:
+                return _py_paths(node.args[0], env)   # os.path.expanduser(path): the path is the argument
+            return held
     return []
 
 
