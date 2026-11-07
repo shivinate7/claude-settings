@@ -260,6 +260,43 @@ class BriefFaults(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertIn(key, codes(self.m.brief_faults(brief(job=JOB + "\n" + line))))
 
+    def test_font_word_at_a_line_end_does_not_read_the_next_line_as_a_font(self):
+        # "font" ends a line and "Uses" starts the next. The font pattern reads one line, not a name across the break.
+        self.assertEqual(self.m.brief_faults(brief(job=JOB + "\nHe reads the envelope font\nUses a magnifier.")), [])
+
+    def test_font_name_after_a_line_break_is_still_refused(self):
+        self.assertIn("token-font", codes(self.m.brief_faults(brief(job=JOB + "\nBody text is set in\nRoboto."))))
+
+    def test_colour_word_before_a_part_number_hash_is_no_colour(self):
+        # "ink cartridge #1234" names a part. A 4-digit hash after a colour word is an id here, not a hex colour.
+        self.assertEqual(self.m.brief_faults(brief(job=JOB + "\nReplace ink cartridge #1234.")), [])
+
+    def test_order_id_with_a_colon_before_the_hash_is_an_id(self):
+        self.assertEqual(self.m.brief_faults(brief(job=JOB + "\nOrder ID: #123456 arrived.")), [])
+
+    def test_plural_orders_before_the_hash_is_an_id(self):
+        self.assertEqual(self.m.brief_faults(brief(job=JOB + "\nOrders #123456 arrived.")), [])
+
+    def test_colour_hex_with_no_id_word_before_it_is_still_refused(self):
+        for line in ("The ink is #abcd.", "Use #3d5af1 for the header."):
+            with self.subTest(line=line):
+                self.assertIn("token-colour", codes(self.m.brief_faults(brief(job=JOB + "\n" + line))))
+
+    def test_pixel_value_written_in_words_is_refused(self):
+        # "12 pixels" is a px value in words. The spacing pattern reads px, rem and dp, so it misses this.
+        self.assertIn("token-spacing", codes(self.m.brief_faults(brief(job=JOB + "\nCards have 12 pixels of padding."))))
+
+    def test_ios_app_named_in_a_device_section_passes(self):
+        # The lane draws an iOS app. "the iOS app" names the product being drawn, not today's product.
+        self.assertEqual(self.m.brief_faults(brief(device=DEVICE + "\nThe lane draws the iOS app for this phone.")), [])
+
+    def test_today_product_named_as_the_web_app_or_as_it_is_now_is_still_refused(self):
+        for where, line in (("job", "The web app has three tabs."), ("device", "The web app has three tabs."),
+                            ("job", "Look at the iOS app as it is now.")):
+            with self.subTest(where=where, line=line):
+                text = brief(**{where: (JOB if where == "job" else DEVICE) + "\n" + line})
+                self.assertIn("current", codes(self.m.brief_faults(text)))
+
     def test_device_gap_inset_and_scale_sizes_pass(self):
         for line in ("8 px gap at the hinge.", "Hinge gap: 8 pt.", "Safe area: 47 pt top inset.",
                      "1114 x 705 pt, a grid of two screens.", "240 pt, one step down.",
