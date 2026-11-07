@@ -636,6 +636,19 @@ class Skips(unittest.TestCase):
     def test_marker_lines_with_no_summary_are_counted(self):
         self.assert_skip(self.check(printing("PASS first\nSKIP second: no keychain\nSKIPPED third\nPASS fourth\n")), 2)
 
+    def test_colon_marker_lines_with_no_summary_are_counted(self):
+        """`SKIP: <case>` is a skip line, as `SKIP <case>` is. A suite that prints only colon lines reads SKIP, not PASS."""
+        self.assert_skip(self.check(printing("PASS first\nSKIP: second case\nSKIP: third case\nPASS fourth\n")), 2)
+
+    def test_colon_summary_line_is_not_counted_on_top_of_its_cases(self):
+        """A summary `SKIP: N check(s)` after N colon case lines adds no skip: the run skipped N, not N + 1."""
+        self.assert_skip(self.check(printing("SKIP: a: no display\nSKIP: b: no display\nSKIP: 2 check(s) not run, none failed\n")), 2)
+
+    def test_space_marker_lines_and_colon_summary_count_once(self):
+        """The shape a suite prints as one run: `SKIP <case> :: detail` lines and a `SKIP: N check(s)` summary (the
+        send-message suite). Green on the old code: it pins that the summary is not counted again."""
+        self.assert_skip(self.check(printing("SKIP a :: x\nSKIP b\nSKIP: 2 check(s) not run, none failed\n")), 2)
+
     def test_a_summary_in_the_chunk_overlap_counts_once(self):
         """bin/verdict reads 1 MiB chunks that overlap by 256 bytes, so a summary in the overlap is read twice."""
         ok_at = UT_ONE_SKIP.index("OK (skipped=1)")
