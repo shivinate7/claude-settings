@@ -511,6 +511,15 @@ class PsError(LeaseCase):
         lines = self.status().stdout.splitlines()
         self.assertFalse(any(mentions(line, holder.pid) for line in lines), "a dead holder is still listed")
 
+    def test_a_take_whose_ps_exits_2_exits_2_and_says_cannot_read_pid(self):
+        pid = self.spawn().pid
+        self.use_ps_exiting(2)
+        r = self.take("duo", pid)
+        self.assertEqual(r.returncode, 2, "a take whose ps exits 2 exits %d, not 2" % r.returncode)
+        self.assertEqual(r.stdout.strip(), "", "a take whose ps exits 2 prints a slot")
+        self.assertIn("cannot read pid", r.stderr, "a take whose ps exits 2 does not say it cannot read the pid")
+        self.assertNotIn("not alive", r.stderr, "a take whose ps exits 2 says the live pid is not alive")
+
 
 class Give(LeaseCase):
     def test_give_frees_the_lease_and_is_idempotent(self):
