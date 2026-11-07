@@ -1507,7 +1507,7 @@
 - conflict-markers-chain-clean-refuse: `git stash pop`, `git pull --rebase` or `git merge`, then commit and push in one call, is refused on a clean tree; the remedy is a separate push (hooks/guard_merge.py `_makes_conflict`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-show-uncapped: the push check runs one `git cat-file` per file with a marker finding, with no cap, and no cost case holds a finding (hooks/guard_merge.py `_kinds_of`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
-- tree-check-scope-literal: the tree check names output-styles/ as a literal path, and does not scan plans, skills or agents (lint/check_record_slugs.py)
-- quoted-gloss-not-read: has_gloss does not read a quoted gloss, so `decision x, "The shapes"` is flagged (lint/report_guard.py has_gloss)
-- underscore-italic-cite-missed: the tree check does not read `_slug_` as a cite, since `_` is a word character (lint/check_record_slugs.py id_pattern)
-- table-and-ref-link-cites: the tree check flags a table row whose gloss sits in the next cell, and a reference-link target line (lint/check_record_slugs.py first_cites)
+- tree-check-scope-literal: the tree check names output-styles/ as a literal path, and does not scan plans, skills or agents (lint/check_record_slugs.py) Fix: none — no record outside the scanned folders has missed a gloss yet. Until: 2026-11-21
+- quoted-gloss-not-read: has_gloss does not read a quoted gloss, so `decision x, "The shapes"` is flagged (lint/report_guard.py has_gloss) Fix: none — the two records it hit carry a plain gloss now, and a fix moves the report guard too. Until: 2026-11-21
+- underscore-italic-cite-missed: the tree check does not read `_slug_` as a cite, since `_` is a word character (lint/check_record_slugs.py id_pattern) Fix: none — no record writes an id in underscore italics. Until: 2026-11-21
+- table-and-ref-link-cites: the tree check flags a table row whose gloss sits in the next cell, and a reference-link target line (lint/check_record_slugs.py first_cites) Fix: none — no record has either form today. Until: 2026-11-21
