@@ -388,11 +388,12 @@ PRESS_VERB = re.compile(r"\b(?:press(?!\s+on\b(?!\s+(?:the|this|that)\b))(?:es|e
 WEB_MARKER = re.compile(r"github|\bpr\b|\bprs\b|pull\s+requests?|" + _REF +
                         r"|(?-i:(?<![\w-])Settings\b(?!\.\w))|\bsettings\s+page\b", re.I)
 PRESS_REF = re.compile(_REF, re.I)
-# "Press Copy" is a button of the waiting page and of the chat, never a press in a web app. It is left out
-# of the press read only when the page is the task title, since the title says nothing of where Copy sits.
-TITLE_PAGE_COPY = re.compile(r"\b(?:press|click|tap)(?:es|ed|ing|s|ped|ping)?\s+(?:the\s+)?[\"'“‘]?copy\b", re.I)
-# A capitalised app named after "in", "on" or "at" ("Press Copy in Procore") is another web app: its Copy is a press.
-OTHER_WEB_APP = re.compile(r"\b(?:in|on|at|inside)\s+(?:the\s+)?(?-i:[A-Z][\w-]*)", re.I)
+# "Press Copy" is a button of the waiting page and of the chat. When the page is the task title, a sentence that
+# presses Copy alone, or then pastes it in the chat, is left out of the press read. Any other word after Copy
+# (an app, "and Submit") may name a web page, so that sentence stays a press.
+TITLE_PAGE_COPY = re.compile(r"(?:^|(?<=[.!?\n]))[ \t]*(?:press|click|tap)\s+(?:the\s+)?[\"'“‘]?copy[\"'”’]?"
+                             r"(?:\s+button)?(?:,?\s+(?:and\s+)?then\s+paste\s+(?:it|this|that|the\s+text)"
+                             r"(?:\s+(?:in|into)\s+(?:the|this)\s+chat)?)?[ \t]*(?:[.!]|$)", re.I | re.M)
 _FILE = (r"[\w./-]+\.(?:md|txt|sh|json|py|ps1|ya?ml|toml|html|log|csv)\b"
          r"|\b(?:plans|docs|notes)/[\w./-]+")
 COMMAND_FILE = re.compile(_FILE, re.I)
@@ -501,8 +502,7 @@ def _press_field_ok(text, links, context="", press_text=None) -> bool:
     /issues/N at a number boundary, is read in `text`, or in `context` when `text` names no page."""
     press = text if press_text is None else press_text
     from_title = not WEB_MARKER.search(text)
-    own_copy = from_title and not OTHER_WEB_APP.search(press)
-    if not PRESS_VERB.search(TITLE_PAGE_COPY.sub("", press) if own_copy else press):
+    if not PRESS_VERB.search(TITLE_PAGE_COPY.sub("", press) if from_title else press):
         return True
     page = context if from_title else text
     if not WEB_MARKER.search(page):
@@ -628,11 +628,10 @@ def _shell_line(span, run) -> bool:
     return False
 
 
-def _without_slash_commands(text) -> str:
-    """`text` with each slash command removed from a clause that names no file. A clause that names a file
-    keeps it, since "run the /sync command shown in plans/x.md" sends the owner to that file."""
-    return "\n".join(clause if COMMAND_FILE.search(clause) else SLASH_COMMAND.sub("", clause)
-                     for clause in re.split(r"(?<=[.!?])\s+|\n", text))
+def _without_slash_commands(texts) -> str:
+    """The steps, joined, with each slash command removed from a step that names no file. A step that names a
+    file anywhere keeps it, since "run the /sync command. See plans/x.md." sends the owner to that file."""
+    return "\n".join(text if COMMAND_FILE.search(text) else SLASH_COMMAND.sub("", text) for text in texts)
 
 
 def command_in_item_hit(data) -> str:
@@ -655,7 +654,7 @@ def command_in_item_hit(data) -> str:
     joined = "\n".join(texts)
     has_file = COMMAND_FILE.search(joined)
     if COMMAND_IN_FILE.search(joined) or (has_file and COMMAND_ITS.search(joined)) \
-            or (has_file and not has_command and COMMAND_VERB.search(_without_slash_commands(joined))):
+            or (has_file and not has_command and COMMAND_VERB.search(_without_slash_commands(texts))):
         return "steps send the owner to a file for a command"
     if any(_shell_line(body, fenced or bool(SPAN_RUN_VERB.search(text[:start])))
            for text in texts for start, body, fenced in _code_spans(text)):

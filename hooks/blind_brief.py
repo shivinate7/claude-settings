@@ -109,7 +109,7 @@ PATTERNS = {
 _SPACE_WORD = r"(?:spacing|gaps?|padding|margins?|gutters?|radius|radii|insets?)"
 _COLOUR_WORD = r"(?:colou?rs?|accent|ink|background|surface|border|fill|brand|palette|tint|shade)"
 _ID_WORD = ("order", "lot", "bin", "invoice", "ticket", "id", "item", "box", "parcel", "package", "no.",
-            "number", "ref")
+            "number", "ref", "cartridge", "part", "issue", "pr")
 # "order #123456", "orders #123456" and "boxes: #123456" are ids, not colours. With a colon after the id word
 # ("Item: #3d5af1") a hash that holds a hex letter is a colour, so only the all-digit pattern reads the colon.
 _NOT_ID_BARE = "".join(r"(?<!\b%s%s )" % (re.escape(w), plural) for w in _ID_WORD for plural in ("", "s", "es"))
@@ -120,14 +120,16 @@ SPACING_EXEMPT = ("Device",)
 # sentence that says "the iOS app" may mean today's product, so it stays a `current` fault.
 IOS_APP_REF = re.compile(r"\bthe\s+ios\s+(?:app|client|version)\b", re.I)
 IOS_APP_EXEMPT = ("Device",)
+# Only a direct object of a draw verb ("draws the iOS app") is exempt, and only when the sentence does not
+# also match it to today's product.
 IOS_DRAW_VERB = re.compile(r"\b(?:draw|draws|drawing|drawn|design|designs|designing|build|builds|building"
-                           r"|mock|mocks|sketch|sketches)\b[^.!?\n]*$", re.I)
+                           r"|mock|mocks|sketch|sketches)\s+$", re.I)
+IOS_MATCH_WORD = re.compile(r"\b(?:match(?:es|ed|ing)?|like|same\s+as|today|now)\b", re.I)
 PATTERNS.update({
     "token-colour": [
         _NOT_ID_BARE + r"#(?=[0-9a-f]*[a-f])(?:[0-9a-f]{6}|[0-9a-f]{8})\b",
         _NOT_ID + r"#(?:\d{6}|\d{8})\b",
-        r"\b" + _COLOUR_WORD + r"\b\W+(?:\w+\W+){0,3}#(?:[0-9a-f]{3}|(?=\d*[a-f])[0-9a-f]{4})\b",
-        r"\b" + _COLOUR_WORD + r"\b\W+#\d{4}\b",
+        r"\b" + _COLOUR_WORD + r"\b\W+(?:\w+\W+){0,3}" + _NOT_ID_BARE + r"#[0-9a-f]{3,4}\b",
         r"\b(?:rgba?|hsla?|hwb|lch|oklab|oklch)\s?\(", r"\b(?:rgba?|hsla?)\s+\d+[ ,]+\d+[ ,]+\d+",
     ],
     "token-font": [
@@ -148,9 +150,12 @@ COMPILED["token-font"] += [re.compile(p) for p in (
     r"|Source Sans|IBM Plex|Fira Sans|Fira Code|JetBrains Mono|Playfair|Merriweather|Garamond|Verdana"
     r"|Tahoma|Segoe UI|Times New Roman|Manrope|DM Sans|Space Grotesk|Work Sans|Figtree|Fraunces|Satoshi"
     r"|General Sans)\b",
-    # After ":" or "is" the name may start the next line; after the bare word it must stay on the line.
-    r"\b[Ff]onts?\b(?:(?::|[ \t]+(?:is|are))\s+|[ \t]+)(?:(?:set )?in[ \t]+)?[A-Z][A-Za-z]+\b(?!-)",
-    r"\b[Tt]ypefaces?\b(?:(?::|[ \t]+(?:is|are))\s+|[ \t]+)(?:(?:set )?in[ \t]+)?[A-Z][A-Za-z]+\b(?!-)")]
+    r"\b[Ff]onts?\b(?:(?::|\s+(?:is|are))\s+|[ \t]+)(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)",
+    r"\b[Tt]ypefaces?\b(?:(?::|\s+(?:is|are))\s+|[ \t]+)(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)",
+    # After the bare word and a line break, a capital word then an article starts a new line ("font" / "Uses a
+    # magnifier."), not a font name.
+    r"\b[Ff]onts?[ \t]*\n\s*(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)(?!\s+(?:a|an|the)\b)",
+    r"\b[Tt]ypefaces?[ \t]*\n\s*(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)(?!\s+(?:a|an|the)\b)")]
 IOS_SKILL = re.compile(r"(?<![\w-])ios-apps(?![\w-])", re.I)
 DUO_FOLDED, DUO_UNFOLDED = "iphone-duo-folded", "iphone-duo-unfolded"  # device ids in lint/layout.json
 TOKEN_SECTION = re.compile(r"palett|colou?r|fonts?\b|typograph|typeface|spacing|tokens?\b|brand|theme|style|radius", re.I)
@@ -362,11 +367,12 @@ def brief_faults(text, current=(), template=None, devices=None):
 
 
 def ios_app_hit(body, exempt):
-    """The matched "the iOS app" text, or None. With `exempt`, a sentence that draws or builds the app before
-    the reference is left out: there it names the product being drawn."""
+    """The matched "the iOS app" text, or None. With `exempt`, a sentence whose draw verb takes the app as its
+    direct object is left out, unless it also matches the app to today's product."""
     for sentence in re.split(r"(?<=[.!?])\s+|\n", body):
         hit = IOS_APP_REF.search(sentence)
-        if hit and not (exempt and IOS_DRAW_VERB.search(sentence[:hit.start()] + " ")):
+        if hit and not (exempt and IOS_DRAW_VERB.search(sentence[:hit.start()])
+                        and not IOS_MATCH_WORD.search(sentence)):
             return hit.group(0)
     return None
 
