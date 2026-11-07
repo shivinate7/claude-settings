@@ -643,7 +643,7 @@ MUTATIONS = [
     ("frozen-path: a printer piped to a program is read by its command word, so the program's text goes unseen",
      "        narrow = command_position and not closed and not piped_to_a_runner and not nested",
      "        narrow = command_position",
-     "guard", "frozen shell: r3, a python program echoed into python /dev/stdin, writes the config settings, denies"),
+     "guard", "frozen stdin: r3, a python program echoed into python /dev/stdin, writes the config settings, denies"),
     ("frozen-path: name the path in the frozen reason",
      '    refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)',
      '    refuse(tool, "deny", "frozen-path", FROZEN_REASON + " " + target, target)', "guard", 'frozen: Write of a config hook'),
