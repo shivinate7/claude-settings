@@ -145,16 +145,18 @@ def two_worktrees_form(subcommand: str, args):
     call that is none of the forms, or a forced add that takes no branch, returns None.
     """
     if subcommand in ("checkout", "switch"):
-        letter = "-C" if subcommand == "switch" else "-B"
+        reset, create = ("C", "c") if subcommand == "switch" else ("B", "b")
         ignore = False
         names = []
-        take = False
+        take = skip = False
         for arg in args:
             if arg == "--":
                 break
             if take:
                 names.append(arg)
                 take = False
+            elif skip:
+                skip = False
             elif arg.startswith("--"):
                 if long_flag_abbrev(arg, "--ignore-other-worktrees", "--ignore-o"):
                     ignore = True
@@ -163,10 +165,18 @@ def two_worktrees_form(subcommand: str, args):
                         names.append(arg.split("=", 1)[1])
                     else:
                         take = True
-            elif arg == letter:
-                take = True
-            elif arg.startswith(letter) and len(arg) > len(letter):
-                names.append(arg[len(letter):])
+            elif arg.startswith("-") and arg != "-":
+                # a short cluster: the first branch-name option ends it, its value is the rest or the next word
+                for offset, char in enumerate(arg[1:], start=2):
+                    if char in (reset, create):
+                        value = arg[offset:]
+                        if char == reset and value:
+                            names.append(value)
+                        elif char == reset:
+                            take = True
+                        else:
+                            skip = not value
+                        break
         return (ignore, names) if ignore or names else None
     if subcommand == "worktree" and args[:1] == ["add"]:
         force = detach = skip = take = False
@@ -189,6 +199,8 @@ def two_worktrees_form(subcommand: str, args):
                 for offset, char in enumerate(arg[1:], start=2):
                     if char == "f":
                         force = True
+                    elif char == "d":
+                        detach = True
                     elif char in "bB":
                         if arg[offset:]:
                             taken.append(arg[offset:])

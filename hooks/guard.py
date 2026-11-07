@@ -3352,12 +3352,19 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "deny", "pointer-head", POINTER_HEAD_REASON, matched)
 
     # 1b2. A checkout, switch or forced worktree add that takes a branch another worktree holds.
-    # Judged against the tree whose HEAD moves (`head_where`), after the pointer rule and before the
-    # silent-write rule; the worktree list is read only for a call of the refused forms.
+    # Each segment is judged in the tree it runs in: its own `git -C` or `--git-dir`, else the cwd as
+    # earlier `cd` segments left it. Placed after the pointer rule and before the silent-write rule;
+    # the worktree list is read only for a call of the refused forms.
+    here = cwd
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
-        matched = two_worktrees_hit(segment, head_where)
+        words = segment_tokens(segment)
+        moved = _segment_cd_target(words) if words else None
+        if moved is not None:
+            here = _absolute(moved, here)
+            continue
+        matched = two_worktrees_hit(segment, head_root(segment, here))
         if matched:
             refuse(tool, "deny", "two-worktrees-one-branch", TWO_WORKTREES_DENY_REASON, matched)
 
