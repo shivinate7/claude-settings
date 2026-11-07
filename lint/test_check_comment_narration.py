@@ -58,6 +58,8 @@ FLAGGED = [
     "Fixed in round 2 places where the rows were summed", "Previously, this returned None",
     "Previously used a dict", "Added after code review", "Added after review of the PR feedback",
     "Changed from returning None to raising", "Changed from the previous default to 5",
+    "changed from the old file layout to the new one", "changed from the old state machine to a table",
+    "changed from the old hash function to sha256", "changed from the old base class to a mixin",
 ]
 
 # Near misses. No pattern may flag any of them.
