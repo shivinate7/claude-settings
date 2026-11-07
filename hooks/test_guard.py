@@ -20879,6 +20879,41 @@ def worktree_home_primary_write_from_home_case():
     return True, "a mkdir, a touch and a redirect into the primary checkout, from the agent's home, are denied"
 
 
+def worktree_home_harness_naming_case():
+    """Rule 0, worktree-home, the names a real session gives. The harness makes an agent's worktree
+    `.claude/worktrees/agent-<id>` on branch `worktree-agent-<id>`, where <id> is the agent id its payload
+    carries; each subagent transcript in a session names its agent id the same way. The test-author's
+    red-run checkout is `.claude/worktrees/agent-<id>-red`. Both are registered with git worktree add. A
+    Bash call from that red checkout passes, as does the doc's cd form from the home."""
+    primary = os.path.join(ROOT, "xcoharness_primary")
+    agent = "a5c3e1f0b7d24a916"
+    home = os.path.join(primary, ".claude", "worktrees", "agent-" + agent)
+    red = os.path.join(primary, ".claude", "worktrees", "agent-" + agent + "-red")
+    make_repo(primary, {"src/app.py": "print(1)\n"})
+    made = run_vcs(primary, "worktree", "add", "-q", home, "-b", "worktree-agent-" + agent)
+    if made.returncode != 0:
+        return False, "fixture setup failed: the agent worktree add: %s" % made.stderr.strip()
+    made = run_vcs(primary, "worktree", "add", "-q", "--detach", red, "HEAD")
+    if made.returncode != 0:
+        return False, "fixture setup failed: the red-run worktree add: %s" % made.stderr.strip()
+    problems = []
+    got, reason = _decide_full("Bash", home, agent_id=agent, command="echo hi")
+    if got != "allow" or not os.path.isfile(os.path.join(primary, ".git", "agent-homes", agent)):
+        problems.append("the agent's recording call: want allow and a home record, got %s (%s)"
+                        % (got, reason[:120]))
+    _expect_call(problems, "pytest from the red checkout", "allow", "Bash", red, agent,
+                 "python3 -m pytest -q")
+    _expect_call(problems, "git status from the red checkout", "allow", "Bash", red, agent, "git status")
+    _expect_call(problems, "cd into the red checkout chained to git status, from the home", "allow", "Bash",
+                 home, agent, "cd %s && git status" % slash(red))
+    got, reason = _decide_full("Write", red, agent_id=agent, file_path=os.path.join(red, "f.txt"), content="x")
+    if got != "allow":
+        problems.append("a Write into the red checkout: want allow, got %s (%s)" % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a Bash call in agent-<id>-red passes under the harness's own names"
+
+
 def worktree_home_red_nested_case():
     """Rule 0, other-checkout, the red-run folder is the primary's alone: a folder named
     `agent-<its id>-red` under another linked worktree's `.claude/worktrees/` belongs to that
@@ -21884,6 +21919,8 @@ LOG_CHECKS = (
      worktree_home_dotdot_cwd_case),
     ("worktree-home: an agent's Bash call from its home cannot mkdir, touch or redirect into the primary checkout",
      worktree_home_primary_write_from_home_case),
+    ("worktree-home: a Bash call in the agent-<id>-red checkout passes under the harness's own names",
+     worktree_home_harness_naming_case),
     ("worktree-home: a red-run folder nested under another linked worktree, not the primary's, is "
      "refused to a cd, a shell write and a Write", worktree_home_red_nested_case),
     ("worktree-home: a write into the own red-run folder spelled in other letters of case passes on "
@@ -28925,6 +28962,8 @@ LOG_RULE_FAMILY = (
     ("worktree-home: a Bash call from an unregistered agent-<id>-x folder cannot write into or rm the primary",
      "worktree-home"),
     ("worktree-home: a Bash call from a symlink named agent-<id>-x into another agent's red-run folder is refused",
+     "worktree-home"),
+    ("worktree-home: a Bash call in the agent-<id>-red checkout passes under the harness's own names",
      "worktree-home"),
     ("worktree-home: a Bash call from a cwd spelled with .. that resolves into the primary is refused",
      "worktree-home"),
