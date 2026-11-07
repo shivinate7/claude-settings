@@ -75,7 +75,9 @@ a turn end in these cases:
   - chat-grant-needs-home. An owner block whose text, fenced text left out, holds a grant word
     (GRANT: approval, approve, approved, grant, granted, authorize, authorized, authorised, go ahead,
     go-ahead, "permission to", "permissions to", "ok to merge", "you can merge", "fine to merge",
-    "merge away"; whole words, any case; a bare "permission", "ok" or "I can merge" is none)
+    "merge away"; whole words, any case; a bare "permission", "ok" or "I can merge" is none. The four
+    merge phrases count only in a sentence with no "?", not opening "is it" or "is this", and with no
+    "not", "never" or "n't" just before the phrase)
     and an act or scope word (ACT: merge, push, delete, deploy, release, publish, always, standing,
     "from now on", and all, any or every right before repo, repos, PR, PRs, branch or branches) needs one real item line of these: a `[ruling]` item
     (its home gets the check above), an open `[page]` item (its send gets the check above), or
