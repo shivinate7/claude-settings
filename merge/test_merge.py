@@ -2633,11 +2633,16 @@ class AfterPush(Env):
                 self.host.on_wait = hook
                 check(*self.run_merge("7", "--confirm"))
 
-    def test_any_error_after_the_push_reverts_the_claim(self):
+    def test_any_error_after_the_push_keeps_the_claim_and_says_unknown(self):
+        claimed = []
         def boom():
+            claimed.append(self.head())  # the claim is on origin when the wait starts
             raise RuntimeError("boom")
         self.host.on_wait = boom
-        self.assert_clean_stop(*self.run_merge("7", "--confirm"))
+        rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(self.worktrees(), 1)
 
     def test_an_error_in_the_merge_call_reverts_the_claim(self):
         def boom(*a):
@@ -3422,7 +3427,7 @@ try:
         # broken_from counts rounds per route (a round is one check-run read and one status read, in either order), so the second route of a round is not cut off early
         if S.get("checks_broken") and i >= S.get("broken_from", 0):
             S[key] = i; save()
-            raise Refused(api_error(404, "Not Found"))  # a 4xx is a refusal, not a network error: the wait's read reverts (a 5xx is a network stop, see GhHalf)
+            raise Refused(api_error(404, "Not Found"))  # only a 401 or 403 is a proven refusal (standing-merge-grant): this 404 is an unknown read, and a 5xx is a network stop (see GhHalf)
         if m_run:
             S["checks_calls"] = S.get("checks_calls", 0) + 1
         save()
@@ -4957,16 +4962,12 @@ class GhHalf(Env):
         self.assertIn(merge.SETTLE_SECONDS, self.paused)
         self.assertEqual(self.head(), before)  # stopped at the head wait: nothing claimed
 
-    def test_a_failed_read_in_the_wait_reverts_the_claim(self):
-        before = self.head()
-        self.set(checks_broken=True, broken_from=2)  # the head and its settle read fine, the wait after the claim push does not
+    def test_a_failed_read_in_the_wait_keeps_the_claim_and_says_unknown(self):
+        self.set(checks_broken=True, broken_from=2)  # the head and its settle read fine, the wait after the claim push does not: a 404, not a proven refusal
         self.set(checks_seq=[[("checks", "pass", "")]])
-        rc, out = self.go()
-        self.assertEqual(rc, 1)
-        self.assertRegex(out, r"checks?\b[^\n]*\bfailed")
-        self.assertNotEqual(self.head(), before)  # the claim was pushed, then reverted
-        self.assertTrue(self.reverted())
-        self.assertFalse(self.lock_ref())
+        rc, out, claim = self.after_the_claim()
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+        self.assertRegex(out, r"checks?\b[^\n]*\bfailed")  # the stop names the read that failed
 
     # ---- no .github/stamp.json: the defaults
 
