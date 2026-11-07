@@ -3667,6 +3667,17 @@ sh("pointer-failed-cd-walk: a cd into the pointer checkout, then a switch, is re
 sh("pointer-failed-cd-walk: a cd out of the pointer checkout, a failed cd, then a switch, is allowed",
    "cd " + slash(NOGIT) + "; cd " + POINTER_NONEXIST + "; " + VCS + " switch other",
    "allow", cwd=PTRMAIN, config=PTRCFG)
+# A worktree add or a clone makes the folder the cd enters. The cd then succeeds, and the switch runs in
+# that new checkout, not in the pointer checkout. Neither folder exists at judge time.
+POINTER_NEW_WORKTREE = slash(os.path.join(ROOT, "ptr-newwt"))
+POINTER_NEW_CLONE = slash(os.path.join(ROOT, "ptr-newclone"))
+sh("pointer-failed-cd-walk: a worktree add of a new folder, a cd into it, then a switch, is allowed",
+   VCS + " worktree add " + POINTER_NEW_WORKTREE + " && cd " + POINTER_NEW_WORKTREE + " && " + VCS + " switch y",
+   "allow", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer-failed-cd-walk: a clone into a new folder, a cd into it, then a switch, is allowed",
+   VCS + " clone https://example.invalid/repo.git " + POINTER_NEW_CLONE + " && cd " + POINTER_NEW_CLONE
+   + " && " + VCS + " switch y",
+   "allow", cwd=PTRMAIN, config=PTRCFG)
 
 # guard-first-c-reads-wrong-tree: the pointer rule judges the checkout each git call RUNS in. A -C on
 # another call is that call's folder, so the first -C of the line does not decide for the switch.
