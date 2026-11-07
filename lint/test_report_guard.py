@@ -4833,6 +4833,10 @@ class MistakeNamesGuardTests(unittest.TestCase):
     def test_mg_green_broke_the_batch_into_lanes_passes(self):
         self.assert_allowed(mg_report("I broke the batch into three lanes."))
 
+    # "into" after "broke" does not clear an admission that names a state the writer put the thing in.
+    def test_mg_red_broke_the_build_into_a_red_state_blocks(self):
+        self.assert_blocked(mg_report("I broke the build into a red state."))
+
     def test_mg_red_changed_the_test_that_was_wrong_blocks(self):
         self.assert_blocked(mg_report("I changed the test that was wrong."))
 
