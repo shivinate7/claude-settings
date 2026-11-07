@@ -299,6 +299,7 @@ class Usage(Job):
 class StepSelect(Job):
     """`--step NAME` (repeatable) runs only the named steps of the job, of any kind. A name no step has is one unknown
     line and exit 2. The merge's ready gate runs its declared names this way (merge.readyChecks)."""
+    PR = Conditions.PR  # the one home of the pull-request condition
 
     def test_only_the_named_steps_run_and_the_others_do_not(self):
         rc, lines, out = self.run_job(step("first", "echo first > first.txt"),
@@ -316,6 +317,20 @@ class StepSelect(Job):
         self.assertIn("nope", lines[0], out)
         self.assertEqual(rc, 2, out)
         self.assertFalse(os.path.exists(os.path.join(self.root, "ran.txt")), out)
+
+    def test_a_named_uses_step_is_one_unknown_line_and_exit_two(self):
+        rc, lines, out = self.run_job(step("ok", "echo ran > ran.txt"), step("act", uses="actions/checkout@v4"),
+                                      args=("--step", "act"))
+        self.assertEqual(self.verdicts(lines), ["unknown"], out)
+        self.assertIn("act", lines[0], out)
+        self.assertEqual(rc, 2, out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "ran.txt")), out)
+
+    def test_a_named_pull_request_step_with_no_base_is_one_unknown_line_and_exit_two(self):
+        rc, lines, out = self.run_job(step("pr", "echo pr > pr.txt", **{"if": self.PR}), args=("--step", "pr"))
+        self.assertEqual(self.verdicts(lines), ["unknown"], out)
+        self.assertEqual(rc, 2, out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "pr.txt")), out)
 
     def test_a_run_with_no_step_runs_every_step(self):  # the control
         rc, lines, out = self.run_job(step("one", "true"), step("two", "true"))
