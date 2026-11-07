@@ -3729,6 +3729,46 @@ sh("two-worktrees: worktree add of a held branch, with no force, is git's own re
 sh("two-worktrees: git -C <holder> checkout -B x, run in the holder's own tree, is allowed",
    VCS + " -C " + slash(TWHOLD) + " checkout -B x", "allow", cwd=TWHOLD)
 
+# THE TREE PER SEGMENT. A `git -C` moves only the call it heads, and the next call runs in the cwd again.
+# One command can therefore run calls in several trees, and each call is judged in the tree it runs in.
+# S is the cwd (TWACT, holds no x), W is the holder (TWHOLD, holds x), and D is the primary checkout on
+# main (TWBASE, holds no x). A `cd` is not used: other-checkout refuses a cd into another checkout of the
+# clone before this rule runs, unless the session has a recorded home there.
+sh("two-worktrees: checkout -B x after a git -C that names the holder is refused, the checkout runs in the cwd",
+   VCS + " -C ../twobr-holder status && " + VCS + " checkout -B x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: checkout -B x before a git -C that names the holder is refused, the checkout runs in the cwd",
+   VCS + " checkout -B x && " + VCS + " -C ../twobr-holder status", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: checkout -B x in the primary checkout is refused while the holder holds x, after a git -C to the holder",
+   VCS + " -C ../twobr-holder status && " + VCS + " -C ../twobr-base checkout -B x", "deny", TWO_RULE, cwd=TWACT)
+# THE CONTROLS FOR THE TREE. A checkout that names the holder with -C runs in the holder's own tree, where x
+# is its own branch, so it is allowed. A `cd` inside quotes is text, so the checkout still runs in the cwd.
+sh("two-worktrees: git -C <holder> checkout -B x, from the cwd, runs in the holder's own tree and is allowed",
+   VCS + " -C ../twobr-holder checkout -B x", "allow", cwd=TWACT)
+sh("two-worktrees: a cd inside an echo's quotes moves no tree, so checkout -B x runs in the cwd and is refused",
+   "echo 'cd ../twobr-holder' && " + VCS + " checkout -B x", "deny", TWO_RULE, cwd=TWACT)
+
+# THE CLUSTERED FLAGS. A short flag can share a cluster with -B or -C (`-fB`, `-qC`), and git reads the
+# letter as its own option. Each clustered form is refused the same as its plain spelling.
+sh("two-worktrees: checkout -fB of a branch another worktree holds is refused",
+   VCS + " checkout -fB x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: checkout -qB of a branch another worktree holds is refused",
+   VCS + " checkout -qB x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: switch -fC of a branch another worktree holds is refused",
+   VCS + " switch -fC x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: switch -qC of a branch another worktree holds is refused",
+   VCS + " switch -qC x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: checkout -fB of a branch no worktree holds is allowed",
+   VCS + " checkout -fB y", "allow", cwd=TWACT)
+sh("two-worktrees: switch -fC of a branch no worktree holds is allowed",
+   VCS + " switch -fC y", "allow", cwd=TWACT)
+
+# THE FALSE ALARM. `-d` is --detach for worktree add (git 2.43 reads it), so a forced add with -d takes
+# no branch, and the guard must not read the held name `x` as one. The long spelling is the control.
+sh("two-worktrees: worktree add -f -d, a forced detached add that takes no branch, is allowed",
+   VCS + " worktree add -f -d ../n x", "allow", cwd=TWACT)
+sh("two-worktrees: worktree add -f --detach, a forced detached add that takes no branch, is allowed",
+   VCS + " worktree add -f --detach ../n2 x", "allow", cwd=TWACT)
+
 
 def _two_worktrees_calls(command, cwd):
     """Run `command` through the guard with the logging stand-in on PATH. Returns (decision, reason, the
