@@ -828,6 +828,14 @@ class IosApps(unittest.TestCase):
         found, out = self.device_codes("Draw the folded Duo after the header, before the unfolded Duo.")
         self.assertEqual(found, set(), "folded is drawn before unfolded, so no duo-order: " + out)
 
+    def test_before_the_folded_duo_draw_the_unfolded_gets_duo_order(self):
+        found, out = self.device_codes("Before the folded Duo, draw the unfolded Duo.")
+        self.assertEqual(found, {"duo-order"}, "unfolded is drawn before folded, so duo-order: " + out)
+
+    def test_before_the_unfolded_duo_draw_the_folded_gets_no_duo_order(self):
+        found, out = self.device_codes("Before the unfolded Duo, draw the folded Duo.")
+        self.assertEqual(found, set(), "folded is drawn before unfolded, so no duo-order: " + out)
+
 
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
