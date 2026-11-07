@@ -12984,7 +12984,7 @@ for _tool, _field in (("Edit", "file_path"), ("Write", "file_path"), ("MultiEdit
     add("builder-test: %s of a test file is refused" % _tool, "deny", rule=BT, tool=_tool,
         carries=("test-author", "Report"), **{_field: "src/test_app.py"}, **B)
 add("builder-test: the refusal routes a test-file merge conflict", "deny", rule=BT, tool="Edit",
-    file_path="src/test_app.py", carries=("merge conflict",), **B)
+    file_path="src/test_app.py", carries=("merge conflict", "test-author"), **B)
 for _path in ("src/app_test.py", "pkg/app_test.go", "web/a.test.ts", "web/a.test.jsx",
               "web/a.spec.js", "tests/helper.py", "pkg/__tests__/x.js", "spec/models/user.rb",
               "src/tests/data/fixture.json", "test/x.txt", "src/conftest.py"):
