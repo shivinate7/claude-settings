@@ -194,7 +194,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     at most 16384 characters (the page's `ICON_MAX`). It replaces the letter on a white or dark tile,
     whichever more of its pixels stand out on. A square icon reads best: a wide one shrinks to fit
     the 22px slot. The page never fetches a URL; any other value keeps the letter.
-- `usage/<key>`: press counts, `{n, at}`, one doc per key. Not built yet; decision `page-usage-counters` (the page's press counts) names the keys. The export does not copy it.
+- `usage/<key>`: press counts, `{n, at}`, one doc per key. Decision `page-usage-counters` (the page's press counts) names the keys. The export does not copy it.
 
 The page hides an item with status `closed`, except an arbiter ruling (see `arbiter` above). It shows an item as answered when
 `answers/<id>` exists: a green edge and the badge "Filing pending, sent" or "Filed
