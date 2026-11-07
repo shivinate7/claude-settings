@@ -1635,7 +1635,7 @@ function buildRuling(it) {
   return card;
 }
 // The fold control. The visible words name the act and what it opens; the hidden words name the item. All three labels sit in one grid cell (see .unfold).
-// A draft, a stood pick or a pending withdraw holds an act Send would submit, so a seen or answered card's fold stays open and its control is locked.
+// A draft, a stood pick or a pending withdraw locks the fold open. A saved item never locks.
 const foldLocked = (it) => !isSaved(it) && (!!eff(it) || withdrawing(it));
 // words ({ show, hide }) names the fold of a sunk answered card, which holds its note, last answer and reply instead of options, steps or commands.
 function unfoldBtn(it, open, locked, ncmd, words) {
@@ -2341,9 +2341,12 @@ const ASK_LOADED = Date.now();
 const askFresh = (a) => { const t = Date.parse(a.answered) || Date.parse(a.at); return ASK_SEEN !== null ? t > ASK_SEEN : ASK_LOADED - t < ASK_NEW_MS; };
 const askIsOpen = (t) => (t.id in askState.open ? askState.open[t.id] : askFresh(askLatest(t) || t));
 // The stamp moves only while the Ask section is on screen: an answer that lands on a hidden tab or below the fold has not been seen.
-const markAsksSeen = () => { const r = $("asks").getBoundingClientRect(); if (r.bottom > 0 && r.top < innerHeight) writeStamp("waiting.askSeen"); };
-document.addEventListener("visibilitychange", () => { if (document.hidden) markAsksSeen(); });
-window.addEventListener("pagehide", markAsksSeen);
+// Hiding the tab stamps once, at the hide time. A visibilitychange or pagehide of a tab already hidden stamps nothing.
+const asksOnScreen = () => { const r = $("asks").getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; };
+const markAsksSeen = () => { if (asksOnScreen()) writeStamp("waiting.askSeen"); };
+let tabWasHidden = document.hidden;
+document.addEventListener("visibilitychange", () => { const hiding = document.hidden && !tabWasHidden; tabWasHidden = document.hidden; if (hiding) markAsksSeen(); });
+window.addEventListener("pagehide", () => { if (!document.hidden) markAsksSeen(); });
 const saveAskDraft = () => { try { const v = $("askText").value; if (v) localStorage.setItem("waiting.askDraft", v); else localStorage.removeItem("waiting.askDraft"); } catch (e) {} };
 try { $("askText").value = localStorage.getItem("waiting.askDraft") || ""; } catch (e) {}
 // The stack is kept beside the draft, so a reload shows it again. An ask already written to the store is not kept. An edit left open keeps its words.
@@ -3283,7 +3286,7 @@ function renderNow() {
 function renderRail() {
   const cur = curPhase(), shown = shownPhase();
   $("svRail").innerHTML = PH.map((p) => {
-    const ss = byPhase(p.k), d = ss.filter((s) => s.status === "done").length, a = ss.filter((s) => s.status === "active").length, b = ss.filter((s) => s.status === "blocked").length;
+    const ss = byPhase(p.k), d = ss.filter((s) => s.status === "done").length, a = ss.filter((s) => shownState(s) === "active").length, b = ss.filter((s) => s.status === "blocked").length;
     const u = ss.filter(stepNew).length;
     return `<button type="button" data-phase="${esc(p.k)}" aria-pressed="${p.k === shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${p === cur && !p.none ? ", current phase" : ""}${u ? ", " + u + " updated since your last visit" : ""}"><span class="nm"><span>${esc(p.n)}${p === cur && !p.none ? '<span class="here" title="Current phase: the first with work left"></span>' : ""}</span><span class="nmr">${u ? countMark(u) : ""}<span class="num" aria-hidden="true">${d}/${ss.length}</span></span></span><span class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</span></button>`;
   }).join("");
@@ -3372,7 +3375,7 @@ const defaultPage = (list) => { const ix = list.findIndex((s) => s.status !== "d
 function renderPhase() {
   stepWords = true;
   const k = shownPhase(), p = PH.find((x) => x.k === k), ss = byPhase(k);
-  const open = openList(k), done = doneList(k), d = done.length, a = ss.filter((s) => s.status === "active").length, b = ss.filter((s) => s.status === "blocked").length;
+  const open = openList(k), done = doneList(k), d = done.length, a = ss.filter((s) => shownState(s) === "active").length, b = ss.filter((s) => s.status === "blocked").length;
   const nextIds = nextUp().map((s) => s.id), size = pageSize();
   const pages = Math.max(1, Math.ceil(open.length / size));
   if (ui.page[k] == null) ui.page[k] = defaultPage(open);
