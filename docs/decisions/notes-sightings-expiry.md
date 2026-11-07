@@ -13,20 +13,21 @@ This record builds on decision `notes-name-their-fix` (each note names its fix).
 - A line the branch edits needs no Seen field. If it carries one, the field must be valid, and its count may not drop below the count at the merge base. Old lines never turn red.
 - A repeat sighting edits the note: it raises N and sets the date to today. That edit is an edit under `notes-name-their-fix`, so a `Fix: none` note then needs a fresh `Until:` date. A sighting is a review.
 - A notes line with N of 2 or more fails CI. The remedy: move it to a debt file, carry its Seen line, and delete the note line.
-- A debt file may carry a `Seen:` line at column one, or after one leading `- `. When present, it must be valid. A debt with no Seen line counts as x1.
+- A Seen field after the Fix field also parses. The check does not judge the order.
+- A debt file may carry a `Seen:` line at column one, or after one leading `- `. When present, it must be valid: a calendar date today or earlier, and N 1 or more. It has no age limit. A debt with no Seen line counts as x1 with no date.
 
 ### Expiry
 
 - A note expires when its last sighting is more than `SEEN_EXPIRY_DAYS` (30) days before today. The last sighting is the Seen date. A line with no Seen field takes the author date of the commit that last touched it, from one `git blame` of the notes file.
 - A line whose blame commit is a shallow-clone boundary has no true date. It is UNKNOWN and is never deleted. A line not yet committed counts as seen today.
 - Every note expires this way, the step form too. The step stays on the roadmap; git keeps the line.
-- The sweep runs it when asked: `python3 ~/.claude/janitor/sweep.py --root <repo> --expire-notes` previews each expired note and the UNKNOWN count. With `--confirm`, it deletes those lines from the checkout's notes file. It never commits or pushes. It refuses when HEAD is the default branch, or when the notes file has uncommitted changes, and says why.
+- The sweep runs it when asked: `python3 ~/.claude/janitor/sweep.py --root <repo> --expire-notes` previews each expired note and the UNKNOWN count. With `--confirm`, it deletes those lines from the checkout's notes file. UNKNOWN lines do not change the exit code. It never commits, pushes or removes a branch. It refuses when HEAD is the default branch, or when the notes file has uncommitted changes, and says why.
 
 ### One debt-fix lane per batch
 
-- When a batch merges, the session that starts lanes starts one debt-fix lane. It fixes the open debt with the highest Seen count. Ties go to the oldest Seen date, then the slug. `python3 ~/.claude/lint/check_record_slugs.py --next-debt` prints that slug.
+- When a batch merges, the session that starts lanes starts one debt-fix lane. It fixes the open debt with the highest Seen count. Ties go to the oldest Seen date, a debt with no date after the dated ones, then the slug. `python3 ~/.claude/lint/check_record_slugs.py --next-debt` prints that slug.
 - That lane also runs the expiry sweep on its own branch, and commits what it deletes.
-- Pace number five is debts opened and closed in the batch: debt files added and deleted between the first lane commit and the merge, not counting the notes file and the README. `python3 ~/.claude/lint/check_record_slugs.py --debt-flow START END` prints it.
+- Pace number five is debts opened and closed in the batch: debt files added and deleted between the first lane commit and the merge, not counting the notes file and the README. `python3 ~/.claude/lint/check_record_slugs.py --debt-flow START END` prints it as `debts opened N, closed M`, then one `+ <slug>` or `- <slug>` line each.
 - The rule to start the lane is prose only: no check sees whether a batch started one.
 
 Cost: the Seen check runs inside the CI check that already reads the notes diff, with no new git process. The expiry runs one `git blame` and one `rev-parse` per notes file, only when the sweep is called with `--expire-notes`. `--next-debt` reads the debt folder once. `--debt-flow` runs one `git diff`, once per batch merge. None starts a long-lived process, writes a log, or runs on a timer.
