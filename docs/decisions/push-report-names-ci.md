@@ -11,7 +11,7 @@ A turn that pushes a head names that head's CI state in its report. This closes 
 - What the report says, per state:
   - Pending: `CI running on <sha7>` under Next, and no BUILT or RECORDED Done item that names the head. A Done item may cite the PR or an earlier commit.
   - Red: `CI red on <sha7>`, anywhere in the reply, and no BUILT or RECORDED Done item that names the head, as for pending.
-  - Unknown, a read that failed or ran out of budget: `CI unknown on <sha7>`, anywhere in the reply. A budget spent before the head is named reads unknown, and the line names the branch.
+  - Unknown, a read that failed or ran out of budget: `CI unknown on <sha7>`, anywhere in the reply. A head no read can name reads unknown, never dropped, and the line names the branch: a spent budget, a failed branch read (the block reason carries that read's own message), or no remote-tracking ref for the branch.
   - Green or none (no open PR, a draft, a repo with no workflows): no line.
 - The missing-report marker also holds each head's state, so the rewrite makes no second read.
 - Measured 2026-11-07 14:12 CST (cloud): the REST read of a branch's open PR and the run list of a commit both work (route rows `ci-pr-read-gh-api-cloud`, `ci-runs-list-gh-cli-cloud`, `ci-runs-read-gh-api-cloud`).

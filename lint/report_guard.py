@@ -378,9 +378,14 @@ PUSH_REJECTED_LINE = re.compile(r"^\s*!\s*\[(?:remote )?rejected\]|^\s*(?:error|
                                re.MULTILINE)
 
 
+# The reason of a pushed head no read could name, when no read raised: no remote-tracking ref names a commit.
+UNNAMED_HEAD = "no remote-tracking ref names the pushed head"
+
+
 def _heads_of_git_push(args, output, folder, ci_wake, budget):
-    """-> [(sha, branch)] a push call updated; sha is None when the read budget ran out before the head
-    was named. Read from the ref lines of its output (`old..new src -> dst`), so an accepted ref of a multi-ref
+    """-> [(sha, branch, why)] a push call updated; sha is None when the head could not be named, and why then says
+    which read failed (the Unknown message of a spent budget or a failed branch read, or UNNAMED_HEAD); why is None
+    when sha is named. Read from the ref lines of its output (`old..new src -> dst`), so an accepted ref of a multi-ref
     push counts past a rejected one; a new branch line, and a call whose output holds none (a verdict wrapper
     prints no ref line), read the remote-tracking ref. With no accepted ref line, a rejected push or an
     up-to-date one updated nothing."""
@@ -397,22 +402,26 @@ def _heads_of_git_push(args, output, folder, ci_wake, budget):
         try:
             names = ([_branch_of(r, folder, budget, ci_wake) for r in refspecs] if refspecs
                      else [ci_wake.current_branch(folder, budget.next_timeout())])
-        except ci_wake.Unknown:
-            return [(None, (refspecs[0].lstrip("+").split(":")[-1] if refspecs else "HEAD") or "HEAD")]
+        except ci_wake.Unknown as unknown:
+            return [(None, (refspecs[0].lstrip("+").split(":")[-1] if refspecs else "HEAD") or "HEAD", str(unknown))]
         seen = [(None, n) for n in names if n]
     heads = []
     for sha, branch in seen:
         if "\n" in branch or branch.startswith("refs/tags/"):
             continue
         branch = branch[len("refs/heads/"):] if branch.startswith("refs/heads/") else branch
+        why = None
         if sha is None and ":" not in remote:
             try:
                 sha = ci_wake.commit_of("refs/remotes/%s/%s" % (remote, branch), folder, budget.next_timeout())
-            except ci_wake.Unknown:
-                heads.append((None, branch))
+            except ci_wake.Unknown as unknown:
+                heads.append((None, branch, str(unknown)))
                 continue
-        if sha:
-            heads.append((sha, branch))
+        if not sha:
+            # commit_of gives "" when no remote-tracking ref names a commit; a head left out here would pass the
+            # report with no CI line, so it reads as unknown on the branch.
+            sha, why = None, UNNAMED_HEAD
+        heads.append((sha, branch, why))
     return heads
 
 
@@ -436,17 +445,17 @@ def _mcp_head(name, tool_input, text):
 
 
 def pushed_heads(after, cwd, budget, ci_wake):
-    """-> [(sha, branch, folder)]: the newest head of each branch this turn pushed, in the order of each branch's last
-    push. sha is None for a head the budget ran out before naming (read as unknown, never dropped)."""
+    """-> [(sha, branch, folder, why)]: the newest head of each branch this turn pushed, in the order of each branch's
+    last push. sha is None for a head no read could name (read as unknown, never dropped); why is the reason."""
     results = {}
     for rec in after:
         for block in tool_results(rec):
             results[block.get("tool_use_id")] = result_text(block)
     found = {}
 
-    def record(sha, branch, folder):
+    def record(sha, branch, folder, why=None):
         found.pop((folder, branch), None)
-        found[(folder, branch)] = sha
+        found[(folder, branch)] = (sha, why)
 
     for rec in after:
         for use in tool_uses(rec):
@@ -463,13 +472,13 @@ def pushed_heads(after, cwd, budget, ci_wake):
                         if subcommand != "push":
                             continue
                         folder = _push_folder(segments, number, ends, cwd)
-                        for sha, branch in _heads_of_git_push(args, output, folder, ci_wake, budget):
-                            record(sha, branch, folder)
+                        for sha, branch, why in _heads_of_git_push(args, output, folder, ci_wake, budget):
+                            record(sha, branch, folder, why)
             elif name in PUSH_TOOLS:
                 head = _mcp_head(name, tool_input, output)
                 if head:
                     record(head[0], head[1], cwd)
-    return [(sha, branch, folder) for (folder, branch), sha in found.items()]
+    return [(sha, branch, folder, why) for (folder, branch), (sha, why) in found.items()]
 
 
 def may_push(records):
@@ -500,9 +509,9 @@ def push_ci_states(after, hook, budget=None):
     budget = budget or ci_wake.Budget()
     cwd = hook.get("cwd") if isinstance(hook.get("cwd"), str) else None
     states = []
-    for sha, branch, folder in pushed_heads(after, cwd, budget, ci_wake):
+    for sha, branch, folder, why in pushed_heads(after, cwd, budget, ci_wake):
         if sha is None:   # the report line then names the branch: no head was read
-            states.append((branch, "unknown", "the read budget ran out before the head was named"))
+            states.append((branch, "unknown", "the head was not named: %s" % why))
             continue
         state, detail = ci_wake.head_state(sha, branch, folder, budget)
         states.append((sha[:7], state, detail))
