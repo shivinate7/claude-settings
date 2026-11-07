@@ -99,7 +99,7 @@ STAMP_RUN_CITE = "(decision one-shared-record-stamp, the claim runs before the m
 STAMP_CFG_CITE = "(decision one-shared-record-stamp, each repo keeps its config in its own tree, and the tool never guesses a config field)"
 REFUSED_CITE = "(decision standing-merge-grant, only a proven refusal reverts the claim: a refusal reply with the pull request still OPEN)"
 READ_CITE = "(decision no-merge-during-batch-ci, a failed read refuses, and unknown is red)"
-GREEN_CITE = "(rule git-never-merge-failing-ci, a head whose checks are not green never merges)"
+GREEN_CITE = "(rule git-never-merge-failing-ci, a head with a failing check never merges)"
 WAIT_CITE = "(decision ci-wait-reads-run-status, each wait reads the run's status until the run ends or its deadline passes)"
 HEAD_CITE = "(decision standing-merge-grant, the required checks must pass on the head that merges)"
 UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not run is reported as unknown, never as clear)"
@@ -723,6 +723,7 @@ class Host:
         self.warned = set()  # (check name, link) already warned about, so a poll loop prints each line once
 
     commit_message = None  # set by confirm just before the merge: one line per reason flag that lifted a check. None leaves GitHub's default message
+    ready_checks = None  # the repo's merge.readyChecks, set by confirm: the all-skipped remedy names the step that runs them. None names none
     before_wait = None  # lock.extend_for, set by confirm once the lock is held: runs before each rate wait. No gh call has one before
 
     def gh(self, args, cwd=None):
@@ -767,7 +768,7 @@ class Host:
                 raise ValueError(out)
             return [x for page in json.loads(out) for x in (page[key] if key else page)]
         except (ValueError, KeyError, TypeError) as e:
-            raise Stop(f"reading {rel} from GitHub failed: {e}")
+            raise Stop(f"reading {rel} from GitHub failed: {e} {READ_CITE}")
 
     # The old GraphQL values the rest of the tool reads, from the REST fields.
     MERGEABLE = {True: "MERGEABLE", False: "CONFLICTING", None: "UNKNOWN"}  # mergeable is null while GitHub works it out
@@ -800,7 +801,7 @@ class Host:
         """-> {head, branch, base, state, mergeable, merge_state, draft, body, created}"""
         c, out = self.api(f"pulls/{self.pr_number(n)}")
         if c:
-            raise Stop("reading the pull request failed: " + out)
+            raise Stop("reading the pull request failed: " + out + " " + READ_CITE)
         d = json.loads(out)
         self.base = d["base"]["ref"]  # the PR's own base drives required_names
         return {"head": d["head"]["sha"], "branch": d["head"]["ref"], "base": d["base"]["ref"],
@@ -1056,7 +1057,7 @@ class Host:
             if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
                 return False, f"the pull request went DIRTY during the wait {BASE_CITE}. Merge the base into the branch and run again."
             got = self.checks(n, sha=info["head"])
-            red, pending, ignored = self.classify(got, names, self.ignore, info["branch"])
+            red, pending, ignored = self.classify(got, names, self.ignore, info["branch"], ready_check_step(self.ready_checks, base))
             r_red, r_pending = self.run_state(sha)
             pending, held, unwaited = pending + r_pending, *self.required_only(pending + r_pending, names)  # only what the wait waits on may clear a "no check ran" red
             red = self.settle(red, held, r_red, [])[0]
@@ -1069,7 +1070,7 @@ class Host:
                     self.pause(self.minute)  # a status from outside Actions can post a minute after the last job ends
                     continue
                 return False, ("no run reports the required check " + ", ".join(absent) + f" on this head, and every check that did report has ended. "
-                               f"Waiting would end at the deadline of {deadline_minutes} minutes. Compare merge.requiredChecks and the branch protection of {base} with the workflow job names. {GREEN_CITE}")
+                               f"Waiting would end at the deadline of {deadline_minutes} minutes. Compare merge.requiredChecks and the branch protection of {base} with the workflow job names. {READ_CITE}")
             absent_seen = None
             pending = held  # after the absent block, which compares the full list; before the settle pass, so its re-read still runs
             if not pending and not settled:
@@ -1087,7 +1088,7 @@ class Host:
                     say("merge: not waited for (not required): " + "; ".join(unwaited))
                 return True, ""
             if self.now() >= end:
-                return False, f"the deadline of {deadline_minutes} minutes passed. Still pending: " + ", ".join(pending) + " " + GREEN_CITE
+                return False, f"the deadline of {deadline_minutes} minutes passed. Still pending: " + ", ".join(pending) + " " + WAIT_CITE
             settled = False
             progress(", ".join(pending))
             self.block(pending, got)
@@ -1253,7 +1254,7 @@ class Host:
         return ([x for x in red if "no check ran" not in x and "no job ran" not in x] if pending else red), pending
 
     @staticmethod
-    def classify(got, names, ignore=None, branch="<branch>"):
+    def classify(got, names, ignore=None, branch="<branch>", ready_step=""):
         """-> (red, pending, ignored). Every check on the head counts, required or not. Red: any bucket
         that is not pass, skipping or pending (fail, cancel, and any bucket gh adds later: closed).
         A cancel entry is dropped when another entry of that name is pass or pending (another run ran; concurrency cancels one of two
@@ -1273,7 +1274,7 @@ class Host:
         if live and not red and not pending and not any(b == "pass" for rows in live.values() for b, _ in rows):
             fix = ("Mark the PR ready, or push anew if the PR is ready" if DRAFT_SKIP_CHECK in names
                    else f"Run `gh workflow run checks.yml --ref {branch}`, or push anew after you mark the PR ready")
-            fix += f". Before you mark it ready, run `merge <pr> --confirm` on the draft: it runs the repo's ready checks, which a mark by MCP or gh skips. {READY_ROUTES}"
+            fix += f". {ready_step + ' ' if ready_step else ''}{READY_ROUTES}"
             red = [f"no check ran on this head (every check skipped). {fix}"]
         if not red and DRAFT_SKIP_CHECK in names and live.get(DRAFT_SKIP_CHECK) and all(b == "skipping" for b, _ in live[DRAFT_SKIP_CHECK]):
             pending = sorted(set(pending) | {DRAFT_SKIP_CHECK})
@@ -1503,6 +1504,14 @@ def records_proof(wt, base_ref):
 
 CI_JOB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "ci-job")  # the lint steps of a job, read from the workflow; the tool brings it
 CI_SCOPE = ".github/scripts/ci-scope.sh"  # the repo's one home of which jobs read which paths; a repo without it never takes a small move
+def ready_check_step(checks, base):
+    """The remedy sentence that runs the repo's `merge.readyChecks` by hand, or "" for a repo that declares none. A mark by MCP or gh skips them,
+    and the draft step that runs them is the command that refused, so the sentence names ci-job's own run (the one `run_ready_checks` makes)."""
+    if not checks:
+        return ""
+    steps = " ".join(f'--step "{c}"' for c in checks)
+    return f"First run the ready checks ({', '.join(checks)}), which a mark by MCP or gh skips: `bin/ci-job checks {steps} --base origin/{base}`."
+
 READY_ROUTES = ("Mark ready in cloud by MCP update_pull_request draft=false; on a computer by `gh pr ready`, "
                 "a GraphQL call a cloud session gets 403 on (route pr-ready-mcp-cloud, route pr-ready-gh-cli-cloud, route pr-ready-gh-cli-local)")
 DRAFT_SKIP_CHECK = REQUIRED_CHECK  # the one required check a draft run skips (actions/all-jobs-passed): its skip means the ready run is still to come, not green
@@ -2844,6 +2853,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     lock.holder = {"pr": n, "branch": info["branch"], "session": session}
     lifts = {}  # each reason flag that lifts a check in this run, for the merge commit message
     token = lock.acquire(base, (WAITS * m["deadlineMinutes"] + 10) * 60)  # each wait at most once, ten minutes spare
+    host.ready_checks = m.get("readyChecks")  # the all-skipped remedy names the step that runs them
     host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant); the TTL spare is for the checks waits
     tmp = wt = claim_sha = None
     judge = None  # the prose judge's plan, built under the lock and run after it is released
