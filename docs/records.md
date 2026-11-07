@@ -187,6 +187,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `merge-deletes-batch-lanes` | Owner, 2026-10-19 12:14 CDT: each merge deletes the lane branches its batch took in. | [`docs/decisions/merge-deletes-batch-lanes.md`](../docs/decisions/merge-deletes-batch-lanes.md) |
 | `merge-lock` | One lock holds each base branch while a merge run works on it. | [`docs/decisions/merge-lock.md`](../docs/decisions/merge-lock.md) |
 | `merge-needs-current-base` | Roadmap step c97, filed 2026-10-27; step c150, 2026-10-28: a batch merges only after a green run that holds for the current main. | [`docs/decisions/merge-needs-current-base.md`](../docs/decisions/merge-needs-current-base.md) |
+| `merge-practices` | Owner, page item 150, pick a, 2026-11-06 12:58 CST ("Build the small proof"): decision `test-practices` stays the testing chapter. | [`docs/decisions/merge-practices.md`](../docs/decisions/merge-practices.md) |
 | `mistake-means-missing-guard` | Owner, 2026-11-06 11:38 CST: AI sometimes assumes it broke something by accident. | [`docs/decisions/mistake-means-missing-guard.md`](../docs/decisions/mistake-means-missing-guard.md) |
 | `mockup-home` | Git is each artifact's home (owner ruling fb-1458-1, 2026-11-02 14:58 CST, option A). | [`docs/decisions/mockup-home.md`](../docs/decisions/mockup-home.md) |
 | `mods-deferred-table` | These mods stay deferred recordings on the repo. | [`docs/decisions/mods-deferred-table.md`](../docs/decisions/mods-deferred-table.md) |
@@ -276,6 +277,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `bare-merge-asks` | Orchestrator call (lane bare-gh-merge-ask); the owner may rule otherwise. | [`docs/decisions/bare-merge-asks.md`](../docs/decisions/bare-merge-asks.md) |
 | `catalog-cells-never-cut` | The cell cap in `docs/catalog.md` sits above the longest cell, so no cell is cut. | [`docs/decisions/catalog-cells-never-cut.md`](../docs/decisions/catalog-cells-never-cut.md) |
 | `ci-wait-reads-run-status` | Owner, 2026-10-16 01:47 CDT ("Status read only") and 03:00 CDT ("Change them too"): no program and no agent runs `gh run watch`, in the foreground or the background. | [`docs/decisions/ci-wait-reads-run-status.md`](../docs/decisions/ci-wait-reads-run-status.md) |
+| `claims-carry-backing` | Owner goal, 2026-11-06 11:36 CST: every definitive prose claim is backed and verifiable. | [`docs/decisions/claims-carry-backing.md`](../docs/decisions/claims-carry-backing.md) |
 | `claude-md-change-is-flagged` | Owner, 2026-10-16: report only, no hold. | [`docs/decisions/claude-md-change-is-flagged.md`](../docs/decisions/claude-md-change-is-flagged.md) |
 | `cloud-start-hooks-run-fresh` | In a cloud session, `install.sh --cloud` runs the repo's startup hooks itself, after it has copied them into `~/.claude`. | [`docs/decisions/cloud-start-hooks-run-fresh.md`](../docs/decisions/cloud-start-hooks-run-fresh.md) |
 | `compliance-defined` | Owner, 2026-10-31 15:04 CDT, waiting-page item 104: a claude-settings rule wins over a child repo's text on the same question, unless that text names the rule as a known exemption. | [`docs/decisions/compliance-defined.md`](../docs/decisions/compliance-defined.md) |
@@ -387,6 +389,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `refusal-shapes-missed` | The PreCompact digest's refusal match misses four denial lines that Claude Code 2.1.316 writes: "Permission to read <path> has been denied.", "Permission to edit <path> has been denied.", "Permission for this tool use was denied: it requires interactive approval", and "Permission for this command was denied by a built-in Claude Code safety check". | [`docs/debts/refusal-shapes-missed.md`](../docs/debts/refusal-shapes-missed.md) |
 | `replay-big-file-unknown` | A file that does not parse is listed as skipped, and its row can still show a kill rate. | [`docs/debts/replay-big-file-unknown.md`](../docs/debts/replay-big-file-unknown.md) |
 | `report-guard-gh-api-merge` | A turn that merges with `gh api -X PUT repos/o/r/pulls/N/merge` or `gh api repos/o/r/merges` lands a commit. | [`docs/debts/report-guard-gh-api-merge.md`](../docs/debts/report-guard-gh-api-merge.md) |
+| `route-flag-stop-untested` | No test feeds a refusal row that carries `route_flag` through the Stop read, so that path has no test. | [`docs/debts/route-flag-stop-untested.md`](../docs/debts/route-flag-stop-untested.md) |
+| `route-match-limits-untested` | No test drives `MAX_TARGET_CHARS` or `MAX_PATTERN_CHARS`, so a change to either limit passes every test. | [`docs/debts/route-match-limits-untested.md`](../docs/debts/route-match-limits-untested.md) |
 | `ruling-kind-vacuous-local-pass` | `lint/check_ruling_kind.py` checks only the committed diff against `origin/main`, so a run before the commit checks zero files and prints PASS. | [`docs/debts/ruling-kind-vacuous-local-pass.md`](../docs/debts/ruling-kind-vacuous-local-pass.md) |
 | `ruling-pr-kind-unchecked` | The merge tool takes the lane's Kind claim. | [`docs/debts/ruling-pr-kind-unchecked.md`](../docs/debts/ruling-pr-kind-unchecked.md) |
 | `scan-mid-sentence-false-alarm` | The waiting-page export allows `password: optional` and `PWD=/Users/x` only when nothing follows the value on its line. | [`docs/debts/scan-mid-sentence-false-alarm.md`](../docs/debts/scan-mid-sentence-false-alarm.md) |
@@ -397,6 +401,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `short-copy-passes` | A child line that copies a claude-settings grant in under 12 words passes the restates group. | [`docs/debts/short-copy-passes.md`](../docs/debts/short-copy-passes.md) |
 | `skill-copy-no-typescript` | A copy of the skill folder outside the clone finds no `node_modules`, so `map-check.mjs` and `map-picture.mjs` cannot load `typescript` there. | [`docs/debts/skill-copy-no-typescript.md`](../docs/debts/skill-copy-no-typescript.md) |
 | `squash-lane-branch-kept` | A squash-merged lane has no merge commit parent. | [`docs/debts/squash-lane-branch-kept.md`](../docs/debts/squash-lane-branch-kept.md) |
+| `stale005-quoted-text-alarm` | STALE005 reads a quoted old claim and a grant title as claims. | [`docs/debts/stale005-quoted-text-alarm.md`](../docs/debts/stale005-quoted-text-alarm.md) |
 | `stamp-shallow-depth-two` | `stamp.mjs --check` off the default branch needs `fetch-depth: 0`. | [`docs/debts/stamp-shallow-depth-two.md`](../docs/debts/stamp-shallow-depth-two.md) |
 | `start-detached-not-main` | hooks/session_start.sh counts a detached checkout as on main only when HEAD equals local `refs/heads/main`. | [`docs/debts/start-detached-not-main.md`](../docs/debts/start-detached-not-main.md) |
 | `step-shell-programs-partial` | Guard rule `command-in-item` reads a backtick span in a step as a shell line only when its first word is in a fixed program list. | [`docs/debts/step-shell-programs-partial.md`](../docs/debts/step-shell-programs-partial.md) |
@@ -408,6 +413,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `verdict-skip-colon-line` | `bin/verdict` counts marker lines that start `SKIP ` or `SKIPPED`. | [`docs/debts/verdict-skip-colon-line.md`](../docs/debts/verdict-skip-colon-line.md) |
 | `windows-main-run-flakes` | Two main push runs went red on Windows only, and each blocked the next batch until a rerun went green. | [`docs/debts/windows-main-run-flakes.md`](../docs/debts/windows-main-run-flakes.md) |
 | `workflow-wrapped-test-run` | A builder who wraps a bare test run in a workflow is refused as a dropped test path. | [`docs/debts/workflow-wrapped-test-run.md`](../docs/debts/workflow-wrapped-test-run.md) |
+| `worktree-guard-loop-var` | Guard rule `hand-made-worktree` refuses `git worktree add /tmp/x <ref>`. | [`docs/debts/worktree-guard-loop-var.md`](../docs/debts/worktree-guard-loop-var.md) |
 | `wp-batch-reads-installed-copy` | `stale_pages.py` batch mode (no `--page`) compares each live page with the `page.html` installed at session start, not with claude-settings main. | [`docs/debts/wp-batch-reads-installed-copy.md`](../docs/debts/wp-batch-reads-installed-copy.md) |
 
 ## Plans
@@ -417,7 +423,10 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `3d-tools-survey` | Plan: 3D tools, what to think about as 3D work grows | [`docs/plans/3d-tools-survey.md`](../docs/plans/3d-tools-survey.md) |
 | `align-watchers` | Plan: one direction for watches, wakes, sweeps, reaps and logs | [`docs/plans/align-watchers.md`](../docs/plans/align-watchers.md) |
 | `child-guard-promotion` | Plan: child guards go up or out | [`docs/plans/child-guard-promotion.md`](../docs/plans/child-guard-promotion.md) |
+| `debate-model-tiers` | Plan: which refuters run Opus | [`docs/plans/debate-model-tiers.md`](../docs/plans/debate-model-tiers.md) |
+| `local-session-reach` | Plan: reach between local and cloud sessions | [`docs/plans/local-session-reach.md`](../docs/plans/local-session-reach.md) |
 | `o10-session-questions-page` | Plan: a page per session for questions waiting on the owner | [`docs/plans/o10-session-questions-page.md`](../docs/plans/o10-session-questions-page.md) |
+| `plugin-assess-three` | Plan: three catalog plugins, add or skip | [`docs/plans/plugin-assess-three.md`](../docs/plans/plugin-assess-three.md) |
 | `pointer-system` | Plan: the pointer system | [`docs/plans/pointer-system.md`](../docs/plans/pointer-system.md) |
 | `refusal-vs-rule` | Plan: each refusal matches its rule | [`docs/plans/refusal-vs-rule.md`](../docs/plans/refusal-vs-rule.md) |
 | `shared-merge-tool` | Plan: the shared merge tool | [`docs/plans/shared-merge-tool.md`](../docs/plans/shared-merge-tool.md) |
