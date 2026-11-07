@@ -65,7 +65,8 @@ PY = sys.executable
 SCRATCH = _test_temp.run_folder()
 atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
 NOW = int(time.time())  # the clock every case passes as STALL_WATCH_NOW, so no case sleeps
-ADVICE = "stop it or tell the owner"
+TELL_OWNER = "tell the owner"
+STOP_IT = re.compile(r"\bstop it\b")  # the stall-watch ruling: a stalled command is reported, never stopped
 RESUME_SUMMARY = "Background shell command didn't finish before the previous session ended"
 WIN_DIR = (r"C:\Users\EXAMPL~1\AppData\Local\Temp\claude"
            r"\C--Users-ExampleUser-Clones-claude-settings\00000000-0000-4000-8000-000000000000\tasks")
@@ -330,6 +331,15 @@ def listed_once(msg, job_id):
     return expect(n == 1, f"job {job_id} listed {n} times, want 1: {msg!r}")
 
 
+def advice_problems(msg, what):
+    """The alarm text tells the model to tell the owner, and never to stop a job. The pins are loose: they
+    check two words, not the sentence, so the wording stays free. Each failure names one cause."""
+    low = msg.lower()
+    problems = expect(TELL_OWNER in low, f"{what} does not say {TELL_OWNER!r}: {msg!r}")
+    problems += expect(STOP_IT.search(low) is None, f"{what} says 'stop it', which tells the model to stop a job: {msg!r}")
+    return problems
+
+
 @case
 def stale_moved_job_is_listed():
     """S1. a call its timeout moved to the background, quiet 600 s: listed once, with age and advice"""
@@ -340,7 +350,7 @@ def stale_moved_job_is_listed():
     msg = system_message(out, problems)
     problems += listed_once(msg, "bmv600a")
     problems += expect("600s" in msg, f"age 600s is not in the listing: {msg!r}")
-    problems += expect(ADVICE in msg.lower(), f"no advice {ADVICE!r}: {msg!r}")
+    problems += advice_problems(msg, "the alarm")
     return problems
 
 
@@ -1429,15 +1439,15 @@ def stale_stop_is_a_block_decision():
 
 
 @case
-def block_reason_says_stop_or_tell_owner_names_the_job_and_its_age():
-    """D2. a quiet job: the reason, the text the model reads, says to stop the shell or tell the owner,
-    names the job once, and gives the job's age"""
+def block_reason_says_tell_owner_not_stop_it_names_the_job_and_its_age():
+    """D2. a quiet job: the reason, the text the model reads, tells the model to tell the owner and never to
+    stop the shell, names the job once, and gives the job's age"""
     base = new_dir()
     output_file(base, "bres600", 600)
     rc, out, err = run_stop(transcript(moved("bres600")), base)
     problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
     reason = block_reason(out, problems)
-    problems += expect(ADVICE in reason.lower(), f"the reason does not say {ADVICE!r}: {reason!r}")
+    problems += advice_problems(reason, "the reason")
     problems += listed_once(reason, "bres600")
     problems += expect("600s" in reason, f"age 600s is not in the reason: {reason!r}")
     return problems
