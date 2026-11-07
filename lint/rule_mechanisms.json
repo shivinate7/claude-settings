@@ -895,8 +895,17 @@
     "output-never-hand-off-doable-step": {
       "test": "hooks/test_reply_judge.py::guard.log: rule is the id the reason names"
     },
+    "output-never-paste-passing-output": {
+      "test": "lint/test_guard_log_report.py::ExactGuardLogRuleTests.test_output_never_paste_passing_output_is_logged_by_its_own_id"
+    },
+    "output-start-with-point": {
+      "test": "lint/test_guard_log_report.py::ExactGuardLogRuleTests.test_output_start_with_point_is_logged_by_its_own_id"
+    },
     "owner-judge": {
       "test": "hooks/test_question_form.py::case_chat_reasons_name_a_remedy_and_no_page_field"
+    },
+    "owner-override": {
+      "test": "lint/test_guard_log_report.py::ExactGuardLogRuleTests.test_an_owner_override_reason_logs_the_owner_override_rule"
     },
     "page-item-design": {
       "test": "hooks/test_guard.py::pd_case"
@@ -906,6 +915,9 @@
     },
     "parallelism-no-mid-task-talk": {
       "test": "hooks/test_sendmessage_state.py::wording FLAG: the deny writes one guard.log line"
+    },
+    "past-ruling": {
+      "test": "lint/test_guard_log_report.py::ExactGuardLogRuleTests.test_a_past_ruling_cite_logs_the_past_ruling_rule"
     },
     "playwright-browsers-path": {
       "test": "hooks/test_guard.py::guard-command-position: playwright, two heredoc headers on one line write the export"
@@ -923,7 +935,7 @@
       "test": "hooks/test_guard.py::press link: a batch with the press item among the sets is denied"
     },
     "prose-judge": {
-      "test": "hooks/test_prose_judge.py::f: the refusal ends with the override line"
+      "test": "lint/test_guard_log_report.py::ExactGuardLogRuleTests.test_a_prose_refusal_logs_the_prose_judge_rule"
     },
     "push-main": {
       "test": "hooks/test_guard.py::push: main, a bare push under push.default current on main asks"
@@ -939,6 +951,9 @@
     },
     "question-judge": {
       "test": "hooks/test_call_judge.py::question: the deny names rule question-judge and logs one deny line"
+    },
+    "questions-go-to-owner": {
+      "test": "lint/test_guard_log_report.py::ExactGuardLogRuleTests.test_questions_go_to_owner_is_logged_by_its_own_id"
     },
     "record-writer-scope": {
       "test": "hooks/test_guard.py::audit-high paths: record-writer Write of a temp file in no repo is still refused"
@@ -999,6 +1014,18 @@
     },
     "spawn-judge": {
       "test": "hooks/test_call_judge.py::agent: the deny names rule spawn-judge and logs one deny line"
+    },
+    "style-cut-narration": {
+      "test": "lint/test_guard_log_report.py::ExactGuardLogRuleTests.test_style_cut_narration_is_logged_by_its_own_id"
+    },
+    "style-limits-kept-silently": {
+      "test": "lint/test_guard_log_report.py::ExactGuardLogRuleTests.test_style_limits_kept_silently_is_logged_by_its_own_id"
+    },
+    "style-question-form": {
+      "test": "lint/test_guard_log_report.py::ExactGuardLogRuleTests.test_style_question_form_is_logged_by_its_own_id"
+    },
+    "style-table-gold-column": {
+      "test": "lint/test_guard_log_report.py::ExactGuardLogRuleTests.test_style_table_gold_column_is_logged_by_its_own_id"
     },
     "subject-unread": {
       "test": "hooks/test_guard.py::subject_unread_log_case"
