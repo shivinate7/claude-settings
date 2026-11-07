@@ -826,8 +826,9 @@ class UnknownTests(StaleCase):
         rc, out = self.run_check(rng, spec=spec)
         self.assertNotIn("stale-cites: UNKNOWN,", out, "a root commit's first push printed the exit-2 read failure\n" + out)
         self.assertEqual(rc, 0, "a root commit's first push (%s) in a full clone did not exit 0 as on main\n%s" % (spec, out))
-        self.assertIn("stale-cites: unknown", out, "a root commit's first push (%s) printed no unknown line, so its "
-                      "range was not named as unread\n%s" % (spec, out))
+        self.assertIn("stale-cites: unknown, the base of %s does not resolve" % spec, out,
+                      "a root commit's first push (%s) did not print its unknown line\n%s" % (spec, out))
+        self.assertNotIn("stale-cites: PASS", out, "a root commit's first push (%s) printed PASS\n%s" % (spec, out))
 
     def test_a_root_commit_range_in_a_full_clone_exits_zero_as_on_main(self):
         self.assert_root_range_exits_zero(self.root_repo(), "HEAD~1..HEAD")
@@ -858,9 +859,10 @@ class UnknownTests(StaleCase):
         the range stays unread and exits 2."""
         rng = self.root_repo()
         other = git(rng.repo, "commit-tree", EMPTY_TREE, "-m", "a second root")
-        self.assertFalse(has_object(rng.repo, other + "^1"), "scope: the other commit is a root with no parent")
-        self.assertNotEqual(other, rng.head, "scope: the other commit is not HEAD")
-        rc, out = self.run_check(rng, spec="%s^1..HEAD" % other)
+        git(rng.repo, "update-ref", "refs/heads/orphan-root", other)
+        self.assertFalse(has_object(rng.repo, "orphan-root^1"), "scope: the orphan branch's root commit has no parent")
+        self.assertNotEqual(other, rng.head, "scope: the orphan root is not HEAD")
+        rc, out = self.run_check(rng, spec="orphan-root^1..HEAD")
         self.assertEqual(rc, 2, "the first parent of a different root commit exited %d, not 2\n%s" % (rc, out))
         self.assertNotIn("stale-cites: PASS", out, "the first parent of a different root commit printed PASS\n" + out)
         self.assertRegex(out, "(?i)unknown", out)
