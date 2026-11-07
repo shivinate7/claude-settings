@@ -556,6 +556,9 @@ def case_task_why_cited_greens():
         why_guard("a Based on (measured) premise line in a str_replace passes", "str_replace",
                   {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Run the proxy check.",
                    "new_str": "Based on (measured): the proxy refused the delete (403)."}, None)
+        why_guard("a bare premise-kind label in a str_replace passes, since it is no cite", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "(read)",
+                   "new_str": "(measured)"}, None)
         why_guard("a capability word outside the Why yours line passes", "set",
                   entry_of(task_item(STEPS, context="The cloud proxy refused the delete (403).\n" + TASK_WHY)), None)
         why_guard("a decision item with an uncited capability line passes, since the rule judges tasks", "set",
