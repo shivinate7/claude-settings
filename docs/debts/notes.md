@@ -84,6 +84,17 @@
 - ghlock-no-compare-and-swap: GitHub API has no compare-and-swap; an expiring lock between read and PATCH could overwrite a rival's lock (merge/merge.py GhLock) Fix: none — rare and harmless. Until: 2026-11-23
 - git-env-glued-block: a glued PowerShell block opener followed by a group hides a git-env set from the guard (hooks/guard_kill.py) Fix: none — owner decides (decision guard-guards-mistakes-only). Until: 2026-11-24
 - git-env-lower-case-fold: lower-case git env names fold to the rule; no record names this as accepted (guard hooks) Fix: none — rare and harmless. Until: 2026-11-25
+- estimate-rule-may-be-checkable: the measured time table (debt `measured-time-table`) may let a check compare a stated time with a measured range (row style-no-unmeasured-estimate)
+- expired-delete-net-error-stops: the expired-lock delete in GhLock.acquire runs once, so a network error or rate limit stops the run with NetStop (merge/merge.py)
+- fb-inbox-append-race: concurrent ab appends to the feedback inbox on Windows lost 406 of 8000 lines in a stress test (hooks/local_time.py)
+- fed-loop-word-cost: nested for loops multiply words, 4x12 takes 2.0 s (hooks/guard_frozen.py). Fix: none — rare and harmless. Until: 2026-11-21.
+- frozen-path-ansi-c-quote: echo ok > $'<frozen path>' is allowed at top level and in bash -c, sh -c and eval; the check does not decode $'...' (hooks/guard.py)
+- guard-exit-7-unprobed: exit 7 under onFailure block was never probed; a timeout was measured to refuse the call (guard wrappers)
+- guard-own-errors-fail-open: guard and rm_prompt_answer exit 0 on their own internal errors (guard scripts)
+- guard-remedy-needs-bash: guard remedy names sh install.sh, which Bash cannot run while the guard is missing (guard wrappers)
+- ghlock-no-compare-and-swap: GitHub API has no compare-and-swap; an expiring lock between read and PATCH could overwrite a rival's lock (merge/merge.py GhLock)
+- git-env-glued-block: a glued PowerShell block opener followed by a group hides a git-env set from the guard (hooks/guard_kill.py)
+- git-env-lower-case-fold: lower-case git env names fold to the rule; no record names this as accepted (guard hooks)
 - git-env-set-false-alarms: safe forms such as try{$env:GIT_DIR=$null}catch{} and Write-Host {$env:GIT_DIR=1} are refused (hooks/guard_kill.py)
 - git-env-set-indirect-forms: indirect sets (function wrapper, iex, EncodedCommand, run-time names) pass the git-env guard (hooks/guard_kill.py) Fix: none — owner decides (decision git-env-set-refused). Until: 2026-11-19
 - git-env-warn-session-start: the git env warning runs at session start only, so mid-session damage shows at next start (guard hooks) Fix: none — rare and harmless. Until: 2026-11-20
