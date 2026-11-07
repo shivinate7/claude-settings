@@ -33,7 +33,7 @@ CI: read live by merge --reviewed
 - The first line is the marker. A line `---` after the CI line ends the record, so the attribution footer may follow.
 - One `Round` line per reviewer. A round can hold more than one line.
 - The `Fix check` line is optional, comes once after the Round lines, and a PASS is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A PASS counts as its round passing in any round; after round 3 it keeps the net value round 3 gave; with no round recorded it reads open.
-- A FAIL is open until the next record. It counts as the next round, N+1: that record carries `Round N+1: reviewer, <model>, FAIL` and no Fix check line, so `--fix-check` may follow again. A FAIL that counts as round 3 makes that record a round-3 record. After round 3 a FAIL is open: revert the fix to the reviewed head, or split it to a new lane.
+- A FAIL is open until the next record. It counts as the next round, N+1: that record carries `Round N+1: reviewer, <model>, FAIL` and no Fix check line, so `--fix-check` may follow again. A FAIL that counts as round 3 makes that record a round-3 record. After round 3 a FAIL holds the change (owner item 356 a).
 - A WIDE is open. Its fix starts a new lane at round 1.
 - No reset: when the record before the newest has a FAIL `Fix check` at last round N, the newest must reach round N+1, or the PR reads open. Why: `a failed fix check on head <9-hex> counts as round N+1, but this record's last round is M`. A WIDE or a PASS sets no floor.
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
@@ -49,13 +49,13 @@ CI: read live by merge --reviewed
 A change is done when one of these holds (rule `roles-review-cap-three`):
 
 - round 1 or 2 is its last round, that round is PASS or a fix check PASSes after its FAIL, and the last `design-reviewer` line (across all rounds) is PASS or absent;
-- round 3 is done, and Guard or check is `no`;
-- round 3 is done, Guard or check is `yes`, and Net value is zero or positive;
+- round 3 is done (no FAIL line at round 3), and Guard or check is `no`;
+- round 3 is done (no FAIL line at round 3), Guard or check is `yes`, and Net value is zero or positive;
 - Kind is `delete-only`, Guard or check is `no`, and round 1 is done;
 - Kind is `docs-only`, with zero rounds, unless the change is a record that files an owner ruling. That change posts `Kind: normal` with one round (decision `docs-only-prs-skip-review`).
 
-- A last `design-reviewer` line of FAIL or PARTIAL keeps a record open on the PASS rule. The round 3 and `delete-only` done rules stay done, and their reason names the design failure.
-- A round 3 verdict does not decide done. When Guard or check is `yes`, Net value does, even after a round 3 PASS: `not owed` is open, and `negative` holds the change (record `hold-unsafe-after-round-3`).
+- A last `design-reviewer` line of FAIL or PARTIAL keeps a record open on the PASS rule. The `delete-only` done rule stays done. Round 3 stays done unless a round 3 line is FAIL, a design FAIL included. The reason names the design failure.
+- A round 3 FAIL holds the change, so the record is open (owner item 356 a). Otherwise, when Guard or check is `yes`, Net value decides done, even after a round 3 PASS: `not owed` is open, and `negative` holds the change (record `hold-unsafe-after-round-3`).
 - A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open unless a fix check PASSes. The rule owes rounds 2 and 3 when round 1 finds a safety hole.
 - `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
 
@@ -85,7 +85,7 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 The coordinator answered both at 23:14. Process-only.
 
 - Q1. Should preview or confirm refuse a PR with no valid record? Pick a: no refusal now. Ruling 113 a names discovery only (rule `outcomes-grant-covers-named-act`). Not taken: confirm refuses an integration PR when a lane tip has no done record. Also not taken: preview prints a review line only.
-- Q2. Which wins when a decision record and rule `roles-review-cap-three` disagree? Pick a: the rule outranks a decision record. Round 3 counts as done, whatever its verdict. Not taken: a final PASS is always needed. Record `standing-merge-grant` says so now.
+- Q2. Which wins when a decision record and rule `roles-review-cap-three` disagree? Pick a: the rule outranks a decision record. Round 3 counts as done unless it FAILs: a round-3 FAIL holds the change (owner item 356 a, relayed by the coordinator). Not taken: a final PASS is always needed. Record `standing-merge-grant` says so now.
 
 Kind: process
 Home: merge/merge.py
