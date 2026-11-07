@@ -2009,9 +2009,10 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
 ENTRY_OWN = re.compile(r"^commit(?: \((?:initial|amend|merge)\))?:")
 ENTRY_REBASE = re.compile(r"^(?:pull --)?rebase\b[^:(]*\(([^)]*)\)")
 ENTRY_RESOLVED = re.compile(r"^(?:commit \(cherry-pick\)|revert)\b")
-# A plain rebase pick, `rebase (pick): <message>` or `rebase -i (pick): <message>`: the replayed commit keeps its
-# message. A commit a rebase drops as already applied has no such entry.
-ENTRY_PICK = re.compile(r"^(?:pull --)?rebase(?: -i)? \(pick\): (.*)$")
+# A plain rebase pick: `rebase (pick): <message>`, `rebase -i (pick): <message>`, or a pull's rebase, which carries
+# the pull's own words, `pull --rebase origin main (pick)` or, with pull.rebase set, `pull origin main (pick)`. The
+# replayed commit keeps its message. A commit a rebase drops as already applied has no such entry.
+ENTRY_PICK = re.compile(r"^(?:pull|rebase)\b[^:(]*\(pick\): (.*)$")
 ENTRY_MESSAGE = re.compile(r"^commit(?: \([a-z]+\))?: (.*)$")
 REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")
 # A git-dir entry that shows a replay in progress: its staged change is git's copy plus what the agent
@@ -2042,16 +2043,6 @@ def git_names(root: str, *args, slow_retry: bool = True):
     if answer is None or answer.returncode != 0:
         return None
     return [p for p in answer.stdout.split("\0") if p]
-
-
-def held_as_replay(root: str, sha: str, slow_retry: bool = True):
-    """True when HEAD holds a commit with the same patch as `sha`, a commit HEAD no longer reaches. False when
-    none does; None when git failed. `git cherry` marks such a commit `-` by its patch id. This reads the patch
-    only: a rebase pick in the reflog is what says HEAD got it by a replay (`own_changes`)."""
-    answer = guard_core._git(root, "cherry", "HEAD", sha, retry=True, slow_retry=slow_retry)
-    if answer is None or answer.returncode != 0:
-        return None
-    return ("- " + sha) in answer.stdout.splitlines()
 
 
 def changed_paths(root: str, old: str, new=None, slow_retry: bool = True):
@@ -2120,8 +2111,8 @@ def own_changes(root: str, slow_retry: bool = True):
       - each commit the agent made (HEAD reflog `commit`, `commit (amend)`, `commit (merge)`) that HEAD
         still holds, or that a rebase replayed into HEAD, against its first parent. A merge commit is
         measured against git's own merge of its parents, so only what the agent resolved or added counts.
-        A lost commit counts as replayed when the reflog holds a `rebase (pick)` of its message that HEAD
-        reaches, and `git cherry` does not say its patch is gone from HEAD (a failed cherry cannot veto).
+        A lost commit counts as replayed when the reflog holds a rebase pick of its message (a pull's rebase
+        too) that HEAD reaches. The pick alone decides: a replay beside a nearby edit changes the patch.
         A commit a rebase dropped as already applied has no pick, and is not held;
       - the working tree against HEAD, or, while a merge is in progress, against git's own merge of
         HEAD and MERGE_HEAD.
@@ -2175,10 +2166,8 @@ def own_changes(root: str, slow_retry: bool = True):
             changes.append(change)
         elif kind == OWN and messages.get(sha) in picked:
             # A rebase replays the agent's own commit as a plain pick: the new commit is another sha, and the
-            # original is gone from HEAD's history. A commit the rebase dropped has no pick entry. The patch
-            # check only vetoes: a rebase that changed the patch no longer holds the original.
-            if held_as_replay(root, sha, slow_retry) is not False:
-                replayed.append(sha)
+            # original is gone from HEAD's history. A commit the rebase dropped has no pick entry.
+            replayed.append(sha)
     old = "HEAD"
     if merging.returncode == 0:
         old = merge_tree(root, "HEAD", merging.stdout.strip())
