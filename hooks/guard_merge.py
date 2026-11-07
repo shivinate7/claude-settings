@@ -228,16 +228,20 @@ MERGE_BATCH_REASON = (
 # The command that runs a repo's ready checks by hand, as the merge tool's all-skipped remedy writes it. It is the one part of the
 # detail a reader runs, so a cut inside it prints a command that fails or runs fewer steps.
 READY_COMMAND = re.compile(r"(`bin/ci-job checks [^`]*`)")
+# A real command (a short base ref, the repo's own step names) is far under this. The bound stops a long PR base ref or a check name
+# that quotes the command start from printing without limit.
+READY_COMMAND_MAX = 400
 
 
 def cap_detail(detail: str, limit: int = 160) -> str:
     """The detail fit to print: the text around a runnable ready-check command shares `limit` characters, cleaned and cut
-    with a mark by `cap_safe`, and each command prints whole. The command's control characters become spaces, as `cap_safe`
-    does for any tool-supplied text; its length is not cut, because it comes from the repo's own merge.readyChecks."""
+    with a mark by `cap_safe`. Each command has its own bound, READY_COMMAND_MAX, so a real command prints whole and a
+    long one is cut with the mark. Its control characters become spaces, as `cap_safe` does for any tool-supplied text."""
     parts = READY_COMMAND.split(detail or "")  # text, command, text, ... : the commands sit at the odd places
     room, out = limit, []
     for i, part in enumerate(parts):
         if i % 2:
+            part = cap_safe(part, READY_COMMAND_MAX)  # cut and cleaned already, so it prints whole below
             out.append(cap_safe(part, len(part)))
             continue
         out.append(cap_safe(part, room))
