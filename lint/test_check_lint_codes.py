@@ -230,7 +230,7 @@ class CheckLintCodesTests(unittest.TestCase):
     # The collisions: a code the branch adds that the ref already defines.
 
     def test_branch_adds_a_stale_code_the_ref_defines_fails(self):
-        # The lane that added STALE003 for stale flags, after main had taken it for the dead-path check.
+        # main defines STALE003 after the branch point; the branch adds its own STALE003 row.
         self.build(tree(), ref=tree(stale=("STALE001", "STALE002", "STALE003")),
                    head=tree(stale=("STALE001", "STALE002", "STALE003")))
         self.assertEqual(rows(self.git("show", "HEAD~1:" + STALE), "STALE003"), 0, "fixture: the base already has STALE003")
