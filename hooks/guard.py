@@ -200,6 +200,13 @@ Other tools, in `judge` order:
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
                        deny. A spawn below the model floor, or a third round on the wrong model.
+                       A SendMessage whose message carries a third-round marker is judged as its
+                       target's next round: the target is the newest Agent or Task spawn in the session
+                       transcript that the `to` names (by agentId or by `name`), and its model is the
+                       spawn's `model`, else the role's agents/*.md pin, else CLAUDE_CODE_SUBAGENT_MODEL.
+                       A model the guard cannot read, a target no spawn holds, an unreadable transcript
+                       and a `session_...` target pass. The remedy names a fresh spawn, because a resume
+                       keeps its model. Cost: only a message with the marker reads the transcript, once.
                        The Workflow scan is static. It reads string-literal `model` and
                        `agentType` keys, and a literal prompt, in each `agent()` call. A template
                        prompt reads its static text only. A step-up call whose prompt or model is
@@ -2605,11 +2612,15 @@ def builder_third_round(brief) -> bool:
 
 
 # A Workflow agent() call is read statically; one whose prompt or model the scan cannot read passes.
-def step_up_hit(tool: str, tool_input) -> str:
+def step_up_hit(tool: str, tool_input, payload=None) -> str:
     """The step-up reason for a spawn whose marker and model disagree, or "". Only a line
     that starts with the marker, or the brief's first line, counts. A missing model runs the env default, which is Sonnet for a builder; a reviewer's
     frontmatter model is haiku, so a reviewer on a later-round brief must name sonnet. A later-round reviewer that names Opus
-    passes here and is refused by the Opus ceiling (opus_spawn_hit), so the remedy names Sonnet only (decision agent-model-cap)."""
+    passes here and is refused by the Opus ceiling (opus_spawn_hit), so the remedy names Sonnet only (decision agent-model-cap).
+    A SendMessage whose message carries a third-round marker is judged as its target's next round (step_up_resume_reason);
+    `payload` supplies the transcript that call reads."""
+    if tool == RESUME_TOOL and isinstance(tool_input, dict):
+        return step_up_resume_reason(tool_input, payload)
     if tool in SPAWN_TOOLS and isinstance(tool_input.get("prompt"), str):
         return step_up_reason(tool_input["prompt"], tool_input.get("subagent_type"), tool_input.get("model"))
     if tool == "Workflow" and isinstance(tool_input.get("script"), str):
@@ -2638,6 +2649,90 @@ def step_up_reason(prompt: str, role, model) -> str:
     if role == "builder" and builder_third_round(prompt) and "opus" not in model:
         return "Builder round 3 runs on Opus. Spawn it with model opus."
     return ""
+
+
+# THE RESUME STEP-UP (rule roles-third-round-steps-up, decision agent-model-cap). A SendMessage resumes the agent it names on the
+# model its spawn gave it, so a third-round message to a builder on Sonnet asks for a third try on the wrong model. The
+# message is judged by step_up_reason as the target's next round. The target is the newest Agent or Task spawn in the session
+# transcript whose result names the agentId `to`, or whose `name` input is `to`; its model is the spawn's `model`, else its
+# role's agents/*.md pin, else CLAUDE_CODE_SUBAGENT_MODEL ("inherit" counts as unset). A model the guard cannot read, a target
+# no spawn holds, a transcript it cannot read and a cross-session `to` pass. Cost: only a message that carries a third-round
+# marker reads anything, and then one pass over the transcript, one file read of the agents folder at most and no process.
+# It is a rare call, so the cost is one transcript read per such message. Nothing is written.
+RESUME_TOOL = "SendMessage"
+RESUME_AGENT_ID = re.compile(r"\bagentId:\s*([A-Za-z0-9_-]+)")
+RESUME_CROSS_SESSION = "session_"
+RESUME_REMEDY = "A resume keeps the agent's old model (%s). Spawn a fresh %s with model"
+
+
+def step_up_resume_reason(tool_input, payload) -> str:
+    """The step-up reason for a SendMessage whose third-round marker disagrees with its target's model, or "". Passes
+    unless the model is known (see THE RESUME STEP-UP). The remedy names a fresh spawn, because a resume keeps its model."""
+    message, to = tool_input.get("message"), tool_input.get("to")
+    if not isinstance(message, str) or not isinstance(to, str) or not to.strip():
+        return ""
+    if not any(n == "3" for _, n in brief_markers(message)):
+        return ""
+    to = to.strip()
+    transcript = payload.get("transcript_path") if isinstance(payload, dict) else None
+    if to.startswith(RESUME_CROSS_SESSION) or not isinstance(transcript, str) or not transcript:
+        return ""
+    spawn = resume_target_spawn(transcript, to)
+    if spawn is None:
+        return ""
+    role = spawn.get("subagent_type")
+    model = str(spawn.get("model") or "").strip()
+    if not model:
+        pointer = pointer_checkout()  # with no pointer checkout there is no agents folder to read, so no pin
+        model = role_pinned_model(pointer, str(role or ROLE_DEFAULT)) if pointer else ""
+        if model is None:  # the agents folder cannot be read, so the model is unknown
+            return ""
+        model = model.split("#")[0].strip().strip("'\"")
+    if not model and model_env_names_one(ROLE_MODEL_ENV):
+        model = os.environ[ROLE_MODEL_ENV].strip()
+    if not model or model.lower() == "inherit":  # the parent's model, which the guard cannot read here
+        return ""
+    reason = step_up_reason(message, role, model)
+    if not reason:
+        return ""
+    return reason.replace("Spawn it with model", RESUME_REMEDY % (model, role))
+
+
+def resume_target_spawn(transcript, to):
+    """The input of the newest Agent or Task spawn in the transcript that `to` names, as an agentId in the spawn's result
+    or as the spawn's `name`, or None when none does or the transcript cannot be read. A line that holds neither an
+    agentId nor a spawn tool name is skipped unparsed."""
+    spawns, ids = [], {}  # spawns: [(tool_use id, input)]; ids: tool_use id -> the agentId its result names
+    try:
+        with open(transcript, encoding="utf-8") as handle:
+            for line in handle:
+                if "agentId" not in line and not any('"%s"' % name in line for name in SPAWN_TOOLS):
+                    continue
+                try:
+                    message = json.loads(line).get("message")
+                    content = message.get("content") if isinstance(message, dict) else None
+                except (ValueError, AttributeError):
+                    continue
+                for block in content if isinstance(content, list) else ():
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "tool_use" and block.get("name") in SPAWN_TOOLS \
+                            and isinstance(block.get("input"), dict):
+                        spawns.append((block.get("id"), block["input"]))
+                    elif block.get("type") == "tool_result":
+                        body = block.get("content")
+                        if isinstance(body, list):
+                            body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
+                        found = RESUME_AGENT_ID.search(body) if isinstance(body, str) else None
+                        if found:
+                            ids[block.get("tool_use_id")] = found.group(1)
+    except (OSError, ValueError):
+        return None
+    target = None
+    for use_id, spawn_input in spawns:
+        if spawn_input.get("name") == to or ids.get(use_id) == to:
+            target = spawn_input
+    return target
 
 
 # THE ROLE MODEL ROW (rule agent-role-model, decision agent-model-cap). The model per role is read at each spawn from the
@@ -2772,16 +2867,26 @@ def role_agent_keys(pointer_root):
         yield frontmatter_keys(lines[1:end])
 
 
-def role_has_model_pin(pointer_root, role):
-    """True when an agent file in the pointer checkout's agents folder names this role and pins a `model:` in its
-    frontmatter, False when none does, None when the folder cannot be read."""
+def role_pinned_model(pointer_root, role):
+    """The `model:` value that an agent file in the pointer checkout's agents folder pins for this role, as the file
+    spells it (raw, comment and quotes kept), "" when none does, None when the folder cannot be read. The one reader
+    of a role's pin; role_has_model_pin reads it too."""
+    if not pointer_root:
+        return None
     try:
         for keys in role_agent_keys(pointer_root):
             if keys.get("name", "").lower() == role.lower() and keys.get("model"):
-                return True
+                return keys["model"]
     except OSError:
         return None
-    return False
+    return ""
+
+
+def role_has_model_pin(pointer_root, role):
+    """True when an agent file in the pointer checkout's agents folder names this role and pins a `model:` in its
+    frontmatter, False when none does, None when the folder cannot be read."""
+    pinned = role_pinned_model(pointer_root, role)
+    return None if pinned is None else bool(pinned)
 
 
 # General-purpose and claude have no agents/ file, so they are listed here to count as real roles. Plan and Explore
@@ -4816,7 +4921,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     worktree-home refusal. refuse() asks this before it spends an override, because a lifted act ends the
     check."""
     # role_model_check's above-row refusal is liftable (item 127 pick a); only its no-model refusal is never lifted.
-    if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input)
+    if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input, payload)
             or role_model_check(tool, tool_input)[1].startswith(ROLE_NO_MODEL_MATCH)
             or worktree_home_hit(payload, tool, tool_input, cwd)):
         return True
@@ -4891,9 +4996,9 @@ def judge(payload) -> None:
 
     # 9b. Step-up: a reviewer's second round on Sonnet, a builder's third on Opus. A reviewer's third round passes here on
     # Sonnet or Opus; the Opus ceiling (9d, opus_spawn_hit) then refuses Opus unless an override lifts it.
-    step_up = step_up_hit(tool, tool_input)
+    step_up = step_up_hit(tool, tool_input, payload)
     if step_up:
-        refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
+        refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model") or tool_input.get("to")))
 
     # 9b2. The lane effort pin: a lane session starts with the effort command as its whole prompt. An
     # override lifts it: it is not in never_lifted, because the owner may mean another start prompt.
