@@ -1,0 +1,11 @@
+{
+  "title": "A guard diff's PR run runs the Windows guard shards",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.11,
+  "owner": "coordinator",
+  "why": "Coordinator, 13:52 CST Nov 7: main red at 174b005c1, Windows guard shard 2.",
+  "note": "Cause of main-red-conflict-markers-windows: the PR run of #1402 did not run the Windows guard shards, so the red showed only on main.",
+  "lane": "session_013NEJL22VqTY2w3YtemTyH1",
+  "updatedAt": "2026-11-07T13:52:00-06:00"
+}

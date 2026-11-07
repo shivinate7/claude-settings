@@ -1,0 +1,11 @@
+{
+  "title": "Main is green again on Windows guard shard 2 (#1402's conflict-markers case)",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.1,
+  "owner": "coordinator",
+  "why": "Coordinator, 13:52 CST Nov 7: main red at 174b005c1, Windows guard shard 2.",
+  "note": "Main red at 174b005c1. The commit-refuses-conflict-markers lane was unarchived for it.",
+  "lane": "session_013NEJKzXJPDWrSRe3i1fGJd",
+  "updatedAt": "2026-11-07T13:52:00-06:00"
+}
