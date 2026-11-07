@@ -4,6 +4,11 @@
   "home": "q_max PRs from lane qmax-browser-main-red",
   "id": "qmax-d369-failed-run-msg",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-07T08:13:14.522Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 326,
   "options": [
     {
@@ -23,8 +28,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "q_max D-369",
+  "reply": "Routed 02:15 CST to the coordinator for lane qmax-browser-main-red. Home: that lane's q_max PR shows the cancel, deadline and dead-worker reasons and hides only the provider's raw text (D-369 stands).",
   "short": "q_max D-369: failed-run reason",
-  "status": "open",
+  "status": "closed",
   "title": "q_max failed-run message: show the reason, or rewrite D-369?",
   "why": "A check stays red until you rule, and q_max main's browser suite must go green without a weaker check."
 }

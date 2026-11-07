@@ -4,6 +4,11 @@
   "home": "q_max PRs from lane qmax-browser-main-red",
   "id": "qmax-d319-cancel-tip",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-07T08:13:31.893Z",
+    "choice": "b",
+    "note": ""
+  },
   "n": 325,
   "options": [
     {
@@ -23,8 +28,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "q_max D-319",
+  "reply": "Routed 02:16 CST to the coordinator for lane qmax-browser-main-red. Home: that lane's q_max PR rules the new, shorter tip and re-points D-319 to it.",
   "short": "q_max D-319: Cancel tip reason",
-  "status": "open",
+  "status": "closed",
   "title": "q_max Cancel tip: put the reason back, or re-point D-319?",
   "why": "A check stays red until you rule, and q_max main's browser suite must go green without a weaker check."
 }
