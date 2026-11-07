@@ -493,6 +493,14 @@ class Devices(unittest.TestCase):
                     self.assertNotIn(name, text.lower())
 
 
+def designer_lines(path):
+    """The lines of an agent file after its front matter."""
+    with open(path, encoding="utf-8") as h:
+        lines = h.read().splitlines()
+    fence = [i for i, line in enumerate(lines) if line == "---"]
+    return lines[fence[1] + 1:] if len(fence) > 1 and fence[0] == 0 else lines
+
+
 class DesignerSteps(unittest.TestCase):
     """The designer loads a design skill before it draws and critiques its own mockup before it reports.
 
@@ -509,10 +517,7 @@ class DesignerSteps(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        with open(os.path.join(HERE, "..", "agents", "designer.md"), encoding="utf-8") as h:
-            lines = h.read().splitlines()
-        fence = [i for i, line in enumerate(lines) if line == "---"]
-        cls.lines = lines[fence[1] + 1:] if len(fence) > 1 and fence[0] == 0 else lines
+        cls.lines = designer_lines(os.path.join(HERE, "..", "agents", "designer.md"))
 
     def at(self, anchor):
         hits = [i for i, line in enumerate(self.lines) if line.startswith(anchor)]
@@ -551,6 +556,19 @@ class DesignerSteps(unittest.TestCase):
                             for step in self.steps(self.REPORT, start=self.DRAW) for s in step),
                         "no sentence between the lines starting %r and %r skips impeccable's Setup and its "
                         "Launcher fallback in a blind designer" % (self.DRAW, self.REPORT))
+
+    def tells_skip_impeccable_context(self, sentence):
+        if re.search(r"\b(?:not|never)\s+skip\b|n't\s+skip\b", sentence, re.I):
+            return False
+        return bool(re.search(r"\bskip\b|\b(?:not|never)\s+run\b|n't\s+run\b", sentence, re.I))
+
+    def test_every_designer_skips_impeccable_context_and_uses_the_launcher_fallback(self):
+        # The launcher is refused to a designer by the review-only guard, so every kind skips the call and uses the fallback.
+        found = [s for step in self.steps(self.REPORT) for s in step
+                 if re.search(r"impeccable context", s, re.I) and "Launcher unavailable" in s
+                 and self.tells_skip_impeccable_context(s)]
+        self.assertTrue(found, "no sentence before the line starting %r tells every designer to skip "
+                        "`impeccable context` and use the \"Launcher unavailable\" fallback" % self.REPORT)
 
 
 class Hook(unittest.TestCase):
