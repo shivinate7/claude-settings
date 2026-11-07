@@ -1621,7 +1621,7 @@ class TodoWithOpenPull(UpkeepFixture):
         self.assertIn("Feedback repeat detect", page)
 
     def test_live_file_with_no_sessions_list_still_goes_red_on_the_pair(self):
-        # The pair gate reads readAt and pulls only. publish() leaves the sessions key out, so the gate must not need it.
+        # The pair check reads readAt and pulls only. publish() leaves the sessions key out, so the check must not need it.
         self.commit_step("r7")
         self.publish(pulls=[{"number": 70, "title": "r7 lane", "branch": "r7"}])
         _, out = self.build_from_main("--live", str(self.live), expect=(1,))
@@ -1658,7 +1658,7 @@ class TodoWithOpenPull(UpkeepFixture):
 
 class ReadyAndDraftRows(UpkeepFixture):
     """Two upkeep rows (spec part B). `ready todo steps` lists each todo step whose note has the sentence `Ready.`,
-    with no gate on live phases. `draft PRs over 12 h with no live lane` lists each draft pull created more than
+    with no check on live phases. `draft PRs over 12 h with no live lane` lists each draft pull created more than
     12 h before the live read, when no live session names its step. An entry reads `#<number> (<branch or title>)`,
     or `unknown (#<number> has no createdAt)` when its createdAt is missing or not an ISO time with a zone."""
 
