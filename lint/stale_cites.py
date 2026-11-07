@@ -97,9 +97,10 @@ or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each t
 when a removed or renamed path, or a name that a touched .py no longer defines, gives the findings something to
 look for. A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
 STALE006 starts no process of its own. A range that edits a non-Markdown file in place reads the tracked Markdown at head
-through the `cat-file --batch` the run opens (the trees of `rng.tree` when a read listed it, else walked through that
-same process, since an `ls-tree` here would be a second start), so a changed file that is no .py adds that one
-`cat-file` start, and a .py adds none. It builds one map (the file's hunks, already in the diff, its base lines and its
+once per file, through the `cat-file --batch` the run opens (the trees of `rng.tree` when a read listed it, else walked
+through that same process, since an `ls-tree` here would be a second start). A range that changes a .py file reads
+that Markdown too, and the .py's own `cat-file` serves it. A changed file that is no .py, in a repo with no decision
+records, adds one `cat-file` start, because nothing else in the run opens it; a decision record opens it already. It builds one map (the file's hunks, already in the diff, its base lines and its
 head lines) for each changed file that an anchor names, and reads the base blob of each edited Markdown file that anchors
 a changed file, once, through the same `cat-file`: no new process.
 The report adds, for a changed non-Markdown file, one `ls-tree` of the decisions folders and the mechanisms file (none
@@ -879,14 +880,17 @@ class RouteClaimReader:
                     found.setdefault((md, number), "cites %s, a route row this range removes" % ", ".join(ids))
 
 
-def drift_of(hunks, first, last):
+def drift_of(hunks, first, last, base=(), head=()):
     """How the range treats the cited lines `first`..`last` of a base file, from its hunks: ("moved", shift) when only
     hunks above the lines change their number, ("removed", 0) when every cited line is deleted, ("changed", 0) when a
     hunk deletes, replaces or splits some of them, and None when nothing above or inside them changes. An insertion
     after line N sits above the lines when N is below `first`, inside them when N is `first` or more and below `last`,
-    and below them otherwise."""
+    and below them otherwise. Given the `base` and `head` lines (line ends already normalised, `file_lines`), a hunk
+    that replaces lines with the same text is no change: a CRLF to LF rewrite alone moves and changes nothing."""
     shift, touched, deleted = 0, False, 0
-    for start, old, new, _ in hunks:
+    for start, old, new, new_start in hunks:
+        if old and old == new and base[start - 1:start - 1 + old] == head[new_start - 1:new_start - 1 + new]:
+            continue
         if old == 0:
             if start < first:
                 shift += new
@@ -1019,7 +1023,7 @@ class DriftReader:
             return 1 <= a <= b <= len(base)  # an anchor with no such lines at base is STALE004's, never drift
 
         def untouched(a, b):
-            drift = drift_of(hunks, a, b) if valid(a, b) else None
+            drift = drift_of(hunks, a, b, base, head) if valid(a, b) else None
             if drift is None:
                 return None
             kind, shift = drift
@@ -1034,12 +1038,12 @@ class DriftReader:
         for a, b in base_anchors or ():
             if (first, last) == (a, b):
                 return untouched(a, b)
-            drift = drift_of(hunks, a, b) if valid(a, b) else None
+            drift = drift_of(hunks, a, b, base, head) if valid(a, b) else None
             if drift and drift[0] == "moved" and (first, last) == (a + drift[1], b + drift[1]):
                 return None  # the writer re-anchored the line after the range moved its lines
         if not valid(first, last):
             return None
-        drift = drift_of(hunks, first, last)
+        drift = drift_of(hunks, first, last, base, head)
         if drift is None or drift[0] != "moved":
             return None
         new_first, new_last = first + drift[1], last + drift[1]
@@ -1112,8 +1116,12 @@ def read_markdown(batch, rev, md):
 def find_stale(rng):
     """{(path, line, code): [messages]}: the findings. Fills `rng.unknowns`."""
     found = {}
+    # The cost contract: these readers read no tree or Markdown unless the range removes, renames or changes a path of
+    # a .py file. STALE006 (`DriftReader`) reads the head Markdown once per file for a range that edits any
+    # non-Markdown file, a .py included, through the same cat-file; a non-.py target in a repo with no decision
+    # records adds one cat-file start.
     if not rng.removed and not rng.renamed and not rng.py_files:
-        return found  # the cost contract: nothing removed, so no blob, tree or Markdown read
+        return found
     active = [(r, state) for r in READERS if getattr(r, "scope", "tree") == "tree"
               for state in [r.prepare(rng)] if state is not None]
     if all(getattr(reader, "unknown", False) for reader, _ in active):
