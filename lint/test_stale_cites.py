@@ -305,6 +305,15 @@ class StaleCase(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertEqual(parse(out), [], out)
 
+    def depth_one_clone(self, rng):
+        """A depth-1 clone of the range's repo: the head is in it and the base is cut away. Asserts the clone is
+        shallow and the base is out before a case reads it. Returns the clone's folder."""
+        clone = os.path.join(rng.case, "shallow")
+        self.assertEqual(shallow_clone.make(rng.repo, clone, rng.head), "", "scope: the depth-1 clone was made")
+        self.assertTrue(shallow_clone.facts(clone, rng.head)["shallow"], "scope: the clone is shallow")
+        self.assertFalse(has_object(clone, rng.base), "scope: the base is cut from the clone")
+        return clone
+
     def run_copy_of_script(self, rng, args):
         """Run a copy of the script's folders with `args` in the repo. Returns (exit code, output, the files before,
         the files after), so a file the run writes in the repo or beside the script shows as a change."""
@@ -781,10 +790,7 @@ class UnknownTests(StaleCase):
             move(repo, "hooks/lib.mjs", MOVED)
             commit(repo)
         rng = self.make_range(base_files(), change)
-        clone = os.path.join(rng.case, "shallow")
-        self.assertEqual(shallow_clone.make(rng.repo, clone, rng.head), "", "scope: the depth-1 clone was made")
-        self.assertTrue(shallow_clone.facts(clone, rng.head)["shallow"], "scope: the clone is shallow")
-        self.assertFalse(has_object(clone, rng.base), "scope: the base is cut from the clone")
+        clone = self.depth_one_clone(rng)
         rc, out = self.run_check(rng._replace(repo=clone))
         self.assertEqual(rc, 0, out)
         self.assertTrue(unknown_lines(out), out)
@@ -1161,14 +1167,30 @@ class UnreadableReadTests(StaleCase):
         self.assert_read_failed(rc, out, "git diff")
         self.assertNotIn("fetch-depth", out, "a missing head was blamed on a shallow clone of the base\n" + out)
 
-    def test_an_unresolvable_base_in_a_full_clone_exits_two_and_names_it(self):
+    def assert_base_missing_from_full_clone(self, spec):
+        """A base that names nothing in a full clone is a read that could not run, in either range form: exit 2, and
+        the output names the base and does not blame a shallow clone."""
         rng = self.moved_lib(cited=True)
         self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is not shallow")
         self.assertFalse(has_object(rng.repo, "nosuchbase"), "scope: the base does not resolve")
         self.assertTrue(has_object(rng.repo, "HEAD"), "scope: the head resolves")
-        rc, out = self.run_check(rng, spec="nosuchbase...HEAD")
+        rc, out = self.run_check(rng, spec=spec)
         self.assert_read_failed(rc, out, "nosuchbase")
         self.assertNotIn("fetch-depth", out, "a base missing from a full clone was blamed on a shallow clone\n" + out)
+
+    def test_an_unresolvable_base_in_a_full_clone_exits_two_and_names_it(self):
+        self.assert_base_missing_from_full_clone("nosuchbase...HEAD")
+
+    def test_an_unresolvable_base_in_a_full_clone_two_dot_range_exits_two_and_names_it(self):
+        self.assert_base_missing_from_full_clone("nosuchbase..HEAD")
+
+    def test_an_unresolvable_base_in_a_depth_one_clone_two_dot_range_prints_unknown_and_exits_zero(self):
+        rng = self.moved_lib(cited=True)
+        clone = self.depth_one_clone(rng)
+        rc, out = self.run_check(rng._replace(repo=clone), spec="%s..%s" % (rng.base, rng.head))
+        self.assertEqual(rc, 0, "a depth-1 clone's two-dot base read exited non-zero, the carve-out is lost\n" + out)
+        self.assertTrue(unknown_lines(out), out)
+        self.assertIn("fetch-depth", out, "the shallow clone's unknown line does not name fetch-depth\n" + out)
 
     def test_a_two_dot_range_with_a_resolving_head_flags_the_stale_cite_and_passes_when_clean(self):
         rng = self.moved_lib(cited=True)
