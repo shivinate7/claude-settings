@@ -26,7 +26,7 @@ AGENT_BRANCH_PREFIX = "worktree-agent-"
 AGENT_PUSH_RULE = "agent-branch-push"
 
 
-# One shell call reads each git answer once: push_verdict and the record-branch rule resolve the same
+# One shell call reads each git answer, and each push's destinations, once: push_verdict and the record-branch rule resolve the same
 # destinations, and the force loop resolves them again. judge_shell clears this at its start, so a read
 # never outlives the call it served. Key: the folder and the git arguments.
 PUSH_READS = {}
@@ -210,20 +210,18 @@ def _push_dest(spec: str, bare: bool, cwd: str, overrides=None):
     return target
 
 
-_DESTINATIONS = {}   # (args, cwd, overrides) -> destinations, for the life of one hook process
-
-
 def push_destinations(args, cwd: str, overrides=None):
     """The branch names a `git push` with these arguments writes, `refs/heads/` cut off, a deletion
-    included. None stands for a destination it cannot resolve. One hook call is one process and reads
-    each push's destinations once, so the record-branch check and the conflict-markers check share the
-    reads (`git symbolic-ref`, `git config`) a HEAD or bare push needs."""
-    key = (tuple(args), cwd, tuple(sorted((overrides or {}).items())))
-    if key not in _DESTINATIONS:
+    included. None stands for a destination it cannot resolve. One shell call reads each push's
+    destinations once (the PUSH_READS memo, cleared at the start of the call), so the record-branch
+    check and the conflict-markers check share the reads (`git symbolic-ref`, `git config`) a HEAD or
+    bare push needs."""
+    key = ("destinations", tuple(args), cwd, tuple(sorted((overrides or {}).items())))
+    if key not in PUSH_READS:
         plain = _push_parse(args)[-1]
         found = [_push_dest(spec, not plain, cwd, overrides) for spec in plain or [""]]
-        _DESTINATIONS[key] = [t.removeprefix("refs/heads/") if t else t for t in found]
-    return _DESTINATIONS[key]
+        PUSH_READS[key] = [t.removeprefix("refs/heads/") if t else t for t in found]
+    return PUSH_READS[key]
 
 
 def _colon_delete(delete, plain):
