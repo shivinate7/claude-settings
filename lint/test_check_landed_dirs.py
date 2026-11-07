@@ -150,6 +150,37 @@ class CheckLandedDirsTests(unittest.TestCase):
         result = run_in_copy(edit)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_file_in_a_pytest_cache_under_a_landed_folder_passes(self):
+        # Why: .pytest_cache is a test tool's cache, a build leftover like __pycache__, never a shipped file.
+        result = run_in_copy(add_file("hooks/.pytest_cache/v/cache/lastfailed", "case\n"))
+        self.assertEqual(result.returncode, 0,
+                         "a file in hooks/.pytest_cache/, a tool cache, was refused as a nested file: %s" % result.stderr)
+
+    def test_file_in_a_mypy_cache_under_a_landed_folder_passes(self):
+        # Why: .mypy_cache is a type checker's cache, a build leftover like __pycache__, never a shipped file.
+        result = run_in_copy(add_file("hooks/.mypy_cache/3.11/guard.data.json", "case\n"))
+        self.assertEqual(result.returncode, 0,
+                         "a file in hooks/.mypy_cache/, a tool cache, was refused as a nested file: %s" % result.stderr)
+
+    def test_file_in_a_ruff_cache_under_a_landed_folder_passes(self):
+        # Why: .ruff_cache is a linter's cache, a build leftover like __pycache__, never a shipped file.
+        result = run_in_copy(add_file("hooks/.ruff_cache/0.1.0/probe.msgpack", "case\n"))
+        self.assertEqual(result.returncode, 0,
+                         "a file in hooks/.ruff_cache/, a tool cache, was refused as a nested file: %s" % result.stderr)
+
+    def test_file_in_a_pycache_under_a_landed_folder_still_passes(self):
+        # Why: __pycache__ is already pruned; this pins that existing filter, so the cache fix cannot drop it.
+        result = run_in_copy(add_file("hooks/__pycache__/guard.cpython-311.pyc", "case\n"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_file_in_a_dot_folder_that_is_no_cache_still_fails(self):
+        # Why: the cache names are an allow list. A fix that skips every dot-folder would let a hidden shipped
+        # file under a landed folder pass, so a dot-folder that is no cache must still be refused.
+        result = run_in_copy(add_file("hooks/.notes/probe.txt", "case\n"))
+        self.assertEqual(result.returncode, 1,
+                         "a file in hooks/.notes/, a dot-folder that is no cache, passed the check: %s" % result.stdout)
+        self.assertIn("probe.txt", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

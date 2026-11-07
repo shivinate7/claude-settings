@@ -13201,6 +13201,18 @@ add("test-author: a whole new test step with if: false is refused", "deny", rule
     file_path=WF, old_string=LINT,
     new_string=LINT + "      - name: Guard tests\n        if: false\n        run: python3 hooks/test_guard.py\n",
     carries=("builder", "Report"), **A)
+# A multi-line run: block whose wrapper takes a quoted value with a space. The shell reads the quoted value as one
+# word, so the run is a test. A whitespace split reads `-screen` and `0` as the command and finds no test path, so
+# the deletion would pass. The bare block beside it is the control: the same block shape, no wrapper, is refused.
+XVFB_QUOTED_BLOCK = ("      - name: Xvfb unit\n        run: |\n"
+                     "          xvfb-run -s \"-screen 0 1024x768x24\" python3 tests/test_a.py\n")
+BARE_BLOCK = "      - name: Bare unit\n        run: |\n          python3 tests/test_a.py\n"
+add("builder-test: a multi-line run under xvfb-run with a quoted -s value, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + XVFB_QUOTED_BLOCK, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a multi-line bare test run, no wrapper, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BARE_BLOCK, new_string=LINT,
+    carries=("test-author", "Report"), **B)
 
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with
