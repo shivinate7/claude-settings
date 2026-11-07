@@ -13228,6 +13228,33 @@ add("builder-test: a multi-line python run with a backslash test path, deleted f
 add("builder-test: a node run with a backslash test path, deleted from checks.yml is refused",
     "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_NODE, new_string=LINT,
     carries=("test-author", "Report"), **B)
+# A whole command held in quotes is one word to the lexer, so its test path must still be read through the quotes.
+# Each deletion below runs a test folder or a test script that only the quoted command names, so each is refused.
+QUOTED_BASH = '      - name: Integration\n        run: bash -c "pytest tests/integration"\n'
+QUOTED_SH = '      - name: Tests\n        run: sh -c "pytest tests/"\n'
+QUOTED_DOCKER = '      - name: Unit\n        run: docker run img sh -c "pytest tests/unit"\n'
+QUOTED_XVFB = '      - name: E2E\n        run: xvfb-run -a bash -c "pytest tests/e2e"\n'
+QUOTED_COMMENT = '      - name: Integration\n        run: bash -c "pytest tests/integration # slow"\n'
+YAML_DQ_PY = '      - name: Run all\n        run: "python tests/run_all.py"\n'
+YAML_SQ_NODE = "      - name: Node\n        run: 'node tests/run.js'\n"
+YAML_DQ_PYTEST = '      - name: Pytest\n        run: "pytest tests/"\n'
+for _name, _step in (
+    ("a bash -c run of a test folder in double quotes", QUOTED_BASH),
+    ("a sh -c run of a test folder in double quotes", QUOTED_SH),
+    ("a docker run whose sh -c runs a test folder in double quotes", QUOTED_DOCKER),
+    ("an xvfb-run bash -c run of a test folder in double quotes", QUOTED_XVFB),
+    ("a bash -c run with a comment opener inside its double quotes", QUOTED_COMMENT),
+    ("a YAML double-quoted python run of a test script", YAML_DQ_PY),
+    ("a YAML single-quoted node run of a test script", YAML_SQ_NODE),
+    ("a YAML double-quoted pytest run of a test folder", YAML_DQ_PYTEST),
+):
+    add("builder-test: %s, deleted from checks.yml is refused" % _name, "deny", rule=BT, tool="Edit",
+        file_path=WF, old_string=LINT + _step, new_string=LINT, carries=("test-author", "Report"), **B)
+# The false-alarm control: the same test run with its quotes dropped is still that test run, so the rewrite is allowed.
+add("builder-test: a bash -c test run rewritten to a bare pytest run in checks.yml is allowed", "allow",
+    tool="Edit", file_path=WF,
+    old_string=LINT + "      - name: Unit\n        run: bash -c 'pytest tests/test_a.py'\n",
+    new_string=LINT + "      - name: Unit\n        run: pytest tests/test_a.py\n", **B)
 
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with
