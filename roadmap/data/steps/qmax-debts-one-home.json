@@ -1,0 +1,10 @@
+{
+  "title": "q_max: drop the second home of the round-3 review limit in docs/debts/README.md",
+  "phase": "now",
+  "status": "todo",
+  "order": 0.27,
+  "owner": "coordinator",
+  "why": "Lane qmax-revive-idle, 12:48 CST Nov 7: docs/debts/README.md:16 (after PR #1020) records a round-3 review limit under \"Holes, named\" in its decision and also in the debt store. That is two homes for one gap, against the file's own \"One gap, one home\" heading.",
+  "note": "No owner question: the file's own rule and global rule building-one-home-per-capability answer it. Drop the \"Holes, named\" clause and keep the debt record. Done: one home for the gap on q_max main. Filed under pr-backlog-clear.",
+  "updatedAt": "2026-11-07T12:52:00-06:00"
+}
