@@ -15,6 +15,7 @@ Output names pinned (the `scope` job re-exports them as job outputs):
 Run with:  python3 lint/test_ci_scope.py -v
 """
 import ast
+import functools
 import os
 import posixpath
 import shutil
@@ -22,15 +23,18 @@ import subprocess
 import tempfile
 import unittest
 from collections import Counter
+from unittest import mock
 
 import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder (lint/_test_temp.py)
+RUN_FOLDER = _test_temp.run_folder()
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 REPO = os.path.abspath(os.path.join(HERE, ".."))
 REPO_REAL = os.path.realpath(REPO)  # the root the derivation reads paths against: __file__ resolves to this too
-JOB_FLAGS =["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
+JOB_FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
 STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
 # Flags derived from others, kept out of JOB_FLAGS so the exact-set cases below stay about the base flags:
 # checks_windows_sweep is set with checks_windows_rest. checks_guard is set when both `code` and `guard` are set, or
@@ -68,9 +72,9 @@ def family_files():
 # The files the guard suite loads, derived from the code of GUARD_SEEDS, not listed by hand. A file is in the closure when
 # a file in it imports it, or loads it by a path (_refs reads each file's syntax tree):
 #   import x, from x import y, importlib.import_module("x"): x is the basename of a repo .py file;
-#   a run-time root that is a folder of the repo (_path_of reads __file__ and the os.path or pathlib calls on it, and a
-#   module-level name bound once to one of these), then one literal, as os.path.join(root, "lit") or root / "lit": the
-#   file at that folder plus the literal (_repo_load);
+#   a run-time root that is a folder of the repo (_path_of reads __file__ and the os.path or pathlib calls on it, .parent,
+#   and a module-level name bound once to one of these), then its literals, as os.path.join(root, "lit") or a `/` chain,
+#   root / "a" / "b": the file at that folder plus the literals (_repo_load);
 #   os.path.join whose literal segments have a `..`, or whose run-time root is the file's own folder (__file__, _HERE):
 #     the file of that name in that folder;
 #   os.path.join of literal segments with no run-time root: a repo path, from the repo root;
@@ -110,13 +114,19 @@ _CLOSURE = {}  # closure_of's cache: seed tuple -> (files, unfollowed)
 
 def _repo_files():
     """Every file under the repo, as '/' paths. Skips .git, build folders, and .claude/worktrees (each worktree copies the repo)."""
+    return list(_files_under(REPO))
+
+
+@functools.lru_cache(maxsize=None)
+def _files_under(root):
+    """The files under `root`, walked once per root. A tuple, so no caller can change the cached list."""
     out = []
-    worktrees = os.path.join(REPO, ".claude", "worktrees")
-    for dirpath, dirnames, filenames in os.walk(REPO):
+    worktrees = os.path.join(root, ".claude", "worktrees")
+    for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in (".git", "node_modules", "__pycache__")
                        and os.path.join(dirpath, d) != worktrees]
-        out += [os.path.relpath(os.path.join(dirpath, n), REPO).replace(os.sep, "/") for n in filenames]
-    return out
+        out += [os.path.relpath(os.path.join(dirpath, n), root).replace(os.sep, "/") for n in filenames if n != ".git"]
+    return tuple(out)
 
 
 def _callee(call):
@@ -176,6 +186,7 @@ def _uses_file(node):
     return any(isinstance(n, ast.Name) and n.id == "__file__" for n in ast.walk(node))
 
 
+@functools.lru_cache(maxsize=None)
 def _bound_names(tree):
     """The module-level names bound once in the file, with their values. A name bound anywhere else in the file (a
     parameter, a local, an import, a second assignment) is not read through: its value is not the module's."""
@@ -196,7 +207,7 @@ def _bound_names(tree):
 
 def _path_of(node, f, bound, depth=0):
     """The absolute path a path expression reads to, or None. Only these are read: __file__ (the loading file), the os.path
-    functions dirname, abspath, realpath, normpath and join, pathlib.Path(...), .resolve(), .parents[N], a `/` with a
+    functions dirname, abspath, realpath, normpath and join, pathlib.Path(...), .resolve(), .parent, .parents[N], a `/` with a
     literal, and a module-level name bound once to one of these. Nothing is called beyond them: no environment, no read."""
     if depth > 20:
         return None
@@ -204,6 +215,9 @@ def _path_of(node, f, bound, depth=0):
         if node.id == "__file__":
             return os.path.realpath(os.path.join(REPO_REAL, f))
         return _path_of(bound[node.id], f, bound, depth + 1) if node.id in bound else None
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        p = _path_of(node.value, f, bound, depth + 1)
+        return None if p is None else os.path.dirname(p)
     if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute) and node.value.attr == "parents" \
             and isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, int):
         p = _path_of(node.value.value, f, bound, depth + 1)
@@ -237,19 +251,29 @@ def _is_test(f):
     return posixpath.basename(f).startswith("test_")
 
 
+def _div_chain(expr):
+    """The root of a pathlib `/` chain and its literal segments in order: root / "a" / "b" -> (root, ["a", "b"]). The chain
+    ends at the first `/` whose right side is not a literal."""
+    lits = []
+    while isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Div) and _is_str(expr.right):
+        lits.insert(0, expr.right.value)
+        expr = expr.left
+    return expr, lits
+
+
 def _repo_load(f, expr, tracked, bound):
     """The repo file a load reads when a run-time root that is a folder of the repo comes before its literals, as
-    os.path.join(root, "lit") or root / "lit": the file at root plus the literals, when it is a repo file. None otherwise.
-    A product module reads one literal; a test module's join reads any number, since its REPO is the real checkout. A
-    literal root, or a `/` chain of several literals, is not read here."""
+    os.path.join(root, "lit") or a `/` chain, root / "a" / "b": the file at root plus the literals, when it is a repo file.
+    None otherwise. A product module's join reads one literal; a test module's join reads any number, since its REPO is the
+    real checkout. A `/` chain reads all its literals. A literal root is not read here."""
     if isinstance(expr, ast.Call) and _callee(expr) == "os.path.join" and len(expr.args) >= 2 \
             and all(_is_str(a) for a in expr.args[1:]) and (_is_test(f) or len(expr.args) == 2):
         root, lits = expr.args[0], [a.value for a in expr.args[1:]]
     elif isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Div) and _is_str(expr.right):
-        root, lits = expr.left, [expr.right.value]
+        root, lits = _div_chain(expr)
     else:
         return None
-    if _is_str(root) or (isinstance(root, ast.BinOp) and _is_str(root.right)):
+    if _is_str(root):
         return None
     base = _path_of(root, f, bound)
     if base is None:
@@ -289,21 +313,31 @@ def _join_file(f, call, tracked, own_names, bound):
     return None, None
 
 
-def _key(node, parents):
-    """The key a load the derivation does not follow is listed under, after its file: the enclosing function (or <module>)
-    and the load's source as ast.unparse writes it. Neither holds a line number."""
-    scope, p = "<module>", node
-    while p in parents:
-        p = parents[p]
-        if isinstance(p, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            scope = p.name
-            break
-    return f"{scope}:{ast.unparse(node)}"
+def _keyed(named, parents):
+    """-> [(key, what)] for the loads the derivation does not follow, in source order. A key, after its file, is the scope
+    the load sits in (its classes and functions, qualified: Class.method, or <module>) and the load's source as ast.unparse
+    writes it. A repeat of one key in the file gets #N, N counting from 2, so no two keys are equal. Neither holds a line."""
+    seen, out = Counter(), []
+    for node, what in sorted(named, key=lambda nw: (nw[0].lineno, nw[0].col_offset)):
+        names, p = [], node
+        while p in parents:
+            p = parents[p]
+            if isinstance(p, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.append(p.name)
+        base = f"{'.'.join(reversed(names)) or '<module>'}:{ast.unparse(node)}"
+        seen[base] += 1
+        out.append((base if seen[base] == 1 else f"{base}#{seen[base]}", what))
+    return out
 
 
 def _refs(f, tree, tracked):
     """What one repo file loads, from its syntax tree: (module names it imports, repo files it loads by path, loader
-    targets, loads it does not follow as (key, what))."""
+    targets, loads it does not follow as (key, what)). Cached per (file, tree, tracked set)."""
+    return _refs_of(f, tree, frozenset(tracked))
+
+
+@functools.lru_cache(maxsize=None)
+def _refs_of(f, tree, tracked):
     parents = {c: n for n in ast.walk(tree) for c in ast.iter_child_nodes(n)}
     own_names = {t.id for st in tree.body if isinstance(st, ast.Assign) and _uses_file(st.value)
                  for t in st.targets if isinstance(t, ast.Name)}
@@ -321,12 +355,12 @@ def _refs(f, tree, tracked):
                 if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
                     modules.add(node.args[0].value.split(".")[0])
                 else:
-                    unfollowed.append((_key(node, parents), "importlib.import_module of a name built at run time"))
+                    unfollowed.append((node, "importlib.import_module of a name built at run time"))
             elif name == "os.path.join":
                 c, kind = _join_file(f, node, tracked, own_names, bound)
                 if kind == "run-time":
                     if not test:  # a test's join under a run-time root is a fixture path, not a repo load
-                        unfollowed.append((_key(node, parents), f"os.path.join with a run-time root, then {c}"))
+                        unfollowed.append((node, f"os.path.join with a run-time root, then {c}"))
                 elif c:
                     paths.add(c)
             elif name.endswith("spec_from_file_location") or name.endswith("SourceFileLoader"):
@@ -336,17 +370,17 @@ def _refs(f, tree, tracked):
                     c, kind = _join_file(f, j, tracked, own_names, bound)
                     if kind == "run-time":
                         named = True
-                        unfollowed.append((_key(j, parents), f"a loader path with a run-time root, then {c}"))
+                        unfollowed.append((j, f"a loader path with a run-time root, then {c}"))
                     elif c:
                         hits.append(c)
                 loads.update(hits)
                 if not hits and not named:
-                    unfollowed.append((_key(arg if arg is not None else node, parents), "a loader path with no literal repo file"))
+                    unfollowed.append((arg if arg is not None else node, "a loader path with no literal repo file"))
         elif isinstance(node, ast.BinOp):  # a pathlib `/` load, read wherever it is written
             c = _repo_load(f, node, tracked, bound)
             if c:
                 paths.add(c)
-    return modules, paths, loads, unfollowed
+    return modules, paths, loads, _keyed(unfollowed, parents)
 
 
 def closure_of(seeds):
@@ -369,9 +403,7 @@ def closure_of(seeds):
             if f in parsed or not is_python:
                 continue
             parsed.add(f)
-            with open(os.path.join(REPO, f), encoding="utf-8") as h:
-                tree = ast.parse(h.read(), filename=f)
-            modules, paths, loads, here = _refs(f, tree, tracked)
+            modules, paths, loads, here = _refs(f, _parse(f, source_of(f)), tracked)
             todo += [(c, True) for m in modules for c in by_name.get(m, [])]
             todo += [(c, c.endswith(".py")) for c in paths]
             todo += [(c, True) for c in loads]
@@ -390,9 +422,15 @@ def merge_closure():
     return closure_of(MERGE_SEEDS)
 
 
+@functools.lru_cache(maxsize=None)
+def _parse(f, src):
+    """The syntax tree of one file's source, parsed once per (file, source): the closure and the cases read the same text."""
+    return ast.parse(src, filename=f)
+
+
 def named_keys(f, src, tracked):
     """The LOAD_EXCEPTIONS keys of the loads one file's source names but does not follow, read from the source text."""
-    return [f"{f}:{k}" for k, _ in _refs(f, ast.parse(src, filename=f), tracked)[3]]
+    return [f"{f}:{k}" for k, _ in _refs(f, _parse(f, src), tracked)[3]]
 
 
 def exceptions_of(f):
@@ -400,6 +438,7 @@ def exceptions_of(f):
     return sorted(k for k in LOAD_EXCEPTIONS if k.split(":")[0] == f)
 
 
+@functools.lru_cache(maxsize=None)
 def source_of(f):
     with open(os.path.join(REPO, f), encoding="utf-8") as handle:
         return handle.read()
@@ -961,7 +1000,7 @@ class GuardClosure(unittest.TestCase):
         tracked = set(_repo_files())
         self.assertIn("janitor/sweep.py", guard_closure()[0], "scope: janitor/sweep.py is not in the closure")
         self.assertIn("settings.json", tracked, "scope: settings.json is not a repo file")
-        _, paths, loads, _ = _refs("janitor/sweep.py", ast.parse(source_of("janitor/sweep.py")), tracked)
+        _, paths, loads, _ = _refs("janitor/sweep.py", _parse("janitor/sweep.py", source_of("janitor/sweep.py")), tracked)
         self.assertIn("settings.json", paths | loads, "the sweep's settings load is not followed")
 
     def test_a_test_module_join_under_the_repo_root_loads_its_file(self):
@@ -969,7 +1008,7 @@ class GuardClosure(unittest.TestCase):
         tracked = set(_repo_files())
         self.assertIn("hooks/test_guard.py", guard_closure()[0], "scope: hooks/test_guard.py is not in the closure")
         self.assertIn("settings.json", tracked, "scope: settings.json is not a repo file")
-        _, paths, loads, _ = _refs("hooks/test_guard.py", ast.parse(source_of("hooks/test_guard.py")), tracked)
+        _, paths, loads, _ = _refs("hooks/test_guard.py", _parse("hooks/test_guard.py", source_of("hooks/test_guard.py")), tracked)
         self.assertIn("settings.json", paths | loads, "the test module's settings load under REPO is not followed")
 
     def test_a_pathlib_load_through_a_name_loads_its_file(self):
@@ -978,7 +1017,7 @@ class GuardClosure(unittest.TestCase):
         tracked = set(_repo_files())
         self.assertIn("merge/merge.py", guard_closure()[0], "scope: merge/merge.py is not in the closure")
         self.assertIn("skills/roadmap/build.py", tracked, "scope: skills/roadmap/build.py is not a repo file")
-        _, _, loads, unfollowed = _refs("merge/merge.py", ast.parse(source_of("merge/merge.py")), tracked)
+        _, _, loads, unfollowed = _refs("merge/merge.py", _parse("merge/merge.py", source_of("merge/merge.py")), tracked)
         self.assertIn("skills/roadmap/build.py", loads, "the idle-lane loader's pathlib path is not followed")
         self.assertNotIn("a loader path with no literal repo file", [what for _, what in unfollowed])
 
@@ -1033,7 +1072,7 @@ class GuardClosure(unittest.TestCase):
         tracked = set(_repo_files())
         self.assertIn("hooks/test_guard.py", guard_closure()[0], "scope: hooks/test_guard.py is not in the closure")
         self.assertIn(target, tracked, f"scope: {target} is not a repo file")
-        _, paths, loads, _ = _refs("hooks/test_guard.py", ast.parse(source_of("hooks/test_guard.py")), tracked)
+        _, paths, loads, _ = _refs("hooks/test_guard.py", _parse("hooks/test_guard.py", source_of("hooks/test_guard.py")), tracked)
         self.assertIn(target, paths | loads, f"the test module's join under REPO for {target} is not followed")
 
     def test_a_test_module_join_under_the_repo_reads_the_impeccable_skill(self):
@@ -1056,6 +1095,70 @@ class GuardClosure(unittest.TestCase):
         _, paths, loads, unfollowed = _refs("hooks/test_zz_probe.py", ast.parse(src), tracked)
         self.assertNotIn("skills/waiting-page/page.html", paths | loads)
         self.assertEqual(unfollowed, [])
+
+    # Two named loads must not share a key: a key is the scope and the load's source, so each collision shape is a fixture.
+    def test_two_same_named_methods_in_two_classes_key_apart(self):
+        # Scope first: the probe's two loads are the multi-literal join under ROOT, a named load (lint/rule_mechanisms.json).
+        tracked = set(_repo_files())
+        self.assertIn("lint/rule_mechanisms.json", tracked, "scope: lint/rule_mechanisms.json is not a repo file")
+        src = ('import os\nROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))\n'
+               'class First:\n    def load(self):\n        return os.path.join(ROOT, "lint", "rule_mechanisms.json")\n'
+               'class Second:\n    def load(self):\n        return os.path.join(ROOT, "lint", "rule_mechanisms.json")\n')
+        _, _, _, unfollowed = _refs("lint/zz_probe.py", ast.parse(src), tracked)
+        keys = [key for key, _ in unfollowed]
+        self.assertEqual(len(keys), 2, f"the two loads are not both named: {keys}")
+        self.assertEqual(len(set(keys)), 2, f"two loads share a key: {keys}")
+        self.assertEqual({key.split(":")[0] for key in keys}, {"First.load", "Second.load"}, f"the scope is not qualified: {keys}")
+
+    def test_two_loads_of_one_source_in_one_function_key_apart(self):
+        # The probe's loads take a path parameter, which no literal names, so both are named.
+        tracked = set(_repo_files())
+        src = ('import importlib.util\n\ndef load(path):\n'
+               '    a = importlib.util.spec_from_file_location("x", path)\n'
+               '    b = importlib.util.spec_from_file_location("y", path)\n    return a, b\n')
+        _, _, _, unfollowed = _refs("lint/zz_probe.py", ast.parse(src), tracked)
+        keys = [key for key, _ in unfollowed]
+        self.assertEqual(len(keys), 2, f"the two loads are not both named: {keys}")
+        self.assertEqual(len(set(keys)), 2, f"two loads share a key: {keys}")
+
+    # A `/` chain and `.parent` are loads when the root is the repo and the path is a repo file. The chain is never named:
+    # a directory and a user-config path are not repo files, and naming them would cry wolf.
+    def test_a_pathlib_chain_through_parent_reads_the_roadmap_page(self):
+        # skills/roadmap/build.py: HERE = pathlib.Path(__file__).resolve().parent, then HERE / "page" / "index.html" (line 751).
+        tracked = set(_repo_files())
+        self.assertIn("skills/roadmap/build.py", guard_closure()[0], "scope: skills/roadmap/build.py is not in the closure")
+        self.assertIn("skills/roadmap/page/index.html", tracked, "scope: skills/roadmap/page/index.html is not a repo file")
+        _, paths, loads, _ = _refs("skills/roadmap/build.py", _parse("skills/roadmap/build.py", source_of("skills/roadmap/build.py")), tracked)
+        self.assertIn("skills/roadmap/page/index.html", paths | loads, "the chain through .parent is not followed")
+
+    def test_a_home_config_chain_is_neither_read_nor_named(self):
+        # Control: a path under the user's home is not a repo file, so the chain reads nothing and names nothing.
+        tracked = set(_repo_files())
+        self.assertIn("settings.json", tracked, "scope: settings.json is a repo file, so the probe names a real repo path")
+        src = 'import pathlib\nUSER_CLAUDE = pathlib.Path.home() / ".claude" / "CLAUDE.md"\n'
+        _, paths, loads, unfollowed = _refs("lint/zz_probe.py", ast.parse(src), tracked)
+        self.assertEqual((paths | loads, unfollowed), (set(), []))
+
+    def test_a_directory_chain_is_neither_read_nor_named(self):
+        # Control: skills/roadmap/page is a directory, not a repo file, so the chain reads nothing and names nothing.
+        tracked = set(_repo_files())
+        self.assertNotIn("skills/roadmap/page", tracked, "scope: skills/roadmap/page is a repo file, not a directory")
+        src = 'import pathlib\nPAGE_DIR = pathlib.Path(__file__).resolve().parents[1] / "skills" / "roadmap" / "page"\n'
+        _, paths, loads, unfollowed = _refs("lint/zz_probe.py", ast.parse(src), tracked)
+        self.assertEqual((paths | loads, unfollowed), (set(), []))
+
+    def test_a_worktree_git_file_is_not_a_repo_file(self):
+        # A worktree's .git is a file, not a folder. The walk skips .git folders only, so the file is listed as a repo file.
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as tmp:
+            os.makedirs(os.path.join(tmp, "lint"))
+            with open(os.path.join(tmp, ".git"), "w", encoding="utf-8") as f:
+                f.write("gitdir: /elsewhere/.git/worktrees/x\n")
+            with open(os.path.join(tmp, "lint", "x.py"), "w", encoding="utf-8") as f:
+                f.write("\n")
+            with mock.patch.object(sys.modules[__name__], "REPO", tmp):
+                files = _repo_files()
+        self.assertIn("lint/x.py", files, "scope: the walk does not list a plain repo file")
+        self.assertNotIn(".git", files, "a worktree's .git file is listed as a repo file")
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
@@ -1183,4 +1286,7 @@ class MutationReport(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    try:
+        unittest.main()
+    finally:
+        shutil.rmtree(RUN_FOLDER, ignore_errors=True)
