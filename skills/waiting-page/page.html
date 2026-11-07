@@ -74,9 +74,6 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .ov-prog { display: grid; gap: 8px; }
 .ov-prog .big { font: 700 15px/1.3 var(--body); }
 .ov-prog .big b { font: inherit; font-variant-numeric: normal; color: var(--acc); margin-right: 4px; }
-.ov-prog .sub { min-height: 22px; display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--muted); }
-.ov-prog .sub.none { visibility: hidden; }
-.ov-prog .sw { width: 10px; height: 10px; border-radius: 3px; background: color-mix(in srgb, var(--acc) 55%, transparent); }
 .ov-prog .track { height: 6px; border-radius: 99px; background: var(--chip); overflow: hidden; display: flex; }
 .ov-prog .track i { display: block; height: 100%; }
 .ov-prog .track .s { background: var(--good); }
@@ -1503,6 +1500,12 @@ function ruledOf(it) {
   const ks = pickKeys(it) || [], lab = (k) => String(((it.options || []).find((o) => o.key === k) || {}).label || k);
   return { letters: ks.map((k) => letterOf(it, k)).join(", "), label: ks.length ? ks.map(lab).join(" and ") : "an option" };
 }
+// The words, without a stop, for a chosen option or options. A key that is no longer in options never shows raw. Shared by receipt() and lastAnswerEl().
+function choseWords(it, c) {
+  if (isMulti(it) && !validKeys(it, c)) return "You chose options that are no longer listed";
+  const o = (it.options || []).find((x) => x.key === c);
+  return o ? "You chose " + letterOf(it, o.key) + ": " + o.label : "You chose an option that is no longer listed";
+}
 // noNote: the owner's note is held by the fold of a card in the Answered section, so the answer line shows without it.
 function receipt(it, noNote) {
   const sv = savedOf(it) || lastOf(it), rc = savedOf(it) ? rcOf(it) : {};
@@ -1515,7 +1518,7 @@ function receipt(it, noNote) {
     what = it.ranked === true ? "You chose, in order:" : "You chose:";
     picks = h(it.ranked === true ? "ol" : "ul", { class: "picks", "aria-label": "Your picks" }, sv.choice.map((k) => h("li", {}, h("span", { class: "key" }, letterOf(it, k)), h("span", {}, it.options.find((x) => x.key === k).label))));
   }
-  else { const o = (it.options || []).find((x) => x.key === sv.choice); what = "You chose " + (o ? letterOf(it, o.key) + ": " + o.label : "an option"); }
+  else what = choseWords(it, sv.choice);
   return h("div", { class: "receipt" },
     h("div", { class: "line" }, glyph("done"), h("b", {}, picks ? what : what + "."),
       rc.read && !rc.filed ? h("span", { class: "read" }, "Read by " + it.owner + " " + fmt(rc.read, false)) : null,
@@ -1535,13 +1538,13 @@ function lastAnswerEl(it) {
   else if (it.kind === "task") what = la.done === true ? "Marked done." : "Not marked done.";
   else if (c === NONE) what = "None of these.";
   else if (c != null && isMulti(it)) {
-    if (!validKeys(it, c)) what = "You chose options that are no longer listed.";
+    if (!validKeys(it, c)) what = choseWords(it, c) + ".";
     else {
       what = it.ranked === true ? "You chose, in order:" : "You chose:";
       picks = h(it.ranked === true ? "ol" : "ul", { class: "picks", "aria-label": "Your last picks" }, c.map((k) => h("li", {}, h("span", { class: "key" }, letterOf(it, k)), h("span", {}, it.options.find((x) => x.key === k).label))));
     }
   }
-  else if (c != null) { const o = (it.options || []).find((x) => x.key === c); what = o ? "You chose " + letterOf(it, o.key) + ": " + o.label + "." : "You chose an option that is no longer listed."; }
+  else if (c != null) what = choseWords(it, c) + ".";
   return h("div", { class: "receipt last" },
     h("p", { class: "lhead" }, "Your last answer" + (t ? ", " + t : "")),
     what ? h("div", { class: "line" }, h("b", {}, what)) : null,
@@ -2057,7 +2060,6 @@ function renderRail() {
   rail.hidden = !total && !state.rulings.length;
   const kids = !total ? [] : [h("div", { class: "ov-prog" },
     h("div", { class: "big" }, h("b", {}, String(sent)), "of " + total + " sent"),
-    h("div", { class: "sub" + (ready ? "" : " none") }, h("i", { class: "sw" }), ready + " ready to send"),
     h("div", { class: "track", "aria-hidden": "true" }, h("i", { class: "s", style: "width:" + (total ? (sent / total) * 100 : 0) + "%" }), h("i", { class: "r", style: "width:" + (total ? (ready / total) * 100 : 0) + "%" })))];
   const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" + (rcOf(it).filed ? " filed" : "") : isByWait(it) ? " sent" : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? (rcOf(it).filed ? ", answered, filed" : ", answered, filing pending") : isByWait(it) ? ", answered, waits on " + waitWords(waitsOf(it)) : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => { if (isSunk(it) && !state.answeredOpen) { state.answeredOpen = true; render(); } jump("item-" + it.id); } }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, shortOf(it)));
   // The chips of a tier or of the Answered section, a group's chips side by side.
