@@ -1253,8 +1253,9 @@ jobs:
 
   # The guard fixture suite on Windows, split off checks-windows by cut F. Two shards run it in full: shard 1 here and
   # shard 2 in checks-windows-guard-2 (the shard switch in hooks/test_guard.py; lint/test_windows_split.py proves each case
-  # runs once). They run on push, schedule and workflow_dispatch, and on a pull_request when guard_windows_full is on (a path
-  # guard.py loads, its test or settings.json changed). On any other guard pull_request only the cases tagged windows run, whole,
+  # runs once). They run on push, schedule and workflow_dispatch, and on a pull_request when guard_windows_full is on (a file
+  # the guard suite loads changed, as GuardClosure in lint/test_ci_scope.py derives and checks, or hooks/test_guard.py,
+  # hooks/mutate_guard.py or settings.json). On any other guard pull_request only the cases tagged windows run, whole,
   # in this job (the slice step, on guard_windows_slice).
   checks-windows-guard:
     runs-on: windows-latest
