@@ -42,6 +42,11 @@ def _climbs(seg: str) -> bool:
     return seg == ".." or (seg[:1] in ".[" and fnmatch.fnmatchcase("..", seg))
 
 
+def _literal_test_path(path: str, pattern) -> bool:
+    """A test path with no glob character: the runner takes one file, so a glob is a first-file false green."""
+    return not set("*?[]") & set(path) and _test_path(path, pattern)
+
+
 def _test_path(path: str, pattern) -> bool:
     return bool(pattern.match(path)) and not path.startswith("/") and not any(map(_climbs, path.split("/")))
 
@@ -65,11 +70,12 @@ def _allowed(args) -> bool:
         if rest[0] == "--test":
             return len(rest) > 1 and all(_test_path(p, NODE_TEST) for p in rest[1:])
         # Plain node runs only its first file, so more would be a false green: one literal path.
-        return len(rest) == 1 and not set("*?[]") & set(rest[0]) and _test_path(rest[0], NODE_TEST)
+        return len(rest) == 1 and _literal_test_path(rest[0], NODE_TEST)
     if prog == "pwsh":
-        return len(rest) == 3 and rest[:2] == ["-NoProfile", "-File"] and _test_path(rest[2], PWSH_TEST)
+        return len(rest) == 3 and rest[:2] == ["-NoProfile", "-File"] and _literal_test_path(
+            rest[2], PWSH_TEST)
     if prog == "python3":
-        return len(rest) == 1 and _test_path(rest[0], PY_TEST)
+        return len(rest) == 1 and _literal_test_path(rest[0], PY_TEST)
     return False
 
 

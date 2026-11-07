@@ -391,9 +391,22 @@ WRAPPER_VALUE_FLAGS["timeout"] = TIMEOUT_FLAGS_WITH_VALUE
 # do sleep 1; done` allowed the sleep, because the segment `do sleep 1` resolved to `do` as its
 # command word. Skip a keyword the same way a wrapper is skipped, so every rule that reads a
 # command word sees the command inside the block, never the keyword that opens it.
-# Commands that print a `{ ... }` argument and never run it, in PowerShell and in POSIX shells.
-PRINTING_COMMANDS = ("write-host", "write-output", "write-verbose", "write-debug", "echo")
 LOOP_KEYWORDS = {"do", "then", "else", "elif", "while", "until", "if", "{", "(", "$("}
+
+# Commands that print a `{ ... }` argument, in PowerShell and in POSIX shells.
+PRINTING_COMMANDS = ("write-host", "write-output", "write-verbose", "write-debug", "echo")
+# A word after a block that makes the block run: a call operator, or a member call on it
+# (`}.Invoke()`, `.Invoke(`, a lone `.` or `&`).
+_BLOCK_RUNS = re.compile(r"^[&.]|\}\s*\.|\.\s*Invoke")
+
+
+def block_is_printed(tokens, piped=False) -> bool:
+    """True when the command that starts `tokens` prints its `{ ... }` argument and never runs it.
+
+    False when the printing command's output goes down a pipe (`Write-Output {..} | % { & $_ }`
+    runs the block in the next segment), and when a later word is a call on the block."""
+    return (bool(tokens) and basename(tokens[0]).lower() in PRINTING_COMMANDS and not piped
+            and not any(_BLOCK_RUNS.search(t) for t in tokens[1:]))
 
 
 # What a PowerShell backtick escape stands for, outside quotes and inside `"..."` (parser, 2026-10-15).
