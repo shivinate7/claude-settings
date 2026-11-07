@@ -464,6 +464,15 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES), out)
 
+    def test_refusal_for_a_bad_reason_lists_the_allowed_reasons(self):
+        # The refusal names each reason the check allows, so a writer can pick one from the refusal alone.
+        self.add_note(NEW_BAD_REASON)
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES), out)
+        for reason in ("owner decides", "needs the Mac", "rare and harmless", "needs a Windows run"):
+            self.assertIn(reason, out, "the refusal does not list the allowed reason: %s" % reason)
+
     def test_edited_old_notes_line_with_the_same_slug_passes(self):
         self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE)
         self.commit_base()
@@ -661,7 +670,7 @@ class RecordSlugsTests(unittest.TestCase):
         self.commit_change()
         self.assert_passes()
 
-    # The Until date: each `Fix: none` line added or edited carries `Until: YYYY-MM-DD`, no more than 30 days from
+    # The Until date: each `Fix: none` line added or edited carries `Until: YYYY-MM-DD`, no more than 14 days from
     # today. Today is PINNED_TODAY, injected through FIXED_TODAY. An already-fixed line needs no date.
 
     def test_none_note_without_until_is_red(self):
@@ -681,11 +690,11 @@ class RecordSlugsTests(unittest.TestCase):
         self.assert_passes()
 
     def test_none_note_at_the_cap_passes(self):
-        self.add_note("- new-note: a gap. Fix: none — owner decides. Until: 2026-12-07\n")  # 30 days after today
+        self.add_note("- new-note: a gap. Fix: none — owner decides. Until: 2026-11-21\n")  # 14 days after today
         self.assert_passes()
 
     def test_none_note_past_the_cap_is_red(self):
-        self.add_note("- new-note: a gap. Fix: none — owner decides. Until: 2026-12-08\n")  # 31 days after today
+        self.add_note("- new-note: a gap. Fix: none — owner decides. Until: 2026-11-22\n")  # 15 days after today
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
         self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES), out)
