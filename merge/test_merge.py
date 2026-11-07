@@ -13015,7 +13015,7 @@ class ProseJudge(Env):
         self.assertEqual(rc, 0, out)
 
     def test_five_prose_files_collapse_their_unknowns_into_one_count_line(self):
-        # The lane brief of 2026-11-07 03:01 CST: UNKNOWNs collapse to one count line with their causes, and findings print in full.
+        # UNKNOWNs collapse to one count line with their causes, and findings print in full.
         # Five governed files come in the range. The default cap of 3 sends a, b and c, so d and e are past it.
         files = {LANE_A: THREE_CITE_DOC, LANE_B: THREE_CITE_DOC, LANE_C: TWO_CITE_DOC, LANE_D: TWO_CITE_DOC, LANE_E: TWO_CITE_DOC}
         self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {**files, BACKING: BACKING_TEXT})
