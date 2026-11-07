@@ -1,6 +1,6 @@
 {
   "design": {
-    "asOf": "Measured Nov 6: claude-settings 7975f6d8, banchi 5815954e, q_max a3afe47e, home-app 8e626361 (home merged in)",
+    "asOf": "Measured Nov 7: claude-settings 5b05f884, banchi affcbb7, q_max b745419, home-app ee1d7c0 (home merged in)",
     "foot": "banchi's 88 design checks are from the Oct 17 audit.",
     "metrics": [
       {
@@ -29,7 +29,7 @@
     ]
   },
   "later": {
-    "asOf": "Measured Nov 6 at claude-settings 7975f6d8",
+    "asOf": "Measured Nov 7 at claude-settings 5b05f884",
     "foot": "Later steps start once the core is steady.",
     "metrics": [
       {
@@ -55,7 +55,7 @@
     ]
   },
   "organize": {
-    "asOf": "Measured Nov 6: claude-settings 7975f6d8, banchi 5815954e, q_max a3afe47e, home-app 8e626361 (home merged in)",
+    "asOf": "Measured Nov 7: claude-settings 5b05f884, banchi affcbb7, q_max b745419, home-app ee1d7c0 (home merged in)",
     "foot": "All four repos measured (home merged into home-app).",
     "metrics": [
       {
@@ -88,9 +88,10 @@
           289,
           402,
           264,
-          281
+          281,
+          456
         ],
-        "value": 281
+        "value": 456
       },
       {
         "label": "Repos with a living roadmap page",
@@ -101,7 +102,7 @@
     ]
   },
   "rollout": {
-    "asOf": "Measured Nov 6: q_max a3afe47e, home-app 8e626361",
+    "asOf": "Measured Nov 7: q_max b745419, home-app ee1d7c0",
     "foot": "Counting method is in each tile, so later counts compare like with like.",
     "metrics": [
       {
@@ -126,7 +127,7 @@
         "label": "home-app web border radii",
         "rule": "Distinct border-radius values in web CSS, HTML and JS. The Oct 17 audit counted 12, likely CSS only (r3)",
         "target": "a few tokens",
-        "value": 51
+        "value": 52
       }
     ]
   }
