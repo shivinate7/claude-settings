@@ -9,9 +9,11 @@ Output names pinned (the `scope` job re-exports them as job outputs):
   JOB_FLAGS  one per check job except the lint job `checks`: checks_windows, checks_windows_merge,
              checks_windows_rest, checks_macos, shell_macos, pointer_windows
   STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags; shoot turns on the whole checks-shoot job)
+  GUARD_SPLIT guard_windows_full, guard_windows_slice (the Windows guard split; GuardWindowsSplit pins them)
 
 Run with:  python3 lint/test_ci_scope.py -v
 """
+import ast
 import os
 import shutil
 import subprocess
@@ -30,7 +32,28 @@ STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
 # directly by the arm for actions/playwright-setup and .github/shoot (the paths checks-guard installs from).
 DERIVED_FLAGS = ["checks_windows_sweep", "checks_guard"]
 ALL = JOB_FLAGS + STEP_FLAGS
+# The Windows guard split. Kept out of ALL and DERIVED_FLAGS: those lists are checked in every case, and the cases that
+# predate the split would then fail on the old script for a missing output. GuardWindowsSplit pins both names.
+GUARD_FULL = "guard_windows_full"
+GUARD_SLICE = "guard_windows_slice"
+GUARD_SPLIT = (GUARD_FULL, GUARD_SLICE)
 BASH = shutil.which("bash")
+
+
+def pre_split(got):
+    """The outputs the script wrote before the guard split: every output but GUARD_SPLIT."""
+    return {n: v for n, v in got.items() if n not in GUARD_SPLIT}
+
+
+def family_files():
+    """hooks/<module>.py for each module in hooks/guard.py's _FAMILY_MODULES. The tuple is read from the file's syntax tree,
+    so guard.py is not imported (its load starts the guard's own reads)."""
+    with open(os.path.join(HERE, "..", "hooks", "guard.py"), encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_FAMILY_MODULES" for t in node.targets):
+            return [f"hooks/{elt.value}.py" for elt in node.value.elts]
+    raise AssertionError("hooks/guard.py has no _FAMILY_MODULES tuple")
 
 
 def git(cwd, *a):
@@ -225,41 +248,46 @@ class Scope(unittest.TestCase):
     # Guard family: hooks/guard_<anything>.py is split out of hooks/guard.py. Each sibling must set
     # exactly the flags guard.py sets, as a new file and as an edit. Today the generic hooks/* rule
     # gives a new sibling no sweep flag, and an edited one no Windows or shell job.
+    # The siblings compare the outputs that predate the guard split. Their split flags are not decided here: guard_core.py is
+    # shared code, not a rule family (hooks/guard.py _FAMILY_MODULES), and guard_rules.py is not a file yet. GuardWindowsSplit
+    # pins the split flags of the family modules.
     GUARD_SIBLINGS = ["hooks/guard_core.py", "hooks/guard_merge.py", "hooks/guard_rules.py"]
 
     def true_set(self, got):
         return {n for n in ALL if got[n] == "true"}
 
     def test_guard_sibling_new_file_sets_the_same_flags_as_guard_py(self):
-        want = run(["hooks/guard.py"])
-        self.assertFlags(want, want_true=["checks_windows", "checks_windows_rest", "checks_macos", "code", "guard", "sweep"],
+        got = run(["hooks/guard.py"])
+        self.assertFlags(got, want_true=["checks_windows", "checks_windows_rest", "checks_macos", "code", "guard", "sweep"],
                          want_false=["checks_windows_merge", "pointer_windows"])
+        want = pre_split(got)
         for p in self.GUARD_SIBLINGS:
             with self.subTest(path=p):
-                self.assertEqual(run([p]), want)
+                self.assertEqual(pre_split(run([p])), want)
 
     def test_guard_sibling_edit_sets_the_same_flags_as_guard_py(self):
-        want = run(["hooks/guard.py"], existing=["hooks/guard.py"])
-        self.assertFlags(want, want_true=["checks_windows", "checks_windows_rest", "checks_macos", "code", "guard", "sweep"],
+        got = run(["hooks/guard.py"], existing=["hooks/guard.py"])
+        self.assertFlags(got, want_true=["checks_windows", "checks_windows_rest", "checks_macos", "code", "guard", "sweep"],
                          want_false=["checks_windows_merge", "shell_macos", "pointer_windows"])
+        want = pre_split(got)
         for p in self.GUARD_SIBLINGS:
             with self.subTest(path=p):
-                self.assertEqual(run([p], existing=[p]), want)
+                self.assertEqual(pre_split(run([p], existing=[p])), want)
 
     def test_shared_names_change_sets_the_same_flags_as_guard_py(self):
         # guard_core.py and config_watch.py import it, so the guard mutation tests must run on it.
-        want = run(["hooks/guard.py"])
-        self.assertEqual(run(["hooks/shared_names.py"]), want)
-        self.assertEqual(run(["hooks/shared_names.py"], existing=["hooks/shared_names.py"]),
-                         run(["hooks/guard.py"], existing=["hooks/guard.py"]))
+        want = pre_split(run(["hooks/guard.py"]))
+        self.assertEqual(pre_split(run(["hooks/shared_names.py"])), want)
+        self.assertEqual(pre_split(run(["hooks/shared_names.py"], existing=["hooks/shared_names.py"])),
+                         pre_split(run(["hooks/guard.py"], existing=["hooks/guard.py"])))
 
     def test_git_reads_change_sets_the_same_flags_as_guard_py(self):
         # guard_core.py and the janitor's sweep.py and session_end_sweep.py import it, so the guard
         # and sweep mutation tests must run on it.
-        want = run(["hooks/guard.py"])
-        self.assertEqual(run(["hooks/git_reads.py"]), want)
-        self.assertEqual(run(["hooks/git_reads.py"], existing=["hooks/git_reads.py"]),
-                         run(["hooks/guard.py"], existing=["hooks/guard.py"]))
+        want = pre_split(run(["hooks/guard.py"]))
+        self.assertEqual(pre_split(run(["hooks/git_reads.py"])), want)
+        self.assertEqual(pre_split(run(["hooks/git_reads.py"], existing=["hooks/git_reads.py"])),
+                         pre_split(run(["hooks/guard.py"], existing=["hooks/guard.py"])))
 
     # Control: the guard test file keeps today's flags. A family rule must not catch it.
     def test_guard_test_file_keeps_its_current_flags(self):
@@ -415,6 +443,91 @@ class Scope(unittest.TestCase):
         self.assertFlags(got, want_false=["code", "shoot"])
         self.assertIn("checks_guard", got, got)
         self.assertEqual(got["checks_guard"], "false", f"checks_guard: {got}")
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class GuardWindowsSplit(unittest.TestCase):
+    """The Windows guard suite on a pull_request. guard_windows_full turns on the full shards (checks-windows-guard's shard 1
+    and checks-windows-guard-2). guard_windows_slice turns on the slice, which is guard on and full off, so the two never run
+    together. Push, schedule, dispatch and the fail-safe paths turn full on and slice off."""
+
+    def test_a_guard_family_pr_turns_the_full_windows_guard_on(self):
+        for p in ["hooks/guard.py", "hooks/test_guard.py", "settings.json"] + family_files():
+            for existing in ((), (p,)):
+                with self.subTest(path=p, edit=bool(existing)):
+                    got = run([p], existing=existing)
+                    self.assertEqual(got["guard"], "true", f"scope: guard is off for {p}")
+                    self.assertEqual(got.get(GUARD_FULL), "true",
+                                     f"{GUARD_FULL} is {got.get(GUARD_FULL)!r} for {p}, want 'true': its full shards would not run")
+
+    def test_a_non_family_guard_hook_pr_runs_the_slice_and_not_the_full_shards(self):
+        got = run(["hooks/daily_note.py"])
+        self.assertEqual(got["guard"], "true", "scope: guard is off for hooks/daily_note.py")
+        with self.subTest(output=GUARD_SLICE):
+            self.assertEqual(got.get(GUARD_SLICE), "true",
+                             f"{GUARD_SLICE} is {got.get(GUARD_SLICE)!r} for hooks/daily_note.py, want 'true'")
+        with self.subTest(output=GUARD_FULL):
+            self.assertEqual(got.get(GUARD_FULL), "false",
+                             f"{GUARD_FULL} is {got.get(GUARD_FULL)!r} for hooks/daily_note.py, want 'false': not a guard family")
+
+    def test_a_docs_only_pr_turns_both_split_flags_off(self):
+        got = run(["README.md", "docs/x.md"])
+        self.assertEqual(got["guard"], "false", "scope: a docs-only pull_request sets guard")
+        for name in GUARD_SPLIT:
+            with self.subTest(output=name):
+                self.assertEqual(got.get(name), "false", f"{name} is {got.get(name)!r} on a docs-only pull_request, want 'false'")
+
+    def test_the_slice_is_guard_on_and_full_off_on_every_kind_of_path(self):
+        # One path of each kind, on a pull_request and on a push: a family module, a non-family guard hook, a guard test
+        # file, a guard-arm module, a module outside the guard, and a docs file.
+        paths = [["hooks/guard.py"], ["hooks/daily_note.py"], ["hooks/guard_test_x.py"], ["lint/guard_log_report.py"],
+                 ["merge/merge.py"], ["README.md"]]
+        for p in paths:
+            for event in ("pull_request", "push"):
+                with self.subTest(paths=p, event=event):
+                    got = run(p, event=event)
+                    full = got.get(GUARD_FULL)
+                    self.assertIn(full, ("true", "false"), f"{GUARD_FULL} is {full!r} for {p} on {event}")
+                    want = "true" if got["guard"] == "true" and full == "false" else "false"
+                    self.assertEqual(got.get(GUARD_SLICE), want,
+                                     f"{GUARD_SLICE} is {got.get(GUARD_SLICE)!r} for {p} on {event}, want {want!r}: "
+                                     "the slice is guard on and full off")
+
+    def test_push_schedule_dispatch_and_an_unreadable_diff_run_the_full_guard_and_not_the_slice(self):
+        runs = [(f"event {ev}", run(["README.md"], event=ev)) for ev in ("push", "schedule", "workflow_dispatch")]
+        runs.append(("an unreadable diff", run(["hooks/guard.py"], base="0" * 40)))
+        for label, got in runs:
+            with self.subTest(case=label):
+                self.assertEqual(got["guard"], "true", f"scope: guard is off for {label}")
+                self.assertEqual(got.get(GUARD_FULL), "true",
+                                 f"{GUARD_FULL} is {got.get(GUARD_FULL)!r} for {label}, want 'true'")
+                self.assertEqual(got.get(GUARD_SLICE), "false",
+                                 f"{GUARD_SLICE} is {got.get(GUARD_SLICE)!r} for {label}, want 'false': the slice would run beside the full shards")
+
+    def test_a_fail_safe_path_runs_the_full_guard_and_not_the_slice(self):
+        for p in (".github/scripts/ci-scope.sh", ".github/workflows/checks.yml", ".gitattributes", "zz-unmapped/blob.bin"):
+            with self.subTest(path=p):
+                got = run([p])
+                self.assertEqual(got["guard"], "true", f"scope: guard is off for {p}")
+                self.assertEqual(got.get(GUARD_FULL), "true", f"{GUARD_FULL} is {got.get(GUARD_FULL)!r} for {p}, want 'true'")
+                self.assertEqual(got.get(GUARD_SLICE), "false", f"{GUARD_SLICE} is {got.get(GUARD_SLICE)!r} for {p}, want 'false'")
+
+    def test_a_full_size_guard_pr_turns_the_full_guard_on_once(self):
+        # Every guard file in one pull_request, not one file at a time: the full state of the split.
+        got = run(["hooks/guard.py", "hooks/test_guard.py", "settings.json"] + family_files())
+        self.assertEqual(got["guard"], "true", "scope: guard is off for the full set of guard files")
+        with self.subTest(output=GUARD_FULL):
+            self.assertEqual(got.get(GUARD_FULL), "true", f"{GUARD_FULL} is {got.get(GUARD_FULL)!r} for the full set, want 'true'")
+        with self.subTest(output=GUARD_SLICE):
+            self.assertEqual(got.get(GUARD_SLICE), "false", f"{GUARD_SLICE} is {got.get(GUARD_SLICE)!r} for the full set, want 'false'")
+
+    def test_a_family_module_sets_the_same_outputs_as_guard_py(self):
+        # A family module is a sibling of guard.py: every output matches it, the split flags included.
+        for edit in (False, True):
+            want = run(["hooks/guard.py"], existing=["hooks/guard.py"] if edit else ())
+            for p in family_files():
+                with self.subTest(path=p, edit=edit):
+                    self.assertEqual(run([p], existing=[p] if edit else ()), want, f"{p}: its outputs differ from guard.py's")
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
