@@ -12841,7 +12841,7 @@ class ReviewDecisionKind(DecisionLayout, ReviewGuardEnv):
 
     def test_normal_over_a_decision_record_of_any_status_is_accepted(self):
         for rolled, path in ((True, "docs/decisions/x.md"), (False, "decisions/x.md")):
-            for status in ("modified", "removed"):  # a control: the Kind check of a removed record is docs-only and delete-only only
+            for status in ("added", "modified", "renamed", "copied", "removed"):  # a control: only docs-only and delete-only refuse a decision record, whatever its status
                 with self.subTest(rolled=rolled, status=status):
                     self.use_layout(rolled)
                     self.host.changed = [(path, status)]
@@ -12849,8 +12849,8 @@ class ReviewDecisionKind(DecisionLayout, ReviewGuardEnv):
                     self.assertEqual(rc, 0, out + err)
                     self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "normal")
 
-    def test_a_decision_record_removed_or_renamed_out_refuses_docs_only(self):
-        # re-pointed from "is accepted": coordinator ruling 2026-11-07 15:17 CST, a decision removed or renamed out also counts
+    def test_a_removed_decision_record_refuses_docs_only_alone_or_beside_a_rename(self):
+        # coordinator ruling 2026-11-07 15:17 CST: a removed decision record counts
         self.use_layout(True)
         for changed in ([("docs/decisions/x.md", "removed")], [("docs/moved.md", "renamed"), ("docs/decisions/x.md", "removed")]):
             with self.subTest(changed=changed):
@@ -12884,7 +12884,7 @@ class ReviewDecisionPaths(DecisionLayout, Env):
         self.assertEqual(review_fn(self, "decision_paths")(self.co, []), [])
 
     def test_names_each_record_of_any_status_under_the_folder_sorted(self):
-        # re-pointed from "skips removed": coordinator ruling 2026-11-07 15:17 CST, a removed decision record counts too
+        # coordinator ruling 2026-11-07 15:17 CST: a removed decision record counts too
         self.use_layout(True)
         files = [("docs/decisions/b.md", "modified"), ("docs/decisions/a.md", "added"), ("docs/decisions/old.md", "removed"),
                  ("docs/decisions/moved.md", "renamed"), ("docs/decisions/copy.md", "copied"), ("docs/decisions/sub/c.md", "added"),
