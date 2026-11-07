@@ -22,6 +22,9 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rule_audit  # noqa: E402
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+
+RUN_FOLDER = _test_temp.run_folder()
 
 # .mjs fixtures must be listable: form 1 names node:test, form 2 names LIST_TESTS (see rule_audit).
 NODE_TEST = 'import { test } from "node:test";\n'
@@ -405,7 +408,7 @@ class GuardTextTests(unittest.TestCase):
     module (guard_x.py, not guard.py) must resolve, and test files must not count as rule homes."""
 
     def tree(self, files):
-        root = tempfile.mkdtemp()
+        root = tempfile.mkdtemp(dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, root, True)
         for rel, body in files.items():
             path = os.path.join(root, rel)
@@ -2794,6 +2797,10 @@ class RefusalCiteRatchetTests(unittest.TestCase):
         src = body_src('    raise Stop("not in a git checkout")\n')
         exempt = {"merge:go: not in a git checkout": "refusal-matches-rule"}
         self.assertTrue(any("needs a reason" in p for p in module_problems(src, exempt)))
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)
 
 
 if __name__ == "__main__":
