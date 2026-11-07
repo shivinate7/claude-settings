@@ -1427,11 +1427,11 @@ class CompactionCarryTests(unittest.TestCase):
                 self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced Recovered item blocks: " + item)
 
     def test_cc_green_pull_commits_sha_and_issue_forms_pass(self):
-        # Catches: the source forms "pull request #<n>", "pull #<n>", "commits <hex>", "sha <hex>", "issue <n>" (no #)
-        # and "PR <n>" (no #) are refused as sourceless. "issue #5" is the pinned edge that already passes.
+        # Catches: the source forms "pull request #<n>", "pull #<n>", "commits <hex>", "sha <hex>" and "PR <n>" (no #)
+        # are refused as sourceless. "issue #5" is the pinned edge that already passes. An issue with no # is no source
+        # (test_cc_red_issue_without_a_hash_is_no_source).
         items = ["ruling X from pull request #978", "ruling X from pull #978", "ruling X from commits abc1234",
-                 "ruling X from sha abc1234", "ruling X from issue 12", "ruling X from issue #5",
-                 "ruling X from PR 978"]
+                 "ruling X from sha abc1234", "ruling X from issue #5", "ruling X from PR 978"]
         for item in items:
             with self.subTest(item=item):
                 reply = report_lines("Recovered: " + item, "Handoff gave: none")
@@ -1446,6 +1446,21 @@ class CompactionCarryTests(unittest.TestCase):
                 out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
                 self.assertIsNotNone(out, "a bare pull <n> passes as a source: " + item)
                 self.assertEqual(out["decision"], "block", item)
+
+    def test_cc_red_issue_without_a_hash_is_no_source(self):
+        # Catches: "issue <n>" with no "#" passes as a source, so a plain "issue 2 of the plan" names no issue.
+        # The source form that counts is "issue #<n>" (test_cc_green_issue_with_a_hash_is_a_source).
+        items = ["ruling X from issue 2 of the plan", "ruling X from issue 12"]
+        for item in items:
+            with self.subTest(item=item):
+                out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
+                self.assertIsNotNone(out, "a bare issue <n> passes as a source: " + item)
+                self.assertEqual(out["decision"], "block", item)
+
+    def test_cc_green_issue_with_a_hash_is_a_source(self):
+        # Catches: "issue #<n>" refused as sourceless. It is the control for the case above: the same item with the "#".
+        reply = report_lines("Recovered: ruling X from issue #2 of the plan", "Handoff gave: none")
+        self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced issue #<n> blocks")
 
     def test_cc_red_bare_hash_number_is_no_source(self):
         # Catches: a bare "#<n>" passes as a source. "#3 of my notes" names no PR, commit or page.
