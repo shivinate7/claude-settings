@@ -253,6 +253,16 @@ RED = [
     ("password with a plain word before a secret", "password: " + "none hunter2", "hunter2"),
     ("password with a plain word and a comma before a secret", "password: " + "none, hunter2", "hunter2"),
     ("password with a quoted plain word before a secret", "password: " + '"none" hunter2', "hunter2"),
+    # A key word inside a longer name is a credential name too. The stem of an everyday word (mon, turn, hoc) is no
+    # reason to skip it. The value is the one the turnkey control in GREEN uses.
+    ("commonKey with a value of letters and digits", "commonKey: " + GLUED_VALUE, GLUED_VALUE),
+    ("daemonKey with a value of letters and digits", "daemonKey: " + GLUED_VALUE, GLUED_VALUE),
+    ("adHocKey with a value of letters and digits", "adHocKey: " + GLUED_VALUE, GLUED_VALUE),
+    ("returnKey with a value of letters and digits", "returnKey: " + GLUED_VALUE, GLUED_VALUE),
+    # A letters-only secret after a plain word and prose is one. The prose after the plain word must not hide it.
+    ("letters-only secret after a plain word and a semicolon",
+     "password: required to log in; default is swordfish", "swordfish"),
+    ("letters-only secret after a plain word and `and`", "password: none and swordfish", "swordfish"),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
@@ -316,6 +326,8 @@ GREEN = [
     # A key word inside a longer word is no credential name, even with a value of letters and digits after it.
     ("a key word inside a longer word with a value", "monkey: Banana12345"),
     ("a key word inside a longer word with a camel value", "hotkey: Ctrl1Shift2"),
+    # The control for the longer names in RED: the everyday word with the same value passes.
+    ("turnkey with a value of letters and digits", "turnkey: " + GLUED_VALUE),
     # The same holds for other words that end in key, with a value of letters and digits.
     ("turkey with a value", "turkey: Gobble2024"),
     ("donkey with a value", "donkey: Kong1981"),
@@ -347,6 +359,7 @@ GREEN = [
     ("none with a period after a password word", "password: " + "none."),
     # A placeholder word with prose after it on the same line, and a backticked shell path, name no secret.
     ("password word with optional and prose after it", "Set password: optional for the guest."),
+    ("password word with none and prose after it", "password: none for the guest"),
     ("backticked shell path after PWD", "`PWD=/Users/x`"),
     # Near misses of the three new shapes: a digit count, a tail length, a prefix inside a word, and a clock time pass.
     ("Telegram token with 11 digits before the colon", "12345678901:" + TG_TAIL),
