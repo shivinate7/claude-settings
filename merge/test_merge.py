@@ -8753,6 +8753,13 @@ class WaitRefusalCites(unittest.TestCase):
         self.assertIn("no run reports the required check needed", why)  # control: the absent-required refusal is the one reached
         self.assertIn("no-merge-during-batch-ci", why, f"the absent-required refusal carries no read cite: {why}")
 
+    def test_a_check_still_pending_at_the_deadline_carries_the_wait_cite(self):
+        host = ClockedHost(lambda t: {"checks": [("pending", "")]})
+        ok, why, *_ = self.wait(host, 5)
+        self.assertFalse(ok)
+        self.assertIn("Still pending: checks", why)  # control: the pending deadline is the refusal reached
+        self.assertIn("ci-wait-reads-run-status", why, f"the pending deadline carries no wait cite: {why}")
+
 class FakeReadsWaitHost(merge.Host):
     """The real wait and classify. Every other read comes from `fake` (a FakeHost): the pull request, the batch, the base, the merge.
     `rows` is what the checks read returns, and `required` names the checks the wait holds on. `in_wait` is set for the wait's own reads only."""
