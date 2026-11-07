@@ -1076,6 +1076,24 @@ CAP_ASK_REASON = (
 )
 
 
+def _settings_place(path: str, cwd: str) -> bool:
+    """True when a settings basename sits where Claude Code reads one: a `.claude` folder, the config
+    directory, or the working folder. The managed file is read from a place no spelling names, so its
+    basename alone counts. A same-named fixture in a scratch folder is none of them."""
+    name = basename(path)
+    if name not in SETTINGS_BASENAMES:
+        return False
+    if name == "managed-settings.json":
+        return True
+    folder = path[:len(path) - len(name)].rstrip("/\\")
+    if not folder or basename(folder) == ".claude":
+        return True
+    here = {os.path.normcase(os.path.realpath(guard_core.config_dir()))}
+    if cwd:
+        here.add(os.path.normcase(os.path.realpath(_expanded(cwd, ""))))
+    return os.path.normcase(os.path.realpath(folder)) in here
+
+
 def is_settings_file(path: str, cwd: str = "") -> bool:
     """True when the path, or the path it resolves to, names a settings file.
 
@@ -1085,10 +1103,10 @@ def is_settings_file(path: str, cwd: str = "") -> bool:
     """
     if not path or not isinstance(path, str):
         return False
-    if basename(path) in SETTINGS_BASENAMES:
-        return True
     try:
-        return basename(_resolved(path, cwd)) in SETTINGS_BASENAMES
+        if _settings_place(_expanded(path, cwd), cwd):
+            return True
+        return _settings_place(_resolved(path, cwd), cwd)
     except Exception:
         return False
 
@@ -1485,7 +1503,7 @@ def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
 
 
 # ---- a message that names a lane by its session number
-LANE_NUMBER = re.compile(r"\bN\d{1,3}b?\b")
+LANE_NUMBER = re.compile(r"(?<!\b[Pp]art )\bN\d{1,3}b?\b")  # `part N12` is a part code of a split, not a lane
 LANE_QUOTED = re.compile(
     r"^[ \t]*(```|~~~).*?^[ \t]*\1|(?<!`)(`+)(?!`)[^\n]*?(?<!`)\2(?!`)", re.MULTILINE | re.DOTALL)
 LANE_REASON = (
@@ -2008,7 +2026,7 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
 # else made, and a reset, checkout, pull or clean merge hands the agent other people's commits: none is read.
 ENTRY_OWN = re.compile(r"^commit(?: \((?:initial|amend|merge)\))?:")
 ENTRY_REBASE = re.compile(r"^(?:pull --)?rebase\b[^:(]*\(([^)]*)\)")
-ENTRY_RESOLVED = re.compile(r"^(?:commit \(cherry-pick\)|revert)\b")
+ENTRY_RESOLVED = re.compile(r"^(?:commit \(cherry-pick\):|revert\b)")
 REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")
 # A git-dir entry that shows a replay in progress: its staged change is git's copy plus what the agent
 # resolved. A MERGE_MSG without MERGE_HEAD is a `cherry-pick -n` or `revert -n`.
@@ -2286,6 +2304,15 @@ def builder_diff_reason() -> str:
     )
 
 
+def veto_override(check) -> None:
+    """Register the check that names the acts no override lifts. A guard_core without the setter has no
+    override either, so every refusal stands and the call is still judged."""
+    try:
+        guard_core.set_override_veto(check)
+    except Exception:
+        pass
+
+
 def diff_refusal(tool: str, role: str, root: str) -> None:
     """Judge a role's own change at commit or push. A builder's test change is refused (rule `builder-diff`,
     with the undo route). A builder's logged change, any other role's offence, and a change that could
@@ -2295,7 +2322,7 @@ def diff_refusal(tool: str, role: str, root: str) -> None:
         record(tool, "noted", "role-diff-unread", root)
     elif found and role == BUILDER_ROLE:
         # A role guard stays outside every override (decision owner-override): a refusal is final.
-        guard_core.set_override_veto(lambda: True)
+        veto_override(lambda: True)
         refuse(tool, "deny", "builder-diff", builder_diff_reason(), found)
     elif found or noted:
         record(tool, "noted", diff_rule(role), found or noted[0])
@@ -2730,7 +2757,7 @@ def role_has_model_pin(pointer_root, role):
     frontmatter, False when none does, None when the folder cannot be read."""
     try:
         for keys in role_agent_keys(pointer_root):
-            if keys.get("name", "").lower() == role.lower() and keys.get("model"):
+            if keys.get("name") and role_key(keys["name"]) == role_key(role) and keys.get("model"):
                 return True
     except OSError:
         return None
@@ -2775,9 +2802,9 @@ def role_list_drift(pointer_root):
 
 
 def role_key(subagent_type) -> str:
-    """The role a spawn names, without case and without surrounding space; an empty role is the default role. The one
-    normaliser in this file: role_name and opus_spawn_hit's Explore grant both read the role through it.
-    hooks/call_judge.py explore_off_model folds the Explore role on its own."""
+    """The role a spawn names, without case and without surrounding space; an empty role is the default role. role_name,
+    role_has_model_pin and opus_spawn_hit's Explore grant read the role through it. Other files fold a role on their
+    own: hooks/call_judge.py explore_off_model."""
     return (str(subagent_type or "").strip() or ROLE_DEFAULT).lower()
 
 
@@ -3178,8 +3205,26 @@ def count_commands(text: str) -> int:
 # After it: `| tail -N`, `| head -N`, `| Out-Null`, `&& echo <text>`, `; Write-Host <text>`. Each is
 # read by its separator and its tokens, so `; echo`, `| cat`, `; Write-Output`, `| tee`, `| sh`, `||`
 # and the aliases sl, chdir and Push-Location stay counted. A redirect, a substitution, a `&` or an
-# escaped quote (`\"`, `\'`) in the segment makes it a command. Only a run of them at the head and a run at the tail count.
-UNSAFE_TEXT = re.compile(r"""[<>`&]|\\["']|\$\(|\$\{""")  # an escaped quote may hide a command; a backslash in a path is fine
+# escaped quote (`\"`, `\'`) outside single quotes makes it a command. Only a run of them at the head and a run at the tail count.
+UNSAFE_OPEN = re.compile(r"[<>&]")  # outside quotes, a redirect or a `&` is a command
+UNSAFE_QUOTED = re.compile(r"`|\$\(|\$\{")  # a substitution runs outside quotes and inside double quotes
+
+
+def unsafe_text(segment: str) -> bool:
+    """True when the segment holds text that may run a second command. A single-quoted span is text. In bash an
+    escaped quote may hide a command; in PowerShell a backslash is a path character, so a quoted path that ends in one is text."""
+    powershell = is_powershell(segment)
+    for index, char, quote in walk_quotes(segment):
+        pair = segment[index:index + 2]
+        if quote == "'":
+            continue
+        if char == "\\" and not powershell and pair[1:] in ("'", '"'):
+            return True
+        if UNSAFE_QUOTED.match(segment, index) or (not quote and UNSAFE_OPEN.match(char)):
+            return True
+    return False
+
+
 ASSIGN_WORD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 COUNT_ARG = re.compile(r"^-(?:n)?\d+$|^-n\d+$")
 
@@ -3212,20 +3257,21 @@ def harmless_commands(text: str) -> int:
     as the ask command, so at least one segment stays."""
     ends = []
     segments = split_segments(text, ends)
-    count = len(segments)
+    live = [index for index, segment in enumerate(segments) if segment.strip()]  # a trailing `;` or newline adds none
+    count = len(live)
 
-    def plain(index: int):
-        segment = segments[index]
-        if UNSAFE_TEXT.search(segment):
+    def plain(position: int):
+        segment = segments[live[position]]
+        if unsafe_text(segment):
             return None
         tokens = segment_tokens(segment)
         return tokens or None
 
     head = 0
-    while head < count - 1 and (tokens := plain(head)) and harmless_lead(tokens, ends[head]):
+    while head < count - 1 and (tokens := plain(head)) and harmless_lead(tokens, ends[live[head]]):
         head += 1
     tail = count
-    while tail > head + 1 and (tokens := plain(tail - 1)) and harmless_tail(tokens, ends[tail - 2]):
+    while tail > head + 1 and (tokens := plain(tail - 1)) and harmless_tail(tokens, ends[live[tail - 1] - 1]):
         tail -= 1
     return head + count - tail
 
@@ -4773,7 +4819,7 @@ def judge(payload) -> None:
     cwd = payload.get("cwd", "") or os.getcwd() or ""
     if not isinstance(cwd, str):
         cwd = ""
-    guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
+    veto_override(lambda: never_lifted(payload, tool, tool_input, cwd))
     session_home_keep(payload, tool, cwd)  # rule session-home's record, kept before any refusal can end the call
     # 0, handoff-unread. After compaction, no call the guard judges runs from the main session until it reads its handoff.
     # Not in never_lifted: the owner may mean the call. A failed import allows.
