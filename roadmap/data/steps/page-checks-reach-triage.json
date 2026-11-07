@@ -1,0 +1,10 @@
+{
+  "title": "The page-item checks run on triage's own page writes",
+  "phase": "now",
+  "status": "todo",
+  "order": 0.7,
+  "owner": "coordinator",
+  "why": "Owner, page comment 13:18 CST Nov 7, on item 350: \"what is this error and why does it happen so often\". The card showed \"This item carries a field the page does not draw.\" Triage wrote `link`, a field outside the page's itemFields list (`links` is the field). Six items carried it. question_form.item_field_hit refuses `link` when called directly (read 13:28 CST), yet none of triage's writes was refused.",
+  "note": "Likely cause, read but not proven: page_item_hit runs the full item checks only when the write's url is the cwd repo's page key. Triage writes from the roadmap worktree or /home/user, where no page key is read, so only the none-key check runs (hooks/question_form.py, the comment above option_letter_hit's caller: \"the page cannot be named reliably\"). The one page writer is the session the checks miss. Fix the cause: read the page key from the session's cs-repo tag or the claude-settings checkout, not the cwd. Done: a red test where a page write from a cwd with no page key and an unlisted field is refused, then green; the six `link` items fixed or closed.",
+  "updatedAt": "2026-11-07T13:30:00-06:00"
+}

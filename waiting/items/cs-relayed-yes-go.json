@@ -4,7 +4,12 @@
   "home": "lane relayed-yes-allow (session_013NEJKzw6Mmu5eviHC3vobt)",
   "id": "cs-relayed-yes-go",
   "kind": "task",
-  "link": "https://claude.ai/code/session_013NEJKzw6Mmu5eviHC3vobt",
+  "links": [
+    {
+      "label": "Open lane relayed-yes-allow's chat",
+      "url": "https://claude.ai/code/session_013NEJKzw6Mmu5eviHC3vobt"
+    }
+  ],
   "n": 350,
   "owner": "coordinator",
   "rank": 1,

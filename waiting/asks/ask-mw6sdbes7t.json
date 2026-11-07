@@ -1,0 +1,7 @@
+{
+  "at": "2026-11-07T19:18:12.484Z",
+  "id": "ask-mw6sdbes7t",
+  "reply": "The check is one Sonnet call with a fixed 15-second limit (hooks/call_judge.py, unchanged since Nov 2). It runs on every question and every page decision. Since then it has more to read: 26 new decision records (183 in all), longer item text, and many more page items written each hour. That is the likely cause, but how often it times out is not measured: this cloud session has no guard log to count from. Step judge-timeout-retries-once (lane running since 12:20 CST) makes it try once more before it refuses. I added to that step that each timeout is logged with its prompt size, so the rate can be read. Triage, 13:30 CST.",
+  "status": "answered",
+  "text": "why has the past ruling hcekc been timing out more often lately?"
+}
