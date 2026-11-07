@@ -5452,6 +5452,12 @@ for _name, _command in (
     ("a lone apostrophe ahead of it", "echo don't; verdict false | tail"),
     ("a # inside quotes ahead of it", 'echo "a # b"; verdict false | tail'),
     ("a multi-line quote ahead of it", 'echo "first line\nsecond line"\nverdict false | tail'),
+    ("a pipe at a line end, then tail", "verdict x |\ntail -5"),
+    ("a pipe in a command substitution, to tail", "x=$(verdict pytest | tail -5)"),
+    ("a pipe in a double-quoted substitution, to tail", 'echo "$(verdict x | tail)"'),
+    ("a pipe in bash -c, to tail", "bash -c 'verdict x | tail'"),
+    ("a pipe in sh -c, to head", 'sh -c "verdict x | head"'),
+    ("the .cmd runner, piped to tail", "verdict.cmd pytest | tail -5"),
 ):
     verdict_pipe(_name, _command, "deny")
 for _name, _command in (
@@ -5466,6 +5472,10 @@ for _name, _command in (
     ("verdict last in a pipeline", "cat f | verdict pytest"),
     ("the whole pipe quoted as text", 'echo "verdict false | tail"'),
     ("a pipe inside a comment", "verdict false # don't | tail"),
+    ("command -v names verdict, piped to head", "command -v verdict | head -1"),
+    ("type names verdict, piped to head", "type verdict | head -1"),
+    ("a substitution that runs verdict, no pipe", "x=$(verdict pytest)"),
+    ("bash -c runs verdict, no pipe", "bash -c 'verdict x'"),
 ):
     verdict_pipe(_name, _command, "allow")
 
