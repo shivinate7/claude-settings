@@ -1353,23 +1353,28 @@ def format_changed(rows) -> str:
     return "\n".join(lines)
 
 
-def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeout: float = 120) -> list:
+def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeout: float = 120, notes=None) -> list:
     """Replay planted defects against a clone's HEAD. Each defect is {id, name, file, old, new, argv, classify}: `old` is the one
     text in `file` that the plant replaces with `new`, and `argv` is the catcher suite, read by the classifier `classify`.
     Returns [{id, name, verdict, reason}] with the verdict CAUGHT (the suite prints an assertion on the planted copy), MISS
     (the suite passed, crashed or timed out on it) or UNKNOWN (the anchor is stale or ambiguous, the entry is malformed, the
-    suite is not green on the clean copy, or the install or its link failed). Only an assertion catches, as in a replay. The run
-    is in a checkout of HEAD made like a replay's, so the working tree and the repository are left as found.
+    suite is not green on the clean copy, an install failed, or a link failed). Only an assertion catches, as in a replay. The
+    run is in a checkout of HEAD made like a replay's, so the working tree and the repository are left as found.
     The checkout is prepared as `--changed` prepares its own. For each part of `profile` (the values of a `parts` profile, else
     the profile itself) the install runs under `deps`, a folder the caller removes, and its folder is linked beside the
-    lockfile. Parts with one lockfile and one install share one install and one link; any other install runs once more. When an
-    install or a link fails, every defect reads UNKNOWN and its reason names the install and the cause."""
+    lockfile. Parts with one lockfile and one install share one install and one link; any other install runs once more.
+    A failed install does not stop the run: the later parts still install and every defect runs. A defect that read CAUGHT
+    stays CAUGHT, because an assertion on the planted copy needs no package that failed to install. Any other verdict becomes
+    UNKNOWN, because the missing package may be what the suite needed, and its reason names the install and the cause. Each
+    failed install's reason is also appended to `notes`, so the caller can report an install that cost nothing. A failed
+    link leaves the checkout unusable, so every defect reads UNKNOWN and its reason names the cause."""
     if not defects:
         return []
     sha = _git(repo, "rev-parse", "HEAD").strip()
     own = tempfile.mkdtemp(prefix="mutate_defects_")
     dest = os.path.join(own, "w")
     results = []
+    failed = []
 
     def all_unknown(reason: str) -> list:
         return [{"id": str(d.get("id", "?")) if isinstance(d, dict) else "?",
@@ -1381,7 +1386,8 @@ def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeou
         for part in (list(profile["parts"].values()) if "parts" in profile else [profile]):
             folder, why = _ensure_deps(repo, sha, part, deps)
             if why:
-                return all_unknown("the install of the profile failed: %s" % why)
+                failed.append("the install of the profile failed: %s" % why)
+                continue
             try:
                 _link_deps(dest, folder, part)
             except OSError as error:
@@ -1391,6 +1397,14 @@ def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeou
     finally:
         _drop_checkout(repo, dest)
         shutil.rmtree(own, ignore_errors=True)
+    if failed:
+        # Without the failed install a clean run or a red control proves nothing, so only a caught plant keeps its verdict.
+        for row in results:
+            if row["verdict"] != "CAUGHT":
+                seen = "it read %s" % row["verdict"] + (" (%s)" % row["reason"] if row["reason"] else "")
+                row.update(verdict="UNKNOWN", reason="%s; %s" % ("; ".join(failed), seen))
+        if notes is not None:
+            notes.extend(failed)
     return results
 
 
