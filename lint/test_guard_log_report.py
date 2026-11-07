@@ -1125,17 +1125,58 @@ def _text_constants(node):
     return {n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
 
 
+def _logged_strings(tree):
+    """{NAME: text} for each top-level name bound exactly once, to a string literal, directly or as one element of
+    a literal tuple unpack (`A, B = "a", "b"`). Only LOGGED_RULES reads it, so an id a writer logs through a
+    variable resolves here; call arguments still read `_module_strings`."""
+    values = {}  # NAME -> the value nodes bound to it at module level, None where no string can be read
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    values.setdefault(target.id, []).append(node.value)
+                elif isinstance(target, ast.Tuple):
+                    paired = isinstance(node.value, ast.Tuple) and len(node.value.elts) == len(target.elts)
+                    for i, elt in enumerate(target.elts):
+                        if isinstance(elt, ast.Name):
+                            values.setdefault(elt.id, []).append(node.value.elts[i] if paired else None)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            values.setdefault(node.name, []).append(None)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                values.setdefault((alias.asname or alias.name).split(".")[0], []).append(None)
+    out = {}
+    for name, bound in values.items():
+        if len(bound) == 1 and isinstance(bound[0], ast.Constant) and isinstance(bound[0].value, str):
+            out[name] = bound[0].value
+    return out
+
+
+def _logged_entry(arg, strings):
+    """The id one LOGGED_RULES entry names: a name bound in this file, or `module.NAME` read from the repo module
+    hooks/module.py. None when the entry names no string; rule_audit is the reader that refuses such an entry."""
+    if isinstance(arg, ast.Name):
+        return strings.get(arg.id)
+    if isinstance(arg, ast.Attribute) and isinstance(arg.value, ast.Name):
+        path = os.path.join(REPO_ROOT, "hooks", arg.value.id + ".py")
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                return _logged_strings(ast.parse(handle.read())).get(arg.attr)
+    return None
+
+
 def emitted_guard_rules(source):
     """The rule ids one guard source can write to guard.log, read with `ast`.
 
-    Three shapes write an id: a literal in refuse()/record() (third argument, or `rule=`) or
-    ask_command() (first argument, or `rule=`); the table in diff_rule(); and the `code, why = {...}`
-    role-scope table. A Name in that position names the string of its module-level binding (see
+    Four shapes write an id: a literal in refuse()/record() (third argument, or `rule=`) or
+    ask_command() (first argument, or `rule=`); the table in diff_rule(); the `code, why = {...}`
+    role-scope table; and a module-level LOGGED_RULES tuple, whose entries name ids through constants
+    (see _logged_entry). A Name in a call's position names the string of its module-level binding (see
     _module_strings). A call that passes a variable with no such binding names no id, and so does a
     bare call to a local wrapper (see _local_wrappers).
     """
     tree = ast.parse(source)
-    strings, wrappers = _module_strings(tree), _local_wrappers(tree)
+    strings, wrappers, logged = _module_strings(tree), _local_wrappers(tree), _logged_strings(tree)
     ids = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
@@ -1162,6 +1203,10 @@ def emitted_guard_rules(source):
         elif isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Tuple) \
                 and [getattr(e, "id", "") for e in node.targets[0].elts] == ["code", "why"]:
             ids |= _text_constants(node.value)
+    for node in tree.body:  # LOGGED_RULES is module-level: its entries are the constants a writer logs through
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "LOGGED_RULES" for t in node.targets) \
+                and isinstance(node.value, ast.Tuple):
+            ids |= {rule for rule in (_logged_entry(e, logged) for e in node.value.elts) if isinstance(rule, str)}
     return ids
 
 
@@ -1219,8 +1264,9 @@ class EmittedRuleReaderTests(unittest.TestCase):
         cases = {
             "module-level constants": ('A = "a-rule"\nB = "b-rule"\nLOGGED_RULES = (A, B)\n', {"a-rule", "b-rule"}),
             "a literal tuple unpack": ('A, B = "a-rule", "b-rule"\nLOGGED_RULES = (A, B)\n', {"a-rule", "b-rule"}),
-            "a module.CONST from a repo module": ('import question_form\nLOGGED_RULES = (question_form.PAST_RULING_RULE,)\n',
-                                                  {question_form.PAST_RULING_RULE}),
+            "a module.CONST from a repo module": (
+                'import question_form\nLOGGED_RULES = (question_form.PAST_RULING_RULE,)\n',
+                {question_form.PAST_RULING_RULE}),
         }
         for label, (src, want) in cases.items():
             with self.subTest(label):
