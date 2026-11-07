@@ -27652,9 +27652,8 @@ for _label, _check in _BRIEF_MARKER_CHECKS:
 # the review record writes, `Guard or check: yes` (rule agent-role-model; owner, 2026-11-07 14:41 CST, page item 359,
 # pick a: Round 1 runs on Sonnet for guard and check diffs; Haiku stays for docs and records). The marker must start a
 # line and match case. It lifts Sonnet on any round, Round 1 included. It lifts no other role and no Opus spawn, and a
-# `no` value, a mid-line marker or a lowercase form lifts nothing. Its one home is REVIEW_GUARD_MARKER in shared_names.
-# Until that name lands, the cases take the same line from the review record's writer, so each case still runs the brief
-# it names and fails on the rule, not on a missing name (P3). A hard import would fail every case in this file instead.
+# `no` value, a mid-line marker, a lowercase form or a line inside a fenced block lifts nothing. Its one home is
+# REVIEW_GUARD_MARKER in shared_names, read here through the file's own loader.
 def review_record_guard_line():
     """The `Guard or check: yes` line merge/merge.py review_body writes for a guard or check change, read from the writer
     so this file holds no copy of the text."""
@@ -27668,10 +27667,7 @@ def review_record_guard_line():
 
 def review_guard_marker_check():
     """shared_names.REVIEW_GUARD_MARKER is the one name for the review record's Guard or check line."""
-    marker = getattr(_shared_names_under_test(), "REVIEW_GUARD_MARKER", None)
-    if marker is None:
-        return False, "shared_names has no REVIEW_GUARD_MARKER yet"
-    if marker != review_record_guard_line():
+    if REVIEW_GUARD_MARKER != review_record_guard_line():
         return False, "REVIEW_GUARD_MARKER is not the Guard or check line the review record writes"
     return True, "REVIEW_GUARD_MARKER is the review record's Guard or check line"
 
@@ -27679,7 +27675,7 @@ def review_guard_marker_check():
 LOG_CHECKS_EXTRA.append(("role-model: shared_names' REVIEW_GUARD_MARKER is the review record's Guard or check line",
                          review_guard_marker_check))
 FIXTURELESS_CHECKS.add(review_guard_marker_check)
-REVIEW_GUARD_MARKER = getattr(_shared_names_under_test(), "REVIEW_GUARD_MARKER", None) or review_record_guard_line()
+REVIEW_GUARD_MARKER = _shared_names_under_test().REVIEW_GUARD_MARKER
 GUARD_NO_LINE = "Guard or check: no"
 
 # A reviewer on Sonnet passes with the marker at a line start: on line 1 or later, on any round, with text after it on
@@ -27708,6 +27704,15 @@ role_model_refuse("role-model: reviewer on sonnet on Round 1 with Guard or check
                   "reviewer", "sonnet", "Round 1 of 3. Check the docs diff.\n" + GUARD_NO_LINE)
 role_model_refuse("role-model: reviewer on sonnet with the guard marker mid-line is denied", "reviewer", "sonnet",
                   "Check the diff. " + REVIEW_GUARD_MARKER)
+# A model the table does not rank sits above every row, so the marker lifts it no more than a Round N line does.
+role_model_refuse("role-model: reviewer on an unranked model with the guard marker is denied (claude-mystery-9 is above "
+                  "the row)", "reviewer", "claude-mystery-9", REVIEW_GUARD_MARKER + "\nCheck the guard diff.")
+# A fenced block is quoted text, as cite-by-id reads it, so a marker line inside one is no marker. A fence that closes
+# before the marker line leaves the marker a line of the brief, so it counts.
+role_model_refuse("role-model: reviewer on sonnet whose only guard marker line sits inside a ``` fence is denied",
+                  "reviewer", "sonnet", "Check the docs diff.\n" + MD_FENCE + "\n" + REVIEW_GUARD_MARKER + "\n" + MD_FENCE)
+role_model_allow("role-model: reviewer on sonnet whose guard marker follows a closed ``` fence is allowed", "reviewer",
+                 "sonnet", "Check the guard diff.\n" + MD_FENCE + "\nsome code\n" + MD_FENCE + "\n" + REVIEW_GUARD_MARKER)
 role_model_refuse("role-model: reviewer on sonnet with the guard marker in lowercase is denied (case-sensitive)",
                   "reviewer", "sonnet", REVIEW_GUARD_MARKER.lower())
 # The refusal names the marker beside the Round N of 3 remedy, as a reviewer's second way past its row.
