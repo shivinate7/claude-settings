@@ -36,6 +36,10 @@ Interface the module must match (the lane's form contract):
   that removes a Goal, Problem or Based on line is refused.
 - hooks/call_judge.py refuses an AskUserQuestion that fails chat_hit before any model call, with the rule
   chat_hit names; the model sees only a box that passes.
+- A page write from a repo with no page, or no repo, is judged against the waiting page its url names: the cwd's, the
+  pointer checkout's, or a sibling child's, each by its registry entry with role waiting-page and the same artifact id.
+  A write to any other artifact is judged against no page and passes the none-key check. The cases run in the hermetic
+  home of test_call_judge.pointer_fixture().
 
 Every case runs on the surfaces the contract names. A page write is judged twice, by question_form.item_hit
 and by guard.data_tool_hit, so a guard that does not delegate shows red. The same form lines are judged on
@@ -1434,6 +1438,130 @@ def case_item_51_stray_field():
          entry_of(page_item(focus="#fill")), ("item-field-rendered", "focus"))
 
 
+# ------------------------------------------------------------------ a page write from a repo with no page, or no repo
+#
+# A page write is judged against the waiting page of the repo its cwd is in. From a repo with no page (a roadmap
+# worktree) or no repo at all, the lookup now reaches the pointer checkout's page, and a sibling child repo's page, by
+# a registry entry with role waiting-page and the same artifact id. Every case runs in the hermetic home of
+# test_call_judge.pointer_fixture(), so no case reads the real HOME. The pointer checkout is the control: the same write
+# is refused from there, so a red here is the cwd, not the data.
+
+LINK = tcj.LINK_FIELD  # `link` is not in the page's itemFields block (skills/waiting-page/page.html)
+LINK_REFUSED = ("item-field-rendered", "field link")
+
+
+def page_update(url, data, doc_id="p1"):
+    """An update to collection `items` of the page at `url`, as ArtifactData sends it."""
+    return {"action": "update", "url": url, "collection": "items", "doc_id": doc_id, "data": data}
+
+
+def judged_from(tool_input, cwd):
+    """(hit, writes, guard verdict) for one call from `cwd`: question_form.page_item_hit, and guard.data_tool_hit,
+    which delegates to it."""
+    hit, writes = question_form.page_item_hit(tool_input, cwd)
+    return hit, writes, guard.data_tool_hit(tool_input, cwd)
+
+
+def judged_against(name, writes, want):
+    """Scope before subject: page_item_hit returns the writes it judged against a waiting page, so `want` True means the
+    call found a page, and False means it found none."""
+    check(name, bool(writes) == want, "judged against a page: %s, want %s" % (bool(writes), want))
+
+
+def refused_from(label, cwd):
+    """A link write to the pointer checkout's page, from `cwd`, is judged against that page and refused by the item-field
+    check, on both surfaces. Called inside tcj.hermetic_home()."""
+    hit, writes, guard_verdict = judged_from(page_update(tcj.POINTER_PAGE_URL, LINK), cwd)
+    judged_against("%s: the link write to the pointer page is judged against that page" % label, writes, True)
+    verdict("%s: the link write to the pointer page is refused, naming the field" % label, hit, LINK_REFUSED)
+    verdict("%s guard: the link write to the pointer page is refused, naming the field" % label, guard_verdict, LINK_REFUSED)
+
+
+def case_page_lookup_fixture_is_what_it_says():
+    """Scope first: the fixture names the checkouts the cases below judge against, so a broken fixture fails here by name."""
+    import guard_pointer  # the pointer checkout the global rules file names (hooks/guard_pointer.py)
+    import layout  # the one layout (lint/layout.py)
+    with tcj.hermetic_home() as fx:
+        want = os.path.normcase(os.path.realpath(fx["settings"]))
+        got = guard_pointer.pointer_checkout()
+        check("page lookup fixture: the global rules file names the fixture pointer checkout", got == want,
+              "got %r, want %r" % (got, want))
+        check("page lookup fixture: the pointer checkout's registry names its waiting page",
+              layout.is_waiting_page_url(fx["settings"], tcj.POINTER_PAGE_URL), layout.waiting_page(fx["settings"]))
+        check("page lookup fixture: the child repo's registry names its own waiting page",
+              layout.is_waiting_page_url(fx["child"], tcj.CHILD_PAGE_URL), layout.waiting_page(fx["child"]))
+        check("page lookup fixture: the roadmap repo is a git repo with no extras file",
+              os.path.isdir(os.path.join(fx["roadmap"], ".git"))
+              and not os.path.exists(os.path.join(fx["roadmap"], ".claude", "layout-extras.json")), fx["roadmap"])
+        check("page lookup fixture: the loose folder is in no git repo", question_form._git_root_of(fx["loose"]) is None,
+              fx["loose"])
+    with tcj.hermetic_home(bare=True):
+        check("page lookup fixture: the bare home's config names no pointer", guard_pointer.pointer_checkout() == "",
+              guard_pointer.pointer_checkout())
+
+
+def case_page_roadmap_repo_refuses_a_link_to_the_pointer_page():
+    with tcj.hermetic_home() as fx:
+        hit, _writes, guard_verdict = judged_from(page_update(tcj.POINTER_PAGE_URL, LINK), fx["settings"])
+        verdict("control, from the pointer checkout: a link write to its page is refused, naming the field", hit, LINK_REFUSED)
+        verdict("control guard, from the pointer checkout: the same link write is refused", guard_verdict, LINK_REFUSED)
+        refused_from("roadmap repo", fx["roadmap"])
+
+
+def case_page_non_repo_folder_refuses_a_link_to_the_pointer_page():
+    with tcj.hermetic_home() as fx:
+        refused_from("non-repo folder", fx["loose"])
+
+
+def case_page_unrelated_artifact_link_still_passes():
+    """A link write to an artifact that is no waiting page of any checkout passes from a roadmap repo or a non-repo folder:
+    an unregistered url, and the pointer checkout's reference entry (its role is reference, not waiting-page)."""
+    with tcj.hermetic_home() as fx:
+        for cwd_label, cwd in (("roadmap repo", fx["roadmap"]), ("non-repo folder", fx["loose"])):
+            for url_label, url in (("an unregistered url", tcj.UNRELATED_URL),
+                                   ("the pointer checkout's reference entry", tcj.POINTER_REF_URL)):
+                label = "%s, %s" % (cwd_label, url_label)
+                hit, writes, guard_verdict = judged_from(page_update(url, LINK), cwd)
+                judged_against("%s: the link write is judged against no page" % label, writes, False)
+                verdict("%s: the link write passes (only the none-key check)" % label, hit, None)
+                verdict("%s guard: the link write passes" % label, guard_verdict, None)
+
+
+def case_page_child_repo_judged_by_its_own_page():
+    """A write from a sibling child repo to the child's own page is judged against that page, and a plain write passes."""
+    with tcj.hermetic_home() as fx:
+        hit, writes, guard_verdict = judged_from(page_update(tcj.CHILD_PAGE_URL, {"title": "Renamed the queue"}), fx["child"])
+        judged_against("child repo: a title write to the child's own page is judged against that page", writes, True)
+        verdict("child repo: a title write to the child's own page passes", hit, None)
+        verdict("child repo guard: a title write to the child's own page passes", guard_verdict, None)
+
+
+def case_page_child_repo_refuses_a_link_to_the_pointer_page():
+    with tcj.hermetic_home() as fx:
+        refused_from("child repo", fx["child"])
+
+
+def case_page_non_repo_folder_refuses_a_link_to_a_sibling_page():
+    """The sibling step: a non-repo folder's write to the child's page, a sibling of the pointer checkout, is found by
+    its registry entry and refused."""
+    with tcj.hermetic_home() as fx:
+        hit, writes, guard_verdict = judged_from(page_update(tcj.CHILD_PAGE_URL, LINK), fx["loose"])
+        judged_against("non-repo folder: the link write to the sibling child's page is judged against that page", writes, True)
+        verdict("non-repo folder: the link write to the sibling child's page is refused, naming the field", hit, LINK_REFUSED)
+        verdict("non-repo folder guard: the link write to the sibling child's page is refused, naming the field",
+                guard_verdict, LINK_REFUSED)
+
+
+def case_page_bare_home_passes_a_link_to_the_pointer_page():
+    """The empty state: a home whose config names no pointer. No page is found from any cwd, the lookup does not raise, and
+    the write passes (only the none-key check)."""
+    with tcj.hermetic_home(bare=True) as fx:
+        hit, writes, guard_verdict = judged_from(page_update(tcj.POINTER_PAGE_URL, LINK), fx["loose"])
+        judged_against("bare home, non-repo folder: the link write is judged against no page", writes, False)
+        verdict("bare home, non-repo folder: the link write passes (only the none-key check)", hit, None)
+        verdict("bare home, non-repo folder guard: the link write passes", guard_verdict, None)
+
+
 def main():
     for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
@@ -1452,7 +1580,12 @@ def main():
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
-                 case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable):
+                 case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
+                 case_page_lookup_fixture_is_what_it_says, case_page_roadmap_repo_refuses_a_link_to_the_pointer_page,
+                 case_page_non_repo_folder_refuses_a_link_to_the_pointer_page, case_page_unrelated_artifact_link_still_passes,
+                 case_page_child_repo_judged_by_its_own_page, case_page_child_repo_refuses_a_link_to_the_pointer_page,
+                 case_page_non_repo_folder_refuses_a_link_to_a_sibling_page,
+                 case_page_bare_home_passes_a_link_to_the_pointer_page):
         try:
             case()
         except Exception as exc:
