@@ -2324,5 +2324,56 @@ class RewordCostTests(RewordCase):
         self.assertEqual(before, after, out)
 
 
+# Review round 2, F5: a head sentence that only gained words used to skip the reword check. The skip was checked against
+# every rule's head sentences, and it ignored a negator in the added words. Now a negator ends the skip, and a rule is
+# compared with its own head sentences only.
+MERGE_BASE = "**Merge.** Main may merge only by pull request.<!-- rule:merge-by-pr -->\n"
+MERGE_MOVED = "**Merge.** Main moves only by pull request.<!-- rule:merge-by-pr -->\n"
+MERGE_NEGATED = "**Merge.** Main may not merge only by pull request.<!-- rule:merge-by-pr -->\n"
+CAN_BASE = "**Merge.** Main can merge only by pull request.<!-- rule:merge-by-pr -->\n"
+CAN_CONTRACTED = "**Merge.** Main can't merge only by pull request.<!-- rule:merge-by-pr -->\n"
+MERGE_LINE = "Main may merge only by pull request. Start with the point.\n"
+CAN_LINE = "Main can merge only by pull request. Start with the point.\n"
+BRIEF_BASE = "**Brief.** Write the brief to the task and the files only.<!-- rule:brief-scope -->\n"
+BRIEF_GROWN = "**Brief.** Write the brief, for each lane, to the task and the files only.<!-- rule:brief-scope -->\n"
+BRIEF_LINE = "Write the brief to the task and the files only. Start with the point.\n"
+BATCH_BASE = "**Batch.** Main may merge only by a pull request.<!-- rule:batch-merge -->\n"
+BATCH_GROWN = "**Batch.** Main, when the checks pass, may merge only by a pull request.<!-- rule:batch-merge -->\n"
+
+
+class RewordSkipTests(RewordCase):
+    def reword(self, base, head, line):
+        """A range whose CLAUDE.md changes from base to head, with `line` in agents/notes.md at both ends."""
+        def change(repo):
+            write(repo, "CLAUDE.md", head)
+            commit(repo)
+        return self.make_range(base_files(extra={"CLAUDE.md": base, "agents/notes.md": line}), change)
+
+    def test_a_rule_reworded_with_no_growth_lists_its_copy(self):
+        # The control: with no growth to skip, the same copy line is listed.
+        rc, out = self.run_check(self.reword(MERGE_BASE, MERGE_MOVED, MERGE_LINE))
+        self.assertEqual(self.listed(out), [("agents/notes.md", 1)], out)
+        self.assertEqual(rc, 1, out)
+
+    def test_a_negator_added_to_a_rule_sentence_is_listed(self):
+        rc, out = self.run_check(self.reword(MERGE_BASE, MERGE_NEGATED, MERGE_LINE))
+        self.assertEqual(self.listed(out), [("agents/notes.md", 1)], out)
+        self.assertEqual(rc, 1, out)
+
+    def test_a_contraction_added_to_a_rule_sentence_is_listed(self):
+        rc, out = self.run_check(self.reword(CAN_BASE, CAN_CONTRACTED, CAN_LINE))
+        self.assertEqual(self.listed(out), [("agents/notes.md", 1)], out)
+        self.assertEqual(rc, 1, out)
+
+    def test_growth_with_no_negator_still_skips(self):
+        self.assert_passes(self.reword(BRIEF_BASE, BRIEF_GROWN, BRIEF_LINE))
+
+    def test_growth_in_another_rule_does_not_hide_a_removed_sentence(self):
+        rng = self.reword(MERGE_BASE + "\n" + BATCH_BASE, MERGE_MOVED + "\n" + BATCH_GROWN, MERGE_LINE)
+        rc, out = self.run_check(rng)
+        self.assertEqual(self.listed(out), [("agents/notes.md", 1)], out)
+        self.assertEqual(rc, 1, out)
+
+
 if __name__ == "__main__":
     unittest.main()
