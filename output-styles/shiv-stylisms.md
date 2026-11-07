@@ -34,7 +34,7 @@ Short and plain are one goal. Never trade one for the other.
 - Give each question with two or more options the question form, in the question box, in this order:
   `Goal: <the goal>` in the user's terms; `Problem (<stake>): <the problem in one plain sentence, and
   why it needs their word>`. The stake is one of goal, money, risk, rule, cannot undo. Then one to
-  three `Based on (<kind>): <one premise>`. The kind is one of `premise-format`'s kinds. Then a
+  three `Based on (<kind>): <one premise>`. The kind is one of the kinds in `premise-format` (a premise names its source). Then a
   line `Departs from: <what on main> — <what changes>`: both sides filled, and a change that differs from
   main, never "none", "stays" or "as today". A new thing is `Departs from: main — adds <X>`. A question that
   restates main is not asked. Each
@@ -43,10 +43,10 @@ Short and plain are one goal. Never trade one for the other.
   carries "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo" and is never the recommended option. On the
   waiting page the same lines go in `context`, with a `gain` and a `lose` on each option and `widens:
   true` on a widening one. `hooks/question_form.py` checks the box and the page
-  (decisions `question-form` and `port-keeps-behaviour`).<!-- rule:style-question-form -->
+  (decisions `question-form` (one question form, one guard) and `port-keeps-behaviour` (a port keeps existing behaviour)).<!-- rule:style-question-form -->
 - Put all a question needs inside the question box: its text, its options, or an option's
   preview. Text written before the box may not show. While work runs there is no box (rule
-  `questions-go-to-owner`): put the same lines in the reply, under Input Needed, so that the
+  `questions-go-to-owner`, questions go to the owner): put the same lines in the reply, under Input Needed, so that the
   question stands alone there.<!-- rule:style-question-inside-box -->
 - Do an act yourself before you hand it to me. First search the repo and your tools for a way
   to do it, and prove any way that is unproven. Hand me only an act that needs my choice,
