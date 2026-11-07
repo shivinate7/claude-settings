@@ -33,7 +33,7 @@ Coordinator pick, 2026-11-07 15:12 CST, rewritten 15:38 CST after review round 1
 
 - Act text: when the task carries a `command`, each line of it (each variant of `{powershell, mac}`), split at `&&`, `||` and `;`, with a leading `env` and `NAME=value` assignments dropped. With no command, each backtick span in the write's `context`.
 - Cover: the cited id is one of the rows on this surface whose `pattern` matches a piece of act text. The match is the route matcher's (`hooks/route_match.py`). Two rows may share a pattern, so the rule is membership. One covered piece covers a task of several steps.
-- No cover: refused when the act is known. A command is known. A backtick span is known only when it matches some other row on this surface; a span no row matches, such as a button label `Merge`, is not an act this check can name. Remedy: cite the row of the act, or name the act's command.
+- No cover: refused when the act is known. A command is known. A backtick span is known only when it matches some other row on this surface. A span no row matches, such as a button label `Merge`, names no act here. Remedy: cite the row of the act, or name the act's command.
 - Each route cite on the line is judged. A line with one covering cite passes. Else a line with one uncovered cite is refused.
 - Unknown, never a refusal: no act text, a span that matches no row, a cited row with no pattern or one that does not compile, or a row not on this surface. The page guard runs before the write and has no note channel, so it lets the write through, as it does for a row whose outcome does not read.
 - A dated `(measured ...)` cite on the line backs it on its own, as the 12:59 pick says; the route cover is not read then.
