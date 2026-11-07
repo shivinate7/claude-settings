@@ -1,7 +1,7 @@
 {
   "added": "2026-11-07T19:23:00Z",
   "context": "Goal: a yes you give through the coordinator lets the acting session act.\nProblem (rule): auto mode refused the coordinator's edit to .claude/CLAUDE.md (13:14 CST). The lane may make it on your own answer, and an answer on this page counts once the lane reads it itself.\nBased on (ruling): decision relayed-grant-read-from-page (owner, 2026-11-05 07:49 CST): an act you approve on this page counts as your word once the acting session reads the answer itself. So you answer here, not in the lane's chat.\nBased on (ruling): decision auto-mode-owner-acts (owner, 2026-10-30 16:24 CDT, \"Allow them\"), restated in your chat at 13:16 CST.\nDeparts from: main, where no grant covers a relayed yes \u2014 adds the relayed-yes bullet under Standing grants in .claude/CLAUDE.md, and a matching autoMode.allow entry.",
-  "home": "lane relayed-yes-allow (session_013NEJKzw6Mmu5eviHC3vobt)",
+  "home": ".claude/CLAUDE.md Standing grants, \"Relayed yes\" (branch relayed-yes-allow)",
   "id": "cs-relayed-yes-go",
   "kind": "decision",
   "n": 350,
@@ -25,7 +25,7 @@
   "ref": "item 349; item 335; decision auto-mode-owner-acts",
   "reply": "Your 13:18 CST question on the 'field the page does not draw' warning: my mistake. I wrote the link as `link`, and the page draws only `links`. It is fixed here. Six of my items carried it, because the field check skips my writes. Step page-checks-reach-triage fixes that. Triage, 13:24 CST.",
   "short": "Relayed-yes grant: go?",
-  "status": "open",
+  "status": "closed",
   "title": "Go: lane relayed-yes-allow writes your relayed-yes grant and its allow entry?",
   "why": "Your 13:10 CST words in runner 8's chat: \"a yes passed on by coordinator should literally be enough\". An answer here reaches the lane directly."
 }

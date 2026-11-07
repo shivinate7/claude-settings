@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-07T19:30:00Z",
+  "context": "Goal: a guard PR's fix check catches a defect that Haiku misses.\nProblem (rule): a reviewer's model is a role rule, which needs your word.\nBased on (ruling): rule agent-model-cap, where reviewers run Sonnet from round 2 on.\nDeparts from: main, where the fix check runs on Haiku \u2014 a moves it to Sonnet for guard and check PRs.",
+  "home": "step guard-fix-check-sonnet (lane session_013NEJKz9HoqeRzdjbw9Fnga)",
+  "id": "guard-fix-check-sonnet",
+  "kind": "decision",
+  "n": 351,
+  "options": [
+    {
+      "gain": "A stronger read on the PRs that change what a guard lets through.",
+      "key": "a",
+      "label": "Sonnet for the fix checks of guard and check PRs (recommended)",
+      "lose": "One Sonnet call per fix check."
+    },
+    {
+      "gain": "No change.",
+      "key": "b",
+      "label": "Keep Haiku",
+      "lose": "A weaker read on guard fixes."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 2,
+  "ref": "item 279 option c",
+  "short": "Guard fix checks: Sonnet or Haiku?",
+  "status": "open",
+  "title": "Should the fix check on a guard or check PR run on Sonnet instead of Haiku?",
+  "why": "You asked on item 279 (Nov 6) how option c made sense there: \"isn't that a separate thign?\". This is it, on its own."
+}

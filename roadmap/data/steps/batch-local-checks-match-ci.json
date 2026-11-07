@@ -1,11 +1,11 @@
 {
   "title": "The batch runner's local checks call the same entry point as CI",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 103.39,
   "why": "Batch 36 went red on CI: the local pre-batch checks lacked lint/check_comment_narration.py, which CI's code-check job runs (two narrating comments from #1321).",
-  "note": "Coordinator 15:18 CST Nov 6. Skill ci-hygiene step 8 does not list that check. Fix the cause: the batch runner's local run calls the CI job's own entry point (bin/ci-job checks, or its equal), so no list can drift. Do not add one more name to a list.",
+  "note": "Done on main by commit e54d2a003: lane-lint runs on the batch head before ready (coordinator, 13:50 CST Nov 7).\nCoordinator 15:18 CST Nov 6. Skill ci-hygiene step 8 does not list that check. Fix the cause: the batch runner's local run calls the CI job's own entry point (bin/ci-job checks, or its equal), so no list can drift. Do not add one more name to a list.",
   "owner": "coordinator",
-  "updatedAt": "2026-11-07T13:30:00-06:00",
+  "updatedAt": "2026-11-07T13:32:00-06:00",
   "lane": "session_013NEJKzqj9raad1ELSgDQ9V"
 }

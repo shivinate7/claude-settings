@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-07T19:30:00Z",
+  "context": "Goal: a lane can update its own PR branch after a rebase without your help.\nProblem (rule): auto mode refuses every lease push, and an allow entry needs your word.\nBased on (ruling): decision relayed-grant-read-from-page (owner, 2026-11-05 07:49 CST): an answer here counts once the acting lane reads it itself.\nBased on (ruling): decision auto-mode-owner-acts (owner, 2026-10-30 16:24 CDT, \"Allow them\"), restated in your chat at 13:16 CST.\nDeparts from: main, where auto mode refuses every lease push \u2014 a adds the allow entry \"Own Branch Lease Push\": a lease push (--force-with-lease --force-if-includes) to a branch this session pushed earlier. Never --force, -f, +refspec, the default branch, archive/, roadmap, merge-lock, --mirror, --all, or a delete.",
+  "home": "step lease-push-c-and-d (lane session_013NEJL27e8puG926YPKVUMf)",
+  "id": "lease-push-own-branch-allow",
+  "kind": "decision",
+  "n": 352,
+  "options": [
+    {
+      "gain": "A lane rebases and updates its own PR branch with no stop. The lease refuses if anyone else pushed to it.",
+      "key": "a",
+      "label": "Go (recommended)",
+      "lose": "Sessions can rewrite branches they pushed themselves."
+    },
+    {
+      "gain": "No new allow entry.",
+      "key": "b",
+      "label": "Not now",
+      "lose": "Each rebased lane branch waits for a Mac session or for you."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 2,
+  "ref": "step lease-push-c-and-d; item 262",
+  "short": "Own-branch lease push: go?",
+  "status": "open",
+  "title": "Go: may a session safely force-update a branch it pushed itself (a lease push)?",
+  "why": "Part c of step lease-push-c-and-d needs your go for one auto-mode allow entry. Lane session_013NEJL27e8puG926YPKVUMf reads your answer here itself."
+}
