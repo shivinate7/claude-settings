@@ -6404,6 +6404,14 @@ sh("silent-write: an ordinary read discarding its output is a carve-out",
    VCS + " status --porcelain >/dev/null 2>&1", "allow", cwd=NOGIT)
 sh("silent-write: 2>&1 alone duplicates a stream and discards nothing",
    VCS + " commit -m x 2>&1", "allow", cwd=NOGIT)
+# A SILENT WRITE INSIDE `bash -c` IS THE SAME WRITE. The check reads the outer command only, so a quoted
+# script that discards a write's output or quiets a push must deny as the bare form does.
+sh("silent-bash-c: a commit that discards both streams inside bash -c denies, as the bare form does",
+   "bash -c '" + VCS + " commit -m x >/dev/null 2>&1'", "deny", "silent-write", cwd=NOGIT)
+sh("silent-bash-c: a push with its own quiet flag inside bash -c denies, as the bare form does",
+   "bash -c '" + VCS + " push -q'", "deny", "silent-write", carries="moved nothing", cwd=NOGIT)
+sh("silent-bash-c: a commit with its own quiet flag inside bash -c is a carve-out and allows",
+   "bash -c '" + VCS + " commit -q -m x'", "allow", cwd=NOGIT)
 
 # Gaps found in Banchi's scripts/silent-write-guard.py.
 sh("silent-write gap: pull silenced, both streams, with -C",
