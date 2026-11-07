@@ -3680,6 +3680,62 @@ def design_unread_push_case():
     return True, "push --delete asks with an unread design folder"
 
 
+# AN ANCESTOR TIP SPENDS NO DESIGN DIFF. design_files states its cost in `diff` starts. A tip already on the default
+# branch is answered by branch_is_ancestor alone (design_push_delete_verdict's shortcut), so its delete runs no `diff`
+# start and its verdict stays allow. design-merged is such a tip: origin/main holds it. The control is design-only, a
+# tip off main that does reach design_files, so the count proves it sees `diff` starts at all.
+DESIGN_DIFF_COST_LABEL = "push: a --delete of an ancestor design tip spends no design diff start, the shortcut's cost"
+DESIGN_DIFF_CONTROL_LABEL = "push: a --delete of a design tip off main reaches the design diff, the count's control"
+
+
+def _design_delete_diff_starts(branch):
+    """(design folder, verdict, the `diff` starts) of one push --delete of BRANCH to origin, in BRANCHREPO. The
+    count is taken at git_reads._git, the one call every design read makes, so it holds every diff start."""
+    materialize(BRANCHREPO)
+    guard = _load_guard_module()
+    git_reads = sys.modules["git_reads"]
+    folder = guard.design_folder()
+    starts = []
+    real_git = git_reads._git
+
+    def counting_git(where, *args):
+        starts.append(args)
+        return real_git(where, *args)
+
+    git_reads._git = counting_git
+    try:
+        verdict = guard.design_push_delete_verdict(BRANCHREPO, "origin", [branch], folder)
+    finally:
+        git_reads._git = real_git
+    return folder, verdict, [args for args in starts if args and args[0] == "diff"]
+
+
+def design_ancestor_no_diff_case():
+    folder, verdict, diffs = _design_delete_diff_starts("design-merged")
+    if folder is None:
+        return False, "scope: the design folder does not read, so the delete is not judged as a design delete"
+    if run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "design-merged", "origin/main").returncode != 0:
+        return False, "scope: design-merged is not an ancestor of origin/main, so its tip is not an ancestor tip"
+    if verdict != "":
+        return False, "push --delete of an ancestor design tip gave %r, want allow" % (verdict,)
+    if diffs:
+        return False, "%d design diff start(s) for an ancestor design tip, want 0" % len(diffs)
+    return True, "an ancestor design tip allows with no design diff start"
+
+
+def design_diff_control_case():
+    folder, verdict, diffs = _design_delete_diff_starts("design-only")
+    if folder is None:
+        return False, "scope: the design folder does not read, so the delete is not judged as a design delete"
+    if run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "design-only", "origin/main").returncode == 0:
+        return False, "scope: design-only is an ancestor of origin/main, so its tip is not off main"
+    if verdict != "deny":
+        return False, "push --delete of a design tip off main gave %r, want deny" % (verdict,)
+    if not diffs:
+        return False, "no design diff start for a design tip off main, so the count sees nothing"
+    return True, "a design tip off main reads %d design diff start(s)" % len(diffs)
+
+
 # `git worktree remove <path>`. The subject lives at PATH, not at the checkout the command runs
 # in, so every case below runs from WTMAIN and names one of its own linked worktrees.
 sh("worktree remove: a clean, unlocked tree with no live session passes",
@@ -14132,6 +14188,10 @@ LOG_CHECKS_EXTRA.append((DESIGN_UNREAD_BRANCH_LABEL, design_unread_branch_case))
 LOG_FAMILY[DESIGN_UNREAD_BRANCH_LABEL] = "branch-worktree"
 LOG_CHECKS_EXTRA.append((DESIGN_UNREAD_PUSH_LABEL, design_unread_push_case))
 LOG_FAMILY[DESIGN_UNREAD_PUSH_LABEL] = "branch-worktree"
+LOG_CHECKS_EXTRA.append((DESIGN_DIFF_COST_LABEL, design_ancestor_no_diff_case))
+LOG_FAMILY[DESIGN_DIFF_COST_LABEL] = "branch-worktree"
+LOG_CHECKS_EXTRA.append((DESIGN_DIFF_CONTROL_LABEL, design_diff_control_case))
+LOG_FAMILY[DESIGN_DIFF_CONTROL_LABEL] = "branch-worktree"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
