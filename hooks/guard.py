@@ -124,7 +124,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   conflict-markers     deny. A `git commit` that would hold a start, a lone mid and an end conflict marker
                        line in one file's added lines, read with `git diff --check`: the index, or the working
                        tree when `-a`, a pathspec or an earlier add reaches the file. It judges a commit only
-                       when each earlier segment is a git add or read, `true` or `false`. Also a `git push`
+                       when each earlier segment is a git add, commit or read, `true`, `false` or `cd`. Also a `git push`
                        whose range (remote-tracking tip, else upstream, else default base, up to the pushed
                        ref) adds such a file; and a push after a commit the guard could not judge.
                        (commit-refuses-conflict-markers)
