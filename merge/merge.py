@@ -3114,10 +3114,11 @@ def review_state(rec, head):
     The done rules follow roles-review-cap-three and the decision pr-review-record: the last round is all PASS, or a fix check PASS counts as that round
     passing, and the last design-reviewer line (by position, across all rounds) is PASS or absent; or the final allowed round is done and Guard or check is no; or the final allowed round is done, Guard or check is yes and Net value is zero or positive; or Kind is delete-only,
     Guard or check is no and the first round is done; or Kind is docs-only with no round. A guard or check change owes the net-value test after the
-    final allowed round whatever the verdict, and owes the later rounds when the first fails unless a fix check PASS follows, even if it only deletes. Net value negative holds the change.
+    final allowed round whatever the verdict, and owes the later rounds when the first fails unless a fix check PASS follows, even if it only deletes. Net value negative holds the change. A FAIL line in the final round holds it too, before the net-value and guard rules (a PARTIAL
+    keeps the rules below).
     A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round or delete-only done names it.
     A fix check (rec["fix"], decision hold-unsafe-after-round-3) is read after the held rule. A FAIL is open, whatever the rounds say, and counts
-    as the next round (after the last recorded one); after the final round it names the exits, revert or a new lane. A WIDE is open, counts no round and
+    as the next round (after the last recorded one); after the final round it is held. A WIDE is open, counts no round and
     needs a new lane at the first round. A PASS counts as the last recorded round passing, even when that round failed, and for a delete-only change with Guard or check yes
     too, so a PASS before the final round owes no net-value test. The design-reviewer hold stays, and with no round recorded it is open. On the final
     round the rules above run as written: it keeps the net value that round gave and settles none that is owed."""
@@ -3129,15 +3130,16 @@ def review_state(rec, head):
         return "held", "net value is negative"
     rounds = rec["rounds"]
     top = max((i for i, *_ in rounds), default=0)
+    fix = rec.get("fix")
+    # a failed final round, or a failed fix check after it, holds the change; the finding becomes a new lane
+    if any(i == REVIEW_LAST_ROUND and v == "FAIL" for i, _, _, v in rounds) or (fix and fix[3] == "FAIL" and top >= REVIEW_LAST_ROUND):
+        return "held", f"round {REVIEW_LAST_ROUND} failed, so the finding becomes a new lane at round 1"
     design = next(((i, v) for i, role, _, v in reversed(rounds) if role == REVIEW_ROLES[1]), None)  # the last design-reviewer line, by position
     bad = design if design and design[1] != "PASS" else None
     note = f"; the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}" if bad else ""
-    fix = rec.get("fix")
     if fix and fix[3] == "WIDE":
         return "open", "the fix diff is wider than its finding, so the fix needs a new lane at round 1"
     if fix and fix[3] == "FAIL":
-        if top >= REVIEW_LAST_ROUND:
-            return "open", f"the fix check failed, and round {REVIEW_LAST_ROUND} is the last round; revert the fix to the reviewed head {fix[0][:9]}, or split it to a new lane"
         return "open", f"the fix check failed, so it counts as round {top + 1}; the next record carries Round {top + 1}"
     if fix and not top:
         return "open", "the fix check passed, but no round is recorded"
