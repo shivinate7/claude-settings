@@ -19089,6 +19089,7 @@ add("lane-repo-tag: a denied lane names the expected repo tag in its reason", "d
 # argv starts with git is the rule's read of the origin.
 def lane_cost_run(body):
     """(children, decision, reason, probe error) of one judge run on `body`, judged in the probe with its own folders."""
+    materialize_for(body)  # the probe reads the origin of body's cwd, so that checkout is built first, not by the run loop
     os.makedirs(LB_DIR, exist_ok=True)
     run = tempfile.mkdtemp(dir=LB_DIR)
     try:
@@ -28839,15 +28840,6 @@ _FIXTURELESS_LABELS = (
     # family shared-tree
     'log: an unreadable subject is allowed and noted',
     'stack: the refusal never names the action it refused',
-    # family simulator
-    'simulator: a held-lease allow of two leases makes two lease reads, one ps per lease (ruling 7)',
-    'simulator: a launch of a booted device makes no lease read (ruling 7)',
-    'simulator: an owner override lifts a raw boot once (a one-act override)',
-    'simulator: an owner override lifts a raw boot until it ends (a timed override)',
-    'simulator: an owner override lifts a test of a shut-down device (simulator-boot-route)',
-    'simulator: an owner override lifts an MCP launch of a shut-down device (simulator-boot-lease)',
-    "simulator: the lease fixtures' fake ps answers each named pid's start and no other",
-    "simulator: the lease read writes nothing: a dead lease is refused and sim-lease's files keep their bytes",
     # family worktree-home
     'other-checkout: an owner override lifts a Write into a separate clone',
     'other-checkout: an owner override lifts a cd into a separate clone',
@@ -28860,11 +28852,24 @@ _FIXTURELESS_LABELS = (
     'lane-closes-after-records: a lane archive reads the open pull requests in one gh call',
     'lane-closes-after-records: a non-lane archive makes no gh call',
 )
+# The simulator section registers these only where os.name != "nt" (its POSIX fakes), so Windows has none of them.
+_FIXTURELESS_POSIX_LABELS = (
+    # family simulator
+    'simulator: a held-lease allow of two leases makes two lease reads, one ps per lease (ruling 7)',
+    'simulator: a launch of a booted device makes no lease read (ruling 7)',
+    'simulator: an owner override lifts a raw boot once (a one-act override)',
+    'simulator: an owner override lifts a raw boot until it ends (a timed override)',
+    'simulator: an owner override lifts a test of a shut-down device (simulator-boot-route)',
+    'simulator: an owner override lifts an MCP launch of a shut-down device (simulator-boot-lease)',
+    "simulator: the lease fixtures' fake ps answers each named pid's start and no other",
+    "simulator: the lease read writes nothing: a dead lease is refused and sim-lease's files keep their bytes",
+)
+_WANTED = set(_FIXTURELESS_LABELS) | (set(_FIXTURELESS_POSIX_LABELS) if os.name != "nt" else set())
 _LABELS_NOW = {label for label, _ in LOG_CHECKS}
-_MISSING = [label for label in _FIXTURELESS_LABELS if label not in _LABELS_NOW]
+_MISSING = [label for label in _WANTED if label not in _LABELS_NOW]
 if _MISSING:
-    sys.exit("fixture setup failed: FIXTURELESS labels not in LOG_CHECKS: %s" % _MISSING)
-FIXTURELESS_CHECKS.update(check for label, check in LOG_CHECKS if label in _FIXTURELESS_LABELS)
+    sys.exit("fixture setup failed: FIXTURELESS labels not in LOG_CHECKS: %s" % sorted(_MISSING))
+FIXTURELESS_CHECKS.update(check for label, check in LOG_CHECKS if label in _WANTED)
 
 # Log checks in the literal and the appended extras are tagged by section above. These prefixes give
 # each one its rule's family instead, so GUARD_FAMILY=<rule> runs its log checks too. A prefix that
