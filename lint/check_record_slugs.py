@@ -16,8 +16,11 @@ simulator or device, then an ISO time with a zone): a fix CI passes can still fe
 Tree mode reads the decision and debt folders, CLAUDE.md and output-styles/*.md. An id is a slug of a decision, debt or
 plan, or a `<!-- rule:x -->` anchor in CLAUDE.md or output-styles/*.md. It fails with:
 
-    GLOSS001  the first cite of an id in a file, a backticked span that is exactly the id, has no short gloss. The
-              gloss test is has_gloss in lint/report_guard.py, the one home that the cite-gloss guard also calls.
+    GLOSS001  the first cite of an id in a file has no short gloss. A cite is a backticked span that is exactly the id,
+              or the id as a whole word in prose (no word character or hyphen beside it). The gloss test is has_gloss
+              in lint/report_guard.py, the one home that the cite-gloss guard also calls. Its window is the cite's
+              paragraph: a gloss on the next line of the same paragraph counts; one past a blank line or a new list
+              item does not.
     DEBT001   a debt has no `**Decision.**` line.
     DEBT002   the Decision line is not a decision slug or `none` exactly: its first slug is not a decision, or `none`
               runs on into prose. A hint line under the findings says so.
@@ -25,8 +28,7 @@ plan, or a `<!-- rule:x -->` anchor in CLAUDE.md or output-styles/*.md. It fails
               slug or by the slug as a whole word in the decision.
     DEBT004   the Decision line says `none` while a decision names the debt.
 
-A cite inside a fenced block, an HTML comment or another code span is not a cite. The decision slug that opens a debt's
-Decision line is a cite with or without backticks.
+A cite inside a fenced block, an HTML comment, another code span, a URL or a link target is not a cite.
 
 The functions take a repo root, so lint/compliance_probes.py reads a child's records with them.
 """
@@ -156,9 +158,13 @@ def too_long(files, dirs):
 OUTPUT_STYLES = "output-styles/"  # beside CLAUDE.md, the other file that carries rule anchors
 ANCHOR = re.compile(r"<!--\s*rule:([\w.-]+)\s*-->")
 SPAN = re.compile(r"(`+)(?!`)((?:[^\n]|\n(?!\s*\n))+?)(?<!`)\1(?!`)")  # a code span; it may run over a line break
+COMMENT = re.compile(r"<!--.*?-->", re.S)
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 SLUG_AT_START = re.compile(r"`([^`\n]+)`|([a-z0-9][a-z0-9-]*)")
 GLOSS_WINDOW = 80  # the characters of context on each side of a cite, as the cite-gloss guard reads them
+LINK_TARGET = re.compile(r"(?<=\])\([^)\n]*\)")  # the target of a markdown link, which is a path, not a cite
+URL = re.compile(r"https?://\S+")
+LIST_ITEM = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 
 
 def blank(text):
@@ -167,7 +173,8 @@ def blank(text):
 
 
 def unfenced(text):
-    """`text` with each fenced block and each HTML comment blanked, so a cite in either is no cite."""
+    """`text` with each fenced block and each HTML comment blanked, so a cite in either is no cite. A comment opener
+    inside a code span is no comment: the scan takes whichever of a span or a comment starts first."""
     out, fence = [], None
     for line in text.split("\n"):
         m = FENCE.match(line)
@@ -180,7 +187,8 @@ def unfenced(text):
             out.append(blank(line))
         else:
             out.append(line)
-    return re.sub(r"<!--.*?-->", lambda m: blank(m.group()), "\n".join(out), flags=re.S)
+    return re.sub(SPAN.pattern + "|" + COMMENT.pattern,
+                  lambda m: m.group() if m.group(1) else blank(m.group()), "\n".join(out), flags=re.S)
 
 
 def spans(text):
@@ -188,49 +196,57 @@ def spans(text):
     return [(m.start(), m.end(), m.group(2)) for m in SPAN.finditer(text)]
 
 
-def decision_line(clean):
-    """(offset, line) of the first Decision line of `clean`, which `unfenced` has already read, else None. The line is
-    stripped; the offset is where it starts in `clean`."""
-    offset = 0
+def paragraphs(clean):
+    """[(start, end)] of each paragraph of `clean`: a run of text lines. A blank line ends one, and a list item starts
+    one. Fenced blocks and comments are blank there, so they end one too."""
+    out, start, offset = [], None, 0
     for raw in clean.split("\n"):
-        line = raw.strip()
-        if DECISION.match(line):
-            return offset + len(raw) - len(raw.lstrip()), line
+        if not raw.strip():
+            if start is not None:
+                out.append((start, offset - 1))
+            start = None
+        else:
+            if start is not None and LIST_ITEM.match(raw):
+                out.append((start, offset - 1))
+                start = None
+            if start is None:
+                start = offset
         offset += len(raw) + 1
-    return None
+    if start is not None:
+        out.append((start, len(clean)))
+    return out
 
 
-def bare_decision_cite(clean):
-    """[(start, end, slug)] for the slug that opens the Decision line of `clean` when it has no backticks, else []."""
-    found = decision_line(clean)
-    if not found:
-        return []
-    offset, line = found
-    at = DECISION.match(line).end()
-    at += len(line[at:]) - len(line[at:].lstrip())
-    m = SLUG_AT_START.match(line, at)
-    if not m or not m.group(2):
-        return []
-    return [(offset + m.start(2), offset + m.end(2), m.group(2))]
+def id_pattern(ids):
+    """The regex of an id of `ids` written as a whole word: no word character or hyphen on either side."""
+    return re.compile(r"(?<![\w-])(?:%s)(?![\w-])" % "|".join(re.escape(i) for i in sorted(ids, key=len, reverse=True)))
 
 
-def first_cites(text, ids, bare=False):
+def first_cites(text, ids):
     """[(line, id, glossed)] for the first cite of each id of `ids` in `text`. A cite is a code span that is exactly
-    the id; with `bare`, also the slug that opens the Decision line when it has no backticks. The context for the gloss
-    test is the text with every code span blanked, as the cite-gloss guard reads it."""
+    the id, or the id as a whole word in prose; prose outside code spans, fences, comments, URLs and link targets. The
+    gloss test reads the text with every code span blanked, as the cite-gloss guard does, clipped to the cite's own
+    paragraph, so a gloss across a blank line or a new list item does not count."""
+    if not ids:
+        return []
     clean = unfenced(text)
     found = spans(clean)
     plain = clean
     for start, end, _ in reversed(found):
         plain = plain[:start] + blank(plain[start:end]) + plain[end:]
-    if bare:
-        found = sorted(found + bare_decision_cite(clean))
+    plain = URL.sub(lambda m: blank(m.group()), LINK_TARGET.sub(lambda m: blank(m.group()), plain))
+    cites = [(start, end, content) for start, end, content in found if content in ids]
+    cites += [(m.start(), m.end(), m.group()) for m in id_pattern(ids).finditer(plain)]
+    bounds = paragraphs(clean)
     seen, out = set(), []
-    for start, end, content in found:
-        if content in ids and content not in seen:
-            seen.add(content)
-            glossed = report_guard.has_gloss(plain[max(0, start - GLOSS_WINDOW):start], plain[end:end + GLOSS_WINDOW])
-            out.append((clean.count("\n", 0, start) + 1, content, glossed))
+    for start, end, ident in sorted(cites):
+        if ident in seen:
+            continue
+        seen.add(ident)
+        lo, hi = next(((a, b) for a, b in bounds if a <= start < b), (start, end))
+        glossed = report_guard.has_gloss(plain[max(lo, start - GLOSS_WINDOW):start],
+                                         plain[end:min(hi, end + GLOSS_WINDOW)])
+        out.append((clean.count("\n", 0, start) + 1, ident, glossed))
     return out
 
 
@@ -264,7 +280,7 @@ def tree_findings(root):
     scanned = [(f, slug) for slug, f in decisions.items()] + [(f, slug) for slug, f in debts.items()] + \
               [(f, None) for f in rule_files]
     for f, own in scanned:
-        for line, ident, glossed in first_cites(read(root, f), ids - {own}, bare=f in debts.values()):
+        for line, ident, glossed in first_cites(read(root, f), ids - {own}):
             if not glossed:
                 out.append("%s:%d GLOSS001 %s" % (f, line, ident))
     for slug, f in decisions.items():
