@@ -35,7 +35,7 @@ CI: read live by merge --reviewed
 - The `Fix check` line is optional, comes once after the Round lines, and a PASS is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A PASS counts as its round passing in any round; after round 3 it keeps the net value round 3 gave; with no round recorded it reads open.
 - A FAIL is open until the next record. It counts as the next round, N+1: that record carries `Round N+1: reviewer, <model>, FAIL` and no Fix check line, so `--fix-check` may follow again. A FAIL that counts as round 3 makes that record a round-3 record. After round 3 a FAIL is open: revert the fix to the reviewed head, or split it to a new lane.
 - A WIDE is open. Its fix starts a new lane at round 1.
-- No reset: when the record before the newest record on a PR has a FAIL `Fix check` and last round N, and the newest record's last round is below N+1, the PR reads open. Why: `a failed fix check on head <9-hex> counts as round N+1, but this record's last round is M`. A WIDE or a PASS sets no floor.
+- No reset: when the record before the newest has a FAIL `Fix check` at last round N, the newest must reach round N+1, or the PR reads open. Why: `a failed fix check on head <9-hex> counts as round N+1, but this record's last round is M`. A WIDE or a PASS sets no floor.
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
   PR as `CI draft, no run`, because a draft has no CI run.
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
