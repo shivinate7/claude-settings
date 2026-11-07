@@ -13472,6 +13472,27 @@ for _name, _command in (
 ):
     sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
 
+# The glued redirects the fix check found still allowed: a redirect with no space after the `)` (`)>`, `)2>&1`, `)&>`).
+# The `)` stays on the script word before the redirect, so the operand reads `gen.py)` and names no file. Each refusal
+# runs a script that writes a test path. Each allow twin runs the same form on a script that writes product code.
+# `(python3 gen.py&)` is no case here: detached-launch refuses a subshell background job before this reader runs.
+for _name, _command in (
+    ("glued paren, (python3 gen.py)>out.txt, no space before the redirect, writes tests/x.py",
+     "(python3 gen.py)>out.txt"),
+    ("glued paren, (python3 gen.py)2>&1, a glued fd redirect, writes tests/x.py", "(python3 gen.py)2>&1"),
+    ("glued paren, (python3 gen.py)&>log.txt, a glued &> redirect, writes tests/x.py", "(python3 gen.py)&>log.txt"),
+):
+    sh("builder-test: script-file, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **SR)
+for _name, _command in (
+    ("glued paren, (python3 gen_ok.py)>out.txt, no space before the redirect, writes src/app.py",
+     "(python3 gen_ok.py)>out.txt"),
+    ("glued paren, (python3 gen_ok.py)2>&1, a glued fd redirect, writes src/app.py", "(python3 gen_ok.py)2>&1"),
+    ("glued paren, (python3 gen_ok.py)&>log.txt, a glued &> redirect, writes src/app.py",
+     "(python3 gen_ok.py)&>log.txt"),
+):
+    sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
+
 # An assignment as the script operand. `NAME=value` is no file name, so the reader has nothing to read from it, and
 # the guard allows the whole call. The control has a readable first segment and shows the second one is read.
 for _name, _command in (
