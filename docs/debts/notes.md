@@ -694,7 +694,6 @@
 - task-names-check-line-start-only: a Why yours line in a list or in bold ("- Why yours:", "**Why yours:**") is refused; the refusal names the form, so one retry fixes it (hooks/question_form.py WHY_YOURS_LINE; decision task-names-its-check)
 - task-names-check-partial-str-replace: a str_replace that removes only the label or only the text after it passes (hooks/question_form.py task_check_hit; decision task-names-its-check)
 - task-names-check-old-task-update: a whole-item update of a task written before the rule is refused when its context has no Why yours line; a status-only update closes it (hooks/question_form.py task_check_hit; decision task-names-its-check)
-- task-why-cited-bare-measured-closed: a whole-token swap to a bare "(measured)" in a task str_replace is now closed by the stored read, which judges the line the edit leaves (hooks/question_form.py stored_why_hit; decision task-names-its-check).
 - task-names-check-file-path-no-cwd-join: `file_path` data is read with no cwd join, and an unreadable file passes (hooks/question_form.py _write_data; decision task-names-its-check)
 - owner-judge-line-not-truth: the guard sees the Problem line, not whether its stake is true, so a decision with a false stake passes (hooks/question_form.py decision_form_hit; decision owner-judge-test)
 - owner-judge-update-no-kind: an update that carries `context` but no `kind` is not judged, since the guard cannot see the stored kind (hooks/question_form.py decision_form_hit; decision owner-judge-test)

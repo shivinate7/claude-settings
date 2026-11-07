@@ -633,14 +633,24 @@ class Pages:
         start = self._start(text, k, stamp, "page")
         if start is None:
             return set()
-        results = {b["tool_use_id"]: b for r in self.records if r.get("type") == "user"
-                   for b in _transcript.tool_results(r) if isinstance(b.get("tool_use_id"), str)}
-        return {use["input"].get("url") for use in self._uses_after(start)
-                if _reads_items(use) and _returns_n(results.get(use.get("id")), n)}
+        return {use["input"].get("url") for use, result in paired_uses(self.records, start)
+                if _reads_items(use) and _returns_n(result, n)}
 
     def sent(self, text, k, proof, stamp, label="page"):
         """True when the proof is found, and true too when the check stands down (see proof_state)."""
         return self.proof_state(text, k, proof, stamp, label) is not False
+
+
+def paired_uses(records, start=0):
+    """(use, result) for each tool_use of the assistant records from index `start`, with the tool_result block of the
+    same tool_use_id (None when the transcript holds none). The one home of the pairing: hooks/question_form.py reads
+    the stored page item through it."""
+    results = {b["tool_use_id"]: b for r in records if r.get("type") == "user"
+               for b in _transcript.tool_results(r) if isinstance(b.get("tool_use_id"), str)}
+    for r in records[start:]:
+        if r.get("type") == "assistant":
+            for use in _transcript.tool_uses(r):
+                yield use, results.get(use.get("id"))
 
 
 def norm(text):

@@ -871,69 +871,69 @@ def task_str_replace_hit(entry):
 
 # The stored line (rule task-why-cited, decision claims-carry-backing, part (v)). A str_replace on `context` carries
 # the edit, not the item, so the line it leaves is read from this session's transcript: no hook can reach the store.
-# Source 1 is the newest get of the item whose version is the write's `if_version`. Source 2 is this session's own
-# successful earlier write to the item that returned that version, replayed onto the text it was pinned to. Either
-# kind of record counts from a subagent too. Anything not found asks, never allows. Cost: one transcript open per
-# page context str_replace, no other read, no process start. The write result's shape (one line, {"id", "version"})
-# is unmeasured against a real transcript, so a result with no parseable version asks.
-WHY_ASK_REASON = ("This edit changes the Why yours line of a stored item, and the guard cannot read the stored text "
+# Source 1 is the newest read of the item (a get, list or query, as hooks/feedback_guard.py _reads_items counts it)
+# that shows the item at the write's `if_version`. Source 2 is this session's own successful earlier write to the item
+# that returned that version, replayed onto the text it was pinned to. A write is replayed only when its result holds
+# just its id and version, and only when its content is seen: a set or update that names a file is not. A subagent's
+# own transcript is a separate file, so a read made there is not seen. Anything not found asks, never allows. Cost: the
+# whole transcript is parsed once per judged call, not once per write, and no process starts. The write result's shape
+# (one line, {"id", "version"}) is unmeasured against a real transcript, so a result with no parseable version asks.
+WHY_ASK_REASON = ("This edit may change the Why yours line of a stored item, and the guard cannot read the stored text "
                   "to judge the line it leaves. Read the item first (an ArtifactData get of items/<doc_id> with no "
                   "out_dir), then write the edit pinned to the version that get returned (if_version), so the guard "
                   "can find the text in this session. (decision claims-carry-backing, part (v), rule task-why-cited)")
 
 
 def _apply_edit(text, old, new, replace_all):
-    """`text` with old_str replaced: every match with replace_all, else only when old_str occurs exactly once. None
-    when it does not apply."""
+    """(text after the edit, "") with old_str replaced: every match with replace_all, else only when old_str occurs
+    exactly once. (None, cause) when it does not apply: "old_str not found" or "old_str not unique"."""
     count = text.count(old) if old else 0
-    if count == 0 or (count > 1 and not replace_all):
-        return None
-    return text.replace(old, new) if replace_all else text.replace(old, new, 1)
+    if count == 0:
+        return None, "old_str not found"
+    if count > 1 and not replace_all:
+        return None, "old_str not unique"
+    return (text.replace(old, new) if replace_all else text.replace(old, new, 1)), ""
 
 
-def _stored_texts(records, url, doc_id):
-    """{str(version): the item's context text} for each version of items/<doc_id> on `url` that this session's
-    transcript shows: from a get (feedback_guard._reads_items, so a read with out_dir does not count, and
-    local_time._records, which reads the document lines), then from a successful write whose result carries one
-    version, replayed onto the text its if_version names. Records run oldest first, so a newer text wins."""
+def _stored_texts(records, url):
+    """{doc_id: {str(version): context text}} for the items of `url` that this session's transcript shows: from each
+    read, then from each successful write whose result holds just its id and version, replayed onto the text its
+    if_version names. Records run oldest first, so a newer text wins. The pairing and the read test are
+    hooks/feedback_guard.py's (paired_uses, _reads_items); the document lines are local_time._records's."""
     import feedback_guard
     import local_time
-    transcript = _lint_module("_transcript")
-    results = {b["tool_use_id"]: b for r in records if r.get("type") == "user"
-               for b in transcript.tool_results(r) if isinstance(b.get("tool_use_id"), str)}
     texts = {}
-    for rec in records:
-        if rec.get("type") != "assistant":
+    for use, result in feedback_guard.paired_uses(records):
+        tool_input = use.get("input")
+        if (not isinstance(tool_input, dict) or not str(use.get("name") or "").startswith(feedback_guard.ARTIFACT_DATA)
+                or tool_input.get("url") != url or tool_input.get("collection") != WAITING_ITEMS
+                or not isinstance(result, dict) or result.get("is_error") is True):
             continue
-        for use in transcript.tool_uses(rec):
-            tool_input, result = use.get("input"), results.get(use.get("id"))
-            if (not isinstance(tool_input, dict) or not str(use.get("name") or "").startswith(transcript.ARTIFACT_DATA)
-                    or tool_input.get("url") != url or tool_input.get("doc_id") != doc_id
-                    or tool_input.get("collection") != WAITING_ITEMS
-                    or not isinstance(result, dict) or result.get("is_error") is True):
-                continue
-            action = tool_input.get("action")
-            shown = [(v, d) for i, v, d in local_time._records(result.get("content")) if i == doc_id and v is not None]
-            if action == "get":
-                if feedback_guard._reads_items(use):
-                    for version, data in shown:
-                        if data is not None:
-                            texts[str(version)] = str(data.get("context") or "")
-            elif action in ITEM_OPS and len(shown) == 1:
-                texts_after = _replayed(action, tool_input, texts)
-                if texts_after is not None:
-                    texts[str(shown[0][0])] = texts_after
+        shown = list(local_time._records(result.get("content")))
+        if feedback_guard._reads_items(use):
+            for doc_id, version, data in shown:
+                if isinstance(doc_id, str) and version is not None and data is not None:
+                    texts.setdefault(doc_id, {})[str(version)] = str(data.get("context") or "")
+        elif tool_input.get("action") in ITEM_OPS and len(shown) == 1:
+            doc_id, version, data = shown[0]
+            if data is None and version is not None and doc_id == tool_input.get("doc_id"):
+                text = _replayed(tool_input, texts.get(doc_id, {}))
+                if text is not None:
+                    texts.setdefault(doc_id, {})[str(version)] = text
     return texts
 
 
-def _replayed(action, tool_input, texts):
-    """The context text a successful write leaves, or None when it cannot be known: a set carries the whole item, an
-    update or a str_replace is pinned to the version whose text it changes."""
-    data = tool_input.get("data")
+def _replayed(tool_input, versions):
+    """The context text a successful write leaves, or None when it cannot be known. A set carries the whole item; an
+    update or a str_replace is pinned to the version in `versions` whose text it changes. A write that names a file
+    leaves a text the guard never sees."""
+    action, data = tool_input.get("action"), tool_input.get("data")
+    if action in ("set", "update") and "file_path" in tool_input:
+        return None
     if action == "set":
         return str(data.get("context") or "") if isinstance(data, dict) else None
     pinned = tool_input.get("if_version")
-    base = texts.get(str(pinned)) if pinned is not None else None
+    base = versions.get(str(pinned)) if pinned is not None else None
     if base is None:
         return None
     if action == "update":
@@ -942,48 +942,48 @@ def _replayed(action, tool_input, texts):
         if tool_input.get("field") != "context":
             return base
         return _apply_edit(base, str(tool_input.get("old_str") or ""), str(tool_input.get("new_str") or ""),
-                           tool_input.get("replace_all") is True)
+                           tool_input.get("replace_all") is True)[0]
     return None
 
 
-def stored_why_hit(entry, url, transcript_path):
-    """(decision, matched) for one str_replace on `context` of a waiting-page item: ("deny", cause) when the Why yours
-    line the edit leaves in the stored text gives a capability reason its cite does not back (the cause as
-    why_cited_hit gives it), ("ask", reason) when the stored text cannot be found or the edit does not apply to it,
-    else ("", ""). The transcript is opened once, before any other read, and is the only file read."""
-    if not transcript_path:
-        return "ask", "unreadable transcript"
-    try:
-        records = _lint_module("_transcript").read_transcript(transcript_path)
-    except (OSError, ValueError):
-        return "ask", "unreadable transcript"
+def stored_why_hit(entry, texts):
+    """(decision, matched) for one str_replace on `context` of a waiting-page item, judged on `texts` (_stored_texts):
+    ("deny", cause) when the Why yours line the edit leaves in the stored text gives a capability reason its cite does
+    not back (the cause as why_cited_hit gives it), ("ask", reason) when the stored text cannot be found or the edit
+    does not apply to it, else ("", "")."""
     version = entry.get("if_version")
     if version is None:
         return "ask", "no if_version"
-    texts = _stored_texts(records, url, entry.get("doc_id"))
-    if not texts:
+    versions = texts.get(entry.get("doc_id"))
+    if not versions:
         return "ask", "no matching read"
-    stored = texts.get(str(version))
+    stored = versions.get(str(version))
     if stored is None:
         return "ask", "version mismatch"
-    applied = _apply_edit(stored, str(entry.get("old_str") or ""), str(entry.get("new_str") or ""),
-                          entry.get("replace_all") is True)
+    applied, why = _apply_edit(stored, str(entry.get("old_str") or ""), str(entry.get("new_str") or ""),
+                               entry.get("replace_all") is True)
     if applied is None:
-        return "ask", "old_str not found"
+        return "ask", why
     cause = why_cited_hit(applied)
     return ("deny", cause) if cause else PASS
 
 
 def stored_why_writes(writes, tool_input, transcript_path):
-    """The first (decision, matched) that stored_why_hit gives for a str_replace on `context` in `writes` (the
-    page's item writes), else ("", ""). A call with no such write opens nothing."""
-    url = tool_input.get("url")
-    for op, entry in writes:
-        if op == "str_replace" and entry.get("field") == "context":
-            hit = stored_why_hit(entry, url, transcript_path if isinstance(transcript_path, str) else "")
-            if hit[0]:
-                return hit
-    return PASS
+    """(decision, matched) for the str_replace-on-`context` writes in `writes` (the page's item writes): the first
+    deny, else the first ask, else ("", ""). The transcript is opened and parsed once for the whole call; a call
+    with no such write opens nothing."""
+    judged = [entry for op, entry in writes if op == "str_replace" and entry.get("field") == "context"]
+    if not judged:
+        return PASS
+    try:
+        if not isinstance(transcript_path, str) or not transcript_path:
+            raise OSError("no transcript_path")
+        records = _lint_module("_transcript").read_transcript(transcript_path)
+    except (OSError, ValueError):
+        return "ask", "unreadable transcript"
+    texts = _stored_texts(records, tool_input.get("url"))
+    hits = [stored_why_hit(entry, texts) for entry in judged]
+    return next((h for h in hits if h[0] == "deny"), next((h for h in hits if h[0]), PASS))
 
 
 # ------------------------------------------------------------------ a page decision states the form
