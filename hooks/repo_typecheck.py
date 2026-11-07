@@ -7,8 +7,9 @@ command and a timeout. After a Write, Edit or MultiEdit of a file that an entry'
 that entry's command from the repo root, with no shell, and returns the report as text. Entries that match
 each run, and their reports join. The entries share one time budget, and the joined report has a length cap.
 
-It speaks only when a command fails with output. A passing command, a missing program, a timeout, an
-unreadable payload, a bad declaration and this module's own faults all return None: a check that reports on
+It speaks only when a command fails with output. A bad entry costs only itself: it is skipped, with one `noted`
+guard.log line, and the good entries still run. A passing command, a missing program, a timeout, an
+unreadable payload, an unreadable extras file and this module's own faults all return None: a check that reports on
 its own malfunction, or on every edit, gets muted, and a muted check protects nothing. It cannot undo the
 edit, because PostToolUse fires after the tool has run. The report tells the agent what the edit broke.
 
@@ -23,6 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 EDIT_TOOLS = ("Write", "Edit", "MultiEdit")
 TOTAL_BUDGET = 90  # seconds that all matching entries of one edit share; the PostToolUse entry in settings.json must leave room
 REPORT_CAP = 8000  # characters of report the block reason holds, so one noisy compiler cannot flood the turn
+RULE = "repo-typecheck-hook"  # the guard.log rule of a skipped bad entry: the governing decision's slug
 
 
 def _layout():
@@ -61,6 +63,18 @@ def _root_of(layout, edited):
         here = parent
 
 
+def _note(tool, problem):
+    """One `noted` guard.log line for a skipped bad entry. The guard's writer loads only here, so an edit in a repo
+    whose entries are all good keeps the fast path on the standard library."""
+    try:
+        if HERE not in sys.path:
+            sys.path.append(HERE)
+        import guard_core
+        guard_core.record(tool, "noted", RULE, problem)
+    except Exception:
+        pass  # a note that cannot be written never stops the good entries
+
+
 def _command_report(root, entry, name, limit):
     """The failure report of one entry's command, run for at most `limit` seconds, or None when it passes,
     cannot run or says nothing."""
@@ -89,8 +103,12 @@ def run(payload):
         if root is None:
             return None
         rel = os.path.relpath(edited, root)
+        problems = []
+        entries = layout.typecheck(root, problems)
+        for problem in problems:
+            _note(payload.get("tool_name"), problem)
         reports, spent = [], 0.0
-        for entry in layout.typecheck(root):
+        for entry in entries:
             if not layout.match_globs(rel, entry["globs"]):
                 continue
             left = TOTAL_BUDGET - spent
