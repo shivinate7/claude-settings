@@ -535,7 +535,7 @@ def answered_problem(text):
 # run on past the report. Next pairs are never mismatch-checked: a Next line can plan a later spawn on
 # another model. The excuse applies only when no builder, test-author or record-writer spawned, or
 # every BUILT or ref-carrying Done item names a builder, test-author or record-writer pair, since a
-# finished agent build is a Done item with a ref. A reviewer-only pair does not count.
+# finished agent build usually carries a ref. Any such pair counts; a reviewer-only pair does not.
 NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
 SPAWN_TOOLS = {"Agent", "Task"}
 MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
