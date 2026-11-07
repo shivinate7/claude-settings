@@ -87,10 +87,11 @@ STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|M
                "|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY")
 # Each shape is a token or a value that names a person or opens an account. The lookbehinds keep a match
 # from starting inside a longer word ("risk-" and "btn-sk-" are not "sk-").
-# Everyday words that end in `key`. A `key` right after the start of one of them is no key word, so `monkey: Banana12345`
-# passes. Any other `key`, `secret`, `token` or `cookie` in a name counts, however it is glued to the word before it.
+# Everyday words that end in `key`. A `key` that ends one of them as a whole word is no key word, so `monkey: Banana12345`
+# passes. The stem must start the word (string start or a non-letter before it): `commonKey` and `returnKey` hold the
+# stems `mon` and `turn` but are credential names. Any other `key`, `secret`, `token` or `cookie` in a name counts.
 EVERYDAY_KEY_WORDS = ("monkey", "hotkey", "turkey", "turnkey", "donkey", "whiskey", "jockey", "hockey", "lackey")
-KEY_WORD = r"(?:secret|token|cookie|" + "".join("(?<!%s)" % w[:-3] for w in EVERYDAY_KEY_WORDS) + r"key)"
+KEY_WORD = r"(?:secret|token|cookie|" + "".join("(?<!(?<![A-Za-z])%s)" % w[:-3] for w in EVERYDAY_KEY_WORDS) + r"key)"
 # The letter and the digit of a random-looking value are looked for in its first characters only: a lookahead to the
 # end of a long run, from each key word in it (`key=key=...`), makes the scan quadratic.
 VALUE_LOOKAHEAD_MAX = 256
@@ -162,9 +163,15 @@ PLACEHOLDER_VALUE = re.compile(
 REST_OF_LINE = re.compile(r"[^\r\n]*")  # the text after a password value, up to its line end
 # Prose after a value: a function word first, then only letter words. A digit, a symbol or a word glued to the value
 # (`none hunter2`, `none, hunter2`) is not prose, and a value must not hide a secret after a plain word.
+PROSE_FUNCTION_WORDS = ("a", "an", "the", "for", "to", "in", "on", "at", "of", "by", "with", "from", "as", "if", "when",
+                        "while", "until", "unless", "and", "or", "but", "is", "are", "since", "because", "so", "then")
 PROSE_REST = re.compile(
-    r"[ \t]+(?:a|an|the|for|to|in|on|at|of|by|with|from|as|if|when|while|until|unless|and|or|but|is|are|since|because|so|then)"
+    r"[ \t]+(?:" + "|".join(PROSE_FUNCTION_WORDS) + r")"
     r"(?:[ \t,;]+[A-Za-z][A-Za-z'-]*)*[.,;:!?]*[ \t]*", re.I)
+# After a `;`, a `,` or one of these words, a word that is no function word may be a second value (`default is
+# swordfish`, `none and swordfish`), so the prose is refused. Only function words may follow such a separator.
+PROSE_SEPARATORS = frozenset(("and", "or", "but", "is", "are"))
+PROSE_TOKEN = re.compile(r"[A-Za-z][A-Za-z'-]*|[;,]")  # one pass over the line: bounded, no nested repeat
 WRAP_PAIRS = frozenset(('""', "''", "[]", "()"))  # one pair around the value is no part of it
 SHELL_PATH = re.compile(r"[~/][\w./~-]*")  # path characters only: no `;`, `&`, `=` or space can hide a second keyword
 SHELL_PWD = "PWD"  # the shell's working-directory variable; with a path value it is no password
@@ -216,11 +223,25 @@ def bare_value(value):
     return value
 
 
+def rest_is_prose(rest):
+    """True when `rest` is plain prose after a password value and holds no second value after a separator."""
+    if not PROSE_REST.fullmatch(rest):
+        return False
+    after_separator = False
+    for token in PROSE_TOKEN.findall(rest):
+        token = token.lower()
+        if token in PROSE_SEPARATORS or token in ";,":
+            after_separator = True
+        elif after_separator and token not in PROSE_FUNCTION_WORDS:
+            return False
+    return True
+
+
 def password_is_no_secret(found):
     """True when the value after a password word is a plain word, a mask or a placeholder, or `found` is
     `PWD=<path>`, and nothing but blanks or plain prose follows it on its line."""
     rest = REST_OF_LINE.match(found.string, found.end()).group(0)
-    if rest.strip() and not PROSE_REST.fullmatch(rest):
+    if rest.strip() and not rest_is_prose(rest):
         return False
     value = bare_value(found.group(2))
     if found.group(1) == SHELL_PWD and SHELL_PATH.fullmatch(value):
