@@ -819,6 +819,21 @@ class Race(Env):
         with self.assertRaises(merge.Held):
             lock2.acquire("main", 600)
 
+    def test_a_failed_reread_after_a_refused_lock_push_keeps_the_push_output(self):
+        # The first read sees no lock, the push is refused, and the re-read after the refused push fails.
+        self.refuse_pushes()
+        real_read, reads = self.lock.read, []
+        def read_then_fail(b, ref=None):  # the second read of the main ref is the re-read, and it fails
+            if ref is None:
+                reads.append(ref)
+                if len(reads) > 1:
+                    raise merge.Stop("cannot read the merge lock: the re-read failed")
+            return real_read(b, ref)
+        self.lock.read = read_then_fail
+        with self.assertRaises(merge.Stop) as got:
+            self.lock.acquire("main", 600)
+        self.assertIn(self.PUSH_REFUSAL, str(got.exception))
+
     def test_a_held_lock_stops_a_full_run_and_touches_nothing(self):
         merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
         before = self.refs()
