@@ -94,13 +94,15 @@ const moduleBindings = (sf) => {
 // The local names that hold the whole module of `target`: `import * as ns`, a default `import lib`, `import m = require(...)`,
 // `const m = require(...)` and `const m = await import(...)`. Each specifier goes through the import reader's resolver, so an
 // alias of any other module is no alias of `target`.
-// With `target` PATH_MODULE the specifier test is `path` or `node:path`, and `named`, when given, collects each named binding of the
-// module as local name -> imported name: `import { join as j } from 'path'` and `const { join: j } = require('path')`.
+// With `target` PATH_MODULE (URL_MODULE) the specifier test is `path` or `node:path` (`url` or `node:url`), and `named`, when given,
+// collects each named binding of the module as local name -> imported name: `import { join as j } from 'path'` and
+// `const { join: j } = require('path')`.
 const PATH_MODULE = Symbol('node:path');
-const PATH_SPECIFIERS = new Set(['path', 'node:path']);
+const URL_MODULE = Symbol('node:url');
+const BUILTIN_SPECIFIERS = new Map([[PATH_MODULE, new Set(['path', 'node:path'])], [URL_MODULE, new Set(['url', 'node:url'])]]);
 const targetAliases = (sf, file, target, tracked, named = null) => {
   const aliases = new Set();
-  const namesTarget = (spec) => ts.isStringLiteralLike(spec) && (target === PATH_MODULE ? PATH_SPECIFIERS.has(spec.text) : resolveSpecifier(file, spec.text, tracked) === target);
+  const namesTarget = (spec) => ts.isStringLiteralLike(spec) && (BUILTIN_SPECIFIERS.has(target) ? BUILTIN_SPECIFIERS.get(target).has(spec.text) : resolveSpecifier(file, spec.text, tracked) === target);
   const visit = (n) => {
     if (ts.isImportDeclaration(n) && n.importClause && namesTarget(n.moduleSpecifier)) {
       const { name, namedBindings } = n.importClause;
@@ -182,12 +184,21 @@ const declarationCounts = (sf) => {
 // `/` drops a `resolve` call, which resets to it; `join` keeps it (`path.join('a', '/b')` is `a/b`).
 // A literal anchor is the first piece, and the joined text goes to `strings`, tried from the file's folder, then the root.
 // Any other anchor must be a known place (placeOf), and the join resolved from it goes to `places`, tried from there only.
+// A place is a repo-relative path, a folder or the file itself. A join treats the file name as one segment, as path normalization does,
+// so `path.join(__filename, '..', 'x')` is `x` beside the file.
 const joinedStrings = (sf, file, files) => {
   const named = new Map();
   const modules = targetAliases(sf, file, PATH_MODULE, files, named);
   const callees = new Map();
   for (const m of modules) for (const f of ['join', 'resolve', 'posix.join']) callees.set(`${m}.${f}`, f !== 'resolve');
   for (const [local, imported] of named) if (imported === 'join' || imported === 'resolve') callees.set(local, imported === 'join');
+  const dirnames = new Set();
+  for (const m of modules) for (const f of ['dirname', 'posix.dirname']) dirnames.add(`${m}.${f}`);
+  for (const [local, imported] of named) if (imported === 'dirname') dirnames.add(local);
+  const namedUrl = new Map();
+  const urlFns = new Set();
+  for (const m of targetAliases(sf, file, URL_MODULE, files, namedUrl)) urlFns.add(`${m}.fileURLToPath`);
+  for (const [local, imported] of namedUrl) if (imported === 'fileURLToPath') urlFns.add(local);
   const strings = [];
   const places = [];
   if (!callees.size) return { strings, places };
@@ -205,14 +216,38 @@ const joinedStrings = (sf, file, files) => {
     return [anchor, rest, callees.get(dottedText(n.expression))];
   };
   const texts = (pieces, keepsSlash) => (pieces.every(isStringPiece) && (keepsSlash || !pieces.some((p) => p.text.startsWith('/'))) ? pieces.map((p) => p.text) : null);
-  // The repo-relative folder that an expression names by static reading, or null: `__dirname` is the file's folder, a join of a known place
-  // with literal pieces is the place it names, and a top-level `const` declared once in the file is the place its value names. Anything else
-  // (an import, a parameter, a `let`, a name set in a hook, a call to a helper, a spread) is no known place.
+  const importMeta = (x, member) => ts.isPropertyAccessExpression(x) && x.name.text === member && ts.isMetaProperty(x.expression) && x.expression.keywordToken === ts.SyntaxKind.ImportKeyword;
+  const folder = path.posix.dirname(file);
+  // The repo-relative path that an expression names by static reading, or null: `__dirname` and `import.meta.dirname` are the file's
+  // folder, and `__filename`, `import.meta.filename` and `fileURLToPath(import.meta.url)` are the file. `path.dirname(x)` of a place is the
+  // folder above it, and `fileURLToPath(new URL('<literal>', import.meta.url))` is the literal resolved from the file's folder. A join of a
+  // known place with literal pieces is the place it names, and a top-level `const` declared once in the file is the place its value
+  // names. Anything else (an import, a parameter, a `let`, a name set in a hook, a call to a helper, a spread) is no known place.
   const placeOf = (x, seen) => {
     while (ts.isParenthesizedExpression(x)) x = x.expression;
     if (ts.isIdentifier(x)) {
-      if (counts.has(x.text) ? counts.get(x.text) !== 1 || !consts.has(x.text) || seen.has(x.text) : x.text !== '__dirname') return null;
-      return consts.has(x.text) ? placeOf(consts.get(x.text), new Set([...seen, x.text])) : path.posix.dirname(file);
+      if (!counts.has(x.text)) return x.text === '__dirname' ? folder : x.text === '__filename' ? file : null;
+      if (counts.get(x.text) !== 1 || !consts.has(x.text) || seen.has(x.text)) return null;
+      return placeOf(consts.get(x.text), new Set([...seen, x.text]));
+    }
+    if (importMeta(x, 'dirname')) return folder;
+    if (importMeta(x, 'filename')) return file;
+    if (ts.isCallExpression(x) && x.arguments.length === 1 && !split(x)) {
+      const callee = dottedText(x.expression);
+      let arg = x.arguments[0];
+      while (ts.isParenthesizedExpression(arg)) arg = arg.expression;
+      if (dirnames.has(callee)) {
+        const from = placeOf(arg, seen);
+        return from === null || from === '.' ? null : path.posix.dirname(from);
+      }
+      if (urlFns.has(callee)) {
+        if (importMeta(arg, 'url')) return file;
+        const url = ts.isNewExpression(arg) && ts.isIdentifier(arg.expression) && arg.expression.text === 'URL' && !counts.has('URL') && arg.arguments?.length === 2 ? arg.arguments : null;
+        // A relative URL with no scheme, query or escape is a plain path from the file's folder.
+        if (url && isStringPiece(url[0]) && importMeta(url[1], 'url') && !/^[a-z][a-z0-9+.-]*:|^[/\\]|[?#%\\]/i.test(url[0].text))
+          return inside(path.posix.join(folder, url[0].text).replace(/\/+$/, '') || '.');
+      }
+      return null;
     }
     const parts = split(x);
     if (!parts) return null;

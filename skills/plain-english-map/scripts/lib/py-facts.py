@@ -165,6 +165,7 @@ PATH_FUNCS = {
     "os.path.join": "join", "posixpath.join": "join",
     "os.path.dirname": "dirname", "posixpath.dirname": "dirname",
     "os.path.abspath": "same", "posixpath.abspath": "same", "os.path.realpath": "same", "posixpath.realpath": "same",
+    "os.path.normpath": "same", "posixpath.normpath": "same",
     "pathlib.Path": "same",
 }
 
@@ -254,8 +255,11 @@ def joined_strings(tree, parent):
     def place(node, seen):
         """("file" or "dir", repo-relative path) for an expression that names a place of the repository by static reading, or None.
         `__file__` is the file. `dirname(x)` and `x.parent` go up one folder. `abspath(x)`, `realpath(x)`, `Path(x)`, `x.resolve()` and
-        `x.absolute()` keep x. A join of a folder with literal pieces is a folder. A name bound once in the file, at module level, is the place
-        its value names. Anything else (a parameter, an import, a call to a helper, a name bound in a function) is no known place."""
+        `x.absolute()` keep x, and so does `normpath(x)`. `x.parents[n]` with a literal n goes up n + 1 folders. A join of a folder with
+        literal pieces is a folder. A join call from the file itself resolves as path normalization does, the file name being one segment, so
+        `os.path.join(__file__, "..", x)` is `x` beside the file; a `/` chain does not, since pathlib keeps `..` as written. A name bound once
+        in the file, at module level, is the place its value names. Anything else (a parameter, an import, a call to a helper, a name bound
+        in a function) is no known place."""
         if isinstance(node, ast.Name):
             if node.id == "__file__":
                 return None if counts.get(node.id) else ("file", parent)
@@ -266,6 +270,13 @@ def joined_strings(tree, parent):
             got = place(node.value, seen)
             up = got and inside(got[1] + "/..")
             return ("dir", up) if up else None
+        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute) and node.value.attr == "parents":
+            index = node.slice
+            if isinstance(index, ast.Constant) and isinstance(index.value, int) and not isinstance(index.value, bool) and index.value >= 0:
+                got = place(node.value.value, seen)
+                up = got and inside(got[1] + "/.." * (index.value + 1))
+                return ("dir", up) if up else None
+            return None
         if isinstance(node, ast.Call) and not node.keywords:
             if isinstance(node.func, ast.Attribute) and node.func.attr in ("resolve", "absolute") and not node.args:
                 return place(node.func.value, seen)
@@ -280,7 +291,7 @@ def joined_strings(tree, parent):
         if parts is None:
             return None
         got, tail = place(parts[0], seen), texts(parts[1])
-        if got is None or got[0] != "dir" or tail is None:
+        if got is None or tail is None or (got[0] == "file" and not isinstance(node, ast.Call)):
             return None
         joined = inside(posixpath.join(got[1], *tail))
         return ("dir", joined) if joined else None
