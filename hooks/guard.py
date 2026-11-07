@@ -2840,8 +2840,10 @@ def role_model_check(tool: str, tool_input):
 def review_guard_marked(brief) -> bool:
     """True when a line of the brief starts with REVIEW_GUARD_MARKER, case-sensitive, so mid-line text does not count.
     A line inside a ``` fence does not count: a quoted brief or example is not the brief's own marker.
-    The marker ends at the end of the line, whitespace or a full stop: a pasted template line `yes|no`, `yesterday`
-    or `yes-ish` is not a choice of yes."""
+    Any line that starts ``` opens or closes a fence: a ~~~ fence hides nothing, and a ```` fence closes at
+    the first ``` line inside it.
+    The marker ends at the end of the line, a space, a tab, a carriage return or a full stop: a pasted template
+    line `yes|no`, `yesterday` or `yes-ish` is not a choice of yes, and neither is `yes,`, `yes:` or `yes;`."""
     if not isinstance(brief, str):
         return False
     fenced = False

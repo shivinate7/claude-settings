@@ -27731,7 +27731,7 @@ role_model_allow("role-model: reviewer on sonnet with Guard or check: yes alone 
                  "reviewer", "sonnet", "Check the guard diff.\n" + REVIEW_GUARD_MARKER)
 role_model_allow("role-model: reviewer on sonnet with Guard or check: yes and a trailing space is allowed",
                  "reviewer", "sonnet", "Check the guard diff.\n" + REVIEW_GUARD_MARKER + " \nThe lane is c204.")
-role_model_allow("role-model: reviewer on sonnet with Guard or check: yes then a parenthesis is allowed",
+role_model_allow("role-model: reviewer on sonnet with Guard or check: yes then a space and a parenthesis is allowed",
                  "reviewer", "sonnet", "Check the guard diff.\n" + REVIEW_GUARD_MARKER + " (`hooks/`)")
 role_model_allow("role-model: reviewer on sonnet with Guard or check: yes then a full stop is allowed",
                  "reviewer", "sonnet", "Check the guard diff.\n" + REVIEW_GUARD_MARKER + ".")
