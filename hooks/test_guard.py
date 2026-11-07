@@ -13269,6 +13269,9 @@ def _build_scriptrepo():
         "gen_default.js": DEFAULT_REGEX_WRITE_JS % "tests/x.js",
         "gen_default_ok.js": DEFAULT_REGEX_WRITE_JS % "src/app.js",
         "gen_void.js": VOID_REGEX_WRITE_JS % "tests/x.js",
+        # The `cd sub` shapes: a test-writing gen.py in sub, and its src-writing twin.
+        "sub/gen.py": TEST_WRITE_PY,
+        "sub/gen_ok.py": SRC_WRITE_PY,
     })
     # The regex cases must hold the regex bytes they name, so an escaping slip fails here, not as another red.
     for name, literal in (("re_star.js", r"p.replace(/\/*$/, '')"), ("re_slashes.js", r"p.replace(/\/\//g, '')"),
@@ -13445,6 +13448,27 @@ for _name, _command in (
     ("spaced paren, ( python3 gen_ok.py ), writes src/app.py", "( python3 gen_ok.py )"),
     ("spaced paren, true && ( python3 gen_ok.py ), writes src/app.py", "true && ( python3 gen_ok.py )"),
     ("spaced paren, ( sh shell_src.sh ), writes src/app.py", "( sh shell_src.sh )"),
+):
+    sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
+
+# A `)` glued to the script word, with a redirect or a `&` after the group. `_unparen` strips a `)` only from the
+# last token, so when `2>&1`, `>` or `&` follows, the `)` stays on the script word: the operand reads `gen.py)`,
+# names no file, and the write is not read. The refusals `subshell (python3 gen.py)` and
+# `subshell (cd x && python3 ../gen.py)` have no word after the `)`, so they are the controls for this shape. Each
+# refusal runs a script that writes a test path. Each allow twin runs the same form on a script that writes product code.
+for _name, _command in (
+    ("subshell (python3 gen.py) 2>&1 piped to tail, writes tests/x.py", "(python3 gen.py) 2>&1 | tail -5"),
+    ("subshell (python3 gen.py) redirected to out.txt, writes tests/x.py", "(python3 gen.py) > out.txt"),
+    ("subshell (python3 gen.py) backgrounded with &, writes tests/x.py", "(python3 gen.py)&"),
+    ("subshell (cd sub && python3 gen.py) 2>&1, writes tests/x.py", "(cd sub && python3 gen.py) 2>&1"),
+):
+    sh("builder-test: script-file, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **SR)
+for _name, _command in (
+    ("subshell (python3 gen_ok.py) 2>&1 piped to tail, writes src/app.py", "(python3 gen_ok.py) 2>&1 | tail -5"),
+    ("subshell (python3 gen_ok.py) redirected to out.txt, writes src/app.py", "(python3 gen_ok.py) > out.txt"),
+    ("subshell (python3 gen_ok.py) backgrounded with &, writes src/app.py", "(python3 gen_ok.py)&"),
+    ("subshell (cd sub && python3 gen_ok.py) 2>&1, writes src/app.py", "(cd sub && python3 gen_ok.py) 2>&1"),
 ):
     sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
 
