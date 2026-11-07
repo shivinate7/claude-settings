@@ -692,6 +692,22 @@ class SendMessageJudge(unittest.TestCase):
                         "SendMessage has only prompt hooks, which cannot read the board's busy state")
 
 
+# An owner question sent by either send tool is judged before it is sent (hooks/call_judge.py, the send path). The one
+# command hook that runs call_judge.py must match both tool names, or the send goes out unchecked.
+SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
+
+
+class OwnerQuestionSendMatcher(unittest.TestCase):
+    def test_the_call_judge_hook_runs_on_both_send_tools(self):
+        rows = call_judge_entries()
+        self.assertEqual(len(rows), 1, "want one call_judge.py command hook, found %d" % len(rows))
+        entry = rows[0][0]
+        for tool in SEND_TOOLS:
+            with self.subTest(tool=tool):
+                self.assertTrue(covers(entry, tool),
+                                "call_judge.py does not run on %s: matcher %r" % (tool, entry.get("matcher")))
+
+
 # Every judge in hooks/call_judge.py must have a row in the model-per-role table
 # (docs/decisions/agent-model-cap.md), and that row's model must equal the module's model.
 RECORD = os.path.join(os.path.dirname(SETTINGS), "docs", "decisions", "agent-model-cap.md")
