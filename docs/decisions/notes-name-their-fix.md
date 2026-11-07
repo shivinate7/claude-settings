@@ -17,15 +17,15 @@ Each line a branch adds to `docs/debts/notes.md`, and each debt file it adds, ca
 
 Three more parts, all on the notes file:
 
-- Ratchet. When a branch touches the notes file, the count of bullets with no valid Fix at HEAD may not exceed the count on `origin/main`. Both counts are read live, with no stored baseline. The check prints the total.
+- Ratchet. When a branch touches the notes file, the count of bullets with no valid Fix at HEAD may not exceed the count at the merge base of `origin/main` and HEAD. A branch forked before main lowered its count is not blamed for that. Both counts are read live from git, with no stored baseline. The check prints the total.
 - Until. A `Fix: none -- <reason>` line carries `Until: YYYY-MM-DD`. The check reads it on lines the branch adds or edits only. A missing date, a past date, or one more than `UNTIL_CAP_DAYS` (30) days from today is refused. A step line and an already-fixed line need no date. Today is the `FIXED_TODAY` variable when set, else the clock.
 - Upkeep. The roadmap build (`skills/roadmap/build.py`) prints one upkeep line per note whose Until date is past. It imports the grammar from `lint/check_record_slugs.py`. It adds no log or timer.
 
-Cost: the ratchet adds one ls-tree and one show per ref, only when a branch touches the notes file. The Stop check starts one git process per commit the turn printed, and none in a checkout with no notes file. The upkeep line reads the notes file once.
+Cost: the ratchet adds one merge-base, one ls-tree and one show per ref, only when a branch touches the notes file. The Stop check starts one git process per commit the turn printed, and none in a checkout with no notes file. The upkeep line reads the notes file once.
 
 Why: on 2026-11-07 13:20 CST the coordinator wrote two fixable gaps into `docs/debts/notes.md`, reported them RECORDED, and started no fix. The owner asked "why not fix it then", and at 13:25 CST said "I want the guard itself". A gap in a file nobody reads never gets fixed. A note is meant for a finding too unlikely to hit, so a fixable gap there needs a step, or a stated reason that it needs none.
 
-Source: owner words 2026-11-07 13:20 CST ("why not fix it then") and 13:25 CST ("I want the guard itself"). Coordinator ruling 2026-11-07 13:30 CST (`step:` is the only form, since the PR ledger counts steps). Coordinator rulings 2026-11-07 13:58 CST (the ratchet; the Until date and its 30-day cap; the Stop check judges the turn's commits only) and 13:59 CST (the upkeep line, one home for the grammar).
+Source: owner words 2026-11-07 13:20 CST ("why not fix it then") and 13:25 CST ("I want the guard itself"). Coordinator ruling 2026-11-07 13:30 CST (`step:` is the only form, since the PR ledger counts steps). Coordinator rulings 2026-11-07 13:58 CST (the ratchet; the Until date and its 30-day cap; the Stop check judges the turn's commits only) and 13:59 CST (the upkeep line, one home for the grammar). Coordinator ruling 2026-11-07 (after the first build): the ratchet's base is the merge base, not live origin/main.
 
 - Risk: incident. Landed 2026-11-07.
 
