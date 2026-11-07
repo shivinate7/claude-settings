@@ -9127,7 +9127,7 @@ add("merge-batch: the merge tool of the host is allowed past an ignored running 
     tool="mcp__github__merge_pull_request", cwd=STAMPIGNORE, pullNumber=1, repo="x", owner="y",
     env_path=GHRUNIGNORED + os.pathsep + PY_PATH)
 # A pinned merge.requiredChecks list is the required list: STAMPREPO pins `checks`, the protection says `gate`, so only the pin counts.
-add("merge-batch: a pinned merge.requiredChecks list is the required list, so a pending gate on pr 2 does not block", "allow",
+add("merge-batch: a pinned merge.requiredChecks list is the required list, so a pending `gate` check on pr 2 does not block", "allow",
     tool="mcp__github__merge_pull_request", cwd=STAMPREPO, pullNumber=1, repo="x", owner="y", env_path=GHPINNED + os.pathsep + PY_PATH)
 
 _BARE_GUARD = dict(env_path=GREEN_ON, config=MERGECFG)
@@ -14694,7 +14694,7 @@ add("impeccable: bare name with polish is denied", "deny", "impeccable-review-on
 # refusal-vs-rule (impeccable-review-only, design-skills): the skill reads the FIRST word as its command
 # and the rest as target text. A `;` inside that target starts no second command, so a review with a
 # focus after the `;` loads. A non-review first word stays refused. A non-review verb after the `;` also
-# stays refused: the skill asks once when two commands fit, and the gate cannot tell that ask from a run.
+# stays refused: the skill asks once when two commands fit, and the guard cannot tell that ask from a run.
 add("impeccable: audit with a focus after a semicolon is allowed", "allow", tool="Skill", skill=IMP,
     args="audit the page; focus on a11y")
 add("impeccable: critique with a focus after a semicolon is allowed", "allow", tool="Skill", skill=IMP,
@@ -25948,7 +25948,7 @@ def cloud_name_check():
 
 
 def cloud_one_home_check():
-    """guard.py's brake gate holds guard_core's is_cloud: the cloud check has one home."""
+    """guard.py's brake guard holds guard_core's is_cloud: the cloud check has one home."""
     import importlib
     guard = _load_guard_module()
     core = importlib.import_module("guard_core")
@@ -25957,12 +25957,12 @@ def cloud_one_home_check():
         return False, "guard_core has no is_cloud: the cloud check has no one home yet"
     got = getattr(guard, "is_cloud", None)
     if got is not helper:
-        return False, "guard.py's brake gate does not hold guard_core.is_cloud (it holds %r)" % (got,)
+        return False, "guard.py's brake guard does not hold guard_core.is_cloud (it holds %r)" % (got,)
     return True, "guard.py holds guard_core.is_cloud"
 
 
 lb_add('cloud check: guard_core.is_cloud exists and is True only for exactly "true"', cloud_name_check)
-lb_add("cloud check: guard.py's brake gate holds guard_core.is_cloud, one home", cloud_one_home_check)
+lb_add("cloud check: guard.py's brake guard holds guard_core.is_cloud, one home", cloud_one_home_check)
 
 
 # A CLOUD SESSION. The brake is specific to local sessions: with CLAUDE_CODE_REMOTE "true" it skips every lane
