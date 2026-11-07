@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-07T18:36:00Z",
+  "context": "Goal: each rule has one home, and a check, not a reader, catches a copy.\nProblem (rule): plan PR #1106 (docs/plans/one-home-check.md) waits on six owner answers in its Input Needed. It now conflicts with main.\nBased on (read): its Input Needed lists 1, ban the retired phrase after the fixes; 2, the child exception word `exempt`; 3, a child reads the parent at a pinned sha; 4, a 5-word floor for removed text; 5, whether debt ste-into-agent-briefs closes; 6, paraphrase copies stay a note.\nDeparts from: main has only the prose rule one-home-per-capability \u2014 a check enforces it.",
+  "home": "step one-home-check",
+  "id": "cs-1106-one-home-plan",
+  "kind": "decision",
+  "n": 333,
+  "options": [
+    {
+      "gain": "The check gets built; you answer once instead of six times.",
+      "key": "a",
+      "label": "Take the plan's recommendations on 1-4 and 6; the lane reads #1105 and decides 5 (recommended)",
+      "lose": "You accept defaults you have not read one by one."
+    },
+    {
+      "gain": "One less open PR.",
+      "key": "b",
+      "label": "Close #1106; the rule stays prose only",
+      "lose": "Copies of a rule keep slipping in unseen."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 2,
+  "ref": "claude-settings #1106; step one-home-check",
+  "short": "Idle PR #1106: the one-home check plan",
+  "status": "open",
+  "title": "Idle plan PR #1106 (a check that each rule lives in one place): take its six recommendations, or close it?",
+  "why": "It has sat as a draft since Nov 2, waiting on six answers from you that never reached the page."
+}

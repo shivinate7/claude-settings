@@ -1,11 +1,11 @@
 {
   "title": "A guard's remedy text never reaches the owner",
   "why": "The owner asked (page ask ask-mw6pwif5wv, 12:09 CST Nov 7) why guard instructions meant for a session reached his page. The Unvetted remedy text was passed to him as is.",
-  "note": "The session adds the `Unvetted:` line itself; guard remedy text never lands in a page item, an ask or a report to the owner. Done check: a red test where a page write that carries a guard's remedy wording is refused. Lane started 12:20 CST Nov 7 (coordinator).",
+  "note": "Coordinator pick 12:26 CST: the leak was the Stop-hook block reason from lint/report_guard.py (UNVETTED_REASON plus CORRECTION_TAIL), not a page write. Done check: a red test where a report_guard Stop reason carries session-instruction wording; green once each reason opens with one plain owner-safe line and cites a record for the session's steps; verdicts unchanged.",
   "phase": "next",
   "status": "doing",
   "order": 262.5,
   "owner": "coordinator",
-  "updatedAt": "2026-11-07T18:17:00Z",
+  "updatedAt": "2026-11-07T18:35:00Z",
   "lane": "session_013NEJL1Ww5ei4o5dFv1mdT9"
 }

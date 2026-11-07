@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-07T18:36:00Z",
+  "context": "Goal: none of your feedback is lost.\nProblem (rule): PR #1008 adds docs/plans/owner-feedback-audit.md, a table of F1 to F252 with each item's state on Nov 2 (172 landed, 40 in flight, 7 filed not started). A plan is a working file, deleted when its work ships, and this snapshot has aged.\nBased on (read): #1008's body; its branch merges clean.\nDeparts from: main has no audit file \u2014 a dated snapshot lands, or none.",
+  "home": "claude-settings #1008",
+  "id": "cs-1008-feedback-audit",
+  "kind": "decision",
+  "n": 334,
+  "options": [
+    {
+      "gain": "The verbatim owner words and their homes are kept in git.",
+      "key": "a",
+      "label": "Merge it as a dated record",
+      "lose": "A five-day-old status table that no check keeps true."
+    },
+    {
+      "gain": "The rows that still need work get real homes; no stale table.",
+      "key": "b",
+      "label": "Close it; a lane first files the 7 'filed not started' and 6 'unknown' rows as steps (recommended)",
+      "lose": "The full table lives only in the closed PR."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "b",
+  "rank": 3,
+  "ref": "claude-settings #1008",
+  "short": "Idle PR #1008: the Nov 2 owner-feedback audit",
+  "status": "open",
+  "title": "Idle PR #1008 (the Nov 2 audit of your 252 feedback items): merge it as a record, or close it?",
+  "why": "It has sat as a draft since Nov 2. Its counts were true on Nov 2 and are now five days old."
+}
