@@ -37,7 +37,7 @@ the answer, so an undone or withdrawn answer is never saved. A `list`, `query`, 
 saves nothing. It collects every string in `tool_response` (a str, content blocks, nested dicts). A
 line that loads as a JSON object with a dict `data` is a document. Only one-line JSON documents in
 text are read: a dict-shaped or pretty-printed document saves nothing. A document with `data.parked` true (a
-parked-line act, `answers/park.<id>`) saves nothing: its note is the entry's own text, not the owner's words. A document whose `session` names another session than the reader's (env
+parked-line act, `answers/park.<id>`) saves nothing: its note is the entry's own text, not the owner's words. An answer whose `data.session` names another session than the reader's (env
 `CLAUDE_CODE_REMOTE_SESSION_ID`) saves nothing; an unknown id on either side saves as before. Each other
 document whose `data.note` is
 a string, non-empty after strip and not `accepted pick`, becomes one inbox block, stamped with the

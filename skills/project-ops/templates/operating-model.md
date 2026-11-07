@@ -111,7 +111,8 @@ parent, or miss a message while busy.
   5. The successor watches each page at once (`ArtifactComments` action `watch`, on each `Watch:` URL),
      before any other act. It reads each page's comments since the time in the hand-off file.
      It rewrites `owner` on each inherited open item to itself. An item's `owner` is the session
-     that reads the answer, so an item left with the old `owner` gets no reader. If it takes over
+     that reads the answer, so an item left with the old `owner` gets no reader. The page-note capture skips an
+     inherited answer whose `session` names the old owner, so it jots that note by hand, like a chat message. If it takes over
      the writer role, it also sets `writer` in `meta/page` to its own session title, as the roster
      gives it. It reads `meta/page` first, then updates `writer` pinned with `if_version`
      (`ArtifactData`). In a repo whose extras file holds the `page-writer` key, it also updates that
