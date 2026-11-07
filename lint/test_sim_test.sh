@@ -27,8 +27,8 @@
 #    it shuts down what it booted, gives the lease, and frees the lock.
 #  - --for S: only with --hold. Default 300, max 900. Out of range or not an integer: exit 2, no lock, no boot.
 #  - The exit code is otherwise xcodebuild's. The tool runs no top.
-#  - One Mac-wide lock, state/sim-test.lock under the config dir, held for the whole run, a hold included, and freed on
-#    every exit, SIGHUP too. A live holder is waited for (SIM_TEST_LOCK_WAIT seconds, then refused). A dead holder is taken
+#  - One Mac-wide lock, state/sim-test.lock under the config dir, held while a run (a hold too) picks and boots its
+#    device, then freed; the slot's lease holds the device until shutdown. It is freed on every exit, SIGHUP too. A live holder is waited for (SIM_TEST_LOCK_WAIT seconds, then refused). A dead holder is taken
 #    over. A lock folder with no pid file counts as held for 60 s, then it is taken over.
 #    A cleanup removes the lock only while its pid file names this run, so a take-over that wrote another pid is left
 #    alone. A take-over whose put-back finds the lock re-created nests nothing inside it. A live holder that kill -0 cannot
