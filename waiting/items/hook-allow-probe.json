@@ -4,6 +4,11 @@
   "home": "grant-reaches-lanes",
   "id": "hook-allow-probe",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T04:16:42.516Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 222,
   "options": [
     {
@@ -25,8 +30,9 @@
   "pick": "a",
   "rank": 22,
   "ref": "decision grant-reaches-lanes (PR #1049); plan section \"The gate\", step 1; page item 152",
+  "reply": "You picked a (Nov 3). Routed to lane grant-reaches-lanes; home: decision grant-reaches-lanes (PR #1049). Closed 12:12 CST Nov 7.",
   "short": "Hook-allow probe",
-  "status": "open",
+  "status": "closed",
   "title": "Run the hook-allow probe for grant-reaches-lanes?",
   "why": "Every write ends with the child's container, and it is the only way to measure the gate."
 }

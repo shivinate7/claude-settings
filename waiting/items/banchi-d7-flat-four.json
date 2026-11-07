@@ -4,6 +4,11 @@
   "home": "banchi D7",
   "id": "banchi-d7-flat-four",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-05T14:17:09.410Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 234,
   "options": [
     {
@@ -24,8 +29,9 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 3,
   "ref": "item 230 b; banchi #1045 merged #1044 at 22:56 CST with the line kept",
+  "reply": "You picked a (Nov 5). Routed to the coordinator; home: banchi D7. Closed 12:12 CST Nov 7.",
   "short": "banchi D7: flat 4 line",
-  "status": "open",
+  "status": "closed",
   "title": "banchi D7 still says \"So the flat 4 stands\": drop that line too?",
   "why": "Recommended: a. An open question may stay open, but it should not state a cap you retired as current."
 }

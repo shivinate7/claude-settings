@@ -1,0 +1,8 @@
+{
+  "answered": "2026-11-07T18:14:00Z",
+  "at": "2026-11-07T18:09:09.185Z",
+  "home": "premise P4 (your 17:31 CST Nov 6 note on item 316); step answered-leaves-page (PR #1383)",
+  "id": "ask-mw6pwiq4n4",
+  "reply": "You are right. They were sent to their lanes when you answered; each reply names the lane. But earlier triage kept them open until their PR merged (\"closes when its PR merges\"). Your 17:31 CST Nov 6 ruling says an answered item closes as soon as it is routed. I never swept the older items. Fixed at 12:12 CST: I closed 10 answered decisions (203, 222, 234, 308-311, 313, 179, 182), each with its home. 331 is now a task for you. What stays: tasks only you can do (240, 264, 273, 324, 329), the parked 291-293, deferred 252, and 328, where you asked a question back. Guard: PR #1383 (answered-leaves-page) takes answered items off the page. Until it merges, I sweep at each wake.",
+  "text": "im seeing a bunch of answered questions still juts remaining here in this artifact and it seems like they've not been delegated out to lanes -- why?"
+}

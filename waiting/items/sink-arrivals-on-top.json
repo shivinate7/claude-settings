@@ -5,7 +5,11 @@
   "home": "step page-answered-sink",
   "id": "sink-arrivals-on-top",
   "kind": "decision",
-  "lane": "page-answered-sink",
+  "lastAnswer": {
+    "at": "2026-11-06T21:51:12.066Z",
+    "choice": "none",
+    "note": ""
+  },
   "n": 311,
   "options": [
     {
@@ -27,9 +31,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "item 309 comment; step page-answered-sink; lane page-answered-sink",
-  "reply": "You picked neither: rule ux-order-holds-still is applied too strictly here and blocks the outcome you want. Sent to lane page-answered-sink at 15:55 CST: build to the outcome (open questions above answered ones) and do not let that rule block it. Roadmap step ux-order-rule-scope asks whether the rule stays a house rule.",
+  "reply": "You picked neither: the order rule was applied too strictly. Home: step page-answered-sink (PR #1373), and your 313 a narrowed the rule. Closed 12:12 CST Nov 7.",
   "short": "Page: new questions on top",
-  "status": "open",
+  "status": "closed",
   "title": "New questions first (your comment on item 309): put new arrivals on top, or drop sent cards below open ones?",
   "why": "Keeping every open card above every sent card means cards move under your pointer each time you Send."
 }

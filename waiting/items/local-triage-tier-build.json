@@ -5,7 +5,11 @@
   "home": "debt local-triage-tier-proof",
   "id": "local-triage-tier-build",
   "kind": "decision",
-  "lane": "coordinator",
+  "lastAnswer": {
+    "at": "2026-11-06T21:45:00Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 310,
   "options": [
     {
@@ -27,9 +31,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "item 213; debt local-triage-tier-proof; guard roadmap-one-writer",
-  "reply": "You picked a in chat at 15:45 CST: build it now and merge it fast. The coordinator starts a claude-settings lane. This item closes when it merges.",
+  "reply": "You picked a in chat at 15:45 CST Nov 6: build it now and merge it fast. Home: step local-triage-tier-build (PR #1378) and debt local-triage-tier-proof. Closed 12:12 CST Nov 7.",
   "short": "Mac triage: build the tier file now",
-  "status": "open",
+  "status": "closed",
   "title": "Home triage on your Mac cannot push the roadmap without your override. Build the tier file now?",
   "why": "You ruled on Nov 5 to build nothing yet. The gap now costs you an override on each push."
 }

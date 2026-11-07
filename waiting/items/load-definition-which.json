@@ -5,7 +5,11 @@
   "home": "decision machine-load-brake",
   "id": "load-definition-which",
   "kind": "decision",
-  "lane": "one-load-definition",
+  "lastAnswer": {
+    "at": "2026-11-06T21:45:55.843Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 309,
   "options": [
     {
@@ -27,9 +31,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "items 304 and 276; lane one-load-definition",
-  "reply": "You picked a: the shared definition reads memory and disk only, and the sim gatekeeper drops its load-average bars. Sent to lane one-load-definition at 15:47 CST. This item closes when its PR merges.",
+  "reply": "You picked a: the shared load definition reads memory and disk only. Sent to lane one-load-definition at 15:47 CST Nov 6; home: decision machine-load-brake. Closed 12:12 CST Nov 7.",
   "short": "Shared load: which reading",
-  "status": "open",
+  "status": "closed",
   "title": "One shared load definition (your item 304 a): drop the load average, or add it to the guard?",
   "why": "Your two rulings disagree, so one shared definition must drop one side."
 }

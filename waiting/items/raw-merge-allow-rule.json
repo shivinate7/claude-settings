@@ -4,6 +4,11 @@
   "home": "auto-mode-owner-acts",
   "id": "raw-merge-allow-rule",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T12:30:45.280Z",
+    "choice": "none",
+    "note": ""
+  },
   "n": 179,
   "options": [
     {
@@ -25,8 +30,9 @@
   "pick": "a",
   "rank": 1,
   "ref": "deep audit 1102, report docs/plans/deep-audit/report.md on audit/deep-1102 (6b6a41f3), table 'claude-settings: homes', row raw-merge-allow-rule",
+  "reply": "You picked neither (Nov 4). The coordinator holds the question; home: step auto-mode-owner-acts. Closed 12:12 CST Nov 7.",
   "short": "raw merge allow entry",
-  "status": "open",
+  "status": "closed",
   "title": "Remove the settings entry that lets any session run a raw gh pr merge with no prompt?",
   "why": "Only the batch runner merges, through the merge tool; a raw allow is the one path around that."
 }

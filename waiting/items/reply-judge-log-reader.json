@@ -4,6 +4,11 @@
   "home": "reply-judge-samples-never-refuses",
   "id": "reply-judge-log-reader",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T12:30:45.280Z",
+    "choice": "none",
+    "note": ""
+  },
   "n": 182,
   "options": [
     {
@@ -25,8 +30,9 @@
   "pick": "a",
   "rank": 6,
   "ref": "deep audit 1102, report docs/plans/deep-audit/report.md on audit/deep-1102 (6b6a41f3), table 'claude-settings: homes', row reply-judge-log-reader",
+  "reply": "You picked neither (Nov 4). The coordinator holds the question; home: step reply-judge-samples-never-refuses. Closed 12:12 CST Nov 7.",
   "short": "reply judge log reader",
-  "status": "open",
+  "status": "closed",
   "title": "The reply judge writes log lines whose named reader cannot rule: name a new reader, or stop the lines?",
   "why": "The lines are the only measure for ruling whether the judge stays."
 }

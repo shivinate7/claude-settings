@@ -3,35 +3,25 @@
   "context": "Goal: q_max sessions never touch Neon (owner, 12:04 CST, in runner 9's chat).\nProblem (risk): at 11:56 CST, someone added a VERIFY_DATABASE_URL that points at a Neon host to the q_max cloud environment (env_01RGfPzEB3iusXZwCZw5q5or). A session that runs `npm run verify:browser` and does not override it writes test data into that Neon database.\nBased on (read): runner 9's report, 12:05 CST.\nDeparts from: the cloud env sets VERIFY_DATABASE_URL to Neon today \u2014 the env drops it, or points it at local Postgres.\nMeanwhile: every lane passes a local VERIFY_DATABASE_URL on each browser run.",
   "home": "q_max cloud environment env_01RGfPzEB3iusXZwCZw5q5or",
   "id": "qmax-cloud-verify-db",
-  "kind": "decision",
-  "lane": "coordinator",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-07T18:09:29.936Z",
+    "choice": "a",
+    "note": ""
+  },
+  "link": "https://claude.ai/code",
   "n": 331,
-  "options": [
-    {
-      "gain": "No session can reach Neon by default.",
-      "key": "a",
-      "label": "Remove VERIFY_DATABASE_URL from the cloud environment, or set it to postgresql://postgres@localhost:5432/postgres (recommended)",
-      "links": [
-        {
-          "label": "Open claude.ai/code, then environment settings \u2192 env_01RGfPzEB3iusXZwCZw5q5or \u2192 environment variables",
-          "url": "https://claude.ai/code"
-        }
-      ],
-      "lose": "Whatever the Neon value was added for stops working in the cloud."
-    },
-    {
-      "gain": "Nothing changes in the environment.",
-      "key": "b",
-      "label": "Keep it; every lane always overrides it",
-      "lose": "One forgotten override writes test data to Neon."
-    }
-  ],
   "owner": "coordinator",
-  "pick": "a",
   "rank": 1,
   "ref": "owner ruling 12:04 CST Nov 7 (runner 9's chat)",
-  "short": "q_max cloud env points browser checks at Neon",
+  "reply": "12:12 CST: You picked a. Only you can change a cloud environment's variables, because the cloud refuses settings edits (premise P15). Until you press Done, lanes pass a local VERIFY_DATABASE_URL on every browser run. Routed to the coordinator.",
+  "short": "q_max cloud env: remove the Neon setting",
   "status": "open",
-  "title": "q_max cloud environment: remove VERIFY_DATABASE_URL, which points at Neon, or keep it and rely on each lane to override it?",
+  "steps": [
+    "Open claude.ai/code and go to the environment settings for env_01RGfPzEB3iusXZwCZw5q5or.",
+    "Delete the variable VERIFY_DATABASE_URL, or set it to postgresql://postgres@localhost:5432/postgres.",
+    "Save, then press Done here."
+  ],
+  "title": "Remove VERIFY_DATABASE_URL from the q_max cloud environment",
   "why": "Your 12:04 CST ruling says q_max sessions never touch Neon. The cloud environment now sends browser checks there by default."
 }

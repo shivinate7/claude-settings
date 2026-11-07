@@ -5,6 +5,11 @@
   "home": "late-review-fixes",
   "id": "fix-check-after-last-round",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-04T04:24:41.331Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 203,
   "options": [
     {
@@ -33,8 +38,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "step late-review-fixes; lane session_013NEJL2mkqxZo8g998PyeoS report, branch late-review-fixes head 93af114c; degen page item 83",
+  "reply": "You picked a (Nov 3). Routed to the coordinator; home: step late-review-fixes. Closed 12:12 CST Nov 7.",
   "short": "Fix check after round 3",
-  "status": "open",
+  "status": "closed",
   "title": "After the last review round, does a small fix get one short read and then merge?",
   "why": "A fix confined to the last findings is the outcome review asked for; one short read is enough to merge it."
 }

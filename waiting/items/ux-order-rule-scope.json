@@ -5,7 +5,11 @@
   "home": "record ux-house-rules",
   "id": "ux-order-rule-scope",
   "kind": "decision",
-  "lane": "ux-order-rule-scope",
+  "lastAnswer": {
+    "at": "2026-11-06T22:47:26.176Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 313,
   "options": [
     {
@@ -35,9 +39,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "item 311; step ux-order-rule-scope; record ux-house-rules",
-  "reply": "You picked a: narrow the rule. An act may move only the row it acted on out of an open list, and no other row changes order. Sent to the coordinator at 16:49 CST, which starts the change to record ux-house-rules.",
+  "reply": "You picked a: narrow the rule. An act may move only the row it acted on out of an open list. Sent to the coordinator at 16:49 CST Nov 6; home: record ux-house-rules (PR #1375). Closed 12:12 CST Nov 7.",
   "short": "Rule: cards hold still",
-  "status": "open",
+  "status": "closed",
   "title": "Rule ux-order-holds-still is too strict (your item 311): narrow it, drop it, or exempt the page?",
   "why": "You said the rule blocks the outcome you want on the waiting page."
 }

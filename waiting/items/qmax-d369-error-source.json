@@ -24,7 +24,7 @@
   "pick": "a",
   "rank": 2,
   "ref": "q_max D-369; item 326",
-  "reply": "12:10 CST, plainly: when a q_max run fails, the screen shows why. Some reasons are our own server's sentences (safe to show). Some are raw text from the AI provider, which your 326 a said to hide. Today both land in one field, so the screen cannot tell them apart. a: tag each reason where it is made, then show ours and hide the provider's. Bigger, but right. b: show only three known sentences and hide all else. Small, but useful reasons stay hidden. Yes, your 326 a is the rule that makes this hard. If you drop it and show every reason, neither a nor b is needed. I sent your note to the lane.",
+  "reply": "12:15 CST, plainly: when a q_max run fails, the screen shows why. Some reasons are our own server's sentences. Some are raw text from the AI provider, which your 326 a said to hide. Both land in one field today. a: tag each reason where it is made, then show ours and hide the provider's. b: show only three known sentences. If you drop 326 a and show every reason, neither is needed.\nYou asked whether raw provider text is scary. Mostly it is just ugly: for example 'overloaded_error', a request id, or a rate-limit line. The API key is not normally sent back. Unchecked: I have not read q_max's provider code in this session, so a lane must confirm that no key or prompt text gets through. q_max is an internal tool, so the cost of showing it is confusion, not a leak.",
   "short": "q_max D-369: where the reason is sorted",
   "status": "open",
   "title": "q_max failed-run reason: mark provider errors at the server, or allow-list three sentences on the screen?",
