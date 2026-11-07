@@ -479,6 +479,33 @@ class Ios(unittest.TestCase):
         self.red(repo, self.diag_gap("Makefile", script))  # one line, the files in tracked order
         self.diag_pass(self.gold().write("docs/testing.md", "Run `xcodebuild test -scheme Tally` by hand.\n"))  # prose is no run
 
+    def test_a_flag_in_a_make_variable_is_no_gap(self):
+        # The recipe passes the flag through `$(FLAGS)`, and the Makefile sets FLAGS to it: the run does carry the flag.
+        repo = self.edit(self.make_run("xcodebuild test -scheme X $(FLAGS)"), "Makefile", "phone:\n",
+                         "FLAGS = -collect-test-diagnostics never\n\nphone:\n")
+        self.diag_pass(repo)
+
+    def test_a_quoted_never_is_no_gap(self):
+        # The shell reads `"never"` and `'never'` as `never`, so the run does carry the flag.
+        for run in ('xcodebuild test -scheme X -collect-test-diagnostics "never"',
+                    "xcodebuild test -scheme X -collect-test-diagnostics 'never'"):
+            with self.subTest(run=run):
+                self.diag_pass(self.make_run(run))
+
+    def test_a_step_name_naming_xcodebuild_test_is_no_test_run(self):
+        # A step's name is text: no xcodebuild test runs in this step, so neither item may read it as one.
+        repo = self.edit(self.gold(), self.FLOW, "run: make app-build",
+                         "run: make app-build\n      - name: xcodebuild test (slow tests)\n        run: echo done")
+        self.diag_pass(repo)
+        self.assertEqual(self.grade(repo, "slow tests"), "pass")
+
+    def test_an_echo_naming_xcodebuild_test_is_no_test_run(self):
+        # An echo prints text: `xcodebuild test` inside its quotes runs nothing, so neither item may read it as a run.
+        repo = self.edit(self.gold(), self.FLOW, "run: make app-build",
+                         'run: make app-build\n      - run: echo "xcodebuild test -scheme Tally"')
+        self.diag_pass(repo)
+        self.assertEqual(self.grade(repo, "slow tests"), "pass")
+
     def test_workflow_runs_are_read(self):
         flow = ".github/workflows/ios.yml"
         run = "xcodebuild test -project native/Tally.xcodeproj -scheme Tally"
