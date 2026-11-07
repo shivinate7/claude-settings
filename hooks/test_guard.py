@@ -275,7 +275,7 @@ def windows_shaped(*parts):
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
-        max_seconds=None, env=None, guard=None, **tool_input):
+        max_seconds=None, env=None, guard=None, tool_use_id=None, **tool_input):
     """Register one case.
 
     `guard` is the path of a copy of hooks/guard.py to run in place of this repository's, for the
@@ -295,6 +295,9 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
 
     `agent_id`, when given, rides on the payload the same way the harness sends it for a
     agent's own tool call: alongside `tool_name` and `tool_input`, never inside either.
+
+    `tool_use_id`, when given, is the id of this call's own tool_use, as the payload carries it. A
+    guard that reads the transcript for the call's siblings finds the call's record by that id.
     """
     CASES.append({
         "name": name,
@@ -314,6 +317,7 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         # are the folder beside it, `<session>/subagents/agent-<id>.jsonl`.
         "transcript": transcript,
         "agent_id": agent_id,
+        "tool_use_id": tool_use_id,
         "agent_type": agent_type,
         "event": event,
         "stop_active": stop_active,
@@ -7632,6 +7636,255 @@ for _command in ("rm -rf ..&", "rm -rf ..>x", "rm -rf .>/dev/null"):
     rm_parent("known open: " + _command, _command, "allow")
 
 
+# =========================================================================== 3a. push after a failed commit
+# Rule push-after-failed-commit (family push-delete). A `git push` is refused when its own response holds a
+# `git commit` that failed, or has not returned yet: that push would send the head the commit was meant to
+# fix. The guard finds the push's own tool_use by the payload's tool_use_id, and reads its siblings, the
+# earlier tool_use records with the same message.id, from the payload's transcript. An agent call reads the
+# subagents file beside its transcript instead. Why: a commit with an empty message failed, and the push sent
+# in the same response went out unfixed.
+PUSH_SEQ_RULE = "push-after-failed-commit"
+PUSH_SEQ_CMD = VCS + " push origin lane/foo"     # from PUSHFEAT, the current guard allows this push
+PUSH_SEQ_COMMIT = VCS + ' commit -m ""'          # an empty message: the commit fails
+PUSH_SEQ_ID = "toolu_push"                       # the push's own tool_use id in the fixtures
+PUSH_SEQ_PROBE_NAME = "push-seq-probe.jsonl"     # the one transcript whose opens the shim logs
+PUSHSEQ = os.path.join(ROOT, "pushseq")          # this section's transcripts, subagents folder and shim
+
+
+def push_seq_path(name):
+    """The transcript of one fixture, under this run's folder."""
+    return os.path.join(PUSHSEQ, name + ".jsonl")
+
+
+PUSHSEQ_AGENT = push_seq_path("agent-main")      # an agent's payload names this; it is never written
+PUSHSEQ_MISSING = push_seq_path("missing")       # named by a payload, never written
+PUSHSEQ_UNREADABLE = push_seq_path("unreadable")  # a folder, so the guard's open() fails on it
+PUSHSEQ_PROBE = push_seq_path("push-seq-probe")
+PUSHSEQ_SHIM = os.path.join(PUSHSEQ, "shim")     # a folder whose sitecustomize logs each open of the probe
+PUSHSEQ_LOG = os.path.join(PUSHSEQ, "opens.log")
+
+
+def seq_use(message, tool_id, command, name="Bash"):
+    """One tool_use record. Each call of a response is its own assistant line, and the lines share message.id."""
+    return json.dumps({"type": "assistant", "message": {"id": message, "content": [
+        {"type": "tool_use", "id": tool_id, "name": name, "input": {"command": command}}]}})
+
+
+def seq_result(tool_id, is_error):
+    """The tool_result that answers one tool_use, in a user line."""
+    return json.dumps({"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": tool_id, "is_error": is_error,
+         "content": "Aborting commit due to empty commit message." if is_error else "ok"}]}})
+
+
+def seq_result_bare(tool_id):
+    """A success whose tool_result carries no is_error key at all."""
+    return json.dumps({"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": tool_id, "content": "ok"}]}})
+
+
+def seq_padding(count):
+    """`count` earlier responses, each one successful `ls`: the transcript of a long session."""
+    lines = []
+    for index in range(count):
+        lines.append(seq_use("msg_old%d" % index, "toolu_old%d" % index, "ls"))
+        lines.append(seq_result("toolu_old%d" % index, False))
+    return lines
+
+
+INCIDENT = [seq_use("msg_A", "toolu_commit", PUSH_SEQ_COMMIT), seq_use("msg_A", PUSH_SEQ_ID, PUSH_SEQ_CMD),
+            seq_result("toolu_commit", True)]
+PUSHSEQ_LINES = {
+    "incident": INCIDENT,
+    "incident-long": seq_padding(300) + INCIDENT,
+    "chained-commit": [seq_use("msg_A", "toolu_commit", VCS + " add x && " + PUSH_SEQ_COMMIT),
+                       seq_use("msg_A", PUSH_SEQ_ID, PUSH_SEQ_CMD), seq_result("toolu_commit", True)],
+    "dash-c-commit": [seq_use("msg_A", "toolu_commit", VCS + ' -C lane commit -m ""'),
+                      seq_use("msg_A", PUSH_SEQ_ID, PUSH_SEQ_CMD), seq_result("toolu_commit", True)],
+    "chained-push": [seq_use("msg_A", "toolu_commit", PUSH_SEQ_COMMIT),
+                     seq_use("msg_A", PUSH_SEQ_ID, VCS + " add x && " + PUSH_SEQ_CMD),
+                     seq_result("toolu_commit", True)],
+    "in-flight": [seq_use("msg_A", "toolu_commit", PUSH_SEQ_COMMIT), seq_use("msg_A", PUSH_SEQ_ID, PUSH_SEQ_CMD)],
+    "powershell": [seq_use("msg_A", "toolu_commit", PUSH_SEQ_COMMIT, name="PowerShell"),
+                   seq_use("msg_A", PUSH_SEQ_ID, PUSH_SEQ_CMD, name="PowerShell"),
+                   seq_result("toolu_commit", True)],
+    "commit-ok": [seq_use("msg_A", "toolu_commit", PUSH_SEQ_COMMIT), seq_use("msg_A", PUSH_SEQ_ID, PUSH_SEQ_CMD),
+                  seq_result("toolu_commit", False)],
+    "commit-ok-no-flag": [seq_use("msg_A", "toolu_commit", PUSH_SEQ_COMMIT),
+                          seq_use("msg_A", PUSH_SEQ_ID, PUSH_SEQ_CMD), seq_result_bare("toolu_commit")],
+    "earlier-response": [seq_use("msg_A", "toolu_commit", PUSH_SEQ_COMMIT), seq_result("toolu_commit", True),
+                         seq_use("msg_B", PUSH_SEQ_ID, PUSH_SEQ_CMD)],
+    "push-alone": [seq_use("msg_A", PUSH_SEQ_ID, PUSH_SEQ_CMD)],
+    "failed-ls": [seq_use("msg_A", "toolu_ls", "ls missing-dir"), seq_use("msg_A", PUSH_SEQ_ID, PUSH_SEQ_CMD),
+                  seq_result("toolu_ls", True)],
+    "quoted-commit": [seq_use("msg_A", "toolu_echo", 'echo "' + VCS + ' commit -m x"'),
+                      seq_use("msg_A", PUSH_SEQ_ID, PUSH_SEQ_CMD), seq_result("toolu_echo", True)],
+    "empty": [],
+    "push-seq-probe": INCIDENT,
+}
+# An agent id, and the fixture its subagents file holds. AGENT2 is the control: the same payload with a
+# sibling that succeeded, so a deny for AGENT1 can only come from its failed sibling.
+PUSHSEQ_AGENT_LINES = {"AGENT1": "incident", "AGENT2": "commit-ok"}
+
+
+def push_seq_agent_file(agent):
+    """The subagents file of one agent: beside the agent's transcript, PUSHSEQ_AGENT without its .jsonl."""
+    return os.path.join(PUSHSEQ, "agent-main", "subagents", "agent-%s.jsonl" % agent)
+PUSH_SEQ_SHIM_SOURCE = (
+    "import builtins, io, os\n"
+    "_LOG = %r\n"
+    "_PROBE = %r\n"
+    "_real_open = io.open\n"
+    "_real_os_open = os.open\n"
+    "def _note(file):\n"
+    "    name = os.fsdecode(file) if isinstance(file, (str, bytes, os.PathLike)) else ''\n"
+    "    if name.endswith(_PROBE):\n"
+    "        fd = _real_os_open(_LOG, os.O_WRONLY | os.O_CREAT | os.O_APPEND)\n"
+    "        os.write(fd, (name + '\\n').encode())\n"
+    "        os.close(fd)\n"
+    "def _logged_open(file, *args, **kwargs):\n"
+    "    _note(file)\n"
+    "    return _real_open(file, *args, **kwargs)\n"
+    "def _logged_os_open(path, *args, **kwargs):\n"
+    "    _note(path)\n"
+    "    return _real_os_open(path, *args, **kwargs)\n"
+    "io.open = builtins.open = _logged_open\n"
+    "os.open = _logged_os_open\n"
+)
+
+
+def _build_push_seq():
+    """This section's transcripts, the subagents files beside the agent's transcript, a folder that stands
+    for an unreadable transcript, and the shim that logs each open of the probe."""
+    for name, lines in PUSHSEQ_LINES.items():
+        write(push_seq_path(name), ("\n".join(lines) + "\n") if lines else "")
+    for agent, name in PUSHSEQ_AGENT_LINES.items():
+        write(push_seq_agent_file(agent), "\n".join(PUSHSEQ_LINES[name]) + "\n")
+    os.makedirs(PUSHSEQ_UNREADABLE, exist_ok=True)
+    write(os.path.join(PUSHSEQ_SHIM, "sitecustomize.py"), PUSH_SEQ_SHIM_SOURCE % (PUSHSEQ_LOG, PUSH_SEQ_PROBE_NAME))
+
+
+lazy_fixture([push_seq_path(name) for name in PUSHSEQ_LINES] + [PUSHSEQ_AGENT, PUSHSEQ_UNREADABLE, PUSHSEQ_SHIM],
+             _build_push_seq)
+
+
+def push_seq(name, expected, transcript, tool_use_id=PUSH_SEQ_ID, tool="Bash", agent_id=None,
+             command=PUSH_SEQ_CMD):
+    """One push judged on `transcript`. A deny names the rule, so a deny from another rule reads as a FAIL."""
+    add("push-after-failed-commit: " + name, expected, rule=PUSH_SEQ_RULE if expected == "deny" else None,
+        tool=tool, cwd=PUSHFEAT, transcript=transcript, tool_use_id=tool_use_id, agent_id=agent_id,
+        command=command)
+
+
+# DENY: the push's own response holds a commit that failed, or that has not returned yet.
+push_seq("the incident: a failed commit before the push in one response", "deny", push_seq_path("incident"))
+push_seq("a failed commit chained after add, before the push", "deny", push_seq_path("chained-commit"))
+push_seq("a failed git -C commit before the push", "deny", push_seq_path("dash-c-commit"))
+push_seq("a push chained after add, after a failed commit", "deny", push_seq_path("chained-push"),
+         command=VCS + " add x && " + PUSH_SEQ_CMD)
+push_seq("a commit still in flight before the push", "deny", push_seq_path("in-flight"))
+push_seq("the incident in an agent's subagents file", "deny", PUSHSEQ_AGENT, agent_id="AGENT1")
+push_seq("the incident from the PowerShell tool", "deny", push_seq_path("powershell"), tool="PowerShell")
+push_seq("the incident after 300 earlier responses", "deny", push_seq_path("incident-long"))
+
+# ALLOW: no failed or in-flight commit in the push's own response, or no record the guard can use.
+push_seq("a commit that went through: the sibling result is ok", "allow", push_seq_path("commit-ok"))
+push_seq("a sibling success whose result has no is_error key", "allow", push_seq_path("commit-ok-no-flag"))
+push_seq("a failed commit in an earlier response, the push in a later one", "allow",
+         push_seq_path("earlier-response"))
+push_seq("a push alone in its response", "allow", push_seq_path("push-alone"))
+push_seq("a failed ls beside the push is not a commit", "allow", push_seq_path("failed-ls"))
+push_seq("a failed echo that quotes a commit is not a commit", "allow", push_seq_path("quoted-commit"))
+push_seq("an empty transcript", "allow", push_seq_path("empty"))
+push_seq("a missing transcript", "allow", PUSHSEQ_MISSING)
+push_seq("an unreadable transcript", "allow", PUSHSEQ_UNREADABLE)
+push_seq("a payload with no tool_use_id", "allow", push_seq_path("incident"), tool_use_id=None)
+push_seq("a tool_use_id that no record holds", "allow", push_seq_path("incident"), tool_use_id="toolu_nomatch")
+push_seq("an agent whose subagents file holds a succeeded commit", "allow", PUSHSEQ_AGENT, agent_id="AGENT2")
+
+
+def _seq_case(command, transcript, env):
+    """A hand-built case for decide: a Bash call in the no-git folder, with the given transcript and env."""
+    return {"raw": None, "tool": "Bash", "tool_input": {"command": command}, "cwd": NOGIT, "session": None,
+            "env_path": None, "config": None, "agent_id": None, "agent_type": None, "event": None,
+            "stop_active": False, "transcript": transcript, "tool_use_id": "toolu_status", "env": env,
+            "guard": None, "temp": None, "no_root": False, "max_seconds": None}
+
+
+def push_seq_fixture_case():
+    """Scope first (P7). A case whose transcript the guard cannot read is allowed, so a fixture that was never
+    written would turn a red into a false green, and a green into a false pass. Each fixture is checked for the
+    record count its list gives, before the cases above mean anything. The missing and unreadable names must
+    stay absent or a folder, or their cases test nothing."""
+    materialize(push_seq_path("incident"))
+    materialize(PUSHSEQ_AGENT)
+    problems = []
+    for name, lines in PUSHSEQ_LINES.items():
+        path = push_seq_path(name)
+        if not os.path.isfile(path):
+            problems.append("%s is not written" % name)
+            continue
+        with open(path, encoding="utf-8") as handle:
+            count = len([line for line in handle if line.strip()])
+        if count != len(lines):
+            problems.append("%s holds %d records, want %d" % (name, count, len(lines)))
+    for agent, name in PUSHSEQ_AGENT_LINES.items():
+        path = push_seq_agent_file(agent)
+        if not os.path.isfile(path):
+            problems.append("the subagents file of %s is not written" % agent)
+            continue
+        with open(path, encoding="utf-8") as handle:
+            count = len([line for line in handle if line.strip()])
+        if count != len(PUSHSEQ_LINES[name]):
+            problems.append("the subagents file of %s holds %d records, want %d"
+                            % (agent, count, len(PUSHSEQ_LINES[name])))
+    if os.path.exists(PUSHSEQ_MISSING):
+        problems.append("the missing transcript exists")
+    if not os.path.isdir(PUSHSEQ_UNREADABLE):
+        problems.append("the unreadable transcript is not a folder")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "%d transcripts and %d subagents files hold the records their cases name" % (
+        len(PUSHSEQ_LINES), len(PUSHSEQ_AGENT_LINES))
+
+
+def _probe_opens():
+    """Each open the shim logged, one line per open. The test runner's own read of the log is not patched."""
+    try:
+        with open(PUSHSEQ_LOG, encoding="utf-8") as handle:
+            return [line for line in handle.read().splitlines() if line]
+    except OSError:
+        return []
+
+
+PUSH_SEQ_NO_OPEN_LABEL = ("push-after-failed-commit: a non-push Bash call is allowed and opens no transcript, "
+                          "and a control push to roadmap in the same shim logs its transcript read")
+
+
+def push_seq_no_open_case():
+    """A non-push Bash call is allowed and opens no transcript. The shim logs each open of the probe, so the
+    control runs first: a push to roadmap with ROLE_ENV reads its transcript at the record branch (see
+    record_push_cost_case). Only once the shim has logged that read does an empty log for `git status` mean
+    the call opened nothing. Why: the rule reads a transcript for a push alone, so a read on any other
+    call is a cost and a leak."""
+    materialize(PUSHSEQ_SHIM)
+    materialize(PUSHSEQ_PROBE)
+    env = dict(ROLE_ENV, PYTHONPATH=os.pathsep.join(filter(None, (PUSHSEQ_SHIM, os.environ.get("PYTHONPATH")))))
+    if os.path.exists(PUSHSEQ_LOG):
+        os.remove(PUSHSEQ_LOG)
+    decide(_seq_case(VCS + " push origin roadmap", PUSHSEQ_PROBE, env))
+    if not _probe_opens():
+        return False, "the control push to roadmap logged no open of its transcript, so the shim proves nothing"
+    os.remove(PUSHSEQ_LOG)
+    got, reason = decide(_seq_case(VCS + " status", PUSHSEQ_PROBE, env))
+    opened = _probe_opens()
+    if got != "allow":
+        return False, "%s status is %s, want allow: %s" % (VCS, got, reason[:90])
+    if opened:
+        return False, "a non-push Bash call opened its transcript %d time(s)" % len(opened)
+    return True, "%s status is allowed, and no call opened the transcript" % VCS
+
+
 # =========================================================================== 3b. linked node_modules
 # q_max links a worktree's node_modules to main's install with a Windows junction. Through that link a
 # hand-run `npm ci` empties main's node_modules (measured on npm 12.0.2). The guard refuses a
@@ -13719,6 +13972,16 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The push-after-failed-commit open check is appended here, where LOG_CHECKS_EXTRA exists, and its family is
+# set by hand (push-delete), as the base-copy check's is. It builds only its own fixtures.
+LOG_CHECKS_EXTRA.append((PUSH_SEQ_NO_OPEN_LABEL, push_seq_no_open_case))
+LOG_FAMILY[PUSH_SEQ_NO_OPEN_LABEL] = "push-delete"
+FIXTURELESS_CHECKS.add(push_seq_no_open_case)
+PUSH_SEQ_FIXTURE_LABEL = ("push-after-failed-commit: every transcript the cases name is written with the records "
+                          "its fixture lists, so no case reads a missing file")
+LOG_CHECKS_EXTRA.append((PUSH_SEQ_FIXTURE_LABEL, push_seq_fixture_case))
+LOG_FAMILY[PUSH_SEQ_FIXTURE_LABEL] = "push-delete"
+FIXTURELESS_CHECKS.add(push_seq_fixture_case)
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
@@ -17682,6 +17945,8 @@ def decide(case):
             body["agent_id"] = case["agent_id"]
         if case.get("agent_type"):
             body["agent_type"] = case["agent_type"]
+        if case.get("tool_use_id"):
+            body["tool_use_id"] = case["tool_use_id"]
         payload = json.dumps(body)
     env = dict(os.environ)
     if case.get("temp"):   # the temp folder this case reads as its own (see TEMP_DIR)
