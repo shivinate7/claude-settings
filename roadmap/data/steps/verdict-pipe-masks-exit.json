@@ -1,0 +1,11 @@
+{
+  "title": "`verdict <cmd> | tail` no longer hides a red exit",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.96,
+  "owner": "coordinator",
+  "why": "Coordinator, 13:52 CST Nov 7.",
+  "note": "",
+  "lane": "session_013NEJL3ZEoUgdA2sYjqkekS",
+  "updatedAt": "2026-11-07T13:51:00-06:00"
+}

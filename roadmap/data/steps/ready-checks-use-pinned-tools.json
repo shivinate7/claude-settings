@@ -1,11 +1,11 @@
 {
   "title": "Ready checks run the pinned claude-settings version",
   "phase": "next",
-  "status": "doing",
+  "status": "ready",
   "order": 261.5,
   "owner": "coordinator",
   "why": "The merge tool's ready checks run through ci-job with the local claude-settings checkout (map skill, code_check.py), not the version the repo's checks.yml pins. The skew can fail or pass a ready falsely; it showed on q_max (map format 4 vs 5).",
-  "note": "Under merge-runs-repo-checks. Found by lane qmax-ready-checks, 11:13 CST Nov 7. Fix in ci-job or merge.py: run the pinned version. Done check: a red test where the local and pinned versions differ on a check's verdict.",
-  "updatedAt": "2026-11-07T17:17:00Z",
+  "note": "Under merge-runs-repo-checks. Found by lane qmax-ready-checks, 11:13 CST Nov 7. Fix in ci-job or merge.py: run the pinned version. Done check: a red test where the local and pinned versions differ on a check's verdict. Built in #1417 (head d508f396a), with runner 8 to merge (coordinator, 13:52 CST Nov 7).",
+  "updatedAt": "2026-11-07T13:51:00-06:00",
   "lane": "session_013NEJL1MUZiHTf89ikYeMTX"
 }
