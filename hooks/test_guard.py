@@ -8034,6 +8034,30 @@ for _opener in ("<<'EOF'", "<<EOF"):
        "node --env-file=" + ENV + " " + _opener + "\nconsole.log(process.env)\nEOF", "deny",
        "env-file", cwd=NOGIT, carries=INLINE_FRAGMENT)
 
+# A here-string, a heredoc whose delimiter has a space before it or a `<<-`, and a `<` redirect each
+# feed a runner its script on stdin. An option whose value is a word (--input-type, --experimental-
+# loader, bun's --preload) must not take that value for the script, or the `-e` after it runs.
+sh("env: a here-string feeds a runner its script, node --env-file=.env <<<",
+   "node --env-file=" + ENV + " <<< \"console.log(process.env)\"", "deny", "env-file",
+   cwd=NOGIT, carries=INLINE_FRAGMENT)
+sh("env: a heredoc with a space before its quoted delimiter, node --env-file=.env << 'EOF'",
+   "node --env-file=" + ENV + " << 'EOF'\nconsole.log(process.env)\nEOF", "deny", "env-file",
+   cwd=NOGIT, carries=INLINE_FRAGMENT)
+sh("env: a <<- heredoc with a space before its delimiter, node --env-file=.env <<- EOF",
+   "node --env-file=" + ENV + " <<- EOF\nconsole.log(process.env)\nEOF", "deny", "env-file",
+   cwd=NOGIT, carries=INLINE_FRAGMENT)
+sh("env: a < redirect feeds a runner its script, node --env-file=.env < s.js",
+   "node --env-file=" + ENV + " < s.js", "deny", "env-file", cwd=NOGIT, carries=INLINE_FRAGMENT)
+sh("env: --input-type takes a value, so the -e after it is inline code",
+   "node --env-file=" + ENV + " --input-type module -e \"x\"", "deny", "env-file", cwd=NOGIT,
+   carries=INLINE_FRAGMENT)
+sh("env: --experimental-loader takes a value, so the -e after it is inline code",
+   "node --env-file=" + ENV + " --experimental-loader x -e \"x\"", "deny", "env-file", cwd=NOGIT,
+   carries=INLINE_FRAGMENT)
+sh("env: bun --preload takes a value, so the -e after it is inline code",
+   "bun --env-file=" + ENV + " --preload x -e \"x\"", "deny", "env-file", cwd=NOGIT,
+   carries=INLINE_FRAGMENT)
+
 sh("env: a script's own -e argument is not inline code, node app.js -e x",
    "node --env-file=" + ENV + " app.js -e x", "allow", cwd=NOGIT)
 sh("env: a script's own -p argument is not inline code, node app.js -p x",
@@ -8046,6 +8070,10 @@ sh("env: a file piped into a script, not a runner's stdin, cat data.txt | node a
    "cat data.txt | node --env-file=" + ENV + " app.js", "allow", cwd=NOGIT)
 sh("env: a heredoc fed to a script is text, node app.js <<'EOF'",
    "node --env-file=" + ENV + " app.js <<'EOF'\nhello\nEOF", "allow", cwd=NOGIT)
+sh("env: a < redirect with a script word is input to the script, node app.js < input.txt",
+   "node --env-file=" + ENV + " app.js < input.txt", "allow", cwd=NOGIT)
+sh("env: --input-type takes a value and app.mjs is the script, not inline code",
+   "node --env-file=" + ENV + " --input-type module app.mjs", "allow", cwd=NOGIT)
 
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
