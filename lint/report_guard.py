@@ -1458,6 +1458,17 @@ def _route_verdict(ids):
                 return kind, text
 
 
+def cite_tokens_verdict(line):
+    """(kind, detail) for the route and measured cite tokens of `line` alone, with no capability verb needed: the page
+    reads a str_replace fragment that swaps only a cite (hooks/question_form.py). Kind is "undated" (a `(measured ...)`
+    token with no date or no check and result), "works", "dead", "unknown" as `_route_verdict` gives them, or "ok"
+    (no token, or a route token whose row says refused or asks). A line with no route token reads no file."""
+    if _measured(line) == "bad":
+        return "undated", ""
+    ids = ROUTE_CITE_RE.findall(line)
+    return _route_verdict(ids) if ids else ("ok", "")
+
+
 def why_yours_verdict(hook, line):
     """(kind, detail) for one Why yours `line`. Kind is "ok" (a choice phrase, no capability verb, or a cite that holds),
     "none" (a capability reason with no cite), "undated" (a `(measured ...)` cite with no date or no check and result),

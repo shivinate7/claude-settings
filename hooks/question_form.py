@@ -804,19 +804,35 @@ WHY_CITED_REASON = ("A Why yours line that says a session cannot do the act must
 WHY_CAUSES = {"none": "no cite", "undated": "undated measured", "works": "works row", "dead": "unknown id"}
 
 
-def why_cited_hit(text: str) -> str:
-    """The cause when a Why yours line of `text` gives a capability reason its cite does not back, else "". The page
-    accepts a route cite and a dated measured cite, and reads no refusals file. report_guard loads here, not at
-    import, as reply_judge does; a line with no route cite never reads the rows file."""
-    lines = [line for line in text.splitlines() if WHY_YOURS_LINE.match(line)]
-    if not lines:
-        return ""
+def _report_guard():
+    """lint/report_guard.py, loaded here and not at import, as hooks/reply_judge.py loads it."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
-    from report_guard import why_yours_verdict
-    for line in lines:
-        cause = WHY_CAUSES.get(why_yours_verdict(None, line.strip())[0])
+    import report_guard
+    return report_guard
+
+
+def why_cited_hit(text: str, fragments: bool = False) -> str:
+    """The cause when a Why yours line of `text` gives a capability reason its cite does not back, else "". The page
+    accepts a route cite and a dated measured cite, and reads no refusals file. A line with no route cite never reads
+    the rows file. With `fragments`, each other line of `text` has its cite tokens judged on their own: a str_replace
+    that swaps only a cite carries no Why yours line, and `new_str` must still hold a cite that backs."""
+    lines = text.splitlines()
+    labelled = [line for line in lines if WHY_YOURS_LINE.match(line)]
+    # A plain substring gate, so report_guard (which holds the cite regexes) loads only for a line that may hold a cite.
+    # A Based on line is the form's own premise line: "Based on (measured): ..." names a kind, not a dated cite.
+    loose = [line for line in lines if fragments and not WHY_YOURS_LINE.match(line) and not BASED_LABEL.match(line)
+             and ("(route" in line.casefold() or "(measured" in line.casefold())]
+    if not (labelled or loose):
+        return ""
+    guard = _report_guard()
+    for line in labelled:
+        cause = WHY_CAUSES.get(guard.why_yours_verdict(None, line.strip())[0])
+        if cause:
+            return cause
+    for line in loose:
+        cause = WHY_CAUSES.get(guard.cite_tokens_verdict(line.strip())[0])
         if cause:
             return cause
     return ""
@@ -846,7 +862,7 @@ def task_str_replace_hit(entry):
     old, new = str(entry.get("old_str") or ""), str(entry.get("new_str") or "")
     if WHY_YOURS_LINE.search(old) and not WHY_YOURS_LINE.search(new):
         return "task-names-check", "context edit that removes the Why yours line"
-    cause = why_cited_hit(new)
+    cause = why_cited_hit(new, fragments=True)
     return (WHY_RULE, cause) if cause else PASS
 
 
