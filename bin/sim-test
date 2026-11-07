@@ -55,7 +55,7 @@
 # no file beyond the lock folder's pid file and, during an own-boot take, take.out (the take's output); no log.
 # Reset: after the device is known (booted or reused) and before xcodebuild or the hold, every run reads the appearance
 # (`simctl ui UDID appearance`) and sets it to light when it is not. A Duo run also reads the fold (`hinge -d UDID get`) and
-# runs `hinge -d UDID close` when it is not closed. One stderr line names each change. With hinge not on PATH, one stderr
+# runs `hinge -d UDID close` unless the reading is the word `closed` or a number of 1.0 or less (an angle in degrees). One stderr line names each change. With hinge not on PATH, one stderr
 # line says the fold was not checked, and the run goes on. It never uninstalls and never erases. Cost: one simctl ui read
 # per run, and one more call when it sets; a Duo run adds one hinge get, and one hinge close when the fold is not closed.
 # It adds `-collect-test-diagnostics never` unless the caller sets that flag: a failed test then starts no simctl diagnose.
@@ -246,8 +246,20 @@ else
 fi
 # reset_device: before xcodebuild or the hold, put the phone in the known posture: light appearance and, for a Duo, a closed
 # fold. A run stopped early, or the last holder, may have left it dark or open. It names each change on stderr and changes
-# nothing else: no uninstall, no erase. A failed read or set never stops the run. The text `hinge get` prints is the
-# brief's `closed` (unchecked against the real binary: the skill names the verbs only), so anything else is closed again.
+# nothing else: no uninstall, no erase. A failed read or set never stops the run. `hinge get` prints a fold angle, or the word
+# `closed` (the word is unchecked against the real binary: the skill names the verbs only). A reading of 1.0 or less, or the word, is closed;
+# anything else is closed again, and the line shows the old reading.
+# fold_is_closed READING: true for the word `closed`, or for a reading that parses as a number of 1.0 degrees or less (`hinge
+# get` prints the fold angle: 0.0 closed, 180.0 open). Any other reading, a sign or empty text included, is not closed.
+fold_is_closed() {
+  [ "$1" = closed ] && return 0
+  [[ $1 =~ ^([0-9]*)(\.([0-9]*))?$ ]] || return 1
+  local whole=${BASH_REMATCH[1]} frac=${BASH_REMATCH[3]}
+  [ -n "$whole$frac" ] || return 1
+  whole=${whole#"${whole%%[!0]*}"} # no leading zeros; empty means 0
+  [ -z "$whole" ] && return 0
+  [ "$whole" = 1 ] && [ -z "${frac//0/}" ]
+}
 reset_device() {
   local cur
   cur=$(xcrun simctl ui "$udid" appearance 2>/dev/null)
@@ -264,7 +276,7 @@ reset_device() {
     return 0
   fi
   cur=$(hinge -d "$udid" get 2>/dev/null)
-  if [ "$cur" != closed ]; then
+  if ! fold_is_closed "$cur"; then
     if hinge -d "$udid" close >/dev/null 2>&1; then
       echo "sim-test: fold ${cur:-unknown} -> closed on $udid" >&2
     else
