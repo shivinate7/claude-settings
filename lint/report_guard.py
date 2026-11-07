@@ -124,6 +124,7 @@ the session's refusals file, and the rows file (hooks/route_match.py read_rows) 
 runs on landed and unlanded turns and not on a stop_hook_active rewrite.
 """
 import datetime
+import functools
 import json
 import os
 import re
@@ -550,8 +551,10 @@ def model_family(text):
     return next((f for f in MODEL_FAMILIES if f in text), "")
 
 
+@functools.lru_cache(maxsize=None)
 def agent_pin(role):
-    """The `model:` key of agents/<role>.md, or '' when the file or key is missing."""
+    """The `model:` key of agents/<role>.md, or '' when the file or key is missing.
+    Cached per role for the life of the process: one file read per role, however many spawns."""
     try:
         with open(os.path.join(AGENTS_DIR, role + ".md"), encoding="utf-8") as f:
             lines = f.read().split("---")[1].splitlines()
@@ -592,18 +595,22 @@ def spawn_models(records):
     return found
 
 
-def done_models_problem(text, spawned, all_spawned=None):
+def done_models_problem(text, spawned, records=None):
     """Name what Done gets wrong about the spawned roles' models, else ''.
 
     `spawned` holds the spawns since the last report; a role in it must be named in Done. A named
-    pair passes when any spawn of that role in `all_spawned`, the whole transcript, ran that model
-    (a reviewer in an earlier window may be named beside this window's). `all_spawned` defaults to
-    `spawned`. Cost: no read; both maps come from the one transcript read the caller already holds.
+    pair passes when its model is in the set of any spawn of that role in `records`, the whole
+    transcript (a reviewer in an earlier window may be named beside this window's), or when this
+    window's set for that role holds '' (a spawn whose model is unknown). An earlier unknown spawn
+    excuses nothing. A named role with no spawn anywhere is skipped. `records` defaults to the
+    window, so `spawned` alone is judged by itself.
+    Cost: a window with no spawn returns at once. Otherwise one more spawn_models pass over records
+    already in memory, and no transcript read. The agents/<role>.md pin read is cached per role,
+    so each role's file is opened once per process.
     """
     if not spawned:
         return ""
-    if all_spawned is None:
-        all_spawned = spawned
+    all_spawned = spawn_models(records) if records is not None else spawned
     done = " ".join(done_items(block_text(text, keep_indent=True)))
     named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
              for r in ROLE_RE.findall(roles)}
@@ -612,7 +619,7 @@ def done_models_problem(text, spawned, all_spawned=None):
         return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
         ran = all_spawned.get(role)
-        if ran is not None and "" not in ran and model not in ran:
+        if ran is not None and model not in ran and "" not in spawned.get(role, ()):
             return f"'{role} {model}' matches no {role} spawn, which ran " + ", ".join(sorted(ran))
     return ""
 
@@ -1551,7 +1558,7 @@ def rewrite_problems(hook):
         text = last_reply(hook)
         spawned = spawn_models(records[idx + 1:])
         reasons = []
-        models = done_models_problem(text, spawned, spawn_models(records))
+        models = done_models_problem(text, spawned, records)
         if models:
             reasons.append(MODELS_REASON + models + ".")
         if unstarted_problem(text, spawned):
@@ -2013,7 +2020,7 @@ def main():
             "Report-shape guard: each Done line must say BUILT, RECORDED, or OTHER. BUILT and "
             "RECORDED must also name a PR or commit. This one does not: " + repr(item) + ".")
     spawned = spawn_models(after)
-    models = done_models_problem(text, spawned, spawn_models(records)) if shape_ok else ""
+    models = done_models_problem(text, spawned, records) if shape_ok else ""
     if models:
         reasons.append(MODELS_REASON + models + ".")
     if shape_ok and unstarted_problem(text, spawned):
