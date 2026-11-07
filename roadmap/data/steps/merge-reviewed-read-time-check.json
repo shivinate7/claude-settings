@@ -1,0 +1,10 @@
+{
+  "title": "`merge --reviewed` checks a review record's claims against the diff paths at read time",
+  "phase": "next",
+  "status": "todo",
+  "order": 261.3,
+  "owner": "coordinator",
+  "why": "Coordinator, 14:09 CST Nov 7: #1437 closed as replaced by #1353 (merge-guard-flag-from-paths). This is the part of #1437 that #1353 left out.",
+  "note": "Starts after step pr-state-is-on-the-pr.",
+  "updatedAt": "2026-11-07T14:08:00-06:00"
+}
