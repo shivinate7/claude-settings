@@ -9695,7 +9695,10 @@ def record_push_cost_case():
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal destination
-    (`origin main`, `HEAD:main`, `HEAD:<branch>`) adds no read. The layout and extras files
+    (`origin main`, `HEAD:main`, `HEAD:<branch>`) adds no read. The conflict-markers push check
+    (decision commit-refuses-conflict-markers) adds one `git diff --check` per push (a three-dot range,
+    so git finds the merge base itself), a second one only when the remote-tracking ref is missing, and
+    a `git show` only when a marker finding needs its line read. The layout and extras files
     are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The
     transcript is read only when the push reaches the record branch: a push to another branch passes
     with an unreadable transcript, and a push to the record branch with one is refused. A stand-in git
@@ -9727,12 +9730,12 @@ def record_push_cost_case():
         return kinds, lines
 
     for label, tail, want in (
-        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1}),
-        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1}),
-        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2}),
-        ("a literal destination, origin main", "push origin main", {"rev-parse": 1}),
-        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1}),
-        ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1}),
+        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1, "diff": 1}),
+        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1}),
+        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1}),
+        ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "diff": 1}),
+        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "diff": 1}),
+        ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1, "diff": 1}),
     ):
         kinds, lines = spawn_kinds(VCS + " " + tail, PUSHFEAT)
         if kinds != want:
