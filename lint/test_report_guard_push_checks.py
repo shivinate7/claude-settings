@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Cases for the Stop-side CI check after a push (lint/report_guard.py; debt push-report-before-checks;
-decision ci-wait-reads-run-status, section "A report after a push").
+decision push-report-names-ci, section "The ruling").
 
 A turn that pushes a head holds its report until that head's CI is known. The report holds one line
 that names the head, in the form the guard reads:
@@ -9,6 +9,10 @@ that names the head, in the form the guard reads:
 - `CI unknown on <sha7>`, when a read failed.
 A green run, a draft PR, a branch with no PR, a repo with no workflows, a tag push, a delete and a dry run need no line. A Done
 item may not claim a pending head.
+
+A check that did not run reads UNKNOWN in the systemMessage, never a block, as the hand-off check's note does
+(`Push-CI guard: UNKNOWN, the check did not run`). That holds when the CI read raises, and when the guard module does
+not load on a push turn.
 
 Each case runs the real Stop hook as a subprocess. The gh stand-in leads its PATH (setUpModule of
 lint/test_report_guard.py, which takes the stand-in's program from hooks/test_ci_wake.py) and answers
@@ -58,6 +62,7 @@ RUNNING = "> **Done** BUILT abc123\n> **Next** CI running on %s" % HEAD7
 RED = "> **Done** BUILT abc123\n> **Next** CI red on %s" % HEAD7
 UNKNOWN = "> **Done** BUILT abc123\n> **Next** CI unknown on %s" % HEAD7
 DONE_CLAIMS_HEAD = "> **Done** BUILT %s\n> **Next** CI running on %s" % (HEAD7, HEAD7)
+PUSH_UNKNOWN_NOTE = "Push-CI guard: UNKNOWN, the check did not run"  # the note of a push check that did not run
 
 
 def pr_entry(draft=False, branch=BRANCH, sha=HEAD, number=1430):
@@ -184,10 +189,12 @@ class PushCheckTests(unittest.TestCase):
     def case_folder(self):
         return tempfile.mkdtemp(prefix="push-", dir=trg.RUN_FOLDER)
 
-    def stop(self, records, answers_=None, stop_active=False, no_gh=False, folder=None, session_id=None):
+    def run_stop(self, records, answers_=None, stop_active=False, no_gh=False, folder=None, session_id=None,
+                 block=()):
         """Run the Stop hook over `records`, with the stand-in answering `answers_`. no_gh: the guard's PATH
         holds no gh at all. folder: the case's folder (its call log and fixture), new when None. session_id:
-        the hook's session, which names the missing-report marker. -> (decision, reason, gh calls)."""
+        the hook's session, which names the missing-report marker. block: module names whose import raises
+        inside the hook (trg.run_guard's seam). -> (the finished process, gh calls)."""
         folder = folder or self.case_folder()
         transcript = trg.write_transcript(records, folder)
         fixture_path = os.path.join(folder, "fixture.json")
@@ -203,12 +210,30 @@ class PushCheckTests(unittest.TestCase):
         if session_id is not None:
             hook["session_id"] = session_id
         try:
-            done = trg.run_guard(trg.REPORT_GUARD, hook, env=trg.gh_env(fixture_path, log, path))
+            done = trg.run_guard(trg.REPORT_GUARD, hook, env=trg.gh_env(fixture_path, log, path), block=block)
         except subprocess.TimeoutExpired:
             self.fail("the Stop hook ran past its timeout: a push turn reads CI once and returns")
         self.assertEqual(done.returncode, 0, "the Stop hook exited %d: %s" % (done.returncode, done.stderr[-300:]))
+        return done, trg.GH_STUB.read_log(log)
+
+    def stop(self, records, answers_=None, stop_active=False, no_gh=False, folder=None, session_id=None):
+        """The Stop hook over `records` (run_stop). -> (decision, reason, gh calls)."""
+        done, calls = self.run_stop(records, answers_, stop_active, no_gh, folder, session_id)
         decision, reason = block_of(done)
-        return decision, reason, trg.GH_STUB.read_log(log)
+        return decision, reason, calls
+
+    def stop_note(self, records, answers_=None, block=()):
+        """The Stop hook over `records` with the modules in `block` unloadable. -> (decision, systemMessage). Silence
+        reads as (None, ""). Text that is not JSON fails the case."""
+        done, _ = self.run_stop(records, answers_, block=block)
+        text = done.stdout.strip()
+        if not text:
+            return None, ""
+        try:
+            out = json.loads(text)
+        except ValueError:
+            self.fail("the Stop hook printed text that is not JSON: %r" % text[:300])
+        return out.get("decision"), out.get("systemMessage") or ""
 
     # Red: each case fails on an assertion on the old code.
 
@@ -373,6 +398,30 @@ class PushCheckTests(unittest.TestCase):
         self.assertEqual(decision, "block", "a rewrite that drops the other branch's running line passed")
         self.assertIn("CI running on " + OTHER7, reason, "the block does not name the dropped head")
 
+    def test_push_ci_check_that_raises_reads_unknown_in_the_note(self):
+        # The raise is the import of ci_wake inside push_ci_states, the check's first read. The turn passes with no
+        # word that the check did not run.
+        steps = push(push_out(HEAD7))
+        fixture_ = answers(prs=[pr_entry()], runs=[PENDING])
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a push turn with a pending run and no CI line was not blocked (scope)")
+        self.assertIn("CI running on " + HEAD7, reason, "the scope check's block does not name the pending head")
+        decision, note = self.stop_note(turn(REPORT, steps), fixture_, block=("ci_wake",))
+        self.assertNotEqual(decision, "block", "a push turn whose CI check raised was blocked, not noted")
+        self.assertIn(PUSH_UNKNOWN_NOTE, note, "a push turn whose CI check raised passed with no UNKNOWN note")
+
+    def test_push_turn_with_an_unloadable_guard_reads_unknown_in_the_note(self):
+        # The guard module's import fails, so turn_landed reads the push as no landing and push_ci_states never runs.
+        steps = push(push_out(HEAD7))
+        fixture_ = answers(prs=[pr_entry()], runs=[PENDING])
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a push turn with a pending run and no CI line was not blocked (scope)")
+        self.assertIn("CI running on " + HEAD7, reason, "the scope check's block does not name the pending head")
+        decision, note = self.stop_note(turn(REPORT, steps), fixture_, block=("guard",))
+        self.assertNotEqual(decision, "block", "a push turn whose guard module did not load was blocked, not noted")
+        self.assertIn(PUSH_UNKNOWN_NOTE, note,
+                      "a push turn whose guard module did not load passed with no UNKNOWN note")
+
     # Green controls: each passes on the old code and on the new.
 
     def test_green_run_on_ready_pr_passes(self):
@@ -453,6 +502,17 @@ class PushCheckTests(unittest.TestCase):
                           + reason)
         older = [c for c in calls if any(MID in a or MID7 in a for a in c)]
         self.assertEqual(older, [], "the guard read the older head of the turn: %s" % older)
+
+    def test_turn_with_no_push_gives_no_push_ci_note_with_a_module_unloadable(self):
+        # The note must not fire on every turn while a module is unloadable, only on a push turn.
+        step = bash("ls -la", "total 0")
+        fixture_ = answers(prs=[pr_entry()], runs=[PENDING])
+        for module in ("ci_wake", "guard"):
+            with self.subTest(module=module):
+                decision, note = self.stop_note(turn(REPORT, step), fixture_, block=(module,))
+                self.assertIsNone(decision, "a turn with no push was blocked with %s unloadable: %s" % (module, note))
+                self.assertNotIn(PUSH_UNKNOWN_NOTE, note,
+                                 "a turn with no push read a push-CI UNKNOWN note with %s unloadable" % module)
 
     # Cost: the call log counts the gh processes a push turn starts.
 
