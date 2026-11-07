@@ -2890,17 +2890,19 @@ def role_model_check(tool: str, tool_input):
     first no-model refusal, else the first other refusal, else the first unread. The no-model refusal comes first
     because no override lifts it (never_lifted reads this function's `matched`), so an above-row spawn ahead of a
     no-model one cannot let the override lift the whole call. Cost: one table read per spawn."""
-    unread, refusal = ("", "", False), None
+    unread = ("", "", False)
+    refusal = None
     for spawn in spawn_inputs(tool, tool_input, no_model=True):
         verdict = role_model_one(spawn)
         if verdict[0]:
             if verdict[1].startswith(ROLE_NO_MODEL_MATCH):
                 return verdict
-            refusal = refusal or verdict
+            if refusal is None:
+                refusal = verdict
             continue
         if verdict[2] and not unread[2]:
             unread = verdict
-    return refusal or unread
+    return refusal if refusal else unread
 
 
 def role_model_one(tool_input):
