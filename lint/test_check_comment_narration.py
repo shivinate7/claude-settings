@@ -75,6 +75,7 @@ CLEAN = [
     "Skip when previously it was seen in this loop",
     "Keep the old behaviour expected by legacy clients", "Keep the old behaviour required by billing",
     "Preserve the old behaviour relied on by v1 callers",
+    "true if the hash changed from the previous snapshot", "true when the file changed from the previous run",
 ]
 
 # Characters that str.splitlines() treats as a line break but ast and tokenize do not.
