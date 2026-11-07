@@ -4,7 +4,7 @@
 
 Owner, 2026-11-02 10:41 CST, ruling fb-1041-2 ("Stop rule churn and drift in the other repos"):
 
-- A child repo's `CLAUDE.md` never copies the text of a claude-settings rule, grant or record. It names the record, such as "Merge grant: claude-settings `standing-merge-grant`".
+- A child repo's `CLAUDE.md` never copies the text of a claude-settings rule, grant or record. It names the record, such as "Merge grant: claude-settings `standing-merge-grant` (standing merge grant)".
 - It adds only what applies to that repo alone: its own paths, its own checks and its own exceptions.
 - When the record changes, the child line stays true, because it holds no copy.
 
@@ -15,7 +15,7 @@ Incident: on 2026-11-01, from 19:19 to 21:34 CST, the owner rewrote the merge gr
 Probe group `restates` in `lint/compliance_probes.py`: `python3 lint/compliance_probes.py restates <child root>`. Child CI runs it through the shared action `actions/claude-md-cites`, pinned like the other shared actions.
 
 - It reads the child's `CLAUDE.md` files and `.claude/**/*.md`, in the same paragraph and list-item units as probe group `supersede`. It never reads a fenced code block.
-- It reads the record text from the decisions folder of the claude-settings checkout it runs from, found through `lint/layout.py`. It keeps no copy (`building-allow-list-is-the-constant`).
+- It reads the record text from the decisions folder of the claude-settings checkout it runs from, found through `lint/layout.py`. It keeps no copy (`building-allow-list-is-the-constant`, allow list points at the constant).
 - Before it compares, it removes headings, `Kind:`, `Plan:` and `Home:` lines, HTML comments, code spans, numbers and time zones, from both sides. So a ruling time counts for nothing in this test.
 - A copy in double quotes, straight or curly, is still a copy (orchestrator, 2026-11-02 11:55 CST: the ruling says never copies and names no quote exemption).
 - A unit is refused when runs of 5 or more words that it shares with records cover at least 12 of its words and at least half of its words.
@@ -36,8 +36,8 @@ Cost: one python start per child CI run, and one per run of skill `compliance-ch
 - Copies of rule text from the root `CLAUDE.md`. The check reads decision records only. For example, a child line that repeats "A lone lane is its own integration PR" passes.
 - A shared run under 5 words.
 - A copy inside a heading, an HTML comment or a code span.
-- A copy shorter than 12 words, such as a one-sentence grant line. See debt `short-copy-passes` (the gap for short copies).
-- Owner words that a record keeps in code spans. The check never indexes them, so a copy of 12 or more of them passes. See debt `record-code-spans-unindexed` (the gap for code-span words).
+- A copy shorter than 12 words, such as a one-sentence grant line. See debt `short-copy-passes` (copied grant line under 12 words) (the gap for short copies).
+- Owner words that a record keeps in code spans. The check never indexes them, so a copy of 12 or more of them passes. See debt `record-code-spans-unindexed` (owner words in code spans) (the gap for code-span words).
 
 ## Why
 

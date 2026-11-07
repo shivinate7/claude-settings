@@ -9,7 +9,7 @@
 2. This repo's `merge.afterMerge` runs `merge/install_from_main.sh` after each merge. The script moves the pinned checkout to the
    new local `main`, then runs the install from it. It never installs from the checkout that ran the merge, because that is often
    a temporary worktree.
-3. The move never exposes a mix (owner ruling 2026-10-15). The new main is checked out in a fresh worktree `<clone>-live-<commit>`, and `<clone>-live` becomes a link to it by one rename. The old worktree stays until the next move. Without link rights the pin is switched in place. The script takes the install lock the installers take (`install-hooks-whole`), reads main's commit only once it holds the lock, and holds the lock through the install.
+3. The move never exposes a mix (owner ruling 2026-10-15). The new main is checked out in a fresh worktree `<clone>-live-<commit>`, and `<clone>-live` becomes a link to it by one rename. The old worktree stays until the next move. Without link rights the pin is switched in place. The script takes the install lock the installers take (`install-hooks-whole`, install never shows a half-copied hook), reads main's commit only once it holds the lock, and holds the lock through the install.
 4. Only that script moves the pinned checkout. A branch switch in any other checkout changes no live setting.
 5. The install makes the pinned checkout when it is missing. Where the OS refuses symlinks, the install copies instead.
 6. When the step cannot move or install, it fails loudly. It prints one line that says the install did not run and names what to
@@ -18,7 +18,7 @@
    main and the tool reports the failed move and exits non-zero (owner ruling, undated).
 
 Open: the SessionStart refresh lock has no test. A refresh child that outlives 10 minutes can remove a
-newer start's lock (debt `refresh-lock-untested`).
+newer start's lock (debt `refresh-lock-untested`, session-start refresh lock lacks a test).
 
 Reason: a merge that adds a file must reach `~/.claude` with no hand install. Links to the clone itself would follow its
 checked-out lane branch, so unreviewed hooks would go live.

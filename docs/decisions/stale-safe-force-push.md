@@ -20,7 +20,7 @@ each `git push` call. Quoted text, heredocs and `git log --grep=--force` are not
 | Any forced push whose destination cannot be resolved | ask |
 
 The remedy reads "retry with --force-with-lease --force-if-includes". It never names the target
-(`git-remedy-never-names-target`).
+(`git-remedy-never-names-target`, a refusal never names its target).
 
 - A deletion at the default branch asks. A deletion elsewhere is allowed.
 - `--mirror` and `--all` reach every branch, so a forced one asks.

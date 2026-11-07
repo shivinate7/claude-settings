@@ -58,7 +58,7 @@ P9. Delete or loosen a test only with proof that coverage holds: one mutant per 
 - Counter: joyous 29eb4e0 then da58dcf — an agent dropped a working test to fit a test count in its brief.
 Applies to: every change that removes or loosens a test case.
 
-P10. A reviewer reads the recorded red run; if it is missing or in doubt, it makes a mutant on a scratch copy and watches the named case go red (`roles-each-layer-proves-once`).
+P10. A reviewer reads the recorded red run; if it is missing or in doubt, it makes a mutant on a scratch copy and watches the named case go red (`roles-each-layer-proves-once`, each layer proves a change once).
 - q_max ac3397064 — a mutant stayed green because an earlier error response answered first.
 - q_max decision D-804 — most round-2 mutants stayed green on the round-1 test file.
 - claude-settings decision mutation-report-scores-suites — hand-written mutants that each name their case: 367 of 367 killed; sampled ast rates are upper bounds, not gold.

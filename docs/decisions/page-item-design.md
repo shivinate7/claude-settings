@@ -2,7 +2,7 @@
 
 ## The ruling
 
-An item write whose picture the page would refuse, or would draw as a thin strip, is refused at write, with the page's own sentence. The owner never sees it (decision `questions-go-to-owner`, skill `waiting-page`, "Add a design").
+An item write whose picture the page would refuse, or would draw as a thin strip, is refused at write, with the page's own sentence. The owner never sees it (decision `questions-go-to-owner` (questions go to the owner), skill `waiting-page`, "Add a design").
 
 - Guard rule `page-item-design` (`hooks/guard.py`, `page_design_hit`) judges an `ArtifactData` write of this repo's waiting page. It judges a `set`, or an `update` that carries both `options` and `designs`, when its data carries a picture: a `designs` list, or an option with `design` (`question_form.design_writes`, the one home of "carries a picture"). A write with no picture never starts node.
 - It runs `skills/waiting-page/check_designs.mjs --page <file> --item <json>` once per judged item, through `_run_check_designs`, the one seam that starts node.
@@ -20,7 +20,7 @@ An item write whose picture the page would refuse, or would draw as a thin strip
 - The file it loads is the one the last allowed publish stamped. `page_stale_hit` writes the absolute path of an allowed current publish to `<git common dir>/waiting-page-published` (`stale_pages.write_published`, beside `write_stamp`, both through `write_common_file`). A refused publish leaves the stamp.
 - Miss: it denies. The reason is the page's sentence, then the fix: republish the design, then write the item again. It names no forbidden target.
 - Unknown (no node, no Playwright or Chromium, no stamp, the stamped file gone, a run past its cap): it allows and logs one `noted` line under `page-item-design`. The rule fails open.
-- Incident class: named incidents (rule `building-guard-needs-incident`), Nov 1 2026.
+- Incident class: named incidents (rule `building-guard-needs-incident`, build guards against likely mistakes), Nov 1 2026.
   - Waiting-page item 51 reached the owner with "The picture of option A shows nothing the focus names". Only the render caught it.
   - Home's item 43 drew each option picture as a strip a few px high: a wide multi-screen design scaled to card width. The page had no floor check at write.
   - Landed 2026-11-01.

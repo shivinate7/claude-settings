@@ -22,7 +22,7 @@ The waiting page shows an option by its position, as a letter: the first option 
   - It reads each write in a batch and data read from `file_path`. The item rules read a relative `file_path` against the call's cwd. The picture check and the model review read it against the hook process's cwd (debt note option-key-gap-relative-path-unjoined).
   - Off this repo's waiting page, it refuses only an option keyed `none`: the page reserves that key, and it blocks the item. That holds for an `items` write whose `options` list has such an option, whatever page the call names and when the cwd repo has no page key. Any other non-letter key on another artifact passes. Only a call whose `url` is this repo's waiting page (`layout.waiting_page`) gets every other check in this record and the other page rules.
   - It passes a set or update of a task, a note or a closed item (one whose write carries `status: closed`). It passes an update that carries no `options` and no matching text, and an `items` write to another artifact with no option keyed `none`.
-  - It reads last, after the form rules (`question-form`, `owner-judge`). Each older rule keeps naming its own refusals.
+  - It reads last, after the form rules (`question-form` (one question form, one guard), `owner-judge`). Each older rule keeps naming its own refusals.
   - The reason says: key the options a, b, c in the order shown, each once, never none, and name an option by its letter. It names no target.
   - It is built against a named incident, below. It landed 2026-10-30. The label clause landed 2026-11-01.
   - Cost: no new process. It runs inside the guard process that every `ArtifactData` call already starts. It writes no file unless it denies.

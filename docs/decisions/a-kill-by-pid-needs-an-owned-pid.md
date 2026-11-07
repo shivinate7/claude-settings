@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Rule `shared-trees-no-machine-wide-kill` says to kill only your own processes. `kill` with a literal pid is refused under rule `machine-wide-kill` when the pid is not owned. An owner override lets a kill of a foreign pid through (`owner-override`, the owner's typed override).
+Rule `shared-trees-no-machine-wide-kill` (kill only your own processes) says to kill only your own processes. `kill` with a literal pid is refused under rule `machine-wide-kill` when the pid is not owned. An owner override lets a kill of a foreign pid through (`owner-override`, the owner's typed override).
 
 - Every Bash command and every hook of one session descends from one process whose command path ends in `claude`. The hook finds it by walking its own parent chain (`ps -o ppid=`, `ps -o comm=`; no list is kept).
 - A pid is owned when its own parent chain reaches that process, or when the process is already dead (`ps` exits 1 with no output). Any other `ps` failure is unknown. The `claude` process itself is not owned. Another session's process, and the owner's editor, do not descend from it.

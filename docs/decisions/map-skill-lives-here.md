@@ -22,14 +22,14 @@ The install links it whole into `~/.claude/skills/plain-english-map`.
   skill (owner, 2026-10-28 02:40 CDT, roadmap step c146 "The map says how the code fits together,
   in checked prose, in every repo", waiting-page item 29, pick a: "fix map-skill-lives-here.md, no
   pinned copies"). This is the uniform ruling: topic t18 (one home, then variants), decision
-  `uniform-over-variants`. A repo changes to match the shared skill, and the skill grows no second form.
+  `uniform-over-variants` (a repo matches a shared format). A repo changes to match the shared skill, and the skill grows no second form.
 - A host may bind its own readers. With none bound, the AI calls tab is empty.
 - The skill's tests live in `skills/plain-english-map/tests/`, with a small fixture
   repository. The `checks` workflow runs them after `npm ci`.
 
 ## Safety holes, named
 
-Debts: `skill-copy-no-typescript` (a copy of the skill outside the clone finds no `typescript`: a cloud install, or a refused symlink. An offline `npm ci` re-install also wipes `node_modules`), `gitignore-skips-map-tests` (a change to only `.gitignore` skips the map skill tests), `upgrade-strips-name-port` (the version 2 upgrade strips a port after a code-file name, such as `node.js:18`).
+Debts: `skill-copy-no-typescript` (map skill copy finds no typescript) (a copy of the skill outside the clone finds no `typescript`: a cloud install, or a refused symlink. An offline `npm ci` re-install also wipes `node_modules`), `gitignore-skips-map-tests` (a change to only `.gitignore` skips the map skill tests), `upgrade-strips-name-port` (version 2 upgrade strips a port) (the version 2 upgrade strips a port after a code-file name, such as `node.js:18`).
 
 Kind: process
 Home: skills/plain-english-map/SKILL.md

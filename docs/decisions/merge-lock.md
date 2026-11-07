@@ -60,7 +60,7 @@ Known gaps, all in `docs/debts/notes.md`:
 
 Risk: likely risk (`building-guard-needs-incident`: a guard or check needs a mistake Claude has made or is
 likely to make in normal work). Two runs on one base would race, and batches often run while another batch merges
-(`merge-needs-current-base`). Landed 2026-09-30, the first merge lock in `merge/merge.py`.
+(`merge-needs-current-base`, merge needs green current base). Landed 2026-09-30, the first merge lock in `merge/merge.py`.
 
 Kind: process
 Home: merge/merge.py

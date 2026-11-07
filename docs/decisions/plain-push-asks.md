@@ -3,7 +3,7 @@
 ## The ruling
 
 Two pushes that are not forced ask. Approving the prompt lets one push through; it is not a grant.
-The owner's typed override lets each through (`owner-override`). Owner rulings, Cockpit, 2026-11-03 22:23 CST.
+The owner's typed override lets each through (`owner-override`, typed override from the owner). Owner rulings, Cockpit, 2026-11-03 22:23 CST.
 
 | Push | Outcome | Rule id |
 |---|---|---|
@@ -11,7 +11,7 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
 | An implied destination (bare push, `HEAD`, `@`, or the current branch's own name) that differs from the branch's upstream, on the upstream's remote | ask | `push-stray-branch` |
 | Any other plain push | allow | |
 
-- Item 207 a, `push-main`: main moves only by pull request (`git-main-only-by-pr`). The names are
+- Item 207 a, `push-main`: main moves only by pull request (`git-main-only-by-pr`, main moves only by pull request). The names are
   literal, `main` and `master`. The remote's HEAD is not read.
 - Item 206 a, `push-stray-branch`: `git push origin HEAD` writes the local branch's name, not its
   upstream. Measured 2026-11-03: local `mylocal` tracking `origin/lane/x` made a new remote branch

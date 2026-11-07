@@ -22,7 +22,7 @@ repo owned its load budget, and fixes deadlocked across repos.
 Why: with no owner, each repo fixed its own side, and a fix in one repo needed a change in another.
 One owner per machine ends the deadlock. A hand-off keeps the owner's guard whole.
 
-Risk kind: incident, per `building-guard-needs-incident`: the 3 crashes in 8 days above, landed 2026-10-28.
+Risk kind: incident, per `building-guard-needs-incident` (build guards against likely mistakes): the 3 crashes in 8 days above, landed 2026-10-28.
 
 Cost: CI only: two CI steps, about 23 Python starts per run (one per test case, one for the suite, one for the check), no file written.
 

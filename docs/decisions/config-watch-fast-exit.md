@@ -4,7 +4,7 @@
 
 Owner, 2026-10-20. `hooks/config_watch.py` hashes the two watched settings files on every call. It does this before it imports the guard. It imports the guard only when a hash changed.
 
-Why: the cost is the import, not the hash. There is no mtime or size stamp. A same-size edit with a reset mtime must not slip past the model-cap watch (`predicate-is-the-act`, the watch reads file content, never a proxy for it).
+Why: the cost is the import, not the hash. There is no mtime or size stamp. A same-size edit with a reset mtime must not slip past the model-cap watch (`predicate-is-the-act` (the predicate is the act), the watch reads file content, never a proxy for it).
 
 - **Check now.** A missing or corrupt record means check now. A recorded lift past its deadline means check now, because a deadline passes with no write of its own (`opus-grant-expires`, an Opus grant expires within 24 hours). Any exception in the fast check falls through to the full check.
 - **One shared module.** `hooks/shared_names.py` holds `PROJECT_FROZEN_FILES`, `config_dir` and `MACHINE_TAGS`. It uses the standard library only, so the fast exit and `local_time` read it without loading the guard. There is no second copy. It lands flat in `hooks/` and in the guard set (`guard.d/<id>/`) with the guard files.

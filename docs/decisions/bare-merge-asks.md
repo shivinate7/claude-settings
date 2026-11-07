@@ -10,7 +10,7 @@ Orchestrator call (lane bare-gh-merge-ask); the owner may rule otherwise. Guard 
 - Quoted text, heredoc bodies and comments that name a merge are text, as in merge-checks.
 - The reason names `merge <pr> --confirm` (the merge tool) and does not echo the repo path.
 
-Why ask and not refuse: a broken merge tool leaves a bare merge as the only way to merge. A refusal would stop the recovery on the day it is needed (`verification-recovery-independent-of-state`). An ask keeps the path open and still stops a bare merge made by habit. Why a rule at all: bare merges left the local main four commits behind origin.
+Why ask and not refuse: a broken merge tool leaves a bare merge as the only way to merge. A refusal would stop the recovery on the day it is needed (`verification-recovery-independent-of-state`, recovery controls stay independent of state). An ask keeps the path open and still stops a bare merge made by habit. Why a rule at all: bare merges left the local main four commits behind origin.
 
 Kind: build
 Plan: docs/decisions/bare-merge-asks.md#the-ruling (all)

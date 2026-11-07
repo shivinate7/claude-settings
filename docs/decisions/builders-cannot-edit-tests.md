@@ -2,9 +2,9 @@
 
 ## The ruling
 
-A builder that cannot pass a test must not delete, skip or rewrite it. A green run must mean the code is right. The guard stops mistakes, not an attacker (`guard-guards-mistakes-only`). The reviewer reads every diff.
+A builder that cannot pass a test must not delete, skip or rewrite it. A green run must mean the code is right. The guard stops mistakes, not an attacker (`guard-guards-mistakes-only`, guards stop mistakes, not attackers). The reviewer reads every diff.
 
-Judge the result, not the commands. The act is a test path in a change the builder made (`predicate-is-the-act`), not `rm`, `mv`, `sed -i` or a redirect. `hooks/guard.py` reads that change at three points. A fourth point reads a builder's shell command, as an early warning:
+Judge the result, not the commands. The act is a test path in a change the builder made (`predicate-is-the-act`, the predicate is the act), not `rm`, `mv`, `sed -i` or a redirect. `hooks/guard.py` reads that change at three points. A fourth point reads a builder's shell command, as an early warning:
 
 - A builder's `git commit` and `git push` (PreToolUse, Bash and PowerShell). A test change refuses with `builder-diff`. The refusal names no path and gives the undo route: restore a changed test file, delete a new one. No override lifts it.
 - A builder's SubagentStop. A test change refuses the first stop with `builder-diff`. A second stop (`stop_hook_active`) is allowed and logs `role-diff-unresolved`, so an agent that cannot fix its tree never loops.
@@ -36,9 +36,9 @@ The payload must carry an `agent_id`. The main session, reviewers, Explore, and 
 - `builder`: refused at commit, push and stop when the diff holds a test path. The write tool and the shell check refuse it too. A test conflict mid-merge is refused. The route is `git merge --abort`, then report to the orchestrator.
 - `test-author`: the inverse. Logged when the diff holds anything but a test path, test config, a dev dependency list or a whole workflow test step (`author-diff`). Never refused at commit, push or stop.
 - `record-writer`: may change only `*.md` files: records, README, CLAUDE.md-style docs, agent files, skills and output styles. It never changes product code, tests, CI or config. The write tool refuses any other path (`record-writer-scope`). At commit, push and stop, a diff that holds one is logged only (`writer-diff`).
-  - Reason: a role name is only a label on the spawn. With no path limit, a Haiku `record-writer` is a Haiku builder under a new name, and the floor means nothing (`agent-model-cap`).
+  - Reason: a role name is only a label on the spawn. With no path limit, a Haiku `record-writer` is a Haiku builder under a new name, and the floor means nothing (`agent-model-cap`, the model-per-role table).
 - `designer`: at commit, push and stop, an offence is logged only (`designer-diff`).
-- Each write refusal names no path. It says to report the needed change, and the orchestrator assigns it to another role (`git-remedy-never-names-target`).
+- Each write refusal names no path. It says to report the needed change, and the orchestrator assigns it to another role (`git-remedy-never-names-target`, a refusal never names its target).
 - The orchestrator gives a test to a test-author, before or after the build. The builder reports the test change it needs and never writes it (`agents/builder.md`).
 - A refusal is final: an agent never writes a refused path another way. The write tool refuses by path. At commit, push and stop, a builder's test change is judged on the builder's own change, so a test file written by shell is refused there too. Other refused paths rest on prose only (owner), in `agents/builder.md` and `agents/test-author.md`. A test-author's shell write of such a path is logged only (`author-diff`), in debt `refusal-route-around-guard` (no guard refuses a test-author that routes around a refusal).
 
@@ -50,7 +50,7 @@ The payload must carry an `agent_id`. The main session, reviewers, Explore, and 
 - A test-author owns a CI step that only runs a test suite. In `.github/workflows/*.yml` or `*.yaml`, it may add or remove a whole test-run step. The step holds only the keys `name`, `if`, `run`, `shell`, `working-directory` and `timeout-minutes`. Its one `run:` is a single line: an optional interpreter (`python`, `python3`, `node`, `bash`, `sh` or `pwsh`), a test path, and arguments that disable no test. No shell operators, `$(` or backtick. The write tool refuses any other workflow change by a test-author (`test-author-scope`), and commit, push and stop log it (`author-diff`). `workflow_test_steps_only` in `hooks/guard.py` judges it, reading `workflow_changed_lines`.
 - A builder keeps every other workflow edit, and may add a test step or move one. Its change counts as a test change (`builder-test-edit`) when it does one of three things. It adds a test-disabling flag or name on a line that names a test runner or runs a test path. It adds `continue-on-error: true` or `if: false` under a test-run step. It drops a test path that the workflow ran before. `workflow_builder_refused` in `hooks/guard.py` judges it, through `workflow_disables_tests`, `workflow_disables_step` and `workflow_drops_tests`; the first reads `workflow_changed_lines`. The builder is not refused for the whole file, because CI work (lint and build steps) is a builder's.
 
-**False alarms pinned** (`guard-that-cries-wolf-is-spent`). A builder may still do these:
+**False alarms pinned** (`guard-that-cries-wolf-is-spent`, a guard that cries wolf). A builder may still do these:
 
 - Rename or delete product files, and add a dependency or a script to a manifest.
 - Read tests, and keep test changes that the branch inherited or that main brought in a merge. Keeping them needs no edit. A merge conflict in a test file is not the builder's to resolve: resolving it chooses what the test checks, so a test-author resolves it. The refusal says so.

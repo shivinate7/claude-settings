@@ -24,7 +24,7 @@ Risk: incident (2026-09-06). `other-checkout` landed 2026-10-28. The separate-cl
 - **No record.** An `agent_id` that never resolves to a home, with a `cwd` not in the worktree shape, is a non-isolated agent. This part allows it.
 - **Bash and PowerShell:** the payload `cwd` is not inside the recorded home. This covers a home folder that is gone. A Git Bash `cwd` in the `/c/...` form is read as `C:\...`. One exception: a lone move back into the home is allowed (`cd`, or in PowerShell `Set-Location`, `sl`, `chdir`, `pushd`), with the home path as its only argument and no separator.
 - **Write, Edit, MultiEdit and NotebookEdit:** the target is under the primary checkout but outside the recorded home. One exception: a target strictly inside the caller's own `agent-<its agent id>-<suffix>` red-run folder passes, never the folder root (see `other-checkout`, the write exemption).
-- **No override lifts it** (`owner-override`, owner 2026-10-18 18:37 CDT).
+- **No override lifts it** (`owner-override` (typed override from the owner), owner 2026-10-18 18:37 CDT).
 
 ### `other-checkout`: no session writes into, or `cd`s into, another checkout
 
@@ -56,7 +56,7 @@ Owner ask, 2026-10-29 16:49 CDT: a resumed top-level session whose worktree was 
 - **Passes.** A target under `<primary>/.git/`, or outside the clone. Read, Grep, and a shell call that writes no file (`git fetch`, `git status`, `git log`, `git diff`, `git branch <name>`, `git worktree add`), so recovery never depends on the lost state. A git command run with `-C` in a live worktree. A git command whose folder is a shell variable (`cd "$WT" && git commit`, `git -C "$WT" commit`): the folder is unknown. A write inside a new worktree, which also rewrites the record.
 - **No record passes.** A fresh session, and one that never entered a worktree, are unchanged.
 - **Resume notice.** `hooks/session_start.sh`, on `source` `resume` with a record whose folder is gone, prints one line: make a new worktree with the EnterWorktree tool before any write. EnterWorktree branches from origin's default branch by default (`worktree.baseRef` "fresh").
-- **The refusal** names EnterWorktree, never the lost path (`git-remedy-never-names-target`).
+- **The refusal** names EnterWorktree, never the lost path (`git-remedy-never-names-target`, a refusal never names its target).
 - **An owner override lifts it** (`owner-override`). A top-level session is the owner's own, so the owner may mean the write.
 - **Cost.** No git spawn beyond what the call already spends: the primary is found by path shape and a stat walk. Files written: one record per session that entered a worktree, rewritten only when its worktree changes, deleted at ExitWorktree. Nothing else deletes it. `session_home_*_case` counts the spawns.
 - **Premises.** ExitWorktree reaching PreToolUse is read from the docs, unmeasured live (debt exit-worktree-hook-unmeasured). A resume keeps the `session_id` unless `--fork-session` is passed (CLI reference, read; unmeasured live). A resume whose worktree is gone starts in the folder Claude was launched from (worktrees docs, read).
@@ -64,10 +64,10 @@ Owner ask, 2026-10-29 16:49 CDT: a resumed top-level session whose worktree was 
 
 ### All three parts
 
-- **Read and Grep** are always allowed, so a session can still report (`verification-recovery-independent-of-state`).
+- **Read and Grep** are always allowed, so a session can still report (`verification-recovery-independent-of-state`, recovery controls stay independent of state).
 - **The refusal** never names the target or the home (`git-remedy-never-names-target`). The matched detail goes to the log.
-- **Unreadable is not a hit.** No git, no common directory, an unreadable record, or a `cwd` in no checkout allows (`verification-report-unknown-reads`).
-- **The predicate is the act** (`predicate-is-the-act`). The rule reads `agent_id`, `cwd` and the write target.
+- **Unreadable is not a hit.** No git, no common directory, an unreadable record, or a `cwd` in no checkout allows (`verification-report-unknown-reads`, report an unrunnable read as unknown).
+- **The predicate is the act** (`predicate-is-the-act`, the predicate is the act). The rule reads `agent_id`, `cwd` and the write target.
 
 Kind: build
 Plan: docs/decisions/an-agent-outside-its-home-tree-must-stop.md#the-ruling (all)

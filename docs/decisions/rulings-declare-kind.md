@@ -20,7 +20,7 @@ task, because nothing linked the ruling to a plan. The line format is in `lint/c
   claude-settings CLAUDE.md. The action reads the second from its own checkout at the pinned sha, with no
   network read. With none readable, a `rule:` Home is red. q_max adopts the format and sets
   `records-dir: docs/decisions`.
-- A message that cites a `docs/debts/` record by path is refused by cite-by-id (`git-cite-by-id`). That is
+- A message that cites a `docs/debts/` record by path is refused by cite-by-id (`git-cite-by-id`, cite records by id). That is
   intended.
 
 **Two routes carry the check to the owner's other repos.**

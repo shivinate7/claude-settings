@@ -33,7 +33,7 @@ Skill `compliance-check` runs probe group `supersede`: `python3 lint/compliance_
   - `known exemption, passes: <file>:<line>: <text>`: a pass line, not a flag.
 - Verdicts: `supersede: out - N line(s) to read in M file(s)`, exit 1. N counts the flagged items only, never the pass lines. M counts every file read. `supersede: in shape - M file(s) read`, exit 0.
 
-Risk kind: named incident, per `building-guard-needs-incident`: banchi `CLAUDE.md` line 350 above. Landed 2026-10-31.
+Risk kind: named incident, per `building-guard-needs-incident` (build guards against likely mistakes): banchi `CLAUDE.md` line 350 above. Landed 2026-10-31.
 
 Cost: one python start for each run of the skill, on demand. It reads files and writes none. It starts no timer and no long-lived process.
 

@@ -6,10 +6,10 @@ What rules govern a cull of rules, prose, guards, tests and records?
 
 ## Ruling
 
-Owner ruling, 2026-10-17 11:56 CDT. The deletion fast path and the notes tier live in `roles-review-cap-three` and `roles-findings-are-debts-or-notes`. The rest:
+Owner ruling, 2026-10-17 11:56 CDT. The deletion fast path and the notes tier live in `roles-review-cap-three` (a change gets three review rounds) and `roles-findings-are-debts-or-notes` (known gaps are debts or notes). The rest:
 
 - No history in the tree. A decision holds only a ruling in force, plus a one-line reason. One exception (owner, 2026-10-21): raw evidence lives inside the decision or debt that uses it, in an Evidence section of about 10 lines, deleted with that record. Delete a decision that a later one replaced, or that a guard or check fully enforces with nothing left to say. Add no history section and no "previously" note.
-- Prose leaves only with proof. The `lint/rule_mechanisms.json` row names a test, the test case name states the behaviour, and a mutant is killed. Keep a reminder of 3 words or fewer, plus the one-line reason. Check these first: `shared-trees-no-destructive-git`, `shared-trees-no-machine-wide-kill`, `git-never-discard-output`, `git-cite-by-id`, `roles-opus-override-guarded`, `roles-third-round-steps-up`.
+- Prose leaves only with proof. The `lint/rule_mechanisms.json` row names a test, the test case name states the behaviour, and a mutant is killed. Keep a reminder of 3 words or fewer, plus the one-line reason. Check these first: `shared-trees-no-destructive-git` (no destructive commands in shared trees), `shared-trees-no-machine-wide-kill` (kill only your own processes), `git-never-discard-output` (never discard write output), `git-cite-by-id` (cite records by id), `roles-opus-override-guarded` (guard asks before an Opus raise), `roles-third-round-steps-up` (third try runs on Opus).
 - Exception to the 3-word cap (owner, waiting page item 238, pick a, 2026-11-06 12:17 CST): `git-never-discard-output` keeps "Keep git write output.", 4 words.
 - The cull runs first. No file moves or renames during it. The only additions are the prose-proof tests and text a brief names. Time box: Monday 2026-10-19.
 

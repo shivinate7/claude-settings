@@ -108,8 +108,8 @@ Cost: one more JSON parse per `stop_hook_summary` line (one a Stop run), in the 
 already makes, at each Stop.
 
 The hook exits 0 and never refuses. A crash never refuses a call, as advisory hooks stay fail-open
-(`guard-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has
-one home (`building-one-home-per-capability`).
+(`guard-hooks-fail-closed`, guard hooks fail closed). It reuses the transcript parsing of the PreToolUse path, so that parsing has
+one home (`building-one-home-per-capability`, each capability has one home).
 
 - Age: the default is 300 seconds, a builder's choice, not measured. `STALL_WATCH_QUIET` sets another
   number of seconds.

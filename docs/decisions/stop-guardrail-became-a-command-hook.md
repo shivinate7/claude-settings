@@ -7,7 +7,7 @@ the permission system. In the desktop app's `auto` permission mode the sandbox d
 `Bash`, and it blocked with "unable to verify", which cost a turn and resolved nothing. Its judge is the
 script `hooks/decision_watch.py`, which takes the same Stop JSON with no permission check. The mod
 `mods/decision-watch` runs the script on every Stop and makes the model call itself
-(`decision-watch-mod-limits`). A direct run of the script with no split flag runs `claude -p`, isolated,
+(`decision-watch-mod-limits`, decision-watch runs as a mod). A direct run of the script with no split flag runs `claude -p`, isolated,
 as below.
 
 - **The trigger is an ACTUAL on-disk change to a protected path.** `git status` against HEAD, scoped to this
@@ -27,7 +27,7 @@ as below.
   and `--safe-mode`. `cwd` and `CLAUDE_CONFIG_DIR` both point at a fresh, empty directory, never this
   project, with only the credential file copied in. So a nested call inherits no permission and cannot
   fire this hook at its own turn end. The child's environment is built from a named allow list, never by
-  subtracting from the parent's (`predicate-is-the-act`). A session that authenticates by API key sees
+  subtracting from the parent's (`predicate-is-the-act`, the predicate is the act). A session that authenticates by API key sees
   the isolated call fail closed, as UNKNOWN.
 - **The `why` field is capped, cleaned, and attributed.** It is bounded to 300 characters, cleaned the way
   the guard's own printed reasons are, and quoted as "the judge model reported" rather than stated
@@ -35,7 +35,7 @@ as below.
 - **Per-incident, per-session cap.** A finding already flagged this session, with unchanged evidence,
   stays quiet at the next Stop. A finding whose evidence moved further is a new incident and is reported
   once more. The cap never applies to an UNKNOWN read, which is always reported again
-  (`guard-that-cries-wolf-is-spent`).
+  (`guard-that-cries-wolf-is-spent`, a guard that cries wolf).
 - **UNKNOWN, never silence.** A harness kill prints nothing, and silence reads as no change. So a timeout,
   a missing `transcript_path`, a git failure, and a model failure or odd answer each print a
   `systemMessage` that says UNKNOWN and names why. None collapses into silence, into ALLOW or into a flag.

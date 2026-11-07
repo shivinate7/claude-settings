@@ -51,7 +51,7 @@ Built on branch `merge-cuts-lanes` (commit 1cae7c63), in `merge/merge.py`: `lane
 - A head with two or more open PRs is judged on all their bases, by the rules above.
 - `Host.open_heads` raises on a failed read, or on 1000 or more rows. Then no head is deleted.
 - It keeps a head whose tip is neither an ancestor of the merge commit nor patch-equal to it, per
-  `guard_core.branch_cherry_empty`. The patch test is in `a-branch-is-redundant-by-patch-not-by-ancestry`, a
+  `guard_core.branch_cherry_empty`. The patch test is in `a-branch-is-redundant-by-patch-not-by-ancestry` (a branch is redundant by patch), a
   branch is redundant by patch, not by ancestry.
 - It deletes each other head with `git push --force-with-lease=refs/heads/<branch>:<tip>`.
 - Every lane prints one line: deleted, or kept with the reason. This includes an unreadable open-PR read and a
@@ -68,8 +68,8 @@ Home: merge/merge.py
 
 ## Safety holes, named
 
-- (a) Any origin head at a lane tip's sha is deleted. `merge.keepBranches` is the only guard, so a long-lived branch merged into a batch is lost. Its commits stay on main; restoring it is one push. Debt: `long-lived-head-lost-in-batch`.
-- (b) A fast-forwarded first lane is never a tip (0 of 112 recent lane merges did this). Debt: `ff-first-lane-not-a-tip`.
-- (c) Squash-merged lanes are kept. Debt: `squash-lane-branch-kept`.
-- (d) A merge tool older than this change refuses main's stamp.json (unknown field `keepBranches`) with a clear stop. `merge/install_from_main.sh` fixes it. Debt: `old-merge-tool-refuses-stamp`.
-- (e) In a cycle of lanes (A based on B, and B based on A), the delete order is the heads order, not dependents first. A failed delete in the cycle can then close a PR whose base is gone. Debt: `lane-cycle-delete-order`.
+- (a) Any origin head at a lane tip's sha is deleted. `merge.keepBranches` is the only guard, so a long-lived branch merged into a batch is lost. Its commits stay on main; restoring it is one push. Debt: `long-lived-head-lost-in-batch` (a long-lived head is lost).
+- (b) A fast-forwarded first lane is never a tip (0 of 112 recent lane merges did this). Debt: `ff-first-lane-not-a-tip` (fast-forwarded first lane is no tip).
+- (c) Squash-merged lanes are kept. Debt: `squash-lane-branch-kept` (a squash-merged lane is kept).
+- (d) A merge tool older than this change refuses main's stamp.json (unknown field `keepBranches`) with a clear stop. `merge/install_from_main.sh` fixes it. Debt: `old-merge-tool-refuses-stamp` (older merge tool refuses the stamp).
+- (e) In a cycle of lanes (A based on B, and B based on A), the delete order is the heads order, not dependents first. A failed delete in the cycle can then close a PR whose base is gone. Debt: `lane-cycle-delete-order` (lane cycle loses delete order).

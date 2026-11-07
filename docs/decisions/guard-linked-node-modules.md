@@ -28,8 +28,8 @@ Home: hooks/guard_push_delete.py
 
 ## Safety holes, named
 
-- (a) `npm prune`, `dedupe`, `audit fix`, `rebuild` and `link` are not judged. Owner ruling 2026-10-20: a follow-up lane `npm-readonly-allowlist` replaces the command list with a read-only allow list. Debt: `npm-audit-fix-linked`.
-- (b) `-w`, `--workspace` and `--prefix` are not read. A bypass and a false alarm both. Debt: `linked-nm-prefix-workspace`.
+- (a) `npm prune`, `dedupe`, `audit fix`, `rebuild` and `link` are not judged. Owner ruling 2026-10-20: a follow-up lane `npm-readonly-allowlist` replaces the command list with a read-only allow list. Debt: `npm-audit-fix-linked` (npm audit fix on linked modules).
+- (b) `-w`, `--workspace` and `--prefix` are not read. A bypass and a false alarm both. Debt: `linked-nm-prefix-workspace` (-w, --prefix not read when linked).
 - (c) `npm install-test` and its aliases are not judged. Note in `docs/debts/notes.md`: `linked-nm-install-test`.
 - (d) `pnpm`, `yarn`, `bun`, `npx` and `npm.exe` are not judged. Note: `linked-nm-other-managers`.
 - (e) `find -delete`, `Get-ChildItem | Remove-Item`, `cmd rmdir /s`, `rimraf`, `cd node_modules && rm -rf x` and `-Recurse:$true` are not read as recursive deletes into the link. Note: `linked-nm-other-deletes`.

@@ -38,7 +38,7 @@ it. A size enters only with a written source.
 A repo prints its true level only once its extras file names `visibility` or `caution`.
 degen, joyous and q_max do not yet.
 
-Risk kind: incident, per `building-guard-needs-incident`. Incidents: the 1 in 5 refused logins above,
+Risk kind: incident, per `building-guard-needs-incident` (build guards against likely mistakes). Incidents: the 1 in 5 refused logins above,
 2026-10-27; and 2026-11-01 19:30-19:52 CST, when degen, joyous and q_max were private (`gh api` `.private`
 true) but had no `visibility` key. Session start printed `repo caution: public`, and a degen lane built a
 wrong spend premise on it. Governing rule: `verification-report-unknown-reads` (a read that cannot run is

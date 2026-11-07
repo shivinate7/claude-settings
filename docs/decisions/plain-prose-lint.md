@@ -5,7 +5,7 @@
 The STE lint is a plain-prose lint. The writer gets a rewrite only where the rewrite keeps the meaning.
 Where the lint cannot judge meaning, it nudges and never refuses.
 
-Owner, 2026-11-02 13:22 CST: drop Simplified Technical English (STE) as a named writing standard, everywhere. Write plainly only. The one standard is rule `output-write-in-ste` in `CLAUDE.md`: "Write plainly: short sentences, one term per meaning, no filler." The lint keeps its current checks and names for now. Renaming the lint, its CI step and its shared action is a separate follow-up.
+Owner, 2026-11-02 13:22 CST: drop Simplified Technical English (STE) as a named writing standard, everywhere. Write plainly only. The one standard is rule `output-write-in-ste` (write plainly, one term per meaning) in `CLAUDE.md`: "Write plainly: short sentences, one term per meaning, no filler." The lint keeps its current checks and names for now. Renaming the lint, its CI step and its shared action is a separate follow-up.
 
 Owner: a lint rule either refuses or does not exist. A rule nobody can see is not a rule. The six advisory codes below are the one exception. `RULES` in `lint/ste_lint.py` is the home.
 
@@ -14,7 +14,7 @@ STE018 (a gendered pronoun) is deleted outright. STE006 (a semicolon) is prose-o
 - A lookup rule (a fixed phrase, a fixed pronoun set, a missing conjunction, a word order) may refuse. A judgment rule (a style call that settles differently each time a reader looks) must not be an `error`.
 - Errors stay for three codes: STE001 (one budget of 30 words, no split by mode), STE011 (bloat) and
   STE013 (double negative). CI's STE lint fails the CI step on them on changed lines. No hook runs the lint
-  on a write (owner, 2026-10-22 10:10 CDT; `ste-guard-fixes-not-nags`).
+  on a write (owner, 2026-10-22 10:10 CDT; `ste-guard-fixes-not-nags`, no STE hook; CI carries the lint).
 - STE020 (label length) and STE021 (bad UI escape) are dropped (owner, 2026-10-22 10:10 CDT). The
   icon-and-label rule and design review carry label length. A UI escape is `ste-disable-line CODE: reason`
   or `ste-disable-next-line CODE: reason` in a comment. Any other escape suppresses nothing.
@@ -28,7 +28,7 @@ STE018 (a gendered pronoun) is deleted outright. STE006 (a semicolon) is prose-o
 - No renames yet. q_max and banchi pin `actions/ste-lint` by SHA, so every code, file and key keeps its name.
 
 Reason: safer outcome first, smaller diff second. A rewrite that changes meaning costs more than a nudge.
-A guard that goes red on prose the project already lives with finds no defect and is spent (`verification-cry-wolf-guard-is-spent`).
+A guard that goes red on prose the project already lives with finds no defect and is spent (`verification-cry-wolf-guard-is-spent`, a guard that cries wolf).
 
 Kind: process
 Home: lint/ste_lint.py

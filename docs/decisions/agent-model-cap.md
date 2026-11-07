@@ -3,7 +3,7 @@
 ## The ruling
 
 Each agent role runs the model and effort of its row in the table below. Sonnet is the ceiling.
-Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer and the design reviewer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`), and the builder's third try by standing grant,
+Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer and the design reviewer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`, design reviewer joins review round 1), and the builder's third try by standing grant,
 and the owner watches that cost. An Explore may run Sonnet or Opus when its brief's first non-blank line carries the `Audit:` marker
 (owner, 2026-11-01 18:38 CST, waiting-page item 137, pick a). An Explore on Opus with no marker is refused, and an override lifts it; no scoped `opus explore` form exists (option b, not picked).
 The question reviewer agent hook keeps its class-level grant of 2026-10-21 (see its row). Any other spawn above its role's model, a reviewer's round 3 on Opus too, is refused. It runs only when the owner's typed override or grant names it
@@ -56,7 +56,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | Claude GitHub Action, if added | haiku | xhigh |
 | teammates, Workflow `agent()` | the role table, by `agentType` | the role table |
 | separate sessions (`start_session`, `create_session`) | main model unless the owner names one | default |
-| lane session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-28 16:15 CDT, waiting item 50, pick b | medium, the owner's ruling of 2026-10-30 15:11 CDT; set by the start prompt, below |
+| lane session (decision `session-tiers`, the session shapes) | opus, the owner's ruling of 2026-10-28 16:15 CDT, waiting item 50, pick b | medium, the owner's ruling of 2026-10-30 15:11 CDT; set by the start prompt, below |
 | arbiter session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-29 16:42 CDT, waiting item 81, pick a | high |
 | safety-classifier fallback | on, the default | n/a |
 | Agent spawn judge (`hooks/call_judge.py`, PreToolUse on Agent, so an override can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
@@ -64,7 +64,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | reply judge (`hooks/reply_judge.py`, Stop) | haiku, through `decision_watch.invoke_model` | xhigh |
 | report guard past-ruling check (`lint/report_guard.py`, Stop) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
 | feedback guard (`hooks/feedback_guard.py`, Stop; one call per Stop that has a new inbox item and an older item to compare with) | claude-haiku-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
-| question reviewer (the same script, on AskUserQuestion and on an ArtifactData write of a waiting-page item) | claude-opus-5-5, through `decision_watch.invoke_model`, by the owner's standing grant of 2026-10-21, given at class level for this hook (decision `question-reviewer-agent-hook`) | model default: the call passes no effort |
+| question reviewer (the same script, on AskUserQuestion and on an ArtifactData write of a waiting-page item) | claude-opus-5-5, through `decision_watch.invoke_model`, by the owner's standing grant of 2026-10-21, given at class level for this hook (decision `question-reviewer-agent-hook`, one Opus call reviews each question) | model default: the call passes no effort |
 | SendMessage busy judge (`hooks/sendmessage_state.py`, PreToolUse; a model call only when the receiver is busy on the session board) | haiku, through `decision_watch.invoke_model` | xhigh |
 | SendMessage wording judge (the same script, one call on every send, so an override can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
 | plain-diff mod note (`mods/plain-diff/hooks/register.mjs`, `$.model.complete`, one call per file with no note) | haiku, set in the call | none set: the call passes no effort field |
@@ -134,7 +134,7 @@ Kind of risk: incident. Landed 2026-11-01.
 Incident: 2026-11-01 18:08 CST, lanes tagged with the short repo name made 18 false in-progress flags on
 the roadmap page, because the live check matches the full tag.
 
-**The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
+**The step-up.** Guard rule `roles-third-round-steps-up` (third try runs on Opus) reads the `Round N of 3` marker in
 the brief. A line that starts with it counts. When the brief's first non-blank line starts with no marker, the
 leftmost marker on that line also counts if it is `Round N of 3`, such as "Builder, Round 3 of 3. Lane ...". A
 leftmost `Try N of 3` there adds nothing. Owner ruling 2026-10-29 16:29 CDT: a round-3
@@ -200,7 +200,7 @@ design-reviewer (the 2026-10-26 grant above), a builder with the `Round 3 of 3` 
 it is refused. An override, `opus 2h`, `opus <role> 2h`, the owner's plain Opus ask (decision `owner-override`) or a step grant lifts the spawn refusal. The ask on a settings write under the same
 id stays outside every override. The refusal fires only on an Opus spawn, so it stops a fan-out only where Opus was
 asked for. A justification line is written after the model is chosen, so it defends the choice; the one line
-before dispatch (`roles-opus-shaped-say-so`) names the reason before the choice, so it stays. The ask on a
+before dispatch (`roles-opus-shaped-say-so`, say so before an Opus-shaped task) names the reason before the choice, so it stays. The ask on a
 write that changes the fallback stays: a write is a standing change, not a dispatch. The Opus refusal and the role row read
 Agent and Task calls, and each Workflow `agent()` call whose `agentType` and model are string literals (the same static
 scan as the Haiku floor and the step-up). Item 127 pick a and the coordinator ruling of 2026-11-01 22:54 CST rule that

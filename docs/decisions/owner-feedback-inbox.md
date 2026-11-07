@@ -28,7 +28,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
 - **Notices.** A message that starts with a tag in `shared_names.MACHINE_TAGS` is agent or system
   text. It is never captured, and it does not count toward a burst. Hand-backs and the
   `<cross-session-message` frame are skipped. That skip is a bandaid (owner ruling 2026-11-01
-  04:29 CST, covering this skip only; debt `inbox-saves-other-notices`, which tracks other notices
+  04:29 CST, covering this skip only; debt `inbox-saves-other-notices` (other notices reach the feedback inbox), which tracks other notices
   the inbox saves). Other peer messages are skipped only where a tag marks them.
 - **Burst.** A turn's messages are the ones captured since the last Stop. They are a burst when there
   are two or more, or when one message has three or more non-blank lines or two or more bullet lines.
@@ -77,7 +77,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   checks each open one, in every block that holds one, burst or not. A `[closed]` one is never checked.
   It blocks until the transcript shows a send after the owner's message. The send is a send_message or
   SendMessage naming n, or an ArtifactData write (set, update or batch) whose input has `n` equal to the
-  item number in collection `items` (rule `questions-go-to-owner`). The k-th block with text T anchors to
+  item number in collection `items` (rule `questions-go-to-owner`, questions go to the owner). The k-th block with text T anchors to
   the k-th owner record with text T. An owner record is a user record, or a queued message (an owner
   message typed while the session runs, a `queued_command` attachment). A peer's words and machine
   notices are never owner records. A missing transcript passes every block with a systemMessage. A block

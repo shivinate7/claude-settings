@@ -22,7 +22,7 @@ text-only change (owner, 2026-11-03: design reviewer only).
     judges against the mockup, or main's screenshots for a text-only change, and the round-1 blind
     list. No new blind pair runs. Its fixes go to the builder with that round's code findings. After a
     fix check, they go to the builder as one more fix, with its own fix check.
-- Routing has one test, one exception: does the lane touch a screen (`roles-one-role-per-agent`). `agents/reviewer.md`
+- Routing has one test, one exception: does the lane touch a screen (`roles-one-role-per-agent`, each agent is one role). `agents/reviewer.md`
   still reviews the code. Exception: a text-only change skips the designer. The design
   reviewer still runs beside round 1. Owner ask `ask-mw18vywh8g` (small text changes on existing
   screens), 2026-11-03 16:13 CST.
@@ -37,10 +37,10 @@ text-only change (owner, 2026-11-03: design reviewer only).
     that sends the lane to a designer.
 - The blind reviewers of `skills/design-review` stay blind. They keep agentType `reviewer` and never
   see the design spec. The design reviewer reads the spec, so it runs only at that skill's compare
-  step, after the blind list is complete (`design-skills`). A second design read reuses the round-1
+  step, after the blind list is complete (`design-skills`, design skills on screens). A second design read reuses the round-1
   blind list.
-- Opus is a standing grant for both roles, a class-level exception to `roles-sonnet-is-the-ceiling`,
-  with no proof run first. The model table is in `agent-model-cap`.
+- Opus is a standing grant for both roles, a class-level exception to `roles-sonnet-is-the-ceiling` (Sonnet is the ceiling),
+  with no proof run first. The model table is in `agent-model-cap` (the model-per-role table).
 - Deferred: whether the designer runs Claude Code's `/design` canvas itself, or the owner runs it.
   Until the owner rules, the designer draws HTML mockups only.
 
@@ -53,7 +53,7 @@ procedure is `skills/design-explore/SKILL.md`.
 
 Guard rule `designer-scope` (`hooks/guard.py`) refuses a designer's Edit or Write on a repo path
 outside the design folder. A path in no repo, and the agent's own scratchpad, stay allowed. It
-extends the role scopes of `builders-cannot-edit-tests`, and logs a designer's diff at commit and
+extends the role scopes of `builders-cannot-edit-tests` (builders cannot edit tests), and logs a designer's diff at commit and
 stop the same way (`designer-diff`). Risk: likely. A designer that writes product code becomes a
 second builder, unreviewed as one. Landed 2026-10-26.
 

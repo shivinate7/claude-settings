@@ -21,14 +21,14 @@ reviewer clause in `agents/reviewer.md`.
   inside its write scope (owner, 2026-10-30, waiting-page item 82 b, designer skills). That pass is not the design review.
 - Pins: Renovate moves each pin. `renovate.json` opens a draft PR each month. The owner merges or skips each PR. The pin homes are the `skill-v*` tag in `skills/impeccable/SOURCE.txt`, the
   commit in the Vercel URL in `skills/design-review/SKILL.md`, and the `anthropics/claude-code` ref in `settings.json`. Each pin moves to the
-  newest version that passes its checks (`verification-newest-that-passes`). The `claude-code` ref is the one that carries `frontend-design`.
+  newest version that passes its checks (`verification-newest-that-passes`, take the newest passing version). The `claude-code` ref is the one that carries `frontend-design`.
 - Narrowing of `verification-newest-that-passes`: the impeccable and `claude-code` pins take the newest release only after it has waited 14
   days (`minimumReleaseAge`, global in `renovate.json`). The Vercel pin's wait is unknown: its `git-refs` source has no release time, and
   `renovate.json` sets `timestamp-optional` for it. The owner wants their improvements.
 - No Vercel plugin: the upstream skill fetches from `main` on every run, so a plugin update would move the rules without a decision. No
   impeccable plugin: it installs hooks that run `impeccable hook` on SessionStart, PostToolUse and Stop in every session, and an agent with
   Write and Edit. The guard sees neither.
-- STE lint skips `skills/impeccable/`: it is third-party prose (Apache 2.0), and third-party skills need not follow our writing rule `output-write-in-ste` (owner,
+- STE lint skips `skills/impeccable/`: it is third-party prose (Apache 2.0), and third-party skills need not follow our writing rule `output-write-in-ste` (write plainly, one term per meaning) (owner,
   2026-10-10). Nobody edits the copy by hand.
 - Guard rule `impeccable-review-only` (`hooks/guard.py`): the Skill tool loads impeccable only for `audit` or `critique`. The skill reads the first word of its args as the command and the rest as target text, so a `;` starts no second command: a part after it is refused only when it opens with a command verb other than `audit` or `critique`. The verbs are the Commands table of `skills/impeccable/SKILL.md`, read by the guard, which holds no copy. A joining `then` or `and` is read past. Plain text such as `check the contrast on mobile`, or `focus on a11y`, is target text and passes. If the table cannot be read, every part after a `;` is refused. `audit; polish` and a `|`, `&&` or newline chain stay refused. In the shell,
   an impeccable call passes only for `detect ...` and `hooks status`. Every other subcommand is refused, also a later one. `detect` may
@@ -42,7 +42,7 @@ reviewer clause in `agents/reviewer.md`.
   list per repo, with what the skill wants, what the repo has, and a recommendation.
 
 Reason: the owner wants the skills to improve every repo. Conformity would make them worthless, so a repo does not silence a skill, and a
-skill does not restyle a repo on its own. Pinning impeccable and Vercel keeps an update from changing a look by itself. The `frontend-design` ref moves only when a newer tag installs it at a fresh start. Reopen when a clash repeats across repos, or a skill restyles a repo. Then follow `outcomes-stale-decision-protocol`.
+skill does not restyle a repo on its own. Pinning impeccable and Vercel keeps an update from changing a look by itself. The `frontend-design` ref moves only when a newer tag installs it at a fresh start. Reopen when a clash repeats across repos, or a skill restyles a repo. Then follow `outcomes-stale-decision-protocol` (how to handle a stale decision).
 
 Kind: process
 Home: skills/impeccable/SOURCE.txt

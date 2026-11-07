@@ -44,6 +44,6 @@ Banchi, a child repo, was read Oct 30. Its `server concurrency` audit row (banch
 - Table lines and screen lines are not checked for bare numbers. The plan named them. The code checks map lines and trace steps.
 - A second copy inside one repo is a reviewer's call. Copies across repos belong to `lint/find_copies.py`.
 
-Risk kind: likely risk, per `building-guard-needs-incident`. Prose that no check reads rots and misleads. Landed 2026-10-30.
+Risk kind: likely risk, per `building-guard-needs-incident` (build guards against likely mistakes). Prose that no check reads rots and misleads. Landed 2026-10-30.
 Kind: process
 Home: skills/plain-english-map/scripts/map-check.mjs

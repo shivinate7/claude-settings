@@ -12,7 +12,7 @@ Three incidents, all on 2026-11-01:
 
 - He said "test groups" for CI test shards.
 - He said "time limits" for CI job caps.
-- He said "outcomes based test audits" for the test and CI standard plan, roadmap step `test-ci-standard`.
+- He said "outcomes based test audits" for the test and CI standard plan, roadmap step `test-ci-standard` (plan for good tests and CI).
 
 `lint/check_glossary.py` reads added paths and lines, the glossary table and the rule files. It never reads what the owner types.
 

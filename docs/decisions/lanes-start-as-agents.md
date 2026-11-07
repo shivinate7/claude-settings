@@ -21,7 +21,7 @@ Incidents:
 
 Mechanized: no. A check would have to tell a lane session from an agent at the point it starts. The start call carries no lane marker.
 
-Cost, per `outcomes-mechanize-rules`: none. It is a rule for the coordinator. It starts no process and writes no file.
+Cost, per `outcomes-mechanize-rules` (turn rules into hooks or checks): none. It is a rule for the coordinator. It starts no process and writes no file.
 
 Kind: process
 Home: rule:parallelism-own-lane-orchestrator

@@ -5,7 +5,7 @@
 The session-board mod (`mods/session-board`, commands `/board` and `/safe-stop`) gives one view of all
 sessions and a safe stopping point, with no typing of "status?" into each one. Reason: each record is
 small. It holds names and counts, no prompt and no file content. `/safe-stop` is in
-`safe-stop-queues-one-prompt`.
+`safe-stop-queues-one-prompt` (/safe-stop queues one prompt).
 
 Update-ready holds only when all five conditions hold (the owner's definition):
 
@@ -24,7 +24,7 @@ session reads git at a turn end, on attach, and then about every 5 minutes. A gi
 seconds (`READ_MAX_AGE_MS`), so an idle board stays update-ready and does not show unknown. The
 board hides a stale entry. The one-day sweep deletes old records and skips a session that `claude agents`
 lists as live. It deletes only when that list is a valid JSON array; a valid empty list counts as real.
-An unreadable check is not a death (`verification-report-unknown-reads`). Session end deletes both
+An unreadable check is not a death (`verification-report-unknown-reads`, report an unrunnable read as unknown). Session end deletes both
 records, for any reason.
 
 Privacy:
@@ -33,7 +33,7 @@ Privacy:
 - The recent list holds the tool name, plus a file name for file tools only. A Bash command and an MCP
   tool give the tool name only.
 - A name that looks secret shows as "(secret file)". The rule copies the plain-diff secret filter
-  (`plain-diff-mod-limits`).
+  (`plain-diff-mod-limits`, diffs sent only past secret filter).
 - The mod shows no cost figure. The figure from `$.session.usage()` was unreliable.
 
 Safety of the session: every host call sits in a try and a failure logs one line prefixed
@@ -53,15 +53,15 @@ session-board holds one guard: rule `question-box-while-work` refuses AskUserQue
 
 Why: Oct 26, a UI session waited on a question box while its background agents filled the disk and crashed it. Oct 27, an orchestrator with no agent or command of its own opened the box, and the lane sessions it had started waited on it.
 
-Risk kind: incident, per `building-guard-needs-incident`. Landed 2026-10-27.
+Risk kind: incident, per `building-guard-needs-incident` (build guards against likely mistakes). Landed 2026-10-27.
 
-Cost, per `outcomes-mechanize-rules`: process starts, none on a box allowed after a good read, and none for a session start; one python start per `guard.log` line (a refusal, or a box allowed because the list was unknown). Files written: that one line. How often: once per AskUserQuestion call. No timer and no watcher; the agent list is read inside the check. `mods/session-board/session-board.test.mjs` (the "question box" cases) pins the zero starts on an allowed box and one line per refusal.
+Cost, per `outcomes-mechanize-rules` (turn rules into hooks or checks): process starts, none on a box allowed after a good read, and none for a session start; one python start per `guard.log` line (a refusal, or a box allowed because the list was unknown). Files written: that one line. How often: once per AskUserQuestion call. No timer and no watcher; the agent list is read inside the check. `mods/session-board/session-board.test.mjs` (the "question box" cases) pins the zero starts on an allowed box and one line per refusal.
 
 ## A missed notice
 
 Owner ruling, waiting-page item 117, 2026-11-01 11:53 CST (picks a and b):
 
-- (a) The mod has no `classic.Stop` handler. It once reset the tracked set from the Stop input's `background_tasks` at each main-loop turn end. The built-in plugin sec-default sends every `classic.*` event past user mods, so that handler never ran. The same reroute is in `decision-watch-mod-limits` (the decision-watch mod's record, section "The event is turn.complete"). The mod still listens on `turn.complete` and others; only `classic.*` is lost.
+- (a) The mod has no `classic.Stop` handler. It once reset the tracked set from the Stop input's `background_tasks` at each main-loop turn end. The built-in plugin sec-default sends every `classic.*` event past user mods, so that handler never ran. The same reroute is in `decision-watch-mod-limits` (decision-watch runs as a mod) (the decision-watch mod's record, section "The event is turn.complete"). The mod still listens on `turn.complete` and others; only `classic.*` is lost.
 - (b) A tracked task clears when a TaskStop call answers without error. The id comes from the output `task_id`, else the input `task_id`, else the input `shell_id`, else the output message "Successfully stopped task: <id>" (the text `hooks/stall_watch.py` reads). An `isError` or `is_error` result is no answer.
 - A TaskStop on a task that already ended fails with "No task found with ID: <id>" (measured by the coordinator, 2026-11-01 12:10 CST). That failure also clears the id, thrown or as an error result, because no task has it. Any other failure keeps the task.
 
