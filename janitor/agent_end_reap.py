@@ -133,7 +133,8 @@ def log(record: dict, replace_run=None, give_up_at=None):
     A drop never fails the hook (exit stays 0). It goes as one JSON line (`at`, `run`, `error`) to the
     drops file, drops_path(), and then to stderr. The append comes first, so a closed stderr (OSError)
     cannot stop it, and log() never raises. The append is best effort: if it fails too, nothing more
-    is written.
+    is written. It shares the `state/` folder with the log, so a folder that cannot be written, or a
+    full disk, fails both and leaves stderr as the only report.
     Cost: one append, only on a failed write, plus one rename when the drops file is DROPS_MAX_BYTES
     (256 KiB) or more; a write that lands writes nothing extra.
     Bound: that rename moves the drops file to `<drops>.old`, replacing any old one, so the two files
