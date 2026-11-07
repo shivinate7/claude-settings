@@ -1778,6 +1778,23 @@ def _build_branch():
         sys.exit("fixture setup failed in build_fixtures: renaming design-merged's file on main "
                  "failed. stderr: %s" % moving.stderr.strip())
     run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "merged.html is renamed on main")
+    # design-modified: main holds the mockup's first bytes, then the branch changes them. The file sits
+    # on both sides, so the branch's change to it is a modification, not an addition. design-same's tip
+    # holds main's mockup bytes unchanged, with a note outside the folder added: the control.
+    modified = design + "/modified.html"
+    write(os.path.join(BRANCHREPO, *modified.split("/")), "on main before the branch\n")
+    run_vcs(BRANCHREPO, "add", modified)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "modified.html is on main")
+    design_branch("design-modified", modified, "changed on the branch, not added\n")
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "design-same")
+    write(os.path.join(BRANCHREPO, "same-note.txt"), "a note off the design folder\n")
+    run_vcs(BRANCHREPO, "add", "same-note.txt")
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "design-same's note")
+    same_push = run_vcs(BRANCHREPO, "push", "-q", "origin", "design-same")
+    if same_push.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: pushing design-same failed. stderr: %s"
+                 % same_push.stderr.strip())
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
     # unmerged-work is made after main's last move. Then origin/main is an ancestor of it, so a
     # swapped ancestor test reads it as merged and allows the only copy; the rule must still refuse.
     run_vcs(BRANCHREPO, "checkout", "-q", "-b", "unmerged-work")
@@ -1859,6 +1876,22 @@ def _build_branch():
     if run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "origin/main", "unmerged-work").returncode != 0:
         sys.exit("fixture setup failed in build_fixtures: origin/main is not an ancestor of "
                  "unmerged-work, so a swapped ancestor test would not flip the only-copy case")
+
+    # The modified-mockup scope, read with git before any case relies on it: origin/main holds the
+    # mockup's first bytes, design-modified's tip holds other bytes at that path (so its change is a
+    # modification), and design-same's tip holds main's bytes (the identical-blob control).
+    if not listed("origin/main", modified):
+        sys.exit("fixture setup failed in build_fixtures: origin/main lacks the mockup design-modified "
+                 "changes, so its change would be an addition")
+    if rev("design-modified:" + modified) == rev("origin/main:" + modified):
+        sys.exit("fixture setup failed in build_fixtures: design-modified's mockup is main's, so its "
+                 "change would not be a modification")
+    if rev("design-same:" + modified) != rev("origin/main:" + modified):
+        sys.exit("fixture setup failed in build_fixtures: design-same's mockup differs from main's, so "
+                 "it would not be the identical-blob control")
+    for name in ("design-modified", "design-same"):
+        if not rev(name) or rev(name) != rev("origin/" + name):
+            sys.exit("fixture setup failed in build_fixtures: origin/%s is not the tip of %s" % (name, name))
 
     # design-unseen is pushed, then this clone drops its tracking ref and local branch, as a clone
     # that fetched before the push has none. No ref here names it, so no read can list its tip.
@@ -3514,6 +3547,12 @@ sh("push: a --delete of a design file with no archive holding its tip denies",
 sh("push: a delete refspec of a design file with no archive holding its tip denies",
    VCS + " push origin :design-only", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
    carries="archive/", lacks=("design-only",))
+# A DRY RUN MOVES NOTHING. `push --dry-run` and `push -n` name the same delete and remove nothing on
+# origin, so the design check must not refuse either. The real delete above stays refused.
+sh("push: a --dry-run --delete of a design file with no archive holding its tip allows",
+   VCS + " push --dry-run origin --delete design-only", "allow", cwd=BRANCHREPO)
+sh("push: a -n --delete of a design file with no archive holding its tip allows",
+   VCS + " push -n origin --delete design-only", "allow", cwd=BRANCHREPO)
 sh("push: a --delete of a design file whose archive is an older commit denies",
    VCS + " push origin --delete design-stale", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
    carries="archive/", lacks=("design-stale",))
@@ -3540,6 +3579,14 @@ sh("push: a --delete of a design branch already on the default branch, its file 
    VCS + " push origin --delete design-merged", "allow", cwd=BRANCHREPO)
 sh("push: a --delete of a design file whose tip an archive under a new name holds allows",
    VCS + " push origin --delete design-taken", "allow", cwd=BRANCHREPO)
+# A MODIFIED MOCKUP IS JUDGED LIKE AN ADDED ONE. design-modified changes a mockup that main already holds,
+# at the same path with other bytes. Deleting it removes the only copy of those bytes, so it is refused as
+# an added mockup is. design-same keeps main's bytes: its control allows.
+sh("push: a --delete of a design branch that modifies a mockup main holds, with no archive, denies",
+   VCS + " push origin --delete design-modified", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
+   carries="archive/", lacks=("design-modified",))
+sh("push: a --delete of a design branch whose mockup is identical to main's allows",
+   VCS + " push origin --delete design-same", "allow", cwd=BRANCHREPO)
 # A TAG IS NOT A BRANCH. v1.0 is a local tag and no branch of that name exists, so no tip resolves for
 # it. The design check judges origin's branches only, and a name that is only a tag keeps main's verdict,
 # which allows. Its control is the same no-tip read with no tag of that name: that still asks.
@@ -3548,6 +3595,46 @@ sh("push: a --delete of a name that is only a local tag allows",
 sh("push: a --delete of a name with no ref and no tag still asks, beside the tag allow",
    VCS + " push origin --delete design-unseen", "ask", ARCHIVE_RULE, cwd=BRANCHREPO,
    lacks=("design-unseen",))
+
+# AN UNREAD DESIGN FOLDER ASKS, NEVER ALLOWS. With no readable lint/layout.json, design_folder() is None,
+# so neither design check can tell a design file from none. Both must ask (decision
+# design-branch-delete-guard: a read that cannot answer asks, never allows). The layout roots are emptied
+# first, and the scope (no folder) is proven before either check runs.
+DESIGN_UNREAD_BRANCH_LABEL = "branch: an unread design folder asks on a branch -D, never allows"
+DESIGN_UNREAD_PUSH_LABEL = "push: an unread design folder asks on a --delete, never allows"
+
+
+def _unread_design_folder():
+    """The guard, loaded with its layout roots set to an empty folder, and the design folder it reads
+    from them: None."""
+    guard = _load_guard_module()
+    empty = os.path.join(ROOT, "design-no-layout")
+    os.makedirs(empty, exist_ok=True)
+    guard.settings_roots = lambda: [empty]
+    del guard._DESIGN_FOLDER[:]
+    return guard, guard.design_folder()
+
+
+def design_unread_branch_case():
+    materialize(BRANCHREPO)
+    guard, folder = _unread_design_folder()
+    if folder is not None:
+        return False, "scope: the design folder still reads with no layout root, so nothing is unread"
+    if guard.design_branch_delete_ask(["-D", "design-only"], BRANCHREPO, folder) is not True:
+        return False, "branch -D of a design branch with an unread design folder allowed, want ask"
+    return True, "branch -D asks with an unread design folder"
+
+
+def design_unread_push_case():
+    materialize(BRANCHREPO)
+    guard, folder = _unread_design_folder()
+    if folder is not None:
+        return False, "scope: the design folder still reads with no layout root, so nothing is unread"
+    verdict = guard.design_push_delete_verdict(BRANCHREPO, "origin", ["design-only"], folder)
+    if verdict != "ask":
+        return False, "push --delete with an unread design folder gave %r, want ask" % verdict
+    return True, "push --delete asks with an unread design folder"
+
 
 # `git worktree remove <path>`. The subject lives at PATH, not at the checkout the command runs
 # in, so every case below runs from WTMAIN and names one of its own linked worktrees.
@@ -13995,6 +14082,12 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The unread-design-folder checks read the design section's fixtures. LOG_CHECKS_EXTRA is defined above,
+# so they register here, and their family is set by hand, as the base-copy cost check's is.
+LOG_CHECKS_EXTRA.append((DESIGN_UNREAD_BRANCH_LABEL, design_unread_branch_case))
+LOG_FAMILY[DESIGN_UNREAD_BRANCH_LABEL] = "branch-worktree"
+LOG_CHECKS_EXTRA.append((DESIGN_UNREAD_PUSH_LABEL, design_unread_push_case))
+LOG_FAMILY[DESIGN_UNREAD_PUSH_LABEL] = "branch-worktree"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
