@@ -43,7 +43,8 @@ sys.path.insert(0, HERE)
 import layout  # noqa: E402  the one home of the extras keys (lint/layout.py)
 
 ROOT = os.path.dirname(HERE)
-REGISTRY = os.path.join(ROOT, "docs", "design", "repo-colours.json")
+REGISTRY_PATH = "docs/design/repo-colours.json"  # the registry's path inside a checkout, for a read at a rev
+REGISTRY = os.path.join(ROOT, *REGISTRY_PATH.split("/"))
 PAGE = os.path.join(ROOT, "skills", "waiting-page", "page.html")
 HEX = re.compile(r"#[0-9a-fA-F]{6}")
 ICON_TYPES = {".svg": "image/svg+xml", ".png": "image/png"}
@@ -52,6 +53,16 @@ ICON_TYPES = {".svg": "image/svg+xml", ".png": "image/png"}
 def load(registry=REGISTRY):
     with open(registry, encoding="utf-8") as f:
         return json.load(f)
+
+
+def repo_names(text):
+    """The names the registry's `repos` object lists, from the registry's JSON `text` (one read, no path). An
+    absent or empty `repos` gives no name. Raises ValueError when `text` is no JSON object."""
+    data = json.loads(text)
+    if not isinstance(data, dict):
+        raise ValueError("the registry is no JSON object")
+    repos = data.get("repos")
+    return set(repos) if isinstance(repos, dict) else set()
 
 
 def retired(registry=REGISTRY):

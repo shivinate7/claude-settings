@@ -42,15 +42,21 @@ each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names
 `<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004). Fenced blocks count as prose.
 Each Markdown file is read as committed at head, never from the working tree.
 --tree [REV] reads every tracked Markdown file at REV (default HEAD) instead of a range, so it fires on lines no
-change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base, so a shallow clone is fine.
+change touched. It is opt-in: the ste-lint input `tree-cites` runs it, and so does the CI step "Debt notes paths
+resolve" (`--only docs/debts/notes.md --any-top`). It needs no base, so a shallow clone is fine.
   STALE003  the line names `<folder>/.../<file.ext>` that is no tracked file (or folder) at REV, as written or
             from the folder of the Markdown file. One tracked file with the same name elsewhere is named as a
             hint. A cite with a placeholder character, no extension, no folder part, or a first segment that is
             no tracked top folder is no path cite, so it never fires, unless --any-top is given. A `~` first segment
             (a home path) never fires, with or without it.
   A `<name>:<path>` run, a name of letters, digits, `_` or `-` and a colon touching the path, is a cite of another
-  checkout's file or of a ref. It is never read, never fires and never anchors, with or without --any-top. A colon
-  followed by a space (`Note: hooks/x.py`) is prose, so that path is read.
+  checkout's file only when `name` is a key of `repos` in docs/design/repo-colours.json at REV. Such a run is
+  never read, never fires and never anchors, with or without --any-top. The keys come from lint/repo_colour.py
+  `repo_names`, the one home of that registry, read as committed at REV and never from the working tree. With no
+  registry at REV, or one that lists no repos, no prefix is a sibling; one that is no JSON object is a read that
+  could not run (`stale-cites: UNKNOWN`, exit 2). Any other `word:` prefix (`Refs:hooks/x.py`) is prose, so the
+  prefix is dropped and the path is checked as a cite. A colon followed by a space (`Note: hooks/x.py`) is
+  prose too, so that path is read.
   STALE004  the line anchors `path:N` or `path:N-M` on a tracked file, and N is below 1, M is below N, or the
             last number is past the file's last line. A dead path gives STALE003 only.
 --only PATH (repeatable, --tree only) reads only the named tracked Markdown files. The tracked files, the folders,
@@ -58,7 +64,9 @@ the top folders and the did-you-mean hint still come from the whole tree, so a c
 path that is no tracked Markdown file this check reads at REV (absent, not .md, untracked, or left out above) is a read
 that could not run: `stale-cites: UNKNOWN, ...`, exit 2.
 --any-top (--tree only) lets STALE003 fire on a file cite whose first segment is no tracked top folder, such as
-`harness/x.mjs`. A cite with a placeholder, a URL, an absolute path or a `~` path still never fires.
+`harness/x.mjs`. A cite with a placeholder, a URL, an absolute path or a `~` path still never fires. A cite is
+resolved as written, then normalised (`./x/y.ext` is `x/y.ext`) against the repo root, then from the folder of
+the Markdown file, so `./hooks/a.py` is one file wherever the Markdown file sits.
 --tree and --range are exclusive. --only and --any-top need --tree.
 
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
@@ -96,7 +104,8 @@ then takes its Home line) and the mechanisms file once. The decisions folder is 
 mechanisms file to that read. Its list of changed files comes from the diff the run already read, with no git start.
 A --tree run starts one python3, then git rev-parse, ls-tree and one cat-file --batch. It reads each tracked .md
 once (only the named ones under --only, with the same starts), and each file a line anchor names once more, even when
-that file is a .md. --any-top adds no start. It writes no file and prints no report.
+that file is a .md. It also reads the colour registry once, as one more blob through that same cat-file, so no
+start. --any-top adds no start. It writes no file and prints no report.
 """
 import argparse
 import ast
@@ -111,6 +120,8 @@ import sys
 
 sys.dont_write_bytecode = True  # the cost contract: a run writes no file, so no .pyc for the import below
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import repo_colour  # noqa: E402  the one home of the colour registry, whose `repos` keys name the sibling checkouts
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import layout  # noqa: E402  the one home of where a repo keeps its decisions (lint/layout.py)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds (hooks/precompact_handoff.py)
@@ -1151,12 +1162,26 @@ def placeholder_adjacent(line, start, end):
     return bool(before and before in "${") or bool(after and after in "?<{[$") or (after == "*" and before != "*")
 
 
-SIBLING_PREFIX = re.compile(r"(?<![\w./@+~-])[A-Za-z0-9_-]+:\Z")  # `name:` touching the run, the name a whole run
+SIBLING_PREFIX = re.compile(r"(?<![\w./@+~-])([A-Za-z0-9_-]+):\Z")  # `name:` touching the run, the name a whole run
 
 
-def sibling_cite(line, start):
-    """True when the run at `start` follows `<name>:` with no space: a file of another checkout, or a ref."""
-    return bool(SIBLING_PREFIX.search(line, 0, start))
+def sibling_names(batch, rev):
+    """The repo names the colour registry lists at `rev`, read through the scan's BlobReader. An absent registry
+    lists none. An unreadable one is a read that could not run, never an empty list."""
+    blob = batch.get("%s:%s" % (rev, repo_colour.REGISTRY_PATH))
+    if blob is None:
+        return set()
+    try:
+        return repo_colour.repo_names(blob.decode("utf-8"))
+    except ValueError as exc:  # a bad byte or bad JSON
+        raise Unknown("%s at %s cannot be read: %s" % (repo_colour.REGISTRY_PATH, rev, exc))
+
+
+def sibling_cite(line, start, siblings):
+    """True when the run at `start` follows `<name>:` with no space and `name` is one of `siblings`: a file of
+    another checkout. Any other `word:` is prose, and the path after it is read."""
+    found = SIBLING_PREFIX.search(line, 0, start)
+    return bool(found) and found.group(1) in siblings
 
 
 def line_count(data):
@@ -1190,6 +1215,7 @@ def scan_tree(rev, only=(), any_top=False):
         return counts[path]
 
     try:
+        siblings = sibling_names(batch, rev)
         for md in mds:
             folder = posixpath.dirname(md)
             for number, line in enumerate(read_markdown(batch, rev, md).split("\n"), 1):
@@ -1200,11 +1226,12 @@ def scan_tree(rev, only=(), any_top=False):
                     cite = run.group(0).rstrip(".-")
                     top = cite.split("/", 1)[0]
                     if not FILE_CITE.match(cite) or placeholder_adjacent(line, run.start(), run.end()) \
-                            or sibling_cite(line, run.start()):
+                            or sibling_cite(line, run.start(), siblings):
                         continue
                     if top not in tops and not (any_top and top != "~"):
                         continue
-                    home = next((c for c in (cite, posixpath.normpath(posixpath.join(folder, cite)))
+                    home = next((c for c in (cite, posixpath.normpath(cite),
+                                           posixpath.normpath(posixpath.join(folder, cite)))
                                  if c in files or c in folders), None)
                     if home is None:
                         if "STALE003" not in off:
