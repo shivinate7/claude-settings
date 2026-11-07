@@ -27,9 +27,13 @@ Coordinator, 2026-11-06 12:59 CST, process-only (option b of the coordinator's c
 
 Lane ruling, 2026-11-06 13:25 CST, process-only, under coordinator pick Q1 (b): a choice, login or safety phrase exempts the line. The capability verbs widen to refused, unable to, denied, forbidden, no access, not allowed or permitted, unavailable and 403. "blocked until" and "not available until" are dependencies, not capabilities. Layer (a) is built in `lint/report_guard.py` (`hand_off_problem`). It reads the reply text. It reads this session's refusals file and the route rows file only for a capability line that needs them.
 
+Send check, 2026-11-07 17:05 CST, process-only: a `send_message` or `SendMessage` that forecasts what a named check, guard, hook, test or rule will or would refuse, block, deny, catch, allow or pass needs a run or a cite. The run is a Bash call in the current turn that names a file the claim names. The cite is a `(test path::name)` or `(read path:line)` to a file at head, read by `lint/stale_cites.py`. A claim that names a check only by pull request number needs the cite, because a run has no file to match. Past tense and fenced text pass. Built in `hooks/call_judge.py` (rule `verdict-claim-needs-run`).
+
 ## Incident
 
 `docs/decisions/session-tiers.md:64` (origin/main 7975f6d8) said "The cloud cannot close a pull request". One fact sat in three places: that line, the 2026-10-30 refusals in `docs/decisions/auto-mode-owner-acts.md` (lines 79-82 on origin/main), and the grant "Acts the cloud refuses" in `.claude/CLAUDE.md:16-19`. It stayed on main with no check. Measured 2026-11-06 on origin/main (7975f6d8): a grep of `lint`, `hooks`, `merge` and `actions` finds no check that reads the phrase.
+
+Send incident, 2026-11-07 16:31 CST: a session sent "#1516's check will refuse it". The check passed it. The claim had no run and no cite.
 
 ## Backing form
 

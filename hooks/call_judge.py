@@ -48,6 +48,15 @@ When the check cannot run (a model error, a source that exists and cannot be rea
 the model was not shown), the question is refused with the Unvetted remedy, unless its own text carries an
 `Unvetted:` line. An absent source allows, with one stderr line.
 
+Verdict claim (rule `verdict-claim-needs-run`, decision claims-carry-backing): a send whose message forecasts what a
+named check, guard, hook, test or rule will or would refuse, block, deny, catch, allow or pass is refused, unless
+(a) the current turn (payload transcript_path, read by lint/_transcript.py read_turn and tool_uses) holds a Bash call that
+names a file the claim names, or (b) the claim carries a backing cite that lint/stale_cites.py reads (paren_cites,
+cite_kind, backing_path) to a file at head. A claim that names no file, such as one that names a check only by pull
+request number, needs the cite: no run can clear it. Fenced text (stale_cites.fenced_lines) and past tense pass. A send
+with none of VERDICT_WORDS exits before any import, transcript read or model call. The refusal goes through refuse(),
+so the owner override lifts it. A source that cannot be read allows, with one stderr line.
+
 Fail open. Any other model error, odd answer or unreadable input allows, with one stderr line.
 
 Cost (rule outcomes-mechanize-rules): a send without the form, a read, and a write of another collection start
@@ -55,6 +64,10 @@ no process and make no model call. A send with the form: one git process (questi
 call. A judged item write: one git process, the dedicated Sonnet call, and then the form judge's Opus call, so one more
 Sonnet call than before. A chat box: one git process and one Opus call, as before. Nothing is written but the
 guard.log line of a refusal. test_call_judge.py counts the processes and the calls.
+Cost of the verdict claim rule: a send with no verdict word costs one regex pass, with no import, no process and no
+model call. A send with one reads the transcript's turn (one file read) and imports lint/stale_cites.py; a cite to a
+file costs one `git cat-file` process per cited file. It makes no model call and writes nothing but a refusal's guard.log
+line.
 
 One exception, opus_ask(): the owner's plain Opus ask (decision owner-override, the Opus word) fails CLOSED. It grants
 an override, so a model error, a timeout or an odd answer grants nothing, with one stderr line. override.grant_opus_ask
@@ -67,6 +80,7 @@ Cost: one more haiku call (low effort, OPUS_SCOPE_TIMEOUT s) for such an ask, no
 """
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -85,6 +99,17 @@ SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
 # and the code rules question_form.chat_hit names) is the question reviewer's.
 SPAWN_CITE = "(decision haiku-prompt-hooks, the spawn judge refuses a brief that breaks the spawn rules)"
 QUESTION_CITE = "(decision question-reviewer-agent-hook, a question is reviewed before it reaches the owner)"
+VERDICT_CLAIM_RULE = "verdict-claim-needs-run"
+VERDICT_CLAIM_CITE = "(decision claims-carry-backing, a forecast of a check's verdict needs its run or a cite)"
+# The words of a verdict claim: a sentence holds one of each list. Whole words, in any case: past tense ("refused")
+# is no forecast. These lists are the one home; hooks/test_call_judge.py reads them from here.
+VERDICT_FORECAST_WORDS = ("will", "would")
+VERDICT_WORDS = ("refuse", "block", "deny", "catch", "allow", "pass")
+VERDICT_SUBJECT_WORDS = ("check", "guard", "hook", "test", "rule")
+VERDICT_CLAIM_REMEDY = (
+    "this message forecasts what a check will refuse, block, deny, catch, allow or pass, and the turn did not run "
+    "it. Run the check first (a command that names the file the claim names), or add a backing cite "
+    "`(test path::name)` or `(read path:line)` to a file at head, or drop the forecast.")
 # THE TIME BUDGET. A judged item write makes two calls, in order, so the longest path is the dedicated past-ruling
 # call (PAST_RULING_TIMEOUT, 15 s) plus the question call's 60 s plus start-up (the git read, the import of
 # lint/report_guard.py). Every other path makes one call. The settings.json PreToolUse entry for this hook carries
@@ -329,7 +354,7 @@ def refuse(payload, tool, args, rule, reason):
     if reason.startswith(rule):
         reason = reason[len(rule):].lstrip(" :-")
     vetoed = explore_off_model(tool, args)
-    text = reason + " " + {SPAWN_RULE: SPAWN_CITE}.get(rule, QUESTION_CITE)  # the text both paths below carry
+    text = reason + " " + {SPAWN_RULE: SPAWN_CITE, VERDICT_CLAIM_RULE: VERDICT_CLAIM_CITE}.get(rule, QUESTION_CITE)  # the text both paths below carry
     try:
         import guard_core
         guard_core.set_log_session(payload.get("session_id"))
@@ -426,8 +451,101 @@ def send_question(message):
     return asked, question_form.has_unvetted(message)
 
 
+def _has_word(text, words):
+    return any(re.search(r"\b%s\b" % re.escape(word), text, re.I) for word in words)
+
+
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+|\n")
+
+
+def verdict_claims(message):
+    """The sentences of `message` that forecast a verdict, outside code fences: each holds a forecast word, a verdict word
+    and a subject word. Plain regex first, so a send with no verdict word imports nothing. Needs lint/ on sys.path."""
+    if not isinstance(message, str) or not _has_word(message, VERDICT_WORDS):
+        return []
+    import stale_cites  # the one home of what is fenced and of what a backing looks like
+    rows = message.split("\n")
+    fenced = stale_cites.fenced_lines(rows)
+    prose = "\n".join(row for number, row in enumerate(rows, 1) if number not in fenced)
+    return [sentence for sentence in SENTENCE_END.split(prose)
+            if _has_word(sentence, VERDICT_FORECAST_WORDS) and _has_word(sentence, VERDICT_WORDS)
+            and _has_word(sentence, VERDICT_SUBJECT_WORDS)]
+
+
+def named_files(sentence):
+    """The file paths a sentence names, each cut of its `:line` or `::name` tail. A bare `#1516` names none."""
+    import stale_cites
+    found = []
+    for word in re.split(r"[\s,;()`]+", sentence):
+        word = word.rstrip(".:")
+        if ("." in word.split("/")[-1] or "/" in word) and stale_cites.SOURCE.match(word):
+            found.append(re.split(r"::?\d*", word, maxsplit=1)[0])
+    return found
+
+
+def file_at_head(cwd, path):
+    """True when `path` is a file in the HEAD tree of the repo at `cwd`: one git process."""
+    import _nowindow
+    done = _nowindow.run(["git", "-C", cwd or ".", "cat-file", "-e", "HEAD:" + path], capture_output=True)
+    return done.returncode == 0
+
+
+def cite_backs(sentence, cwd):
+    """True when a paren cite of `sentence` is a test or read cite to a file at head (stale_cites, the one parser)."""
+    import stale_cites
+    for cite in stale_cites.paren_cites(sentence):
+        path = stale_cites.backing_path(*stale_cites.cite_kind(cite))
+        if path and file_at_head(cwd, path):
+            return True
+    return False
+
+
+def turn_commands(transcript_path):
+    """The Bash commands of the current turn, read by lint/_transcript.py (the one turn reader)."""
+    import _transcript
+    _, turn = _transcript.read_turn(transcript_path)
+    return [str((use.get("input") or {}).get("command", "")) for rec in turn for use in _transcript.tool_uses(rec)
+            if use.get("name") == "Bash"]
+
+
+def verdict_claim_problem(payload, message):
+    """The refusal text for an unbacked verdict forecast in `message`, or None. A claim is backed by a cite, or by a
+    Bash call in this turn that names a file the claim names."""
+    lint = os.path.join(HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    claims = verdict_claims(message)
+    if not claims:
+        return None
+    cwd, commands = payload.get("cwd") or "", None
+    for sentence in claims:
+        if cite_backs(sentence, cwd):
+            continue
+        files = named_files(sentence)
+        if files and commands is None:
+            path = payload.get("transcript_path")
+            try:
+                commands = turn_commands(path) if path else []
+            except OSError as exc:
+                print("verdict claim check unknown: transcript unreadable (%s)" % exc.__class__.__name__,
+                      file=sys.stderr)
+                return None
+        if not any(name in command for name in files for command in commands or ()):
+            return VERDICT_CLAIM_REMEDY
+    return None
+
+
 def judge_send(payload, tool, args):
-    """An owner question sent by a send tool gets the dedicated past-ruling call before it goes."""
+    """A send that forecasts a check's verdict needs its run or a cite. An owner question sent by a send tool gets the
+    dedicated past-ruling call before it goes."""
+    try:
+        problem = verdict_claim_problem(payload, args.get("message"))
+    except Exception as exc:
+        print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
+              file=sys.stderr)
+        problem = None
+    if problem:
+        return refuse(payload, tool, args, VERDICT_CLAIM_RULE, problem)
     try:
         question = send_question(args.get("message"))
         found = past_ruling_check(payload, question[0], question[1]) if question else None
