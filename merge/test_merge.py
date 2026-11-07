@@ -12288,7 +12288,7 @@ class ReviewRecordRules(unittest.TestCase):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, head=REVIEW_OLD_HEAD), head=REVIEW_HEAD), "stale")
 
     def test_a_guard_change_with_no_reproduction_line_is_open_and_names_the_line(self):
-        # the incident record: a guard change whose round 1 passed, with no Reproduction line, must not read done
+        # the incident record: a guard change whose first review passed, with no Reproduction line, must not read done
         state, why = record_verdict(self, record_text(rounds=REVIEW_PASS, guard="yes", net="not owed"))
         self.assertEqual(state, "open", "a guard or check change with no Reproduction line must read open, not done")
         self.assertIn("Reproduction", why, f"why does not name the Reproduction line: {why!r}")
@@ -12312,7 +12312,7 @@ class ReviewRecordRules(unittest.TestCase):
         self.assertEqual(stale_state, "stale", f"a stale guard change with no Reproduction line must read stale: {stale_why!r}")
 
     def test_with_a_reproduction_line_the_existing_rules_read_as_today(self):
-        # the line changes no done, open or held rule: a passed round, a round 2 pass, round 3 with a net value, and the held and open rules
+        # the line changes no done, open or held rule: a first or second pass, a final review with a net value, and the held and open rules
         cases = (
             (REVIEW_PASS, "normal", "yes", "not owed", "done"),
             (("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"), "normal", "yes", "not owed", "done"),
