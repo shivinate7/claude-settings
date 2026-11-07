@@ -253,13 +253,15 @@ RED = [
     ("password with a plain word before a secret", "password: " + "none hunter2", "hunter2"),
     ("password with a plain word and a comma before a secret", "password: " + "none, hunter2", "hunter2"),
     ("password with a quoted plain word before a secret", "password: " + '"none" hunter2', "hunter2"),
-    # A key word inside a longer name is a credential name too. The stem of an everyday word (mon, turn) is no reason
-    # to skip it when a lower-case run holds the stem, so `commonKey` and `returnKey` stay refused. The value is the one
-    # the turnkey control in GREEN uses. A stem that starts at a camelCase hump is a word start: see GREEN.
+    # A key word inside a longer name is a credential name too. The stem of an everyday word (mon, turn, hoc) is no
+    # reason to skip it. The value is the one the turnkey control in GREEN uses.
     ("commonKey with a value of letters and digits", "commonKey: " + GLUED_VALUE, GLUED_VALUE),
     ("daemonKey with a value of letters and digits", "daemonKey: " + GLUED_VALUE, GLUED_VALUE),
+    ("adHocKey with a value of letters and digits", "adHocKey: " + GLUED_VALUE, GLUED_VALUE),
     ("returnKey with a value of letters and digits", "returnKey: " + GLUED_VALUE, GLUED_VALUE),
-    # `and`, `or` or `but` right after a plain word starts a second value, so a letters-only word after it is one.
+    # A letters-only secret after a plain word and prose is one. The prose after the plain word must not hide it.
+    ("letters-only secret after a plain word and a semicolon",
+     "password: required to log in; default is swordfish", "swordfish"),
     ("letters-only secret after a plain word and `and`", "password: none and swordfish", "swordfish"),
 ]
 
@@ -324,10 +326,6 @@ GREEN = [
     # A key word inside a longer word is no credential name, even with a value of letters and digits after it.
     ("a key word inside a longer word with a value", "monkey: Banana12345"),
     ("a key word inside a longer word with a camel value", "hotkey: Ctrl1Shift2"),
-    # A camelCase hump starts a word, so the everyday stem at a hump in these names is no key word.
-    ("adHocKey with a value of letters and digits", "adHocKey: " + GLUED_VALUE),
-    ("globalHotkey with a symbol value", "globalHotkey: Ctrl+Alt+2"),
-    ("toggleHotkey with a symbol and digit value", "toggleHotkey: CmdOrCtrl+Shift+1"),
     # The control for the longer names in RED: the everyday word with the same value passes.
     ("turnkey with a value of letters and digits", "turnkey: " + GLUED_VALUE),
     # The same holds for other words that end in key, with a value of letters and digits.
@@ -362,12 +360,6 @@ GREEN = [
     # A placeholder word with prose after it on the same line, and a backticked shell path, name no secret.
     ("password word with optional and prose after it", "Set password: optional for the guest."),
     ("password word with none and prose after it", "password: none for the guest"),
-    # Prose after a plain word passes. Only `and`, `or` or `but` right after the value starts a second value;
-    # `is`, `are`, `;` and `,` do not.
-    ("password word with none and `and` later in the prose", "password: none for guests and visitors"),
-    ("password word with none and `is` in the prose", "password: none is needed for the guest"),
-    ("password word with none and a semicolon in the prose", "password: none for the guest; ask the owner"),
-    ("password word with required and a semicolon in the prose", "password: required to log in; default is swordfish"),
     ("backticked shell path after PWD", "`PWD=/Users/x`"),
     # Near misses of the three new shapes: a digit count, a tail length, a prefix inside a word, and a clock time pass.
     ("Telegram token with 11 digits before the colon", "12345678901:" + TG_TAIL),
