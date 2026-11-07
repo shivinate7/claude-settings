@@ -27,6 +27,9 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+RUN = _test_temp.run_folder()  # removed when the suite ends
 
 # Today's values, pinned from hooks/guard_frozen.py and hooks/guard_core.py.
 FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
@@ -308,6 +311,47 @@ def case_one_home_for_lane_heads():
     return not problems, "; ".join(problems) or "both read the one home"
 
 
+def _hooks_without_shared_names(scratch):
+    """A copy of hooks/ under `scratch` with shared_names.py removed: the install that lands a hook before its sibling."""
+    hooks = os.path.join(scratch, "hooks")
+    shutil.copytree(HERE, hooks, ignore=shutil.ignore_patterns("__pycache__"))
+    os.remove(os.path.join(hooks, "shared_names.py"))
+    return hooks
+
+
+def case_sim_boot_record_exits_zero_without_shared_names():
+    """sim_boot_record.py exits 0 in every case (its docstring). With shared_names.py absent, a Bash call that
+    names no simulator tool still exits 0 and writes nothing to stdout."""
+    scratch = os.path.join(RUN, "sim-boot-no-shared")
+    hooks = _hooks_without_shared_names(scratch)
+    cfg = os.path.join(scratch, "cfg")
+    os.makedirs(cfg)
+    payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "s-nosh", "cwd": scratch,
+               "tool_input": {"command": "export FOO=1"}}
+    done = subprocess.run([sys.executable, os.path.join(hooks, "sim_boot_record.py")], input=json.dumps(payload),
+                          capture_output=True, text=True, env=dict(os.environ, CLAUDE_CONFIG_DIR=cfg), cwd=scratch)
+    return (done.returncode == 0 and done.stdout.strip() == ""), "rc=%s stdout=%r stderr=%r" % (
+        done.returncode, done.stdout[:80], done.stderr[-160:])
+
+
+def case_precompact_builds_its_digest_without_shared_names():
+    """A hook that lands before its shared_names.py still does its job: the PreCompact run writes the digest."""
+    scratch = os.path.join(RUN, "precompact-no-shared")
+    hooks = _hooks_without_shared_names(scratch)
+    cfg, repo = os.path.join(scratch, "cfg"), os.path.join(scratch, "repo")
+    os.makedirs(cfg)
+    os.makedirs(repo)
+    transcript = os.path.join(scratch, "transcript.jsonl")
+    with open(transcript, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps({"type": "user", "message": {"role": "user", "content": "hello"}}) + "\n")
+    payload = {"session_id": "s-nosh", "transcript_path": transcript, "cwd": repo, "hook_event_name": "PreCompact"}
+    done = subprocess.run([sys.executable, os.path.join(hooks, "precompact_handoff.py")], input=json.dumps(payload),
+                          capture_output=True, text=True, env=dict(os.environ, CLAUDE_CONFIG_DIR=cfg), cwd=repo)
+    digest = os.path.join(cfg, "state", "handoff", "s-nosh.digest.md")
+    return (done.returncode == 0 and os.path.isfile(digest)), "rc=%s digest written=%s stderr=%r" % (
+        done.returncode, os.path.isfile(digest), done.stderr[-160:])
+
+
 # The copies of the config dir logic (debt config-dir-copies): (module, the function that holds the copy).
 COPY_SITES = (
     ("daily_note.py", "main"),
@@ -366,6 +410,9 @@ CASES = [
      case_one_home_for_lane_heads),
     ("(l) each config dir copy reads shared_names.config_dir, with no CLAUDE_CONFIG_DIR literal of its own",
      case_config_dir_copies_read_the_shared_home),
+    ("(m) sim_boot_record exits 0 with shared_names.py absent", case_sim_boot_record_exits_zero_without_shared_names),
+    ("(n) precompact_handoff still writes its digest with shared_names.py absent",
+     case_precompact_builds_its_digest_without_shared_names),
 ]
 
 
@@ -388,4 +435,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    finally:
+        shutil.rmtree(RUN, ignore_errors=True)

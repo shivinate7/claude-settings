@@ -3692,6 +3692,39 @@ def case_step_path_is_derived_from_override_step_dir():
           guard_module().STEP_PATH == "roadmap/data/steps/%s.json", guard_module().STEP_PATH)
 
 
+def case_one_shot_home_does_not_pass_a_standing_grant():
+    """A message with a standing word ("always") is a standing grant, not a one-shot approval. A `once:<act>` note
+    is no home for it: the message still has no home, as it has none on main."""
+    mod = guard_module()
+    line = "- fb-0958-1 [note] -> once:merge-green-prs"
+    out = mod.problems(mod.parse(render_block("approved, always merge green PRs", items=(line,))), "")
+    check("standing grant: a once: home does not pass a message with a standing word",
+          any("has no home" in s for s in out), out)
+
+
+def case_closed_once_note_is_no_home_for_a_grant():
+    """A closed `once:<act>` note is no home. A closed note needs a tracked file, a step, a page or not-a-grant, so the
+    one-shot approval still has no home."""
+    mod = guard_module()
+    line = "- fb-0958-1 [note] -> once:merge-pr-12 [closed]"
+    out = mod.problems(mod.parse(render_block(ONE_SHOT_TEXT, items=(line,))), "")
+    check("closed once note: the grant still has no home, the closed note is no home",
+          any("has no home" in s for s in out), out)
+
+
+def case_guard_home_tracked_in_the_stop_repo_passes_when_the_sidecar_names_another():
+    """The sidecar binds the session to repo A. The Stop runs from repo B, and the ruling home is tracked only in B.
+    Either repo's tree may hold the home, so it passes."""
+    bound = make_repo("bound-a", tracked=("README.md",))
+    stop_repo = make_repo("stop-b", tracked=("decisions/b-ruling.md",))
+    cfg, sid = new_cfg(), "r-bound-a"
+    write_file(sidecar_of(cfg, sid), bound)
+    write_file(inbox_of(cfg, sid), render_block("the rule is settled\nkeep it\nthanks",
+                                                items=("- fb-8 [ruling] -> decisions/b-ruling.md",)))
+    expect_silent("either repo: a home tracked only in the Stop's repo passes when the sidecar names another",
+                  guard(cfg, sid, cwd=stop_repo))
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -3856,6 +3889,9 @@ CASES = (
     case_one_shot_grant_passes_with_its_home_and_blocks_without_one,
     case_guard_ruling_home_is_judged_in_the_repo_the_session_worked_in,
     case_step_path_is_derived_from_override_step_dir,
+    case_one_shot_home_does_not_pass_a_standing_grant,
+    case_closed_once_note_is_no_home_for_a_grant,
+    case_guard_home_tracked_in_the_stop_repo_passes_when_the_sidecar_names_another,
 )
 
 
