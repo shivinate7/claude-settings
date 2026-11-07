@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
 # Decides which checks jobs and suites a run needs. Writes name=<bool> lines to $GITHUB_OUTPUT:
 #   per job: checks_guard (set when code and guard are both set, or directly by a path the checks-guard job installs from: actions/playwright-setup, .github/shoot), checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep (the janitor sweep suites, set with checks_windows_rest) checks_macos shell_macos pointer_windows, and shoot (below)
-#   per suite: code (any non-docs file changed), mods (a path under mods/, or a .md path under skills/plain-english-map/: the mod tests and the
+#   per suite: code (any non-docs file changed), guard_windows_full (the Windows guard suite runs in full shards on a pull_request: set by the paths guard.py loads, its test and mutation files, and settings.json; every path that sets it also sets guard), mods (a path under mods/, or a .md path under skills/plain-english-map/: the mod tests and the
 #   map skill tests, one CI step in each of the `checks`, `checks-windows` and `checks-macos` jobs), guard (guard mutation test), sweep (janitor mutation test), shoot (the checks-shoot job: the bin/shoot suite, which installs a browser). The `checks` lint job and the checks-merge-install job always run, so they have no flag (their suites carry `code`). checks_macos gates both checks-macos and checks-macos-b.
+# guard_windows_slice is derived (after the loop, and outside ALL): guard on and guard_windows_full off. On a pull_request the Windows guard job runs the slice then, and the full shards only when guard_windows_full is on. Both are job outputs.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
 # BASE_SHA, HEAD_REF.
 set -u
 JOBS="checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos pointer_windows"
-ALL="$JOBS checks_guard code mods guard sweep shoot"
+ALL="$JOBS checks_guard code mods guard sweep shoot guard_windows_full"
 range=""
 [ "${EVENT:-}" = pull_request ] && [ -n "${BASE_SHA:-}" ] && range="$BASE_SHA...HEAD"
 on=" "
 # --no-renames lists the old path of a rename too, so a move out of a mapped path counts.
 if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name-only --no-renames "$range" 2>/dev/null) && [ -n "$files" ]; then
+  F=guard_windows_full
   W=checks_windows M=checks_windows_merge R=checks_windows_rest Z=checks_windows_sweep X=checks_macos S=shell_macos P=pointer_windows
   while IFS= read -r f; do
     case "$f" in
@@ -23,11 +25,11 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py.
       # guard_<family>.py modules are guard.py; guard_test_* is not (it falls to hooks/* below).
       hooks/guard_test_*) on="$on $R $Z $X code guard " ;;
-      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/question_form.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep " ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/question_form.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep $F " ;;
       # settings.json: the same jobs, plus merge/test_merge.py (CloudAllow reads it).
-      settings.json) on="$on $M $W $R $Z $X code guard sweep " ;;
+      settings.json) on="$on $M $W $R $Z $X code guard sweep $F " ;;
       landed-dirs.txt) on="$on $W $R $Z $X $S code guard " ;;
-      hooks/test_guard.py|hooks/mutate_guard.py) on="$on $W $X code guard " ;;
+      hooks/test_guard.py|hooks/mutate_guard.py) on="$on $W $X code guard $F " ;;
       # install.sh and session_start.sh: the checkout-detection suite and test_guard read them.
       hooks/test_install_src.sh|hooks/test_install_windows.sh) on="$on $W $X $S code guard " ;;
       # install.sh: also read by merge/test_merge.py (CloudAllow reads its settings step).
@@ -97,8 +99,10 @@ else
 fi
 # checks_guard: the checks-guard job runs the guard suite, which needs both flags (the old step if). The playwright-setup arm above also sets it directly.
 case "$on" in *" code "*) case "$on" in *" guard "*) on="$on checks_guard " ;; esac ;; esac
+# guard_windows_slice: guard on and guard_windows_full off. It is outside ALL, so no arm sets it and no fail-safe turns it on.
+case "$on" in *" guard "*) case "$on" in *" guard_windows_full "*) ;; *) on="$on guard_windows_slice " ;; esac ;; esac
 echo "CI scope: event=${EVENT:-} range=${range:-none} on=$on"
-for n in $ALL; do
+for n in $ALL guard_windows_slice; do
   case "$on" in *" $n "*) v=true ;; *) v=false ;; esac
   echo "$n=$v" >> "$GITHUB_OUTPUT"
 done
