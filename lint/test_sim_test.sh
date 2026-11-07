@@ -1289,5 +1289,78 @@ need "the fold is closed before xcodebuild" in_order "hinge -d $DUO1 close" xcod
 need "one stderr line names fold 180.0 -> closed" names_once "fold 180.0 -> closed"
 end_case "97 hinge get prints 180.0: close runs before xcodebuild, and one stderr line names fold 180.0 -> closed"
 
+# Cases 98 to 100: two duo runs at once, and a booted Duo whose slot is leased (decision sim-lease-tool). A duo run reuses
+# a booted Duo only when that Duo's slot has no live lease. Otherwise it takes a fresh lease (slot 2 under the bars) and
+# boots that slot. A reuse queues with a `reuse` field in leases.json, so queue_state reads a pid's queue entry while it waits.
+queue_state() { python3 -I -c 'import json, sys
+try:
+    data = json.load(open(sys.argv[1]))
+except (OSError, ValueError):
+    print("absent"); sys.exit(0)
+for e in data.get("queue", []):
+    if str(e.get("pid")) == sys.argv[2]:
+        print("reuse:" + e["reuse"] if e.get("reuse") else "queued"); sys.exit(0)
+print("absent")' "$lease_file" "$1"; }
+tool_settled() { [[ $(queue_state "$tool_pid") != absent ]] || tool_ended; }
+b_pid=
+# start_second [VAR=value...]: a second run with its own run folder, the same HOME, and Duo 1 listed as booted in its folder.
+start_second() {
+  rm -rf "$work/runB"; /bin/mkdir -p "$work/runB"
+  printf '    iPhone Duo (%s) (Booted) \n' "$DUO1" > "$work/runB/booted"
+  env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" RUN="$work/runB" SIM_TEST_CRASH_DIR="$crashdir" \
+    SIM_TEST_POLL=1 SIM_TEST_LOCK_WAIT=2 SIM_LEASE_POLL=1 "$@" "$script" "${ARGS[@]}" > "$work/b.std" 2> "$work/b.err" &
+  b_pid=$!
+}
+b_calls_has() { grep -Fq -- "$1" "$work/runB/calls" 2>/dev/null; }
+b_has_line() { grep -Fxq -- "$1" "$work/runB/calls" 2>/dev/null; }
+b_no_duo1() { ! b_calls_has "-destination platform=iOS Simulator,id=$DUO1"; }
+b_holds_slot2() { grep -E "^lease slot 2 pid $b_pid " "$work/runB/status_at_xc" 2>/dev/null | grep -Fq "udid $DUO2"; }
+both_alive() { kill -0 "$tool_pid" 2>/dev/null && kill -0 "$b_pid" 2>/dev/null; }
+b_ended() { local st; st=$(ps -o stat= -p "$b_pid" 2>/dev/null); [[ -z $st || $st == Z* ]]; }
+b_settled() { [[ -e "$work/runB/started" ]] || [[ $(queue_state "$b_pid") != absent ]] || b_ended; }
+
+fresh; ARGS=(-scheme X); start_tool STUB_HANG=1 STUB_HANG_SECS=12
+need "run A is in xcodebuild on Duo 1" poll_for 20 test -e "$work/started"
+need "the Mac lock is free while A is up and leased" test ! -e "$work/lock_during"
+need "run A's status names slot 1 for its pid" status_at_xc_has 1 "$tool_pid"
+start_second STUB_HANG=1 STUB_HANG_SECS=12 SIM_LEASE_WAIT=4
+poll_for 20 b_settled
+need "run B does not queue a reuse of Duo 1 while A's lease is live" test "$(queue_state "$b_pid")" != "reuse:$DUO1"
+need "run B does not run its xcodebuild on Duo 1" b_no_duo1
+need "run B boots Duo 2 beside A's slot 1" b_has_line "simctl boot $DUO2"
+need "run B runs its xcodebuild on Duo 2" b_calls_has "-destination platform=iOS Simulator,id=$DUO2"
+need "run B holds slot 2 with Duo 2's UDID in status" b_holds_slot2
+need "both runs are running at once" both_alive
+kill -TERM "$b_pid" 2>/dev/null; wait "$b_pid" 2>/dev/null
+kill -TERM -- "-$tool_pid" 2>/dev/null; finish_tool
+ARGS=(-scheme X)
+end_case "98 two duo runs at once: B boots Duo 2 beside A's slot 1, holds slot 2 in status, never queues or runs on Duo 1"
+
+fresh; booted "iPhone Duo" $DUO1; hold_slot1
+ARGS=(-scheme X); start_tool SIM_LEASE_WAIT=4
+poll_for 20 tool_settled
+need "run B does not queue a reuse of Duo 1 while slot 1 is leased" test "$(queue_state "$tool_pid")" != "reuse:$DUO1"
+finish_tool
+need "run B boots Duo 2, the slot-2 device" has_call "simctl boot $DUO2"
+need "run B runs its xcodebuild on Duo 2" dest_is "$DUO2"
+need "run B holds slot 2 with Duo 2's UDID in status" status_at_xc_udid 2 "$tool_pid" "$DUO2"
+need "run B ends with exit 0" rc_is 0
+release_slot1
+ARGS=(-scheme X)
+end_case "99 a booted Duo whose slot is leased, at 5-minute load under 60: B takes slot 2 and boots Duo 2, no reuse of Duo 1"
+
+fresh; booted "iPhone Duo" $DUO1; hold_slot1; set_load "{ 0.50 60.00 0.50 }"
+ARGS=(-scheme X); start_tool SIM_LEASE_WAIT=4
+poll_for 20 tool_settled
+need "run B queues for a lease with no reuse of Duo 1 at 5-minute load 60" test "$(queue_state "$tool_pid")" = queued
+finish_tool
+need "run B is refused at the lease wait limit: exit 1" rc_is 1
+need "run B's refusal names the 5-minute load" grep -Fq "5-min 60.00" "$work/run.err"
+need "run B boots nothing" no_boot
+need "run B runs no xcodebuild" no_xcodebuild
+release_slot1
+ARGS=(-scheme X)
+end_case "100 a booted Duo whose slot is leased, at 5-minute load 60: B waits in queue with no reuse, refused at the lease wait limit"
+
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
