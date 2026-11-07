@@ -290,9 +290,9 @@ GUARD_SLICE_ENV = {"GUARD_TESTS": "windows-slice"}
 GUARD_JOB = "checks-windows-guard"
 # A long suite splits across shard jobs: the base job, then `<base>-2` to `<base>-<n>`. The full step of each
 # carries SHARD_VAR[base]=<i>/<n> in its step env, and the n values cover 1 to n once each, so every case runs
-# once. A merge shard past the first never runs on pull_request (SHARD_JOB_IF). A guard shard past the first is needed by
-# all-jobs-passed on a ready pull_request: its job-level if holds only the draft guard (draft_guard_only), and its step
-# decides, on guard_windows_full (GuardShardSteps). The slice stays in the base job, with no shard value.
+# once. A merge shard past the first never runs on pull_request (SHARD_JOB_IF). A guard shard past the first has no
+# job-level if: all-jobs-passed needs it, a draft skips it through needs: scope, and its step decides on guard_windows_full
+# (GuardShardSteps). The slice stays in the base job, with no shard value.
 SHARD_VAR = {"checks-windows-guard": "GUARD_SHARD", "checks-windows-merge": "MERGE_SHARD"}
 SHARD_CMD = {"checks-windows-guard": "python hooks/test_guard.py", "checks-windows-merge": "python merge/test_merge.py"}
 SHARD_JOB_IF = "${{ github.event_name != 'pull_request' }}"
@@ -384,9 +384,12 @@ IF_PIN = {"python janitor/mutate_sweep.py":
           "python merge/test_merge.py":
           "${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true' }}",
           SLICE: "${{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true' }}",
-          # The full guard suite runs off pull_request; the guard slice only on it (cut F).
-          GUARD_CMD: "${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true' }}",
-          GUARD_SLICE: "${{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true' }}"}
+          # The full guard shards run on every event but a pull_request without guard_windows_full; the slice only on a
+          # pull_request with guard_windows_slice (cut F and the guard split).
+          GUARD_CMD: f"${{{{ !cancelled() && (needs.scope.outputs.{FULL_FLAG} == 'true' || github.event_name != 'pull_request') "
+                     f"&& needs.scope.outputs.code == 'true' }}}}",
+          GUARD_SLICE: f"${{{{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.{SLICE_FLAG} == 'true' "
+                       f"&& needs.scope.outputs.code == 'true' }}}}"}
 
 
 FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows",
@@ -546,8 +549,9 @@ def draft_guard_only(expr):
 
 
 def job_check_problems(name, job, flag=None):
-    """`needs: scope`. A shard past the first keeps the event job-level if (SHARD_JOB_IF) and nothing else. The lint jobs
-    (LINT_JOBS) have no scope condition. A lint or scoped job's job-level if, if any, is the draft guard (draft_guard_only).
+    """`needs: scope`. A guard shard past the first (GUARD_JOB's shards) has no job-level if: all-jobs-passed needs it, and a draft
+    skips it through needs. Any other shard past the first keeps the event job-level if (SHARD_JOB_IF) and nothing else. The lint
+    jobs (LINT_JOBS) have no scope condition. A lint or scoped job's job-level if, if any, is the draft guard (draft_guard_only).
     A scoped job's scope condition G is the one its steps carry (read_scope_condition), every step carries G
     (scope_condition_step_problems), and G keeps the scope condition rules (scope_condition_property_problems). `flag` names
     the scope output for a job whose flag is not its own name (FLAG_OF)."""
@@ -555,6 +559,8 @@ def job_check_problems(name, job, flag=None):
     if not re.fullmatch(r"\[?\s*scope\s*\]?", job["needs"] or ""):
         problems.append(f"{name}: needs is {job['needs']}, want scope")
     expr = job["if"]
+    if shard_base(name) == GUARD_JOB:
+        return problems + ([] if expr is None else [f"{name}: guard shard keeps a job-level if {expr}, want none: all-jobs-passed needs it"])
     if shard_base(name):
         return problems + ([] if expr == SHARD_JOB_IF else [f"{name}: shard job if is {expr}, want {SHARD_JOB_IF}"])
     if name in LINT_JOBS:  # they run on every PR: no scope condition, and a job-level if only when it is the draft guard
@@ -952,11 +958,11 @@ class WindowsSplit(unittest.TestCase):
         full_e, slice_e = unwrap(IF_PIN[GUARD_CMD]), unwrap(IF_PIN[GUARD_SLICE])
 
         def job(name, shard, base=False, slice_=False):
-            # The base job is scoped: the scope condition sits in each step. A shard keeps its job-level if and its steps' own ifs.
+            # The base job is scoped: the scope condition sits in each step. A guard shard has no job-level if, and its steps' own ifs decide.
             def cond(e):
                 return f"${{{{ ({scope_condition}) && {e} }}}}" if base else f"${{{{ {e} }}}}"
 
-            head = f"  {name}:\n    runs-on: windows-latest\n    needs: scope\n" + ("" if base else f"    if: {SHARD_JOB_IF}\n")
+            head = f"  {name}:\n    runs-on: windows-latest\n    needs: scope\n"
             setup = "      - uses: actions/setup-python@abc # v6\n" + (f"        if: ${{{{ {scope_condition} }}}}\n" if base else "")
             full = (f"      - name: Full\n        if: {cond(full_e)}\n"
                     + (f"        env:\n          GUARD_SHARD: {shard}\n" if shard else "")
@@ -975,10 +981,11 @@ class WindowsSplit(unittest.TestCase):
         good = doc(base, job("checks-windows-guard-2", "2/3"), job("checks-windows-guard-3", "3/3"))
         self.assertEqual(place(good), [])
         self.assertEqual(guard_problems(good), [])
-        # A guard shard on the event-only if never runs on a ready pull_request, so all-jobs-passed would not need it (GuardShardSteps).
+        # A guard shard keeps no job-level if: the event-only if would skip it on a ready pull_request, and all-jobs-passed reads
+        # that skip as red (GuardShardJobIf).
         with self.subTest(defect="a guard shard keeps the event-only if"):
             self.assertTrue(job_check_problems("checks-windows-guard-2", {"needs": "scope", "if": SHARD_JOB_IF, "steps": []}),
-                            "checks-windows-guard-2 with the event-only if is accepted: it never runs on a ready pull_request")
+                            "checks-windows-guard-2 with the event-only if is accepted: it is skipped on a ready pull_request")
         bad = {
             "a shard dropped": doc(base, job("checks-windows-guard-2", "2/3")),
             "a shard doubled": doc(base, job("checks-windows-guard-2", "2/3"), job("checks-windows-guard-3", "2/3")),
@@ -1770,7 +1777,7 @@ class GuardShardSteps(unittest.TestCase):
         block = job_block(self.text, "scope")
         for name in (FULL_FLAG, SLICE_FLAG):
             with self.subTest(output=name):
-                self.assertRegex(block, rf"^      {name}:\s*\S", f"the scope job has no output {name}: the guard steps cannot read it")
+                self.assertRegex(block, rf"(?m)^      {name}:\s*\S", f"the scope job has no output {name}: the guard steps cannot read it")
 
     def test_a_pr_with_the_full_flag_on_runs_both_full_shards_and_skips_the_slice(self):
         self.check_rows("pull_request", scope_flags(full="true"), [
@@ -1795,15 +1802,17 @@ class GuardShardSteps(unittest.TestCase):
             ("slice", self.slice.get("if"), False),
         ])
 
-    def test_a_draft_pr_runs_no_guard_shard_past_the_first(self):
-        # A draft pull_request runs no job: scope skips it. checks-windows-guard-2's own if must skip it too.
-        self.assertFalse(gate_runs(self.shard2_job_if, "pull_request", scope_flags(full="true"), draft=True),
-                         "checks-windows-guard-2 runs on a draft pull_request")
+    def test_a_draft_pr_skips_guard_shard_2_through_needs_scope(self):
+        # checks-windows-guard-2 has no job-level if, so a draft pull_request skips it because scope skips it.
+        self.assertEqual(self.jobs["checks-windows-guard-2"]["needs"], "scope", "checks-windows-guard-2 does not need scope")
+        scope_if = self.jobs["scope"]["if"]
+        self.assertFalse(gate_runs(scope_if, "pull_request", {}, draft=True), f"scope runs on a draft pull_request: {scope_if!r}")
+        self.assertTrue(gate_runs(scope_if, "pull_request", {}, draft=False), f"scope skips a ready pull_request: {scope_if!r}")
 
-    def test_guard_shard_2_job_if_is_the_draft_guard_only(self):
-        # all-jobs-passed needs it on a ready pull_request, and its steps decide there, so the job-level if reads no flag.
-        self.assertTrue(draft_guard_only(self.shard2_job_if),
-                        f"checks-windows-guard-2's job-level if is {self.shard2_job_if!r}: it must hold the draft guard only")
+    def test_guard_shard_2_has_no_job_level_if(self):
+        # all-jobs-passed needs it on a ready pull_request, and its steps decide there: the job itself carries no if.
+        self.assertIsNone(self.shard2_job_if,
+                          f"checks-windows-guard-2 keeps a job-level if {self.shard2_job_if!r}: it must have none")
 
     def test_merge_shards_past_the_first_never_run_on_a_pull_request(self):
         for n in range(2, 6):
@@ -1815,15 +1824,18 @@ class GuardShardSteps(unittest.TestCase):
 
 
 class GuardShardJobIf(unittest.TestCase):
-    """job_check_problems on a shard job past the first. A guard shard takes the draft guard only, since all-jobs-passed needs it
-    on a ready pull_request. A merge shard takes the event-only if, since it runs off pull_request only."""
+    """job_check_problems on a shard job past the first. A guard shard has no job-level if: all-jobs-passed needs it, and a draft
+    skips it through needs. A merge shard takes the event-only if, since it runs off pull_request only."""
 
     DRAFT = "${{ !github.event.pull_request.draft }}"
 
-    def test_a_guard_shard_takes_the_draft_guard_only(self):
+    def test_a_guard_shard_takes_no_job_level_if(self):
+        with self.subTest(if_="none"):
+            self.assertEqual(job_check_problems("checks-windows-guard-2", {"needs": "scope", "if": None, "steps": []}), [],
+                             "checks-windows-guard-2 with no job-level if is refused")
         with self.subTest(if_="the draft guard"):
-            self.assertEqual(job_check_problems("checks-windows-guard-2", {"needs": "scope", "if": self.DRAFT, "steps": []}), [],
-                             "checks-windows-guard-2 with the draft guard only is refused")
+            self.assertTrue(job_check_problems("checks-windows-guard-2", {"needs": "scope", "if": self.DRAFT, "steps": []}),
+                            "checks-windows-guard-2 with the draft guard as its job-level if is accepted")
         with self.subTest(if_="a flag"):
             flag_if = "${{ needs.scope.outputs.guard == 'true' }}"
             self.assertTrue(job_check_problems("checks-windows-guard-2", {"needs": "scope", "if": flag_if, "steps": []}),
