@@ -3290,9 +3290,9 @@ def main(argv=None) -> int:
                          help="sweep the one repository PATH belongs to (PATH may be a linked "
                               "worktree or a folder inside it); adds to any ROOT given")
     parser.add_argument("--session-end", action="store_true", dest="session_end",
-                         help="the SessionEnd run only: skips the loose-process report, because "
-                              "the hook discards its output. It does not set the scope: the "
-                              "ROOT argument and --root do")
+                         help="the SessionEnd run only: judges branches and worktrees in its "
+                              "own repository only, stops proven orphans machine-wide like the "
+                              "scheduled job, and skips the loose-process report")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--tier1", action="store_true",
                        help="only stale registrations and husks. The one mode that acts "
