@@ -196,7 +196,7 @@ def waiting_copy(root):
     try:
         if layout.waiting_page(root) == "unknown":
             return None
-        branch, home = layout.record_branch(root), layout.path(root, "waiting-data")
+        branch, home = layout.record_branch(root), layout.folder_any_mark(root, "waiting-data")
     except layout.LayoutError as err:
         return "unknown - waiting copy: %s" % err
     seen = False

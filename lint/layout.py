@@ -238,17 +238,12 @@ def path(root, name):
 
 def folders_any_mark(root, name):
     """The folders kind `name` may sit at in `root`, relative, with `/` separators, as a tuple. A valid mark reads the one
-    folder `path` gives. A bad "rolled-out" mark (RolledOutMarkError) leaves legacy and layout both possible, so it gives
-    the legacy-repos place when the repo has one (that holds under either mark), else the layout path and the legacy path.
-    The one home of that fallback."""
+    folder `path` gives. A bad "rolled-out" mark (RolledOutMarkError) gives `candidates(..., any_mark=True)`, the one home of
+    that fallback."""
     try:
         return (path(root, name),)
     except RolledOutMarkError:
-        owner = repo_name(root)
-        kept = legacy_repos().get(owner, {}).get(name) if owner else None
-        if kept:
-            return (kept.strip("/"),)
-        return tuple(dict.fromkeys((layout()["kinds"][name]["path"].strip("/"), legacy(name))))
+        return candidates(root, name, any_mark=True)
 
 
 def folder_any_mark(root, name):
@@ -268,10 +263,28 @@ def md_under(rel, folder):
     return rel.endswith(".md") and rel.startswith(folder.rstrip("/") + "/")
 
 
-def candidates(root, name):
+def candidates(root, name, any_mark=False):
     """`path(root, name)`, then the layout path when it differs: for a reader that takes the first
-    one that exists, as STE lint's gloss collapse does."""
-    first, then = path(root, name), layout()["kinds"][name]["path"].strip("/")
+    one that exists, as STE lint's gloss collapse does.
+
+    Under a bad "rolled-out" mark (RolledOutMarkError) the two callers differ on purpose. A record check
+    (stale_cites.py, ste_lint.py) leaves `any_mark` off and the error propagates, so it fails closed: it will not pick a
+    folder it cannot trust. The feedback guard and the waiting copy (`folders_any_mark`) pass `any_mark=True`, because
+    refusing there would block the owner's own filing. Legacy and layout are both possible then, so they get the
+    legacy-repos place when the repo has one (that holds under either mark), else the layout path and the legacy path."""
+    try:
+        first = path(root, name)
+    except RolledOutMarkError:
+        if not any_mark:
+            raise
+        owner = repo_name(root)
+        kept = legacy_repos().get(owner, {}).get(name) if owner else None
+        if kept:
+            return (kept.strip("/"),)
+        first = None
+    then = layout()["kinds"][name]["path"].strip("/")
+    if first is None:
+        return tuple(dict.fromkeys((then, legacy(name))))
     return (first,) if first == then else (first, then)
 
 
