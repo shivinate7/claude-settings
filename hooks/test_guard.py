@@ -5431,8 +5431,8 @@ sh("narrate: merge --confirm named in a quoted argument runs nothing",
 
 # --- a roster command piped into tail or head (rule check-tail)
 #
-# Incident 2026-11-07, lane notes-fix-other-2: a backgrounded `merge --lane-lint 1476 2>&1 | tail -8`
-# lost its verdict. The roster is named, one spelling per entry: `merge`, `merge.cmd`,
+# A backgrounded `merge --lane-lint 1476 2>&1 | tail -8` loses its verdict (decision
+# background-check-through-verdict holds the incident). The roster is named, one spelling per entry: `merge`, `merge.cmd`,
 # `~/.claude/bin/merge`, `python merge/merge.py`, `python merge/launch.py`, and `ci-job checks --lint`.
 # `merge --lane-lint` and `merge --review-record` are refused in the foreground and in the background.
 # `ci-job` is refused only in the background. The whole pipeline is read, so a filter between the check
