@@ -22,7 +22,7 @@ Three more lanes hit the same form on 2026-11-07: lint-uses-pinned-tools, notes-
 
 A commit from the stale tree reverts work silently, and the diff looks like a normal edit.
 
-Remedy the refusal prints: use a branch of your own (`git switch -c <new-branch> <start>`), or read the other tree with `git -C <dir>`.
+Remedy the refusal prints: in your own worktree, run `git -C <own worktree> checkout --detach origin/<branch>`, commit there, then `git -C <own worktree> push origin HEAD:<branch>`. It names the worktree with `-C`, because a shell's cwd can reset to the pointer checkout (coordinator, 2026-11-07 17:20 CST, from lane pointer-head-own-detach). To read the other tree, use `git -C <dir>`.
 
 Kind: build
 Plan: docs/decisions/two-worktrees-one-branch.md#the-ruling (all)

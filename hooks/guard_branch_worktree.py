@@ -124,8 +124,10 @@ TWO_WORKTREES_DENY_REASON = (
     "git's check that no two worktrees hold one branch. A commit in either tree then moves the "
     "branch under the other tree, whose files stay at the old commit, and a commit there reverts "
     "the other tree's work with a diff that looks like a normal edit. "
-    "Remedy: use a branch of your own (`git switch -c <new-branch> <start>`), or read the other "
-    "tree with `git -C <dir>`."
+    "Remedy: in your own worktree, run `git -C <own worktree> checkout --detach origin/<branch>`, "
+    "commit there, then `git -C <own worktree> push origin HEAD:<branch>`. Name the worktree with "
+    "-C, because a shell's cwd can reset to another checkout. To read the other tree, use "
+    "`git -C <dir>`."
 )
 
 
