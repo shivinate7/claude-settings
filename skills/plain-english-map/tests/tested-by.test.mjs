@@ -31,8 +31,10 @@
 //        Under a backtick line in a Notes section it is an orphan and fails (T7h): a tested-by line is valid only under a Code files map line.
 //   T8   one hop. Through `src/pkg/index.ts`, the test passes (T8a). Without the re-export, it fails (T8b). Two hops fail (T8c).
 //        Through `src/pkgpy/__init__.py`, the test passes (T8d). Without the re-export, it fails (T8e).
-//   T10  a join of literal pieces loads the file: os.path.join and pathlib (T10a to T10c), path.join and resolve (T10d, T10e). Red on main for
-//        those five, since MAP11 does not read a join yet. A non-literal piece (T10f), an array join (T10g) and a join to an untracked nested path (T10h) stay FAILs, green on main.
+//   T10  a join of literal pieces loads the file: os.path.join, posixpath, pathlib, path.join, path.posix.join, resolve (T10a to T10e, T10m, T10n).
+//        A join that is no load stays a FAIL: a name or a starred piece (T10f, T10j), an absolute piece (T10i), an array join (T10g), a join
+//        from another module (T10k), a join in a comment, docstring or string (T10l), an untracked nested path (T10h). T10o (a tmp_path anchor
+//        is no anchor) and T10p (path.join keeps a leading-slash piece) are the rules the next builder change adds.
 //   C0   control, green on the old code: the import reader MAP11 uses reads the fixture's imports the way these cases assume.
 
 import { test } from 'node:test';
@@ -461,10 +463,12 @@ const pieceCase = (testFile, text, file, literals) => {
 const mustLoad = (r, testFile, file) =>
   assert.match(map11(r), /^\[PASS\] MAP11\b/, `MAP11 must PASS: ${testFile} loads ${file} through a join of its pieces\n${shown(r)}`);
 
-/** MAP11 fails on the page, the test and the file, and the cause is that the test does not load the file: the join has a piece that is no literal. */
-const mustNotLoad = (r, page, testFile, file) => {
-  mustFail(r, page, testFile, file);
+/** MAP11 fails on the page, the test and the file, and the cause is that the test does not load the file. `why` names the rule the case holds. */
+const mustNotLoad = (r, page, testFile, file, why = 'the test does not load the file') => {
+  assert.match(map11(r), /^\[FAIL\] MAP11\b/, `MAP11 must FAIL: ${why}\n${shown(r)}`);
+  for (const n of [page, testFile, file]) assert.ok(map11(r).includes(n), `the MAP11 failure must name ${n}\n${map11(r)}`);
   assert.ok(map11(r).includes('does not load the file'), `the MAP11 failure must say that ${testFile} does not load ${file}\n${map11(r)}`);
+  assert.notEqual(r.status, 0, `the command must exit non-zero on a FAIL\n${shown(r)}`);
 };
 
 test('T10a. os.path.join(ROOT, "src", "retry.py") in a test under tests/ loads src/retry.py: MAP11 passes', () => {
@@ -566,4 +570,108 @@ def test_wait():
     assert os.path.isfile(path)
 `, 'src/retry.py', ['vendor', 'src', 'retry.py']);
   mustNotLoad(check(dir), CORE, testFile, 'src/retry.py');
+});
+
+test('T10i. control, green on the built join: os.path.join(ROOT, "src", "/retry.py") has an absolute piece, which resets the join, so the call is no load: MAP11 fails and names the page, the test and the file', () => {
+  needFile(REL);
+  const testFile = 'tests/join_slash.py';
+  const dir = pieceCase(testFile, `import os
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def test_wait():
+    path = os.path.join(ROOT, "src", "/retry.py")
+    assert os.path.isfile(path)
+`, 'src/retry.py', ['src', '/retry.py']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/retry.py', 'an absolute piece after the anchor resets os.path.join, so the call is no load');
+});
+
+test('T10j. control, green on the built join: os.path.join(*base, "src", "retry.py") has a starred anchor, so the call is no literal join: MAP11 fails and names the page, the test and the file', () => {
+  needFile(REL);
+  const testFile = 'tests/join_star.py';
+  const dir = pieceCase(testFile, `import os
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+base = [ROOT]
+
+
+def test_wait():
+    path = os.path.join(*base, "src", "retry.py")
+    assert os.path.isfile(path)
+`, 'src/retry.py', ['src', 'retry.py']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/retry.py', 'a starred argument makes the call no literal join');
+});
+
+test("T10k. control, green on the built join: a bare join imported from './utils' is no path join, so join(ROOT, 'src', 'home.ts') is no load: MAP11 fails and names the page, the test and the file", () => {
+  needFile(REL);
+  const testFile = 'tests/join_bare.spec.ts';
+  const dir = pieceCase(testFile, `import { join } from './utils';
+
+const ROOT = __dirname;
+
+export const page = join(ROOT, 'src', 'home.ts');
+`, 'src/home.ts', ['./utils', 'src', 'home.ts']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/home.ts', 'a join imported from another module is no path join');
+});
+
+test('T10l. control, green on the built join: a join written in a comment, a docstring or a plain string is no call: MAP11 fails and names the page, the test and the file', () => {
+  needFile(REL);
+  const testFile = 'tests/join_text.py';
+  const dir = pieceCase(testFile, `"""Reads os.path.join(ROOT, "src", "retry.py") in this docstring, and in no code."""
+# os.path.join(ROOT, "src", "retry.py") in a comment
+NOTE = "os.path.join(ROOT, 'src', 'retry.py')"
+
+
+def test_wait():
+    assert NOTE
+`, 'src/retry.py', ['src', 'retry.py']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/retry.py', 'a join in a comment, a docstring or a plain string is no call');
+});
+
+test('T10m. posixpath.join(ROOT, "src", "retry.py") with `import posixpath` loads src/retry.py: MAP11 passes', () => {
+  needFile(REL);
+  const testFile = 'tests/posix_join.py';
+  const dir = pieceCase(testFile, `import posixpath
+
+ROOT = posixpath.dirname(posixpath.dirname(posixpath.abspath(__file__)))
+
+
+def test_wait():
+    path = posixpath.join(ROOT, "src", "retry.py")
+    assert posixpath.isfile(path)
+`, 'src/retry.py', ['src', 'retry.py']);
+  mustLoad(check(dir), testFile, 'src/retry.py');
+});
+
+test("T10n. path.posix.join(__dirname, '..', 'src', 'home.ts') with `import path from 'node:path'` loads src/home.ts: MAP11 passes", () => {
+  needFile(REL);
+  const testFile = 'tests/posix.spec.ts';
+  const dir = pieceCase(testFile, `import path from 'node:path';
+
+export const page = path.posix.join(__dirname, '..', 'src', 'home.ts');
+`, 'src/home.ts', ['node:path', '..', 'src', 'home.ts']);
+  mustLoad(check(dir), testFile, 'src/home.ts');
+});
+
+test('T10o. a pathlib chain on tmp_path is no anchor: tmp_path / "src" / "retry.py" in a test that takes tmp_path does not load src/retry.py, so MAP11 fails and names the page, the test and the file', () => {
+  needFile(REL);
+  const testFile = 'tests/tmp_chain.py';
+  const dir = pieceCase(testFile, `def test_wait(tmp_path):
+    path = tmp_path / "src" / "retry.py"
+    assert path.name == "retry.py"
+`, 'src/retry.py', ['src', 'retry.py']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/retry.py', 'an anchor named tmp_path is a temp folder, not the repository, so the chain is no load');
+});
+
+test("T10p. path.join(ROOT, 'src', '/home.ts') loads src/home.ts: Node's path.join does not reset on a leading '/', so MAP11 passes", () => {
+  needFile(REL);
+  const testFile = 'tests/join_slash.spec.ts';
+  const dir = pieceCase(testFile, `import path from 'node:path';
+
+const ROOT = __dirname;
+
+export const page = path.join(ROOT, 'src', '/home.ts');
+`, 'src/home.ts', ['node:path', 'src', '/home.ts']);
+  mustLoad(check(dir), testFile, 'src/home.ts');
 });
