@@ -8451,19 +8451,24 @@ for _header in ("ssh host", "php", "lua", "at now", "su", "sudo", "doas"):
 sh("env: heredoc-stdin: a print heredoc, then `cat <<'EOF'` whose body reads the env file, allowed",
    "python3 - <<'PY'\nprint(1)\nPY\ncat <<'EOF'\ncat " + ENV + "\nEOF", "allow", cwd=PROJ)
 # These headers read their heredoc body as commands: a make recipe, a parallel job list, an ex or vim
-# script, an sftp batch, a bun script on stdin. The body stays in view after a print heredoc.
+# script, an sftp batch. The body stays in view after a print heredoc.
 for _shell, _stdin_body in (
         ("make -f -", "all:\n\tcat " + ENV),
         ("parallel", "cat " + ENV),
         ("vim -es", ":!cat " + ENV),
         ("ex", ":!cat " + ENV),
         ("sftp host", "!cat " + ENV),
-        ("bun -", "require('child_process').execSync('cat " + ENV + "')"),
 ):
     sh("env: heredoc-stdin: a print heredoc, then `%s <<'EOF'` whose body reads the env file, denies "
        "[red on 15f6573]" % _shell,
        "python3 - <<'PY'\nprint(1)\nPY\n" + _shell + " <<'EOF'\n" + _stdin_body + "\nEOF", "deny", "env-file",
        cwd=PROJ)
+# A bun script reads its stdin body as JavaScript, and a backtick span in execSync runs a shell that the env
+# rule reads. A single-quoted execSync string is not read as shell, so the backtick form is the one pinned.
+sh("env: heredoc-stdin: a print heredoc, then `bun - <<'EOF'` whose body runs the env read in a backtick span, "
+   "denies [red on 15f6573]",
+   "python3 - <<'PY'\nprint(1)\nPY\nbun - <<'EOF'\nrequire('child_process').execSync(" + _BT + "cat " + ENV
+   + _BT + ")\nEOF", "deny", "env-file", cwd=PROJ)
 # Allow controls: `sudo tee` writes its body to a file and runs nothing, and an echo chained before a
 # cat-write runs no shell.
 sh("env: heredoc-stdin: an echo chained before a cat-write heredoc whose body names the env file, allowed "
