@@ -574,19 +574,29 @@ class Scan(Base):
                 self.assertEqual(r.returncode, 0, "%s: the run failed without a refusal. Output:\n%s" % (label, shown(r)))
                 self.assertEqual(read_text(os.path.join(out, "items", "ok.json")), canonical(doc), label)
 
-    def test_a_long_run_of_name_characters_scans_within_the_bound(self):
-        # One run of 20,000 name characters with no keyword in it. An unbounded name prefix re-reads the run from each
-        # start position, so the scan grows with the square of the run's length.
-        run = "aB3_-" * 4000
-        fetched = self.fetch(items={"ok": {"id": "ok", "title": "Ok", "note": run}})
-        out = self.out("long-run")
+    def assert_scans_within_bound(self, folder, note, what):
+        # A shape that re-reads a run from each start position makes the scan grow with the square of the run's length.
+        fetched = self.fetch(items={"ok": {"id": "ok", "title": "Ok", "note": note}})
+        out = self.out(folder)
         start = time.perf_counter()
         r = self.export(fetched, out)
         took = time.perf_counter() - start
-        self.assertEqual(r.returncode, 0, "the run of name characters did not export (exit %d). Output:\n%s"
-                         % (r.returncode, shown(r)))
+        self.assertEqual(r.returncode, 0, "%s did not export (exit %d). Output:\n%s" % (what, r.returncode, shown(r)))
         self.assertLess(took, LONG_RUN_BOUND,
-                        "the scan of a 20,000-character run took %.2f s, over the %.1f s bound" % (took, LONG_RUN_BOUND))
+                        "the scan of %s took %.2f s, over the %.1f s bound" % (what, took, LONG_RUN_BOUND))
+
+    def test_a_long_run_of_name_characters_scans_within_the_bound(self):
+        # 20,000 name characters with no keyword in them.
+        self.assert_scans_within_bound("long-run", "aB3_-" * 4000, "a 20,000-character run of name characters")
+
+    def test_a_long_run_of_underscores_scans_within_the_bound(self):
+        # The password shape's name prefix takes `_`, so a run of them is re-read from each start position.
+        self.assert_scans_within_bound("underscores", "_" * 20000, "a 20,000-character run of underscores")
+
+    def test_a_long_run_of_key_equals_scans_within_the_bound(self):
+        # The credential-name value lookaheads scan to the end of a run of `key=`, from each start position. At 20,000
+        # characters the run is under the bound, so this run is 40,000.
+        self.assert_scans_within_bound("key-equals", "key=" * 10000, "a 40,000-character run of key=")
 
 
 class Mirror(Base):
