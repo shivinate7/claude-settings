@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-07T08:21:00Z",
+  "context": "Goal: a resumed failed run shows why it failed, and hides only the provider's raw text.\nProblem (rule): the job row's error column holds both the server's own sentences and the provider's raw text, with nothing marking which is which (src/worker/reconcileWorker.ts writes error.message; claudeProvider.ts throws provider text unchanged).\nBased on (read): today recoverRun (src/components/Chat.tsx) sends every reason through answerFailure (src/utils/plainReason.ts), which drops all but the network and no-key reasons.\nBased on (read): the D-369 check's fixture error, \"the worker gave up after three attempts\", is not a sentence the product writes.\nDeparts from: main hides every resumed reason \u2014 the resumed view shows the row's reason.",
+  "home": "q_max PRs from lane qmax-browser-main-red",
+  "id": "qmax-d369-error-source",
+  "kind": "decision",
+  "lane": "qmax-browser-main-red",
+  "n": 328,
+  "options": [
+    {
+      "gain": "Hides only provider text, as 326 a says. Pipeline failures such as \"No line items were extracted\" also show. Fixes the cause; the D-369 fixture stays.",
+      "key": "a",
+      "label": "Mark the source at the server; the screen shows the row's text (recommended)",
+      "lose": "A wider change: three throw families, the Jobs screen's error text changes, some tests re-pointed."
+    },
+    {
+      "gain": "Small, and it cannot leak provider text.",
+      "key": "b",
+      "label": "Allow-list three sentences on the screen: cancel, deadline, dead worker",
+      "lose": "Pipeline failures stay hidden, short of \"hides only\"; the D-369 check's fixture changes."
+    }
+  ],
+  "owner": "lane qmax-browser-main-red",
+  "pick": "a",
+  "rank": 2,
+  "ref": "q_max D-369; item 326",
+  "short": "q_max D-369: where the reason is sorted",
+  "status": "open",
+  "title": "q_max failed-run reason: mark provider errors at the server, or allow-list three sentences on the screen?",
+  "why": "Follow-up to your 326 a. The screen cannot show the server's reason and hide the provider's raw text until one of these is built."
+}
