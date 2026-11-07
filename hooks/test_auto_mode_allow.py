@@ -30,12 +30,12 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   one `--confirm` merge rule. Its Covers text names the coordinator that relays (cs-build:coordinator),
   the batch runner that merges (cs-build:batch-runner), and the pull request the relay names. Its
   Never covers names each act in RELAYED_MERGE_REFUSED, the reason flags, and a session not tagged
-  cs-build:batch-runner (owner ruling, 2026-11-07).
+  cs-build:batch-runner (decision `auto-mode-owner-acts`).
 - One "Batch Runner Merge:" entry quotes the same derived merge command in its Covers text. Its
   Covers text names the coordinator that sends the merge go (cs-build:coordinator), the batch runner
   (cs-build:batch-runner), `merge go`, and the pull request the merge go names. Its Never covers
   names each act in BATCH_MERGE_REFUSED, the reason flags, and a merge go from a session not tagged
-  cs-build:coordinator (owner ruling, 2026-11-07 13:27 CST).
+  cs-build:coordinator (decision `auto-mode-owner-acts`).
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
@@ -96,14 +96,14 @@ RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page 
                    ("closed item", "a closed item"), ("arbiter overturn only", r"except an arbiter overturn"),
                    ("permissions", "permissions"), ("settings", "settings"), ("overrides", "overrides"),
                    ("no counted line", "no `counted` line in this session"))
-# Each act the Relayed Merge Yes entry's "Never covers" sentence must name (owner ruling, 2026-11-07).
+# Each act the Relayed Merge Yes entry's "Never covers" sentence must name (decision `auto-mode-owner-acts`).
 RELAYED_MERGE_REFUSED = (("another pull request", "another pull request"),
                          ("not tagged cs-build:coordinator", "not tagged `cs-build:coordinator`"),
                          ("failing", "failing"), ("running", "running"), ("approval", "approv"),
                          ("review", "review"), ("admin", "admin"), ("force push", "force[- ]push"),
                          ("permissions", "permission"), ("settings", "setting"),
                          ("overrides", "override"), ("any other act", "any other act"))
-# Each act the Batch Runner Merge entry's "Never covers" sentence must name (owner ruling, 2026-11-07 13:27 CST).
+# Each act the Batch Runner Merge entry's "Never covers" sentence must name (decision `auto-mode-owner-acts`).
 BATCH_MERGE_REFUSED = (("not tagged cs-build:batch-runner", "not tagged `cs-build:batch-runner`"),
                        ("nobody named", "nobody named"),
                        ("failing", "failing"), ("running", "running"), ("approval", "approv"),
