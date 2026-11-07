@@ -2411,7 +2411,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
 
 PROSE_JUDGE_MAX_CALLS = 3  # model calls one merge makes; each may run MODEL_TIMEOUT s after the lock is released, so the count bounds how long the run waits before it ends. A file past it reads UNKNOWN
 PROSE_JUDGE_MAX_LINES = 20  # finding lines (stale, unbacked) one merge prints for the prose judge; the rest are one count line. UNKNOWN lines never count against it
-PROSE_JUDGE_CAUSES = ("timed out", "model error", "no readable verdict", "past the call cap", "skipped by the reply")  # the buckets of the one UNKNOWN count line, in print order; no raw error text reaches the report
+PROSE_JUDGE_CAUSES = ("timed out", "model error", "no readable verdict", "past the call cap", "skipped by the reply")  # the buckets of the one UNKNOWN count line, in print order; the count line carries no raw error text
 TIMED_OUT, MODEL_ERROR, NO_VERDICT, PAST_CAP, SKIPPED = PROSE_JUDGE_CAUSES
 
 def prose_judge_lines(wt, sha, base_ref, changed):
@@ -2525,19 +2525,19 @@ def readable_verdicts(verdict):
     return rows
 
 def prose_judge_cause(verdict, error):
-    """The PROSE_JUDGE_CAUSES bucket for a call that gave no readable verdict (a verdict that failed readable_verdicts has an error of None). Reply-parse errors from decision_watch start with "model output"
-    or "model result"; every other error (exit, failed start, token read) is a model error."""
+    """The PROSE_JUDGE_CAUSES bucket for a call that gave no readable verdict (a verdict that failed readable_verdicts has an error of None). Reply-parse errors from decision_watch start with one of its REPLY_ERROR_PREFIXES;
+    every other error (exit, failed start, token read) is a model error."""
     import decision_watch
     if error == decision_watch.MODEL_TIMEOUT_ERROR:
         return TIMED_OUT
-    if error is None or error.startswith(("model output", "model result")):
+    if error is None or error.startswith(decision_watch.REPLY_ERROR_PREFIXES):
         return NO_VERDICT
     return MODEL_ERROR
 
 def prose_judge_run(plan, n):
     """Report-only (outcomes-mechanize-rules), after the lock is released: one decision_watch.invoke_model call per job in `plan`, looked up
     at call time. -> the report lines: one per line the model calls stale or unbacked, at most PROSE_JUDGE_MAX_LINES, then one count line for
-    the rest; then one UNKNOWN count line for every line not judged, by cause (PROSE_JUDGE_CAUSES). Nothing here refuses a merge or writes a file."""
+    the rest; then one UNKNOWN count line for every line not judged, by cause (PROSE_JUDGE_CAUSES; it carries no raw error text). A plan-level failure line names its exception type and message. Nothing here refuses a merge or writes a file."""
     findings = []
     plan_failures = []  # a plan-level UNKNOWN line stands alone, whole
     counts = dict.fromkeys(PROSE_JUDGE_CAUSES, 0)
