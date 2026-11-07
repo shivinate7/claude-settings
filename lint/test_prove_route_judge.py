@@ -6,14 +6,16 @@ lint/route_claims_labelled.json. Standard library only.
 
 The script runs as a child with the git repo that holds the rows' revs as its cwd. Interface pinned here:
 `--labelled PATH` (the rows file; default lint/route_claims_labelled.json beside the script) and `--max-calls N`.
-It prints one verdict line, e.g. `false alarms 1/13 (7.7%), hits 3/4, unknown 0, skipped 4`, exits 0, and writes
-no file and no log. PROVE_ROUTE_JUDGE_UNDER_TEST names another copy of the script.
+It prints one verdict line, e.g. `false alarms 1/13 (7.7%), hits 3/4, unbacked 5/17, unknown 0, skipped 4`, exits 0,
+and writes no file and no log. PROVE_ROUTE_JUDGE_UNDER_TEST names another copy of the script.
 
 Scoring: TRUE rows are holds rows. STALE, PARTLY_STALE and HALF rows are stale-family rows. UNKNOWN and HISTORY
-rows are skipped: left out of the score. False alarms: holds rows the model calls stale or unbacked, out of all
-holds rows. Hits: stale-family rows the model flags as stale or unbacked, out of all stale-family rows. A row the
-model could not judge (a failed call, a malformed reply, a line the reply leaves out, a group past --max-calls) is
-UNKNOWN: reported apart, never a pass, and still in its label's denominator.
+rows, and a row with no rev, are skipped: left out of the score. False alarms: holds rows the model calls stale, out
+of all holds rows. Hits: stale-family rows the model calls stale, out of all stale-family rows. Unbacked: every scored
+row the model calls unbacked, out of all scored rows, reported in its own field: an unbacked verdict is neither a
+false alarm nor a hit. A row the model could not judge (a failed call, a malformed reply, a line the reply leaves out,
+a group past --max-calls) is UNKNOWN: reported apart, never a pass, and still in its label's denominator. When a model
+call failed, the unknown count carries that failure's first line.
 
 Calls: rows group by (rev, file), one model call per group. The group's prompt is merge.prose_judge_prompt's output
 for its rows, and the file is read at its rev through git, never from the working tree.
@@ -56,13 +58,19 @@ RUN_FOLDER = _test_temp.run_folder()
 atexit.register(tracked_tree.rm_tree, RUN_FOLDER)
 
 # The model's answers on the labelled file that make the example line: one TRUE row judged stale (the false alarm),
-# and three of the four stale-family rows flagged (the one it misses is judged holds). Every other row is judged holds.
+# three of the four stale-family rows flagged (the one it misses is judged holds), and five TRUE rows judged unbacked.
+# Every other row is judged holds.
 FULL_FILE_VERDICTS = {
     ("docs/debts/notes.md", "830"): "stale",
     ("docs/decisions/session-tiers.md", "64"): "holds",
     ("docs/decisions/records-index-at-merge.md", "20"): "stale",
     ("docs/decisions/records-index-at-merge.md", "11"): "stale",
     (".claude/CLAUDE.md", "16-20"): "stale",
+    ("docs/decisions/pr-review-record.md", "41"): "unbacked",
+    ("docs/decisions/standing-merge-grant.md", "14"): "unbacked",
+    ("docs/decisions/standing-merge-grant.md", "31"): "unbacked",
+    ("docs/decisions/lanes-start-as-agents.md", "13"): "unbacked",
+    ("docs/decisions/task-names-its-check.md", "19"): "unbacked",
 }
 
 # The `claude` the child finds first. It records each prompt, then answers each `Line N: text` from ANSWERS by the
@@ -83,7 +91,7 @@ for number, text in re.findall(r"^Line (\\d+): (.*)$", prompt, re.M):
     if answer not in ("ERROR", "GARBAGE", "OMIT"):
         entries.append({"line": int(number), "verdict": answer})
 if error:
-    sys.stderr.write("stub: the model failed\\n")
+    sys.stderr.write("stub: the model failed\\nsecond line of stderr\\n")
     sys.exit(1)
 if garbage:
     print("this reply is not JSON")
@@ -185,7 +193,7 @@ def patched(env, case):
 
 class Run:
     def __init__(self, proc, case):
-        self.code, self.out, self.case = proc.returncode, proc.stdout, case
+        self.code, self.out, self.err, self.case = proc.returncode, proc.stdout, proc.stderr, case
         calls = os.path.join(case, "calls")
         self.calls = [read(os.path.join(calls, name)) for name in sorted(os.listdir(calls))]
 
@@ -244,17 +252,27 @@ class ControlTests(Base):
 
 
 class LabelMapTests(Base):
-    def test_true_rows_judged_stale_or_unbacked_are_false_alarms(self):
+    def test_true_rows_judged_stale_are_false_alarms(self):
         case = self.case()
         repo, (rev,) = make_repo(case, [{"docs/a.md": doc({1: "alpha claim", 2: "beta claim", 3: "gamma claim"})}])
         rows = [row("docs/a.md", 1, "TRUE", "alpha claim", rev), row("docs/a.md", 2, "TRUE", "beta claim", rev),
                 row("docs/a.md", 3, "STALE", "gamma claim", rev)]
-        run = judge(case, repo, {"alpha claim": "unbacked", "beta claim": "holds", "gamma claim": "holds"}, rows=rows)
+        run = judge(case, repo, {"alpha claim": "stale", "beta claim": "holds", "gamma claim": "holds"}, rows=rows)
         self.assertEqual(len(run.calls), 1, "expected one judge call for the one group, got %d" % len(run.calls))
-        self.assertEqual(run.lines(), ["false alarms 1/2 (50.0%), hits 0/1, unknown 0, skipped 0"],
-                         "a TRUE row judged unbacked must count as a false alarm")
+        self.assertEqual(run.lines(), ["false alarms 1/2 (50.0%), hits 0/1, unbacked 0/3, unknown 0, skipped 0"],
+                         "a TRUE row judged stale must count as a false alarm")
 
-    def test_stale_family_rows_judged_flagged_are_hits(self):
+    def test_unbacked_verdict_is_neither_a_false_alarm_nor_a_hit(self):
+        case = self.case()
+        repo, (rev,) = make_repo(case, [{"docs/a.md": doc({1: "alpha claim", 2: "beta claim", 3: "gamma claim"})}])
+        rows = [row("docs/a.md", 1, "TRUE", "alpha claim", rev), row("docs/a.md", 2, "TRUE", "beta claim", rev),
+                row("docs/a.md", 3, "STALE", "gamma claim", rev)]
+        run = judge(case, repo, {"alpha claim": "unbacked", "beta claim": "holds", "gamma claim": "unbacked"}, rows=rows)
+        self.assertEqual(len(run.calls), 1, "expected one judge call for the one group, got %d" % len(run.calls))
+        self.assertEqual(run.lines(), ["false alarms 0/2 (0.0%), hits 0/1, unbacked 2/3, unknown 0, skipped 0"],
+                         "a TRUE row judged unbacked must not count as a false alarm, and an unbacked stale row not as a hit")
+
+    def test_stale_family_rows_judged_stale_are_hits(self):
         case = self.case()
         repo, (rev,) = make_repo(case, [{"docs/a.md": doc({1: "s1 claim", 2: "p1 claim", 3: "h1 claim", 4: "h2 claim",
                                                              5: "t1 claim"})}])
@@ -264,8 +282,8 @@ class LabelMapTests(Base):
         run = judge(case, repo, {"s1 claim": "stale", "p1 claim": "unbacked", "h1 claim": "stale", "h2 claim": "holds",
                                  "t1 claim": "holds"}, rows=rows)
         self.assertEqual(len(run.calls), 1, "expected one judge call for the one group, got %d" % len(run.calls))
-        self.assertEqual(run.lines(), ["false alarms 0/1 (0.0%), hits 3/4, unknown 0, skipped 0"],
-                         "STALE, PARTLY_STALE and HALF rows the model flags must be hits, and a HALF row judged holds a miss")
+        self.assertEqual(run.lines(), ["false alarms 0/1 (0.0%), hits 2/4, unbacked 1/5, unknown 0, skipped 0"],
+                         "hits count stale verdicts only: stale rows of the stale family are hits, and the unbacked one is not")
 
     def test_unknown_and_history_rows_are_skipped_not_scored(self):
         case = self.case()
@@ -274,7 +292,7 @@ class LabelMapTests(Base):
                 row("docs/a.md", 3, "UNKNOWN", "u1 claim", rev), row("docs/a.md", 4, "HISTORY", "h1 claim", rev)]
         run = judge(case, repo, {"t1 claim": "holds", "s1 claim": "holds", "u1 claim": "stale", "h1 claim": "stale"}, rows=rows)
         self.assertEqual(len(run.calls), 1, "expected one judge call for the one group, got %d" % len(run.calls))
-        self.assertEqual(run.lines(), ["false alarms 0/1 (0.0%), hits 0/1, unknown 0, skipped 2"],
+        self.assertEqual(run.lines(), ["false alarms 0/1 (0.0%), hits 0/1, unbacked 0/2, unknown 0, skipped 2"],
                          "UNKNOWN and HISTORY rows must be left out of the score and counted as skipped")
 
 
@@ -323,6 +341,19 @@ class RevTests(Base):
         self.assertNotIn("working tree claim", prompt, "the prompt holds the working tree's line, not the rev's")
         self.assertNotIn("working backing text", prompt, "the prompt holds the working tree's backing file")
 
+    def test_row_with_no_rev_is_skipped_and_the_run_still_prints_its_line(self):
+        case = self.case()
+        repo, (rev,) = make_repo(case, [{"docs/a.md": doc({1: "alpha claim", 2: "beta claim", 3: "gamma claim"})}])
+        no_rev = row("docs/a.md", 1, "TRUE", "alpha claim", None)
+        no_rev["note"] = "the commit was not recorded"  # the shape lint/route_claims_labelled.json gives a null rev
+        rows = [no_rev, row("docs/a.md", 2, "TRUE", "beta claim", rev), row("docs/a.md", 3, "STALE", "gamma claim", rev)]
+        run = judge(case, repo, {"beta claim": "holds", "gamma claim": "stale"}, rows=rows)
+        self.assertEqual(run.lines(), ["false alarms 0/1 (0.0%), hits 1/1, unbacked 0/2, unknown 0, skipped 1"],
+                         "a row with no rev must be counted as skipped, and the run must still print its verdict line")
+        self.assertEqual(len(run.calls), 1, "the row with no rev made a judge call of its own, or the rest were not judged")
+        self.assertEqual(run.code, 0, "a row with no rev must not end the run with a non-zero exit")
+        self.assertNotIn("Traceback", run.err, "a row with no rev raised an exception in the script")
+
 
 class UnknownTests(Base):
     def test_model_error_is_unknown_never_a_pass(self):
@@ -333,7 +364,8 @@ class UnknownTests(Base):
                 row("docs/b.md", 2, "STALE", "gamma claim", rev)]
         run = judge(case, repo, {"alpha claim": "ERROR", "beta claim": "holds", "gamma claim": "stale"}, rows=rows)
         self.assertEqual(len(run.calls), 2, "expected one judge call per group, 2 groups, got %d" % len(run.calls))
-        self.assertEqual(run.lines(), ["false alarms 0/2 (0.0%), hits 1/1, unknown 1, skipped 0"],
+        self.assertEqual(run.lines(), ["false alarms 0/2 (0.0%), hits 1/1, unbacked 0/3, unknown 1 (model error: "
+                                       "model exited 1: stub: the model failed), skipped 0"],
                          "a row whose model call failed must be UNKNOWN: in its label's denominator, in neither numerator")
 
     def test_line_the_reply_leaves_out_is_unknown(self):
@@ -343,8 +375,8 @@ class UnknownTests(Base):
                 row("docs/a.md", 3, "STALE", "gamma claim", rev)]
         run = judge(case, repo, {"alpha claim": "stale", "beta claim": "OMIT", "gamma claim": "stale"}, rows=rows)
         self.assertEqual(len(run.calls), 1, "expected one judge call for the one group, got %d" % len(run.calls))
-        self.assertEqual(run.lines(), ["false alarms 1/2 (50.0%), hits 1/1, unknown 1, skipped 0"],
-                         "a row the reply leaves out must be UNKNOWN, not a holds verdict")
+        self.assertEqual(run.lines(), ["false alarms 1/2 (50.0%), hits 1/1, unbacked 0/3, unknown 1, skipped 0"],
+                         "a row the reply leaves out must be UNKNOWN, not a holds verdict, and carries no model error")
 
     def test_malformed_reply_is_unknown(self):
         case = self.case()
@@ -354,8 +386,9 @@ class UnknownTests(Base):
                 row("docs/b.md", 2, "STALE", "gamma claim", rev)]
         run = judge(case, repo, {"alpha claim": "GARBAGE", "beta claim": "holds", "gamma claim": "stale"}, rows=rows)
         self.assertEqual(len(run.calls), 2, "expected one judge call per group, 2 groups, got %d" % len(run.calls))
-        self.assertEqual(run.lines(), ["false alarms 0/2 (0.0%), hits 1/1, unknown 1, skipped 0"],
-                         "a reply that is not JSON must make its rows UNKNOWN")
+        self.assertEqual(run.lines(), ["false alarms 0/2 (0.0%), hits 1/1, unbacked 0/3, unknown 1 (model error: "
+                                       "model output was not JSON), skipped 0"],
+                         "a reply that is not JSON must make its rows UNKNOWN, carrying the call's error")
 
 
 class RunTests(Base):
@@ -399,16 +432,35 @@ class RunTests(Base):
         self.assertEqual(files_under(os.path.join(case, "config")), [], "the run wrote into the config folder")
 
 
+def full_file_run(case, answer_for):
+    """Run the script on the whole labelled file, each row answered by answer_for(row). -> Run."""
+    with open(LABELLED, encoding="utf-8") as f:
+        rows = json.load(f)
+    answers = {" ".join(r["text"].split()): answer_for(r) for r in rows}
+    return judge(case, ROOT, answers, labelled=LABELLED)
+
+
 class FullFileTests(Base):
     def test_full_labelled_file_gives_the_example_line(self):
-        case = self.case()
-        with open(LABELLED, encoding="utf-8") as f:
-            rows = json.load(f)
-        answers = {" ".join(r["text"].split()): FULL_FILE_VERDICTS.get((r["file"], r["line"]), "holds") for r in rows}
-        run = judge(case, ROOT, answers, labelled=LABELLED)
-        self.assertEqual(run.lines(), ["false alarms 1/13 (7.7%), hits 3/4, unknown 0, skipped 4"],
+        run = full_file_run(self.case(), lambda r: FULL_FILE_VERDICTS.get((r["file"], r["line"]), "holds"))
+        self.assertEqual(run.lines(), ["false alarms 1/13 (7.7%), hits 3/4, unbacked 5/17, unknown 0, skipped 4"],
                          "the score of the full labelled file is not the example line")
         self.assertEqual(run.code, 0, "the full labelled file's run must exit 0")
+
+    def test_judge_that_says_unbacked_to_every_line_scores_no_false_alarm(self):
+        run = full_file_run(self.case(), lambda r: "unbacked")
+        self.assertEqual(run.lines(), ["false alarms 0/13 (0.0%), hits 0/4, unbacked 17/17, unknown 0, skipped 4"],
+                         "a judge that says unbacked to every line must score 0 false alarms and 0 hits, with 17 unbacked")
+        self.assertEqual(run.code, 0, "the every-line-unbacked run must exit 0")
+
+    def test_model_error_carries_its_first_line_on_the_unknown_count(self):
+        run = full_file_run(self.case(), lambda r: "ERROR")
+        self.assertEqual(run.lines(), ["false alarms 0/13 (0.0%), hits 0/4, unbacked 0/17, unknown 17 (model error: "
+                                       "model exited 1: stub: the model failed), skipped 4"],
+                         "every row whose model call failed must be UNKNOWN, and the count must carry the call's first error line")
+        self.assertNotIn("second line of stderr", run.out,
+                         "the verdict line carries the error's second line, not only its first")
+        self.assertEqual(run.code, 0, "a run whose every model call failed must still exit 0")
 
 
 if __name__ == "__main__":
