@@ -4827,19 +4827,29 @@ class MistakeNamesGuardTests(unittest.TestCase):
     def test_mg_green_debt_filed_sentence_passes(self):
         self.assert_allowed(mg_report("I broke the inbox. Debt filed: inbox-fence."))
 
-    # A fault word with no admission in it passes: "broke" that means split, and a fault word that describes the
-    # test, not the writer's act. Each one is refused on main, where a first-person word sits before the fault word.
+    # "broke" that means split admits nothing, so it passes. Each fault word after it still admits a mistake, even
+    # with a relative clause ("that was wrong"), a when clause or a parenthesis after the writer's verb: a regex
+    # cannot tell that description from an admission, so no such clause clears it.
     def test_mg_green_broke_the_batch_into_lanes_passes(self):
         self.assert_allowed(mg_report("I broke the batch into three lanes."))
 
-    def test_mg_green_changed_the_test_that_was_wrong_passes(self):
-        self.assert_allowed(mg_report("I changed the test that was wrong."))
+    def test_mg_red_changed_the_test_that_was_wrong_blocks(self):
+        self.assert_blocked(mg_report("I changed the test that was wrong."))
 
-    def test_mg_green_repointed_test_in_parentheses_passes(self):
-        self.assert_allowed(mg_report("I re-pointed the test (the one that was wrong)."))
+    def test_mg_red_repointed_test_in_parentheses_blocks(self):
+        self.assert_blocked(mg_report("I re-pointed the test (the one that was wrong)."))
 
-    def test_mg_green_repointed_test_when_check_was_wrong_passes(self):
-        self.assert_allowed(mg_report("I re-pointed the test when the check was wrong."))
+    def test_mg_red_repointed_test_when_check_was_wrong_blocks(self):
+        self.assert_blocked(mg_report("I re-pointed the test when the check was wrong."))
+
+    def test_mg_red_wrote_the_test_that_was_wrong_blocks(self):
+        self.assert_blocked(mg_report("I wrote the test that was wrong."))
+
+    def test_mg_red_merged_the_pr_when_check_was_wrong_blocks(self):
+        self.assert_blocked(mg_report("I merged the PR when the check was wrong."))
+
+    def test_mg_red_merged_the_pr_and_that_was_wrong_blocks(self):
+        self.assert_blocked(mg_report("I merged the PR and that was wrong."))
 
     # The twins: an admission keeps its block when a parenthesis, a that clause or a when clause follows it.
     # A clause split must cut only after the admission, never drop it.
