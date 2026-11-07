@@ -99,7 +99,7 @@ FAMILIES = {
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
-    "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
+    "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread; a create_session or send_message that starts or names a step overlapping an open lane on another repo is asked (lane-start-overlap)",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -9212,6 +9212,7 @@ ROLE_DIR = os.path.join(ROOT, "rolerec")
 GET_SESSION = "mcp__claude-code-remote__get_session"
 SET_SESSION_TAGS = "mcp__claude-code-remote__set_session_tags"
 LIST_SESSIONS = "mcp__claude-code-remote__list_sessions"
+ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
 LANE_TAGS = ["cs-build:lane", "cs-repo:o/r"]
 RUNNER_TAGS = ["cs-build:batch-runner", "cs-repo:o/r"]
 COORD_TAGS = ["cs-build:coordinator", "cs-repo:o/r"]
@@ -9297,11 +9298,11 @@ CREATE_SESSION = "mcp__claude-code-remote__create_session"
 ROLE_NEW = "session_ROLENEW01"  # the id a create_session call starts, and a send_message names
 
 
-def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False, key="id"):
-    """One paired create_session call that starts `session` with `tags`. Its result names the new id: as
+def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False, key="id", title="a lane session"):
+    """One paired create_session call that starts `session` with `tags` and `title`. Its result names the new id: as
     JSON {`key`: ...} when `plain` is False, else as plain text. Each shape has its own fixture."""
     body = "Created session " + session + "." if plain else json.dumps({key: session})
-    return [role_use(tool_id, CREATE_SESSION, {"title": "a lane session", "tags": list(tags)}),
+    return [role_use(tool_id, CREATE_SESSION, {"title": title, "tags": list(tags)}),
             role_result(tool_id, body)]
 
 
@@ -9309,6 +9310,55 @@ def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False, key="id"):
 STEP_TOPIC_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-topic:icons", "cs-repo:o/r"]
 STEP_OLD_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-step:icon-b", "cs-repo:o/r"]
 STEP_COLORS_TAGS = ["cs-build:lane", "cs-step:colors-a", "cs-topic:colors", "cs-repo:o/r"]
+
+# lane-start-overlap. The open lanes a create_session start or a send_message step is judged against. The home repo is
+# the calling checkout's own (cwd LANE_REPO, origin claude-settings). The q_max repo is the one a second lane shares.
+LANE_START_RULE = "lane-start-overlap"
+START_HOME = "cs-repo:shivinate7/claude-settings"
+START_QMAX = "cs-repo:shivinate7/q_max"
+START_MAP_ID = "session_013NEJL1dp5Gks9NWgNMJ7Jw"     # the incident's lane qmax-map-format-skew
+START_VERIFY_ID = "session_013NEJKzRCmwHVEerq6qBgSn"  # the incident's lane qmax-verify-report-fixes
+START_MAP_TAGS = ["cs-build:lane", START_HOME, START_QMAX, "cs-step:qmax-map-format-skew",
+                  "cs-topic:plain-english-map"]
+START_VERIFY_TAGS = ["cs-build:lane", START_HOME, START_QMAX, "cs-step:qmax-browser-shard",
+                     "cs-topic:qmax-verify-report-fixes"]
+# The same lane, with a second step named on it. A brief that names this step names one the lane already carries.
+START_VERIFY_TWO_TAGS = ["cs-build:lane", START_HOME, START_QMAX, "cs-step:qmax-browser-shard",
+                         "cs-step:qmax-map-legend", "cs-topic:qmax-verify-report-fixes"]
+START_MAIN_TAGS = ["cs-build:lane", START_HOME, START_QMAX, "cs-step:qmax-main-map-ts", "cs-topic:plain-english-map"]
+START_HOME_ID = "session_STARTHOME01"
+START_HOME_TAGS = ["cs-build:lane", START_HOME, "cs-step:page-names-check", "cs-topic:page-names"]
+START_SHARD_ID = "session_STARTSHARD01"
+START_SHARD_TAGS = ["cs-build:lane", START_HOME, START_QMAX, "cs-step:qmax-browser-shard", "cs-topic:shard-split"]
+# Five home-repo lanes on one topic, and four on the guard word: the home-only shapes that are never checked.
+START_WAITING = [("session_STARTWAIT0%d" % n, ["cs-build:lane", START_HOME, "cs-step:waiting-page-" + step,
+                  "cs-topic:waiting-page"], "lane: waiting-page-" + step) for n, step in enumerate("abcde", 1)]
+START_GUARD = [("session_STARTGUARD0%d" % n, ["cs-build:lane", START_HOME, "cs-step:guard-" + step,
+                "cs-topic:guard-rules"], "lane: guard-" + step) for n, step in enumerate("acde", 1)]
+
+
+def start_lanes(*lanes):
+    """The create_session pairs of `lanes`, each (session, tags, title), in order."""
+    rows = []
+    for number, (session, tags, title) in enumerate(lanes):
+        rows += role_create_call("s%d" % number, tags, session=session, title=title)
+    return rows
+
+
+def start_close(session):
+    """An archive_session call on `session` whose result is a success."""
+    return [role_use("a1", ARCHIVE_TOOL, {"session_id": session}), role_result("a1", "ok")]
+
+
+def start_row(session, status, tags):
+    """One row of list_sessions, as its ccr.data holds it."""
+    return {"id": session, "session_status": status, "tags": list(tags)}
+
+
+def start_list(*rows):
+    """A list_sessions result: its rows in ccr.data, returned as another session's text, nonce-wrapped."""
+    body = role_wrapped(json.dumps({"ccr": {"data": list(rows)}}))
+    return [role_use("l1", LIST_SESSIONS), role_result("l1", body)]
 
 
 # lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
@@ -9428,6 +9478,21 @@ ROLE_LINES = {
     "body-int-then-lane": role_call("r0", RUNNER_TAGS) + [role_use("g1", GET_SESSION, {"session_id": ROLE_OTHER}),
                                                           role_result_block("g1", content=7)]
                           + role_target_call("g2", ARCH_LANE_TAGS),
+    # lane-start-overlap shapes. A create_session start or a send_message is judged against the open lanes these hold.
+    "start-incident": start_lanes((START_MAP_ID, START_MAP_TAGS, "lane: qmax-map-format-skew"),
+                                  (START_VERIFY_ID, START_VERIFY_TAGS, "lane: qmax-verify-report-fixes")),
+    "start-two-steps": start_lanes((START_MAP_ID, START_MAP_TAGS, "lane: qmax-map-format-skew"),
+                                   (START_VERIFY_ID, START_VERIFY_TWO_TAGS, "lane: qmax-verify-report-fixes")),
+    "start-map-only": start_lanes((START_MAP_ID, START_MAP_TAGS, "lane: qmax-map-format-skew")),
+    "start-list-only": start_list(start_row(START_MAP_ID, "SESSION_STATUS_RUNNING", START_MAP_TAGS)),
+    "start-shard": start_lanes((START_SHARD_ID, START_SHARD_TAGS, "lane: qmax-browser-shard")),
+    "start-home-restart": start_lanes((START_HOME_ID, START_HOME_TAGS, "lane: page-names-check")),
+    "start-home-archived": start_lanes((START_HOME_ID, START_HOME_TAGS, "lane: page-names-check"))
+                           + start_close(START_HOME_ID),
+    "start-home-list-archived": start_lanes((START_HOME_ID, START_HOME_TAGS, "lane: page-names-check"))
+                                + start_list(start_row(START_HOME_ID, "SESSION_STATUS_ARCHIVED", START_HOME_TAGS)),
+    "start-waiting-five": start_lanes(*START_WAITING),
+    "start-guard": start_lanes(*START_GUARD),
 }
 
 
@@ -9855,7 +9920,6 @@ FAMILY = "lane-closes-after-records"
 #   - a lane: the guard reads the open pull requests of the lane's cs-repo. Any open one whose head names the
 #     cs-step slug denies. None allows. A read that cannot run denies: guards fail closed.
 # The allows are as load-bearing as the refusals: a false alarm on a finished lane blocks the batch runner.
-ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
 ARCHIVE_RULE = "lane-closes-after-records"
 ARCHIVE_NAMED = ("archive_session",)  # the refusal never names the tool, so it never invites the same act
 ARCHIVE_STEER = ("get_session", "alone", ("retry", "Retry"))  # the remedy: get_session on the target alone, then retry
@@ -19083,6 +19147,122 @@ add("lane-repo-tag: a denied lane names the expected repo tag in its reason", "d
     tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane"],
     carries="cs-repo:shivinate7/claude-settings")
 
+
+# ---- lane-start-overlap (family lane-one-topic). A create_session that starts a lane, or a send_message that names
+# a step, is asked when an open lane on another repo than the home repo overlaps it: the same cs-topic, or a word of
+# the new step shared with that lane's step slug or title slug. Words split on - and _, casefolded, and the words of
+# the shared repo's name are dropped. Home-only overlap is never checked, except an exact re-start (the same step and
+# the same topic on the home repo), which is asked. A closed lane (archived, or archive_session with a success result)
+# overlaps nothing. The reason names the overlapping lane's step slug and its session id.
+_OUTER_FAMILY = FAMILY
+FAMILY = "lane-one-topic"
+
+
+def start_ask(name, transcript, tags, title, carries):
+    """A create_session the guard asks about: an open lane overlaps the start. Its reason names the lane."""
+    add("lane-start-overlap: " + name, "ask", rule=LANE_START_RULE, tool=LANE_TOOL, cwd=LANE_REPO,
+        transcript=transcript, prompt="/effort medium", tags=list(tags), title=title, carries=carries)
+
+
+def start_allow(name, transcript, tags, title):
+    """A create_session the guard lets through silently."""
+    add("lane-start-overlap: " + name, "allow", tool=LANE_TOOL, cwd=LANE_REPO, silent=True, transcript=transcript,
+        prompt="/effort medium", tags=list(tags), title=title)
+
+
+def send_ask(name, transcript, target, message, carries):
+    """A send_message the guard asks about: its step overlaps an open lane. Its reason names the lane."""
+    add("lane-start-overlap: " + name, "ask", rule=LANE_START_RULE, tool=SEND_MESSAGE, cwd=LANE_REPO,
+        transcript=transcript, env=ROLE_ENV, session_id=target, message=message, carries=carries)
+
+
+def send_allow(name, transcript, target, message):
+    """A send_message the guard lets through silently."""
+    add("lane-start-overlap: " + name, "allow", tool=SEND_MESSAGE, cwd=LANE_REPO, silent=True, transcript=transcript,
+        env=ROLE_ENV, session_id=target, message=message)
+
+
+# Asked: the topic clause. A constructed start on topic plain-english-map beside an open lane on that topic and q_max.
+start_ask("constructed by topic: a start on the same topic as an open lane on q_max is asked",
+          role_path("start-map-only"), START_MAIN_TAGS, "lane: qmax-main-map-ts",
+          carries=("qmax-map-format-skew", START_MAP_ID))
+# Asked: the same overlap, seen only through a list_sessions result that another session's text wraps.
+start_ask("a lane seen only through a nonce-wrapped list_sessions row is asked",
+          role_path("start-list-only"), START_MAIN_TAGS, "lane: qmax-main-map-ts",
+          carries=("qmax-map-format-skew", START_MAP_ID))
+# Asked: the exact re-start clause. The same step and topic on the home repo only, which the home-only exemption never lifts.
+start_ask("exact re-start: the same step and topic on the home repo only is asked",
+          role_path("start-home-restart"), START_HOME_TAGS, "lane: page-names-check",
+          carries=("page-names-check", START_HOME_ID))
+# Asked: the topic clause alone. The new step shares no word with the open lane's step or title, so only the topic overlaps.
+start_ask("topic only: a new step sharing no word, on the same topic and q_max, is asked",
+          role_path("start-map-only"),
+          ["cs-build:lane", START_HOME, START_QMAX, "cs-step:qmax-font-swap", "cs-topic:plain-english-map"],
+          "lane: qmax-font-swap", carries=("qmax-map-format-skew", START_MAP_ID))
+# Asked: the word clause alone. The same step on q_max under other topics: the new step's words are the lane's own.
+start_ask("word only: the same step on q_max under another topic is asked",
+          role_path("start-shard"),
+          ["cs-build:lane", START_HOME, START_QMAX, "cs-step:qmax-browser-shard", "cs-topic:shard-plan"],
+          "lane: qmax-browser-shard", carries=("qmax-browser-shard", START_SHARD_ID))
+# Asked: the incident. A marker brief names a new step to the lane qmax-verify-report-fixes, and the word map overlaps
+# the lane qmax-map-format-skew on q_max. The brief's topic matches the target, so lane-one-topic passes it.
+send_ask("incident, a marker brief naming a new step to an open lane is asked, not denied",
+         role_path("start-incident"), START_VERIFY_ID,
+         "Lane brief: qmax-main-map-ts. Topic: qmax-verify-report-fixes.",
+         carries=("qmax-map-format-skew", START_MAP_ID))
+# Asked: the incident again, as a plain message with no marker. Only the step's word map overlaps.
+send_ask("incident, a plain message naming a new step to an open lane is asked, not denied",
+         role_path("start-incident"), START_VERIFY_ID,
+         "take q_max's 10 MAP failures as step qmax-main-map-ts",
+         carries=("qmax-map-format-skew", START_MAP_ID))
+
+# Allowed: a different step and a different topic on q_max, sharing no word with the open lane.
+start_allow("different step and topic on q_max is allowed",
+            role_path("start-map-only"),
+            ["cs-build:lane", START_HOME, START_QMAX, "cs-step:qmax-nav-audit", "cs-topic:nav-audit"],
+            "lane: qmax-nav-audit")
+# Allowed: the same topic on the home repo only, beside five open home lanes on it. Home-only overlap is never checked.
+start_allow("same topic on the home repo only, beside five open lanes on it, is allowed",
+            role_path("start-waiting-five"),
+            ["cs-build:lane", START_HOME, "cs-step:waiting-page-f", "cs-topic:waiting-page"],
+            "lane: waiting-page-f")
+# Allowed: the same lane restarted after an archive_session call on the old id returned a success.
+start_allow("re-start after archive_session with a success result is allowed",
+            role_path("start-home-archived"), START_HOME_TAGS, "lane: page-names-check")
+# Allowed: the same lane restarted after a newer list_sessions row shows the old id archived.
+start_allow("re-start after a newer list_sessions row shows the old lane archived is allowed",
+            role_path("start-home-list-archived"), START_HOME_TAGS, "lane: page-names-check")
+# Allowed: no lane tag, so the rule does not judge the call, even beside an overlapping open lane.
+start_allow("a create_session with no lane tag is not judged, even beside an overlapping lane",
+            role_path("start-incident"),
+            [START_HOME, START_QMAX, "cs-step:qmax-main-map-ts", "cs-topic:plain-english-map"],
+            "lane: qmax-main-map-ts")
+# Allowed: no lane record in the transcript at all.
+start_allow("a create_session in a transcript with no lane records is allowed",
+            role_path("no-record"), START_MAIN_TAGS, "lane: qmax-main-map-ts")
+
+# Allowed: the brief names a step the target already carries, so no new step is started.
+send_allow("a marker brief naming a step the target already carries is allowed",
+           role_path("start-two-steps"), START_VERIFY_ID,
+           "Lane brief: qmax-map-legend. Topic: qmax-verify-report-fixes.")
+# Allowed: a new step whose words share nothing with the other q_max lane.
+send_allow("a new step sharing no word with another q_max lane is allowed",
+           role_path("start-incident"), START_VERIFY_ID,
+           "Lane brief: qmax-font-swap. Topic: qmax-verify-report-fixes.")
+# Allowed: a new step in a home-only lane sharing the word guard with three other home lanes: home-only is never checked.
+send_allow("a new step in a home-only lane sharing a word with three home lanes is allowed",
+           role_path("start-guard"), START_GUARD[0][0],
+           "Lane brief: guard-f. Topic: guard-rules.")
+# Allowed: a send_message with no step slug. Its word MAP overlaps the open lane, but no step is named.
+send_allow("a send_message with no step slug is allowed, though a word of it overlaps an open lane",
+           role_path("start-incident"), START_VERIFY_ID,
+           "Status: the MAP run is green. No action needed.")
+# Allowed: the same message with an unreadable transcript. A message with no step slug reads no transcript.
+send_allow("a send_message with no step slug is allowed with an unreadable transcript",
+           role_path("unreadable"), START_VERIFY_ID,
+           "Status: the MAP run is green. No action needed.")
+
+FAMILY = _OUTER_FAMILY
 
 # ---- Cost. The rule starts one git process for a lane create_session, to read the origin, and none for any
 # other call. The probe counts each child process the judge starts (CountingPopen and the os seams). A child whose
