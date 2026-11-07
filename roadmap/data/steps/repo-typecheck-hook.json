@@ -1,0 +1,11 @@
+{
+  "title": "A repo-declared TypeScript check after each edit, one claude-settings hook",
+  "order": 264.2,
+  "why": "Owner ask ask-mw6vyc57pi part 1, 14:58 CST Nov 7. Incident: a probe on 2026-11-03 (banchi-only project thread, three runs) showed a project's cloud thread loads the claude-settings guard but never runs a repo's own .claude/settings.json hooks or deny rules. Banchi copies its hooks into /etc/claude-code/managed-settings.json as a workaround.",
+  "note": "Model: banchi scripts/typecheck-hook.py (PostToolUse on Write|Edit; silent unless a .ts/.tsx file under the declared folder; runs tsc --noEmit there; exit 2 with tsc output on failure; fails open on its own bugs). Read the command and folder from .claude/layout-extras.json. One home, no per-repo copies; opt-in per repo. Candidates: banchi, q_max, joyous, mailaudit. Red test first.",
+  "updatedAt": "2026-11-07T14:59:00-06:00",
+  "lane": "",
+  "owner": "coordinator",
+  "phase": "now",
+  "status": "todo"
+}

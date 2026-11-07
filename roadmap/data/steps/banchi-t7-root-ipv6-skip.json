@@ -1,0 +1,11 @@
+{
+  "title": "banchi: T7 checks that cannot run as root or without IPv6 report a named SKIP",
+  "order": 264.1,
+  "why": "Owner ask ask-mw6vybwdb8 part 2, 14:58 CST Nov 7. Six T7 checks cannot pass in a Claude Code cloud VM (measured 2026-11-02 on banchi main b86f621): 4 read-only-door checks in harness/tests/t7/store_core.py chmod a folder 0555, which root ignores; 2 dual-stack bind checks need IPv6, which the VM kernel lacks (errno 97).",
+  "note": "The owner's ask names his pick: each reports a named SKIP when euid is 0 or IPv6 is absent, counted by scripts/ci-skip-count.sh, never a pass; CI is non-root with IPv6, so CI is unchanged. The ask also says to bring the options to the owner first, because it changes what a test proves: the lane files that question with his pick as the recommendation before it builds. Repo banchi.",
+  "updatedAt": "2026-11-07T14:59:00-06:00",
+  "lane": "",
+  "owner": "coordinator",
+  "phase": "now",
+  "status": "todo"
+}
