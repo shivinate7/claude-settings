@@ -25,7 +25,7 @@ WCAG level, is not taken on by choice (owner, 2026-11-01 12:23 CST, by triage).
   - `ux-canvas-has-words` (P): a canvas that informs has a name, text and keyboard acts.
   - `ux-scroll-stays-native` (P): the page scrolls by its usual steps.
   - `ux-forced-colors-hold` (P): controls, edges, focus and state show in forced colours.
-  - `ux-full-height-fits` (P): each `vh` value has an `svh` or `dvh` fallback after it.
+  - `ux-full-height-fits` (P): each `vh` or `lvh` value has an `svh` or `dvh` fallback after it.
   - `ux-vitals-measured` (P): LCP, INP and CLS are measured "good".
   - `ux-feature-baseline-or-fallback` (P): a new browser feature sits behind a test, with a fallback.
   - `ux-unknown-is-not-empty` (P): loading, failed, unknown, empty and loaded differ; an empty state
