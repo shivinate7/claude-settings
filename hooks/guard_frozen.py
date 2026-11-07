@@ -235,7 +235,7 @@ def _mutates_as_command(command: str, words) -> bool:
     return bool(re.fullmatch(MUTATING_COMMAND, command))
 
 
-def writes_to(path: str, cmd: str, written=(), command=None, words=()) -> bool:
+def writes_to(path: str, cmd: str, command=None, words=(), written=()) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
     Two ways to write a named file from a shell: redirect onto it, or hand it to a command that
@@ -657,14 +657,15 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 
 
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False, writes_first=False,
-                     command_position=False) -> str:
+                     command_position=False, predicate_command=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
-    when that folder cannot be told. `writes_first` asks `writes_to` before `predicate`, for a `predicate` that
-    reads files: a word that is no write target never reaches it. The default keeps the cheap `predicate`
-    first, because `writes_to` scans the whole text for each word and a command of thousands of words scales
-    with the square of its length."""
+    when that folder cannot be told. `predicate_command` also hands `predicate` the segment's command
+    name as a third argument (`''` when none). `writes_first` asks `writes_to` before `predicate`, for a
+    `predicate` that reads files: a word that is no write target never reaches it. The default keeps the cheap
+    `predicate` first, because `writes_to` scans the whole text for each word and a command of thousands of
+    words scales with the square of its length."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -712,16 +713,19 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                     written.add(_unquoted(word))
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
-        command = _segment_command(words) if command_position else ()
+        command = _segment_command(words) if command_position or predicate_command else ()
+        verb = command[0] if predicate_command else ""
         for place, word in enumerate(words):
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>") or place in stood_in:
                 continue   # a stand-in names no path: judged, it would resolve to the cwd
             if writes_first:
-                if writes_to(word, text, written, *command) and predicate(word, at):
+                if writes_to(word, text, *(command if command_position else ()), written=written) and (
+                        predicate(word, at, verb) if predicate_command else predicate(word, at)):
                     return word
-            elif predicate(word, at) and writes_to(word, text, written, *command):
+            elif (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(
+                    word, text, *(command if command_position else ()), written=written):
                 return word
     return ""
 

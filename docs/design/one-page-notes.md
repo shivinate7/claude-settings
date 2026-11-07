@@ -4,7 +4,7 @@ Mockup: `docs/design/one-page.html`. Screens: `skills/waiting-page/page.html` an
 `skills/roadmap/page/index.html` (main 1cc47f01).
 Ruling: the owner, Oct 27 12:15 CDT. One page per repo, with one writer. "Waiting on you" comes
 first. Status sits below it or in a tab. The two-page proposal is dropped.
-Rulings for this round (orchestrator, inside the owner's ruling): the waiting-page writer alone
+Rulings for this round (orchestrator, inside the owner's ruling): the page writer alone
 publishes the page file, and the tab row always shows.
 Sizes: phone 390, mid 800, wide 1280, light and dark. They are the sizes of `waiting-page-notes.md`.
 The mockup draws the waiting part with the `<style>` of page.html, unchanged.
@@ -53,9 +53,9 @@ Add `&w=all|390|800|1280`, `&t=light|dark` and `&lab=off`. Each state is an elem
 5. A load always opens Questions. The page does not keep the tab choice. The roadmap's own view
    memory (`rm-view`) stays for Plan, Changes, Reference and Records. Gain: what waits is first,
    each time. Loss: the owner who reads status first presses once on each load.
-6. The page is named "Queue". Each part has one name, the name of its tab: "Questions" and "Status".
-   The document title is "<repo> Queue", with " · Status" on the Status tab (shiv, chat, 14:33 CDT
-   Oct 30, 2026). The tab row always shows, so the header shows the repo name only, with no "waiting
+6. The page is named "Cockpit". Each part has one name, the name of its tab: "Questions" and "Status".
+   The document title is "<repo> Cockpit" on every tab, and "Cockpit" with no repo name (owner,
+   chat, 2026-11-02 11:12 CST; `cockpit-title-notes.md`). The tab row always shows, so the header shows the repo name only, with no "waiting
    on you" line (reviewer's pick, taken by the orchestrator, round 3).
    With no repo name, the header shows the mark only, and the h1 holds the tab name for screen
    readers. Departs from: this mockup, which always shows a name.
@@ -138,7 +138,7 @@ Each part below is kept as it is today, with no change. The mockup does not draw
    `answers/<id>`, then check that the answered card shows. The test also checks that nothing
    writes or deletes a document in `answers/`. The live check runs once per batch, as step 4 of
    "Update a repo's pages" in the waiting-page skill says: update one page first, then read its items.
-5. One writer publishes the page file: the waiting-page writer. The roadmap build makes only a data
+5. One writer publishes the page file: the page writer. The roadmap build makes only a data
    block, in its own marked block, and gives it to that writer. The build never publishes.
 6. Before each publish, the writer reads the live page. It replaces only the marked block that it
    changes: the `designData` block or the roadmap block. It keeps the other block. It runs one

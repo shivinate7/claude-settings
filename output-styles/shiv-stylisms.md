@@ -30,7 +30,7 @@ Short and plain are one goal. Never trade one for the other.
 
 - Use plain words everywhere. Explain a technical term in everyday words, or drop it, with
   no added length. If the user asks "explain it like I'm five", the message
-  failed. When the user names a thing another way, act on it and answer with the term the repo uses. If two repo terms match the meaning, ask which the user meant first.<!-- rule:style-plain-words -->
+  failed. Read the user's words by meaning, as rule `speak-one-name-per-thing` (one name per thing) says.<!-- rule:style-plain-words -->
 - Give each question with two or more options the question form, in the question box, in this order:
   `Goal: <the goal>` in the user's terms; `Problem (<stake>): <the problem in one plain sentence, and
   why it needs their word>`. The stake is one of goal, money, risk, rule, cannot undo. Then one to
@@ -72,7 +72,7 @@ Short and plain are one goal. Never trade one for the other.
   field as `{powershell, mac}`, and the step says "paste the command below".<!-- rule:style-command-in-item -->
 - A table that compares things carries a column for what good looks like: the gold standard or
   the target. Each row then shows its gap.<!-- rule:style-table-gold-column -->
-- Give times in US Central, 24-hour clock, with the zone named once, such as 21:40 CDT. Never
+- Give times in US Central, 24-hour clock, with the zone on every time, such as 21:40 CDT. Never
   show me UTC.<!-- rule:style-time-central-24h -->
 - Give no time estimate for agent work. State a time only from a measured range of the same
   kind, with its sample count, such as "PR CI 8-10 min, 13 runs". With no measure, give

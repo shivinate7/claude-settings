@@ -5,7 +5,8 @@ Run: python3 merge/test_lane_lint.py
 The lint is bin/ci-job's `checks --lint`, reached through merge.CI_JOB. Each case points CI_JOB at a stub that
 prints scripted step lines and exits with a scripted code, so no real lint runs. The stub logs each call, so a
 case reads what the tool ran, in which tree, at which head. The repo builder, the fakes and the cloud-session
-fixture come from merge/test_merge.py: a case extends that fixture, it does not copy it.
+fixture come from merge/test_merge.py: a case extends that fixture, it does not copy it. The draft step's ready check
+(class ReadyChecks) runs the same stub, through CiJobStub.
 The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
@@ -56,6 +57,31 @@ merge.CI_JOB = __STUB__
 sys.exit(merge.main(sys.argv[1:]))
 '''
 
+# Added to STUB before its verdict lines: one `start:` line per step on stderr, then a wait for the GO file. The wait is
+# a bound only (20 s): the case creates GO once it has read the first announcement from merge's stderr, so the lint
+# cannot end before the announcement is read.
+PROGRESS = '''GO = __GO__
+for _state, _name in STEPS:
+    print("start: " + _name, file=sys.stderr, flush=True)
+end = time.time() + 20
+while not os.path.exists(GO) and time.time() < end:
+    time.sleep(0.05)
+'''
+
+WORKFLOW = """name: t
+on: push
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lint one
+        run: python3 lint/a.py
+      - name: Make lint-py
+        run: make lint-py
+      - name: Lint two
+        run: python3 lint/b.py
+"""
+
 
 def pass_lines(text):
     return [line for line in text.splitlines() if line.startswith("PASS:")]
@@ -73,16 +99,24 @@ class NoLock:
         raise AssertionError("merge --lane-lint unlocked a merge lock")
 
 
-class LaneLint(tm.CloudSession):
-    @classmethod
-    def setUpClass(cls):
-        unittest.TestCase.setUpClass()  # not CloudSession's: it would make a second run folder
-        cls.run_dir = RUN_FOLDER
+class LintStepNames(unittest.TestCase):
+    """merge's lint_steps reads each `would run ` line of ci-job's plan as a step name. The plan's summary line names no
+    step, so it must not come back as one."""
 
-    def setUp(self):
-        with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER):  # Env.setUp makes its repos in the temp dir: keep them in this run's folder
-            super().setUp()
-        self.lock = NoLock()
+    def test_the_plan_summary_is_not_a_step_name(self):
+        root = tempfile.mkdtemp(prefix="lint-steps-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, root, True)
+        os.makedirs(os.path.join(root, ".github", "workflows"))
+        tm.put(os.path.join(root, ".github", "workflows", "checks.yml"), WORKFLOW)
+        names = merge.lint_steps(root, "origin/main")
+        self.assertEqual(names, {"Lint one", "Lint two"}, "lint_steps read a line that is no step: %s" % sorted(names - {"Lint one", "Lint two"}))
+
+
+class CiJobStub:
+    """The stub ci-job of this suite, for a class with self.t. Its setUp calls init_stub(). use_ci_job points merge.CI_JOB at
+    a stub that prints `steps` and exits `rc`; lint_calls reads back every run the stub logged, never a plan."""
+
+    def init_stub(self):
         self.log = os.path.join(self.t, "ci-calls.jsonl")
         self.stub = os.path.join(self.t, "ci-job-stub.py")
         self.step_log = os.path.join(self.t, "ci-job-step.log")
@@ -107,6 +141,19 @@ class LaneLint(tm.CloudSession):
         with open(self.log, encoding="utf-8") as f:
             calls = [json.loads(line) for line in f if line.strip()]
         return [c for c in calls if "--plan" not in c["argv"]]
+
+
+class LaneLint(CiJobStub, tm.CloudSession):
+    @classmethod
+    def setUpClass(cls):
+        unittest.TestCase.setUpClass()  # not CloudSession's: it would make a second run folder
+        cls.run_dir = RUN_FOLDER
+
+    def setUp(self):
+        with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER):  # Env.setUp makes its repos in the temp dir: keep them in this run's folder
+            super().setUp()
+        self.lock = NoLock()
+        self.init_stub()
 
     def run_lane(self, *argv, cloud=False):
         """-> (rc, stdout and stderr together) of merge in the lane checkout. A refused command line fails the case with its reason."""
@@ -141,6 +188,47 @@ class LaneLint(tm.CloudSession):
         sh = tm.sh
         sh(self.other, "git", "fetch", "-q", "origin")
         sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/release")
+
+    def progress_run(self, steps, rc, *argv):
+        """Run merge in a subprocess through HARNESS, with the stub of `steps` (see PROGRESS). -> (rc, stdout, stderr).
+        stderr is read live: the case creates the GO file at the first `start:` line, so a stderr that merge captures
+        instead of passing on reads to the end only after the stub's bound."""
+        go = os.path.join(self.t, "go")
+        text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
+        text = text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(0))
+        tm.put(self.stub, text.replace("lines = [", PROGRESS.replace("__GO__", repr(go)) + "lines = [", 1))
+        harness = os.path.join(self.t, "lane_lint_progress.py")
+        tm.put(harness, HARNESS.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(self.stub)))
+        env = {**os.environ, "CLAUDE_CONFIG_DIR": self.cfg}
+        env.pop("CLAUDE_CODE_REMOTE", None)
+        proc = subprocess.Popen([sys.executable, harness, *argv], cwd=self.co, env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(self.stop_run, proc)
+        err = []
+        for line in proc.stderr:
+            err.append(line)
+            if line.startswith("start:"):
+                open(go, "w", encoding="utf-8").close()
+                break
+        out, rest = proc.communicate(timeout=120)
+        return proc.returncode, out, "".join(err) + rest
+
+    def test_a_progress_line_from_ci_job_reaches_the_callers_stderr_live_and_the_pass_still_reads_from_stdout(self):
+        rc, out, err = self.progress_run(PASSING, 0, "--lane-lint", self.head("feat"))
+        self.assertTrue(any(line.startswith("start:") for line in err.splitlines()),
+                        "no ci-job start line reached merge's stderr while the lint ran: " + err)
+        self.assertEqual(len(self.lint_calls()), 1, out + err)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertEqual([line for line in out.splitlines() if line.startswith("start:")], [], out)
+
+    def test_a_failed_step_with_a_progress_line_still_refuses_and_names_the_step(self):
+        rc, out, err = self.progress_run(FAILING, 1, "--lane-lint", self.head("feat"))
+        self.assertTrue(any(line.startswith("start:") for line in err.splitlines()),
+                        "no ci-job start line reached merge's stderr while the lint ran: " + err)
+        self.assertEqual(rc, 1, out + err)
+        self.assertTrue(any("comment narration" in line and "FAIL" in line for line in (out + err).splitlines()), out + err)
+        self.assertEqual(pass_lines(out), [], out)
 
     def test_a_passing_lint_prints_one_pass_line_naming_head_and_base(self):
         self.use_ci_job(PASSING, 0)
@@ -373,6 +461,156 @@ class LaneLint(tm.CloudSession):
         self.assertNotIn("coordinator", err.lower())
         self.assertNotIn("batch-runner", err.lower())
         self.assertFalse(os.path.exists(self.role_file), "a refused role wrote the role file")
+
+
+class ReadyChecks(CiJobStub, tm.RecordsEnv):
+    """The ready check of the draft step (merge.draft_step): before a draft goes ready, the repo's declared merge.readyChecks
+    run through ci-job as `checks --step NAME ... --base origin/<base>`, on the tree that would be pushed. A FAIL or an
+    unknown stops the draft: nothing pushed, no ready mark, and no unknown-ok flag. The stub logs each run. Each red case
+    asserts that run first, so a missing check fails there by name. On main a declared key is refused as an unknown field
+    before the draft step runs, so the red cases never reach the draft step on main."""
+
+    def setUp(self):
+        with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER):  # Env.setUp makes its repos in the temp dir: keep them in this run's folder
+            super().setUp()
+        self.use_fake_records()
+        self.init_stub()
+
+    def declare(self, names, stamp_kinds=False):
+        """Put the base's stamp on main with merge.readyChecks `names` (None: no key). Stamp kinds stay off, so no claim,
+        unless stamp_kinds gives the repo's own kinds: a claim head needs its pending record."""
+        block = dict(tm.CONFIG["merge"])
+        if names is not None:
+            block["readyChecks"] = names
+        kinds = tm.CONFIG["kinds"] if stamp_kinds else []
+        tm.put_base_config(self, json.dumps(dict(tm.CONFIG, kinds=kinds, merge=block)))
+
+    def stale_feat(self):
+        """feat carries a debt its page does not list, so a draft run rebuilds the page and would push it."""
+        self.on("feat", {"debts/gap-one.md": tm.DEBT_TEXT})
+
+    def base_stamp(self, base, names):
+        """A branch `base` on origin, made from main, whose stamp declares `names`. The pull request's base becomes it:
+        a pull request's config is read from its own base, so the declaration lives there."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", base, "origin/main")
+        tm.put(os.path.join(o, ".github", "stamp.json"), json.dumps(dict(tm.CONFIG, merge=dict(tm.CONFIG["merge"], readyChecks=names))))
+        tm.sh(o, "git", "commit", "-qam", f"{base}: declare the ready checks")
+        tm.sh(o, "git", "push", "-q", "origin", base)
+        self.host.base = base
+
+    def test_a_declared_step_that_fails_stops_the_draft_before_any_push_or_ready(self):
+        self.declare(["check invariants"])
+        self.stale_feat()
+        self.use_ci_job([("FAIL", "check invariants")], 1)
+        refs_before = self.refs()
+        rc, out = self.draft_confirm()
+        self.assertEqual(len(self.lint_calls()), 1, "the ready check did not run the declared step once: " + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "a page was pushed on a red ready check")
+        self.assertEqual(self.host.readies, [], "the pull request went ready on a red ready check")
+        self.assertNotIn("ready after its draft run shows", out)
+
+    def test_declared_steps_that_pass_run_ci_job_once_on_the_tree_pushed_and_mark_ready(self):
+        names = ["check invariants", "records page"]  # two steps, one run
+        self.declare(names)
+        self.stale_feat()
+        self.use_ci_job([("PASS", name) for name in names], 0)
+        before = self.head()
+        rc, out = self.draft_confirm()
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the ready check ran ci-job %d times, want once: %s" % (len(runs), out))
+        self.assertNotEqual(runs[0]["head"], before, "the check ran on the old head, not on the page commit it would push")
+        argv = runs[0]["argv"]
+        self.assertEqual(argv[:1], ["checks"], out)
+        self.assertNotIn("--lint", argv, out)
+        self.assertEqual([argv[i + 1] for i, arg in enumerate(argv) if arg == "--step"], names, out)
+        self.assertIn("--base", argv, out)
+        self.assertEqual(argv[argv.index("--base") + 1], "origin/main", out)
+        self.assertEqual(runs[0]["head"], self.head(), "the ready check ran on a tree other than the one pushed")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.host.readies, [7], out)
+        self.assertEqual(self.show("feat", merge.RECORDS_PAGE), tm.page("gap-one").strip())
+
+    def test_a_declared_step_that_passes_on_a_current_page_runs_ci_job_on_the_pr_head(self):
+        self.declare(["check invariants"])
+        self.on("feat", {merge.RECORDS_PAGE: tm.page()})  # the page is current: nothing to rebuild or push
+        self.use_ci_job([("PASS", "check invariants")], 0)
+        before = self.head()
+        rc, out = self.draft_confirm()
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the ready check ran ci-job %d times, want once: %s" % (len(runs), out))
+        self.assertEqual(runs[0]["head"], before, "the ready check ran on a tree other than the PR head")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.host.readies, [7], out)
+
+    def test_a_declared_name_with_no_step_refuses_as_unknown_with_no_unknown_ok_escape(self):
+        self.declare(["no such step"])
+        self.stale_feat()
+        self.use_ci_job([("unknown", "no such step")], 2)
+        refs_before = self.refs()
+        rc, out = self.draft_confirm()
+        self.assertEqual(len(self.lint_calls()), 1, "the declared name did not reach ci-job: " + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "a page was pushed on an unknown ready check")
+        self.assertEqual(self.host.readies, [], "the pull request went ready on an unknown ready check")
+        self.assertNotIn("--lint-unknown-ok", out, "the ready check offers the lint's unknown-ok flag")
+        self.assertNotIn("ready after its draft run shows", out)
+
+    def test_a_declared_step_that_fails_on_a_non_default_base_still_stops_the_draft(self):
+        self.base_stamp("integ", ["check invariants"])
+        self.use_ci_job([("FAIL", "check invariants")], 1)
+        rc, out = self.draft_confirm()
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the ready check did not run on a non-default base: " + out)
+        self.assertIn("--base", runs[0]["argv"], out)
+        self.assertEqual(runs[0]["argv"][runs[0]["argv"].index("--base") + 1], "origin/integ", out)
+        self.assertEqual(runs[0]["head"], self.head("feat"), "the ready check ran on a tree other than the PR head")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.host.readies, [], out)
+
+    def test_a_record_claim_head_that_fails_its_declared_step_gets_no_ready_by_hand_remedy(self):
+        self.declare(["check invariants"], stamp_kinds=True)  # the config first: a merge after the claim would hide its trailer
+        self.claim_head()
+        self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", "origin/feat").strip(), "D-002")  # precondition: a claim head
+        self.use_ci_job([("FAIL", "check invariants")], 1)
+        refs_before = self.refs()
+        rc, out = self.draft_confirm()
+        self.assertEqual(len(self.lint_calls()), 1, "the Record-claim head's ready check did not run: " + out)
+        self.assertNotIn("ready by hand", out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "a push on a red ready check")
+        self.assertEqual(self.host.readies, [], out)
+
+    def test_a_record_claim_head_with_no_declared_ready_check_keeps_the_manual_ready_remedy(self):  # the control
+        self.claim_head()  # the seed's own stamp: stamp kinds on, no ready checks declared
+        self.use_ci_job([("PASS", "check invariants")], 0)
+        refs_before = self.refs()
+        rc, out = self.draft_confirm()
+        self.assertEqual(self.lint_calls(), [], "ci-job ran with no ready checks declared")
+        self.assertIn("ready by hand", out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, out)
+        self.assertEqual(self.host.readies, [], out)
+
+    def test_a_repo_that_declares_no_ready_checks_marks_ready_and_runs_no_ci_job(self):  # the control
+        self.declare(None)
+        self.stale_feat()
+        self.use_ci_job([("PASS", "check invariants")], 0)
+        rc, out = self.draft_confirm()
+        self.assertEqual(self.lint_calls(), [], "ci-job ran with no ready checks declared")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.host.readies, [7], out)
+
+    def test_a_repo_that_declares_no_ready_checks_says_so_in_one_line(self):
+        self.declare(None)
+        self.stale_feat()
+        self.use_ci_job([("PASS", "check invariants")], 0)
+        rc, out = self.draft_confirm()
+        notes = [line for line in out.splitlines() if "declares no ready checks" in line.lower()]
+        self.assertEqual(len(notes), 1, out)
+        self.assertEqual(rc, 0, out)
 
 
 class RunFolderSweep(unittest.TestCase):

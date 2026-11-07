@@ -89,7 +89,7 @@ def main():
                     and os.path.isfile(ph.handoff_path(sid))):
                 print(json.dumps({"decision": "block", "reason": (
                     "Context was compacted and you have not re-read your handoff. Read %s "
-                    "now, then continue." % ph.handoff_path(sid))}))
+                    "now, then continue. (decision precompact-handoff)" % ph.handoff_path(sid))}))
     except Exception as e:
         sys.stderr.write("reread_check: %s\n" % e)
     return 0

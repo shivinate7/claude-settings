@@ -17,6 +17,8 @@ fails, and any simpler route the facts open. Put this list at the top of the pla
 
 Check each new name in the plan against `GLOSSARY.md` beside the global `CLAUDE.md`. Use its term, never a name from its "Not" cell.
 
+Before you plan a test or merge change, read decisions `test-practices` and `merge-practices` (the claude-settings repo's `docs/decisions/` folder), and cite each practice the plan uses.
+
 Read the code the task touches first. Then give the plan: the acts in order, the files each
 act changes, the risks, and the check that proves each act done. Cite file:line for every
 claim about the code. Say "unknown" for anything you could not find. Surface ambiguity
@@ -29,5 +31,5 @@ slices you planned and the slices you propose.
 
 Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
 
-Report once. Start with the point. Write in Simplified Technical English. Report in under 25
+Report once. Start with the point. Write plainly (rule output-write-in-ste). Report in under 25
 lines unless the brief names another cap.

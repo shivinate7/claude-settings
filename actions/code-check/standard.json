@@ -50,7 +50,7 @@
       "extensions": [".js", ".mjs", ".cjs"],
       "shebangs": ["node"],
       "gold": {"typecheck": "tsc --noEmit with checkJs", "lint": "ESLint, bug rules", "format": "Prettier"},
-      "typecheck": {"skip": "plain scripts with no tsconfig; checkJs not adopted"},
+      "typecheck": {"run": "mjs-imports"},
       "lint": {"skip": "no bug-rule set chosen for ESLint yet"},
       "format": {"skip": "after o2"}
     },

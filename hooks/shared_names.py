@@ -24,6 +24,10 @@ MACHINE_TAGS = ("<system-reminder>", TASK_NOTIFICATION_TAG) + _HAND_BACK_TAGS + 
     for frame in ("Another Claude session sent a message:",
                   "Another Claude session sent a message while you were working:")
     for tag in _HAND_BACK_TAGS) + _PEER_FRAME_TAGS
+# More notice frames that the plain Opus ask cuts (hooks/override.py). Kept apart from MACHINE_TAGS: the inbox skip
+# of MACHINE_TAGS is ruled one tag at a time (debt inbox-saves-other-notices), and test_shared_names pins its copy.
+NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teammate-message")
+                      for end in "> \t\n\r") + ("[SYSTEM NOTIFICATION",)
 
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries this marker
 # (rule agent-role-model). Here, not in the guard, so the spawn judge names it without importing the guard.
@@ -57,6 +61,30 @@ BRIEF_MARKERS = (
 GH_DEFAULT_LOGIN = "shivinate7"
 GH_FALLBACK_LOGIN = "ssemwal-cdc"
 
+# The tags a session carries (decision session-tiers, Tier tags). The roadmap build reads them from live sessions and
+# the guard's rule lane-repo-tag checks them on a lane `create_session`, so both name the same strings.
+REPO_TAG = "cs-repo:"
+STEP_TAG = "cs-step:"
+# A topic lane carries TOPIC_TAG; a tier session (batch-runner, triage) carries BUILD_TAG plus its tier; a lane
+# session carries LANE_TAG.
+TOPIC_TAG = "cs-topic:"
+BUILD_TAG = "cs-build:"
+LANE_TAG = BUILD_TAG + "lane"
+
+
+def lane_head_refs(slug: str) -> tuple[str, str]:
+    """The head refs a lane's pull request may carry for its step `slug`: the bare slug and `lane/<slug>`. The one
+    home, read by the roadmap build (idle lanes, stalled steps) and by the archive guard, so the two forms cannot
+    drift apart."""
+    return (slug, "lane/" + slug)
+
+
+def repo_tag_names(tag: object, slug: str) -> bool:
+    """True when `tag` is exactly REPO_TAG plus `slug` (owner/name), the slug compared without case. The one
+    reading of a repo tag: no strip, the exact prefix, so a tag one reader accepts the other accepts."""
+    return isinstance(tag, str) and tag.startswith(REPO_TAG) and tag[len(REPO_TAG):].lower() == slug.lower()
+
+
 # The tool that reads and writes the waiting page's items (hooks/guard.py, hooks/call_judge.py).
 DATA_TOOL = "ArtifactData"
 
@@ -76,3 +104,11 @@ def refusals_path(session_id: object) -> Optional[str]:
     if not isinstance(session_id, str) or not re.fullmatch(r"[\w.-]+", session_id) or session_id.startswith("."):
         return None
     return os.path.join(config_dir(), STATE_DIR_NAME, "refusals", session_id + ".jsonl")
+
+
+def route_flags_path(session_id: object) -> Optional[str]:
+    """The file of route-row flags a session's Stop has already shown, so each shows once per session, or None for
+    an id that is not a plain name. Written and read by lint/report_guard.py."""
+    if not isinstance(session_id, str) or not re.fullmatch(r"[\w.-]+", session_id) or session_id.startswith("."):
+        return None
+    return os.path.join(config_dir(), STATE_DIR_NAME, "route-flags", session_id + ".json")

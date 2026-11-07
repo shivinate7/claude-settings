@@ -9,6 +9,7 @@
     python3 lint/compliance_probes.py words <child root>
     python3 lint/compliance_probes.py supersede <child root>
     python3 lint/compliance_probes.py slugs <child root>
+    python3 lint/compliance_probes.py restates <child root>
     python3 lint/compliance_probes.py scorecard <child root> < group-lines
 
 Each group reads only: tracked files (`git ls-files`), and the files it names. One line per item,
@@ -43,7 +44,8 @@ words: each retired word in a checked repo, one item per line: `  <word>: <file>
   files. The probe holds no list. A glossary that cannot be read, or has no rows, or a file that does not
   parse, makes the group unknown. It prints the claude-settings commit whose glossary it read. A term of
   the child's own GLOSSARY.md, at its root, spans a retired word, as a claude-settings term does. A child
-  term that repeats a claude-settings term, or is the retired word itself, does not. After WORDS_DEADLINE
+  term that repeats a claude-settings term, or is the retired word itself, does not. It is an item at its
+  GLOSSARY.md line, unless the word is tagged (this sense). An unreadable child GLOSSARY.md makes the group unknown. After WORDS_DEADLINE
   seconds the group is `unknown - stopped at <file>, N of M read`. That limit is a bandaid for file shapes
   the read is not yet fast on.
 supersede: text in the child that departs from a shared rule and names no known exemption. It reads the tracked
@@ -67,6 +69,15 @@ supersede: text in the child that departs from a shared rule and names no known 
 slugs: a record file this change adds against origin/main, in the child's own record folders (the layout's),
   with a slug over 32 characters is one item line. Long slugs already on main are one note line: the count
   and the first three. No origin/main makes the group unknown. It calls lint/check_record_slugs.py.
+restates: a unit of the child's rule Markdown that copies the text of a claude-settings record (decision
+  child-cites-not-copies). It reads the same files and units as supersede, and the records of the decisions
+  folder of this script's own checkout, never the child's. Before it compares, it drops headings, `Kind:`, `Plan:`
+  and `Home:` lines, HTML comments, code spans, numbers and time zones, on both sides. Quoted text is read: a
+  copy in quotes is a copy. A unit is refused when its runs of SHARED_RUN or more words that a record also holds
+  cover at least SHARED_MIN of its words and at least RESTATES_SHARE of them. A unit with under SHARED_MIN
+  shared words passes, a record citation included. An item names the file, the line and the record, and the
+  remedy; it never prints record text. An unreadable records folder or no record makes the group unknown. A
+  claude-settings checkout is n/a.
 scorecard: not a probe. It reads the group lines from stdin and rewrites the layout's scorecard kind file in
   the child, in place: one table, columns Group, Score, Gold standard, Gap, Source. It adds the row
   for the STE lint's gap on UI files, a known gap.
@@ -152,6 +163,42 @@ def finish(group, lines, verdict, code):
     return code
 
 
+def git_ok(root, *args):
+    """The completed `git -C root <args>`, or None when git cannot start."""
+    try:
+        return _nowindow.run(["git", "-C", root, *args], capture_output=True)
+    except OSError:
+        return None
+
+
+def waiting_copy(root):
+    """None when `root` names no waiting page. Else "present", "missing waiting copy: ..." or "unknown - ...": whether the
+    waiting-data folder (decision waiting-data-in-repo) is on the record branch, read with git from the local ref, then
+    origin's. A ref that is not there (a shallow CI clone) is unknown, never a pass and never a fail."""
+    try:
+        if layout.waiting_page(root) == "unknown":
+            return None
+        branch, home = layout.record_branch(root), layout.path(root, "waiting-data")
+    except layout.LayoutError as err:
+        return "unknown - waiting copy: %s" % err
+    seen = False
+    for ref in ("refs/heads/" + branch, "refs/remotes/origin/" + branch):
+        probe = git_ok(root, "rev-parse", "--verify", "-q", ref + "^{commit}")
+        if probe is None or probe.returncode not in (0, 1):
+            return "unknown - waiting copy: git cannot read %s" % ref
+        if probe.returncode == 1:
+            continue
+        listed = git_ok(root, "ls-tree", "-r", "--name-only", ref, "--", home)
+        if listed is None or listed.returncode != 0:
+            return "unknown - waiting copy: git cannot list %s" % ref
+        seen = True
+        if any(line.startswith(home + "/") for line in listed.stdout.decode("utf-8", "replace").splitlines()):
+            return "present"
+    if not seen:
+        return "unknown - waiting copy: no record branch %s here or on origin" % branch
+    return "missing waiting copy: %s/ on record branch %s" % (home, branch)
+
+
 def probe_layout(root):
     try:
         rolled = layout.rolled_out(root)
@@ -192,11 +239,21 @@ def probe_layout(root):
         home = kept.get(name, kind["path"].strip("/"))
         if kind.get("set") == "core" and not any(f == home or f.startswith(home + "/") for f in files):
             lines.append("  missing core kind %s: %s" % (name, kind["path"]))
+    waiting = waiting_copy(root)
+    if waiting and waiting.startswith("missing"):
+        lines.append("  " + waiting)
+    unread = waiting if waiting and waiting.startswith("unknown") else None
     if not rolled:
+        if unread and not lines:
+            return finish("layout", [], unread, 2)  # an unread branch is never a clear preview
         lines = ["  preview" + line[1:] for line in lines]
-        return finish("layout", lines, "not rolled out (no %s with rolled-out: true); %d preview finding(s)" % (extras, len(lines)), 0)
+        total = len(lines)
+        return finish("layout", lines + (["  " + unread] if unread else []),
+                      "not rolled out (no %s with rolled-out: true); %d preview finding(s)" % (extras, total), 0)
     if lines:
-        return finish("layout", lines, "out - %d finding(s)" % len(lines), 1)
+        return finish("layout", lines + (["  " + unread] if unread else []), "out - %d finding(s)" % len(lines), 1)
+    if unread:
+        return finish("layout", [], unread, 2)  # an unread branch is never a pass
     return finish("layout", lines, "in shape", 0)
 
 
@@ -402,22 +459,33 @@ def paragraphs(text, rel):
     return found
 
 
-def probe_supersede(root):
+def live_anchors():
+    """The live claude-settings rule anchors, read from this script's own checkout."""
     try:
         live = set(rule_audit.claude_md_anchors(rule_audit.rule_text()))
     except (OSError, ValueError) as err:
         raise CannotRun("rule text: %s" % err)
     if not live:
         raise CannotRun("no live rule anchors in the claude-settings rule files")
+    return live
+
+
+def is_settings(root, live):
+    """True when `root` holds its own rule files with at least NA_SHARE of the live anchors: it is claude-settings."""
     try:
         own = set(rule_audit.claude_md_anchors(rule_audit.rule_text(root)))
     except (OSError, ValueError):
         own = set()  # a child holds no rule files
-    if len(own & live) >= NA_SHARE * len(live):
-        print("supersede: n/a - this is claude-settings")
-        return 0
-    hits, passes, seen = [], [], set()
-    for rel in [f for f in tracked(root) if SUPERSEDE_SCOPE.search(f)]:
+    return len(own & live) >= NA_SHARE * len(live)
+
+
+def child_units(root):
+    """((file, first line, text) of each unit in the child's rule Markdown, the number of files read). A file
+    reached twice is read once."""
+    units, seen = [], set()
+    # A symlink is read after the files, so a file reached by both names is reported under its real one.
+    for rel in sorted((f for f in tracked(root) if SUPERSEDE_SCOPE.search(f)),
+                      key=lambda f: os.path.islink(os.path.join(root, *f.split("/")))):
         real = os.path.realpath(os.path.join(root, *rel.split("/")))
         if real in seen:
             continue
@@ -425,26 +493,117 @@ def probe_supersede(root):
         text = read(root, rel)
         if text is None:
             raise CannotRun("cannot read %s" % rel)
-        for number, paragraph in paragraphs(text, rel):
-            at, shown, departure = "%s:%d" % (rel, number), paragraph[:160], departs(paragraph)
-            if KNOWN_EXEMPTION.search(paragraph):
-                # An anchor comment is a definition, never a reference to an exemption.
-                named = RULE_REF.findall(ANCHOR_COMMENT.sub("", paragraph))
-                if any(n in live for n in named):
-                    if departure:
-                        passes.append("  known exemption, passes: %s: %s" % (at, shown))
-                elif named or departure:
-                    # With no id, a child's own lint exemption is not ours: it counts only beside departure wording.
-                    hits.append("  unknown exemption rule:%s: %s: %s" % (named[0] if named else "?", at, shown))
-            elif departure:
-                hits.append("  departs, no exemption: %s: %s" % (at, shown))
-            for anchor in dict.fromkeys(rule_audit.claude_md_anchors(paragraph)):
-                if anchor in live:
-                    hits.append("  redefines rule:%s: %s" % (anchor, at))
+        units.extend((rel, number, paragraph) for number, paragraph in paragraphs(text, rel))
+    return units, len(seen)
+
+
+def probe_supersede(root):
+    live = live_anchors()
+    if is_settings(root, live):
+        print("supersede: n/a - this is claude-settings")
+        return 0
+    hits, passes = [], []
+    units, files = child_units(root)
+    for rel, number, paragraph in units:
+        at, shown, departure = "%s:%d" % (rel, number), paragraph[:160], departs(paragraph)
+        if KNOWN_EXEMPTION.search(paragraph):
+            # An anchor comment is a definition, never a reference to an exemption.
+            named = RULE_REF.findall(ANCHOR_COMMENT.sub("", paragraph))
+            if any(n in live for n in named):
+                if departure:
+                    passes.append("  known exemption, passes: %s: %s" % (at, shown))
+            elif named or departure:
+                # With no id, a child's own lint exemption is not ours: it counts only beside departure wording.
+                hits.append("  unknown exemption rule:%s: %s: %s" % (named[0] if named else "?", at, shown))
+        elif departure:
+            hits.append("  departs, no exemption: %s: %s" % (at, shown))
+        for anchor in dict.fromkeys(rule_audit.claude_md_anchors(paragraph)):
+            if anchor in live:
+                hits.append("  redefines rule:%s: %s" % (anchor, at))
     lines = hits + passes
     if hits:
-        return finish("supersede", lines, "out - %d line(s) to read in %d file(s)" % (len(hits), len(seen)), 1)
-    return finish("supersede", lines, "in shape - %d file(s) read" % len(seen), 0)
+        return finish("supersede", lines, "out - %d line(s) to read in %d file(s)" % (len(hits), files), 1)
+    return finish("supersede", lines, "in shape - %d file(s) read" % files, 0)
+
+
+# A child unit that copies the text of a claude-settings record. The record text is read live from this script's own
+# checkout, so the probe keeps no copy (decision child-cites-not-copies).
+HEADING_LINE = re.compile(r"^\s{0,3}#{1,6}(?:\s|$)")
+META_LINE = re.compile(r"^\s*(?:Kind|Plan|Home):")
+# One pass, left to right, so a mark inside one span never opens another: a code span (the closer is a run of the same
+# length) or an HTML comment. An opener with no closer is plain text. Quoted text is read: a copy in quotes is a copy.
+STRIPPED = re.compile(r"(?P<tick>`+)(?!`).*?(?<!`)(?P=tick)(?!`)|<!--.*?-->")
+NUMBERED = re.compile(r"\S*\d\S*")
+TIME_ZONES = {"utc", "gmt", "cst", "cdt", "est", "edt", "pst", "pdt", "mst", "mdt"}
+SHARED_RUN = 5  # words in a row that a unit and a record hold
+SHARED_MIN = 12  # shared words that refuse a unit, and at least RESTATES_SHARE of its words
+RESTATES_SHARE = 0.5
+
+
+def plain_words(unit):
+    """The lowercase words of `unit` that a comparison reads: no heading, Kind/Plan/Home line, comment, code span,
+    number or time zone."""
+    if HEADING_LINE.match(unit) or META_LINE.match(unit):
+        return []
+    words = re.findall(r"[a-z]+", NUMBERED.sub(" ", STRIPPED.sub(" ", unit)).lower())
+    return [w for w in words if w not in TIME_ZONES]
+
+
+def record_index():
+    """{word run of SHARED_RUN: [slug of each record that holds it]}, read from the decisions folder of this script's
+    own checkout."""
+    base = os.path.dirname(HERE)
+    try:
+        folder = os.path.join(base, *layout.path(base, "decisions").split("/"))
+        names = sorted(n for n in os.listdir(folder) if n.endswith(".md"))
+    except (OSError, layout.LayoutError, KeyError) as err:
+        raise CannotRun("the records folder cannot be read: %s" % type(err).__name__)
+    if not names:
+        raise CannotRun("the records folder holds no record")
+    runs = {}
+    for name in names:
+        slug = name[:-len(".md")]
+        text = read(folder, name)
+        if text is None:
+            raise CannotRun("cannot read record %s" % slug)
+        for _, unit in paragraphs(text, slug):
+            words = plain_words(unit)
+            for at in range(len(words) - SHARED_RUN + 1):
+                holders = runs.setdefault(tuple(words[at:at + SHARED_RUN]), [])
+                if slug not in holders:
+                    holders.append(slug)
+    return runs
+
+
+def shared_with_records(words, runs):
+    """({slug: number of `words` in a run of SHARED_RUN words that record holds}, the number of `words` in such a run
+    of any record)."""
+    per_record, anywhere = {}, set()
+    for at in range(len(words) - SHARED_RUN + 1):
+        for slug in runs.get(tuple(words[at:at + SHARED_RUN]), ()):
+            per_record.setdefault(slug, set()).update(range(at, at + SHARED_RUN))
+            anywhere.update(range(at, at + SHARED_RUN))
+    return {slug: len(hit) for slug, hit in per_record.items()}, len(anywhere)
+
+
+def probe_restates(root):
+    if is_settings(root, live_anchors()):
+        print("restates: n/a - this is claude-settings")
+        return 0
+    runs = record_index()
+    units, files = child_units(root)
+    hits = []
+    for rel, number, paragraph in units:
+        words = plain_words(paragraph)
+        per_record, covered = shared_with_records(words, runs)
+        if covered < SHARED_MIN or covered < RESTATES_SHARE * len(words):
+            continue
+        slug = max(sorted(per_record), key=per_record.get)
+        hits.append("  copies a record: %s:%d: %d of %d words copy the record %s; name the record, keep only what "
+                    "applies to this repo" % (rel, number, covered, len(words), slug))
+    if hits:
+        return finish("restates", hits, "out - %d line(s) to read in %d file(s)" % (len(hits), files), 1)
+    return finish("restates", hits, "in shape - %d file(s) read" % files, 0)
 
 
 PW_FILE = re.compile(r"(^|/)(\.github/workflows/[^/]+\.ya?ml|action\.ya?ml|(GNU)?[Mm]akefile|[^/]+\.sh"
@@ -877,7 +1036,10 @@ def probe_words(root):
         raise CannotRun("%s has no rows under '%s'" % (check_glossary.GLOSSARY, check_glossary.SECTION))
     found, unread, files = [], [], tracked(root)
     child = read(root, "GLOSSARY.md") if "GLOSSARY.md" in files else None  # the child's own domain terms, in its root
+    if "GLOSSARY.md" in files and child is None:  # an unread child glossary hides each clash: unknown, not clean
+        raise CannotRun("the child's GLOSSARY.md cannot be read as UTF-8")
     spans = check_glossary.child_spans(check_glossary.rows(child.lstrip("\ufeff")), table) if child else []
+    clashes = check_glossary.child_clashes(child.lstrip("\ufeff"), table) if child else []
 
     def add(rel, line, problem, detail):
         word = WORD_HIT.search(problem)
@@ -885,6 +1047,8 @@ def probe_words(root):
         if item not in found:
             found.append(item)
 
+    for line, term, problem in clashes:  # a child term that defines a claude-settings term again
+        found.append((term, "GLOSSARY.md", line, problem))
     deadline = time.monotonic() + WORDS_DEADLINE
 
     def tick():
@@ -936,7 +1100,7 @@ def probe_words(root):
 
 GROUPS = {"layout": probe_layout, "design": probe_design, "lanecap": probe_lanecap, "playwright": probe_playwright,
           "ios": probe_ios, "words": probe_words, "supersede": probe_supersede, "slugs": probe_slugs,
-          "scorecard": scorecard}
+          "restates": probe_restates, "scorecard": scorecard}
 
 
 def main(argv):

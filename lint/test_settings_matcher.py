@@ -3,7 +3,7 @@
 Run: python3 lint/test_settings_matcher.py. Without Workflow and start_session in the matcher,
 the guard's agent-model-floor never sees those calls.
 """
-import json, os, re, subprocess, sys, unittest
+import json, os, re, sys, unittest
 
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "settings.json")
 
@@ -72,6 +72,13 @@ class Matcher(unittest.TestCase):
                      "mcp__claude-code-remote__request_computer_folder"):
             with self.subTest(tool=tool):
                 self.assertTrue(re.fullmatch(matcher, tool), "the first guard matcher does not cover %s: %r" % (tool, matcher))
+
+    def test_guard_matcher_covers_send_message(self):
+        # Rule lane-one-topic refuses a brief sent to a lane of another topic, so a guard matcher must see send_message.
+        matchers = guard_matchers()
+        tool = "mcp__claude-code-remote__send_message"
+        self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                        "no guard matcher covers %s: %r" % (tool, matchers))
 
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
@@ -410,13 +417,12 @@ class QuestionReviewer(unittest.TestCase):
         found = sorted(ev for ev, entries in events.items() if "question_outcome" in json.dumps(entries))
         self.assertEqual(found, [], "a hook still names question_outcome under: %s" % found)
 
-    def test_question_outcome_script_is_a_stub(self):
-        # A running session may still call it, so it stays as an exit-0 stub (lint/check_hook_stubs.py).
-        script = os.path.join(os.path.dirname(SETTINGS), "hooks", "question_outcome.py")
-        r = subprocess.run([sys.executable, script], input='{"tool_name": "AskUserQuestion"}',
-                           capture_output=True, text=True, timeout=30)
-        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""),
-                         "hooks/question_outcome.py must exit 0 and print nothing")
+    def test_retired_stubs_are_gone(self):
+        # lint/check_hook_stubs.py allowed their removal once no settings.json from the last 14 days called them.
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+        for rel in ("hooks/question_outcome.py", "lint/ste_gate.py", "lint/md_sweep.py"):
+            with self.subTest(script=rel):
+                self.assertFalse(os.path.exists(os.path.join(root, rel)), "%s is back" % rel)
 
 
 # The STE write guard and the markdown sweep are not wired in settings.json.

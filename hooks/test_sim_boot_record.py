@@ -33,6 +33,9 @@ The contract pinned here (hooks/sim_boot_record.py must match it):
     The fake xcrun counts each run in a log, so the cases count the simctl reads.
   - the snapshot lives under <config>/state/. The cases find it by name-agnostic means: they only
     remove or corrupt files in that folder, never read the snapshot's own name.
+  - record mode: `--record <UDID>` appends one record line for that device, from the same device list
+    and launchd_sim read as the hook mode. bin/sim-test calls it after its own boot. It prints nothing
+    and exits 0. It writes no line when the device is not listed or its launchd_sim is unclear.
 
 Each case runs the hook as Claude Code does: one JSON object on stdin. A fake `xcrun` stands first on
 PATH and answers `simctl list devices` from a file the case rewrites between the two events. A fake
@@ -572,6 +575,7 @@ class SimBootRecordTests(unittest.TestCase):
                 self.assertIn(U1, reason, "the reason does not name the UDID")
                 self.assertIn("broken", reason.lower())
                 self.assertIn("stop", reason.lower(), "the reason does not say to stop using it")
+                self.assertIn("decision sim-boot-is-verified", reason, "the reason does not cite its decision")
                 names = [c.split()[0] for c in self.check_calls()]
                 self.assertEqual(names.count("shutdown"), 1, "more or fewer than one shutdown")
                 self.assertEqual(names.count("boot"), 1, "more or fewer than one boot")
@@ -629,6 +633,68 @@ class SimBootRecordTests(unittest.TestCase):
                          "boot did not run after a failed shutdown")
         self.assertIn("again", json.loads(result.stdout)["hookSpecificOutput"]
                       ["additionalContext"].lower())
+
+    # ------------------------------------------------------------------ record mode (`--record <UDID>`)
+    # bin/sim-test calls the hook as `sim_boot_record.py --record <UDID>` after its own boot. The mode
+    # appends one record line for that device, read with the same devices() and launchd() as the hook
+    # mode. It prints nothing and exits 0 in every case.
+
+    def run_record(self, udid):
+        """The hook in record mode for UDID, with an empty stdin, as bin/sim-test runs it."""
+        env = dict(os.environ)
+        env["CLAUDE_CONFIG_DIR"] = self.cfg
+        env["PATH"] = self.bin + os.pathsep + os.path.dirname(sys.executable)
+        return subprocess.run([sys.executable, HOOK, "--record", udid], input="",
+                              capture_output=True, text=True, env=env, timeout=60)
+
+    def test_record_mode_appends_one_line_for_the_named_device(self):
+        self.set_devices([(U1, "Idle Pro", "Booted", TYPE_PRO)])
+        result = self.run_record(U1)
+        self.assertEqual(result.returncode, 0, "--record exited non-zero: %s" % result.stderr[:300])
+        self.assertEqual(result.stdout, "", "--record wrote to stdout: %r" % result.stdout[:200])
+        records = self.read_records()
+        self.assertEqual(len(records), 1, "--record appended %d lines, want one" % len(records))
+        record = records[0]
+        self.assertEqual(sorted(record), sorted(["udid", "name", "deviceTypeIdentifier", "runtime",
+                                                 "at", "launchd_pid", "launchd_start"]),
+                         "the --record line has other fields than the hook's record line")
+        self.assertEqual(record["udid"], U1)
+        self.assertEqual(record["name"], "Idle Pro")
+        self.assertEqual(record["deviceTypeIdentifier"], TYPE_PRO)
+        self.assertEqual(record["runtime"], RT)
+        self.assertEqual(record["launchd_pid"], LAUNCHD_PIDS[U1])
+        self.assertEqual(record["launchd_start"], LSTART)
+        time.strptime(record["at"], "%Y-%m-%dT%H:%M:%SZ")  # raises if `at` is not ISO-8601 UTC
+
+    def test_record_mode_names_only_the_device_it_is_given(self):
+        self.set_devices([(U1, "Idle Pro", "Booted", TYPE_PRO), (U2, "Idle Air", "Booted", TYPE_AIR)])
+        self.assertEqual(self.run_record(U1).returncode, 0)
+        self.assertEqual([r["udid"] for r in self.read_records()], [U1],
+                         "--record wrote a line for a device it was not given")
+
+    def test_record_mode_writes_nothing_when_no_launchd_sim_names_the_device(self):
+        self.write_ps([(str(LAUNCHD_PIDS[U2]), "1", "0", LAUNCHD_CMD + " " + U2)])
+        self.set_devices([(U1, "Idle Pro", "Booted", TYPE_PRO)])
+        result = self.run_record(U1)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(self.read_records(), [], "a device with no launchd_sim was recorded")
+
+    def test_record_mode_writes_nothing_when_two_launchd_sims_name_the_device(self):
+        self.write_ps([(str(LAUNCHD_PIDS[U1]), "1", "0", LAUNCHD_CMD + " " + U1),
+                       ("2999", "1", "0", LAUNCHD_CMD + " " + U1)])
+        self.set_devices([(U1, "Idle Pro", "Booted", TYPE_PRO)])
+        result = self.run_record(U1)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(self.read_records(), [], "an unclear launchd_sim was recorded")
+
+    def test_record_mode_exits_zero_and_writes_nothing_when_the_device_list_is_unreadable(self):
+        self.set_devices([], rc=1)
+        result = self.run_record(U1)
+        self.assertEqual(result.returncode, 0, "--record exited non-zero on an unreadable list")
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(self.read_records(), [], "a device was recorded from an unreadable list")
 
     def tearDown_state(self):
         """Reset the fake's logs, plans, flag and records between sub-cases of one test."""

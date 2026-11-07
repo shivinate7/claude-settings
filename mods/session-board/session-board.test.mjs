@@ -1244,7 +1244,10 @@ await test('question box: a live agent refuses it, and the refusal says what to 
   assert.match(r.reason, /1 agent/, 'the reason counts the agents')
   assert.match(r.reason, /reply/i, 'the reason says to ask in the reply')
   assert.match(r.reason, /waiting page/i, 'the reason names the waiting page')
-  assert.match(r.reason, /5[ -]min|five minutes/i, 'the reason names the 5-minute wait before the page')
+  // Every question goes to the page writer in the same turn it is asked, with no clock.
+  assert.match(r.reason, /same turn/i, 'the reason sends the question to the page writer in the same turn')
+  assert.match(r.reason, /page'?s? writer/i, 'the reason names the page writer')
+  assert.doesNotMatch(r.reason, /5[ -]min|five minutes/i, 'the reason has no 5-minute wait')
   assert.doesNotMatch(r.reason, /and on the waiting page instead/, 'the reason does not send the question to the page at once')
   assert.match(r.reason, /keep working/i, 'the reason says to keep working')
   await settle()
@@ -1440,7 +1443,10 @@ for (const tool of ['mcp__ccd_session__start_session', 'mcp__claude-code-remote_
     same(r && r.decision, 'deny', 'verdict')
     assert.match(r.reason, /started 1 session\b/, 'the reason counts the started sessions')
     assert.match(r.reason, /waiting page/i, 'the reason names the waiting page')
-    assert.match(r.reason, /5[ -]min|five minutes/i, 'the reason names the 5-minute wait before the page')
+    // Every question goes to the page writer in the same turn it is asked, with no clock.
+    assert.match(r.reason, /same turn/i, 'the reason sends the question to the page writer in the same turn')
+    assert.match(r.reason, /page'?s? writer/i, 'the reason names the page writer')
+    assert.doesNotMatch(r.reason, /5[ -]min|five minutes/i, 'the reason has no 5-minute wait')
     assert.doesNotMatch(r.reason, /and on the waiting page instead/, 'the reason does not send the question to the page at once')
     assert.match(r.reason, /keep working/i, 'the reason says to keep working')
     await callTool(h, tool, STARTED)

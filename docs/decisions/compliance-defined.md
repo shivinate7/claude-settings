@@ -7,6 +7,7 @@ Owner, 2026-10-31 15:04 CDT, waiting-page item 104: a claude-settings rule wins 
 - Child text is any guard, hook, `CLAUDE.md` line or other text in a child repo.
 - Child text that conflicts with how repos inherit from claude-settings, and cites no known exemption, is wrong. It is stale prose for the compliance check to find.
 - A known exemption names the claude-settings rule by id, as `rule:<id>`, with the words "known exemption", in the same paragraph or list item.
+- A known exemption needs the owner's grant for that child repo (owner, 2026-11-02 14:11 CST).
 - A bare mention of `rule:<id>` is no exemption.
 - The fix goes in the child repo: rewrite its text, or name the exemption. The claude-settings rule stays as it is.
 
@@ -40,12 +41,13 @@ Done check (roadmap step `parent-rules-supersede`): a fixture child repo with a 
 
 ## Not mechanized
 
-No check reads these four. The ruling holds for all four.
+No check reads these five. The ruling holds for all five.
 
 - A semantic conflict with no departure wording: a child paragraph or list item that answers a shared question in other words.
 - A departure split over two sentences. The check reads one sentence at a time, so a cue in one sentence and a shared rule in the next pass.
 - Hook and code text in the child. Reading it needs a parser, and the check reads Markdown only.
 - Which rule an exemption names. The id is not tied to the rule the text departs from, so any live id passes. A negated "no known exemption" reads as a known exemption.
+- Whether the owner granted an exemption for that child repo. No check reads the grant; the ruling holds.
 
 Unmeasured: how many paragraphs and list items the check flags across the owner's child repos.
 
