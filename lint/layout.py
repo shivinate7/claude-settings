@@ -236,6 +236,31 @@ def path(root, name):
     return legacy(name)
 
 
+def folders_any_mark(root, name):
+    """The folders kind `name` may sit at in `root`, relative, with `/` separators, as a tuple. A valid mark reads the one
+    folder `path` gives. A bad "rolled-out" mark (RolledOutMarkError) leaves legacy and layout both possible, so it gives
+    the legacy-repos place when the repo has one (that holds under either mark), else the layout path and the legacy path.
+    The one home of that fallback."""
+    try:
+        return (path(root, name),)
+    except RolledOutMarkError:
+        owner = repo_name(root)
+        kept = legacy_repos().get(owner, {}).get(name) if owner else None
+        if kept:
+            return (kept.strip("/"),)
+        return tuple(dict.fromkeys((layout()["kinds"][name]["path"].strip("/"), legacy(name))))
+
+
+def folder_any_mark(root, name):
+    """The one folder of kind `name` in `root` that reads the same under every mark: the waiting data and design folders,
+    which legacy and layout place alike. A kind whose folder depends on the mark re-raises RolledOutMarkError under a bad
+    mark, so a check that needs one folder fails closed."""
+    found = folders_any_mark(root, name)
+    if len(found) > 1:
+        path(root, name)  # raises RolledOutMarkError: the folder depends on the mark
+    return found[0]
+
+
 def md_under(rel, folder):
     """True when `rel` (a repo-relative path with `/` separators) is a markdown file under `folder`, at any depth. `folder` takes a
     trailing slash or none. Only whole path parts match, so docs/decisionsx/a.md is not under docs/decisions. The one home of the
@@ -298,7 +323,7 @@ WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta")  # what the
 def artifacts(root, exports=True):
     """[{id, url, role, account, collections, export}] from the "artifacts" key of `root`'s extras file, in order; []
     for a repo with no extras file or no key. With `exports` False, an entry with no export key of its own reads `export`
-    None: the folder depends on the "rolled-out" mark, and a caller that wants ids, urls and roles never reads it.
+    None: a caller that wants ids, urls and roles never reads it.
     `collections` and `export` are filled in: the waiting-page role exports
     the five waiting collections to the waiting-data folder of the record branch, any other role needs its own
     `collections` and exports to `artifacts/<id>/`. A page-only entry (any other role, `"collections": []`) exports its page
@@ -357,7 +382,7 @@ def _registry(root, found, where, exports=True):
         elif not exports:
             target = None
         else:
-            target = path(root, "waiting-data") if role == WAITING_ROLE else "artifacts/" + entry_id
+            target = folder_any_mark(root, "waiting-data") if role == WAITING_ROLE else "artifacts/" + entry_id
         out.append(dict(item, collections=list(names), export=target))
     if sum(1 for e in out if e["role"] == WAITING_ROLE) > 1:
         raise LayoutError("%s: %s holds more than one entry with the role %s" % (where, ARTIFACTS, WAITING_ROLE))
@@ -633,24 +658,15 @@ def _owner_home(home):
     return None if found in ("", "~") else found
 
 
-def _design_folder(root):
-    """The design folder of `root`, relative, with `/` separators. A bad "rolled-out" mark reads the legacy place, which
-    for design is the layout's, so the mockup home reads under any mark. The one home of that fallback."""
-    try:
-        return path(root, "design")
-    except RolledOutMarkError:
-        return legacy("design")
-
-
 def mockup_homes(root):
     """The folders a mockup may sit in, as a tuple of paths: the repo's design folder inside the checkout. Reads no
     file and starts no process."""
-    return (os.path.join(root, *_design_folder(root).split("/")),)
+    return (os.path.join(root, *folder_any_mark(root, "design").split("/")),)
 
 
 def mockup_home_words(root):
     """The mockup home as a sentence shows it, with no absolute path."""
-    return "%s/<file>, committed to git" % _design_folder(root)
+    return "%s/<file>, committed to git" % folder_any_mark(root, "design")
 
 
 def _flavour(*texts):

@@ -342,11 +342,11 @@ def no_items_problem(block, inbox, homes_line=""):
 def kind_homes(layout, root, kind):
     """The paths under `root` that may hold a `kind` item's home: each HOME_KINDS layout key the
     repo has, as its layout path and its base path, that exist. The check and the block text both use it."""
-    known, base = layout.kinds(root), layout.layout()["kinds"]
+    base = layout.layout()["kinds"]
     homes = []
     for key in HOME_KINDS[kind]:
-        if key in known:
-            homes += [layout.path(root, key)] + ([base[key]["path"].strip("/")] if key in base else [])
+        if key in base:  # a kind only the extras file names is unreadable under a bad mark, so it adds no home
+            homes += list(layout.folders_any_mark(root, key)) + [base[key]["path"].strip("/")]
     return [h for h in dict.fromkeys(homes) if os.path.exists(os.path.join(root, *h.split("/")))]
 
 
@@ -376,7 +376,7 @@ def waiting_copy(layout, root):
     (Homes.filed_numbers) and the export check (export_check). Raises layout.LayoutError."""
     branch = layout.record_branch(root)
     waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
-    return branch, (waiting[0]["export"] if waiting else layout.path(root, "waiting-data")).strip("/")
+    return branch, (waiting[0]["export"] if waiting else layout.folder_any_mark(root, "waiting-data")).strip("/")
 
 
 def session_repo(session_id):
