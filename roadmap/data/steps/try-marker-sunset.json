@@ -1,0 +1,11 @@
+{
+  "title": "Remove \"try\" from BUILDER_MARKERS in hooks/guard.py, with its mutant and cases",
+  "phase": "later",
+  "status": "todo",
+  "order": 290.0,
+  "lane": "",
+  "owner": "",
+  "why": "Note try-marker-sunset (decision agent-model-cap): the \"try\" builder marker is kept only until 2026-11-12.",
+  "note": "Not before 2026-11-12. Unowned until that date. Filed by lane notes-reverify-flags, 15:15 CST.",
+  "updatedAt": "2026-11-07T15:16:00-06:00"
+}
