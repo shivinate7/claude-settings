@@ -1729,6 +1729,19 @@ class RouteClaimTests(StaleCase):
         rng, flagged = self.route_range(rows)
         self.assert_route_claims(rng, flagged)
 
+    def test_route_claim_in_a_tilde_fence_four_spaces_deep_under_a_list_item_is_silent(self):
+        # CODE_SPAN pairs backtick rows across lines and blanks the claim between them, so a backtick fence pins nothing
+        # about FENCE. A tilde fence has no such pairing: only FENCE keeps its claim out of the scan.
+        rows = [
+            ("- Run the step:", False),
+            ("    ~~~", False),
+            ("    The cloud cannot push to main.", False),  # inside a tilde fence four spaces deep
+            ("    ~~~", False),
+            ("- The cloud cannot push to main.", True),  # the scope control: the same claim outside the fence
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
     def test_route_claim_fires_on_a_code_span_used_as_the_subject_and_skips_only_a_span_holding_the_whole_claim(self):
         rows = [
             ("- `gh` cannot close a pull request.", True),  # the span is the subject; the claim is outside the span
