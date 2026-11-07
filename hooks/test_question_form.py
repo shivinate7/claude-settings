@@ -598,7 +598,8 @@ def case_task_why_cited_greens():
 # "tool_use", "id", "name": "ArtifactData", "input"}]}}. Its result is {"type": "user", "message": {"content":
 # [{"type": "tool_result", "tool_use_id", "content": <text>, "is_error"}]}}, paired by tool_use_id. A get's text is
 # one document line, {"id", "version", "updatedAt", "data": {...}}. A successful write's text is one line, {"id",
-# "version"}, with no data. A sidechain record is a subagent's, not this session's.
+# "version"}, with no data. A sidechain record is kept: a read is pinned to its version, so it is the stored text
+# whoever made it. The write result's shape is assumed here, not verified against a real transcript.
 
 STORED = "Why yours: I can't delete it (route r-refused)."
 MEASURED = "Why yours: I can't delete it (measured 2026-11-06, the proxy said 403)."
@@ -756,6 +757,8 @@ def case_stored_line_reds():
                 get_of(3, STORED), DENY)
     stored_case("a stored cite swapped for a bare premise label is denied", edit("(route r-refused)", "(measured)"),
                 get_of(3, STORED), DENY)
+    stored_case("a subagent read at the write's version is the stored text, so a false edit is denied",
+                edit("r-refused", "r-works"), get_of(3, STORED, sidechain=True), DENY)
 
 
 def case_stored_line_asks():
@@ -770,8 +773,6 @@ def case_stored_line_asks():
     stored_case("an old_str the stored text lacks is asked", edit("r-missing", "r-works"), get_of(3, STORED), ASK)
     stored_case("a write with no if_version is asked", edit("r-refused", "r-asks", version=None),
                 get_of(3, STORED), ASK)
-    stored_case("a read made by a subagent is not this session's read, so it is asked", edit("r-refused", "r-asks"),
-                get_of(3, STORED, sidechain=True), ASK)
 
 
 def case_stored_line_replay():
@@ -785,6 +786,9 @@ def case_stored_line_replay():
     stored_case("a failed earlier write is not replayed, so a second edit at its version is asked",
                 edit("r-asks", "r-works", version=4),
                 get_of(3, STORED) + write_of(WRITE_ID, first, failed, is_error=True), ASK)
+    stored_case("a successful write with no parseable version is not replayed, so the next pinned edit is asked",
+                edit("r-asks", "r-works", version=4),
+                get_of(3, STORED) + write_of(WRITE_ID, first, "Saved the item."), ASK)
 
 
 def case_stored_line_greens():
