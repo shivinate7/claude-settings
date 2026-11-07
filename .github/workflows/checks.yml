@@ -230,6 +230,9 @@ jobs:
       - name: Stop-hook guard fixture suite
         run: python3 lint/test_report_guard.py
 
+      - name: Stop-hook triage hold suite
+        run: python3 lint/test_report_guard_stalled.py
+
       - name: Stop-hook question route suite
         run: python3 lint/test_report_guard_route.py
 
@@ -695,6 +698,12 @@ jobs:
         run: |
           python3 --version && git --version
           NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs
+
+      - name: roadmap page suite
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
+        shell: bash
+        run: |
+          NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/roadmap/tests/page.test.mjs
 
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.

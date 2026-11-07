@@ -89,6 +89,18 @@ tool counts by its full name. Each tool the reply names is cleared, on a
 stop_hook_active rewrite too, which never blocks on a refusal (decision refusals-reach-the-owner).
 Cost: one stat per Stop when the session had no refusal.
 
+The triage hold (a roadmap build's `stalled step:` lines): a session whose own newest get_session record carries
+cs-build:triage (hooks/guard_merge.py _own_tier_proved) cannot end a turn while the newest roadmap build output in its
+transcript (the result of a Bash run of build.py) has an entry line, `stalled step: <id> (...)` or
+`stalled step: item <n> (...)`. An unknown line is no entry. The hold also covers a Stop after a refusal
+(stop_hook_active), which it releases only when the report's Input Needed section names every entry's id and item
+number. An owner `override` typed for the session lifts it, taken as guard_core's refuse() takes it, and the Stop
+it lifts spends a one-act override. A held Stop never carries the report's correction tail. A build run through
+verdict is read from the log file verdict printed (a missing log reads as no entries for that run). Cost: no
+transcript read of its own on a plain Stop (it shares main's read). Only when a Bash run of build.py is in it: the
+build module's import, and one log read for a verdict run. Only when an entry prints: the own-record read and one
+override read.
+
 Route-row flags (hooks/route_match.py holds the rows, the surface and the match): a refused call that a "works" row
 matches gets a `route_flag` in its refusals row (hooks/refusal_note.py), and a successful call of the turn that a
 "refused" row matches gets one here. Each flag rides in the systemMessage of the line this Stop prints and never
@@ -1227,6 +1239,11 @@ def pending_refusals(hook, text):
         return []
 
 
+def hold_reason(entries):
+    """The block reason for the triage hold, naming its `entries` (joined)."""
+    return HOLD_REASON % entries
+
+
 def _shown_flags(hook, flags):
     """The texts of `flags`, (key, text) pairs, that this session's Stop has not shown yet. It records their keys
     in <config dir>/state/route-flags/<session_id>.json, so each shows once per session. [] when the session has
@@ -1307,12 +1324,13 @@ def success_route_flags(hook, after):
         return []
 
 
-def refusal_reason(tools):
-    """The block reason for refused tools the reply has not raised, or ''."""
+def refusal_reason(tools, hold=""):
+    """The block reason for refused tools the reply has not raised, and for the triage hold's entries, or ''."""
+    held = hold_reason(hold) if hold else ""
     if not tools:
-        return ""
+        return held
     names = ", ".join("`%s`" % tool for tool in tools)
-    return (
+    return (held + " " if held else "") + (
         "Refusal guard: the auto-mode classifier refused %s this session, and the reply does not "
         "raise it with the owner. Add an Input Needed line \"allow `<tool_name>`?\" for each tool, "
         "and a line in the repo's debt notes file (notes.md) that names it. Or, if the refusal was "
@@ -1577,6 +1595,109 @@ def rewrite_relay(hook):
         return []
 
 
+HOLD_TIER = "triage"
+HOLD_REASON = (
+    "Triage hold: the newest roadmap build prints stalled step lines for %s. Dispose each (resume, pause or done), "
+    "rebuild, then end; or name them under Input Needed to escalate (decision session-tiers, the triage session)."
+)
+# A Bash command that runs the roadmap build: python, its flags, then a path that ends in build.py. A quoted or
+# piped mention (cat build.py, grep 'python3 build.py') is no run.
+BUILD_CALL_RE = re.compile(r"(?:^|[\s;&|(])python[\d.]*\s+(?:-\S+\s+)*(?:\S*/)?build\.py(?=[\s;&|)]|$)")
+
+
+def _roadmap_build_prefix():
+    """build.STALLED_LINE, the one emitter's line prefix (skills/roadmap/build.py), loaded only when a build ran."""
+    import importlib.util
+    path = os.path.join(HERE, "..", "skills", "roadmap", "build.py")
+    spec = importlib.util.spec_from_file_location("roadmap_build_for_hold", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, os.path.dirname(path))
+    spec.loader.exec_module(module)
+    return module.STALLED_LINE
+
+
+def _result_text(content):
+    if isinstance(content, list):
+        content = "\n".join(b.get("text", "") for b in content if isinstance(b, dict))
+    return content if isinstance(content, str) else ""
+
+
+# The verdict line bin/verdict prints for a run: `PASS|FAIL|SKIP <cmd> ... log=<path>`.
+VERDICT_LOG_RE = re.compile(r"^(?:PASS|FAIL|SKIP) .* log=(\S+)\s*$", re.M)
+VERDICT_RUN_HEADER = "=== verdict run "
+
+
+def _verdict_log_text(path):
+    """The last run's text in the verdict log at `path` (a log can hold several runs, each under a header line),
+    or None when the file is missing or unreadable."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+    except Exception:
+        return None
+    cut = text.rfind(VERDICT_RUN_HEADER)
+    return text if cut < 0 else text[cut:]
+
+
+def stalled_entries(records):
+    """The entries ("<step id>" or "item <n>") of the newest roadmap build output in `records`: each line
+    `<STALLED_LINE>: <id> (...)` or `<STALLED_LINE>: item <n> (...)`. An unknown line is no entry. A newer build
+    that prints none leaves none. Cost: no process, and the build module loads only when a build ran."""
+    runs, text = set(), None
+    for rec in records:
+        if rec.get("isSidechain"):
+            continue
+        for use in tool_uses(rec):
+            inp = use.get("input")
+            if use.get("name") == "Bash" and isinstance(inp, dict) and BUILD_CALL_RE.search(str(inp.get("command", ""))):
+                runs.add(use.get("id"))
+        for result in tool_results(rec):
+            if result.get("tool_use_id") in runs:
+                shown = _result_text(result.get("content"))
+                logged = VERDICT_LOG_RE.search(shown)
+                if logged:  # a run through verdict shows failure lines only; its log holds the build's own lines
+                    shown = _verdict_log_text(logged.group(1))
+                    if shown is None:
+                        continue  # a missing or unreadable log reads as no entries for this run; the older ones stand
+                text = shown
+    if not text:
+        return []
+    line = re.compile(r"^%s: (?:item (\d+)|(?!unknown )([^\s()]+)) \(" % re.escape(_roadmap_build_prefix()), re.M)
+    return ["item " + n if n else step for n, step in line.findall(text)]
+
+
+def _names_every(section, entries):
+    for entry in entries:
+        item = re.fullmatch(r"item (\d+)", entry)
+        pattern = r"(?<![\w-])item\s+%s(?!\d)" % item.group(1) if item else r"(?<![\w-])%s(?![\w-])" % re.escape(entry)
+        if not re.search(pattern, section, re.I if item else 0):
+            return False
+    return True
+
+
+def triage_hold(hook, records, active):
+    """The entries, joined, when this is a triage session whose newest roadmap build prints a stalled entry, else ''.
+    A Stop after a refusal is released when Input Needed names every entry. An owner override lifts the hold, and a
+    one-act override is spent here, after every other release has been ruled out. Fails open on any error."""
+    try:
+        entries = stalled_entries(records)
+        if not entries:
+            return ""
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        from guard_merge import _own_tier_proved
+        if not _own_tier_proved(hook.get("transcript_path"), HOLD_TIER):
+            return ""
+        if active and _names_every(input_needed_section(last_reply(hook)), entries):
+            return ""
+        import override
+        if override.take(hook.get("session_id"), None, override.now()) in override.LIFTS:
+            return ""
+        return ", ".join(entries)
+    except Exception as exc:
+        print("triage hold failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+        return ""
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -1586,12 +1707,31 @@ def main():
         return
     if hook.get("hook_event_name") != "Stop":
         return
-    if hook.get("stop_hook_active"):
+    path = hook.get("transcript_path")
+    hold = ""
+    active = bool(hook.get("stop_hook_active"))
+    records, read_failed = [], False
+    if path and os.path.exists(path):
+        try:
+            records = read_transcript(path)  # the one read of a plain Stop: the hold and the checks below share it
+        except Exception:
+            read_failed = True
+        try:
+            hold = triage_hold(hook, records, active)
+        except Exception:
+            pass
+    if active:
         pending_refusals(hook, last_reply(hook))  # clears what the rewrite names; never blocks on a refusal
         reasons = rewrite_problems(hook)
         reasons += rewrite_relay(hook)
+        if hold and not reasons:
+            print(json.dumps({"decision": "block", "reason": hold_reason(hold)}))
+            return
+        if hold:
+            reasons.insert(0, hold_reason(hold))
         if reasons:
-            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)" + CORRECTION_TAIL}))
+            tail = "" if hold else CORRECTION_TAIL  # a held Stop is refused for its entries, not for the report's shape
+            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)" + tail}))
         return
     # A marker left by a rewrite that never ran must not reach a later turn: only the Stop
     # straight after a missing-report block may consume one.
@@ -1613,29 +1753,15 @@ def main():
 
     # Every Stop, landed or not, settles the refusals file; the reason joins whichever block follows.
     pending = pending_refusals(hook, last_reply(hook))
-    refusal = refusal_reason(pending)
+    refusal = refusal_reason(pending, hold)  # the triage hold joins the refusals
 
     def stop_for_refusal():
-        finish({"decision": "block", "reason": refusal_reason(pending)} if refusal else None)
+        finish({"decision": "block", "reason": refusal} if refusal else None)
 
-    path = hook.get("transcript_path")
     if not path or not os.path.exists(path):
         return stop_for_refusal()
 
-    records = []
-    try:
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except Exception:
-                    continue
-                if isinstance(rec, dict):
-                    records.append(rec)
-    except Exception:
+    if read_failed:
         return stop_for_refusal()
 
     last_human_idx = None
@@ -1682,7 +1808,7 @@ def main():
             pick.append(refusal)
             pick = [r for r in pick if r]
             if pick:
-                reason = " ".join(pick) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if report_shape_ok(text) else "")
+                reason = " ".join(pick) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if report_shape_ok(text) and not hold else "")
                 finish({"decision": "block", "reason": reason})
             else:
                 finish({"systemMessage": note} if note else None)
@@ -1739,7 +1865,7 @@ def main():
     if refusal:
         reasons.append(refusal)
     if reasons:
-        reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok else "")
+        reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok and not hold else "")
         if not shape_ok:
             write_marker(hook, last_human_idx)
         finish({"decision": "block", "reason": reason})
