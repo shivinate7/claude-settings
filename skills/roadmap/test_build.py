@@ -1658,7 +1658,7 @@ class TodoWithOpenPull(UpkeepFixture):
 
 class ReadyAndDraftRows(UpkeepFixture):
     """Two upkeep rows (spec part B). `ready todo steps` lists each todo step whose note has the sentence `Ready.`,
-    with no check on live phases. `draft PRs over 12 h with no live lane` lists each draft pull created more than
+    with no live-phase filter. `draft PRs over 12 h with no live lane` lists each draft pull created more than
     12 h before the live read, when no live session names its step. An entry reads `#<number> (<branch or title>)`,
     or `unknown (#<number> has no createdAt)` when its createdAt is missing or not an ISO time with a zone."""
 
