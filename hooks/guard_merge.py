@@ -225,10 +225,30 @@ MERGE_BATCH_REASON = (
 )
 
 
+# The command that runs a repo's ready checks by hand, as the merge tool's all-skipped remedy writes it. It is the one part of the
+# detail a reader runs, so a cut inside it prints a command that fails or runs fewer steps.
+READY_COMMAND = re.compile(r"(`bin/ci-job checks [^`]*`)")
+
+
+def cap_detail(detail: str, limit: int = 160) -> str:
+    """The detail fit to print: the text around a runnable ready-check command shares `limit` characters, cleaned and cut
+    with a mark by `cap_safe`, and each command prints whole. The command's control characters become spaces, as `cap_safe`
+    does for any tool-supplied text; its length is not cut, because it comes from the repo's own merge.readyChecks."""
+    parts = READY_COMMAND.split(detail or "")  # text, command, text, ... : the commands sit at the odd places
+    room, out = limit, []
+    for i, part in enumerate(parts):
+        if i % 2:
+            out.append(cap_safe(part, len(part)))
+            continue
+        out.append(cap_safe(part, room))
+        room -= min(len(part), room)  # cap_safe swaps a control character for one space, so the length holds
+    return "".join(out)
+
+
 def merge_check_reason(verdict: str, detail: str) -> str:
     if verdict == "batch":
         return MERGE_BATCH_REASON % cap_safe(detail, 160)
-    return MERGE_CHECK_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
+    return MERGE_CHECK_REASON % (verdict + (" (" + cap_detail(detail) + ")" if detail else ""))
 
 
 def _merge_config_at(root: str):

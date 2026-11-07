@@ -2308,6 +2308,10 @@ MUTATIONS = [
      '    while rest and _gh_root_repo_flag(rest, 0):',
      '    while False and _gh_root_repo_flag(rest, 0):',
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
+    ("merge-checks: a ready-check command is cut with the text around it",
+     '            out.append(cap_safe(part, len(part)))\n',
+     '            out.append(cap_safe(part, room))\n',
+     "guard", "names the whole ready-check command for three ready checks"),
 ]
 
 
