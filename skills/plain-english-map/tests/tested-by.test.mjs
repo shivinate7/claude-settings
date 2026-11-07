@@ -14,6 +14,7 @@
 //   - an unindented tested-by line, a line with no backticks, and a `;` separator each fail, and the failure names the page (T7d to T7f).
 //   - `import pkgpy` loads `pkgpy/__init__.py` by its package name (T8d, T8e).
 //   - a map line whose tested-by line is missing passes: the line is optional (T1b).
+//   - a join whose first argument is a literal reads that literal as a piece too, since the rule lets the anchor be any expression (T10e).
 //
 // Cases:
 //   T1   the clean fixture passes. T1b: no tested-by line at all passes. T1c, T1d: full size, 40 tests on one line, all pass; one that does not load the file fails.
@@ -30,12 +31,14 @@
 //        Under a backtick line in a Notes section it is an orphan and fails (T7h): a tested-by line is valid only under a Code files map line.
 //   T8   one hop. Through `src/pkg/index.ts`, the test passes (T8a). Without the re-export, it fails (T8b). Two hops fail (T8c).
 //        Through `src/pkgpy/__init__.py`, the test passes (T8d). Without the re-export, it fails (T8e).
+//   T10  a join of literal pieces loads the file: os.path.join and pathlib (T10a to T10c), path.join and resolve (T10d, T10e). Red on main for
+//        those five, since MAP11 does not read a join yet. A non-literal piece (T10f) and an array join (T10g) stay FAILs, green on main.
 //   C0   control, green on the old code: the import reader MAP11 uses reads the fixture's imports the way these cases assume.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
-import { delimiter, dirname, join } from 'node:path';
+import { delimiter, dirname, join, posix } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { FIXTURE, POSIX_ONLY, SKILL, gitIn, needFile, run, scratchRepo, tmpFolder } from './helpers.mjs';
 
@@ -426,4 +429,126 @@ test('C0. control, green on the old code: the import reader MAP11 uses reads the
   assert.deepEqual(of('src/pkg.spec.ts'), ['src/pkg/index.ts'], 'pkg.spec.ts loads the package, and reaches home.ts only through it: one hop');
   assert.deepEqual(of('src/pkg/index.ts'), ['src/home.ts'], 'the package re-exports home.ts');
   assert.deepEqual(of('src/home.spec.ts', "import type { homeTitle } from './home';\n"), [], 'a type-only import loads nothing');
+});
+
+// ---- T10. A join of pieces. MAP11's `loads` op reads a join call as a load of the file that its pieces name (py-facts.py `named_files`,
+// fact-readers.mjs `namedFiles`). The callee is os.path.join or posixpath.join, a pathlib `/` chain, or, in JS, path.join, path.resolve,
+// path.posix.join, or a bare join or resolve imported from 'path' or 'node:path'. The first argument is the anchor and may be any expression;
+// every later argument is a plain string literal. The literal pieces, joined with `/`, resolve from the test's folder and then the root, exactly.
+// Each case writes its test under `tests/`. On main a piece such as "retry.py" resolves from `src/`, which would hide the red.
+
+/**
+ * Writes `text` as the test `testFile` in a scratch repository, tracks it with `git add -N`, and names it on the tested-by line of `file`.
+ * The scope comes first: the test is tracked, each literal of `literals` is quoted in the text, and none resolves to a tracked path,
+ * from the test's folder or from the root. So a verdict below comes from the join alone.
+ */
+const pieceCase = (testFile, text, file, literals) => {
+  const dir = scratchRepo();
+  writeAt(dir, testFile, text);
+  gitIn(dir, 'add', '-N', testFile);
+  const tracked = gitIn(dir, 'ls-files').split('\n').map((l) => l.trim());
+  assert.ok(tracked.includes(testFile), `${testFile} must be tracked, or a verdict on it says nothing about the join`);
+  for (const s of literals) {
+    assert.ok(text.includes(`'${s}'`) || text.includes(`"${s}"`), `${testFile} must hold the literal ${JSON.stringify(s)} in quotes`);
+    const hits = [posix.normalize(posix.join(posix.dirname(testFile), s)), posix.normalize(s)].filter((c) => tracked.includes(c));
+    assert.deepEqual(hits, [], `no literal of ${testFile} may resolve to a tracked path, but ${JSON.stringify(s)} resolves to ${hits.join(', ')}`);
+  }
+  setTestedBy(dir, file, tested(testFile));
+  return dir;
+};
+
+/** MAP11 passes, so the join of `testFile` loads `file`. On main this is red: MAP11 fails and its line names the test and the file. */
+const mustLoad = (r, testFile, file) =>
+  assert.match(map11(r), /^\[PASS\] MAP11\b/, `MAP11 must PASS: ${testFile} loads ${file} through a join of its pieces\n${shown(r)}`);
+
+/** MAP11 fails on the page, the test and the file, and the cause is that the test does not load the file: the join has a piece that is no literal. */
+const mustNotLoad = (r, page, testFile, file) => {
+  mustFail(r, page, testFile, file);
+  assert.ok(map11(r).includes('does not load the file'), `the MAP11 failure must say that ${testFile} does not load ${file}\n${map11(r)}`);
+};
+
+test('T10a. os.path.join(ROOT, "src", "retry.py") in a test under tests/ loads src/retry.py: MAP11 passes', () => {
+  needFile(REL);
+  const testFile = 'tests/join_root.py';
+  const dir = pieceCase(testFile, `import os
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def test_wait():
+    path = os.path.join(ROOT, "src", "retry.py")
+    assert os.path.isfile(path)
+`, 'src/retry.py', ['src', 'retry.py']);
+  mustLoad(check(dir), testFile, 'src/retry.py');
+});
+
+test('T10b. pj(os.path.dirname(__file__), "..", "src", "retry.py") with `from os.path import join as pj` loads src/retry.py: MAP11 passes', () => {
+  needFile(REL);
+  const testFile = 'tests/join_here.py';
+  const dir = pieceCase(testFile, `import os
+from os.path import join as pj
+
+
+def test_wait():
+    path = pj(os.path.dirname(__file__), "..", "src", "retry.py")
+    assert os.path.isfile(path)
+`, 'src/retry.py', ['..', 'src', 'retry.py']);
+  mustLoad(check(dir), testFile, 'src/retry.py');
+});
+
+test('T10c. Path(__file__).parent.parent / "src" / "retry.py" loads src/retry.py: MAP11 passes', () => {
+  needFile(REL);
+  const testFile = 'tests/join_lib.py';
+  const dir = pieceCase(testFile, `from pathlib import Path
+
+
+def test_wait():
+    path = Path(__file__).parent.parent / "src" / "retry.py"
+    assert path.is_file()
+`, 'src/retry.py', ['src', 'retry.py']);
+  mustLoad(check(dir), testFile, 'src/retry.py');
+});
+
+test("T10d. path.join(__dirname, '..', 'src', 'home.ts') with `import path from 'node:path'` loads src/home.ts: MAP11 passes", () => {
+  needFile(REL);
+  const testFile = 'tests/join.spec.ts';
+  const dir = pieceCase(testFile, `import path from 'node:path';
+
+export const page = path.join(__dirname, '..', 'src', 'home.ts');
+`, 'src/home.ts', ['node:path', '..', 'src', 'home.ts']);
+  mustLoad(check(dir), testFile, 'src/home.ts');
+});
+
+test("T10e. resolve('src', 'home.ts') with `import { resolve } from 'path'` loads src/home.ts: MAP11 passes", () => {
+  needFile(REL);
+  const testFile = 'tests/resolve.spec.ts';
+  const dir = pieceCase(testFile, `import { resolve } from 'path';
+
+export const page = resolve('src', 'home.ts');
+`, 'src/home.ts', ['path', 'src', 'home.ts']);
+  mustLoad(check(dir), testFile, 'src/home.ts');
+});
+
+test('T10f. control, green on main: os.path.join(ROOT, "src", NAME) has a name as its last piece, so MAP11 fails and names the page, the test and the file', () => {
+  needFile(REL);
+  const testFile = 'tests/join_name.py';
+  const dir = pieceCase(testFile, `import os
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+NAME = "retry.py"
+
+
+def test_wait():
+    path = os.path.join(ROOT, "src", NAME)
+    assert os.path.isfile(path)
+`, 'src/retry.py', ['src', 'retry.py']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/retry.py');
+});
+
+test("T10g. control, green on main: ['..', 'src', 'home.ts'].join('/') is an array join, not a path join, so MAP11 fails and names the page, the test and the file", () => {
+  needFile(REL);
+  const testFile = 'tests/array_join.spec.ts';
+  const dir = pieceCase(testFile, `export const page = ['..', 'src', 'home.ts'].join('/');
+`, 'src/home.ts', ['..', 'src', 'home.ts', '/']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/home.ts');
 });
