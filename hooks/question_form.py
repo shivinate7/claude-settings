@@ -1012,7 +1012,7 @@ def design_file_problems(writes, root, cwd=""):
 
 
 def is_waiting_page(tool_input, cwd) -> bool:
-    """True when the call's url is this repo's waiting page."""
+    """True when the call's url is the waiting page of a known root (waiting_page_root), whatever the cwd."""
     return waiting_page_root(tool_input, cwd) is not None
 
 

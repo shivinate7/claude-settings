@@ -6,7 +6,7 @@ A session never hands the owner an act that a session can do. When the cloud ref
 
 - A waiting-page task carries a line in `context` that starts `Why yours:`. The line names why only the owner can do the act. It also names the check that showed it, such as the try on a session on the owner's computer and its outcome.
 - Guard rule `task-names-check` (`hooks/question_form.py`, run by `hooks/guard.py`) refuses an `ArtifactData` set to `items` of `kind: task` whose `context` has no such line. The line needs text after the colon. It also judges an update that carries `kind: task` and `context`. It also judges a `str_replace` on `context` whose `old_str` holds the line and whose `new_str` does not. It reads each write in a batch and data read from `file_path`.
-  - It judges only a call whose `url` is this repo's waiting page (`layout.waiting_page`).
+  - It judges only a call whose `url` is the waiting page of a known root (`question_form.waiting_page_root`, whatever the cwd).
   - It passes an update with only status, rank or other fields (the writer re-ranks by update), a decision, and a call to another artifact.
   - The reason tells the session to ask a session on the owner's computer first, and to add the line.
   - It is built against a named incident, below. It landed 2026-10-29.

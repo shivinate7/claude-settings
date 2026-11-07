@@ -8,7 +8,7 @@ A field on a waiting item is for the owner to read. A field the page does not dr
 - Guard rule `item-field-rendered` (`hooks/question_form.py`, `item_field_hit`, called by `item_hit`) refuses an `ArtifactData` write to `items` that names a top-level field outside the list.
   - It reads the block with `html.parser`, never a regex. Script text is data, so a block inside a string or a template literal is no block.
   - It judges `set` and `update` by the keys of `data`, and `str_replace` by `field`. It reads each write in a batch and data read from `file_path`.
-  - It judges only a call whose `url` is this repo's waiting page (`layout.waiting_page`).
+  - It judges only a call whose `url` is the waiting page of a known root (`question_form.waiting_page_root`, whatever the cwd).
   - Scope: top-level keys only. A key inside `options`, `steps` or a listed field is not judged.
   - An update may remove a stored field with `{"__delete__": true}`, which passes. A set never carries that marker.
   - A page with no block, an empty list, or a block that is no JSON list of strings, reads as unknown and the write passes.

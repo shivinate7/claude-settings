@@ -7,7 +7,7 @@ Owner, 2026-10-27 12:51 CDT, topic t18 (one home, then variants): when a repo di
 - An option that widens what a shared tool accepts is a second accepted form, an allow-list entry or a per-repo exception. It carries "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo" and is never the recommended option. Rule `style-question-form` holds the text.
 - On the waiting page (skill `waiting-page`), such an option carries `widens: true`. Its card shows the label.
 - Guard rule `uniform-pick` (`hooks/question_form.py`, run by `hooks/guard.py`) refuses an `ArtifactData` set or update to `items` whose `pick` names an option with `widens: true`. It reads each write in a batch and data read from `file_path`.
-  - It judges only a call whose `url` is this repo's waiting page (`layout.waiting_page`), and only an item of kind `decision` or with no kind.
+  - It judges only a call whose `url` is the waiting page of a known root (`question_form.waiting_page_root`, whatever the cwd), and only an item of kind `decision` or with no kind.
   - It is built against a named incident, below. It landed 2026-10-28.
   - Cost: no new process. It runs inside the guard process that every `ArtifactData` call already starts. It writes no file unless it denies.
   - Known limit: an update that sets `pick` without `options` cannot see the stored options and passes. The writer carries `options` again on such an update.

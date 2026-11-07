@@ -3592,7 +3592,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 #
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
 # `command-in-item`, `gh-login-switch`, `task-names-check`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
-# write to this repo's waiting page.
+# write to the waiting page of a known root (question_form.waiting_page_root), whatever the cwd.
 from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
 
@@ -3611,10 +3611,11 @@ def data_tool_hit(tool_input, cwd=""):
 
 # ------------------------------------------------------------------ a waiting page behind main is not published
 #
-# Rule `page-stale` (decision page-stale-publish). A publish of this repo's waiting page from a file whose
-# code is not main's skills/waiting-page/page.html is refused. The compare is skills/waiting-page/stale_pages.py
-# `matches`, the one home of "current" (the designData, roadmap block and title text are ignored, so a
-# page the writer's --write built passes). Main is origin/main of the checkout that holds stale_pages.py.
+# Rule `page-stale` (decision page-stale-publish). A publish of the waiting page of a known root
+# (question_form.waiting_page_root, whatever the cwd) from a file whose code is not main's
+# skills/waiting-page/page.html is refused. The compare is skills/waiting-page/stale_pages.py `matches`, the
+# one home of "current" (the designData, roadmap block and title text are ignored, so a page the writer's
+# --write built passes). Main is origin/main of the checkout that holds stale_pages.py.
 # Known limit: a live page that is itself untouched (placeholder title, empty blocks) is refused too; the guard cannot read the live page.
 # A read, a list, an asset upload, a publish of another page, an unreadable file or an unreadable main
 # is not judged: unknown allows and logs one line. A republish of main's untouched template, with its title
@@ -3657,7 +3658,7 @@ def _stale_pages_module():
 
 
 def page_stale_hit(tool_input, cwd):
-    """(reason, matched) when the call publishes this repo's waiting page from a file behind main, else
+    """(reason, matched) when the call publishes a known root's waiting page from a file behind main, else
     None. A call that is no such publish leaves before any import. Fails open: any unread state allows."""
     path, url = tool_input.get("file_path"), tool_input.get("url")
     if (tool_input.get("action") not in (None, "", "publish") or tool_input.get("asset") is True
