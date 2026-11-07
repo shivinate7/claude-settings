@@ -123,8 +123,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        `,` or `:`, an optional date, then `HH:MM CST|CDT`, after optional markdown lead characters. The
                        refusal fires when the stamp is more than 3 minutes off the clock (local_time.clock), ahead or
                        behind. A dated stamp is an instant with its zone's offset; an undated one is minute of day mod
-                       1440. The reason prints the real time. No transcript, file or process; a missing clock module
-                       passes the message. An override lifts it.
+                       1440. The reason prints the real time. The same limit judges three written values, each an ISO instant
+                       with an offset: `added` in an ArtifactData set, update or batch write to collection items;
+                       `updatedAt` in a Write or Edit to roadmap/data/steps/<name>.json; a literal double-quoted
+                       `updatedAt` in a Bash command, read as text. The reason prints the time in Central and ISO. No
+                       transcript, file or process, and one clock read only when a judged value is present; a missing
+                       clock module passes the call. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -388,7 +392,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -4899,6 +4903,11 @@ def judge(payload) -> None:
     stamped = stamp_hit(tool, tool_input)
     if stamped:
         refuse(tool, "deny", "message-time-matches-clock", stamped[1], stamped[0])
+
+    # A written time off the clock: `added` in items, a step's `updatedAt`, a literal `updatedAt` in a command.
+    written = written_time_hit(tool, tool_input)
+    if written:
+        refuse(tool, "deny", "message-time-matches-clock", written[1], written[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)

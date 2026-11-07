@@ -10,11 +10,11 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from guard_core import (
-    _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
+    SHELL_TOOLS, WRITE_TOOLS, _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
     git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import DATA_TOOL, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -1144,6 +1144,12 @@ STAMP_REASON = (
 )
 
 
+def _minutes_off(then, now) -> int:
+    """Whole minutes between an instant and the clock, either way. Both are cut to the minute first, so the
+    header stamp and an ISO instant compare one way (rule message-time-matches-clock)."""
+    return abs(int((then.replace(second=0, microsecond=0) - now.replace(second=0, microsecond=0)).total_seconds() // 60))
+
+
 def stamp_hit(tool: str, tool_input):
     """Return (matched, reason) when this send_message opens with a header stamp more than STAMP_LIMIT_MINUTES
     off the clock, else None. Only the first non-blank line is read, and only its header stamp. A dated stamp is
@@ -1165,7 +1171,7 @@ def stamp_hit(tool: str, tool_input):
         hour, minute = int(found.group("hour")), int(found.group("minute"))
         if found.group("date"):
             stamped = datetime.fromisoformat(found.group("date")).replace(hour=hour, minute=minute, tzinfo=zone)
-            off = abs(int((stamped - now).total_seconds() // 60))
+            off = _minutes_off(stamped, now)
         else:
             if hour > 23 or minute > 59:
                 return None
@@ -1177,6 +1183,99 @@ def stamp_hit(tool: str, tool_input):
         return "header stamp " + found.group(0).strip(), STAMP_REASON.format(off=off, now=local_time.central_hhmm(now))
     except (ImportError, ValueError, OverflowError):
         return None
+
+
+# Written values: an ISO instant with an offset, in three places (rule message-time-matches-clock). The Bash scan
+# reads the command as text, not as tokens: a quote-aware reader skips a literal inside a quoted string or after
+# a lone apostrophe, which is where an incident's literal sat. It needs a double-quoted value, so a single-quoted
+# `'updatedAt': '...'` in a script's body is not read.
+_ISO_INSTANT = r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})"
+_ISO_FULL = re.compile(_ISO_INSTANT)
+_UPDATED_AT = re.compile(r'updatedAt\\?"?\s*[:=]\s*\\?"' + _ISO_INSTANT + r'\\?"')
+_STEP_FILE = re.compile(r"(?:^|/)roadmap/data/steps/[^/]+\.json$")
+WRITTEN_ITEMS = "items"  # the ArtifactData collection whose `added` is judged
+WRITTEN_REASON = (
+    "this written time ({what}) is {off} minutes off the clock, and the limit is " + str(STAMP_LIMIT_MINUTES) + ". "
+    "The time is {now}, which is {central} and {utc}: write that time, then run the call again."
+)
+
+
+def _instant(found):
+    """The aware datetime of an _ISO_INSTANT match, or None for an impossible date or offset."""
+    year, month, day, hour, minute, zone = found.groups()
+    try:
+        if zone == "Z":
+            offset = timezone.utc
+        else:
+            digits = zone[1:].replace(":", "")
+            offset = timezone(timedelta(hours=int(digits[:2]), minutes=int(digits[2:])) * (-1 if zone[0] == "-" else 1))
+        return datetime(int(year), int(month), int(day), int(hour), int(minute), tzinfo=offset)
+    except ValueError:
+        return None
+
+
+def _written_texts(tool: str, tool_input: dict):
+    """The text of each written value this call carries that holds an ISO instant to judge: ISO strings alone
+    (an `added`), or text holding a literal `updatedAt` (a step's content, an edit's new text, a command)."""
+    if tool == DATA_TOOL:
+        action = tool_input.get("action")
+        writes = [(w.get("op") or w.get("action"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)] \
+            if action == "batch" else [(action, tool_input)]
+        for op, entry in writes:
+            data = entry.get("data")
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except ValueError:
+                    continue
+            added = data.get("added") if isinstance(data, dict) else None
+            if op in ("set", "update") and entry.get("collection") == WRITTEN_ITEMS and isinstance(added, str):
+                yield "added " + added.strip(), added.strip()
+        return
+    if tool in WRITE_TOOLS:
+        paths = [v.replace("\\", "/") for k in ("file_path", "path") if isinstance(v := tool_input.get(k), str)]
+        if any(_STEP_FILE.search(p) for p in paths):
+            parts = [tool_input.get(f) for f in ("content", "new_string")]
+            parts += [e.get("new_string") for e in tool_input.get("edits") or [] if isinstance(e, dict)]
+            for part in parts:
+                if isinstance(part, str) and "updatedAt" in part:
+                    for found in _UPDATED_AT.finditer(part):
+                        yield "updatedAt " + found.group(0), found.group(0)
+        return
+    command = tool_input.get("command")
+    if tool in SHELL_TOOLS and isinstance(command, str) and "updatedAt" in command:
+        for found in _UPDATED_AT.finditer(command):
+            yield "updatedAt " + found.group(0), found.group(0)
+
+
+def written_time_hit(tool: str, tool_input):
+    """Return (matched, reason) when a written ISO instant is more than STAMP_LIMIT_MINUTES off the clock, else
+    None. Judged: `added` in an ArtifactData set, update or batch write to collection items; `updatedAt` in a
+    Write or Edit to roadmap/data/steps/<name>.json; a literal double-quoted `updatedAt` in a shell command.
+    Only an instant with an offset is read. Cost: one clock read, and only when a judged value is present; no
+    transcript, file or process. Fails open, like stamp_hit."""
+    if not isinstance(tool_input, dict):
+        return None
+    judged = []
+    for what, text in _written_texts(tool, tool_input):
+        found = _ISO_FULL.search(text)
+        then = _instant(found) if found else None
+        if then:
+            judged.append((what, then))
+    if not judged:
+        return None
+    try:
+        import local_time
+        now = local_time.clock().replace(second=0, microsecond=0)
+        for what, then in judged:
+            off = _minutes_off(then, now)
+            if off > STAMP_LIMIT_MINUTES:
+                return what, WRITTEN_REASON.format(
+                    what=what, off=off, now=local_time.central_hhmm(now), central=local_time.central_iso(now),
+                    utc=now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"))
+    except (ImportError, ValueError, OverflowError):
+        return None
+    return None
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the

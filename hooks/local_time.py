@@ -95,6 +95,12 @@ def central_hhmm(at):
     return " ".join(line(lambda: at).split()[3:5])
 
 
+def central_iso(at):
+    """`YYYY-MM-DDTHH:MM-06:00` for an instant, in Central with its offset: the time line's own clock."""
+    parts = line(lambda: at).split()
+    return "%sT%s%s" % (parts[2], parts[3], parts[5].strip("()")[3:])
+
+
 def override_line(result):
     """The context line for a grant() result: names the override and when it ends, Central time."""
     kind, until = result[:2]
