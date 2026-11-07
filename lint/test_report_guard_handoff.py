@@ -84,7 +84,8 @@ TOOL_CITE = "Why yours: I can't push from here, since `%s` was refused this sess
 CAPABILITY_REASONS = ("I can't push from here", "I cannot push from here", "the remote refuses the push",
                       "the push is blocked here", "a push is not available here",
                       "I could not push from here", "I couldn't push from here", "I couldn’t push from here",
-                      "the remote rejected the push", "the API returned 401")
+                      "the remote rejected the push", "the API returned 401",
+                      "my push got rejected", "the push keeps getting rejected", "the remote rejected it")
 CAPABILITY_LINE = "Why yours: %s, since check_red_run showed the trailer needs the owner."
 # Lines whose word looks like a capability verb and gives no capability reason. Each passes with no cite, so a widened
 # verb must not take them for one.
@@ -92,6 +93,8 @@ FALSE_ALARM_LINES = (
     "Why yours: the PR was rejected by review, so pick the form.",
     "Why yours: PR #401 needs your review.",
     "Why yours: the fix could not be simpler.",
+    "Why yours: the fix could not be made simpler.",
+    "Why yours: the fix could not be any simpler.",
 )
 # The choice phrases of CHOICE_RE in lint/report_guard.py, copied so the scope check does not import the product module.
 CHOICE_WORDS = ("your choice", "your call", "your login", "sign in as you", "stays yours", "safety rules keep")
