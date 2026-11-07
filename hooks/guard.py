@@ -4470,6 +4470,45 @@ def _own_red_run(payload, primary: str, path: str, root_ok: bool = True) -> bool
         folder = parent
 
 
+def _homeless_write_hit(targets, command: str, where: str, session_id: str, has_agent: bool,
+                        temp: str, writes: bool) -> str:
+    """The log detail when a write from a cwd in no checkout lands in a checkout of the home clone,
+    else ''. TARGETS is a write tool's targets; None means the shell COMMAND. The home clone is the
+    one that holds CLAUDE_PROJECT_DIR; unset or in no clone, it is unknown and nothing is refused.
+    The temp folder (scratchpads, scratch clones), a top-level call's own scratchpad and the clone's
+    common `.git` directory pass. Stat and small file reads only: no git is spawned."""
+    home = os.environ.get("CLAUDE_PROJECT_DIR", "")
+    try:
+        top = _checkout_root_by_stat(os.path.realpath(home)) if home else ""
+        home_common = _git_common_dir(top) if top else ""
+    except Exception:
+        return ""
+    if not home_common:
+        return ""
+
+    def in_home_clone(target, at, verb=""):
+        try:
+            resolved = _resolved(target, at)
+            if not has_agent and under_session_scratchpad(resolved, session_id):
+                return False
+            if path_is_inside(resolved, temp) is True:
+                return False
+            root = _checkout_root_by_stat(os.path.realpath(resolved))
+            return (bool(root) and _git_common_dir(root) == home_common
+                    and path_is_inside(resolved, os.path.join(root, ".git")) is not True)
+        except Exception:
+            return False
+
+    if targets is None:
+        hit = _shell_write_hit(command, where, in_home_clone, follow_cd=True,
+                               predicate_command=True) if writes else ""
+        return "shell write into the home clone from a cwd in no checkout: " + hit if hit else ""
+    for target in targets:
+        if in_home_clone(target, where):
+            return "write target in the home clone from a cwd in no checkout: " + target
+    return ""
+
+
 def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = "",
                        payload=None,
                        has_agent: bool = True) -> str:
@@ -4477,7 +4516,10 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     of this clone other than the one holding `cwd`, else ''. A target in no checkout passes. A
     linked checkout in this session's own scratchpad passes for a call with no `agent_id` and a
     valid `session_id`; a caller that omits `has_agent` gets no exemption. An unreadable git
-    state, or a cwd in no checkout, is unknown and passes. One git read per call that can write.
+    state is unknown and passes. A cwd in no checkout reads no `cd` and no git verb, but a write
+    from it into a checkout of the home clone (the one CLAUDE_PROJECT_DIR names) is refused
+    (`_homeless_write_hit`); with that variable unset it passes. One git read per call that can
+    write, and none from a cwd in no checkout.
     A shell `cd`, `pushd` or `Set-Location` that moves into another checkout is refused too, unless
     `payload` marks the target as the caller's own home or red-run folder (a write strictly inside that red-run
     folder passes too, a shell `cp` may also name its root); a `cd` toward a folder
@@ -4510,12 +4552,17 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         return ""
     roots = clone_checkouts(where) if where else None
     own = _owning_checkout(where, roots) if roots else ""
-    if not own:
-        return ""
-
-    tops, common, stranded = _clone_scope(roots, own)
     import tempfile   # lazy: only a call that can write or move reaches here
     temp = os.path.realpath(tempfile.gettempdir())
+    if not own:
+        # A cwd in no checkout (stat alone says so) reads no `cd` and no git verb. It may not write
+        # into a checkout of the home clone, the one CLAUDE_PROJECT_DIR names. An unreadable git state
+        # (a `.git` above cwd that git cannot list) stays unknown and passes.
+        if not where or _checkout_root_by_stat(os.path.realpath(where)):
+            return ""
+        return _homeless_write_hit(targets, command if targets is None else "", where, session_id,
+                                   has_agent, temp, writes)
+    tops, common, stranded = _clone_scope(roots, own)
     clone_hit = {}   # target -> True when the hit was a separate clone, not a checkout of this one
 
     def elsewhere(target, at, verb=""):
@@ -4648,7 +4695,14 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
             return
         if not lane and held and os.path.isdir(held):
             # The session came back to the primary while its visited lane still stands: that visit
-            # was no home. A record whose folder is gone stays, and the guard keeps judging.
+            # was no home. A record whose folder is gone stays, and the guard keeps judging. A `cd`
+            # from the primary into the held folder is the way back home, so it keeps the record
+            # (`_cd_home_exempt` reads it in the same call).
+            tool_input = payload.get("tool_input")
+            command = str(tool_input.get("command", "") or "") if isinstance(tool_input, dict) else ""
+            if tool in SHELL_TOOLS and any(path_is_inside(move, held) is True
+                                           for move in _cd_targets(tool, command, where)):
+                return
             os.remove(record)
             return
         if not lane or held == lane or session_home_agent_tree(lane):
