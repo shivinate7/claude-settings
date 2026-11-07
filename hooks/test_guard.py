@@ -7734,6 +7734,14 @@ nm_case("linked-nm: cd into a real folder, then npm ci, is allowed, though the p
 nm_case("linked-nm: cd into a folder with no node_modules, then npm ci, is allowed",
         "cd " + slash(NMABSENT) + " && npm ci", "allow", NMLINKED)
 
+# THE PREFIX FLAG. `npm ci --prefix <dir>` installs into <dir>, so the folder the flag names is the one judged,
+# not the working folder. Each case is the other folder's answer: a real prefix from a linked folder is allowed,
+# and a linked prefix from a real folder is refused.
+nm_case("linked-nm: npm ci --prefix a real folder, run from a linked folder, is allowed",
+        "npm ci --prefix " + slash(NMREAL), "allow", NMLINKED)
+nm_case("linked-nm: npm ci --prefix a linked folder, run from a real folder, is refused",
+        "npm ci --prefix " + slash(NMLINKED), "deny", NMREAL)
+
 # THE CONTROLS IN A LINKED FOLDER. Each is the job of a linked folder, and none is refused.
 for _command, _tool in (("npm run setup", "Bash"), ("npm run build", "Bash"), ("npm test", "Bash"),
                         ("rm node_modules", "Bash"), ("Remove-Item node_modules", "PowerShell")):
