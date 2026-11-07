@@ -16,6 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import merge  # noqa: E402
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
+from shared_names import BATCH_LABEL  # noqa: E402  the one home of the integration pull request's label (hooks/shared_names.py)
 import decision_watch  # noqa: E402  the one model caller (hooks/decision_watch.py); merge.py puts hooks on sys.path
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
@@ -12696,8 +12697,6 @@ LEDGER_NOW = datetime(2026, 10, 2, 6, 0, 0, tzinfo=timezone.utc)  # the clock of
 LEDGER_ACT = {"batch": "batch", "lane round": "lane round 2", "held": "waits on debt:await-held",
               "parked": "waits on debt:await-parked", "replaced": "waits on debt:await-replaced"}  # the act each kind's fixture gives
 
-BATCH_LABEL = "batch"  # the label of an integration pull request; merge.HOLD_LABELS holds it
-
 def ago(hours):
     """A GitHub time `hours` before LEDGER_NOW, as created_at reads it. A negative count is a time after it."""
     return (LEDGER_NOW - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -13053,6 +13052,7 @@ class ReviewedLedger(ReviewEnv):
         self.assertEqual(rc, 1, out + err)
 
     def test_the_batch_label_is_one_of_the_hold_labels_read_from_the_constant(self):
+        self.assertEqual(merge.BATCH_LABEL, BATCH_LABEL, "merge.BATCH_LABEL is not the label hooks/shared_names.py names")
         self.assertIn(BATCH_LABEL, merge.HOLD_LABELS, "merge.HOLD_LABELS does not hold the batch label")
 
     def test_a_pull_request_labelled_batch_inside_the_batch_limit_reads_batch_run(self):
