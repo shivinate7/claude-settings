@@ -27715,6 +27715,23 @@ role_model_allow("role-model: reviewer on sonnet whose guard marker follows a cl
                  "sonnet", "Check the guard diff.\n" + MD_FENCE + "\nsome code\n" + MD_FENCE + "\n" + REVIEW_GUARD_MARKER)
 role_model_refuse("role-model: reviewer on sonnet with the guard marker in lowercase is denied (case-sensitive)",
                   "reviewer", "sonnet", REVIEW_GUARD_MARKER.lower())
+# The marker is the value `yes` as a whole word. The template line `Guard or check: yes|no`, a word that starts with yes
+# (`yesterday`) and `yes-ish` are not that value, so they lift nothing. `yes` then a space, a full stop or a parenthesis
+# is the value, and lifts the reviewer as before.
+role_model_refuse("role-model: reviewer on sonnet with the template line Guard or check: yes|no is denied",
+                  "reviewer", "sonnet", "Check the docs diff.\nGuard or check: yes|no")
+role_model_refuse("role-model: reviewer on sonnet with Guard or check: yesterday is denied",
+                  "reviewer", "sonnet", "Check the docs diff.\nGuard or check: yesterday")
+role_model_refuse("role-model: reviewer on sonnet with Guard or check: yes-ish is denied",
+                  "reviewer", "sonnet", "Check the docs diff.\nGuard or check: yes-ish")
+role_model_allow("role-model: reviewer on sonnet with Guard or check: yes alone on its line is allowed",
+                 "reviewer", "sonnet", "Check the guard diff.\n" + REVIEW_GUARD_MARKER)
+role_model_allow("role-model: reviewer on sonnet with Guard or check: yes and a trailing space is allowed",
+                 "reviewer", "sonnet", "Check the guard diff.\n" + REVIEW_GUARD_MARKER + " \nThe lane is c204.")
+role_model_allow("role-model: reviewer on sonnet with Guard or check: yes then a parenthesis is allowed",
+                 "reviewer", "sonnet", "Check the guard diff.\n" + REVIEW_GUARD_MARKER + " (`hooks/`)")
+role_model_allow("role-model: reviewer on sonnet with Guard or check: yes then a full stop is allowed",
+                 "reviewer", "sonnet", "Check the guard diff.\n" + REVIEW_GUARD_MARKER + ".")
 # The refusal names the marker beside the Round N of 3 remedy, as a reviewer's second way past its row.
 role_model_refuse("role-model: reviewer on sonnet with no marker is denied, and names the guard marker beside the "
                   "Round N of 3 remedy", "reviewer", "sonnet", "Check the guard diff.",
