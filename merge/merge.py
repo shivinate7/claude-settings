@@ -21,7 +21,7 @@
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
-                          PR's issue comments since the PR opened.
+                          PR's issue comments since the PR opened. With --guard yes, MODEL must be sonnet (exit 2 otherwise).
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
@@ -3056,6 +3056,7 @@ REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
 REVIEW_SHA = r"[0-9a-f]{40}"
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
+REVIEW_FIX_GUARD_MODEL = "sonnet"  # the fix check of a guard or check change runs on this model; any other fix check may run on haiku (decision agent-model-cap)
 
 def review_body(n, head, kind, guard, rounds, net, fix=None):
     """-> the record text, one field per line, in the order of the form. `rounds` is a list of (number, role, model, verdict). `fix` is None or the
@@ -3133,6 +3134,8 @@ def review_state(rec, head):
     fix = rec.get("fix")
     if fix and fix[3] != "PASS":
         return "open", "the fix check failed, so the fix needs a new lane"
+    if fix and rec["guard"] == "yes" and fix[2] != REVIEW_FIX_GUARD_MODEL:
+        return "open", f"the fix check of a guard or check change must run on {REVIEW_FIX_GUARD_MODEL}, not {fix[2]}"
     if fix and not top:
         return "open", "the fix check passed, but no round is recorded"
     if top >= REVIEW_LAST_ROUND:  # before the PASS rule: a final-round PASS on a guard or check change still owes the net-value test
@@ -3329,6 +3332,8 @@ def main(argv, host=None, lock=None):
             p.error("--kind docs-only means no guard or check, so --guard must be no")
         if a.fix_check and a.fix_check[0] == a.head:
             p.error("--fix-check: the reviewed head must differ from --head, or the fix diff is empty")
+        if a.fix_check and a.guard == "yes" and a.fix_check[2] != REVIEW_FIX_GUARD_MODEL:
+            p.error(f"--fix-check: the fix check of a guard or check change runs on {REVIEW_FIX_GUARD_MODEL}, so give {REVIEW_FIX_GUARD_MODEL} as MODEL, not {a.fix_check[2]}")
         if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)) is None:
             p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3")
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
