@@ -1,0 +1,11 @@
+{
+  "title": "A push of Markdown that fails the STE lint is refused",
+  "phase": "now",
+  "status": "doing",
+  "order": 269.2,
+  "owner": "coordinator",
+  "lane": "session_013NEJKzXyKNARtJsbz3Q1R2",
+  "why": "Lane replay-profile-parts pushed four notes over the STE sentence limit to #1653 (coordinator, 17:33 CST Nov 7). The gap showed only in CI.",
+  "note": "Related: step lane-lint-runs-local-tools (#1461). Done check: a red test where a push of failing Markdown is refused, and a push with no Markdown change starts nothing.",
+  "updatedAt": "2026-11-07T17:33:00-06:00"
+}
