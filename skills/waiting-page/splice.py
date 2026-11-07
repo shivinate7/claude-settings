@@ -24,9 +24,12 @@ A marker counts only as a comment in the page's markup. Text inside <script>, <s
 is not a block.
 The splice refuses, and writes no file, when the live page has no block, an unclosed block, or more
 than one block, and when FILE is not one marked block. The message names the roadmap block.
+prune_designs(text, items) is the one home of dropping a closed item's mockups from a page's designData block
+(stale_pages.py --write --items calls it after carry; carry and --block never prune).
 Cost: one read of each file and one write; no process starts.
 """
 import argparse
+import json
 import re
 import sys
 
@@ -39,6 +42,7 @@ OLD_TITLE = re.compile("(?P<prefix>.* )?(?:Queue(?: \u00b7 Status)?|Roadmap)", r
 SVG_OPEN, SVG_CLOSE = "svg-open", "svg-close"
 SVG_TAG = re.compile(r"<(/?)svg(?=[\s/>])", re.I)
 DESIGN_ID = re.compile(r"""\bid\s*=\s*["']?designData["']?(?=[\s/>"'])""", re.I)
+DESIGN_ELEMENT = re.compile(r"""(<script(?:[^>"']|"[^"]*"|'[^']*')*>)(.*)(</script[^>]*>)""", re.S | re.I)
 RAW = ("script", "style", "textarea", "title")
 TAG = re.compile(r"<(%s)(?=[\s/>])" % "|".join(RAW), re.I)
 
@@ -120,6 +124,44 @@ def design_span(text, what):
     if len(spans) != 1:
         raise SystemExit("splice: %s has %s designData block, so nothing was written." % (what, "no" if not spans else "more than one"))
     return spans[0][1], spans[0][2]
+
+
+def named_slugs(item):
+    """The mockup slugs one item names: each `designs[].slug`, and each `options[].design` (an older item names them there only)."""
+    slugs = set()
+    if not isinstance(item, dict):
+        return slugs
+    for key, field in (("designs", "slug"), ("options", "design")):
+        for entry in item.get(key) or []:
+            if isinstance(entry, dict) and isinstance(entry.get(field), str):
+                slugs.add(entry[field])
+    return slugs
+
+
+def prune_designs(text, items):
+    """`text` with the mockups of closed items dropped from its designData block; every other byte stays.
+    A slug goes only when each item that names it is closed (status "closed") and is not an arbiter ruling (`arbiter` true),
+    since an Overturn reopens a ruling. A slug no item names stays: the writer publishes a mockup before its item. A slug named
+    by an open item as well stays. The block is rewritten only when a slug goes, as one JSON object with each `<` written as
+    \\u003c (so no string can close the script); an unreadable block, or one that is no object, is left as is. SystemExit
+    when `text` has no single designData block. The caller passes a complete items list: a cut-short one would keep too little."""
+    start, end = design_span(text, "the page")
+    parts = DESIGN_ELEMENT.fullmatch(text[start:end])
+    try:
+        designs = json.loads(parts.group(2))
+    except (ValueError, AttributeError):
+        return text
+    if not isinstance(designs, dict):
+        return text
+    kept, dropped = set(), set()
+    for item in items:
+        done = isinstance(item, dict) and item.get("status") == "closed" and item.get("arbiter") is not True
+        (dropped if done else kept).update(named_slugs(item))
+    gone = {slug for slug in dropped - kept if slug in designs}
+    if not gone:
+        return text
+    rest = {slug: html for slug, html in designs.items() if slug not in gone}
+    return text[:start] + parts.group(1) + json.dumps(rest).replace("<", "\\u003c") + parts.group(3) + text[end:]
 
 
 def title_span(text):

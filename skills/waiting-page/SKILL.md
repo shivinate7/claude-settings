@@ -267,7 +267,8 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    republish, so the copy holds the page as it was.
 4. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
    `<out>` is main's page with the live `designData` and roadmap blocks kept, byte for byte
-   (`--write` calls `splice.carry`). A live page with no roadmap block keeps the template's empty one.
+   (`--write` calls `splice.carry`), minus the mockups of closed items when you pass `--items` (step 2).
+   A live page with no roadmap block keeps the template's empty one.
    When you also add a design, do it in
    `<out>` first and republish once ("Add a design").
 5. `unknown`: republish nothing, and say the line in the reply. The line names the cause: the page
@@ -700,7 +701,11 @@ The guard runs `check_designs.mjs` on the published page at each item write that
    that read the page earlier would overwrite the first one's mockups. A lane never does this step:
    the orchestrator does (see "Add an item").
 
-The mockup leaves the page when its question closes and the page is next republished. The page
+The mockup leaves the page when its question closes and the page is next republished with
+`stale_pages.py --write --items`, which calls `splice.prune_designs`. That drops a slug only when every item that names it
+(`designs[].slug` or `options[].design`) is closed and is not an arbiter ruling, since an Overturn reopens a ruling. A
+slug no item names stays, and so does every slug when the items list is not complete (no `.complete` marker).
+`splice.carry` and `splice.py --block` never prune. The page
 holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another artifact.
 
 ## Update the roadmap block
@@ -754,7 +759,9 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
 3. For each `behind` page, build the page to publish from the live page you fetched in step 1, never
    from plain `page.html`, as "Keep the page on main's code" step 2 says:
    `stale_pages.py --page <fetched page> --write <new page>`.
-   `--write` carries the live `designData` block, roadmap block and `<title>` text into main's page, byte for byte. A live
+   `--write` carries the live `designData` block, roadmap block and `<title>` text into main's page, byte for byte. With
+   `--items <list or folder>` of a complete list it then drops the mockups of closed items (see "The mockup leaves the page"
+   above); without `--items` it prunes nothing. A live
    page with no roadmap block gives its `designData` block, and the template keeps its empty roadmap
    block. The carry refuses, with nothing written and the verdict `unknown`. It refuses when the template
    lacks either block, when the live page has no `designData` block, or when either file has a

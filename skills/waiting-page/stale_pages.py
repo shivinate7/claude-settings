@@ -37,8 +37,10 @@ Single-page mode (the writer, at each wake and before each republish):
 One verdict line names the template source: `origin/main <short sha>` or the --main path. Exit 0
 current, 1 behind, 2 unknown. Unknown: the file is missing or empty, it holds no designData block
 or more than one, main's page.html cannot be read, or --write fails. --write, on current or behind,
-saves main's page with the live designData and roadmap blocks kept (splice.carry); unknown writes nothing. The template is
---main; else page.html at origin/main of the checkout that holds this script, else of the checkout
+saves main's page with the live designData and roadmap blocks kept (splice.carry); unknown writes nothing.
+With --items and a complete list, --write also drops each mockup whose items are all closed and none an arbiter ruling
+(splice.prune_designs). A mockup no item names stays. A list from a folder with no .complete marker prunes nothing.
+The template is --main; else page.html at origin/main of the checkout that holds this script, else of the checkout
 the `@<path>` line in ~/.claude/CLAUDE.md names. With neither, or with no hooks/_nowindow.py to
 start git, the verdict is unknown: the installed copy never stands in for main.
 --items names the items the session saved with `ArtifactData list items`: a JSON list file, or the folder of
@@ -514,19 +516,23 @@ def single_page(argv):
     ap.add_argument("--main")
     ap.add_argument("--items")
     args = ap.parse_args(argv)
-    code = page_verdict(args)
+    loaded = error = None
     if args.items is not None:
         try:
-            lines = wait_lines(*load_items(args.items))
+            loaded = load_items(args.items)
         except ValueError as err:
-            lines = ["wait: the items cannot be read: unknown (%s)" % err]
+            error = err
+    code = page_verdict(args, loaded)
+    if args.items is not None:
+        lines = ["wait: the items cannot be read: unknown (%s)" % error] if error else wait_lines(*loaded)
         for line in lines:
             print(line)
     return code
 
 
-def page_verdict(args):
-    """The verdict of one fetched page: prints its line and returns the exit code."""
+def page_verdict(args, loaded=None):
+    """The verdict of one fetched page: prints its line and returns the exit code. `loaded` is load_items' (items, complete) or None;
+    --write drops the mockups of closed items (splice.prune_designs) only from a complete list."""
     try:
         with open(args.page, encoding="utf-8", errors="replace", newline="") as f:
             live = f.read()
@@ -557,6 +563,8 @@ def page_verdict(args):
     if args.write:
         try:
             text = splice.carry(template, live)  # the one carry home: live designData and roadmap blocks, byte for byte
+            if loaded and loaded[1]:
+                text = splice.prune_designs(text, loaded[0])  # a closed item's mockup leaves the page; carry itself never prunes
         except SystemExit as err:  # a template or live page whose roadmap markers carry cannot place
             print("unknown: the --write file cannot be built (%s)" % err)
             return 2
