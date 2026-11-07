@@ -319,8 +319,20 @@ def ov_cfg():
     return tempfile.mkdtemp(prefix="cfg_", dir=ROOT)
 
 
-def ov_type(cfg, prompt, session=OV_SESSION):
-    """The owner types `prompt`. Returns the finished child, or None when it timed out."""
+# A child that runs the hook with the named modules missing: sys.modules holds None for each, so an import of one raises
+# ImportError, as it does on a machine without the file. The hook still runs as __main__, as Claude Code runs it.
+HIDE_DRIVER = ("import runpy, sys\n"
+               "hooks, hook, hidden = sys.argv[1], sys.argv[2], sys.argv[3:]\n"
+               "sys.path.insert(0, hooks)\n"
+               "for name in hidden:\n"
+               "    sys.modules[name] = None\n"
+               "sys.argv = [hook]\n"
+               "runpy.run_path(hook, run_name='__main__')\n")
+
+
+def ov_type(cfg, prompt, session=OV_SESSION, hide=()):
+    """The owner types `prompt`. Returns the finished child, or None when it timed out. `hide` names modules the child
+    cannot import."""
     env = dict(os.environ)
     for name in ("PYTHONUTF8", "PYTHONIOENCODING"):
         env.pop(name, None)
@@ -333,9 +345,11 @@ def ov_type(cfg, prompt, session=OV_SESSION):
     env["PATH"] = NO_MODEL_PATH
     payload = json.dumps({"hook_event_name": "UserPromptSubmit", "session_id": session,
                           "prompt": prompt, "cwd": HERE})
+    command = [sys.executable, MODULE_PATH]
+    if hide:
+        command = [sys.executable, "-c", HIDE_DRIVER, os.path.dirname(MODULE_PATH), MODULE_PATH] + list(hide)
     try:
-        return subprocess.run([sys.executable, MODULE_PATH], input=payload, capture_output=True,
-                              text=True, env=env, timeout=30)
+        return subprocess.run(command, input=payload, capture_output=True, text=True, env=env, timeout=30)
     except subprocess.TimeoutExpired:
         return None
 
@@ -458,6 +472,19 @@ def case_override_off():
           and not ov_pass_files(cfg), "rc=%s files %r" % (proc and proc.returncode, ov_pass_files(cfg)))
 
 
+def case_override_off_with_a_full_stop_is_a_reason():
+    # `override off.` is not the whole word `off`, so it is a reason: main's one-act override, which replaces a timed one.
+    cfg = ov_cfg()
+    ov_type(cfg, "override 2h")
+    before = ov_pass(cfg)
+    ov_type(cfg, "override off.")
+    after = ov_pass(cfg)
+    check("override: `override 2h` is a 2-hour override before `override off.`",
+          ends_after(before, "timed", timedelta(hours=2)), "before %r; files %r" % (before, ov_pass_files(cfg)))
+    check("override: `override off.` after a 2-hour override is main's one-act override, which replaces it",
+          ends_after(after, "once", OV_ONCE), "before %r, after %r; files %r" % (before, after, ov_pass_files(cfg)))
+
+
 # A prompt that starts with the word `override` is a one-act override, and the rest is the reason. The
 # reason goes to guard.log on ONE line: the log is one record per line, tab-separated, so a newline
 # or a tab in the owner's text is folded to a space. The log line may be built any way; the cases only
@@ -476,6 +503,8 @@ OV_WORDS = [
     ("a newline and a tab in the reason fold to one log line",
      "override: use opus\nfor the review agent\twith a tab", "use opus for the review agent with a tab"),
     ("a lone quote in the reason", "override: don't ask twice", "don't ask twice"),
+    ("a whole word `off` near the start of the reason is a reason word", "override: kick off the nightly build",
+     "kick off the nightly build"),
 ]
 
 
@@ -628,6 +657,20 @@ def case_override_fail_open():
           and "Traceback" not in proc.stderr,
           "rc=%s stdout=%r stderr=%r" % (proc and proc.returncode, proc and proc.stdout[-120:],
                                          proc and proc.stderr[-120:]))
+
+
+def case_override_capture_failure_keeps_the_grant():
+    # capture() raises when its helper is missing: _session_base imports precompact_handoff. A capture that raises must
+    # not stop the owner's keyword grant. The precondition check proves the child failed on that import, not elsewhere.
+    cfg = ov_cfg()
+    proc = ov_type(cfg, "override 15m", hide=("precompact_handoff",))
+    stderr = proc.stderr if proc else ""
+    check("override: with precompact_handoff missing, the capture fails on that import (precondition)",
+          "precompact_handoff" in stderr, "stderr %r" % stderr.strip()[-160:])
+    got = ov_pass(cfg)
+    check("override: with precompact_handoff missing, `override 15m` still grants a 15-minute override",
+          proc is not None and proc.returncode == 0 and ends_after(got, "timed", timedelta(minutes=15)),
+          "rc=%s; got %r; files %r" % (proc and proc.returncode, got, ov_files(cfg)))
 
 
 # OPUS BY PLAIN WORDS (decision owner-override, the Opus word). The owner's own prompt can grant Opus without the
@@ -2440,8 +2483,8 @@ def case_override_ask_plain_one_act_logs_its_words_once():
     check("override ask: a plain timed ask, `%s`, logs none" % timed, ov_log(cfg) == [], "log %r" % (ov_log(cfg),))
 
 
-# A first-word `override` whose reason holds the whole word `off` within NEGATION_SPAN words of its start grants nothing,
-# on the keyword route and on the plain route: an intended `off` never becomes a grant (decision owner-override).
+# A first-word `override` whose reason holds the whole word `off` grants main's one-act override, on the keyword route
+# and on the plain route. `off` in a reason is a reason word: only the whole prompt `override off` ends an override.
 OV_REASON_OFF = (
     ("`override that off`", "override that off"),
     ("`override it off please`", "override it off please"),
@@ -2449,8 +2492,8 @@ OV_REASON_OFF = (
     ("`override that OFF`, the word in capitals", "override that OFF"),
     ("`override that off for 15 minutes`, a length in the reason", "override that off for 15 minutes"),
 )
-# The controls: no whole word `off` near the start, or `off` past the window, so main's once stays. `offload` and
-# `payoff` hold `off` inside a longer word.
+# The controls: `off` inside a longer word, or past the window, grants the same once. `offload` and `payoff` hold `off`
+# inside a longer word.
 OV_REASON_OFF_ONCE = (
     ("`override: offload the cache`, `off` inside a longer word", "override: offload the cache"),
     ("`override: the payoff script is stuck`, `off` at the end of a longer word",
@@ -2460,9 +2503,9 @@ OV_REASON_OFF_ONCE = (
 )
 
 
-def case_override_ask_off_in_the_reason_grants_nothing():
+def case_override_ask_off_in_the_reason_grants_once():
     for name, prompt in OV_REASON_OFF:
-        ask_no_grant(name, prompt, {None})
+        ask_no_grant(name, prompt, {"once"})
     for name, prompt in OV_REASON_OFF_ONCE:
         ask_no_grant(name, prompt, {"once"})
     # The plain route's control: a length and no whole word `off`, so the judge says yes and the timed override is granted.
@@ -2534,6 +2577,7 @@ def main():
         case_override_grants()
         case_override_context_line()
         case_override_off()
+        case_override_off_with_a_full_stop_is_a_reason()
         case_opus_context_line()
         case_override_takes_words()
         case_override_reason_goes_through_the_log_writer()
@@ -2542,6 +2586,7 @@ def main():
         case_override_corrupt_file_replaced()
         case_override_session_id_stays_inside()
         case_override_fail_open()
+        case_override_capture_failure_keeps_the_grant()
         case_opus_ask_judge_approved_lifts_every_role()
         case_opus_ask_judge_refusal_grants_nothing()
         case_opus_ask_keyword_forms_never_ask_the_judge()
@@ -2627,7 +2672,7 @@ def main():
         case_override_ask_bare_number_reads_the_raw_first_word()
         case_override_ask_judge_import_failure_keeps_main_result()
         case_override_ask_plain_one_act_logs_its_words_once()
-        case_override_ask_off_in_the_reason_grants_nothing()
+        case_override_ask_off_in_the_reason_grants_once()
         case_override_ask_judge_kill_keeps_the_inbox_capture()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
