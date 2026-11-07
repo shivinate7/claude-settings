@@ -3612,12 +3612,14 @@ def table_reorient_forms():
               case_reorient_nothing_when_no_open_items))
 
 
-def case_fence_line_read_by_the_guard_is_the_shared_fence_line():
+def case_guard_reads_top_level_indented_and_no_break_space_fence_lines_as_prose():
     import feedback_guard  # the guard's own unfenced(), not a copy of its fence rule
-    # Pins: a fence line indented four spaces, or led by a tab, opens a fence in the guard, so the text under it is no prose.
+    # Red: CommonMark reads a fence line indented four spaces, or led by a tab, at the top level as indented code. So the
+    # text under it is prose, and only the fence at the next ``` line hides text. The guard fences it today.
     for opener in ("    ```", "\t```"):
         kept = feedback_guard.unfenced("%s\nhidden\n```\nshown" % opener)
-        check("fence line %r: the text under it is fenced" % opener, "hidden" not in kept and "shown" in kept, repr(kept))
+        check("top-level fence line %r: the text under it is read as prose" % opener,
+              "hidden" in kept and "shown" not in kept, repr(kept))
     # Red: a line led by a no-break space is no fence line (CommonMark indents with spaces and tabs only), so its text
     # is prose and the fence opens at the next ``` line. The guard reads it as a fence today.
     kept = feedback_guard.unfenced("  ```\nhidden line\n```\nshown line")
@@ -3784,7 +3786,7 @@ CASES = (
     case_repeat_cap_keeps_the_newest_notes_lines,
     case_repeat_cap_keeps_the_open_roadmap_steps,
     case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit,
-    case_fence_line_read_by_the_guard_is_the_shared_fence_line,
+    case_guard_reads_top_level_indented_and_no_break_space_fence_lines_as_prose,
 )
 
 
