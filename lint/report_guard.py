@@ -24,9 +24,12 @@ holds the report until it names it (decision ci-wait-reads-run-status, section "
 `CI running on <sha7>` under Next and no BUILT or RECORDED Done item that names the head. Red: `CI red on <sha7>`.
 A read that failed or ran out of budget: `CI unknown on <sha7>`. Green, a draft PR and a branch with no PR need no
 line. Only the newest head of each branch counts. Cost: only on a Stop after a push that is not a stop_hook_active
-Stop, at most 2 gh processes per head (the branch's open PR, then the head's runs), plus 1 git process for a head the
-push output does not give or a short head on main; 8 s for each read and 20 s for all, under the Stop timeout in
-settings.json (the seam is ci_wake.Budget, passed to push_ci_states). No timer, no new long-lived process. The
+Stop, at most 2 gh processes per head (the branch's open PR, then the head's runs), a 3rd when the run list is empty
+(the workflow list, so a repo with no workflows reads none), plus up to 2 local processes for a head the push output
+does not give (a bare `git push origin HEAD`: the branch, then its remote ref) or 1 for a short head on main. Every
+read is inside one 20 s budget, 8 s at most each, under the Stop timeout in settings.json (the seam is
+ci_wake.Budget, passed to push_ci_states); a budget spent before a head is named reads unknown, and the line names
+the branch. No timer, no new long-lived process. The
 missing-report marker also holds each head's state (a line each), so the rewrite makes no second read.
 
 On landed turns whose report has the right shape, it also blocks a Deviations item that admits a mistake
@@ -346,42 +349,53 @@ def _push_call(args):
     return (words[0] if words else ""), words[1:], flags
 
 
-def _push_folder(segment, cwd):
-    """The folder a segment's `git -C <dir>` runs in, else cwd."""
-    tokens = guard.guard_core.segment_tokens(segment) or []
-    folder = cwd
+def _push_folder(segments, number, ends, cwd):
+    """The folder segment `number` runs in: where the shell is after the `cd` segments before it
+    (guard_core.dir_before_segment, the guard's one reader of cd), else cwd; then its own `-C <dir>`."""
+    tokens = guard.guard_core.segment_tokens(segments[number]) or []
+    folder = guard.guard_core.dir_before_segment(segments, number, cwd, ends) if cwd is not None else None
+    folder = folder or cwd
     for i, token in enumerate(tokens[:-1]):
         if token == "-C" and cwd is not None:
             folder = os.path.join(folder, tokens[i + 1])
     return folder
 
 
-def _branch_of(refspec, folder):
+def _branch_of(refspec, folder, budget):
     """The remote branch a push refspec updates, or "" for a tag or a ref it does not name."""
     dst = refspec.lstrip("+").split(":")[-1]
     if refspec.lstrip("+") == "HEAD":
-        dst = _symbolic_branch(folder)
+        dst = _symbolic_branch(folder, budget)
     dst = dst[len("refs/heads/"):] if dst.startswith("refs/heads/") else dst
     return "" if not dst or dst.startswith("refs/") or dst == "HEAD" else dst
 
 
+# A `! [rejected]` or `! [remote rejected]` ref line, a `fatal:` or `error:` line, or the all-up-to-date line, each
+# anchored at a line start: the word rejected inside a branch name is no rejection.
+PUSH_REJECTED_LINE = re.compile(r"^\s*!\s*\[(?:remote )?rejected\]|^\s*(?:error|fatal):|^Everything up-to-date",
+                               re.MULTILINE)
+
+
 def _heads_of_git_push(args, output, folder, ci_wake, budget):
-    """-> [(sha, branch)] a `git push` call updated. Read from the ref lines of its output (`old..new src -> dst`);
-    a new branch line, and a call whose output holds none (a verdict wrapper prints no ref line), read the remote-tracking
-    ref. A rejected push or an up-to-date one updated nothing."""
+    """-> [(sha, branch)] a push call updated; sha is None when the read budget ran out before the head
+    was named. Read from the ref lines of its output (`old..new src -> dst`), so an accepted ref of a multi-ref
+    push counts past a rejected one; a new branch line, and a call whose output holds none (a verdict wrapper
+    prints no ref line), read the remote-tracking ref. With no accepted ref line, a rejected push or an
+    up-to-date one updated nothing."""
     call = _push_call(args)
     if call is None:
         return []
     remote, refspecs, flags = call
-    if re.search(r"rejected|error:|fatal:|Everything up-to-date", output):
-        return []
     remote = remote or "origin"
     seen = [(m.group(2), m.group(3)) for m in map(PUSH_REF_LINE.match, output.splitlines()) if m]
-    if not seen and set(flags) & {"--tags", "--all", "--mirror", "--prune"}:
+    if not seen and (PUSH_REJECTED_LINE.search(output) or set(flags) & {"--tags", "--all", "--mirror", "--prune"}):
         return []
 
     if not seen:
-        names = [_branch_of(r, folder) for r in refspecs] if refspecs else [_symbolic_branch(folder)]
+        try:
+            names = [_branch_of(r, folder, budget) for r in refspecs] if refspecs else [_symbolic_branch(folder, budget)]
+        except ci_wake.Unknown:
+            return [(None, (refspecs[0].lstrip("+").split(":")[-1] if refspecs else "HEAD") or "HEAD")]
         seen = [(None, n) for n in names if n]
     heads = []
     for sha, branch in seen:
@@ -389,17 +403,22 @@ def _heads_of_git_push(args, output, folder, ci_wake, budget):
             continue
         branch = branch[len("refs/heads/"):] if branch.startswith("refs/heads/") else branch
         if sha is None and ":" not in remote:
-            sha = ci_wake.commit_of("refs/remotes/%s/%s" % (remote, branch), folder, budget.next_timeout())
+            try:
+                sha = ci_wake.commit_of("refs/remotes/%s/%s" % (remote, branch), folder, budget.next_timeout())
+            except ci_wake.Unknown:
+                heads.append((None, branch))
+                continue
         if sha:
             heads.append((sha, branch))
     return heads
 
 
-def _symbolic_branch(folder):
-    """The branch the folder has checked out, or "" for a detached HEAD or a failed read."""
+def _symbolic_branch(folder, budget):
+    """The branch the folder has checked out, or "" for a detached HEAD or a failed read. The read is inside
+    the Stop's budget: it raises ci_wake.Unknown once the total is spent."""
     try:
         done = subprocess.run(["git", "symbolic-ref", "--short", "-q", "HEAD"], cwd=folder, capture_output=True,
-                              text=True, timeout=5, stdin=subprocess.DEVNULL)
+                              text=True, timeout=budget.next_timeout(), stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired):
         return ""
     return done.stdout.strip() if done.returncode == 0 else ""
@@ -425,7 +444,8 @@ def _mcp_head(name, tool_input, text):
 
 
 def pushed_heads(after, cwd, budget, ci_wake):
-    """-> [(sha, branch, folder)]: the newest head of each branch this turn pushed, in the order of each branch's last push."""
+    """-> [(sha, branch, folder)]: the newest head of each branch this turn pushed, in the order of each branch's last
+    push. sha is None for a head the budget ran out before naming (read as unknown, never dropped)."""
     results = {}
     for rec in after:
         for block in tool_results(rec):
@@ -444,11 +464,13 @@ def pushed_heads(after, cwd, budget, ci_wake):
                 command = tool_input.get("command")
                 if not isinstance(command, str) or not command.strip():
                     continue
-                for segment in guard.split_segments(guard.strip_heredoc_bodies(command)):
+                ends = []
+                segments = guard.split_segments(guard.strip_heredoc_bodies(command), ends)
+                for number, segment in enumerate(segments):
                     for subcommand, args in guard.git_calls(segment):
                         if subcommand != "push":
                             continue
-                        folder = _push_folder(segment, cwd)
+                        folder = _push_folder(segments, number, ends, cwd)
                         for sha, branch in _heads_of_git_push(args, output, folder, ci_wake, budget):
                             record(sha, branch, folder)
             elif name in PUSH_TOOLS:
@@ -472,6 +494,9 @@ def push_ci_states(after, hook, budget=None):
     cwd = hook.get("cwd") if isinstance(hook.get("cwd"), str) else None
     states = []
     for sha, branch, folder in pushed_heads(after, cwd, budget, ci_wake):
+        if sha is None:   # the report line then names the branch: no head was read
+            states.append((branch, "unknown", "the read budget ran out before the head was named"))
+            continue
         state, detail = ci_wake.head_state(sha, branch, folder, budget)
         states.append((sha[:7], state, detail))
     return states
@@ -479,8 +504,8 @@ def push_ci_states(after, hook, budget=None):
 
 def push_ci_problem(text, states):
     """The block reason for a pushed head whose state the report does not name, or "". Pending needs `CI running on
-    <sha7>` under Next and no BUILT or RECORDED Done item that names the head; red needs `CI red on <sha7>`, an
-    unknown read `CI unknown on <sha7>`, anywhere in the reply. Green and no CI need nothing."""
+    <sha7>` under Next; red needs `CI red on <sha7>` anywhere in the reply; neither lets a BUILT or RECORDED Done
+    item name the head. An unknown read needs `CI unknown on <sha7>` anywhere in the reply. Green and no CI need nothing."""
     reasons = []
     for sha7, state, detail in states:
         if state not in CI_WORDS:
@@ -491,13 +516,13 @@ def push_ci_problem(text, states):
             reasons.append("Push-CI guard: this turn pushed %s and its CI is %s (%s). Add the line `%s`%s, as a "
                            "short correction." % (sha7, CI_WORDS[state], detail or "no detail", line,
                                                     " under Next" if state == "pending" else ""))
-        elif state == "pending":
+        elif state in ("pending", "red"):
             claim = [i for i in report_section(text, "Done").splitlines()
                      if sha7 in i and re.search(r"\b(?:BUILT|RECORDED)\b", i)]
             if claim:
-                reasons.append("Push-CI guard: a Done item names %s as built while its CI is still running. Cite the "
-                               "PR or an earlier commit in Done, and keep the head in `%s` under Next."
-                               % (sha7, line))
+                reasons.append("Push-CI guard: a Done item names %s as built while its CI is %s. Cite the "
+                               "PR or an earlier commit in Done, and keep the head in `%s`."
+                               % (sha7, "still running" if state == "pending" else "red", line))
     return " ".join(reasons)
 
 

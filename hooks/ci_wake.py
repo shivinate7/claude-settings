@@ -21,7 +21,8 @@ The cancelled-twin rule is merge.py's `Host.judge_runs`, loaded through guard_me
 
 The Stop-side read (`head_state`, for lint/report_guard.py after a push): one read of a pushed head's CI state,
 in a Stop hook that is already running. It starts no watch, timer or process of its own. Cost per head: at most 2
-gh processes (the open PR of the branch, then the head's runs), plus 1 local process to name a short head on main.
+gh processes (the open PR of the branch, then the head's runs), plus 1 more when the run list is empty (the
+workflow list), plus 1 local process to name a short head on main.
 Budget: HEAD_READ seconds for each read, HEAD_TOTAL for all of a Stop's reads, under the Stop hook timeout in
 settings.json. The seam is `Budget(total, per_read, clock)`: a test passes a clock it controls, so the budget is
 proved without real time.
@@ -263,11 +264,12 @@ def verdict(sha, runs):
     return "CI %s on %s: %s" % ("cancelled" if cancelled else "red", sha[:7], ", ".join(dict.fromkeys(names)))
 
 
-def no_workflows(cwd, repo):
+def no_workflows(cwd, repo, timeout=READ_TIMEOUT):
     """True only when `gh workflow list` reads cleanly and shows no active workflow: no CI, so no
     watch. A failed or non-JSON read is unknown, not "no workflows" (the watch runs)."""
     try:
-        return gh_json(["workflow", "list", *(["-R", repo] if repo else []), "--json", "id"], cwd) == []
+        return gh_json(["workflow", "list", *(["-R", repo] if repo else []), "--json", "id"], cwd,
+                       timeout=timeout) == []
     except (Unknown, NoPR):
         return False
 
@@ -365,7 +367,8 @@ def commit_of(ref, cwd, timeout=HEAD_READ):
 
 def head_state(sha, branch, cwd, budget=None):
     """-> (state, detail) for a head pushed to `branch`; sha may be short. One read, no wait.
-    state: "none" (no CI to wait for: no open PR, a draft PR, or a head the PR has moved past), "green",
+    state: "none" (no CI to wait for: no open PR, a draft PR, a head the PR has moved past, or a repo with no
+    workflows, read once when the run list is empty), "green",
     "pending" (a run has not ended, or a ready PR has no run yet), "red" (a run ended not green), or "unknown"
     (a read failed or ran out of budget). A push to main reads the head's runs direct. A ready PR's runs drop
     skipped ones as `wait_for` does, then judge_runs judges the rest (the cancelled-twin rule is its own)."""
@@ -387,6 +390,9 @@ def head_state(sha, branch, cwd, budget=None):
         args = ["run", "list", "--commit", full, "--limit", "100", "--json", RUN_FIELDS]
         runs = [r for r in gh_json(args, cwd, timeout=budget.next_timeout()) if r["conclusion"] != "skipped"]
         if not runs:
+            # No run is listed: either the repo has no CI (nothing to wait for) or the run has not started.
+            if no_workflows(cwd, "", budget.next_timeout()):
+                return "none", "the repo has no workflows"
             return ("unknown", "no run is listed for a push to %s" % branch) if main else ("pending", "no run yet")
         from guard_merge import merge_module
         merge = merge_module()
