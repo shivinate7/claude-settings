@@ -110,18 +110,24 @@ _SPACE_WORD = r"(?:spacing|gaps?|padding|margins?|gutters?|radius|radii|insets?)
 _COLOUR_WORD = r"(?:colou?rs?|accent|ink|background|surface|border|fill|brand|palette|tint|shade)"
 _ID_WORD = ("order", "lot", "bin", "invoice", "ticket", "id", "item", "box", "parcel", "package", "no.",
             "number", "ref")
-# "order #123456", "ID: #123456" and "orders #123456" are ids, not colours
-_NOT_ID = "".join(r"(?<!\b%s%s )" % (w, tail) for w in _ID_WORD for tail in ("", ":", "s"))
+# "order #123456", "orders #123456" and "boxes: #123456" are ids, not colours. With a colon after the id word
+# ("Item: #3d5af1") a hash that holds a hex letter is a colour, so only the all-digit pattern reads the colon.
+_NOT_ID_BARE = "".join(r"(?<!\b%s%s )" % (re.escape(w), plural) for w in _ID_WORD for plural in ("", "s", "es"))
+_NOT_ID = "".join(r"(?<!\b%s%s%s )" % (re.escape(w), plural, colon)
+                  for w in _ID_WORD for plural in ("", "s", "es") for colon in ("", ":"))
 SPACING_EXEMPT = ("Device",)
-# A Device section may say the lane draws an iOS app: there it names the product being drawn. A free
-# section that says "the iOS app" may mean today's product, so it stays a `current` fault.
+# A Device section may say the lane draws an iOS app: there it names the product being drawn. Any other
+# sentence that says "the iOS app" may mean today's product, so it stays a `current` fault.
 IOS_APP_REF = re.compile(r"\bthe\s+ios\s+(?:app|client|version)\b", re.I)
 IOS_APP_EXEMPT = ("Device",)
+IOS_DRAW_VERB = re.compile(r"\b(?:draw|draws|drawing|drawn|design|designs|designing|build|builds|building"
+                           r"|mock|mocks|sketch|sketches)\b[^.!?\n]*$", re.I)
 PATTERNS.update({
     "token-colour": [
-        _NOT_ID + r"#(?=[0-9a-f]*[a-f])(?:[0-9a-f]{6}|[0-9a-f]{8})\b",
+        _NOT_ID_BARE + r"#(?=[0-9a-f]*[a-f])(?:[0-9a-f]{6}|[0-9a-f]{8})\b",
         _NOT_ID + r"#(?:\d{6}|\d{8})\b",
         r"\b" + _COLOUR_WORD + r"\b\W+(?:\w+\W+){0,3}#(?:[0-9a-f]{3}|(?=\d*[a-f])[0-9a-f]{4})\b",
+        r"\b" + _COLOUR_WORD + r"\b\W+#\d{4}\b",
         r"\b(?:rgba?|hsla?|hwb|lch|oklab|oklch)\s?\(", r"\b(?:rgba?|hsla?)\s+\d+[ ,]+\d+[ ,]+\d+",
     ],
     "token-font": [
@@ -142,8 +148,9 @@ COMPILED["token-font"] += [re.compile(p) for p in (
     r"|Source Sans|IBM Plex|Fira Sans|Fira Code|JetBrains Mono|Playfair|Merriweather|Garamond|Verdana"
     r"|Tahoma|Segoe UI|Times New Roman|Manrope|DM Sans|Space Grotesk|Work Sans|Figtree|Fraunces|Satoshi"
     r"|General Sans)\b",
-    r"\b[Ff]onts?\b(?::|[ \t]+(?:is|are))?[ \t]+(?:(?:set )?in[ \t]+)?[A-Z][A-Za-z]+\b(?!-)",
-    r"\b[Tt]ypefaces?\b(?::|[ \t]+(?:is|are))?[ \t]+(?:(?:set )?in[ \t]+)?[A-Z][A-Za-z]+\b(?!-)")]
+    # After ":" or "is" the name may start the next line; after the bare word it must stay on the line.
+    r"\b[Ff]onts?\b(?:(?::|[ \t]+(?:is|are))\s+|[ \t]+)(?:(?:set )?in[ \t]+)?[A-Z][A-Za-z]+\b(?!-)",
+    r"\b[Tt]ypefaces?\b(?:(?::|[ \t]+(?:is|are))\s+|[ \t]+)(?:(?:set )?in[ \t]+)?[A-Z][A-Za-z]+\b(?!-)")]
 IOS_SKILL = re.compile(r"(?<![\w-])ios-apps(?![\w-])", re.I)
 DUO_FOLDED, DUO_UNFOLDED = "iphone-duo-folded", "iphone-duo-unfolded"  # device ids in lint/layout.json
 TOKEN_SECTION = re.compile(r"palett|colou?r|fonts?\b|typograph|typeface|spacing|tokens?\b|brand|theme|style|radius", re.I)
@@ -339,17 +346,29 @@ def brief_faults(text, current=(), template=None, devices=None):
         for kind, pats in COMPILED.items():
             if kind == "token-spacing" and name in SPACING_EXEMPT:
                 continue
-            if kind == "current" and name not in IOS_APP_EXEMPT:
-                pats = pats + [IOS_APP_REF]
             for pat in pats:
                 hit = pat.search(body)
                 if hit:
                     faults.append((kind, name, hit.group(0).strip()))
                     break
+            else:
+                ios = ios_app_hit(body, name in IOS_APP_EXEMPT) if kind == "current" else None
+                if ios:
+                    faults.append((kind, name, ios))
         for view in current:
             if view and re.search(r"(?<!\w)" + re.escape(view) + r"(?!\w)", body):
                 faults.append(("named-view", name, view))
     return faults
+
+
+def ios_app_hit(body, exempt):
+    """The matched "the iOS app" text, or None. With `exempt`, a sentence that draws or builds the app before
+    the reference is left out: there it names the product being drawn."""
+    for sentence in re.split(r"(?<=[.!?])\s+|\n", body):
+        hit = IOS_APP_REF.search(sentence)
+        if hit and not (exempt and IOS_DRAW_VERB.search(sentence[:hit.start()] + " ")):
+            return hit.group(0)
+    return None
 
 
 def blind_designers_ok(text):

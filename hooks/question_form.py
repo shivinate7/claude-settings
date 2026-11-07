@@ -391,6 +391,8 @@ PRESS_REF = re.compile(_REF, re.I)
 # "Press Copy" is a button of the waiting page and of the chat, never a press in a web app. It is left out
 # of the press read only when the page is the task title, since the title says nothing of where Copy sits.
 TITLE_PAGE_COPY = re.compile(r"\b(?:press|click|tap)(?:es|ed|ing|s|ped|ping)?\s+(?:the\s+)?[\"'“‘]?copy\b", re.I)
+# A capitalised app named after "in", "on" or "at" ("Press Copy in Procore") is another web app: its Copy is a press.
+OTHER_WEB_APP = re.compile(r"\b(?:in|on|at|inside)\s+(?:the\s+)?(?-i:[A-Z][\w-]*)", re.I)
 _FILE = (r"[\w./-]+\.(?:md|txt|sh|json|py|ps1|ya?ml|toml|html|log|csv)\b"
          r"|\b(?:plans|docs|notes)/[\w./-]+")
 COMMAND_FILE = re.compile(_FILE, re.I)
@@ -499,7 +501,8 @@ def _press_field_ok(text, links, context="", press_text=None) -> bool:
     /issues/N at a number boundary, is read in `text`, or in `context` when `text` names no page."""
     press = text if press_text is None else press_text
     from_title = not WEB_MARKER.search(text)
-    if not PRESS_VERB.search(TITLE_PAGE_COPY.sub("", press) if from_title else press):
+    own_copy = from_title and not OTHER_WEB_APP.search(press)
+    if not PRESS_VERB.search(TITLE_PAGE_COPY.sub("", press) if own_copy else press):
         return True
     page = context if from_title else text
     if not WEB_MARKER.search(page):
@@ -625,6 +628,13 @@ def _shell_line(span, run) -> bool:
     return False
 
 
+def _without_slash_commands(text) -> str:
+    """`text` with each slash command removed from a clause that names no file. A clause that names a file
+    keeps it, since "run the /sync command shown in plans/x.md" sends the owner to that file."""
+    return "\n".join(clause if COMMAND_FILE.search(clause) else SLASH_COMMAND.sub("", clause)
+                     for clause in re.split(r"(?<=[.!?])\s+|\n", text))
+
+
 def command_in_item_hit(data) -> str:
     """The matched text when a task's `command` is not {powershell, mac}, when its powershell string
     holds bash syntax, when its steps, joined, send the owner to a file for a command, or when a
@@ -645,7 +655,7 @@ def command_in_item_hit(data) -> str:
     joined = "\n".join(texts)
     has_file = COMMAND_FILE.search(joined)
     if COMMAND_IN_FILE.search(joined) or (has_file and COMMAND_ITS.search(joined)) \
-            or (has_file and not has_command and COMMAND_VERB.search(SLASH_COMMAND.sub("", joined))):
+            or (has_file and not has_command and COMMAND_VERB.search(_without_slash_commands(joined))):
         return "steps send the owner to a file for a command"
     if any(_shell_line(body, fenced or bool(SPAN_RUN_VERB.search(text[:start])))
            for text in texts for start, body, fenced in _code_spans(text)):
