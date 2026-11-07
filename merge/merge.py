@@ -2664,7 +2664,8 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         "  batch:  " + batch,
         f"  {base} run: {verdict}" + (f": {detail}. --confirm refuses it unless --base-red-ok \"<reason>\" is given." if verdict != "green" else ""),
         "  base:   " + (current or f"holds {base}'s tip"),
-        "  claim:  " + (f"already claimed ({resumed}); " + ("--confirm on the draft refuses this head, so mark it ready by hand (route pr-ready-mcp-cloud in cloud)" if info["draft"] else "a run resumes at the wait")
+        "  claim:  " + (f"already claimed ({resumed}); " + ((f"run `merge {n} --confirm` on the draft first: it runs the ready checks (" + ", ".join(m["readyChecks"]) + "), then refuses this head, so mark it ready by hand after they pass (route pr-ready-mcp-cloud in cloud)"
+                         if m.get("readyChecks") else "--confirm on the draft refuses this head, so mark it ready by hand (route pr-ready-mcp-cloud in cloud)") if info["draft"] else "a run resumes at the wait")
                         if resumed else trailer or "nothing to claim"),
         *([f"  records: {records}"] if records else []),
         *([] if base == cfg["defaultBranch"] else [f"  ids:    stay pending: {base} is not the default branch ({cfg['defaultBranch']}); they are claimed when it merges there."]),
