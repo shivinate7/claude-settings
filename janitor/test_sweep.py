@@ -4713,8 +4713,8 @@ class AgentEndOtherWorktreeTests(_AgentEndFixture):
 class AgentEndRedTreeTests(_AgentEndFixture):
     """A red-run checkout is the test-author's `.claude/worktrees/agent-<id>-red` (agents/test-author.md).
     Its owner is the running agent's tree `.claude/worktrees/agent-<id>`. While the owner tree is still
-    registered as a worktree, the agent-end reap KEEPS the red-run checkout, and its row names the owner
-    tree (when-a-worktree-may-be-removed). Once the owner tree is gone, the red-run checkout follows the
+    registered as a worktree, the agent-end reap and the session-end sweep KEEP the red-run checkout, and
+    the keep names the owner tree (when-a-worktree-may-be-removed). Once the owner tree is gone, the red-run checkout follows the
     other-tree rules. A name that only looks like a red-run checkout follows those rules too. Each
     red-shaped tree is clean, pushed, unlocked and idle 31 minutes, so only the owner check can keep it."""
 
@@ -4772,6 +4772,31 @@ class AgentEndRedTreeTests(_AgentEndFixture):
             self.assertEqual(row.get("action"), "keep", "the red-run checkout row is not keep: %r" % row)
             self.assertIn("agent-" + self.OWNER, str(row.get("reason")),
                           "the keep reason does not name the owner tree: %r" % row.get("reason"))
+
+    def test_the_session_end_sweep_keeps_a_red_run_checkout_while_its_owner_tree_is_registered(self):
+        """The session-end route (decide_worktree, attended False) with a 5 h idle read: the same
+        clean, pushed, merged, unlocked tree that the other-tree rules would remove."""
+        owner = self.add(self.OWNER)
+        red = self.add(self.OWNER + "-red")
+        lookalike = self.add(self.OWNER + "-redx")
+        self.assertIn(_norm_path(owner), self.listed(), "the owner tree is not registered before the sweep decides")
+        rows = {_norm_path(e["path"]): e for e in sweep.parse_worktree_list(self.primary)}
+
+        def entry_for(path):
+            return dict(rows[_norm_path(path)], idle=5 * 3600)
+
+        with self.subTest(case="red-run checkout whose owner tree is registered, session-end route"):
+            decision = sweep.decide_worktree(self.primary, entry_for(red))
+            self.assertEqual(decision["action"], "keep",
+                             "red-run checkout %s was not kept while its owner tree %s is registered: %s"
+                             % (red, owner, decision["reason"]))
+            self.assertIn("agent-" + self.OWNER, decision["reason"],
+                          "the keep reason does not name the owner tree: %r" % decision["reason"])
+        with self.subTest(case="name only looks like red-run: agent-<owner>-redx gets today's verdict"):
+            decision = sweep.decide_worktree(self.primary, entry_for(lookalike))
+            self.assertEqual(decision["action"], "reap",
+                             "%s did not get today's verdict (reap) on the session-end route: %s"
+                             % (lookalike, decision["reason"]))
 
     def test_a_red_run_checkout_with_no_owner_tree_is_removed_as_today(self):
         ending = self.add("endnow")
