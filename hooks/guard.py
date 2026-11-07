@@ -73,6 +73,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
   live-stream, waiter  deny. A command that follows a stream with no end, or polls with sleep.
   background-end       deny. A background command with no end note. (background-needs-end-note)
+  background-check-tail
+                       deny. A background check piped into tail or head. (background-check-through-verdict)
   playwright-browsers-path, playwright-install
                        deny. (playwright-browsers-path, playwright-install-once)
   rm-var-unguarded     deny. A recursive delete under an unguarded variable.
@@ -403,9 +405,9 @@ while True:
         )
         _loading = "guard_stream"
         from guard_stream import (
-            BACKGROUND_END_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
+            BACKGROUND_CHECK_TAIL_REASON, BACKGROUND_END_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
             NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, WAITER_REASON, background_end_hit,
-            live_stream_hit, ln_descends_hit, loop_condition_polls_a_pattern,
+            background_check_tail_hit, live_stream_hit, ln_descends_hit, loop_condition_polls_a_pattern,
             narrated_tail_hit, waiter_verdict,
         )
         _loading = "guard_rm_var"
@@ -3452,6 +3454,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = narrated_tail_hit(stripped)
     if matched:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
+    matched = background_check_tail_hit(stripped, background)
+    if matched:
+        refuse(tool, "deny", "background-check-tail", BACKGROUND_CHECK_TAIL_REASON, matched)
     matched = background_end_hit(split_segments(stripped), background, description)
     if matched:
         refuse(tool, "deny", "background-end", BACKGROUND_END_REASON, matched)

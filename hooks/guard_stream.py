@@ -92,6 +92,13 @@ def narrating_stage(segment: str) -> str:
     index = resolve_command(tokens)
     if index is None:
         return ""
+    return _roster_word(tokens, index)
+
+
+def _roster_word(tokens, index: int) -> str:
+    """The roster spelling the command at `index` runs (`merge`, `merge.cmd`, or a script run through
+    an interpreter, `python merge.py`), else ''. The one reader of NARRATING_COMMANDS and
+    NARRATING_SCRIPT_TAILS."""
     word = basename(tokens[index])
     if word in NARRATING_COMMANDS:
         return word
@@ -126,6 +133,61 @@ NARRATED_TAIL_REASON = (
     "like a hang. "
     "Remedy: run the command with nothing after it and read its output as it arrives, or "
     "redirect to a file you read back afterwards, or use tee to keep a full copy."
+)
+
+
+# A BACKGROUNDED CHECK piped into `tail` or `head` (decision background-check-through-verdict). A filter
+# that keeps one end holds every byte until the command exits, then prints a few lines, so a background
+# job's one useful line, its verdict, can be cut off or never read. `verdict <cmd>` keeps the whole log and
+# prints the verdict itself. Only the named checks count, one entry per incident: `merge --lane-lint`
+# in each spelling of the roster above, and `ci-job`. Refusing every backgrounded `| tail` is the cry-wolf
+# guard (docs/decisions/guard-that-cries-wolf-is-spent.md). A foreground call is never refused.
+CHECK_COMMANDS = ("ci-job", "ci-job.cmd")
+CHECK_FLAG = "--lane-lint"
+VERDICT_WRAPPER = "verdict"
+
+
+def check_stage(segment: str) -> str:
+    """The command word when one segment runs a named verification command outside `verdict`, else ''."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    index = resolve_command(tokens)
+    if index is None:
+        return ""
+    # resolve_command skips `verdict` like any wrapper, and the wrapper walk skips the `verdict` after
+    # `python3` without recording it, so read the words ahead of the command word: a check run through
+    # it, alone or as `python3 .../verdict`, keeps its full log.
+    if any(basename(token) == VERDICT_WRAPPER for token in tokens[:index]):
+        return ""
+    if basename(tokens[index]) in CHECK_COMMANDS:
+        return basename(tokens[index])
+    return _roster_word(tokens, index) if CHECK_FLAG in tokens else ""
+
+
+def background_check_tail_hit(stripped: str, background: bool) -> str:
+    """The matched text when a background call pipes a named check straight into `tail`/`head`."""
+    if not background:
+        return ""
+    ends = []
+    segments = split_segments(stripped, ends)
+    for index in range(len(segments) - 1):
+        if ends[index] != "|":
+            continue
+        stage = check_stage(segments[index])
+        tokens = segment_tokens(segments[index + 1]) if stage else None
+        at = resolve_command(tokens) if tokens else None
+        if at is not None and basename(tokens[at]) in TRUNCATING_FILTERS:
+            return stage + " | " + basename(tokens[at])
+    return ""
+
+
+BACKGROUND_CHECK_TAIL_REASON = (
+    "this check runs in the background and its output goes straight into a filter that keeps "
+    "one end, so the filter holds everything until the check exits and the verdict can be lost "
+    "(decision background-check-through-verdict). "
+    "Remedy: run the check through verdict, as `verdict <cmd>`. It keeps the full log and "
+    "prints the verdict itself."
 )
 
 

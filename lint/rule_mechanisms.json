@@ -351,9 +351,11 @@
     },
     "tokens-run-through-verdict": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "No check sees which command an agent ran a verification through. CI tests only that bin/verdict itself works."
-      }
+        "kind": "guard",
+        "ref": "background-check-tail",
+        "reason": "Partly mechanized. The guard (background-check-tail, hooks/guard_stream.py background_check_tail_hit) refuses a backgrounded `merge --lane-lint` or `ci-job` piped straight into tail or head and not run through verdict. It does not see any other verification command, a foreground call, or a command run outside verdict with no pipe."
+      },
+      "test": "hooks/test_guard.py::background-check-tail: the incident line, backgrounded, is refused"
     },
     "tokens-point-brief-at-files": {
       "mechanism": {
