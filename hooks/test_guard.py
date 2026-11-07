@@ -19213,6 +19213,8 @@ FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT),"settings.json", "CLAUDE.md", "g
 # rule 8's reason too.
 REASON_MAY_NAME = {
     "agent-model-cap": (ROOT, slash(ROOT), "settings.json", ".claude"),
+    # The no-model refusal names the row's model as its remedy: haiku for a haiku row (coordinator ruling 15:09 CST Nov 7).
+    "agent-role-model": ("haiku",),
     # The refusal names the handoff the session must read: under the config folder, which is ROOT here
     # and ~/.claude in a session. That path is the remedy, so the rule may name its folder.
     "handoff-unread": (ROOT, slash(ROOT), ".claude"),
@@ -27159,6 +27161,9 @@ workflow_refuse("role-model: Workflow builder with no model is denied when both 
 workflow_refuse("role-model: Workflow test-author with no model is denied when CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL is inherit",
                 WF_NO_MODEL_SCRIPT, rule=ROLE_RULE, carries=WF_NO_MODEL_CARRIES, lacks=ROLE_LACKS,
                 env=WF_WORKFLOW_INHERIT)
+workflow_refuse("role-model: Workflow builder with no model is denied when both defaults are unset, and names no haiku",
+                _step_flow("'Fix the failing case.'", "agentType: 'builder'"), rule=ROLE_RULE,
+                carries=WF_NO_MODEL_CARRIES, lacks=ROLE_LACKS + ("haiku",), env=WF_UNSET)
 # Plan's row is opus, and a no-model Agent Plan is allowed through its file's pin. The Workflow allow follows that.
 workflow_allow("role-model: Workflow Plan with no model is allowed when both defaults are unset (Plan's row is opus)",
                _step_flow("'Plan the change.'", "agentType: 'Plan'"), env=WF_UNSET)
