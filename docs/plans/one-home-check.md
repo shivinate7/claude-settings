@@ -12,12 +12,8 @@ Before then, the rules are the working text here.
 ### The incident
 
 - The STE output rule (`output-write-in-ste`) was reworded in commit 9d577ab4 (the plain-prose
-  lint commit, 2026-10-17). The removed sentence reads, in full:
-
-```
-**Output.** Write in Simplified Technical English by default, to me and between agents,
-unless told otherwise.<!-- rule:output-write-in-ste -->
-```
+  lint commit, 2026-10-17). The removed sentence is at `git show 9d577ab4^:CLAUDE.md`, anchor
+  `output-write-in-ste`. It is not quoted here: owner item 337 retires its 5-word fragment.
 
 - The old sentence has 15 words. In the old file it wrapped across two lines.
 - On origin/main 5a5f081e, eight files in `agents/` still hold the old phrase, as a 5-word

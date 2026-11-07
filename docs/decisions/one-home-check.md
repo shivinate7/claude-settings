@@ -10,7 +10,7 @@ repo's own nuance. Plan: PR #1106 (the one-home check plan). Owner answers to it
 - Item 337, pick a: the old STE sentence fragment joins the retired-names list once the copies are
   fixed. PR #1105 (agent briefs drop the STE name) fixed them, so it joins in this lane.
 - Item 338, pick a: a child exception is the marker `<!-- exempt: <rule-id> reason: <text> -->`.
-  The word `override` stays the owner's word (decision `owner-override`).
+  The word `override` keeps its one meaning, the owner's typed prompt (decision `owner-override`).
 - Item 339, pick a, with the note "isnt there a better way than both of these options tho".
   Triage's answer: run the child check inside the shared lint action that child repos already pin,
   with no new CI step. See "The better way", below.

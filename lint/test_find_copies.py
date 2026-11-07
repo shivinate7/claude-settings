@@ -9,6 +9,7 @@ q_max's verbatim copy of a parent test with a header added, and the impeccable c
 ios-adblock, joyous and degen, which differ from the parent and from each other.
 FIND_COPIES_UNDER_TEST overrides the module path.
 """
+import collections
 import contextlib
 import importlib.util
 import io
@@ -25,8 +26,11 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _test_temp  # noqa: E402
+from rule_audit import REASON_MIN_WORDS  # noqa: E402  the one home of the exception reason's minimum (lint/rule_audit.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  copies what git lists, for the cost case's script tree (testing/tracked_tree.py)
 MODULE = os.environ.get("FIND_COPIES_UNDER_TEST") or os.path.join(HERE, "find_copies.py")
 RUN_FOLDER = _test_temp.run_folder()  # test-temp-standard (one run folder per test run)
 REPO = os.path.dirname(HERE)
@@ -344,6 +348,15 @@ def git_show(sha, path):
     return proc.stdout.decode("utf-8", "replace") if proc.returncode == 0 else None
 
 
+def on_main(sha):
+    """True when sha is an ancestor of origin/main, False when it is not. Raises when git cannot tell."""
+    proc = subprocess.run(["git", "-C", REPO, "merge-base", "--is-ancestor", sha, "origin/main"], capture_output=True)
+    if proc.returncode in (0, 1):
+        return proc.returncode == 0
+    raise AssertionError(f"UNKNOWN: cannot tell whether {sha} is on origin/main: "
+                         f"{proc.stderr.decode('utf-8', 'replace').strip()}")
+
+
 class ParaphraseTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
@@ -494,7 +507,8 @@ class ParaphraseLabelledSetTest(unittest.TestCase):
     not have, so only its form is checked here. Its text was checked against the clone when the set was built."""
 
     SOURCE = re.compile(r"^(?:(?P<repo>[a-z_]+):)?(?P<path>[^:@]+):(?P<line>[0-9]+)@(?P<sha>[0-9a-f]{7,40})$")
-    FIELDS = {"id", "rule_id", "rule_at", "text", "source", "label", "basis", "why"}
+    SHA = re.compile(r"^[0-9a-f]{7,40}$")
+    FIELDS = {"id", "rule_id", "rule_at", "rule_text", "text", "source", "label", "basis", "why"}
 
     def load(self):
         self.assertTrue(os.path.isfile(LABELLED), "lint/paraphrase_labelled.json is missing")
@@ -510,6 +524,7 @@ class ParaphraseLabelledSetTest(unittest.TestCase):
             self.assertFalse(missing, f"case {case.get('id')!r} lacks {sorted(missing)}")
             self.assertIn(case["label"], ("paraphrase", "distinct"), f"case {case['id']} has label {case['label']!r}")
             self.assertTrue(case["why"].strip(), f"case {case['id']} has an empty why")
+            self.assertTrue(case["rule_text"].strip(), f"case {case['id']} has an empty rule_text")
             self.assertNotIn("\n", case["text"], f"case {case['id']} text spans lines")
         ids = [case["id"] for case in cases]
         self.assertEqual(len(ids), len(set(ids)), "two cases share an id")
@@ -540,9 +555,9 @@ class ParaphraseLabelledSetTest(unittest.TestCase):
     def test_each_rule_id_is_an_anchor_at_its_rule_at(self):
         anchors = {}
         for case in self.load():
-            if "rule_text" in case:
-                continue  # its rule_at is archive-only, so CI cannot read it: rule_id is checked at HEAD below
             sha = case["rule_at"]
+            if not self.SHA.match(sha) or not on_main(sha):
+                continue  # a label, or a sha not on main: CI has no provenance to read for it
             if sha not in anchors:
                 self.assertIsNotNone(git_show(sha, "CLAUDE.md"), f"rule_at {sha} cannot be read")
                 found = set()
@@ -562,24 +577,337 @@ class ParaphraseLabelledSetTest(unittest.TestCase):
     def plain(text):
         return " ".join(re.sub(r"<!--.*?-->", "", text).split())
 
-    def test_rule_text_is_quoted_in_the_plan_at_head(self):
-        # The retired sentence's rule_at (9d577ab4^) is on archive branches only, so CI cannot read it.
-        # The plan quotes that sentence in a fence at HEAD, so the text is checked there instead.
-        plan = git_show("HEAD", "docs/plans/one-home-check.md")
-        self.assertIsNotNone(plan, "UNKNOWN: docs/plans/one-home-check.md cannot be read at HEAD")
+    def test_rule_text_is_the_rule_as_it_read_at_rule_at_when_on_main(self):
         for case in self.load():
-            if "rule_text" in case:
-                self.assertIn(self.plain(case["rule_text"]), self.plain(plan),
-                              f"case {case['id']}: the retired rule_text is not quoted in the plan")
+            sha = case["rule_at"]
+            if not self.SHA.match(sha) or not on_main(sha):
+                continue  # a label, or a sha not on main: its text is not checked by git here
+            claude = git_show(sha, "CLAUDE.md")
+            self.assertIsNotNone(claude, f"UNKNOWN: CLAUDE.md cannot be read at {sha}")
+            style = git_show(sha, "output-styles/shiv-stylisms.md") or ""
+            self.assertIn(self.plain(case["rule_text"]), self.plain(claude + "\n" + style),
+                          f"case {case['id']}: rule_text is not the rule at {sha}")
 
-    def test_a_rule_text_case_cites_a_rule_id_that_is_a_current_anchor(self):
+    def test_each_rule_id_is_a_current_anchor(self):
         current = set()
         for path in ("CLAUDE.md", "output-styles/shiv-stylisms.md"):
             current |= set(re.findall(r"rule:([a-z0-9-]+)", git_show("HEAD", path) or ""))
         for case in self.load():
-            if "rule_text" in case:
-                self.assertIn(case["rule_id"], current,
-                              f"case {case['id']}: no current rule:{case['rule_id']} anchor at HEAD")
+            self.assertIn(case["rule_id"], current, f"case {case['id']}: no current rule:{case['rule_id']} anchor at HEAD")
+
+
+# One-home check, copies inside a repo (plan parts a and c). The parent holds rule sentences in its RULE_FILES and
+# the child copies them. Every case runs `--in-repo` from the child folder with an explicit --parent, so no case reads
+# this clone's own rule text. A case that expects no finding also carries a control copy in a sibling file, so a scan
+# that prints nothing fails (decision test-practices, P7).
+PARENT_RULES = (
+    "# Parent rules\n\n"
+    "**Briefs.** Write the `<!--` opener as text. Don't pad a brief: keep it to the task, the files, the governing "
+    "rulings and the check that proves it done.<!-- rule:brief-contents -->\n\n"
+    "**Comments.** Keep the `//` and `/*` marks out of a brief, and leave the text after them alone."
+    "<!-- rule:comment-marks -->\n\n"
+    "**Quoted.** Quote the form as `Quoted form in a span stays text, not a source, so copy it only as text."
+    "<!-- rule:quoted-form -->` in a brief.\n\n"
+    "**Output.** Write plainly: short sentences, one term per meaning, no filler.<!-- rule:output-plain -->\n"
+)
+RULE = "Don't pad a brief: keep it to the task, the files, the governing rulings and the check that proves it done."
+MARKS = "Keep the `//` and `/*` marks out of a brief, and leave the text after them alone."
+QUOTED = "Quoted form in a span stays text, not a source, so copy it only as text."
+REASON = "this child keeps its own brief wording for a reason stated here"  # twelve words, over the minimum
+CONTROL = {"agents/control.md": RULE + "\n"}
+CONTROL_FINDING = ("agents/control.md", 1, "COPY001")
+FIND_LINE = re.compile(r"^(.+?):(\d+): (COPY001|EXEMPT00[123]) (.*)$")
+
+
+def rule_parent(root):
+    write(root, "CLAUDE.md", PARENT_RULES)
+    write(root, "output-styles/shiv-stylisms.md", "# Output style\n\nPlain prose, with no rule anchor.\n")
+    write(root, "skills/README.md", "# Skills\n")
+
+
+def parse_findings(out):
+    """(path, line, code, text) for each finding line the scan printed."""
+    return [(m.group(1), int(m.group(2)), m.group(3), m.group(4))
+            for m in (FIND_LINE.match(line) for line in out.splitlines()) if m]
+
+
+def keyed(found):
+    return sorted((path, line, code) for path, line, code, _ in found)
+
+
+AUDIT_RUNNER = '''import json, runpy, sys
+events_path, module, argv = sys.argv[1], sys.argv[2], sys.argv[3:]
+events = []
+
+
+def hook(name, args):
+    if name == "subprocess.Popen" and isinstance(args[1], (list, tuple)):
+        events.append(["proc", " ".join(str(a) for a in args[1])])
+    elif name == "open" and isinstance(args[0], str):
+        flags = args[2] if len(args) > 2 and isinstance(args[2], int) else -1
+        events.append(["open", args[0], "" if args[1] is None else str(args[1]), flags])
+
+
+out = open(events_path, "w")
+sys.addaudithook(hook)
+sys.argv = [module] + argv
+code = 0
+try:
+    runpy.run_path(module, run_name="__main__")
+except SystemExit as exc:
+    code = exc.code or 0
+finally:
+    out.write(json.dumps(events))
+    out.close()
+sys.exit(code)
+'''
+
+
+WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
+
+
+def is_write(event):
+    """True when an `open` event of AUDIT_RUNNER asks for a write: a write mode, or os flags that write (os.open and
+    tempfile.mkstemp raise no mode). Flags of -1 mean the call gave none, so its mode decides."""
+    _, _, mode, flags = event
+    return any(c in mode for c in "wax+") or (flags >= 0 and bool(flags & WRITE_FLAGS))
+
+
+class OneHomeInRepoTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
+        self.addCleanup(self.tmp.cleanup)
+        self.parent = os.path.join(self.tmp.name, "parent")
+        self.child = os.path.join(self.tmp.name, "child")
+        rule_parent(self.parent)
+        os.makedirs(self.child)
+
+    def tracked(self, files, control=True):
+        """Write `files` into the child and make it a git repo that tracks them, with the control copy beside them."""
+        for rel, text in {**(CONTROL if control else {}), **files}.items():
+            write(self.child, rel, text)
+        subprocess.run(["git", "-C", self.child, "init", "-q"], check=True)
+        subprocess.run(["git", "-C", self.child, "add", "-A"], check=True)
+
+    def scan(self, child=None, parent=None):
+        proc = subprocess.run([sys.executable, MODULE, "--in-repo", "--parent", parent or self.parent],
+                              cwd=child or self.child, capture_output=True, text=True, timeout=60)
+        return proc.returncode, proc.stdout + proc.stderr
+
+    def verdict_scan(self):
+        """(findings, out) of a scan that printed its verdict. No verdict line means the mode is not there."""
+        rc, out = self.scan()
+        lines = out.strip().splitlines()
+        last = lines[-1] if lines else ""
+        self.assertIn(last, ("copies: PASS", "copies: FAIL"),
+                      "--in-repo printed no copies: verdict, so the mode is missing: %s" % out[-400:])
+        self.assertEqual(rc, 1 if last == "copies: FAIL" else 0, out)
+        return parse_findings(out), out
+
+    def test_copy_of_a_rule_sentence_without_its_id_is_reported(self):
+        self.tracked({"agents/brief.md": "# Brief\n\n%s\n" % RULE}, control=False)
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [("agents/brief.md", 3, "COPY001")], out)
+        self.assertEqual(found[0][3], "brief-contents copied", out)
+
+    def test_seven_word_run_is_no_copy_and_eight_words_is(self):
+        self.tracked({"agents/seven.md": "Keep it to the task, the files, then stop.\n",
+                      "agents/eight.md": "Keep it to the task, the files, the rest waits.\n"}, control=False)
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [("agents/eight.md", 1, "COPY001")], out)
+
+    def test_rule_id_in_the_same_paragraph_exempts_the_copy(self):
+        self.tracked({"agents/paragraph.md": "Per brief-contents, the brief reads:\n%s\n" % RULE})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [CONTROL_FINDING], out)
+
+    def test_rule_id_in_the_same_table_row_exempts_the_copy(self):
+        self.tracked({"agents/table.md": "| Rule | Text |\n| --- | --- |\n| brief-contents | %s |\n" % RULE})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [CONTROL_FINDING], out)
+
+    def test_rule_id_in_the_same_fence_exempts_the_copy(self):
+        self.tracked({"agents/fence.md": "```text\n%s <!-- rule:brief-contents -->\n```\n" % RULE})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [CONTROL_FINDING], out)
+
+    def test_rule_id_in_the_same_blockquote_exempts_the_copy(self):
+        self.tracked({"agents/quote.md": "> %s See brief-contents.\n" % RULE})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [CONTROL_FINDING], out)
+
+    def test_rule_id_in_the_next_paragraph_does_not_exempt(self):
+        self.tracked({"agents/next.md": "%s\n\nSee brief-contents.\n" % RULE})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), sorted([CONTROL_FINDING, ("agents/next.md", 1, "COPY001")]), out)
+
+    def test_rule_id_in_another_table_row_does_not_exempt(self):
+        self.tracked({"agents/row.md": "| brief-contents | term |\n| Brief | %s |\n" % RULE})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), sorted([CONTROL_FINDING, ("agents/row.md", 2, "COPY001")]), out)
+
+    def test_stock_phrase_under_eight_words_is_no_copy(self):
+        self.tracked({"agents/stock.md": "Start with the point. No preamble.\n"})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [CONTROL_FINDING], out)
+
+    def test_glossary_and_records_pages_are_not_read(self):
+        self.tracked({"GLOSSARY.md": "| Brief | %s |\n" % RULE, "docs/records.md": "%s\n" % RULE})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [CONTROL_FINDING], out)
+
+    def test_untracked_markdown_is_not_read(self):
+        self.tracked({})
+        write(self.child, "agents/untracked.md", "%s\n" % RULE)
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [CONTROL_FINDING], out)
+
+    def test_import_only_file_is_no_copy(self):
+        self.tracked({"CLAUDE.md": "@~/claude-settings-main/CLAUDE.md\n"})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [CONTROL_FINDING], out)
+
+    def test_reflowed_copy_is_reported_inside_its_span(self):
+        self.tracked({"agents/reflow.md": "Don't pad a brief: keep it to the task,\nthe files, the governing rulings "
+                                          "and the check\nthat proves it done.\n"})
+        found, out = self.verdict_scan()
+        reflow = [line for path, line, _, _ in found if path == "agents/reflow.md"]
+        self.assertEqual(len(reflow), 1, out)
+        self.assertIn(reflow[0], (1, 2, 3), out)
+        self.assertEqual([p for p, _, _, _ in found if p != "agents/reflow.md"], ["agents/control.md"], out)
+
+    def test_comment_opener_in_a_code_span_before_the_copy_does_not_hide_it(self):
+        self.tracked({"agents/opener.md": "Write the `<!--` opener as text. %s\n" % RULE})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), sorted([CONTROL_FINDING, ("agents/opener.md", 1, "COPY001")]), out)
+
+    def test_comment_marks_inside_the_copied_sentence_do_not_hide_it(self):
+        self.tracked({"agents/marks.md": "%s\n" % MARKS})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), sorted([CONTROL_FINDING, ("agents/marks.md", 1, "COPY001")]), out)
+
+    def test_multi_line_code_span_before_the_copy_does_not_hide_it(self):
+        self.tracked({"agents/span.md": "Use the form `brief\nspan closes here`, then: %s\n" % RULE})
+        found, out = self.verdict_scan()
+        span = [line for path, line, _, _ in found if path == "agents/span.md"]
+        self.assertEqual(len(span), 1, out)
+        self.assertIn(span[0], (1, 2), out)
+
+    def test_a_rule_sentence_quoted_in_a_code_span_is_not_a_source(self):
+        self.tracked({"agents/quoted.md": "%s\n" % QUOTED})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [CONTROL_FINDING], out)
+
+    def test_child_exception_covers_its_own_copy_in_its_file(self):
+        self.tracked({"agents/own.md": "<!-- exempt: brief-contents reason: %s -->\n%s\n" % (REASON, RULE)})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [CONTROL_FINDING], out)
+
+    def test_exception_with_an_empty_reason_is_refused(self):
+        self.tracked({"agents/empty.md": "<!-- exempt: brief-contents reason: -->\nNothing copied here.\n"})
+        found, out = self.verdict_scan()
+        self.assertIn(("agents/empty.md", 1, "EXEMPT001"), keyed(found), out)
+
+    def test_exception_one_word_under_the_minimum_is_refused(self):
+        short = " ".join(REASON.split()[:REASON_MIN_WORDS - 1])  # distinct words: only the count differs
+        self.tracked({"agents/short.md": "<!-- exempt: brief-contents reason: %s -->\nNothing copied here.\n" % short})
+        found, out = self.verdict_scan()
+        self.assertIn(("agents/short.md", 1, "EXEMPT001"), keyed(found), out)
+
+    def test_exception_at_the_minimum_is_accepted(self):
+        exact = " ".join(REASON.split()[:REASON_MIN_WORDS])  # distinct words, the minimum count
+        self.tracked({"agents/exact.md": "<!-- exempt: brief-contents reason: %s -->\n%s\n" % (exact, RULE)})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [CONTROL_FINDING], out)
+
+    def test_exception_for_a_rule_the_parent_lacks_is_refused(self):
+        self.tracked({"agents/gone.md": "<!-- exempt: no-such-rule reason: %s -->\n%s\n" % (REASON, RULE)})
+        found, out = self.verdict_scan()
+        # EXEMPT003 may follow as well, since the exception covers no copy of its own id. Membership only.
+        self.assertIn(("agents/gone.md", 1, "EXEMPT002"), keyed(found), out)
+        self.assertIn(("agents/gone.md", 2, "COPY001"), keyed(found), out)
+        self.assertIn(CONTROL_FINDING, keyed(found), out)
+
+    def test_exception_with_no_copy_in_its_file_is_refused(self):
+        self.tracked({"agents/unused.md": "<!-- exempt: brief-contents reason: %s -->\nNothing copied here.\n" % REASON})
+        found, out = self.verdict_scan()
+        self.assertIn(("agents/unused.md", 1, "EXEMPT003"), keyed(found), out)
+
+    def test_exception_covers_only_its_own_file_and_rule(self):
+        self.tracked({"agents/a.md": "<!-- exempt: brief-contents reason: %s -->\nNothing copied here.\n" % REASON,
+                      "agents/b.md": "%s\n" % RULE,
+                      "agents/c.md": "<!-- exempt: comment-marks reason: %s -->\n%s\n" % (REASON, RULE)})
+        found, out = self.verdict_scan()
+        copies = sorted(path for path, _, code, _ in found if code == "COPY001")
+        self.assertEqual(copies, ["agents/b.md", "agents/c.md", "agents/control.md"], out)
+        self.assertIn(("agents/a.md", 1, "EXEMPT003"), keyed(found), out)
+
+    def test_missing_parent_is_unknown(self):
+        self.tracked({}, control=False)
+        rc, out = self.scan(parent=os.path.join(self.tmp.name, "nowhere"))
+        self.assertEqual(rc, 2, out)
+        self.assertIn("unknown", out, out)
+        self.assertNotIn("copies:", out, out)
+
+    def test_parent_without_rule_files_is_unknown(self):
+        bare = os.path.join(self.tmp.name, "bare-parent")
+        os.makedirs(bare)
+        self.tracked({"agents/copy.md": "%s\n" % RULE}, control=False)
+        rc, out = self.scan(parent=bare)
+        self.assertEqual(rc, 2, out)
+        self.assertIn("unknown", out, out)
+        self.assertNotIn("copies: PASS", out, out)
+
+    def test_child_with_no_markdown_passes(self):
+        self.tracked({"src/app.py": "value = 1\n"}, control=False)
+        found, out = self.verdict_scan()
+        self.assertEqual(found, [], out)
+
+    def test_full_size_child_reports_only_its_copy(self):
+        files = {"docs/note%03d.md" % i: "Note %d: the team reviews the lane output each week.\n" % i
+                 for i in range(300)}
+        files["agents/copy.md"] = "%s\n" % RULE
+        self.tracked(files, control=False)
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [("agents/copy.md", 1, "COPY001")], out)
+
+    def test_cross_repo_mode_still_reports_a_byte_equal_copy(self):
+        # Green control: the existing cross-repo mode reads the same parent and still reports a verbatim copy.
+        write(self.child, "vendor/rules.md", PARENT_RULES)
+        proc = run(self.parent, self.child, "--json")
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        out = json.loads(proc.stdout)
+        self.assertIn("vendor/rules.md", [f["child"] for f in out["files"]], proc.stdout)
+
+    def test_one_git_start_one_read_per_markdown_and_no_write(self):
+        self.tracked({"docs/a.md": "Plain notes.\n", "agents/copy.md": "%s\n" % RULE})
+        write(self.tmp.name, "audit_runner.py", AUDIT_RUNNER)
+        scripts = os.path.join(self.tmp.name, "scripts")
+        tracked_tree.copy_tracked(scripts, "lint", "hooks")
+        module = os.path.join(scripts, "lint", "find_copies.py")
+        events_path = os.path.join(self.tmp.name, "events.json")
+        before = (sorted(os.walk(self.child)), sorted(os.walk(scripts)))
+        before_tmp = sorted(os.listdir(self.tmp.name))  # TMPDIR is this folder: a temp root the scan makes lands here
+        env = dict(os.environ, TMPDIR=self.tmp.name)
+        env.pop("PYTHONDONTWRITEBYTECODE", None)  # a set variable would hide a .pyc the scan writes
+        env.pop("PYTHONPYCACHEPREFIX", None)
+        proc = subprocess.run([sys.executable, os.path.join(self.tmp.name, "audit_runner.py"), events_path, module,
+                               "--in-repo", "--parent", self.parent],
+                              cwd=self.child, env=env, capture_output=True, text=True, timeout=60)
+        self.assertIn("copies: FAIL", proc.stdout, proc.stdout + proc.stderr)
+        with open(events_path, encoding="utf-8") as f:
+            events = json.load(f)
+        starts = [e[1] for e in events if e[0] == "proc"]
+        self.assertEqual(len(starts), 1, "one git start expected, got %s" % starts)
+        self.assertIn("ls-files", starts[0])
+        opened = collections.Counter(os.path.realpath(e[1]) for e in events if e[0] == "open")
+        for rel in ("docs/a.md", "agents/copy.md"):
+            self.assertEqual(opened[os.path.realpath(os.path.join(self.child, rel))], 1, rel)
+        writes = [e[1] for e in events if e[0] == "open" and is_write(e)]
+        self.assertEqual(writes, [], "the scan opened a file for writing")
+        self.assertEqual((sorted(os.walk(self.child)), sorted(os.walk(scripts))), before)
+        self.assertEqual(sorted(set(os.listdir(self.tmp.name)) - {"events.json"}), before_tmp,
+                         "a file or folder appeared in TMPDIR, such as a test temp root")
 
 
 if __name__ == "__main__":

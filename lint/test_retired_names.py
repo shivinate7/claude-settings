@@ -189,6 +189,39 @@ class LineScope(unittest.TestCase):
         self.assertEqual(hits(repo, self.OLD), [other])
 
 
+# Owner item 337: the old STE sentence fragment joins the retired names. This file holds the phrase whole, which is
+# allowed because SELF is never a hit. The retired-names test must fail when a copy of the phrase comes back.
+STE_PHRASE = "Write in Simplified Technical English"
+
+
+class SteFragment(unittest.TestCase):
+    def test_phrase_is_a_retired_name(self):
+        self.assertIn(STE_PHRASE, RETIRED, "RETIRED has no entry for %r, so a copy of it that comes back passes"
+                      % STE_PHRASE)
+
+    def test_a_tracked_file_holding_the_phrase_is_a_hit(self):
+        repo = make_repo({"agents/brief.md": STE_PHRASE + ". Start with the point.\n"})
+        self.assertEqual(hits(repo, STE_PHRASE), ["agents/brief.md"])
+
+    def test_the_retired_names_test_fails_on_a_copy_of_the_phrase(self):
+        repo = make_repo({"agents/brief.md": STE_PHRASE + ". Start with the point.\n"})
+        on_copy = type("OnCopy", (RetiredNames,), {"repo": repo})
+        result = unittest.TestResult()
+        on_copy("test_no_retired_name").run(result)
+        self.assertFalse(result.wasSuccessful(), "the retired-names test passes on a file that holds %r" % STE_PHRASE)
+
+    def test_technical_english_alone_is_no_hit(self):
+        repo = make_repo({"agents/brief.md": "Use Technical English for the summary.\n"})
+        self.assertEqual(hits(repo, STE_PHRASE), [])
+
+    def test_a_clean_repo_passes_the_retired_names_test(self):
+        repo = make_repo({"agents/brief.md": "Plain text, no retired name.\n"})
+        on_clean = type("OnClean", (RetiredNames,), {"repo": repo})
+        result = unittest.TestResult()
+        on_clean("test_no_retired_name").run(result)
+        self.assertTrue(result.wasSuccessful(), "the retired-names test fails on a clean fixture")
+
+
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
