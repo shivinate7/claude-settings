@@ -908,18 +908,21 @@ class KnownDefectsTests(unittest.TestCase):
                          "reads CAUGHT\n" + out + err)
         self.assertEqual(code, 0, "all defects caught must exit 0: exit %d\n%s%s" % (code, out, err))
 
-    def test_a_failed_install_reads_every_defect_unknown_naming_the_install_and_exits_1(self):
+    def test_a_failed_install_reads_unknown_only_for_the_catcher_that_imports_its_module(self):
+        # kb-dep's catcher imports kb_oracle, which the failed install would have provided: UNKNOWN, naming both. kb-plain's
+        # catcher loads no module, so it reads its real verdict.
         repo = defect_repo(extra_files={ROOT_LOCK: LOCK_TEXT, "test_oracle.py": ORACLE_SUITE})
         profile = {"install": FAILING_INSTALL, "lockfile": ROOT_LOCK}
         defects = [defect("kb-dep", "return a + b", "return a - b", "test_oracle.py"),
                    defect("kb-plain", "return a * b", "return a + b", "test_calc.py")]
         code, out, err = known_run(defects, repo, profile=profile)
-        self.assertEqual(verdicts_of(out), {"kb-dep": "UNKNOWN", "kb-plain": "UNKNOWN"},
-                         "a profile with one install needs it for every defect, the install-free catcher too\n" + out + err)
-        lines = [line for line in out.splitlines() if line.startswith("UNKNOWN kb-")]
-        self.assertEqual(len(lines), 2, "one UNKNOWN line per defect:\n" + out)
-        for line in lines:
-            self.assertIn("install", line, "the UNKNOWN reason must name the install: " + line)
+        self.assertEqual(verdicts_of(out), {"kb-dep": "UNKNOWN", "kb-plain": "CAUGHT"},
+                         "pick A, 15:54 CST: a catcher that imports the failed install's module reads UNKNOWN, and a "
+                         "catcher that loads no missing module reads its real verdict\n" + out + err)
+        lines = [line for line in out.splitlines() if line.startswith("UNKNOWN kb-dep:")]
+        self.assertEqual(len(lines), 1, "one UNKNOWN line for kb-dep:\n" + out)
+        self.assertIn("kb_oracle", lines[0], "pick A, 15:54 CST: the UNKNOWN reason must name the module: " + lines[0])
+        self.assertIn("install", lines[0], "pick A, 15:54 CST: the UNKNOWN reason must name the install: " + lines[0])
         self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
 
     def test_known_defects_without_a_profile_is_a_bad_argument_exit_2(self):
@@ -929,21 +932,19 @@ class KnownDefectsTests(unittest.TestCase):
         self.assertEqual(code, 2, "--known-defects takes --profile or --profile-file, and exits 2 without one: "
                          "exit %d\n%s%s" % (code, out, err))
 
-    def test_a_failed_install_of_one_part_reads_every_defect_unknown_when_another_part_shares_its_lockfile(self):
+    def test_a_failed_install_of_one_part_does_not_hide_defects_whose_catchers_load_no_missing_module(self):
+        # Part b's install failed, but no catcher imports a module only b would provide. kb-f1-dep imports kb_oracle, which
+        # part a installed into the shared link, so both read their real verdict.
         repo = defect_repo(extra_files={ROOT_LOCK: LOCK_TEXT, "test_oracle.py": ORACLE_SUITE})
         profile = {"parts": {"a": {"install": ORACLE_INSTALL, "lockfile": ROOT_LOCK},
                              "b": {"install": FAILING_INSTALL, "lockfile": ROOT_LOCK}}}
         defects = [defect("kb-f1-dep", "return a + b", "return a - b", "test_oracle.py"),
                    defect("kb-f1-plain", "return a * b", "return a + b", "test_calc.py")]
         code, out, err = known_run(defects, repo, profile=profile)
-        self.assertEqual(verdicts_of(out), {"kb-f1-dep": "UNKNOWN", "kb-f1-plain": "UNKNOWN"},
-                         "neither part has a regex, so every defect needs every install: part b's failed install makes "
-                         "every defect UNKNOWN\n" + out + err)
-        lines = [line for line in out.splitlines() if line.startswith("UNKNOWN kb-f1-")]
-        self.assertEqual(len(lines), 2, "one UNKNOWN line per defect:\n" + out)
-        for line in lines:
-            self.assertIn("install", line, "the UNKNOWN reason must name the install: " + line)
-        self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
+        self.assertEqual(verdicts_of(out), {"kb-f1-dep": "CAUGHT", "kb-f1-plain": "CAUGHT"},
+                         "pick A, 15:54 CST: a failed part's install does not make a defect UNKNOWN unless its catcher "
+                         "imports a module that install would have provided\n" + out + err)
+        self.assertEqual(code, 0, "all defects caught must exit 0: exit %d\n%s%s" % (code, out, err))
 
     def test_an_optional_import_fallback_planted_after_a_failed_install_reads_unknown_never_caught(self):
         # The fallback asserts 3 when kb_oracle is missing. The plant makes add(1, 2) return -1, so the fallback catches it
@@ -974,10 +975,9 @@ class KnownDefectsTests(unittest.TestCase):
         self.assertIn("install", line[0], "the UNKNOWN reason must name the failed install: " + line[0])
         self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
 
-    def test_a_failed_part_claims_only_its_own_defects_and_the_installed_part_still_catches(self):
-        # Part a fails and claims kb-a by its code regex. kb-a's catcher passes on the plant, so it reads UNKNOWN, not
-        # MISS. Part b installs and claims kb-b by its tests regex, so it reads CAUGHT. kb-u is claimed by no part, so
-        # it needs every install and reads UNKNOWN, though its catcher needs no package.
+    def test_a_failed_part_leaves_each_defect_to_its_own_catcher_verdict(self):
+        # Part a's install failed. kb-a's catcher passes on its plant, so it reads MISS, and kb-u's catcher loads no module
+        # of part a, so it reads CAUGHT. kb-b's catcher imports kb_oracle, which part b installed, so it reads CAUGHT.
         repo = defect_repo(extra_files={ROOT_LOCK: LOCK_TEXT, APP_LOCK: LOCK_TEXT, "app/calc.py": CALC_BASE,
                                         "test_oracle.py": ORACLE_SUITE})
         profile = {"parts": {"a": {"install": FAILING_INSTALL, "lockfile": APP_LOCK, "code": r"^app/calc\.py$"},
@@ -986,14 +986,10 @@ class KnownDefectsTests(unittest.TestCase):
                    defect("kb-b", "return a + b", "return a - b", "test_oracle.py"),
                    defect("kb-u", "return a * b", "return a + b", "test_calc.py")]
         code, out, err = known_run(defects, repo, profile=profile)
-        self.assertEqual(verdicts_of(out), {"kb-a": "UNKNOWN", "kb-b": "CAUGHT", "kb-u": "UNKNOWN"},
-                         "a defect claimed only by the part that installed reads CAUGHT; one claimed by the failed part, "
-                         "or by no part, reads UNKNOWN\n" + out + err)
-        for defect_id in ("kb-a", "kb-u"):
-            line = [text for text in out.splitlines() if text.startswith("UNKNOWN %s:" % defect_id)]
-            self.assertEqual(len(line), 1, "one UNKNOWN line for %s:\n%s" % (defect_id, out))
-            self.assertIn("install", line[0], "the UNKNOWN reason must name the failed install: " + line[0])
-        self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
+        self.assertEqual(verdicts_of(out), {"kb-a": "MISS", "kb-b": "CAUGHT", "kb-u": "CAUGHT"},
+                         "pick A, 15:54 CST: a failed install reads a defect UNKNOWN only when its catcher imports a "
+                         "module that install would have provided\n" + out + err)
+        self.assertEqual(code, 1, "a MISS exits 1: exit %d\n%s%s" % (code, out, err))
 
     def test_a_tracked_file_at_the_link_path_reads_unknown_naming_the_path_and_never_runs_on_it(self):
         # The tracked node_modules/kb_oracle.py is the module itself. A run that silently used it would read CAUGHT.
@@ -1089,28 +1085,21 @@ class KnownDefectsTests(unittest.TestCase):
                          "needs an install: with ts failed, the defect runs and reads CAUGHT\n" + out + err)
         self.assertEqual(code, 0, "all defects caught must exit 0: exit %d\n%s%s" % (code, out, err))
 
-    def test_a_part_with_no_regex_makes_every_defect_need_its_install_so_a_failed_part_b_reads_unknown(self):
-        # When any part has no regex, every defect needs every install (decision
-        # `mutation-ci-report-and-replay`). Part c has no regex, so the defect in x/1.py needs a, b and c. Part b's
-        # install failed, and the defect must not run.
+    def test_a_part_with_no_regex_does_not_hold_back_a_defect_whose_catcher_loads_no_missing_module(self):
+        # Part c has no regex, which no longer routes anything. The defect in x/1.py is loaded by its catcher with no import,
+        # so it reads CAUGHT though part b's install failed.
         code, out, err = mixed_defect_run((PASSING_INSTALL, FAILING_INSTALL, PASSING_INSTALL))
-        self.assertEqual(verdicts_of(out), {"kb-mix": "UNKNOWN"},
-                         "with a part that has no regex, every defect needs every install, so part b's failed install "
-                         "makes the defect UNKNOWN\n" + out + err)
-        lines = [text for text in out.splitlines() if text.startswith("UNKNOWN kb-mix")]
-        self.assertEqual(len(lines), 1, "one UNKNOWN line for kb-mix:\n" + out)
-        self.assertIn("part b", lines[0], "the UNKNOWN reason must name part b's install: " + lines[0])
-        self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
+        self.assertEqual(verdicts_of(out), {"kb-mix": "CAUGHT"},
+                         "pick A, 15:54 CST: a defect whose catcher loads no missing module reads CAUGHT, though part b's "
+                         "install failed\n" + out + err)
+        self.assertEqual(code, 0, "all defects caught must exit 0: exit %d\n%s%s" % (code, out, err))
 
-    def test_a_failed_install_of_the_part_with_no_regex_reads_the_defect_unknown_naming_that_part(self):
-        # Part c has no regex, so the defect in x/1.py needs c's install. A failed c install makes the defect UNKNOWN.
+    def test_a_failed_install_of_the_part_with_no_regex_does_not_hold_back_its_defect(self):
         code, out, err = mixed_defect_run((PASSING_INSTALL, PASSING_INSTALL, FAILING_INSTALL))
-        self.assertEqual(verdicts_of(out), {"kb-mix": "UNKNOWN"},
-                         "part c has no regex, so the defect in x/1.py needs c's install, which failed\n" + out + err)
-        lines = [text for text in out.splitlines() if text.startswith("UNKNOWN kb-mix")]
-        self.assertEqual(len(lines), 1, "one UNKNOWN line for kb-mix:\n" + out)
-        self.assertIn("part c", lines[0], "the UNKNOWN reason must name part c's install: " + lines[0])
-        self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
+        self.assertEqual(verdicts_of(out), {"kb-mix": "CAUGHT"},
+                         "pick A, 15:54 CST: a defect whose catcher loads no missing module reads CAUGHT, though part c's "
+                         "install failed\n" + out + err)
+        self.assertEqual(code, 0, "all defects caught must exit 0: exit %d\n%s%s" % (code, out, err))
 
 
 # ---------------------------------------------------------------------------------------------------
