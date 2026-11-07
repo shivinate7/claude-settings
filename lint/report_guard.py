@@ -70,6 +70,17 @@ unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, 
 refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 
+The posted-comment check (rule `posted-needs-comment-url`): on any turn, landed or not, it refuses each line of the last
+reply whose clause claims a posted PR comment or review record, unless the same line cites that comment's URL. A claim is
+the verb posted, left, filed or commented, with a comment, review or record in the same clause (commented needs no noun;
+left needs the noun after it). The URL is a comment-anchored GitHub link (`/pull/<n>` or `/issues/<n>` with
+`#issuecomment-`, `#discussion_r` or `#pullrequestreview-`); a bare PR link, a `#<n>`, a hash or a time is no source, and a
+`#<n>` on the line that matches no URL number refuses. Fences, code spans, questions and negated or future clauses (not,
+no, never, will, should, once, until and the like) are exempt. One refusal per turn lists the lines and joins any other
+reason; a rewrite after a missing-report refusal is checked too. Risk kind and incident: decision posted-needs-comment-url.
+Cost: regex over the reply, no file, no process. The URL is not resolved against GitHub: the guard makes no GitHub reads,
+and a resolve would start a new process.
+
 After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
 may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
 precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start, after a
@@ -476,7 +487,8 @@ def bare_cite(text):
 # nobody, never, cannot, yet to. A line that ends in `?` asks and claims nothing.
 ANSWERED_RE = re.compile(r"(?<![\w-])answered(?![\w-])", re.I)
 ANSWERED_INBOX_RE = re.compile(r"\[question\]\s*(?:->|\u2192)\s*answered\b", re.I)
-ANSWERED_NEGATOR_RE = re.compile(r"\bnot\b|n['\u2019]t\b|\bno(?:ne|thing|body)?\b|\bnever\b|\bcannot\b|\byet\s+to\b", re.I)
+_NEGATOR = r"\bnot\b|n['\u2019]t\b|\bno(?:ne|thing|body)?\b|\bnever\b|\bcannot\b|\byet\s+to\b"
+ANSWERED_NEGATOR_RE = re.compile(_NEGATOR, re.I)
 ANSWERED_CLAUSE_BREAK_RE = re.compile(r"[.;:!?,\u2014\u2013]|\s-{1,2}\s")
 ANSWERED_TOP_DIRS = {"docs", "hooks", "lint", "bin", "skills", "agents", "roadmap"}
 ANSWERED_FILE_RE = re.compile(
@@ -496,20 +508,23 @@ def _has_path(line):
     return bool(ANSWERED_FILE_RE.search(line))
 
 
+def _unnegated(plain, word_re, negator_re):
+    """Yield each match of `word_re` in `plain` with no negator in its clause before it."""
+    for m in word_re.finditer(plain):
+        clause = ANSWERED_CLAUSE_BREAK_RE.split(plain[:m.start()])[-1]
+        if not negator_re.search(clause):
+            yield m
+
+
 def _claims_answered(plain):
     """True when `plain` holds the word with no negator in its clause before it."""
-    for m in ANSWERED_RE.finditer(plain):
-        clause = ANSWERED_CLAUSE_BREAK_RE.split(plain[:m.start()])[-1]
-        if not ANSWERED_NEGATOR_RE.search(clause):
-            return True
-    return False
+    return next(_unnegated(plain, ANSWERED_RE, ANSWERED_NEGATOR_RE), None) is not None
 
 
-def answered_problem(text):
-    """The refusal for reply lines that say "answered" with no source on the line, else ''."""
-    if not ANSWERED_RE.search(text):
-        return ""
-    bad, fence = [], ""
+def _claim_lines(text):
+    """Yield each reply line a claim check reads: quote prefix stripped, with fenced lines and lines that
+    end in `?` left out. A fence opens and closes on ``` or ~~~ at the start of a line."""
+    fence = ""
     for line in text.splitlines():
         body = QUOTE_PREFIX.sub("", line, count=1).strip()
         marker = body[:3] if body[:3] in ("```", "~~~") else ""
@@ -518,6 +533,15 @@ def answered_problem(text):
             continue
         if fence or body.rstrip("*_)\"' ").endswith("?"):
             continue
+        yield body
+
+
+def answered_problem(text):
+    """The refusal for reply lines that say "answered" with no source on the line, else ''."""
+    if not ANSWERED_RE.search(text):
+        return ""
+    bad = []
+    for body in _claim_lines(text):
         plain = ANSWERED_INBOX_RE.sub(" ", CODE_SPAN.sub(" ", body))
         if not _claims_answered(plain):
             continue
@@ -526,6 +550,65 @@ def answered_problem(text):
             continue
         bad.append(body)
     return ANSWERED_REASON + "".join("\n- " + b for b in bad) if bad else ""
+
+
+# posted-needs-comment-url: a reply line that claims a posted PR comment or review record cites the comment's URL.
+# The verb is posted, left, filed or commented; the noun is comment, review or record, in the same clause (a clause
+# breaks as in answered). commented needs no noun. left needs the noun after it, so "two records left" is no claim.
+# The negator is the answered one plus modals and conditionals, since "will be posted" claims nothing yet. A URL is
+# cut out of the line before clauses are read, so its dots break nothing. The only source is a comment-anchored
+# GitHub URL. A `#<n>` on the line that matches no cited URL's number refuses: the URL is for another PR.
+POSTED_VERB_RE = re.compile(r"(?<![\w-])(posted|left|filed|commented)(?![\w-])", re.I)
+POSTED_NOUN_RE = re.compile(r"(?<![\w-])(?:comments?|reviews?|records?)(?![\w-])", re.I)
+POSTED_NEGATOR_RE = re.compile(
+    _NEGATOR + r"|\b(?:will|would|should|shall|must|can|could|may|might|needs?|once|until|when|whenever|after"
+    r"|before|if|unless)\b|\bto\s+be\b", re.I)
+POSTED_URL_RE = re.compile(r"https?://\S+", re.I)
+POSTED_SOURCE_RE = re.compile(
+    r"https?://[^\s)>\]]*?/(?:pull|issues)/(\d+)#(?:issuecomment-\d+|discussion_r\d+|pullrequestreview-\d+)", re.I)
+POSTED_REF_RE = re.compile(r"(?<![\w&])#(\d+)\b")
+POSTED_REASON = (
+    "Posted guard (rule posted-needs-comment-url): each line below claims a posted PR comment or review record and "
+    "cites no comment URL for it. Add the comment's own link on the same line (it ends in #issuecomment-<n>, "
+    "#discussion_r<n> or #pullrequestreview-<n>, on the PR the line names), or say the record is not posted yet. "
+    "Lines: ")
+
+
+def _claims_posted(plain):
+    """True when `plain` holds an unnegated posted-claim verb with its noun in the same clause."""
+    for m in _unnegated(plain, POSTED_VERB_RE, POSTED_NEGATOR_RE):
+        verb = m.group(1).lower()
+        if verb == "commented":
+            return True
+        before = ANSWERED_CLAUSE_BREAK_RE.split(plain[:m.start()])[-1]
+        after = ANSWERED_CLAUSE_BREAK_RE.split(plain[m.end():])[0]
+        if POSTED_NOUN_RE.search(after) or (verb != "left" and POSTED_NOUN_RE.search(before)):
+            return True
+    return False
+
+
+def _cites_comment_url(kept):
+    """True when `kept` cites a comment-anchored URL, and any `#<n>` on the line matches a cited URL's number."""
+    numbers = {m.group(1) for m in POSTED_SOURCE_RE.finditer(kept)}
+    if not numbers:
+        return False
+    refs = set(POSTED_REF_RE.findall(POSTED_URL_RE.sub(" ", kept)))
+    return not refs or bool(refs & numbers)
+
+
+def posted_problem(text):
+    """The refusal for reply lines that claim a posted comment or review record with no comment URL, else ''."""
+    if not POSTED_VERB_RE.search(text):
+        return ""
+    bad = []
+    for body in _claim_lines(text):
+        plain = POSTED_URL_RE.sub(" ", CODE_SPAN.sub(" ", body))
+        if not _claims_posted(plain):
+            continue
+        if _cites_comment_url(CODE_SPAN.sub(lambda m: m.group(2), body)):
+            continue
+        bad.append(body)
+    return POSTED_REASON + "".join("\n- " + b for b in bad) if bad else ""
 
 
 # reports-done-names-models: a Done item that agents built or reviewed names each one's role
@@ -1547,9 +1630,10 @@ def rewrite_problems(hook):
             reasons.append(MODELS_REASON + models + ".")
         if unstarted_problem(text, spawned):
             reasons.append(UNSTARTED_REASON)
-        answered = answered_problem(text)
-        if answered:
-            reasons.append(answered)
+        for check in (answered_problem, posted_problem):
+            found = check(text)
+            if found:
+                reasons.append(found)
         recovered = recovered_problem(records, text) if report_shape_ok(text) else ""
         if recovered:
             reasons.append(recovered)
@@ -1965,10 +2049,11 @@ def main():
     relay = []
     if last_human_idx is not None:  # a transcript with no human message never ran the relay and answered checks
         relay = relay_reasons(after, text, hook.get("cwd"))
-        try:
-            relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
-        except Exception:
-            pass
+        for check in (answered_problem, posted_problem):  # one block per turn, joined with any other reason, landed or not
+            try:
+                relay.append(check(text))
+            except Exception:
+                pass
     if last_human_idx is None or not turn_landed(after):
         # An unlanded turn is judged on the question check and the Departs from check alone. An error in
         # either fails open on its own: the Departs from check never drops the question refusal.
