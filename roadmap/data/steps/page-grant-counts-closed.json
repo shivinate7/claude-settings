@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "why": "Coordinator, 13:48 CST Nov 7: page_grant.py prints \"not counted: item status is closed\" for an answer on an item that triage closed after routing it. So a lane that reads its own answer after the close can never pass the check. Lane review-fix-check-round hit this on item 356 at 13:43 CST. Triage closes at routing (owner, item 316), so every routed answer hits it.",
   "note": "Done check: a red test where an answer saved before the close is counted after the close. An answer saved after the close is still refused. The guard's verdict changes, so this is a build lane.",
-  "updatedAt": "2026-11-07T13:50:00-06:00",
-  "lane": "coordinator fix lane"
+  "updatedAt": "2026-11-07T13:52:00-06:00",
+  "lane": "session_013NEJL47DQRUhMUMYHumgq6"
 }
