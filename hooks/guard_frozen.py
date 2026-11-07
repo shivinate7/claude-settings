@@ -1302,8 +1302,8 @@ def _runner_inner(tokens, index: int):
     return (rest, inner) if inner is not None else None
 
 
-# An input redirect is glued too (`)<in`, `)0<in`); `<<` (heredoc) and `<(` (process substitution) are not.
-_GLUED_REDIRECT = re.compile(r"\d*>|&>|\d*<(?![<(])")
+# An input redirect is glued too (`)<in`, `)0<in`, `)<<EOF`, `)<<-EOF`, `)<<<x`); `<(` (process substitution) is not.
+_GLUED_REDIRECT = re.compile(r"\d*>|&>|\d*<(?!\()")
 
 
 def _unparen(segment: str, tokens):
