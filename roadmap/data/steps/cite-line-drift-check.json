@@ -1,10 +1,10 @@
 {
   "title": "A merge-time check flags a (read path:line) cite whose line changed in the merge range",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "doing",
   "order": 536.2,
   "owner": "coordinator",
   "why": "Lane prose-governance-workflow, relayed by the coordinator 2026-11-07 04:15 CST: a `(read path:line)` cite drifts on any edit above it. STALE002 checks only that the file exists, and record review caught five drifted cites by hand.",
-  "note": "Under step prose-governance-workflow. At merge, re-read the cited line and flag it when its text changed in the merge range. Done check: a red test on a drifted cite, and green on a stable one. A check's verdict changes, so a build lane (test-author, builder, reviewer). Same lane as prose-judge-labelled-set. No owner question.",
-  "updatedAt": "2026-11-07T10:15:00Z"
+  "note": "Under step prose-governance-workflow. At merge, re-read the cited line and flag it when its text changed in the merge range. Done check: a red test on a drifted cite, and green on a stable one. A check's verdict changes, so a build lane (test-author, builder, reviewer). Same lane as prose-judge-labelled-set. No owner question. Lane prose-governance-workflow (session_013NEJL32AmBg2eZnNkXRFQK) started it 2026-11-07 04:15 CST.",
+  "updatedAt": "2026-11-07T10:17:00Z"
 }
