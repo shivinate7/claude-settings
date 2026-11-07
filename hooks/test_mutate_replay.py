@@ -15,6 +15,8 @@ asks for the score. The failure classes under test:
 - each finished mutant prints one line before its pull request's row, so a long pull request shows progress;
 - a profile's `select` gives the suites to run against each product file's mutants, and a failed select falls
   back to every changed suite, with a note in the row;
+- a commit that lacks its profile's `select` script reads the copy at HEAD, and that copy lists the checkout's suites:
+  it reads the checkout as its root, and it loads a module from the checkout's node_modules with NODE_PATH unset;
 - a `pr_budget` leaves the mutants not started past it as `not_run`, never as a kill, a survivor or a crash;
 - a replay leaves the repository, the temp folders and the child processes as it found them;
 - a banchi pull request that changes a T7 group module, harness/tests/t7/<group>.py, is scored by that group's own
@@ -568,14 +570,55 @@ LATER_IMPORTS = {"harness/tests-for.mjs": SELECTOR_IMPORTS_LISTS, "harness/lists
 LATER_BOTH = {"harness/tests-for.mjs": SELECTOR_LISTS_BOTH}
 # A root file named node at HEAD. The select argv's `node` is a command PATH resolves, never this file.
 LATER_BARE_NODE = dict(LATER_IMPORTS, node="not a program\n")
+# The selectors a commit's copy at HEAD runs, shaped like q_max's harness/tests-for.mjs: `[--root <dir>] <path>...`. A
+# suite is listed when it imports the path. Each selector has one defect, so a failure names one cause.
+# SELECTOR_HEAD_ROOT_DEFAULT takes its root from its own folder, where no suite is. SELECTOR_HEAD_MODULE_CWD loads a
+# module that only the checkout's node_modules holds, and reads its root from the working folder, the checkout.
+HEAD_MODULE = "fixture-layout"
+LAYOUT_JS = "module.exports = { TEST_DIR: 'test' };\n"
+LOCKFILE = {"package-lock.json": "{}\n"}  # _ensure_deps reads the lockfile at the commit it installs for
+SELECTOR_LISTING = """\
+const args = process.argv.slice(2);
+let root = DEFAULT_ROOT;
+const given = [];
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--root') root = path.resolve(args[++i] ?? '');
+  else given.push(args[i]);
+}
+const dir = path.join(root, TEST_DIR);
+const suites = existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith('.test.mjs')).sort() : [];
+for (const target of given) {
+  for (const suite of suites) {
+    if (readFileSync(path.join(dir, suite), 'utf8').includes(`'../${target}'`)) console.log(`${TEST_DIR}/${suite}`);
+  }
+}
+"""
+SELECTOR_HEAD_ROOT_DEFAULT = (
+    "import { existsSync, readdirSync, readFileSync } from 'node:fs';\n"
+    "import path from 'node:path';\n"
+    "import { fileURLToPath } from 'node:url';\n"
+    "const TEST_DIR = 'test';\n"
+    "const DEFAULT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');\n"
+    + SELECTOR_LISTING
+)
+SELECTOR_HEAD_MODULE_CWD = (
+    "import { existsSync, readdirSync, readFileSync } from 'node:fs';\n"
+    "import path from 'node:path';\n"
+    "import { createRequire } from 'node:module';\n"
+    f"const {{ TEST_DIR }} = createRequire(import.meta.url)('{HEAD_MODULE}');\n"
+    "const DEFAULT_ROOT = process.cwd();\n"
+    + SELECTOR_LISTING
+)
+LATER_HEAD_ROOT = {"harness/tests-for.mjs": SELECTOR_HEAD_ROOT_DEFAULT}
+LATER_HEAD_MODULE = {"harness/tests-for.mjs": SELECTOR_HEAD_MODULE_CWD}
 
 
-def select_fixture(name, selector=SELECTOR_LISTS, pr_deletes_selector=False, later=None):
+def select_fixture(name, selector=SELECTOR_LISTS, pr_deletes_selector=False, later=None, base_extra=None):
     """One merged pull request, 1, that changes src/x.mjs, src/y.mjs, test/a.test.mjs and test/b.test.mjs. Its base
-    holds `selector` at harness/tests-for.mjs, or no selector when `selector` is None. With `pr_deletes_selector` the
-    pull request deletes that file, so the selector is missing at its commit. With `later`, a {path: text} map, a
-    second merged pull request, 2, writes those files after pull request 1: the repository's HEAD is then pull
-    request 2's merge, and `sha` stays pull request 1's. Built once per `name`."""
+    holds `selector` at harness/tests-for.mjs, or no selector when `selector` is None, and the {path: text} map
+    `base_extra` beside it. With `pr_deletes_selector` the pull request deletes that file, so the selector is missing at
+    its commit. With `later`, a {path: text} map, a second merged pull request, 2, writes those files after pull request
+    1: the repository's HEAD is then pull request 2's merge, and `sha` stays pull request 1's. Built once per `name`."""
     key = "select-" + name
     if key not in CACHE:
         repo = new_repo(name)
@@ -583,6 +626,7 @@ def select_fixture(name, selector=SELECTOR_LISTS, pr_deletes_selector=False, lat
                 "test/a.test.mjs": SELECT_A_BASE, "test/b.test.mjs": SELECT_B_BASE}
         if selector is not None:
             base["harness/tests-for.mjs"] = selector
+        base.update(base_extra or {})
         put(repo, base)
         commit(repo, "Base")
         logs = {"a": os.path.join(fresh(), "runs-a.txt"), "b": os.path.join(fresh(), "runs-b.txt")}
@@ -600,13 +644,16 @@ def select_fixture(name, selector=SELECTOR_LISTS, pr_deletes_selector=False, lat
     return CACHE[key]
 
 
-def select_run(name, **options):
-    """The replay of select_fixture(name) with every mutant kept, and the runs each suite made. Returns (row, runs,
-    fixture). The runs are read right after the replay, because a later replay appends to the logs too."""
+def select_run(name, profile=SELECT_PROFILE, **options):
+    """The replay of select_fixture(name) with every mutant kept, under `profile`, and the runs each suite made. Returns
+    (row, runs, fixture). The runs are read right after the replay, because a later replay appends to the logs too. The
+    replay runs with NODE_PATH unset, so a selector finds a module only where the checkout's node_modules holds it."""
     key = "select-run-" + name
     if key not in CACHE:
         fixture = select_fixture(name, **options)
-        row = replay(fixture["repo"], fixture["sha"], SELECT_PROFILE, limit=1000)
+        with mock.patch.dict(os.environ):
+            os.environ.pop("NODE_PATH", None)
+            row = replay(fixture["repo"], fixture["sha"], profile, limit=1000)
         runs = {suite: runs_in(path) for suite, path in fixture["logs"].items()}
         CACHE[key] = (row, runs, fixture)
     return CACHE[key]
@@ -990,13 +1037,27 @@ def t7_mutants(name):
     return expected_mutants(repo, sha, GRADE_PATH, lines=changed(repo, sha, GRADE_PATH))
 
 
-def install_argv(counter):
-    """A stand-in install: it makes node_modules/marker.txt in its folder and counts each run in `counter`."""
+def install_argv(counter, modules=()):
+    """A stand-in install: it makes node_modules/marker.txt in its folder and counts each run in `counter`. Each entry
+    of `modules`, a {name: index.js text} map, is also written as node_modules/<name>/ with a package.json naming it."""
     source = ("import os\n"
               "os.makedirs('node_modules', exist_ok=True)\n"
               "open(os.path.join('node_modules', 'marker.txt'), 'w').write('ok')\n"
               "open(%r, 'a').write('x')\n" % counter)
+    for name, text in dict(modules).items():
+        source += ("folder = os.path.join('node_modules', %r)\n"
+                   "os.makedirs(folder, exist_ok=True)\n"
+                   "open(os.path.join(folder, 'package.json'), 'w').write(%r)\n"
+                   "open(os.path.join(folder, 'index.js'), 'w').write(%r)\n"
+                   % (name, json.dumps({"name": name, "main": "index.js"}), text))
     return [sys.executable, "-c", source]
+
+
+def module_profile():
+    """SELECT_PROFILE with an install that puts HEAD_MODULE in the checkout's node_modules, as a real install does. The
+    lockfile it reads is LOCKFILE, which the base commit holds."""
+    return dict(SELECT_PROFILE, install=install_argv(os.path.join(fresh(), "installs.txt"),
+                                                      modules={HEAD_MODULE: LAYOUT_JS}))
 
 
 def replay(repo, sha, profile, limit=50, seed=0, suite_timeout=60, jobs=2):
@@ -1832,6 +1893,39 @@ class SelectTests(unittest.TestCase):
         notes = repr(row.get("notes"))
         self.assertIn("src/x.mjs", notes, "the row must record the fallback for src/x.mjs")
         self.assertIn("src/y.mjs", notes, "the row must record the fallback for src/y.mjs")
+
+    def test_the_copy_at_head_lists_the_checkouts_suites_not_the_ones_in_its_own_folder(self):
+        """The commit lacks the selector, so the copy at HEAD runs. Its default root is its own folder, where no suite
+        is, so the copy lists none. The copy reads the checkout as its root, so each path keeps its suite."""
+        row, runs, fixture = select_run("head-root", selector=None, later=LATER_HEAD_ROOT)
+        notes = repr(row.get("notes"))
+        self.assertIn("harness/tests-for.mjs", notes, "the row must name the selector it read from HEAD: %s" % notes)
+        self.assertNotIn("no changed suite reaches it", notes,
+                         "the copy at HEAD listed no suite, because its default root is its own folder, not the "
+                         "checkout: %s" % notes)
+        self.assert_per_file_runs(row, runs, fixture)
+
+    def test_the_copy_at_head_loads_its_module_from_the_checkouts_node_modules(self):
+        """The commit lacks the selector, so the copy at HEAD runs. It loads HEAD_MODULE, which the install puts only in
+        the checkout's node_modules, with NODE_PATH unset. The copy cannot load it and exits, so every changed suite
+        runs."""
+        row, runs, fixture = select_run("head-module", selector=None, later=LATER_HEAD_MODULE, base_extra=LOCKFILE,
+                                        profile=module_profile())
+        notes = repr(row.get("notes"))
+        self.assertIn("harness/tests-for.mjs", notes, "the row must name the selector it read from HEAD: %s" % notes)
+        self.assertNotIn("every changed suite runs", notes,
+                         "the copy at HEAD could not load %s from the checkout's node_modules, so every changed suite "
+                         "ran: %s" % (HEAD_MODULE, notes))
+        self.assert_per_file_runs(row, runs, fixture)
+
+    def test_a_commit_that_holds_its_selector_lists_the_same_suites_with_a_module(self):
+        """Control, green on the old code: the commit holds the selector, so its own copy runs in the checkout and loads
+        the module from the checkout's node_modules."""
+        row, runs, fixture = select_run("head-control", selector=SELECTOR_HEAD_MODULE_CWD, base_extra=LOCKFILE,
+                                        profile=module_profile())
+        self.assertNotIn("harness/tests-for.mjs", repr(row.get("notes")),
+                         "the row names a selector read from HEAD, but the commit holds its own")
+        self.assert_per_file_runs(row, runs, fixture)
 
     def test_the_banchi_ts_part_names_the_per_file_selector(self):
         self.assertEqual(banchi_part("ts").get("select"), BANCHI_SELECT, "the banchi ts part has no per-file selector")
