@@ -223,6 +223,13 @@ def path(root, name):
     return legacy(name)
 
 
+def md_under(rel, folder):
+    """True when `rel` (a repo-relative path with `/` separators) is a markdown file under `folder`, at any depth. `folder` takes a
+    trailing slash or none. Only whole path parts match, so docs/decisionsx/a.md is not under docs/decisions. The one home of the
+    records scope that lint/check_ruling_kind.py and merge/merge.py read."""
+    return rel.endswith(".md") and rel.startswith(folder.rstrip("/") + "/")
+
+
 def candidates(root, name):
     """`path(root, name)`, then the layout path when it differs: for a reader that takes the first
     one that exists, as STE lint's gloss collapse does."""
