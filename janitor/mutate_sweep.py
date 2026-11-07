@@ -974,6 +974,13 @@ MUTATIONS = [
      '    return abs(actual - locked_ms) > git_reads.SESSION_LIVE_TOLERANCE_MS',
      '    return True',
      "test_running_agent_lock_keeps"),
+    ("stale lock: a live agent lock, the calling session's own included, no longer keeps the tree",
+     "sweep",
+     '        if stale_agent_lock is not True:\n'
+     '            return {"path": path, "action": "keep", "reason": "locked: %s" % holder}\n',
+     '        if stale_agent_lock is not True and not AGENT_LOCK_RE.match(holder):\n'
+     '            return {"path": path, "action": "keep", "reason": "locked: %s" % holder}\n',
+     "test_own_lock_on_a_live_ancestor_on_a_clean_merged_idle_tree_keeps"),
     ("stale lock: an unreadable lock start counts as stale",
      "sweep",
      '        except Exception:\n'
