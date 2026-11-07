@@ -70,10 +70,10 @@ def family_files():
 #     the file of that name in that folder;
 #   os.path.join of literal segments with no run-time root: a repo path, from the repo root;
 #   a spec_from_file_location or SourceFileLoader path: its Name read through to the path assigned to it.
-# Not followed: a join with a run-time root and several literals. A product module's such join, when its path is a repo file,
-# is named in LOAD_EXCEPTIONS. A test module's is not named: most are fixture paths in a temp folder, and the five under REPO
-# in hooks/test_guard.py read files the closure already holds. A run-time root that is not a folder of the repo is not read.
-# A loader path with no literal repo file is named. A string or a comment holds no load: the syntax tree is read.
+# Not followed: a product module's join with a run-time root and several literals, when its path is a repo file: it is named
+# in LOAD_EXCEPTIONS. A test module's such join is read when its root is the repo, and is not named otherwise: its root is a
+# fixture path in a temp folder. A run-time root that is not a folder of the repo is not read. A loader path with no literal
+# repo file is named. A string or a comment holds no load: the syntax tree is read.
 GUARD_SEEDS = ("hooks/guard.py", "hooks/test_guard.py")
 # Each load guard_closure finds but does not follow, as "file:scope:source": why. The scope is the enclosing function (or
 # <module>) and the source is the load's text as ast.unparse writes it, so a line added above a load keeps its entry.
@@ -223,14 +223,20 @@ def _path_of(node, f, bound, depth=0):
     return None
 
 
+def _is_test(f):
+    return posixpath.basename(f).startswith("test_")
+
+
 def _repo_load(f, expr, tracked, bound):
-    """The repo file a load reads when a run-time root that is a folder of the repo comes before one literal, as
-    os.path.join(root, "lit") or root / "lit": the file at root plus the literal, when it is a repo file. None otherwise:
-    a literal root, or a chain of several literals, is not read here."""
-    if isinstance(expr, ast.Call) and _callee(expr) == "os.path.join" and len(expr.args) == 2 and _is_str(expr.args[1]):
-        root, lit = expr.args[0], expr.args[1].value
+    """The repo file a load reads when a run-time root that is a folder of the repo comes before its literals, as
+    os.path.join(root, "lit") or root / "lit": the file at root plus the literals, when it is a repo file. None otherwise.
+    A product module reads one literal; a test module's join reads any number, since its REPO is the real checkout. A
+    literal root, or a `/` chain of several literals, is not read here."""
+    if isinstance(expr, ast.Call) and _callee(expr) == "os.path.join" and len(expr.args) >= 2 \
+            and all(_is_str(a) for a in expr.args[1:]) and (_is_test(f) or len(expr.args) == 2):
+        root, lits = expr.args[0], [a.value for a in expr.args[1:]]
     elif isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Div) and _is_str(expr.right):
-        root, lit = expr.left, expr.right.value
+        root, lits = expr.left, [expr.right.value]
     else:
         return None
     if _is_str(root) or (isinstance(root, ast.BinOp) and _is_str(root.right)):
@@ -242,7 +248,7 @@ def _repo_load(f, expr, tracked, bound):
         rel = os.path.relpath(base, REPO_REAL).replace(os.sep, "/")
     except ValueError:  # another drive on Windows: not in the repo
         return None
-    c = posixpath.normpath(posixpath.join(rel, lit))
+    c = posixpath.normpath(posixpath.join(rel, *lits))
     return c if c in tracked else None
 
 
@@ -292,7 +298,7 @@ def _refs(f, tree, tracked):
     own_names = {t.id for st in tree.body if isinstance(st, ast.Assign) and _uses_file(st.value)
                  for t in st.targets if isinstance(t, ast.Name)}
     bound = _bound_names(tree)
-    test = posixpath.basename(f).startswith("test_")
+    test = _is_test(f)
     modules, paths, loads, unfollowed = set(), set(), set(), []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
