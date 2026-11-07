@@ -10,6 +10,9 @@ FIELD_TABLE_UNDER_TEST names the script to run (default: field_table.py beside t
 red against a mutant of it. The rows are read by an oracle written here with html.parser, so the script's own
 reader is not its own oracle. Temp files: the run folder of lint/_test_temp.py; its sweep is proved in
 lint/test_find_copies.py.
+
+The ties of field_table.json, each (field, rule) pair, are checked against the guard in class Ties: one fixture per
+tie, a pair of item writes that differ in that field alone and that the guard judges differently for that rule.
 """
 import html.parser
 import json
@@ -20,10 +23,13 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
 import _test_temp  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "..", "..", "hooks"))
+import question_form  # noqa: E402
 
 CMD = os.environ.get("FIELD_TABLE_UNDER_TEST") or os.path.join(HERE, "field_table.py")
 REAL = {name: os.path.join(HERE, name) for name in ("SKILL.md", "page.html", "field_table.json")}
@@ -353,6 +359,184 @@ class Write(Copies):
         self.assertEqual(code, 1, "an empty data file: exit %d, want 1; said: %s" % (code, out + err))
         flagged = [line for line in out.splitlines() if line.endswith("has no entry in the data file")]
         self.assertEqual(len(flagged), len(fields), "an empty data file does not flag every field")
+
+
+# ------------------------------------------------------------------ the ties of field_table.json, against the guard
+#
+# A tie (field, rule) is a claim: the guard's `rule` reads `field`. Each tie has one fixture, a pair of item
+# writes that differ in `field` alone. The guard refuses one side for `rule` and not the other. The guard is
+# question_form.item_hit, run on each side as an ArtifactData set. A rule that stops reading its field gives both
+# sides one verdict, so the tie fails. The base item COMMON passes every rule, so a side is refused only by the
+# field that changed. Where a kind fixture needs a kind the guard does not judge, its other side is kind "note".
+
+ABSENT = object()  # a fixture leaves this field out
+GOAL = "Goal: Keep the search results stable."
+PROBLEM = "Problem (goal): Two indexes disagree on results."
+PROBLEM_NO_STAKE = "Problem: Two indexes disagree on results."
+BASED = "Based on (read): The nightly job log shows the mismatch."
+DEPARTS = "Departs from: the session flow — adds a check."
+DEPARTS_BAD = "Departs from: the session flow"  # no separator, so the line is not valid
+WHY = "Why yours: the cloud refused the write."
+CTX_FORM = "\n".join((GOAL, PROBLEM, BASED, DEPARTS, WHY))
+CTX_NO_GOAL = "\n".join((PROBLEM, BASED, DEPARTS, WHY))
+CTX_NO_WHY = "\n".join((GOAL, PROBLEM, BASED, DEPARTS))
+CTX_NO_STAKE = "\n".join((GOAL, PROBLEM_NO_STAKE, BASED, DEPARTS, WHY))
+CTX_BAD_DEPARTS = "\n".join((GOAL, PROBLEM, BASED, DEPARTS_BAD, WHY))
+CTX_NO_BASED = "\n".join((GOAL, PROBLEM_NO_STAKE, DEPARTS, WHY))
+OPT_A = {"key": "a", "label": "Keep the old index", "how": "Users keep today's results.",
+         "gain": "Nothing is rebuilt.", "lose": "Old mismatches stay."}
+OPT_B = {"key": "b", "label": "Rebuild the index", "how": "The index rebuilds from source.",
+         "gain": "Results match the source.", "lose": "A rebuild takes a night."}
+OPT_A_BAD_KEY = dict(OPT_A, key="x")
+OPT_A_PRESS = dict(OPT_A, how="Click Merge on GitHub to finish.")
+OPT_A_NO_GAIN = dict(OPT_A, gain="")
+OPT_A_REWORK = dict(OPT_A, how="Options are being reworked.")
+OPT_A_WIDENS = dict(OPT_A, widens=True)
+OPT_B_WIDENS = dict(OPT_B, widens=True)
+COMMAND = {"powershell": "Restart-Service indexer", "mac": "launchctl kickstart -k gui/501/indexer"}
+GH_COMMAND = {"powershell": "gh pr view 12", "mac": "gh pr view 12"}
+COMMON = {
+    "title": "Pick the index rebuild", "kind": "decision", "status": "open", "context": CTX_FORM,
+    "options": [OPT_A, OPT_B], "pick": "a", "steps": ["Open the index folder.", "Run the restart command below."],
+    "command": COMMAND, "why": "Keeps results stable.",
+}
+# (field, rule) -> (side A, side B). Each side is an item write: `item(...)` is COMMON with the changes applied.
+TIE_FIXTURES = {
+    ("kind", "command-in-item"): (
+        {**COMMON, "kind": "task", "steps": ["Run the command in plans/notes.md."]},
+        {**COMMON, "kind": "decision", "steps": ["Run the command in plans/notes.md."]}),
+    ("kind", "gh-login-switch"): ({**COMMON, "kind": "task", "command": GH_COMMAND},
+                                  {**COMMON, "kind": "decision", "command": GH_COMMAND}),
+    ("kind", "option-letter-keys"): ({**COMMON, "kind": "decision", "options": [OPT_A_BAD_KEY, OPT_B]},
+                                     {**COMMON, "kind": "task", "options": [OPT_A_BAD_KEY, OPT_B]}),
+    ("kind", "owner-judge"): ({**COMMON, "kind": "decision", "context": CTX_NO_STAKE},
+                              {**COMMON, "kind": "task", "context": CTX_NO_STAKE}),
+    ("kind", "port-question"): ({**COMMON, "kind": "task", "title": "Porting the search index"},
+                                {**COMMON, "kind": "note", "title": "Porting the search index"}),
+    ("kind", "press-link"): ({**COMMON, "kind": "decision", "options": [OPT_A_PRESS, OPT_B]},
+                             {**COMMON, "kind": "note", "options": [OPT_A_PRESS, OPT_B]}),
+    ("kind", "question-departs"): ({**COMMON, "kind": "decision", "context": CTX_BAD_DEPARTS},
+                                   {**COMMON, "kind": "task", "context": CTX_BAD_DEPARTS}),
+    ("kind", "question-form"): ({**COMMON, "kind": "decision", "context": CTX_NO_GOAL},
+                                {**COMMON, "kind": "task", "context": CTX_NO_GOAL}),
+    ("kind", "task-names-check"): ({**COMMON, "kind": "task", "context": CTX_NO_WHY},
+                                   {**COMMON, "kind": "decision", "context": CTX_NO_WHY}),
+    ("kind", "uniform-pick"): ({**COMMON, "kind": "decision", "pick": "b", "options": [OPT_A, OPT_B_WIDENS]},
+                               {**COMMON, "kind": "task", "pick": "b", "options": [OPT_A, OPT_B_WIDENS]}),
+    ("status", "option-letter-keys"): ({**COMMON, "status": "open", "options": [OPT_A_BAD_KEY, OPT_B]},
+                                       {**COMMON, "status": "closed", "options": [OPT_A_BAD_KEY, OPT_B]}),
+    ("status", "owner-judge"): ({**COMMON, "status": "open", "context": CTX_NO_STAKE},
+                                {**COMMON, "status": "closed", "context": CTX_NO_STAKE}),
+    ("status", "question-departs"): ({**COMMON, "status": "open", "context": CTX_BAD_DEPARTS},
+                                     {**COMMON, "status": "closed", "context": CTX_BAD_DEPARTS}),
+    ("status", "question-form"): ({**COMMON, "status": "open", "context": CTX_NO_GOAL},
+                                  {**COMMON, "status": "closed", "context": CTX_NO_GOAL}),
+    ("status", "rework-off-page"): ({**COMMON, "status": "open", "title": "Pick the index rebuild, being reworked"},
+                                    {**COMMON, "status": "closed", "title": "Pick the index rebuild, being reworked"}),
+    ("title", "option-letter-keys"): ({**COMMON, "title": "Take option e2 first"}, COMMON),
+    ("title", "port-question"): ({**COMMON, "title": "Porting the search index"}, COMMON),
+    ("title", "press-link"): ({**COMMON, "title": "Merge PR #12", "steps": ["Click Merge."]},
+                              {**COMMON, "title": "Merge the search index", "steps": ["Click Merge."]}),
+    ("title", "rework-off-page"): ({**COMMON, "title": "Pick the index rebuild, being reworked"}, COMMON),
+    ("context", "option-letter-keys"): ({**COMMON, "context": CTX_FORM + "\nSee option e2 for detail."}, COMMON),
+    ("context", "owner-judge"): ({**COMMON, "context": CTX_NO_STAKE}, COMMON),
+    ("context", "port-question"): ({**COMMON, "context": CTX_FORM + "\nPort of the search flow."}, COMMON),
+    ("context", "question-departs"): ({**COMMON, "context": CTX_BAD_DEPARTS}, COMMON),
+    ("context", "question-form"): ({**COMMON, "context": CTX_NO_GOAL}, COMMON),
+    ("context", "rework-off-page"): ({**COMMON, "context": CTX_FORM + "\nThe options are being reworked."}, COMMON),
+    ("context", "task-names-check"): ({**COMMON, "kind": "task", "context": CTX_NO_WHY},
+                                      {**COMMON, "kind": "task"}),
+    ("holds", "port-question"): ({**COMMON, "holds": "Blocks the port of the search."}, COMMON),
+    ("stands", "owner-judge"): ({**COMMON, "context": CTX_NO_STAKE},
+                                {**COMMON, "context": CTX_NO_STAKE, "stands": True}),
+    ("stands", "question-form"): ({**COMMON, "context": CTX_NO_BASED},
+                                  {**COMMON, "context": CTX_NO_BASED, "stands": True}),
+    ("options", "option-letter-keys"): ({**COMMON, "options": [OPT_A_BAD_KEY, OPT_B]}, COMMON),
+    ("options", "press-link"): ({**COMMON, "options": [OPT_A_PRESS, OPT_B]}, COMMON),
+    ("options", "question-form"): ({**COMMON, "options": [OPT_A_NO_GAIN, OPT_B]}, COMMON),
+    ("options", "rework-off-page"): ({**COMMON, "options": [OPT_A_REWORK, OPT_B]}, COMMON),
+    ("options", "uniform-pick"): ({**COMMON, "options": [OPT_A_WIDENS, OPT_B]}, COMMON),
+    ("pick", "uniform-pick"): ({**COMMON, "pick": "b", "options": [OPT_A, OPT_B_WIDENS]},
+                               {**COMMON, "pick": "a", "options": [OPT_A, OPT_B_WIDENS]}),
+    ("why", "option-letter-keys"): ({**COMMON, "why": "Pick option e2 as the fix."}, COMMON),
+    ("why", "rework-off-page"): ({**COMMON, "why": "The options are being reworked."}, COMMON),
+    ("steps", "command-in-item"): ({**COMMON, "kind": "task", "steps": ["Run the command in plans/notes.md."]},
+                                   {**COMMON, "kind": "task"}),
+    ("steps", "option-letter-keys"): ({**COMMON, "steps": ["Check option e2."]}, COMMON),
+    ("steps", "press-link"): ({**COMMON, "steps": ["Click Merge on GitHub."]}, COMMON),
+    ("steps", "rework-off-page"): ({**COMMON, "steps": ["The options are being reworked."]}, COMMON),
+    ("links", "press-link"): ({**COMMON, "steps": ["Click Merge on PR #12."]},
+                              {**COMMON, "steps": ["Click Merge on PR #12."],
+                               "links": [{"label": "PR 12", "url": "https://github.com/shivinate7/claude-settings/pull/12"}]}),
+    ("command", "command-in-item"): ({**COMMON, "kind": "task",
+                                      "command": {"powershell": "Restart-Service indexer && echo done",
+                                                  "mac": COMMAND["mac"]}},
+                                     {**COMMON, "kind": "task"}),
+    ("command", "gh-login-switch"): ({**COMMON, "kind": "task", "command": GH_COMMAND}, {**COMMON, "kind": "task"}),
+    ("port", "port-question"): ({**COMMON, "port": True}, COMMON),
+}
+
+
+def listed_ties():
+    """The (field, rule) ties field_table.json lists, read from the real file."""
+    data = json.loads(read(REAL["field_table.json"]))
+    return {(field, rule) for field, entry in data.items() for rule in entry.get("rules", [])}
+
+
+def judge(data):
+    """The guard's (rule, matched) for an item write of `data`; ("", "") when no rule refuses it."""
+    return question_form.item_hit("set", {"data": data}, "")
+
+
+def tie_name(tie):
+    return "%s -> %s" % tie
+
+
+class Ties(unittest.TestCase):
+    def setUp(self):
+        env = mock.patch.dict(os.environ)  # the guard reads the page's item-fields list from this variable, when set
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop(question_form.ITEM_FIELDS_SEAM, None)
+
+    def test_the_base_item_passes_every_rule(self):
+        self.assertEqual(judge(COMMON), ("", ""), "fixture: the base item is refused: %s" % (judge(COMMON),))
+
+    def test_every_listed_tie_has_a_fixture(self):
+        ties = listed_ties()
+        self.assertTrue(ties, "fixture: field_table.json lists no tie")  # scope before subject (P7)
+        for tie in sorted(ties):
+            with self.subTest(tie=tie_name(tie)):
+                self.assertIn(tie, TIE_FIXTURES, "tie %s has no fixture in test_field_table.py" % tie_name(tie))
+
+    def test_every_fixture_is_a_listed_tie(self):
+        ties = listed_ties()
+        for tie in sorted(TIE_FIXTURES):
+            with self.subTest(tie=tie_name(tie)):
+                self.assertIn(tie, ties, "fixture for %s, which field_table.json does not list as a tie" % tie_name(tie))
+
+    def test_each_tie_moves_the_verdict_when_its_field_changes_alone(self):
+        ties = sorted(listed_ties() & set(TIE_FIXTURES))
+        self.assertTrue(ties, "fixture: no listed tie has a fixture")  # scope before subject (P7)
+        for tie in ties:
+            with self.subTest(tie=tie_name(tie)):
+                field, rule = tie
+                a, b = TIE_FIXTURES[tie]
+                changed = sorted(k for k in set(a) | set(b) if a.get(k, ABSENT) != b.get(k, ABSENT))
+                self.assertEqual(changed, [field], "fixture for %s changes %s, not its field alone"
+                                 % (tie_name(tie), changed))
+                fires_a, fires_b = judge(a)[0] == rule, judge(b)[0] == rule
+                self.assertNotEqual(fires_a, fires_b, "%s: changing %s alone leaves %s with the same verdict "
+                                    "(first refusal %r, then %r)" % (tie_name(tie), field, rule,
+                                                                    judge(a)[0] or "none", judge(b)[0] or "none"))
+
+    def test_empty_and_full_size_lists_pass_every_rule(self):
+        full = [dict(OPT_A, key=chr(97 + i), label="Choice %d" % i) for i in range(26)]  # keys a to z, the page's range
+        for why, change in (("an empty options list", {"options": []}), ("an empty steps list", {"steps": []}),
+                            ("26 options keyed a to z", {"options": full})):
+            with self.subTest(why):
+                self.assertEqual(judge({**COMMON, **change}), ("", ""), "%s is refused: %s"
+                                 % (why, judge({**COMMON, **change})))
 
 
 if __name__ == "__main__":
