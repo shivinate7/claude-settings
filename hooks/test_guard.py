@@ -13315,7 +13315,7 @@ add("swift-test: Edit of non-test native/abTests/x.swift is allowed", "allow", t
 # ---- an Xcode test plan is test config (Degen, 2026-10-11; decisions/builders-cannot-edit-tests.md,
 # "Test path"). `native/Degen.xctestplan` is test config. A builder change that ADDS a skip
 # (`skippedTests`) disables tests, so it is a test change. A new unrelated key (`codeCoverage`) stays
-# allowed. A test-author may edit the plan. The write tool judges the new text. The diff check
+# allowed. A test-author may edit the plan. The write tool judges the new text. The builder-diff guard
 # refuses the builder's skip at commit and push (the builder-refuse section), and logs the author's
 # plan edit (`xctestplan_logs_case`).
 XCTESTPLAN = "native/Degen.xctestplan"
@@ -13703,7 +13703,7 @@ def _guard_answers(text):
 
 
 def diff_refusal_case():
-    """The diff check refuses a builder's test change at commit, push and stop, and logs a test-author's
+    """The builder-diff guard refuses a builder's test change at commit, push and stop, and logs a test-author's
     diff. A test-author's diff logs for the reviewer and never blocks: commit, push and stop print nothing
     and write one `noted` line each, named `author-diff`. The builder half is one run of the same three
     calls on the incident repo; BUILDER_RED pins each call on its own."""
@@ -15049,7 +15049,7 @@ def logged_builder_case(label):
 
 def refused_push_and_stop_case(label):
     """A builder's own commit holds a test change. Push and the first stop are each denied, and each denial
-    writes a builder-diff line. The guard is left out: the row names push and stop only."""
+    writes a builder-diff line. The guard's commit part is left out: the row names push and stop only."""
     def case():
         out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label), os.path.join(DIFFROOT, label),
                                   "builder", "bld1", commit=False)
@@ -15065,7 +15065,7 @@ def refused_push_and_stop_case(label):
 
 # Allow: a merge result and a plain cherry-pick of a test-author commit are git's, not the builder's. A commit
 # the builder makes from a staged pick or a squash is its own (the rows below).
-# The guard runs in the state the builder stops in; push and stop run after the commit.
+# The guard's commit part runs in the state the builder stops in; push and stop run after the commit.
 _bd_c1_pre = diff_repo("bd-c1-pre", _c1_mid_merge)
 sh("builder-refuse: a merge of main with a product-file conflict, while main changed a test file, is allowed at commit",
    COMMIT, "allow", cwd=_bd_c1_pre, agent_id="bld1", agent_type="builder")
