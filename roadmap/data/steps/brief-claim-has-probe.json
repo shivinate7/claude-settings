@@ -1,0 +1,11 @@
+{
+  "title": "A brief that states main's behaviour carries the probe that showed it",
+  "phase": "next",
+  "status": "todo",
+  "order": 267.2,
+  "owner": "coordinator",
+  "lane": "session_013NEJKzjkypcToggneCjJN8",
+  "why": "Incident #1581 (coordinator, 16:24 CST Nov 7): a brief stated main's behaviour with no probe behind the claim.",
+  "note": "Lane notes-fix-page takes it after nfp-stalled-kind-color. Done check: a brief with a main-behaviour claim and no probe is red, and one with the probe passes.",
+  "updatedAt": "2026-11-07T16:24:00-06:00"
+}
