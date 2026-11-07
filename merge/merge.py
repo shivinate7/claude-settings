@@ -1010,10 +1010,12 @@ class Host:
         return got
 
     def wait_checks(self, n, sha, deadline_minutes, prior=None):
-        """Wait until every check on `sha` has finished and none failed. -> (ok, why). `prior` is the head before this run's push.
+        """Wait until every required check on `sha` has finished and none failed. -> (ok, why). `prior` is the head before this run's push.
         Each pass reads the pull request first: a third head, DIRTY or CONFLICTING ends the wait. A head
-        that still reads as `prior` is GitHub lagging the push: keep waiting. Any red check, required or
-        not, ends the wait, and any pending check, required or not, is waited on. A pending check pauses with no gh call (30 s with an Actions run link, else a minute), then the loop reads again."""
+        that still reads as `prior` is GitHub lagging the push: keep waiting. Any red check or run, required or not,
+        ends the wait. Only a pending required check holds the wait, or a pending workflow run whose file defines the
+        REQUIRED_CHECK job (`required_only`); any other pending check or run is dropped from the wait, and the success
+        line names it. A pending check pauses with no gh call (30 s with an Actions run link, else a minute), then the loop reads again."""
         listed = self.required if isinstance(self.required, list) else None  # protection mode needs a gh read to know the names
         say("merge: checking " + (", ".join(listed) if listed else "the required checks") + " ...")  # before the first gh read, which can block
         names = self.required_names()
@@ -1058,6 +1060,7 @@ class Host:
                 return False, ("no run reports the required check " + ", ".join(absent) + f" on this head, and every check that did report has ended. "
                                f"Waiting would end at the deadline of {deadline_minutes} minutes. Compare merge.requiredChecks and the branch protection of {base} with the workflow job names. {GREEN_CITE}")
             absent_seen = None
+            pending, unwaited = self.required_only(pending, names)  # after the absent block, which compares the full list; before the settle pass, so its re-read still runs
             if not pending and not settled:
                 # ponytail: a workflow GitHub has not created yet still reads as green. The runs read and this settle read close most of the window. Ceiling: a workflow that appears after SETTLE_SECONDS.
                 if self.now() - said_at + SETTLE_SECONDS > 120:  # the settle pause would break the 120 s rhythm
@@ -1069,12 +1072,29 @@ class Host:
             if not pending:
                 if ignored:
                     say("merge: ignored by merge.ignoreChecks: " + "; ".join(ignored))
+                if unwaited:
+                    say("merge: not waited for (not required): " + "; ".join(unwaited))
                 return True, ""
             if self.now() >= end:
                 return False, f"the deadline of {deadline_minutes} minutes passed. Still pending: " + ", ".join(pending) + " " + GREEN_CITE
             settled = False
             progress(", ".join(pending))
             self.block(pending, got)
+
+    def required_only(self, pending, names):
+        """-> (held, dropped) from the pending list of `wait_checks`. Held: a required name, and a `workflow <name>` run whose file defines the REQUIRED_CHECK job.
+        Dropped: every other pending check or run. A run is matched to its file by run name against the file's top-level `name:`.
+        A folder or file that cannot be read holds every run: a failed read never loosens the wait."""
+        runs = [x for x in pending if x.startswith("workflow ") and x not in names]
+        holds = None
+        if runs:
+            try:
+                flow = workflow_dir(self.cwd)
+                holds = {n for n in (workflow_name(p.name, p.read_text(encoding="utf-8"), REQUIRED_CHECK) for p in sorted(flow.glob("*.y*ml"))) if n} if flow else None
+            except (OSError, ValueError):
+                holds = None
+        held = [x for x in pending if x in names or (x in runs and (holds is None or x[len("workflow "):] in holds))]
+        return held, [x for x in pending if x not in held]
 
     def runs(self, sha):
         """The workflow runs of `sha`, less the ignored ones."""
@@ -2203,6 +2223,21 @@ def workflow_dir(start):
         if (p / ".git").exists():
             return None
     return None
+
+def workflow_name(filename, text, job):
+    """-> the run name of a workflow file (its top-level `name:`, else its path) when it defines `job` as a job id or a job name, else None. A line scan like job_caps:
+    a job is a two-space key under `jobs:`, its name a four-space `name:`."""
+    name, in_jobs, found = None, False, False
+    for line in text.splitlines():
+        if re.match(r"[^\s#]", line):
+            in_jobs = line.startswith("jobs:")
+            if m := re.match(r"name:\s*(.+?)\s*(?:#.*)?$", line):
+                name = m.group(1).strip("'\"")
+        elif in_jobs and (m := re.match(r"^ {2}([\w-]+):\s*(?:#.*)?$", line)):
+            found = found or m.group(1) == job
+        elif in_jobs and (m := re.match(r"^ {4}name:\s*(.+?)\s*(?:#.*)?$", line)):
+            found = found or m.group(1).strip("'\"") == job
+    return (name or f".github/workflows/{filename}") if found else None
 
 def job_caps(texts):
     """-> {job id or job name: timeout-minutes} from workflow file texts. A line scan, since the repo has no YAML reader:
