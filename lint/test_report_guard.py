@@ -4193,6 +4193,98 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         out, _ = self.stop(self.decided, records=records)
         self.assertNotIn("question-keys", self.reason(out), out)
 
+    # ------------------------------------------------ the past-ruling call retries a timeout once (owner ask ask-mw6pwif5wv)
+    #
+    # A question's model call gets one retry after a timeout, capped at the retry's own time (owner ask ask-mw6pwif5wv,
+    # 2026-11-07 12:09 CST). The past-ruling check, report_guard.past_ruling_problem, is one of those calls. Each case
+    # runs that function in a child process, so the stub answers its calls in order and its return value comes back as
+    # data. Expected texts come from report_guard's constants, never from copied reason strings.
+    def past_ruling(self, answers):
+        """What report_guard.past_ruling_problem returns for the relayed question, with the stub answering `answers` in
+        order, and the model calls the stub recorded."""
+        self.reset_calls()
+        overrides = {"CJ_ANSWER": tcj.ALLOW, "CJ_SCRIPT": json.dumps(answers)}
+        with mock.patch.dict(os.environ, overrides):
+            proc = subprocess.run([sys.executable, "-c", PAST_RULING_PROBE, RELAY, self.decided],
+                                  capture_output=True, text=True, timeout=60)
+        results = [line[len("RESULT "):] for line in proc.stdout.splitlines() if line.startswith("RESULT ")]
+        self.assertEqual(len(results), 1, "the probe printed no result: " + proc.stderr[-400:])
+        return json.loads(results[0]), self.model_calls()
+
+    def test_a_timeout_then_an_ok_retries_once_and_allows(self):
+        result, calls = self.past_ruling([tcj.TIMEOUT_REPLY, tcj.ALLOW])
+        self.assertEqual(len(calls), 2, "a timeout on try 1 made %d model calls, not 2" % len(calls))
+        retry = tcj.call_judge_value("PAST_RULING_RETRY_TIMEOUT")
+        self.assertEqual(calls[1].get("timeout"), retry,
+                         "try 2 is not capped at call_judge.PAST_RULING_RETRY_TIMEOUT (%r)" % (retry,))
+        self.assertEqual(result, "", "an ok answer on try 2 did not allow the question: %r" % (result,))
+
+    def test_two_timeouts_refuse_with_the_cannot_run_text_after_two_calls(self):
+        import decision_watch  # the one home of the timeout text
+        rg = report_guard_constants()
+        result, calls = self.past_ruling([tcj.TIMEOUT_REPLY, tcj.TIMEOUT_REPLY])
+        self.assertEqual(len(calls), 2, "two timeouts made %d model calls, not 2" % len(calls))
+        expected = rg.cannot_run(RELAY, decision_watch.MODEL_TIMEOUT_ERROR)
+        self.assertTrue(expected, "cannot_run gave no text for a question with no Unvetted line")
+        self.assertEqual(result, expected, "two timeouts did not return the cannot-run text: %r" % (result,))
+
+    def test_a_timeout_then_a_cited_flag_refuses_with_the_relay_rule_text(self):
+        rg = report_guard_constants()
+        reason = json.loads(REFUSE_APPS)["reason"]
+        result, calls = self.past_ruling([tcj.TIMEOUT_REPLY, REFUSE_APPS])
+        self.assertEqual(len(calls), 2, "a timeout then a flag made %d model calls, not 2" % len(calls))
+        self.assertEqual(result, rg.RELAY_RULE_REASON % reason,
+                         "the flag on try 2 did not return the relay rule text: %r" % (result,))
+
+    def test_a_model_error_that_is_not_a_timeout_is_not_retried(self):
+        import decision_watch  # the one home of the timeout text
+        rg = report_guard_constants()
+        result, calls = self.past_ruling([tcj.EXIT_REPLY, tcj.ALLOW])
+        self.assertEqual(len(calls), 1, "a model error that is not a timeout made %d model calls, not 1" % len(calls))
+        head, tail = rg.UNVETTED_REASON.split("%s")
+        self.assertTrue(result.startswith(head) and result.endswith(tail),
+                        "the model error did not return the cannot-run text: %r" % (result,))
+        why = result[len(head):len(result) - len(tail)]
+        self.assertTrue(why and why != decision_watch.MODEL_TIMEOUT_ERROR,
+                        "the cannot-run text carries no error of its own: %r" % (why,))
+
+
+# The probe runs report_guard.past_ruling_problem(asked, cwd) in a child process, and prints its return value as JSON.
+PAST_RULING_PROBE = (
+    "import json, sys\n"
+    "sys.path.insert(0, %r)\n"
+    "import report_guard\n"
+    "print('RESULT ' + json.dumps(report_guard.past_ruling_problem(sys.argv[1], sys.argv[2])))\n"
+) % HERE
+
+
+def report_guard_constants():
+    """report_guard.py loaded in this process, for its reason texts and cannot_run. Loading it runs no check."""
+    spec = importlib.util.spec_from_file_location("report_guard_constants", REPORT_GUARD)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class PastRulingRetryBudgetTests(unittest.TestCase):
+    def test_the_stop_timeout_covers_both_past_ruling_tries_and_the_start_up_allowance(self):
+        # The 10 s is an unmeasured start-up allowance: the python start and the two `claude -p` starts run outside the
+        # model caps, and nobody has timed them. It is a budget to keep honest, not a measured figure.
+        start_up_allowance = 10
+        with open(os.path.join(HERE, "..", "settings.json"), encoding="utf-8") as f:
+            settings = json.load(f)
+        stop = [h for entry in settings.get("hooks", {}).get("Stop", []) for h in entry.get("hooks", [])
+                if "report_guard.py" in h.get("command", "")]
+        self.assertEqual(len(stop), 1, "settings.json needs one Stop hook that runs report_guard.py, found %d" % len(stop))
+        stop_timeout = stop[0].get("timeout")
+        self.assertIsInstance(stop_timeout, int, "the report_guard Stop hook has no integer timeout")
+        first = tcj.call_judge_value("PAST_RULING_TIMEOUT")
+        retry = tcj.call_judge_value("PAST_RULING_RETRY_TIMEOUT")
+        self.assertTrue(isinstance(first, int) and isinstance(retry, int),
+                        "hooks/call_judge.py has no integer PAST_RULING_RETRY_TIMEOUT (found %r) beside "
+                        "PAST_RULING_TIMEOUT (found %r)" % (retry, first))
+        self.assertLessEqual(first + retry + start_up_allowance, stop_timeout,
+                             "the past-ruling tries and the start-up allowance overrun the Stop hook's timeout")
 
 
 class AnsweredNeedsSourceTests(unittest.TestCase):
