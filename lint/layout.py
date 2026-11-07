@@ -625,6 +625,8 @@ def typecheck(root):
             raise LayoutError("%s: \"globs\" is not a non-empty list of strings" % where)
         for glob in globs:
             _safe(glob, where)
+            if "{" in glob or "}" in glob or glob.replace("\\", "/").startswith("./"):
+                raise LayoutError("%s: glob %r uses braces or starts with ./, which match_globs does not read" % (where, glob))
         if not isinstance(command, list) or not command or not all(isinstance(c, str) and c for c in command):
             raise LayoutError("%s: \"command\" is not a non-empty list of strings" % where)
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:

@@ -5,7 +5,7 @@ hooks/config_watch.py calls `run` on each PostToolUse payload. A repo declares i
 "typecheck" in its `.claude/layout-extras.json` (lint/layout.py `typecheck`): each entry holds globs, a
 command and a timeout. After a Write, Edit or MultiEdit of a file that an entry's globs match, `run` starts
 that entry's command from the repo root, with no shell, and returns the report as text. Entries that match
-each run, and their reports join.
+each run, and their reports join. The entries share one time budget, and the joined report has a length cap.
 
 It speaks only when a command fails with output. A passing command, a missing program, a timeout, an
 unreadable payload, a bad declaration and this module's own faults all return None: a check that reports on
@@ -17,10 +17,12 @@ The extras path and the glob match come from lint/layout.py, the one home of bot
 import os
 import subprocess
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 EDIT_TOOLS = ("Write", "Edit", "MultiEdit")
-TIMEOUT_CAP = 90  # seconds; the PostToolUse entry in settings.json must leave room for it
+TOTAL_BUDGET = 90  # seconds that all matching entries of one edit share; the PostToolUse entry in settings.json must leave room
+REPORT_CAP = 8000  # characters of report the block reason holds, so one noisy compiler cannot flood the turn
 
 
 def _layout():
@@ -59,14 +61,15 @@ def _root_of(layout, edited):
         here = parent
 
 
-def _command_report(root, entry, name):
-    """The failure report of one entry's command, or None when it passes, cannot run or says nothing."""
+def _command_report(root, entry, name, limit):
+    """The failure report of one entry's command, run for at most `limit` seconds, or None when it passes,
+    cannot run or says nothing."""
     argv = list(entry["command"])
     if ("/" in argv[0] or "\\" in argv[0]) and not os.path.isabs(argv[0]):
         argv[0] = os.path.join(root, argv[0])  # a relative program resolves against the root on every platform
     try:
         done = subprocess.run(argv, cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                              timeout=min(entry["timeout"], TIMEOUT_CAP))
+                              timeout=min(entry["timeout"], limit))
     except (OSError, subprocess.SubprocessError):
         return None
     output = ((done.stdout or "") + (done.stderr or "")).strip()
@@ -86,12 +89,21 @@ def run(payload):
         if root is None:
             return None
         rel = os.path.relpath(edited, root)
-        reports = []
+        reports, spent = [], 0.0
         for entry in layout.typecheck(root):
-            if layout.match_globs(rel, entry["globs"]):
-                found = _command_report(root, entry, os.path.basename(edited))
-                if found:
-                    reports.append(found)
-        return "\n\n".join(reports) or None
+            if not layout.match_globs(rel, entry["globs"]):
+                continue
+            left = TOTAL_BUDGET - spent
+            if left <= 0:
+                break  # the budget is gone: the rest of the matching entries do not run
+            started = time.monotonic()
+            found = _command_report(root, entry, os.path.basename(edited), left)
+            spent += time.monotonic() - started
+            if found:
+                reports.append(found)
+        report = "\n\n".join(reports)
+        if len(report) > REPORT_CAP:
+            report = report[:REPORT_CAP] + "\n[typecheck report cut at %d characters]" % REPORT_CAP
+        return report or None
     except Exception:  # a check never fails a turn on its own bug
         return None
