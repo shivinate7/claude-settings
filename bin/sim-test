@@ -37,8 +37,8 @@
 # phone. It skips the load bars, waits in queue order while another live pid holds that slot, and exits 1 at SIM_LEASE_WAIT
 # with no xcodebuild. A no-op take on a reuse runs on with no lease. The lease is given back after the shutdown and before
 # the lock, if still held, is freed, on every exit, INT and TERM too. A live holder renews its lease: every SIM_TEST_RENEW
-# seconds (default 60; text that is not whole seconds, or 0, counts as the default) the watch loop runs `sim-lease renew
-# --pid $$`, while the child or the hold runs, so SIM_LEASE_MAX counts the silence since the last renew and a lease never
+# seconds (default 60; text that is not whole seconds, or 0, counts as the default; it must stay below SIM_LEASE_MAX,
+# or a live run's lease expires) the watch loop runs `sim-lease renew --pid $$`, while the child or the hold runs, so SIM_LEASE_MAX counts the silence since the last renew and a lease never
 # expires under a live run (coordinator pick, 2026-11-07). A renew that exits 1 means the lease is lost: one stderr line, once, and the run goes on. Any other failed renew is ignored. The take runs in the background and
 # this tool waits on it, so INT and TERM act at once. After the grant of an own-boot take it reads the booted list again, under
 # the lock, and reruns the reuse, cross-role and cap checks before the boot: a simulator a dead holder left booted is
