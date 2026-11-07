@@ -2312,6 +2312,16 @@ MUTATIONS = [
      '            out.append(cap_safe(part, len(part)))\n',
      '            out.append(cap_safe(part, room))\n',
      "guard", "names the whole ready-check command for three ready checks"),
+    # The text beside a ready-check command shares one budget (cap_detail). Uncapped, a long step prints its text past the
+    # 160 budget, and a reason with long text on both sides of the command goes past the bound.
+    ("merge-checks: the text beside a ready-check command is not capped",
+     '        out.append(cap_safe(part, room))\n',
+     '        out.append(cap_safe(part, len(part)))\n',
+     "guard", "a long ready step keeps its whole command"),
+    ("merge-checks: the text after a ready-check command gets the whole budget again",
+     'room -= min(len(part), room)',
+     'room -= 0',
+     "guard", "a long ready step keeps its whole command"),
 ]
 
 

@@ -275,7 +275,7 @@ def windows_shaped(*parts):
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
-        max_seconds=None, env=None, guard=None, **tool_input):
+        max_seconds=None, env=None, guard=None, max_reason=None, **tool_input):
     """Register one case.
 
     `guard` is the path of a copy of hooks/guard.py to run in place of this repository's, for the
@@ -288,6 +288,9 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
     approver reads, not only the decision. A tuple inside `carries` is any-of: the reason holds
     one of its fragments. `lacks` names fragments the printed reason MUST NOT hold.
+
+    `max_reason`, when given, is the most characters the printed reason may hold. A longer reason fails
+    the case, and the failure prints its measured length, so a bound is read from the run, never guessed.
 
     A case NEVER opts out of the generic-reason check. Which fragments a reason may name is read
     from the case's RULE, through `REASON_MAY_NAME` below, so the exemption belongs to one rule and
@@ -324,6 +327,8 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "env": env,
         # The guard copy this case runs (see add), or None for this repository's guard.
         "guard": guard,
+        # The most characters the printed reason may hold (see add), or None for no bound.
+        "max_reason": max_reason,
         # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
         "silent": silent,
         # The temp folder this case's guard run reads as its own (see TEMP_DIR above).
@@ -339,10 +344,11 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
 
 def sh(name, command, expected, rule=None, tool="Bash", cwd=None, env_path=None, session=None,
        carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
-       agent_type=None, transcript=None, env=None):
+       agent_type=None, transcript=None, env=None, max_reason=None):
     add(name, expected, rule=rule, tool=tool, cwd=cwd, env_path=env_path, session=session,
         agent_id=agent_id, agent_type=agent_type, no_root=no_root, silent=silent,
-        carries=carries, lacks=lacks, config=config, transcript=transcript, env=env, command=command)
+        carries=carries, lacks=lacks, config=config, transcript=transcript, env=env, command=command,
+        max_reason=max_reason)
 
 
 # ASK ALONE. A shell call that holds a command
@@ -463,6 +469,8 @@ GHRUNNONE = os.path.join(ROOT, "ghrunnone")      # pull request 2's workflow `ci
 GHRUNDONE = os.path.join(ROOT, "ghrundone")      # pull request 2's workflow finished, and its required check passed
 GHRUNIGNORED = os.path.join(ROOT, "ghrunignored")  # pull request 2's only running workflow is `sync`, which STAMPIGNORE ignores
 GHSKIPPED = os.path.join(ROOT, "ghskipped")      # the head's one check is skipped, so no check ran on it: the all-skipped read
+GHLONGREF = os.path.join(ROOT, "ghlongref")      # the same, with a 300-character base ref on the pull request
+GHINJECT = os.path.join(ROOT, "ghinject")        # one check passed, and one failed under a name that quotes a ready-check command
 
 
 def batch_other(*checks, runs=None):
@@ -1265,6 +1273,10 @@ def build_fixtures():
     make_fake_gh(GHPEND, "main", checks=[{"name": "checks", "bucket": "pending", "link": ""}])
     make_fake_gh(GHRED, "main", checks=[{"name": "checks", "bucket": "fail", "link": ""}])
     make_fake_gh(GHSKIPPED, "main", checks=[{"name": "checks", "bucket": "skipping", "link": ""}])
+    make_fake_gh(GHLONGREF, "rel/" + "b" * 296, checks=[{"name": "checks", "bucket": "skipping", "link": ""}])
+    make_fake_gh(GHINJECT, "main", checks=[
+        {"name": "checks", "bucket": "pass", "link": ""},
+        {"name": "x `bin/ci-job checks " + "j" * 1000 + "` y", "bucket": "fail", "link": ""}])
     make_fake_gh(GHRUNPEND, "main",
                  runs=[{"status": "in_progress", "conclusion": "", "name": "checks"}])
     make_fake_gh(GHBROKEN, "main", broken=True)
@@ -9145,6 +9157,7 @@ add("merge-batch: a pinned merge.requiredChecks list is the required list, so a 
 # STAMPREADY3 three; each merge block is otherwise STAMPREPO's, so only the ready checks differ.
 STAMPREADY = os.path.join(ROOT, "stamp_ready")          # stamp.json whose merge block declares one ready check
 STAMPREADY3 = os.path.join(ROOT, "stamp_ready3")        # the same, declaring three ready checks
+STAMPLONGSTEP = os.path.join(ROOT, "stamp_longstep")    # the same, declaring one ready check of 106 characters
 READY_CMD_1 = 'bin/ci-job checks --step "check invariants" --base origin/main'
 READY_CMD_3 = 'bin/ci-job checks --step "check invariants" --step "check lint" --step "check types" --base origin/main'
 
@@ -9152,12 +9165,13 @@ READY_CMD_3 = 'bin/ci-job checks --step "check invariants" --step "check lint" -
 def _build_ready_stamp_repos():
     merge = {"method": "merge", "requiredChecks": ["checks"], "deadlineMinutes": 30, "deleteBranch": True}
     for where, steps in ((STAMPREADY, ["check invariants"]),
-                         (STAMPREADY3, ["check invariants", "check lint", "check types"])):
+                         (STAMPREADY3, ["check invariants", "check lint", "check types"]),
+                         (STAMPLONGSTEP, ["check " + "a" * 100])):
         stamp = {"defaultBranch": "main", "kinds": [], "merge": dict(merge, readyChecks=steps)}
         make_repo(where, {".github/stamp.json": json.dumps(stamp) + "\n", "hooks/keep": "x\n"})
 
 
-lazy_fixture([STAMPREADY, STAMPREADY3], _build_ready_stamp_repos)
+lazy_fixture([STAMPREADY, STAMPREADY3, STAMPLONGSTEP], _build_ready_stamp_repos)
 # The scope first: the read reaches the all-skipped remedy. Then the subject: the whole command is printed, not a cut of it.
 sh("merge-checks: a ready head with every check skipped names the whole ready-check command for one ready check",
    "gh pr merge 12 --squash", "deny", "merge-checks", carries=("no check ran on this head", READY_CMD_1),
@@ -9176,6 +9190,37 @@ sh("merge-checks: a repo that declares no ready checks names no ready step on an
    "gh pr merge 12 --squash", "deny", "merge-checks", carries=("no check ran on this head",),
    lacks=("First run the ready checks", "bin/ci-job checks"),
    cwd=STAMPREPO, env_path=GHSKIPPED + os.pathsep + PY_PATH, config=MERGECFG)
+
+# THE READY-CHECK REASON IS BOUNDED. The command is printed whole, because a cut inside it prints a command that fails, but a
+# base ref from the pull request, or a check name that quotes the command, must not make the reason unbounded. MEASURED on the
+# printed refusal: about 421 characters of wording (the rule name, the fixed sentence, the override line), 172 of text (the
+# 160 budget and its two cut marks), and one ready-check command of at most 400 characters. 421 + 172 + 400 is 993, and the
+# bound is 1000. The three-step control prints under the bound; a command with a 100-character step and the same base does not.
+# A change to the refusal's wording moves the control, so the measured lengths are read again before the bound moves.
+MERGE_REASON_MAX = 1000
+READY_LONG_CMD = 'bin/ci-job checks --step "check ' + "a" * 100 + '" --base origin/main'
+READY_CMD_LONG_BASE = ('bin/ci-job checks --step "check invariants" --step "check lint" --step "check types" '
+                       '--base origin/rel/' + "b" * 296)
+# The control: three short steps and the 300-character base make one command near the allowance, which prints whole and stays in the bound.
+sh("merge-checks: a three-step ready-check command with a 300-character base ref prints whole, within the bound",
+   "gh pr merge 12 --squash", "deny", "merge-checks",
+   carries=("no check ran on this head", "First run the ready checks (check invariants", READY_CMD_LONG_BASE),
+   max_reason=MERGE_REASON_MAX, cwd=STAMPREADY3, env_path=GHLONGREF + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a 300-character base ref with one long ready step keeps the reason within the bound",
+   "gh pr merge 12 --squash", "deny", "merge-checks",
+   carries=("no check ran on this head", "First run the ready checks (check aaaa"),
+   max_reason=MERGE_REASON_MAX, cwd=STAMPLONGSTEP, env_path=GHLONGREF + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a check name that quotes a ready-check command keeps the reason within the bound",
+   "gh pr merge 12 --squash", "deny", "merge-checks",
+   carries=("this head is not settled", "x `bin/ci-job checks"),
+   max_reason=MERGE_REASON_MAX, cwd=STAMPREADY, env_path=GHINJECT + os.pathsep + PY_PATH, config=MERGECFG)
+# THE SHARED BUDGET. A long step puts long text on both sides of the command. The text before it takes the budget and is cut
+# and marked, and the text after it gets what is left, which is nothing. Each marker sits past its share of the budget.
+sh("merge-checks: a long ready step keeps its whole command, and the text around it shares one cut budget",
+   "gh pr merge 12 --squash", "deny", "merge-checks",
+   carries=("[cut]", READY_LONG_CMD),
+   lacks=("which a mark by MCP or gh skips", "push anew"),
+   cwd=STAMPLONGSTEP, env_path=GHSKIPPED + os.pathsep + PY_PATH, config=MERGECFG)
 
 _BARE_GUARD = dict(env_path=GREEN_ON, config=MERGECFG)
 # ASK: the repo uses the merge tool, and the call skips it.
@@ -28864,6 +28909,9 @@ def run_cases():
             ok = False
             note = "  (the reason carries %r, which it must not: %s)" % (
                 [f for f in case["lacks"] if f in reason][0], reason[:90])
+        elif ok and case["max_reason"] and len(reason) > case["max_reason"]:
+            ok = False
+            note = "  (the reason is %d characters, over the %d bound)" % (len(reason), case["max_reason"])
         elif ok and got != "allow" and names_the_target(reason, case["rule"]):
             ok = False
             note = "  (the reason names the forbidden target %r)" % names_the_target(
