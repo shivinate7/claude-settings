@@ -608,9 +608,11 @@ class Scope(unittest.TestCase):
         return {n for n in ALL if got[n] == "true"}
 
     def test_guard_sibling_new_file_sets_the_same_flags_as_guard_py(self):
+        # checks_windows_merge is on: the guard closure is in the merge closure (MergeClosure), so the merge job starts too.
         got = run(["hooks/guard.py"])
-        self.assertFlags(got, want_true=["checks_windows", "checks_windows_rest", "checks_macos", "code", "guard", "sweep"],
-                         want_false=["checks_windows_merge", "pointer_windows"])
+        self.assertFlags(got, want_true=["checks_windows", "checks_windows_rest", "checks_macos", "code", "guard", "sweep",
+                                         "checks_windows_merge"],
+                         want_false=["pointer_windows"])
         want = pre_split(got)
         for p in self.GUARD_SIBLINGS:
             with self.subTest(path=p):
@@ -618,8 +620,9 @@ class Scope(unittest.TestCase):
 
     def test_guard_sibling_edit_sets_the_same_flags_as_guard_py(self):
         got = run(["hooks/guard.py"], existing=["hooks/guard.py"])
-        self.assertFlags(got, want_true=["checks_windows", "checks_windows_rest", "checks_macos", "code", "guard", "sweep"],
-                         want_false=["checks_windows_merge", "shell_macos", "pointer_windows"])
+        self.assertFlags(got, want_true=["checks_windows", "checks_windows_rest", "checks_macos", "code", "guard", "sweep",
+                                         "checks_windows_merge"],
+                         want_false=["shell_macos", "pointer_windows"])
         want = pre_split(got)
         for p in self.GUARD_SIBLINGS:
             with self.subTest(path=p):
@@ -647,11 +650,13 @@ class Scope(unittest.TestCase):
                          {"checks_windows", "checks_windows_rest", "checks_macos", "shell_macos", "code", "guard"})
         self.assertEqual(self.true_set(run([p], existing=[p])), {"checks_windows_rest", "checks_macos", "code", "guard"})
 
-    # Control: the guard selector test keeps today's flags.
+    # Control: the guard selector test keeps its flags. Its merge job is on too: the test file is in the merge closure (MergeClosure).
     def test_test_guard_keeps_its_current_flags(self):
         p = "hooks/test_guard.py"
-        self.assertEqual(self.true_set(run([p])), {"checks_windows", "checks_macos", "shell_macos", "code", "guard"})
-        self.assertEqual(self.true_set(run([p], existing=[p])), {"checks_windows", "checks_macos", "code", "guard"})
+        self.assertEqual(self.true_set(run([p])),
+                         {"checks_windows", "checks_macos", "shell_macos", "code", "guard", "checks_windows_merge"})
+        self.assertEqual(self.true_set(run([p], existing=[p])),
+                         {"checks_windows", "checks_macos", "code", "guard", "checks_windows_merge"})
 
     # Mod and map-skill tests run as a step of the checks, checks-windows and checks-macos jobs, run only on the
     # `mods` flag. A job runs on its own flag, so a path that turns on `mods` must turn on checks_windows and
@@ -740,7 +745,7 @@ class Scope(unittest.TestCase):
         for p in ("bin/sim-test", "bin/sim-lease"):
             with self.subTest(path=p):
                 got = run([p], existing=[p])
-                self.assertEqual(self.true_set(got), {"shell_macos", "code", "guard"}, f"{p}: {got}")
+                self.assertEqual(self.true_set(got), {"shell_macos", "code", "guard", "checks_windows_merge"}, f"{p}: {got}")
                 self.assertEqual(got[GUARD_FULL], "true", f"{GUARD_FULL} for {p}: {got}")
                 self.assertEqual(got["checks_guard"], "true", f"checks_guard for {p}: {got}")
         with self.subTest(path="lint/test_sim_test.sh"):

@@ -292,7 +292,7 @@ GUARD_JOB = "checks-windows-guard"
 # carries SHARD_VAR[base]=<i>/<n> in its step env, and the n values cover 1 to n once each, so every case runs
 # once. A guard or merge shard past the first has no job-level if: all-jobs-passed needs it, a draft skips it through
 # needs: scope, and its steps decide on the full flag (GuardShardSteps, MergeShardSteps). The slice stays in the base job,
-# with no shard value. SHARD_JOB_IF, the event-only if, would skip a shard on a ready pull_request, so no shard carries it.
+# with no shard value. job_check_problems refuses any job-level if on a shard, SHARD_JOB_IF (the event-only if) included.
 SHARD_VAR = {"checks-windows-guard": "GUARD_SHARD", "checks-windows-merge": "MERGE_SHARD"}
 SHARD_CMD = {"checks-windows-guard": "python hooks/test_guard.py", "checks-windows-merge": "python merge/test_merge.py"}
 SHARD_JOB_IF = "${{ github.event_name != 'pull_request' }}"
@@ -556,8 +556,8 @@ def draft_guard_only(expr):
 
 
 def job_check_problems(name, job, flag=None):
-    """`needs: scope`. A guard shard past the first (GUARD_JOB's shards) has no job-level if: all-jobs-passed needs it, and a draft
-    skips it through needs. Any other shard past the first keeps the event job-level if (SHARD_JOB_IF) and nothing else. The lint
+    """`needs: scope`. A shard past the first (a guard or a merge shard, shard_base) has no job-level if: all-jobs-passed needs it,
+    and a draft skips it through needs. The lint
     jobs (LINT_JOBS) have no scope condition. A lint or scoped job's job-level if, if any, is the draft guard (draft_guard_only).
     A scoped job's scope condition G is the one its steps carry (read_scope_condition), every step carries G
     (scope_condition_step_problems), and G keeps the scope condition rules (scope_condition_property_problems). `flag` names
@@ -566,10 +566,8 @@ def job_check_problems(name, job, flag=None):
     if not re.fullmatch(r"\[?\s*scope\s*\]?", job["needs"] or ""):
         problems.append(f"{name}: needs is {job['needs']}, want scope")
     expr = job["if"]
-    if shard_base(name) == GUARD_JOB:
-        return problems + ([] if expr is None else [f"{name}: guard shard keeps a job-level if {expr}, want none: all-jobs-passed needs it"])
     if shard_base(name):
-        return problems + ([] if expr == SHARD_JOB_IF else [f"{name}: shard job if is {expr}, want {SHARD_JOB_IF}"])
+        return problems + ([] if expr is None else [f"{name}: shard keeps a job-level if {expr}, want none: all-jobs-passed needs it"])
     if name in LINT_JOBS:  # they run on every PR: no scope condition, and a job-level if only when it is the draft guard
         return problems + ([] if expr is None or draft_guard_only(expr) else [f"{name}: job-level if: {expr}"])
     if expr is not None and not draft_guard_only(expr):
