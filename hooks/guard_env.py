@@ -69,6 +69,27 @@ ENV_LOADER_COMMANDS = (
 )
 ENV_LOADER_FLAGS = ("--env-file", "--env-file-if-exists")
 
+# A node-family runner that runs a script given on the command line prints process.env when that script
+# logs it, so the loader flag beside one of these flags is no longer a quiet load. (`docker -e` sets a
+# variable and `npm -p` is not an eval flag, so only these two runners are judged.) The words after the
+# script name are the script's own arguments, so the read stops at the first plain word.
+ENV_EVAL_COMMANDS = ("node", "node.exe", "bun", "bun.exe")
+ENV_EVAL_FLAG = re.compile(r"-(?:pe|ep|e|p)|--(?:eval|print)(?:=.*)?")
+ENV_RUNNER_VALUE_FLAGS = ("-r", "--require", "--import", "--loader", "--experimental-loader")
+
+
+def _runner_evals(words, position: int) -> bool:
+    """True when the runner at `position` is given an eval or print flag ahead of its script."""
+    i = position + 1
+    while i < len(words):
+        word = words[i]
+        if ENV_EVAL_FLAG.fullmatch(word):
+            return True
+        if not word.startswith("-"):
+            return False
+        i += 2 if word in ENV_LOADER_FLAGS + ENV_RUNNER_VALUE_FLAGS else 1
+    return False
+
 # Commands that ask whether the file is THERE. They read no contents.
 ENV_EXISTENCE_COMMANDS = ("ls", "test", "[", "[[")
 
@@ -133,6 +154,10 @@ ENV_VARIABLE_REASON = (
 ENV_RUNNER_REASON = (
     "only a runner may be handed an environment file with the loader flag, and this command "
     "is not a runner"
+)
+ENV_EVAL_REASON = (
+    "a runner given an environment file with the loader flag and a script of its own on the command "
+    "line (-e, -p, --eval, --print) can print the file's values"
 )
 ENV_CONTENTS_REASON = (
     "this command would read, write or commit the contents of an environment file"
@@ -668,6 +693,9 @@ def _env_flat(cmd: str, text_ok: bool = False):
                     return (ENV_VARIABLE_REASON,
                             "a shell variable holds '%s'" % named)
                 loaded = flag in ENV_LOADER_FLAGS or previous in ENV_LOADER_FLAGS
+                if loaded and command.lower() in ENV_EVAL_COMMANDS and _runner_evals(words, position):
+                    return (ENV_EVAL_REASON,
+                            "'%s' runs a script of its own with '%s' loaded" % (command, named))
                 if loaded and command.lower() in ENV_LOADER_COMMANDS:
                     continue  # a runner loading it into its own environment prints nothing
                 if loaded:

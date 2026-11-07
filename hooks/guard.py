@@ -1072,6 +1072,7 @@ CAP_ASK_REASON = (
     "hold. A project settings file overrides user settings, so the write lifts the cap for every "
     "agent started there. Requested: {change}. File: {where}. "
     "Approve it only when a model above Sonnet is wanted for this project. "
+    "The lift ends by itself when the top-level `_agentCapUntil` field holds an ISO-8601 time within 24 hours. "
     "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
 )
 
@@ -1456,7 +1457,7 @@ def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
 
     Acts: `git commit` and `gh pr create|edit`.
     """
-    read = message_texts(segment, raw, where, before)
+    read = message_texts(segment, raw, where, before, titles=True)
     if read is None:
         return ""
     is_commit, texts, unread = read
@@ -3266,7 +3267,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 1. Shared trees.
     whole_root = []   # command_root reads the whole command: once per command, never per segment
-    for segment in split_segments(stripped):
+    for segment in [part for each in split_segments(stripped) for part in
+                    [each, *(p for text in inner_commands(segment_tokens(each) or [])
+                             for p in split_segments(text))]]:   # `sh -c`, `bash -lc`, `eval` bodies too
         if not segment.strip():
             continue
         words = segment_tokens(segment)
@@ -3360,6 +3363,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         while last < len(segments) - 1 and ends[last] == "|":
             last += 1
         matched, mechanism, kind = silent_write_hit(segment, segments[last] if last > number else "")
+        if not matched:   # a write inside `bash -c`, `eval` or a runner is the same write
+            matched, mechanism, kind = next(
+                (hit for text in inner_commands(segment_tokens(segment) or []) for part in split_segments(text)
+                 if (hit := silent_write_hit(part))[0]), ("", "", ""))
         if matched and not in_throwaway(segments, number, cwd, ends):
             reason = (SILENT_WRITE_REDIRECT_REASON if mechanism == "redirect"
                       else SILENT_WRITE_QUIET_REASON)
@@ -3599,7 +3606,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # and rule 1 strips it. A command that writes a settings file and names the cap variable
     # somewhere else on the line is asked too: an over-trigger of one prompt, inside a scope this
     # narrow, beats a bypass by a second segment.
-    matched = _shell_write_hit(stripped, cwd, is_settings_file)
+    matched = (_shell_write_hit(stripped, cwd, is_settings_file)
+               or interpreter_write_hit(raw, cwd, is_settings_file))
     if matched:
         change = cap_change(raw)
         if change:
