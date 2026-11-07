@@ -818,7 +818,8 @@ class CostTests(StaleCase):
     the rule files, starts three git processes and reads no blob, or one more when it adds a governed line: STALE005
     reads the added lines once. A removed or renamed path makes the check read the
     tracked Markdown files. So does a name that a touched .py no longer defines. A changed file that is not Markdown
-    also reads the repo's decision records for its Home line, even when nothing was removed. No run writes a file."""
+    also reads the repo's decision records for its Home line, even when nothing was removed. A range that edits any file
+    in place, .py included, also reads each governed Markdown file at head once for STALE006. No run writes a file."""
 
     def run_traced(self, rng):
         rc, out, commands = self.run_traced_commands(rng)
@@ -975,6 +976,82 @@ class CostTests(StaleCase):
         rc, out, before, after = self.run_copy_of_script(rng, ["--range", "%s...%s" % (rng.base, rng.head)])
         self.assertIn(rc, (0, 1), out)
         self.assertEqual(after, before, out)
+
+    def scan_counts(self, rng, name, without=()):
+        """(reads, commands) of one in-process scan of the range from the repo. `reads` counts each object the BlobReader
+        reads, by its spec. `commands` are the git commands the run started, read from the GIT_TRACE file `name`. A code
+        in `without` leaves its reader out, so a case compares a run with STALE006 against the run without it."""
+        stale = load_module_under_test()
+        real_read, saved_readers = stale.BlobReader.read, stale.READERS
+        saved_trace, cwd, trace = os.environ.get("GIT_TRACE"), os.getcwd(), os.path.join(rng.case, name)
+        reads = collections.Counter()
+
+        def counting(batch, spec, kind=b"blob"):
+            reads[spec] += 1
+            return real_read(batch, spec, kind)
+
+        stale.BlobReader.read = counting
+        stale.READERS = tuple(r for r in saved_readers if getattr(r, "code", "") not in without)
+        os.environ["GIT_TRACE"] = trace
+        os.chdir(rng.repo)
+        try:
+            stale.scan("%s...%s" % (rng.base, rng.head))
+        finally:
+            os.chdir(cwd)
+            stale.BlobReader.read, stale.READERS = real_read, saved_readers
+            if saved_trace is None:
+                os.environ.pop("GIT_TRACE", None)
+            else:
+                os.environ["GIT_TRACE"] = saved_trace
+        return reads, git_subcommands(trace)
+
+    def markdown_of(self, reads):
+        """The Markdown blob reads of a `scan_counts` count, by spec. Tree reads of the walk are left out."""
+        return collections.Counter({spec: n for spec, n in reads.items() if spec.endswith(".md")})
+
+    def test_a_py_only_range_reads_the_markdown_at_head_once_and_starts_no_git_process_for_that_read(self):
+        """STALE006 reads each governed Markdown file at head once for any range that edits a file in place, .py included.
+        Main reads no Markdown for this range, so the one read is STALE006's, and the .py's own cat-file serves it."""
+        def change(repo):
+            write(repo, "code.py", text_of(insert_above_line_ten(source_lines())))
+            commit(repo)
+        rng = self.make_range(base_files(extra={"code.py": text_of(source_lines())}), change)
+        self.assertEqual(touched(rng), {"code.py"})  # scope: the range changes only the .py, and no Markdown anchors it
+        with_drift, subs = self.scan_counts(rng, "git-trace-with.txt")
+        without, subs_without = self.scan_counts(rng, "git-trace-without.txt", without=("STALE006",))
+        md = "%s:%s" % (rng.head, NOTES)
+        self.assertEqual(self.markdown_of(without), collections.Counter(), "main reads Markdown for this range\n")
+        self.assertEqual(self.markdown_of(with_drift), collections.Counter({md: 1}),
+                         "STALE006 does not read each governed Markdown file at head exactly once\n")
+        self.assertEqual(sorted(subs), sorted(subs_without), "STALE006 starts a git process for its Markdown read\n")
+
+    def test_a_non_py_range_in_a_repo_with_no_decision_records_adds_one_cat_file_start_and_reads_the_markdown_once(self):
+        """The accepted cost: a range that edits a non-.py file reads every governed Markdown file at head once through
+        the one cat-file start that the run did not make before. This repo has no decision record, so nothing else opens it."""
+        def change(repo):
+            write(repo, "hooks/lib.mjs", LIB + "export const more = 1;\n")
+            commit(repo)
+        rng = self.make_range(base_files(), change)
+        self.assertEqual(touched(rng), {"hooks/lib.mjs"})  # scope: one non-.py file changes, and no decision record exists
+        with_drift, subs = self.scan_counts(rng, "git-trace-with.txt")
+        without, subs_without = self.scan_counts(rng, "git-trace-without.txt", without=("STALE006",))
+        self.assertEqual(self.markdown_of(with_drift), collections.Counter({"%s:%s" % (rng.head, NOTES): 1}),
+                         "STALE006 does not read each governed Markdown file at head exactly once\n")
+        self.assertEqual(collections.Counter(subs) - collections.Counter(subs_without), collections.Counter({"cat-file": 1}),
+                         "STALE006 does not add exactly one cat-file start for a non-.py range\n")
+
+    def test_a_non_py_range_in_a_repo_with_decision_records_adds_no_git_start_for_its_markdown_read(self):
+        """The decision records' read already opens the cat-file that the Markdown read uses, so the start is not extra."""
+        extra = decisions(("tool-home-record", "config/tool.toml"))
+
+        def change(repo):
+            write(repo, "config/tool.toml", "mode = 2\n")
+            commit(repo)
+        rng = self.make_range(base_files(extra=extra), change)
+        self.assertEqual(touched(rng), {"config/tool.toml"})  # scope: one non-.py file changes, and a decision names it
+        _, subs = self.scan_counts(rng, "git-trace-with.txt")
+        _, subs_without = self.scan_counts(rng, "git-trace-without.txt", without=("STALE006",))
+        self.assertEqual(sorted(subs), sorted(subs_without), "STALE006 starts a git process a decision record did not start\n")
 
     def run_tree_traced(self, rng):
         """(exit code, output, the git subcommands started). No trace file means no git start at all."""
@@ -2376,6 +2453,32 @@ class DriftTests(StaleCase):
         rng = self.drift(insert_above_line_ten(source_lines()), base_notes=notes)
         self.assertNotIn(NOTES, touched(rng))  # scope: the anchored line is untouched
         self.assert_stale006(rng, 5, ["code.py:13"])
+
+    def test_a_line_ending_change_alone_is_no_drift_on_the_line_that_cites_it(self):
+        crlf = [line + "\r" for line in source_lines()]  # the same text, every line ends CRLF
+        rng = self.drift(crlf)
+        self.assertEqual(base_hunks(rng, "code.py"), [(1, 20)])  # scope: every line of code.py is rewritten
+        self.assertNotIn(NOTES, touched(rng))  # scope: the anchoring line is untouched
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(stale006_lines(out), [], "a line-ending change alone reads as a text change at code.py:10\n" + out)
+
+    def test_a_real_edit_of_the_cited_line_still_reads_as_changed_under_a_line_ending_change(self):
+        lines = source_lines()
+        lines[9] = "v10 = 99"  # line 10, the cited line, changes its text
+        rng = self.drift([line + "\r" for line in lines])
+        self.assertEqual(base_hunks(rng, "code.py"), [(1, 20)])  # scope: the same full rewrite as the case above
+        self.assert_stale006(rng, 3, ["code.py:10", "cited text changed"])
+
+    def test_added_cite_of_head_lines_the_range_inserts_is_pinned_as_a_pre_range_guess(self):
+        """Pinned, not fixed. `code.py:1-3` written beside three lines the range inserts at the top is what a writer who
+        reads head numbers writes. It is also what a writer who reads pre-range numbers writes for base lines 1-3, which
+        now sit at 4-6. The file reads the same either way, so the rule keeps its "may use pre-range numbers" guess."""
+        head = ["x1 = 1", "x2 = 2", "x3 = 3"] + source_lines()
+        rng = self.drift(head, head_notes="# Notes\n\n- the gate is `code.py:1-3`.\n", base_notes="# Notes\n")
+        self.assertEqual(base_hunks(rng, "code.py"), [(0, 0)])  # scope: three lines go in above line 1
+        self.assertEqual(base_hunks(rng, NOTES), [(1, 0)])  # scope: the range adds the anchoring line
+        self.assert_stale006(rng, 3, ["pre-range", "code.py:4-6"])
 
 
 if __name__ == "__main__":
