@@ -2148,6 +2148,11 @@ class RouteClaimFixtureTests(unittest.TestCase):
             self.assertTrue(row["text_summary"].strip(), row)
         self.assertEqual(len({(row["file"], row["line"], row["rev"]) for row in rows}), len(rows),
                          "a (file, line, rev) repeats")  # one line judged at two revs is two rows
+        # The pinned label mix. Adding or removing a row changes this pin, on purpose.
+        self.assertEqual(collections.Counter(row["label"] for row in rows),
+                         collections.Counter({"STALE": 19, "PARTLY_STALE": 1, "HALF": 1, "TRUE": 13,
+                                              "HISTORY": 1, "UNKNOWN": 3}),
+                         "the label mix of the labelled file moved: pin it here if the change is on purpose")
         unknown = [row["evidence"][:40] for row in rows if "evidence" in row and not known_commit(row["evidence"][:40])]
         if unknown and git(ROOT, "rev-parse", "--is-shallow-repository") == "true":
             self.skipTest("evidence sha missing from this shallow clone: %s" % ", ".join(unknown))
