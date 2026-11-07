@@ -1424,5 +1424,18 @@ class MockupHomes(Tree):
         self.refuses("docs/design")
 
 
+class WaitingCollections(unittest.TestCase):
+    """The waiting page's collections have one home: export_page.COLLECTIONS (skill waiting-page). layout.py holds that
+    tuple itself, not a copy, so a collection added there reaches the layout and the export together. export_page is
+    imported under its module name, so a layout that imports it by that name gets the same object."""
+
+    def test_layout_waiting_collections_is_the_export_pages_tuple(self):
+        layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+        sys.path.insert(0, os.path.join(LINT, "..", "skills", "waiting-page"))
+        import export_page  # noqa: E402  the one home of the collection list
+        self.assertIs(layout.WAITING_COLLECTIONS, export_page.COLLECTIONS,
+                      "lint/layout.py WAITING_COLLECTIONS is a copy of the list, not export_page.COLLECTIONS")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -31,6 +31,7 @@ Contract the page cases assume (the builder builds to it):
 """
 import collections
 import glob
+import importlib.util
 import json
 import os
 import re
@@ -46,7 +47,16 @@ LINT = os.path.realpath(os.path.join(HERE, "..", "..", "lint"))
 sys.path.insert(0, LINT)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 
-COLLECTIONS = ("items", "answers", "groups", "asks", "meta")
+
+def load_export_page(path):
+    """export_page.py loaded from the script under test, so the list the cases check is that script's own."""
+    spec = importlib.util.spec_from_file_location("export_page", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+COLLECTIONS = load_export_page(CMD).COLLECTIONS  # the one home (export_page.py); the page's calls are checked against it
 MARKER = ".complete"  # the session touches it in each collection folder after the last list page
 ARTIFACT = "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"
 SENTINEL = 1000000000  # a fixed mtime for a file a run must not rewrite; no clock is read
@@ -79,6 +89,27 @@ with open(os.path.join(HERE, "page.html"), encoding="utf-8") as f:
     PAGE = f.read()
 assert len(DESIGN.findall(PAGE)) == 1, "page.html must hold one designData block: the fixture's shape"
 DESIGN_ELEMENT = DESIGN.search(PAGE).group(0)
+# The page's own collection calls. Only the script blocks are read, and in them a comment or a string is skipped, so a
+# call inside either is no call (building-scanner-respects-strings). A regex literal that holds a quote is not handled.
+SCRIPT_BODY = re.compile(r"<script\b[^>]*>(.*?)</script\s*>", re.I | re.S)
+JS_TOKEN = re.compile(
+    r"//[^\n]*"                                    # a line comment
+    r"|/\*.*?\*/"                                  # a block comment, across lines
+    r"|\"(?:\\.|[^\"\\\n])*\""                     # a double-quoted string
+    r"|'(?:\\.|[^'\\\n])*'"                        # a single-quoted string
+    r"|`(?:\\.|[^`\\])*`"                          # a template literal, across lines
+    r"|\bcollection\(\s*\"([A-Za-z_]+)\"\s*\)",    # a call with a literal name: group 1
+    re.S)
+
+
+def collection_calls(text):
+    """The names of the `collection("name")` calls in the script blocks of `text`, in order. A call inside a comment or a
+    string is no call. Page text outside a script block is not read, so a quote in it opens no string."""
+    return [m.group(1) for body in SCRIPT_BODY.findall(text) for m in JS_TOKEN.finditer(body) if m.group(1)]
+
+
+PAGE_NAMES = frozenset(collection_calls(PAGE))
+FETCHED = tuple(sorted(set(COLLECTIONS) | PAGE_NAMES))  # a fetch pulls every collection the page reads and the export holds
 # The fixture page as bytes with a CRLF line and non-ASCII text, so a copy that normalizes either goes red.
 PAGE_BYTES = PAGE.replace("<style>", "<!-- café — über -->\r\n<style>", 1).encode("utf-8")
 REVISED_PAGE = PAGE.replace("<style>", "<!-- revised note -->\n<style>", 1).encode("utf-8")  # changed outside designData
@@ -468,14 +499,14 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: never the system temp dir
         self.addCleanup(self.tmp.cleanup)
 
-    def fetch(self, items=None, answers=None, groups=None, asks=None, meta=None):
-        """A fetched folder: one folder per collection, each doc a JSON file, and the completeness marker. An empty
-        collection is an empty folder with its marker."""
+    def fetch(self, items=None, answers=None, groups=None, asks=None, meta=None, receipts=None):
+        """A fetched folder: one folder per collection of FETCHED, each doc a JSON file, and the completeness marker. An
+        empty collection is an empty folder with its marker."""
         root = tempfile.mkdtemp(prefix="fetched-", dir=self.tmp.name)
-        docs = {"items": items, "answers": answers, "groups": groups, "asks": asks, "meta": meta}
-        for name in COLLECTIONS:
+        docs = {"items": items, "answers": answers, "groups": groups, "asks": asks, "meta": meta, "receipts": receipts}
+        for name in FETCHED:
             os.makedirs(os.path.join(root, name))
-            for doc_id, data in (docs[name] or {}).items():
+            for doc_id, data in (docs.get(name) or {}).items():
                 write_text(os.path.join(root, name, doc_id + ".json"), canonical(data))
             write_text(os.path.join(root, name, MARKER), "")
         return root
@@ -507,6 +538,37 @@ class Base(unittest.TestCase):
         found = [m for m in (re.match(r"batches\s+(\d+)\s+docs\s+(\d+)\b", line) for line in verdict_lines(r)) if m]
         self.assertTrue(found, "no `batches <k> docs <n>` line. Output:\n" + shown(r))
         self.assertEqual((int(found[0].group(1)), int(found[0].group(2))), (k, n), shown(r))
+
+
+class PageCollections(unittest.TestCase):
+    """The page's collections are export_page.COLLECTIONS: each collection the page reads or writes is exported, and each
+    exported one is read or written by the page. The scanner is also checked on snippets, so a call hidden by a comment
+    or a string fails there by name."""
+
+    def test_the_page_reads_and_writes_exactly_the_export_collections(self):
+        self.assertTrue(SCRIPT_BODY.search(PAGE), "page.html has no script block, so there is nothing to scan")
+        page = set(collection_calls(PAGE))
+        self.assertTrue(page, "the scan found no collection(\"name\") call in page.html")
+        self.assertEqual(sorted(page - set(COLLECTIONS)), [],
+                         "the page reads or writes a collection that export_page.COLLECTIONS does not export")
+        self.assertEqual(sorted(set(COLLECTIONS) - page), [],
+                         "export_page.COLLECTIONS exports a collection the page never reads or writes")
+
+    def test_a_comment_opener_inside_a_string_hides_no_call(self):
+        text = '<script>const s = "/* open"; const u = "https://x"; db.collection("receipts").doc(id);</script>'
+        self.assertEqual(collection_calls(text), ["receipts"], "a comment opener inside a string hid the call after it")
+
+    def test_a_call_named_in_a_multi_line_template_literal_is_no_call(self):
+        text = "<script>const t = `first\ncollection(\"scratch\")\n// not a comment\n`; db.collection(\"items\");</script>"
+        self.assertEqual(collection_calls(text), ["items"], "a call named inside a multi-line template literal was counted")
+
+    def test_a_lone_quote_in_page_text_or_a_comment_opens_no_string(self):
+        text = "<p>Don't stop here.</p>\n<script>// Don't read this\ndb.collection(\"asks\");</script>"
+        self.assertEqual(collection_calls(text), ["asks"], "a lone quote in text or a comment hid the call after it")
+
+    def test_a_commented_out_call_is_no_call(self):
+        text = '<script>// db.collection("scratch")\n/* db.collection("scratch") */ db.collection("items");</script>'
+        self.assertEqual(collection_calls(text), ["items"], "a commented-out collection call was counted")
 
 
 class Scan(Base):
@@ -629,7 +691,7 @@ class Mirror(Base):
 
     def test_a_fetch_with_no_completeness_markers_is_unknown_and_writes_nothing(self):
         fetched = self.fetch(items={"a": {"id": "a"}}, meta={"page": META})
-        for name in COLLECTIONS:
+        for name in FETCHED:
             os.remove(os.path.join(fetched, name, MARKER))
         out = self.out()
         write_text(os.path.join(out, "items", "old.json"), "{}\n")
@@ -645,6 +707,15 @@ class Mirror(Base):
         r = self.export(fetched, out)
         self.assertVerdict(r, "same")
         self.assertEqual(r.returncode, 0, shown(r))
+
+    def test_a_receipts_doc_in_the_fetch_lands_in_the_copy(self):
+        receipt = {"id": "r1", "read": "2026-10-02T10:00:00Z"}
+        fetched = self.fetch(items={"a": {"id": "a"}}, receipts={"r1": receipt}, meta={"page": META})
+        out = self.out()
+        r = self.export(fetched, out)
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.assertTrue(os.path.isfile(os.path.join(out, "receipts", "r1.json")), "waiting/receipts/r1.json is not in the copy")
+        self.assertEqual(read_text(os.path.join(out, "receipts", "r1.json")), canonical(receipt))
 
     def test_a_missing_collection_folder_is_unknown_and_writes_nothing(self):
         fetched = self.fetch(items={"a": {"id": "a"}}, meta={"page": META})
@@ -958,6 +1029,17 @@ class Rebuild(Base):
         self.assertEqual(len(lines), 1, "a crash must print one unknown line. Output:\n" + shown(r))
         self.assertTrue(lines[0].startswith("unknown"), shown(r))
 
+    def test_a_receipts_folder_in_the_copy_rebuilds_as_receipts_entries(self):
+        waiting = self.exported({"items": {"item-001": item(1)}}, page=False)
+        receipt = {"id": "r1", "read": "2026-10-02T10:00:00Z"}
+        write_text(os.path.join(waiting, "receipts", "r1.json"), canonical(receipt))
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.rebuild(waiting, batches)
+        self.assertEqual(r.returncode, 0, "the rebuild refused the copy's receipts folder. Output:\n" + shown(r))
+        _, entries, _ = self.batch_entries(batches)
+        self.assertIn({"op": "set", "collection": "receipts", "doc_id": "r1", "data": receipt}, entries,
+                      "no batch entry sets receipts/r1")
+
     def test_an_empty_waiting_dir_is_unknown(self):
         waiting = self.out()
         os.makedirs(waiting)
@@ -990,7 +1072,8 @@ class All(Base):
     def docs(self):
         """What each artifact's fetch holds. The queue lists items only, so its answers are fetched but never exported."""
         return {self.WAIT: dict(items={"i1": item(1)}, answers={"a1": {"item": "i1", "pick": "a"}},
-                                groups={"g1": {"name": "Group"}}, asks={"k1": {"item": "i1"}}, meta={"page": META}),
+                                groups={"g1": {"name": "Group"}}, asks={"k1": {"item": "i1"}}, meta={"page": META},
+                                receipts={"r1": {"id": "r1", "read": "2026-10-02T10:00:00Z"}}),
                 self.QUEUE: dict(items={"q1": item(2)}, answers={"qa1": {"item": "q1", "pick": "b"}})}
 
     def fetched_all(self, docs, pages=None, files=None):
