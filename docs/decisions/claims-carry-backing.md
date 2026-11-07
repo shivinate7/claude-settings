@@ -34,7 +34,7 @@ Coordinator pick, 2026-11-07 15:12 CST, process-only, reversible (lane `why-cite
 - Act text: each line of the task's `command` field (each variant of `{powershell, mac}`), split at `&&` and `;`, plus each backtick span in its `context`.
 - Cover: the cited id is one of the rows on this surface whose `pattern` matches a piece of act text. The match is the route matcher's (`hooks/route_match.py`), so the row file's patterns need no change. Two rows may share a pattern, so the rule is membership, not the one row the matcher picks first.
 - No cover: a cited row whose pattern matches no piece is refused. Remedy: cite the row of the act, or name the act's command.
-- No act text, or a cited row with no pattern: UNKNOWN note, never a pass and never a refusal.
+- No act text, or a cited row with no pattern or one that does not compile: UNKNOWN, never a refusal. The page guard runs before the write and has no note channel, so it lets the write through, as it does for a row whose outcome does not read.
 - Alternates do not cover: a row's `alternates` name other acts, not this one.
 - Replies are out of scope: part (b), the reply judge, judges a reply's cite against its act.
 
