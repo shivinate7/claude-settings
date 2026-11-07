@@ -126,10 +126,10 @@ common_dir() { git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/
 # The main working tree of the repo DIR belongs to: the first entry of the worktree list.
 clone_of() { git -C "$1" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p'; }
 
-# Prints the clone when DIR is its live pin (decision merge-reinstalls-from-main): a linked worktree whose
+# Prints the clone when DIR is its live pin (decision install-refuses-linked-tree): a linked worktree whose
 # resolved path is the resolved <clone>-live, or is <clone>-live-<12 hex>. Returns 1 for anything else.
-# The pin name has four copies; change all together: this file, hooks/session_start.sh (sh cannot source
-# this file), hooks/guard_frozen.py (LIVE_PIN_SUFFIX) and merge/install_from_main.sh (builds the name).
+# The pin name has five copies; change all together: this file, install.ps1 (builds <clone>-live), hooks/session_start.sh
+# (sh cannot source this file), hooks/guard_frozen.py (LIVE_PIN_SUFFIX) and merge/install_from_main.sh (builds the name).
 live_pin_clone() {
   is_linked_worktree "$1" || return 1
   lp_clone=$(clone_of "$1")
@@ -216,7 +216,7 @@ pin_off_main() {
 
 # An install from a linked worktree would point the global config at a temp
 # checkout. Refuse before any write, whether the source came from the script or from the cwd.
-# Decision merge-reinstalls-from-main: the pinned checkout <clone>-live is the one linked
+# Decision install-refuses-linked-tree: the pinned checkout <clone>-live is the one linked
 # worktree allowed, and only on a detached HEAD at the clone's local main commit. <clone>-live
 # may be a link to such a worktree (merge/install_from_main.sh moves it), so paths compare resolved.
 if [ -n "$SRC" ] && is_linked_worktree "$SRC"; then
@@ -439,12 +439,26 @@ use_main_mirror() {
   fi
 }
 
+# git_op_in_progress DIR: prints the name of the operation stopped in DIR's checkout (rebase, bisect, cherry-pick, revert
+# or merge) and returns 0, or returns 1 when none is. HEAD is detached and the tree can be clean during one, so a move
+# would lose the operation's place.
+git_op_in_progress() {
+  for gop in rebase-merge:rebase rebase-apply:rebase BISECT_LOG:bisect CHERRY_PICK_HEAD:cherry-pick REVERT_HEAD:revert MERGE_HEAD:merge; do
+    gop_path=$(git -C "$1" rev-parse --git-path "${gop%%:*}" 2>/dev/null) || continue
+    case "$gop_path" in /*) ;; *) gop_path="$1/$gop_path" ;; esac
+    if [ -e "$gop_path" ]; then printf '%s\n' "${gop#*:}"; return 0; fi
+  done
+  return 1
+}
+
 # Cloud, a session's own checkout (no marker): a cloud session starts it detached at its creation commit, so its
 # hooks, lint and merge allow rules would never follow main. A clean, detached checkout whose commit main already
 # holds moves to origin/$REF, so nothing is lost. A clean branch checkout at the tip of origin/$REF stays the source as it is.
 # Another branch, a dirty tree or a commit main lacks stays as it is and is
 # not the source: use_main_mirror takes the install's files from $REF, so no old branch's hooks go live.
-# When $REF cannot be fetched, the checkout stays the source as before, with a WARN.
+# A stopped rebase, bisect, cherry-pick, revert or merge also leaves it as it is and not the source.
+# When $REF cannot be fetched, a detached checkout stays the source as before, with a WARN. A branch checkout stays
+# the source only when HEAD equals the older origin/$REF record; any other branch goes to the mirror.
 # The fetch is launch.py's refspec form, never --depth: a shallow fetch would make the session's full clone shallow.
 # The live pin skips it.
 if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/.git" ] \
@@ -477,6 +491,9 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/
     fi
   elif [ -n "$(git -C "$SRC" status --porcelain 2>/dev/null)" ]; then
     log "WARN: the checkout $SRC has uncommitted changes; left as is at $(git -C "$SRC" rev-parse --short HEAD), not moved to $REF"
+    own_not_source=1
+  elif own_op=$(git_op_in_progress "$SRC"); then
+    log "WARN: the checkout $SRC has a $own_op in progress; left as is at $(git -C "$SRC" rev-parse --short HEAD), not moved to $REF"
     own_not_source=1
   elif ! cloud_git -C "$SRC" fetch -q origin "+refs/heads/$REF:refs/remotes/origin/$REF"; then
     log "WARN: could not fetch $REF into $SRC; left as is at $(git -C "$SRC" rev-parse --short HEAD); the install takes its files from it, which may not be $REF"
