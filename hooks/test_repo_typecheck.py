@@ -445,6 +445,18 @@ class Command(CaseName):
         self.assertEqual(len(noted), 1, "the bad entry did not write exactly one guard.log line naming typecheck")
         self.assertIn("\tnoted\t", noted[0], "the bad entry's guard.log line is not a noted line")
 
+    def test_a_glob_that_does_not_compile_costs_only_its_entry(self):
+        repo = Repo(self.name())
+        repo.declare(entry(fail_command(), globs=("app/**/*.ts",)),
+                     entry(fail_command(), globs=("app/[z-a].ts",)))
+        rc, out, err = run_host(repo, repo.payload(repo.abs("app/x.ts")))
+        block = block_of(out)
+        self.assertIsNotNone(block, "a glob that does not compile cost the good entry its report")
+        self.assertIn("boom", block["reason"], "the good entry's output is not in the block")
+        noted = [line for line in guard_log_lines(repo) if "typecheck" in line]
+        self.assertEqual(len(noted), 1, "the bad glob did not write exactly one guard.log line naming typecheck")
+        self.assertIn("\tnoted\t", noted[0], "the bad glob's guard.log line is not a noted line")
+
     def test_a_timeout_is_silent(self):
         repo = Repo(self.name())
         repo.declare(entry(fail_command(), timeout=30))
