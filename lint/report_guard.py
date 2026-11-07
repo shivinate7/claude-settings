@@ -1595,12 +1595,13 @@ UNVETTED_AFTER_SENTENCE = re.compile(r"([.?!][*_)\"']*)[ \t]+(?=Unvetted:[ \t]*\
 LIST_ITEM = re.compile(r"^[ ]{0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)")
 
 
-def prose_questions(text):
-    """The reply's own prose lines that hold a sentence ending in `?`, outside fenced code, indented code and code
-    spans. A blockquote line counts. Indented code opens after a blank line or another code line, as in CommonMark;
-    inside a list an indented line is list text, never code."""
-    found, fenced, code_ok, in_list = [], False, True, False
-    for line in text.splitlines():
+def prose_lines(text):
+    """(line index, text) of each prose line: outside fenced code and indented code, the blockquote mark and the edge
+    spaces cut. Indented code opens after a blank line or another code line, as in CommonMark; inside a list an
+    indented line is list text, never code. The one reader of what is code, for prose_questions and for the send gate
+    of hooks/call_judge.py."""
+    fenced, code_ok, in_list = False, True, False
+    for index, line in enumerate(text.splitlines()):
         inner = QUOTE_PREFIX.sub("", line, count=1)
         body = inner.strip()
         if body.startswith("```"):
@@ -1619,9 +1620,13 @@ def prose_questions(text):
             in_list = True
         elif not indented:
             in_list = False
-        if SENTENCE_QUESTION.search(CODE_SPAN.sub("", body)):
-            found.append(body)
-    return found
+        yield index, body
+
+
+def prose_questions(text):
+    """The reply's own prose lines that hold a sentence ending in `?`, outside fenced code, indented code and code
+    spans. A blockquote line counts."""
+    return [body for _, body in prose_lines(text) if SENTENCE_QUESTION.search(CODE_SPAN.sub("", body))]
 
 
 def has_input_needed(text):
@@ -1653,23 +1658,27 @@ def asked_text(text):
     return "\n".join(questions + [u for u in unvetted if u not in questions])[-ASK_TEXT_MAX:]
 
 
-def cannot_run(asked, why):
+def cannot_run(asked, why, marked=None):
     """The Unvetted refusal for a check that could not run, or '' when the asked text carries its own
-    `Unvetted:` line. The marker is read only here, so it never skips a check that can run."""
+    `Unvetted:` line. The marker is read only here, so it never skips a check that can run. A caller that asks several
+    questions in one text passes `marked`, whether every one carries its own line."""
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     import question_form
-    return "" if question_form.has_unvetted(asked) else UNVETTED_REASON % why
+    if marked is None:
+        marked = question_form.has_unvetted(asked)
+    return "" if marked else UNVETTED_REASON % why
 
 
-def past_ruling_problem(asked, cwd):
-    """The refusal text for asked text that a past ruling settles, or that could not be checked, else ''."""
+def past_ruling_problem(asked, cwd, marked=None):
+    """The refusal text for asked text that a past ruling settles, or that could not be checked, else ''. `marked`
+    is cannot_run's: set by a caller whose text holds several questions or is cut before it is sent here."""
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     import question_form
     candidates, unknown = question_form.past_rulings(asked, repo_root(cwd) or cwd or os.getcwd())
     print(question_form.unknown_line(unknown), file=sys.stderr)
     unreadable = question_form.unreadable_sources(unknown)
     if unreadable:
-        return cannot_run(asked, "; ".join(unreadable))
+        return cannot_run(asked, "; ".join(unreadable), marked)
     import call_judge  # the one home of item 8, its model and its time limit
     import decision_watch
     prompt = ("Review this text, which a session sends the owner and which asks him something:\n<<<\n" + asked
@@ -1681,13 +1690,13 @@ def past_ruling_problem(asked, cwd):
                                                  timeout=call_judge.PAST_RULING_TIMEOUT,
                                                  shape=call_judge.OK_SHAPE, effort=None)
     if error:
-        return cannot_run(asked, " ".join(str(error).split()))
+        return cannot_run(asked, " ".join(str(error).split()), marked)
     if verdict.get("ok") is not False:
         return ""
     reason = verdict.get("reason")
     reason = reason.strip() if isinstance(reason, str) and reason.strip() else "a past ruling settles this."
     if question_form.ruling_cite(reason, question_form.candidate_ids(candidates), strict=True) != "cited":
-        return cannot_run(asked, "the review cited a record that was not in the list")
+        return cannot_run(asked, "the review cited a record that was not in the list", marked)
     return RELAY_RULE_REASON % reason
 
 
