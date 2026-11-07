@@ -241,6 +241,16 @@ def guard_closure():
     return _CLOSURE["files"], _CLOSURE["unfollowed"]
 
 
+def named_keys(f, src, tracked):
+    """The LOAD_EXCEPTIONS keys of the loads one file's source names but does not follow, read from the source text."""
+    return [f"{f}:{k}" for k, _ in _refs(f, ast.parse(src, filename=f), tracked)[3]]
+
+
+def exceptions_of(f):
+    """The LOAD_EXCEPTIONS keys of one file, sorted."""
+    return sorted(k for k in LOAD_EXCEPTIONS if k.split(":")[0] == f)
+
+
 def git(cwd, *a):
     return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
@@ -760,6 +770,25 @@ class GuardClosure(unittest.TestCase):
         for p in ("hooks/_nowindow.py", "lint/layout.json", "bin/sim-lease"):
             with self.subTest(path=p):
                 self.assertIn(p, files)
+
+    def test_blank_lines_above_a_load_keep_its_load_exception(self):
+        # Each file read with three blank lines at its top: its named loads must still be its LOAD_EXCEPTIONS entries, so
+        # a key cannot hold a line number. The control, the same check unshifted, is the next case.
+        tracked = set(_repo_files())
+        for f in sorted({key.split(":")[0] for key in LOAD_EXCEPTIONS}):
+            with self.subTest(path=f):
+                self.assertIn(f, guard_closure()[0], f"scope: {f} is not in the guard closure")
+                keys = named_keys(f, "\n\n\n" + open(os.path.join(REPO, f), encoding="utf-8").read(), tracked)
+                self.assertEqual(len(keys), len(set(keys)), f"{f}: two named loads share a key: {keys}")
+                self.assertEqual(sorted(keys), exceptions_of(f), f"{f}: its named loads moved when blank lines went above them")
+
+    def test_the_plain_source_keeps_its_load_exceptions(self):
+        # The control: the same check on each file as it is. It passes on any key scheme that names the loads.
+        tracked = set(_repo_files())
+        for f in sorted({key.split(":")[0] for key in LOAD_EXCEPTIONS}):
+            with self.subTest(path=f):
+                keys = named_keys(f, open(os.path.join(REPO, f), encoding="utf-8").read(), tracked)
+                self.assertEqual(sorted(keys), exceptions_of(f), f"{f}: its named loads differ from its LOAD_EXCEPTIONS entries")
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
