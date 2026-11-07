@@ -1734,7 +1734,7 @@ def flag_runs(expr, event, flags, draft=False):
     return eval_if(text, event, "false", draft=draft)
 
 
-def gate_runs(expr, event, flags, draft=False):
+def if_runs(expr, event, flags, draft=False):
     """Whether a job-level or step-level `if:` runs. None is no condition, and no condition runs."""
     return True if expr is None else flag_runs(expr, event, flags, draft)
 
@@ -1769,7 +1769,7 @@ class GuardShardSteps(unittest.TestCase):
     def check_rows(self, event, flags, rows):
         for label, expr, want in rows:
             with self.subTest(part=label, event=event):
-                got = gate_runs(expr, event, flags)
+                got = if_runs(expr, event, flags)
                 self.assertEqual(got, want, f"{label} runs {got} on {event} with {FULL_FLAG} {flags[FULL_FLAG]}, want {want}")
 
     def test_the_scope_job_exports_both_split_flags(self):
@@ -1806,8 +1806,8 @@ class GuardShardSteps(unittest.TestCase):
         # checks-windows-guard-2 has no job-level if, so a draft pull_request skips it because scope skips it.
         self.assertEqual(self.jobs["checks-windows-guard-2"]["needs"], "scope", "checks-windows-guard-2 does not need scope")
         scope_if = self.jobs["scope"]["if"]
-        self.assertFalse(gate_runs(scope_if, "pull_request", {}, draft=True), f"scope runs on a draft pull_request: {scope_if!r}")
-        self.assertTrue(gate_runs(scope_if, "pull_request", {}, draft=False), f"scope skips a ready pull_request: {scope_if!r}")
+        self.assertFalse(if_runs(scope_if, "pull_request", {}, draft=True), f"scope runs on a draft pull_request: {scope_if!r}")
+        self.assertTrue(if_runs(scope_if, "pull_request", {}, draft=False), f"scope skips a ready pull_request: {scope_if!r}")
 
     def test_guard_shard_2_has_no_job_level_if(self):
         # all-jobs-passed needs it on a ready pull_request, and its steps decide there: the job itself carries no if.
@@ -1819,8 +1819,8 @@ class GuardShardSteps(unittest.TestCase):
             name = f"checks-windows-merge-{n}"
             with self.subTest(job=name):
                 job_if = self.jobs[name]["if"]
-                self.assertFalse(gate_runs(job_if, "pull_request", {}), f"{name} runs on a pull_request: its job-level if is {job_if!r}")
-                self.assertTrue(gate_runs(job_if, "push", {}), f"{name} does not run on push: its job-level if is {job_if!r}")
+                self.assertFalse(if_runs(job_if, "pull_request", {}), f"{name} runs on a pull_request: its job-level if is {job_if!r}")
+                self.assertTrue(if_runs(job_if, "push", {}), f"{name} does not run on push: its job-level if is {job_if!r}")
 
 
 class GuardShardJobIf(unittest.TestCase):
