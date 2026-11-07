@@ -101,7 +101,12 @@ SECRET_SHAPES = (
     ("private-key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY")),
     ("jwt", re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*")),
     ("auth-header", re.compile(r"\bAuthorization:\s*(?:Bearer|Basic)\s+\S+", re.I)),
-    ("cookie-header", re.compile(r"\bCookie:\s*[^\s=;]+=\S+", re.I)),
+    # `Cookie:`, optional space, a name with no space, "=" or ";", then "=" and a value. Linear: the name is the rest of a
+    # run of [^\s=;], so each run is read once, from its start. Branch 1 is `Cookie:` plus space; branch 2 is `Cookie:`
+    # inside a run, found by one lazy scan from that run's start. (`\s*[^\s=;]+` re-read the run at each `cookie:`.)
+    ("cookie-header", re.compile(
+        r"\bCookie:\s+(?=[^\s=;]++=\S)"
+        r"|(?<![^\s=;])(?=[^\s=;]++=\S)[^\s=;]*?\bCookie:[^\s=;]", re.I)),
     ("session-cookie", re.compile(r"(?<![A-Za-z0-9_.])connect\.sid=\S+")),
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
     # `scheme://user:password@host`, on any host: a version pin after the `@` is blanked, so an IP host is caught here.
