@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The progress beat of hooks/test_guard.py (decision stall-watch; debt test-guard-no-progress-line).
+"""The progress beat of hooks/test_guard.py (decision stall-watch).
 
 A full run of test_guard.py can print nothing for minutes, and the stall watch then reports a stall on a
 healthy run. The runner owes a line at least every GUARD_HEARTBEAT seconds of quiet (default 60). The line
