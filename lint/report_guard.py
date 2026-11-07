@@ -74,7 +74,7 @@ unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, 
 refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 
-The promise check (rule `building-mistake-names-its-guard`, promise_problem): on any turn, landed or not, it refuses
+The promise guard (rule `building-mistake-names-its-guard`, promise_problem): on any turn, landed or not, it refuses
 each reply line that promises "from now on" and names a handoff, unless the line also cites a PR, a commit, a
 `step:<slug>` or a repo path other than a handoff's. Quoted text, code spans, fences and questions never count.
 Incident: roadmap step export-after-page-write. Cost: regex over the reply, no file, no process.
@@ -736,14 +736,16 @@ def answered_problem(text):
     return ANSWERED_REASON + "".join("\n- " + b for b in bad) if bad else ""
 
 
-# The promise check (rule building-mistake-names-its-guard): a reply line that promises "from now on" and names
+# The promise guard (rule building-mistake-names-its-guard): a reply line that promises "from now on" and names
 # a handoff as the home of that promise, with no mechanical home on the line: a PR or commit (DONE_REF_RE),
-# a `step:<slug>` (MISTAKE_STEP_RE) or a repo path other than a handoff's. Quoted text, code spans, fences and
-# a line that ends in `?` never count. Incident (roadmap step export-after-page-write): a page writer wrote "From now on,
+# a `step:<slug>` (MISTAKE_STEP_RE) or a repo path other than a handoff's. A promise in quoted text, a code
+# span, a fence or a line that ends in `?` never counts; a handoff path in a code span still names a handoff.
+# The "Handoff gave:" label names no home. Incident (roadmap step export-after-page-write): a page writer wrote "From now on,
 # every wake that changes the page ends with an export. That step is in my handoff." Cost: regex over the
 # reply, on every Stop; no file, no process.
 PROMISE_RE = re.compile(r"(?<![\w-])from\s+now\s+on(?![\w-])", re.I)
 PROMISE_HANDOFF_RE = re.compile(r"(?<![\w-])handoffs?(?![\w-])", re.I)
+PROMISE_LABEL_RE = re.compile(r"\bhandoff\s+gave\s*:", re.I)  # the compaction-carry label names no home
 PROMISE_REASON = (
     "Promise guard (rule building-mistake-names-its-guard): each line below promises \"from now on\" and names "
     "only a handoff as its home. A handoff line is no mechanism (owner, 2026-11-06 19:02 CST). Build the check "
@@ -763,10 +765,12 @@ def promise_problem(text):
             continue
         if fence or body.rstrip("*_)\"' ").endswith("?"):
             continue
-        plain = QUOTED_RE.sub(" ", CODE_SPAN.sub(" ", body))
-        if not (PROMISE_RE.search(plain) and PROMISE_HANDOFF_RE.search(plain)):
+        unwrapped = CODE_SPAN.sub(lambda m: m.group(2), body)
+        named = PROMISE_LABEL_RE.sub(" ", QUOTED_RE.sub(" ", unwrapped))
+        if not (PROMISE_RE.search(QUOTED_RE.sub(" ", CODE_SPAN.sub(" ", body)))
+                and PROMISE_HANDOFF_RE.search(named)):
             continue
-        kept = " ".join(t for t in CODE_SPAN.sub(lambda m: m.group(2), body).split()
+        kept = " ".join(t for t in unwrapped.split()
                         if not PROMISE_HANDOFF_RE.search(t.replace("/", " ").replace(".", " ")))
         if DONE_REF_RE.search(kept) or MISTAKE_STEP_RE.search(kept) or _has_path(kept):
             continue

@@ -421,12 +421,12 @@ WRITER_SESSION_RE = re.compile(r"(?<![\w-])session_\w+(?![\w-])")
 
 def writer_session(writer):
     """The session id a `writer` value names. A bare id is itself. A label such as "Triage (session_<x>)",
-    the form the live pages hold, names the one session_<x> in it. A label with no id, or with two, names
-    none, so the caller treats the writer as unknown."""
+    the form the live pages hold, names the one session_<x> in it. A label with no id, or with two, stays
+    whole: it names a writer that is no session id, so no session matches it."""
     if WRITER_BARE_RE.fullmatch(writer):
         return writer
     ids = set(WRITER_SESSION_RE.findall(writer))
-    return ids.pop() if len(ids) == 1 else None
+    return ids.pop() if len(ids) == 1 else writer
 
 
 def _page_reads(records):
