@@ -87,8 +87,17 @@ def has_extras(root):
 
 def rolled_out(root):
     """True when `root` holds its extras file and the file's "rolled-out" key is true, so it keeps
-    every kind at its layout path."""
-    return has_extras(root) and _read(_extras(root)).get(ROLLED_OUT) is True
+    every kind at its layout path. An absent key or false reads as legacy. Any other value (a string,
+    a number, null) raises LayoutError: reading it as legacy would send a check to decisions/ and
+    pass over docs/decisions."""
+    if not has_extras(root):
+        return False
+    data = _read(_extras(root))
+    if ROLLED_OUT not in data:
+        return False
+    if not isinstance(data[ROLLED_OUT], bool):
+        raise LayoutError("%s: \"%s\" must be JSON true or false, not %s" % (_extras(root), ROLLED_OUT, json.dumps(data[ROLLED_OUT])))
+    return data[ROLLED_OUT]
 
 
 def kinds(root=None):
