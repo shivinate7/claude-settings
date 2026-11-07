@@ -5,7 +5,8 @@ Modes:
 - UserPromptSubmit: Tells the session the time in US Central, and saves the owner's message to the
   session's inbox file (decision owner-feedback-inbox).
   A prompt whose first word is `override` also grants a one-act owner override, and the rest is the
-  reason, logged to guard.log. `override <n>[m|h]` and `override off` mean that only as the whole prompt
+  reason, logged to guard.log. `override <n>[m|h]` and `override off` mean that only as the whole prompt.
+  A plain typed ask that holds the word `override` may grant one too, after a model call
   (decision owner-override; hooks/override.py). It prints one more line.
 - --agent: At SubagentStart, gives the agent the time in US Central as context.
 - --page-note: After an ArtifactData read of one waiting-page answer, saves the owner's note on it to the session's inbox, like a chat message (decision owner-feedback-inbox). It prints no time line.

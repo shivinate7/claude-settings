@@ -600,8 +600,12 @@ def grant_override_ask(session_id, prompt, at, judge=None, transcript=None, sour
     def main():
         return grant(session_id, prompt, at, defer=False) if keyword else None
 
-    gated = _owner_ask(prompt, source, transcript, _override_wanted)
-    length = _override_length(gated[0]) if gated else False
+    try:  # a gate that raises (a transcript read, an import) leaves main's result standing
+        gated = _owner_ask(prompt, source, transcript, _override_wanted)
+        length = _override_length(gated[0]) if gated else False
+    except Exception as exc:
+        print("override: plain ask grants nothing new: %s" % " ".join(str(exc).split()), file=sys.stderr)
+        return main()
     if gated is None or length is False:
         return main()
     if judge is None:
