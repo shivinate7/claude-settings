@@ -33,6 +33,8 @@ sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+import git_reads  # noqa: E402  the one home of the origin parser, origin_slug (hooks/git_reads.py)
 RUN_FOLDER = _test_temp.run_folder()  # test-temp-standard (one run folder per test run; its sweep is proved in test_find_copies.py)
 LONG = "a" * 33 + ".md"  # a slug over 32 characters
 EXTRAS = ".claude/layout-extras.json"
@@ -222,6 +224,16 @@ class LayoutFile(Tree):
                 self.setUp()
                 self.origin(url)
                 self.assertEqual(self.layout.repo_name(self.tree), want)
+
+    def test_repo_name_reads_an_origin_with_a_port_as_origin_slug_does(self):
+        """repo_name keeps its own GitHub parser, which breaks on a port between the host and the path. origin_slug
+        reads the same origin, so the two must agree."""
+        for url in ("ssh://git@github.com:22/shivinate7/q_max.git", "https://github.com:443/shivinate7/q_max.git"):
+            with self.subTest(url=url):
+                self.setUp()
+                self.origin(url)
+                self.assertEqual(self.layout.repo_name(self.tree), git_reads.origin_slug(url),
+                                 "repo_name reads no owner/name from an origin with a port after the host")
 
     def test_an_unreadable_git_file_is_no_origin_never_a_crash(self):
         with open(os.path.join(self.tree, ".git"), "wb") as f:
