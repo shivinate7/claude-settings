@@ -1,0 +1,10 @@
+{
+  "title": "The page export refuses an item reply that names a roadmap step with no step file",
+  "phase": "next",
+  "status": "todo",
+  "order": 260.5,
+  "owner": "coordinator",
+  "why": "Triage 6 slip, 2026-11-07 02:10 CST: item 183's reply named roadmap step ux-house-rules, which never existed (git log has no such file). The coordinator had to ask where the ruling lived.",
+  "note": "Check: export_page.py (skill waiting-page) reads each closed item's reply. For each 'roadmap step <slug>' it finds, it checks for roadmap/data/steps/<slug>.json on the record branch, and on a miss it exits 1 with the item n and slug. Prove it red on a reply that names a missing step, and green on item 183's reply as fixed (v9). A guard's verdict changes, so this is a build lane (test-author, builder, reviewer).",
+  "updatedAt": "2026-11-07T08:16:00Z"
+}
