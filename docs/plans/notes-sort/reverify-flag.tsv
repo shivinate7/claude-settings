@@ -1,0 +1,14 @@
+slug	verdict	reason
+guard-suite-red-on-unparsed	flag	test_guard.py is red on clean parsed and unparsed source on every report run, so the guard has no gold row; cause is findable and no reason fits.
+guard-abtests-test-path	flag	The builder test-folder rule ^[A-Z]\w*Tests$ (hooks/test_guard.py:13177) matches ABTests, so a builder is blocked there every time; an exception needs the owner's rule change.
+stall-message-delivery-unproven	flag	Claude Code shows a Stop systemMessage to the user, not the model, so the stall alarm's order to stop the shell likely never reaches the model (hooks/stall_watch.py:531).
+try-marker-sunset	flag	Dated fix due on or after 2026-11-12 (remove "try" from BUILDER_MARKERS); "Fix: none" would misstate it.
+merge-role-skips-raw-merge	flag	session-tiers.md:113 names it a debt, but no debt record exists; raw merge skips the role check.
+nao-builder-ran-opus	flag	Real model-cap breach (PR #872); hooks/guard.py:2877 passes a no-model spawn when the env var holds any value; cause unpinned.
+frozen-path-string-mention	flag	A false alarm hit in normal work on Nov 1; the repo rule makes a note a debt after a real incident.
+builder-diff-check-fail-open	flag	Observed once in a real batch run (48 builder-refuse cases got "allow" under parallel runs); fail-open on an unread git result is by design (hooks/guard.py:2248 diff_violation), but the cause of the failed reads is unread and batch runs repeat this load.
+qmax-select-exits-1	flag	Not rare: q_max `select` exited 1 in 24 scored PRs, so every changed suite ran each time; the cause is unread.
+banchi-cli-identify-red-clean	flag	Not rare: banchi t7/cli_identify.py was red on clean source in 5 PRs (898, 923, 926, 930, 956); the cause is unread, and it needs a fix or a flake ruling in banchi.
+builder-diff-merge-main-refused	flag	A builder's routine merge of main was refused once; cause unmeasured, and the suite says a clean merge passes (a guard bug or a designed test-conflict refusal).
+cloud-released-lock-stuck	flag	One stuck merge-lock ref blocked every later merge and the clears were refused; only the diagnostic landed, cause unmeasured.
+frozen-path-refuses-verdict	flag	frozen-path refused the mandatory verdict wrapper 4 times in one lane; possible false alarm, guard.log unread (not on this machine).
