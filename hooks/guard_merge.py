@@ -946,13 +946,37 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
     value), the merge is denied, never skipped."""
     if not is_cloud():
         return ""
+    return "merge --confirm" if _unproved_confirm(stripped, cwd, transcript, 0) else ""
+
+
+MERGE_NEST_DEPTH = 4  # `bash -c` inside `bash -c` is followed this far; a deeper script is judged as a refusal
+
+
+def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
+    """True when a `merge --confirm` in `text` acts in a checkout the own record does not prove. `text` is the command, or a script a
+    segment hands on (`bash -c`, `sh -c`, `eval`: inner_commands, the one reader of those wrappers), which runs in the directory its own
+    segment is in. A `)` or `&` glued to the last word ends the merge's arguments (_command_words), so a merge closing a subshell is read."""
     ends = []
-    segments = split_segments(stripped, ends)
+    segments = split_segments(text, ends)
     for number, segment in enumerate(segments):
-        rest = merge_tool_args(segment) if segment.strip() else None
+        if not segment.strip():
+            continue
+        tokens = segment_tokens(segment)
+        inner = inner_commands(tokens) if tokens else []
+        if inner:
+            if depth >= MERGE_NEST_DEPTH:
+                if any("--confirm" in script for script in inner):
+                    return True
+            else:
+                where = dir_before_segment(segments, number, cwd, ends) or ""
+                if any(_unproved_confirm(script, where, transcript, depth + 1) for script in inner):
+                    return True
+        rest = merge_tool_args(segment)
         if rest is None:
             continue
+        rest = _command_words(rest)
         bare = merge_tool_args(REDIRECTION.sub(" ", segment))
+        bare = None if bare is None else _command_words(bare)
         if "--confirm" not in (rest if bare is None else bare):
             continue
         try:
@@ -971,8 +995,8 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
                     continue
         except Exception:
             pass
-        return "merge --confirm"
-    return ""
+        return True
+    return False
 
 
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)

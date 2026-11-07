@@ -151,6 +151,8 @@ merge --dev ...         run the checkout's own tree, not origin main
 
 `merge --help` lists every flag except `--dev`.
 
+A flag prefix is an error, not the flag it starts (`merge 5 --conf` fails; write `--confirm`).
+
 * **Launcher.** On macOS and Linux, `bin/merge` lands in `~/.claude/bin`. On Windows,
   `bin\merge.cmd` lands there too, and starts `bin\merge`. The installers put `~/.claude/bin`
   on PATH. The launcher holds no merge logic. It finds this clone through `CLAUDE_SETTINGS_DIR`,
