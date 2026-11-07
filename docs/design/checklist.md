@@ -7,7 +7,7 @@ finding.
 
 Screen: ____ Size: ____ Theme: ____
 
-- [ ] ux-press-moves-nothing: Do all other elements keep their place and size on each press and load? Under ux-order-holds-still, the row that leaves an open list, the rows that close its gap and the rows that make room where it lands may move, but never resize. A count badge or section header that those rows shift may shift too.
+- [ ] ux-press-moves-nothing: Do all other elements keep their place and size on each press and load?
 - [ ] ux-order-holds-still (guidance): After an act on one row, do the other rows stay in the open list and keep their order? If that row left, did the next open row, if any, take its slot?
 - [ ] ux-unknown-is-not-empty: Do a failed read and an unknown state each show their own words? Is each empty state one sentence and one control? With no data, are filters hidden? After a filter empties the list, do filters show with a clear control?
 - [ ] ux-statements-are-true (guidance): Is each promise in the copy true of the product now?

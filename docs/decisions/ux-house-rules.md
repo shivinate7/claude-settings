@@ -42,7 +42,7 @@ WCAG level, is not taken on by choice (owner, 2026-11-01 12:23 CST, by triage).
 - Guidance, not house rules: `ux-order-holds-still`, `ux-statements-are-true`, `ux-no-dead-end`,
   `ux-machine-text-hidden`, `ux-a11y-floor` (P) and `ux-control-beside-area` (L). Each entry says
   "Guidance", and a miss is advice, not a finding.
-- Open with the owner: `ux-press-moves-nothing` (P), item 183 option b. A lane checks
+- Not adopted: `ux-press-moves-nothing` (P), item 183 option b (owner, 2026-11-06 13:11 CST). A lane checks
   `ux-swift-same-intent` (L), roadmap step ux-swift-same-intent-check.
 - `ux-empty-one-action` is part of `ux-unknown-is-not-empty`. `ux-ask-or-undo` is not a rule.
 - Touch size is the Target size row in `docs/design/a11y.md`: 44px on touch, 24px for mouse.
@@ -69,10 +69,9 @@ WCAG level, is not taken on by choice (owner, 2026-11-01 12:23 CST, by triage).
   row then takes its slot, and the other rows keep their order (owner, 2026-11-06 16:47 CST, item
   313 a). The owner on item 311 (15:51 CST): the rule was "applied too strictly and is taking me away from the
   outcome I want".
-- `ux-press-moves-nothing` does not count as a move the row that leaves an open list, the rows
-  that close its gap, or the rows that make room where it lands. They never resize (owner,
-  2026-11-06 16:47 CST, item 313 a). Nor does it count a count badge or section header that those
-  rows shift (owner, 2026-11-06 17:19 CST, item 318 a).
+- `ux-order-holds-still` also lets other parts move with that row: the rows that close its gap,
+  the rows that make room where it lands, and a count badge or section header that those rows
+  shift (owner, 2026-11-06 17:19 CST, item 318 a).
 - Not rules: behaviour defaults (dropped); spend shows cost, work-screen head, real photos only and
   phone-first (per repo); letter case (Vercel).
 
