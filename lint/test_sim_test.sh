@@ -113,7 +113,7 @@ DEST="xcodebuild test -scheme X -collect-test-diagnostics never -destination pla
 crashdir=$work/crash
 lockdir=$work/home/.claude/state/sim-test.lock
 
-# xcodebuild: logs its call. When the lock folder exists it records the lock (lock_during, lock_alive, lock_pid_seen).
+# xcodebuild: logs its call. When the lock folder exists it records the lock (lock_during).
 # With STUB_CRASH=N it waits 1 s, then writes N <STUB_CRASH_PREFIX or SpringBoard>-<i>.ips reports into SIM_TEST_CRASH_DIR,
 # each naming the device folder of STUB_CRASH_UDID (see mkreport).
 # With STUB_HANG or STUB_CRASH it marks a start file and sleeps STUB_HANG_SECS (default 30). It writes xc_finished only
@@ -124,9 +124,6 @@ echo "xcodebuild $*" >> "$RUN/calls"
 lock="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-test.lock"
 if [ -d "$lock" ]; then
   : > "$RUN/lock_during"
-  cat "$lock/pid" > "$RUN/lock_pid_seen" 2>/dev/null
-  p=$(cat "$lock/pid" 2>/dev/null)
-  if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then : > "$RUN/lock_alive"; fi
 fi
 lease="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-lease/leases.json"
 [ -f "$lease" ] && cp "$lease" "$RUN/lease_at_xc"
@@ -163,10 +160,10 @@ case "$1" in
     *--json*) cat "$RUN/devices.json" ;;
     *) echo "== Devices =="; echo "-- iOS 27.0 --"; cat "$RUN/booted" ;;
   esac ;;
-  boot) cp -f "$lease" "$RUN/lease_at_boot" 2>/dev/null; [ -n "${STUB_BOOT_RC:-}" ] && exit "$STUB_BOOT_RC"
+  boot) cp -f "$lease" "$RUN/lease_at_boot" 2>/dev/null; cat "$lock/pid" > "$RUN/lock_pid_at_boot" 2>/dev/null; [ -n "${STUB_BOOT_RC:-}" ] && exit "$STUB_BOOT_RC"
     if [ -n "${STUB_BOOT_HOLD:-}" ]; then : > "$RUN/boot_started"; n=0; while [ ! -e "$RUN/boot_release" ] && [ "$n" -lt 40 ]; do sleep 0.5; n=$((n + 1)); done; fi
     case $2 in "$STUB_PRO_UDID") name="iPhone 18 Pro" ;; *) name="iPhone Duo" ;; esac; echo "    $name ($2) (Booted) " > "$RUN/booted" ;;
-  shutdown) : > "$RUN/booted" ;;
+  shutdown) cp -f "$lease" "$RUN/lease_at_shutdown" 2>/dev/null; : > "$RUN/booted" ;;
   ui) case "$*" in
     *" appearance light") echo light > "$RUN/appearance" ;;
     *appearance) if [ -f "$RUN/appearance" ]; then cat "$RUN/appearance"; else echo "${STUB_APPEARANCE:-light}"; fi ;;
@@ -251,10 +248,7 @@ cat > "$hold_cmd" <<'SH'
 #!/bin/sh
 echo "$SIM_TEST_UDID" > "$RUN/cmd_udid"
 echo "$*" > "$RUN/cmd_args"
-if [ -d "$HOME/.claude/state/sim-test.lock" ]; then
-  cat "$HOME/.claude/state/sim-test.lock/pid" > "$RUN/cmd_lock_pid" 2>/dev/null
-  : > "$RUN/cmd_lock_seen"
-fi
+cp -f "$HOME/.claude/state/sim-lease/leases.json" "$RUN/cmd_lease" 2>/dev/null
 exit 7
 SH
 chmod +x "$hold_cmd"
@@ -265,10 +259,10 @@ booted() { printf '    %s (%s) (Booted) \n' "$1" "$2" >> "$booted_file"; }
 fresh() {
   : > "$calls"; : > "$booted_file"
   rm -f "$work/topcalls" "$work/started" "$work/xc_finished" "$work/watchdog_fired" "$work/lock_during" \
-    "$work/lock_alive" "$work/lock_pid_seen" "$work/lock_simctl" "$work/devices.json" \
-    "$work/cmd_udid" "$work/cmd_args" "$work/cmd_lock_seen" "$work/cmd_lock_pid"
+    "$work/lock_simctl" "$work/devices.json" \
+    "$work/cmd_udid" "$work/cmd_args" "$work/cmd_lease"
   rm -rf "$work/home/.claude" "$crashdir" "$work/sweep_root"
-  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/status_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release" "$work/mv_hooked" "$work/posture" "$work/appearance"
+  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/lease_at_shutdown" "$work/lock_pid_at_boot" "$work/status_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release" "$work/mv_hooked" "$work/posture" "$work/appearance"
   /bin/mkdir -p "$crashdir" "$work/home"
 }
 # start_tool [VAR=value...]: starts the tool in its own process group, behind a hard timeout. Its stdout and stderr go
@@ -348,14 +342,12 @@ hold_lock() { /bin/mkdir -p "$lockdir" && printf '%s\n' "$1" > "$lockdir/pid"; }
 # exits at once and no zombie is left for the tool to see as alive.
 holder_ends_after() { holder_pid=$(sh -c "sleep $1 > /dev/null 2>&1 & echo \$!"); }
 # lock checks: the stub records the lock at each xcodebuild call, and at each simctl call with yes or no.
-lock_seen() { test -e "$work/lock_during"; }
-lock_alive() { test -e "$work/lock_alive"; }
 lock_gone() { test ! -e "$lockdir"; }
 lock_at() { grep -Fxq "$1 yes" "$work/lock_simctl"; }
-lock_at_every_simctl() { [[ -s $work/lock_simctl ]] && ! grep -Eq ' no$' "$work/lock_simctl"; }
-lock_pid_is_tool() { [[ "$(cat "$work/lock_pid_seen" 2>/dev/null)" == "$tool_pid" ]]; }
-# lock_pid_file_is_tool: the lock folder is held now, and its pid file names this tool.
-lock_pid_file_is_tool() { [[ "$(cat "$lockdir/pid" 2>/dev/null)" == "$tool_pid" ]]; }
+# lock_pid_at_boot_is_tool: the lock names this tool's pid when the device boots. The lock is held there, not at xcodebuild.
+lock_pid_at_boot_is_tool() { [[ "$(cat "$work/lock_pid_at_boot" 2>/dev/null)" == "$tool_pid" ]]; }
+# lock_at_pick_and_boot: the lock is held at the list and the boot, and free at the shutdown (gap-5 contract).
+lock_at_pick_and_boot() { grep -Eq '^list yes$' "$work/lock_simctl" && grep -Eq '^boot yes$' "$work/lock_simctl" && ! grep -Eq '^shutdown yes$' "$work/lock_simctl"; }
 # lease checks: sim-lease keeps its state under this run's HOME. lease_holds FILE PID exits 0 when the JSON in FILE holds PID
 # as a value anywhere (no field name is assumed), 1 when it does not or FILE is missing, 2 when FILE is not JSON. The
 # compare is on the whole value, so pid 12 does not match 123.
@@ -389,6 +381,8 @@ lease_slot() { python3 -I -c "$SLOT_CHECK" "$1" "$2" "$3"; }
 lease_at_boot_holds() { lease_holds "$work/lease_at_boot" "$tool_pid"; }
 lease_at_boot_slot() { lease_slot "$work/lease_at_boot" "$tool_pid" "$1"; }
 lease_at_xc_holds() { lease_holds "$work/lease_at_xc" "$tool_pid"; }
+lease_at_shutdown_holds() { lease_holds "$work/lease_at_shutdown" "$tool_pid"; }
+cmd_lease_holds() { lease_holds "$work/cmd_lease" "$tool_pid"; }
 lease_at_xc_slot() { lease_slot "$work/lease_at_xc" "$tool_pid" "$1"; }
 # status_at_xc_has SLOT PID: the status the xcodebuild stub read during the run has a lease line for SLOT and PID. The
 # pid is a whole word: the space after it ends the number. status_at_xc_udid also names the UDID on that line.
@@ -435,10 +429,22 @@ release_slot1() {
   if [[ -n $slot_holder ]]; then kill "$slot_holder" 2>/dev/null; wait "$slot_holder" 2>/dev/null; fi
   slot_holder=
 }
+# hold_slot2: a second live holder, taken while slot 1 is held, is granted Duo slot 2. release_slot2 stops it.
+slot2_holder=
+hold_slot2() {
+  sleep 600 > /dev/null 2>&1 &
+  slot2_holder=$!
+  need "the second holder is granted Duo slot 2" test "$(env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" \
+    "$sim_lease" take --device duo --pid "$slot2_holder" --wait 1 2>/dev/null)" = 2
+}
+release_slot2() {
+  if [[ -n $slot2_holder ]]; then kill "$slot2_holder" 2>/dev/null; wait "$slot2_holder" 2>/dev/null; fi
+  slot2_holder=
+}
 # hold_then_term ARG...: runs the tool with ARG... (a --hold run with no CMD). It waits for the holding line, records
-# whether the lock folder is held by this tool's pid (lock_hold_ok), then sends TERM to its group. The wait is for the
+# whether this tool's pid holds the slot's lease (lease_hold_ok), then sends TERM to its group. The wait is for the
 # line or for the tool to end, never a fixed delay.
-lock_hold_ok=
+lease_hold_ok=
 hold_then_term() {
   fresh
   ARGS=("$@"); start_tool; ARGS=(-scheme X)
@@ -447,7 +453,7 @@ hold_then_term() {
     kill -0 "$tool_pid" 2>/dev/null || break
     "$REAL_SLEEP" 0.5
   done
-  lock_hold_ok=; lock_pid_file_is_tool && lock_hold_ok=1
+  lease_hold_ok=; lease_holds "$lease_file" "$tool_pid" && lease_hold_ok=1
   kill -TERM -- "-$tool_pid" 2>/dev/null
   finish_tool
 }
@@ -499,9 +505,9 @@ fresh; booted "iPhone Duo" $DUO1; run
 need "exit code" rc_is 0
 need "no top call" test ! -e "$work/topcalls"
 need "lock mkdir (no -p) before the first simctl call" mkdir_lock_first
-need "lock held during xcodebuild" lock_seen
+need "the slot's lease is held through xcodebuild" lease_at_xc_holds
 need "lock gone after the pass" lock_gone
-end_case "16 reuse path: no top; takes the lock first, holds it, frees it"
+end_case "16 reuse path: no top; takes the lock first, holds the slot's lease through xcodebuild, frees the lock"
 
 fresh; booted "iPhone Duo" $DUO2; booted "iPhone Duo" $DUO1; run
 need "destination is the first booted Duo" dest_is "$DUO2"
@@ -570,33 +576,37 @@ need "lock folder kept" test -d "$lockdir"
 need "holder's pid file unchanged" test "$(cat "$lockdir/pid")" = "$$"
 end_case "25 live holder that never ends: refused at the wait bound, no boot, no xcodebuild, lock kept"
 
+# Case 26 (gap-5 contract, owner 2026-11-02 14:23 CST, applied 2026-11-07 13:41 CST): the lease, not the lock, is held through
+# xcodebuild and to the shutdown. The lock covers the list and the boot only. The lease checks come first, so a mutant that
+# gives the lease back early fails on the lease, not on the lock.
 fresh; run
-need "exit code" rc_is 0
-need "lock held at every simctl call" lock_at_every_simctl
-need "lock held during xcodebuild" lock_seen
-need "lock mkdir (no -p) before the first simctl call" mkdir_lock_first
-need "pid in the lock is the tool's pid" lock_pid_is_tool
-end_case "26 booted by me: one mkdir takes the lock before any simctl call; held through list, boot, xcodebuild, shutdown"
+need "the slot's lease is held through xcodebuild" lease_at_xc_holds
+need "the slot's lease is still held at the shutdown" lease_at_shutdown_holds
+need "the lock is not held during xcodebuild" test ! -e "$work/lock_during"
+need "the lock is held at the list and the boot, and free at the shutdown" lock_at_pick_and_boot
+need "the lock is made by one mkdir (no -p) before the first simctl call" mkdir_lock_first
+need "the slot's lease is given back after the run" lease_released
+end_case "26 booted by me: the lease, not the lock, is held through xcodebuild and to the shutdown; the lock covers list and boot only"
 
 fresh; run
 need "exit code" rc_is 0
-need "lock held during xcodebuild" lock_seen
+need "the slot's lease is held through xcodebuild" lease_at_xc_holds
 need "lock gone after a pass" lock_gone
-end_case "27 lock gone after a pass"
+end_case "27 lock gone after a pass, with the slot's lease held through xcodebuild"
 
 fresh; run STUB_RC=65
 need "exit 65 passes through" rc_is 65
-need "lock held during xcodebuild" lock_seen
+need "the slot's lease is held through xcodebuild" lease_at_xc_holds
 need "lock gone after an xcodebuild failure" lock_gone
 end_case "28 lock gone after an xcodebuild failure"
 
 sig_case INT
-need "lock held during xcodebuild" lock_seen
+need "the slot's lease is held through xcodebuild" lease_at_xc_holds
 need "lock gone after INT" lock_gone
 end_case "29 lock gone after INT"
 
 sig_case TERM
-need "lock held during xcodebuild" lock_seen
+need "the slot's lease is held through xcodebuild" lease_at_xc_holds
 need "lock gone after TERM" lock_gone
 end_case "30 lock gone after TERM"
 
@@ -619,18 +629,17 @@ dead=$(dead_pid)
 fresh; hold_lock "$dead"; run
 need "exit code" rc_is 0
 need "steps are boot run shutdown" steps_are "boot run shutdown "
-need "lock held during xcodebuild" lock_seen
-need "lock taken over: its holder is alive during xcodebuild" lock_alive
-need "pid in the lock is the tool's pid" lock_pid_is_tool
+need "the slot's lease is held through xcodebuild" lease_at_xc_holds
+need "pid in the lock is the tool's pid at boot" lock_pid_at_boot_is_tool
 need "lock gone after the run" lock_gone
-end_case "33 stale lock (dead pid) is taken over, rewritten to the tool's pid, freed after"
+end_case "33 stale lock (dead pid) is taken over, rewritten to the tool's pid at boot, freed after; the slot's lease held through xcodebuild"
 
 fresh; holder_ends_after 1; hold_lock "$holder_pid"; run SIM_TEST_LOCK_WAIT=10
 need "exit code" rc_is 0
 need "waited: stderr names the holder's pid" grep -Fq "$holder_pid" "$work/run.err"
 need "steps are boot run shutdown" steps_are "boot run shutdown "
-need "lock held during xcodebuild" lock_seen
-need "pid in the lock is the tool's pid" lock_pid_is_tool
+need "the slot's lease is held through xcodebuild" lease_at_xc_holds
+need "pid in the lock is the tool's pid at boot" lock_pid_at_boot_is_tool
 need "lock gone after the run" lock_gone
 end_case "34 live holder that ends in about 1 s: the run waits, then runs normally"
 
@@ -647,7 +656,7 @@ end_case "35 crash loop on a simulator it booted: stops xcodebuild, shuts it dow
 
 fresh; run STUB_CRASH=3 STUB_HANG_SECS=4
 need "exit is non-zero" test $rc -ne 0
-need "lock held during xcodebuild" lock_seen
+need "the slot's lease is held through xcodebuild" lease_at_xc_holds
 need "lock gone after the crash stop" lock_gone
 end_case "36 lock gone after the crash-loop stop"
 
@@ -684,8 +693,8 @@ end_case "40 crash loop on a reused Duo: exits non-zero, no shutdown"
 # Lock age: a lock folder with no pid file counts as held for 60 s, then it is stale.
 fresh; /bin/mkdir -p "$lockdir"; touch -t 202001010000 "$lockdir"; run
 need "exit code" rc_is 0
-need "lock taken over: held during xcodebuild" lock_seen
-need "lock taken over: pid in the lock is the tool's pid" lock_pid_is_tool
+need "lock taken over: the slot's lease is held through xcodebuild" lease_at_xc_holds
+need "lock taken over: pid in the lock is the tool's pid at boot" lock_pid_at_boot_is_tool
 need "lock gone after the run" lock_gone
 end_case "42 lock folder with no pid, older than 60 s: taken over"
 
@@ -698,7 +707,7 @@ end_case "43 lock folder with no pid, younger than 60 s: still held, refused"
 
 # SIGHUP: like TERM, it frees the lock and shuts down the simulator the tool booted.
 sig_case HUP
-need "lock held during xcodebuild" lock_seen
+need "the slot's lease is held through xcodebuild" lease_at_xc_holds
 need "lock gone after SIGHUP" lock_gone
 end_case "44 SIGHUP during xcodebuild: lock gone, booted simulator shut down, like TERM"
 
@@ -921,7 +930,7 @@ end_case "64 --hold --for 1 with no CMD: exit 0 on timeout, shuts the Duo down, 
 
 hold_then_term --hold
 need "holding line names the Duo, this pid and 300s" grep -Fq "sim-test: holding $DUO1 as pid $tool_pid for 300s" "$work/run.std"
-need "lock held during the hold, by this tool's pid" test "$lock_hold_ok" = 1
+need "the slot's lease is held during the hold, by this tool's pid" test "$lease_hold_ok" = 1
 need "exit 130 on TERM" rc_is 130
 need "boot, then shutdown of the Duo" steps_are "boot shutdown "
 need "shutdown of the Duo" has_call "simctl shutdown $DUO1"
@@ -941,10 +950,9 @@ done
 end_case "67 --for out of range or not an integer: exit 2, no lock, no boot, no xcodebuild"
 
 fresh; ARGS=(--hold -- "$hold_cmd"); run; ARGS=(-scheme X)
-need "the child saw the lock folder" test -e "$work/cmd_lock_seen"
-need "the lock's pid is this tool's pid while the child runs" test "$(cat "$work/cmd_lock_pid" 2>/dev/null)" = "$tool_pid"
+need "the slot's lease is held while the child runs, by this tool's pid" cmd_lease_holds
 need "lock freed after the hold" lock_gone
-end_case "68 lock held through a --hold run: the child sees the lock with this tool's pid, and it is freed after"
+end_case "68 the slot's lease held through a --hold run: the child sees the lease with this tool's pid, and the lock is freed after"
 
 # ---- Cases 69 to 77: the queued duo run, simctl list failing, a hold past its time, a crash loop in a hold, and TERM
 # during the lease wait and during a boot.
@@ -1116,13 +1124,6 @@ end_case "82 reuse at a 1-minute load of 60: takes slot 1's lease and runs"
 
 # mentions_err PID: the pid is a whole word on stderr.
 mentions_err() { grep -Ewq -- "$1" "$work/run.err"; }
-fresh; hold_slot1; booted "iPhone Duo" $DUO1; run SIM_LEASE_WAIT=2
-need "exit 1 at the lease wait limit" rc_is 1
-need "no xcodebuild call" no_xcodebuild
-need "stderr names the pid that holds slot 1" mentions_err "$slot_holder"
-release_slot1
-end_case "83 reuse while another live pid holds slot 1: waits, exits 1 at the lease wait limit, runs no xcodebuild"
-
 fresh; booted "iPhone Duo" $OTHER; run
 need "destination is the other Duo's UDID" dest_is "$OTHER"
 need "steps are run only" steps_are "run "
@@ -1136,8 +1137,11 @@ live_pid() { sh -c 'sleep 600 > /dev/null 2>&1 & echo $!'; }
 # no_nested_dead: no dead-holder folder sits inside the lock folder.
 no_nested_dead() { [ -z "$(ls -d "$lockdir"/*.dead.* 2>/dev/null)" ]; }
 
-fresh; booted "iPhone Duo" $DUO1; ARGS=(-scheme X); start_tool STUB_HANG=1 STUB_HANG_SECS=30
-need "xcodebuild started, so the run holds the lock" poll_for 20 test -e "$work/started"
+# Case 85 (gap-5 contract): the lock is held while the run picks and boots, so this case ends the run during its boot. The
+# run's cleanup takes only its own lock: a pid file that names another live pid is left, with its folder.
+fresh; ARGS=(-scheme X); start_tool STUB_BOOT_HOLD=1
+need "the boot is in flight" poll_for 20 test -e "$work/boot_started"
+need "the run holds the lock during its boot" test "$(cat "$lockdir/pid" 2>/dev/null)" = "$tool_pid"
 new_holder=$(live_pid)
 printf '%s\n' "$new_holder" > "$lockdir/pid"
 need "scope: the pid file names the other pid before the run ends" test "$(cat "$lockdir/pid")" = "$new_holder"
@@ -1147,7 +1151,7 @@ ARGS=(-scheme X)
 need "the lock folder is still there after the run's cleanup" test -d "$lockdir"
 need "the pid file still names the other pid" test "$(cat "$lockdir/pid" 2>/dev/null)" = "$new_holder"
 kill "$new_holder" 2>/dev/null
-end_case "85 cleanup takes only its own lock: a pid file that names another live pid is left, with its folder"
+end_case "85 cleanup takes only its own lock: ended during its boot, a pid file that names another live pid is left, with its folder"
 
 # The take-over window: the lock is taken by a dead holder's move, a live pid takes it before the put-back, and another
 # run re-creates it in between. The put-back must not nest the moved folder inside the new lock.
@@ -1356,6 +1360,7 @@ need "run B queues for a lease with no reuse of Duo 1 at 5-minute load 60" test 
 finish_tool
 need "run B is refused at the lease wait limit: exit 1" rc_is 1
 need "run B's refusal names the 5-minute load" grep -Fq "5-min 60.00" "$work/run.err"
+need "run B's refusal names the pid that holds slot 1" mentions_err "$slot_holder"
 need "run B boots nothing" no_boot
 need "run B runs no xcodebuild" no_xcodebuild
 release_slot1
@@ -1381,6 +1386,35 @@ need "xcodebuild finished on its own" test -e "$work/xc_finished"
 need "one xcodebuild call" test "$(grep -c ^xcodebuild "$calls")" -eq 1
 ARGS=(-scheme X)
 end_case "102 a run inside SIM_TEST_MAX_RUN is not stopped: exit 0, xcodebuild finishes"
+
+# Cases 103 and 104: both Duos are booted and each is leased by another live pid. A duo run must wait in the queue for a
+# lease, not exit at the cap check. It reuses whichever Duo frees first, or exits 1 at the lease wait limit.
+fresh; booted "iPhone Duo" $DUO1; booted "iPhone Duo" $DUO2; hold_slot1; hold_slot2
+ARGS=(-scheme X); start_tool SIM_LEASE_WAIT=20
+poll_for 20 tool_settled
+need "both Duos leased by other live pids: the run queues for a lease, not exit at the cap check" test "$(queue_state "$tool_pid")" != absent
+release_slot2
+poll_for 30 tool_ended
+finish_tool
+need "run reuses Duo 2, the Duo whose holder ended first" dest_is "$DUO2"
+need "run boots nothing" no_boot
+need "exit code" rc_is 0
+release_slot1
+ARGS=(-scheme X)
+end_case "103 both Duos booted, each leased by another live pid: the run queues, then reuses Duo 2 when its holder ends; exit 0"
+
+fresh; booted "iPhone Duo" $DUO1; booted "iPhone Duo" $DUO2; hold_slot1; hold_slot2
+ARGS=(-scheme X); start_tool SIM_LEASE_WAIT=4
+poll_for 20 tool_settled
+need "both Duos leased by other live pids: the run queues for a lease" test "$(queue_state "$tool_pid")" != absent
+finish_tool
+need "exit 1 at the lease wait limit" rc_is 1
+need "no xcodebuild call" no_xcodebuild
+need "no boot" no_boot
+release_slot1
+release_slot2
+ARGS=(-scheme X)
+end_case "104 both Duos booted, each leased by another live pid: the run queues, then exits 1 at the lease wait limit, with no xcodebuild and no boot"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
