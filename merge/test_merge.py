@@ -12342,6 +12342,12 @@ class ReviewRecordRules(unittest.TestCase):
         self.assertEqual(state, "open")
         self.assertNotIn("Reproduction", why, f"a delete-only change names the Reproduction line: {why!r}")
 
+    def test_a_none_reproduction_line_reads_done_on_a_passed_round(self):
+        # control: a guard change whose reproduction is `none: <reason>` is a record like any other, so a passed round reads done
+        state, why = record_verdict(self, record_text(rounds=REVIEW_PASS, guard="yes", repro=(repro_line(REVIEW_REPRO_NONE),)))
+        self.assertEqual(state, "done", f"a none reproduction on a passed round must read done: {why!r}")
+        self.assertNotIn("Reproduction", why, f"the why names the Reproduction line though the line is present: {why!r}")
+
 class ReviewFixRules(unittest.TestCase):
     """review_state with a fix check (decision hold-unsafe-after-round-3). A fix check is not a review of its own. A FAIL is open, whatever
     the rounds say. A PASS counts as the round it follows passing. When that round is the first or the second allowed one, the record is done
@@ -12631,6 +12637,35 @@ class ReviewRecordWrite(ReviewEnv):
             with self.subTest(bad=bad):
                 out, _err = self.assert_usage_error("7", "--review-record", *self.guard_flags(), "--reproduction", bad)
                 self.assertNotIn(REVIEW_MARKER, out)
+
+    def test_a_control_character_in_reproduction_exits_two_and_names_the_flag(self):
+        # control: the same value with no control character exits 0, so a parser that never learned the flag fails here too
+        rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(), "--reproduction", REVIEW_REPRO)
+        self.assertEqual(rc, 0, "the well-formed --reproduction is refused:\n" + out + err)
+        for ch in ("\r", "\n", "\t", "\x07", "\x1b"):
+            with self.subTest(ch=repr(ch)):
+                rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(), "--reproduction", f"python3 merge/test_merge.py{ch} -> reads done")
+                self.assertEqual(rc, 2, f"--reproduction with {ch!r} was not refused:\n" + out + err)
+                errors = [l for l in err.splitlines() if l.startswith("merge: error:")]
+                self.assertTrue(errors, "no usage error line for --reproduction:\n" + err)
+                self.assertIn("--reproduction", errors[-1], f"the error does not name --reproduction: {errors[-1]!r}")
+                self.assertNotIn("--round", errors[-1], f"the error names --round, not --reproduction: {errors[-1]!r}")
+                self.assertNotIn(REVIEW_MARKER, out, "a refused --reproduction still printed a record")
+                self.assertNotIn("Traceback", err)
+
+    def test_review_body_refuses_a_control_character_in_the_reproduction(self):
+        # review_body either raises, or prints a Reproduction line that does not parse back to the same text: never a record that does
+        fn = review_fn(self, "review_body")
+        for ch in ("\r", "\n", "\t", "\x07", "\x1b"):
+            with self.subTest(ch=repr(ch)):
+                text = f"python3 merge/test_merge.py{ch} -> reads done"
+                try:
+                    body = fn(7, REVIEW_HEAD, "normal", "yes", [(1, "reviewer", "sonnet", "PASS")], "not owed", reproduction=text)
+                except (ValueError, TypeError):
+                    continue
+                rec = review_fn(self, "parse_review")(body)
+                self.assertTrue(rec is None or rec.get("repro") != text,
+                                f"review_body printed {ch!r} in a Reproduction line, and it parses back to the same text")
 
 class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
