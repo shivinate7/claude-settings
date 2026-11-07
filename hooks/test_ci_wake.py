@@ -77,7 +77,8 @@ with its own -R or --repo (any spelling gh takes), else a PR URL selector's repo
 fixture's `cwd_repo`. An entry with no
 `repo` answers every call. `workflows` is the `gh workflow list` answer (one active `checks` workflow
 when absent); without --all only active entries answer. The fixture key `workflow_list` ("error" or
-"garbage") fails that one call and no other.
+"garbage") fails that one call and no other. The fixture key `list_error_from` N makes every `run list`
+from the Nth call of the case on exit 1 (HTTP 403), so a re-list can be refused after a judged run.
 
 Draft run, then the real run: `gh pr create --draft` makes a run
 whose jobs all skip, and `gh pr ready` makes the real run seconds later. A hook that lists the head
@@ -342,6 +343,9 @@ def main(args):
     if obj == "run" and verb == "list":
         commit = flag(args, "--commit")
         n = lists_of()
+        if fx.get("list_error_from") and n >= fx["list_error_from"]:   # the lists from that call on are refused
+            sys.stderr.write("HTTP 403: Forbidden\n")
+            return 1
         hits = [r for r in fx["runs"] if here(r, args, fx) and (commit is None or r["headSha"].startswith(commit))
                 and r.get("appears_at_list", 1) <= n]
         sys.stdout.write(json.dumps([view(r, True, n) for r in hits]) + "\n")
@@ -917,6 +921,39 @@ def case_run_visible_at_the_at_once_relist_is_judged():
     check("%s: reads the second run (932) and lists again" % label,
           "932" in watched(res) and count(res, "run", "list") >= 2, why(res))
     expect_verdict(label, res, "red", names_in=["scan"], names_out=["lint", "unit"])
+
+
+def case_the_at_once_relist_judges_the_newest_run_of_a_name():
+    """The at-once re-list can show a newer run of the same name as a run already judged. judge_runs keeps the
+    first run of each name in list order, which is newest first, so the newer run must be judged in place of the
+    green one. Control: both runs listed at the first list, newest first, judge red. Red row: the newer run
+    shows only at the re-list, after the green run was judged, and the verdict must still be red."""
+    ok = run(100, "CI", "success", [job("lint", "success"), job("unit", "success")])
+    late_fail = run(101, "CI", "failure", [job("unit", "failure")], appears_at_list=2,
+                    unfinished_to_list=2, in_progress_reads=1)
+    together = run(101, "CI", "failure", [job("unit", "failure")])
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [together, ok]), extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE},
+                   launcher=FAST_SLEEP_LAUNCHER)
+    expect_verdict("both CI runs listed at once, the newer one failed (control)", res, "red",
+                   names_in=["unit"], names_out=["lint"])
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [late_fail, ok]), extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE},
+                   launcher=FAST_SLEEP_LAUNCHER)
+    label = "newer CI run shows only at the at-once re-list, after the green run was judged"
+    check("%s: reads the newer run (101)" % label, "101" in watched(res), why(res))
+    expect_verdict(label, res, "red")
+
+
+def case_failed_re_list_keeps_the_judged_verdict():
+    """A red run is judged, and then the at-once re-list is refused (HTTP 403). The judged run is the answer:
+    the hook says red with its failing jobs, not `CI unknown`. Control: the same run with no refusal."""
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [RED]), extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    expect_verdict("red run, no refusal (control)", res, "red", names_in=["unit", "e2e"], names_out=["lint"])
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [RED], list_error_from=2),
+                   extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    label = "red run judged, then the at-once re-list is refused"
+    check("%s: reads run 902 and lists twice" % label, "902" in watched(res) and count(res, "run", "list") == 2,
+          why(res))
+    expect_verdict(label, res, "red", names_in=["unit", "e2e"], names_out=["lint"])
 
 
 def case_new_runs_on_every_list_are_paced_after_the_at_once_relist():
@@ -1551,6 +1588,36 @@ def case_exported_gh_repo_names_the_pr_repo():
         expect_verdict(label, res, "green")
 
 
+def case_gh_repo_values_the_hook_cannot_read_fall_back_to_the_folder():
+    """A GH_REPO the hook cannot expand (`$repo`, `$REPO`, `$(x)`, a backtick) names no repo, so the hook's own
+    gh calls go to the folder's repo, as with no GH_REPO. `$null` clears it, and so does `Remove-Item Env:GH_REPO`
+    after a set. `unset OTHER` leaves GH_REPO set (control). The folder holds PR 214 in the fallback rows, so a
+    wrong repo finds nothing. Scope first (the PR read's path), then the verdict."""
+    home = fixture([pr(214, repo=REPO_HOME)], [in_repo(GREEN, REPO_HOME)], cwd_repo=REPO_HOME,
+                   workflows=[wf(repo=REPO_HOME)])
+    app = fixture([pr(214, repo=REPO_APP)], [in_repo(GREEN, REPO_APP)], cwd_repo=REPO_HOME,
+                  workflows=[wf(repo=REPO_APP)])
+    folder, app_path = "repos/{owner}/{repo}/pulls/214", "repos/%s/pulls/214" % REPO_APP
+    rows = (
+        ("$env:GH_REPO = $repo", powershell('$env:GH_REPO = $repo; gh pr ready 214'), home, folder),
+        ("export GH_REPO=$REPO", bash("export GH_REPO=$REPO && gh pr ready 214"), home, folder),
+        ("export GH_REPO=$(x)", bash("export GH_REPO=$(x) && gh pr ready 214"), home, folder),
+        ("export GH_REPO=`x`", bash("export GH_REPO=`x` && gh pr ready 214"), home, folder),
+        ("$env:GH_REPO = $null", powershell('$env:GH_REPO = $null; gh pr ready 214'), home, folder),
+        ("$env:GH_REPO set, then Remove-Item Env:GH_REPO",
+         powershell('$env:GH_REPO = "%s"; Remove-Item Env:GH_REPO; gh pr ready 214' % REPO_APP), home, folder),
+        ("export GH_REPO, then unset OTHER (control: stays set)",
+         bash("export GH_REPO=%s && unset OTHER && gh pr ready 214" % REPO_APP), app, app_path),
+    )
+    for label, payload, fx, path in rows:
+        res = run_hook(payload, fx, extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+        where = "the folder's repo" if path == folder else REPO_APP
+        check("%s: the PR read goes to %s" % (label, where), api_reads(res)[:1] == [path],
+              "%r; %s" % (api_reads(res), why(res)))
+        expect_verdict(label, res, "green")
+        expect_watch(label, res, ["901"])
+
+
 def case_exported_gh_repo_is_cleared_by_unset_and_empty_export():
     """An exported GH_REPO lasts until the command clears it. `unset GH_REPO` and `export GH_REPO=` (empty)
     clear it, so the hook's own gh calls go to the folder's repo, which holds no PR here, and it says nothing.
@@ -1896,6 +1963,8 @@ def main():
     case_real_failed_run_beside_a_draft_run_is_red()
     case_draft_run_ending_skipped_is_no_run_yet()
     case_run_visible_at_the_at_once_relist_is_judged()
+    case_the_at_once_relist_judges_the_newest_run_of_a_name()
+    case_failed_re_list_keeps_the_judged_verdict()
     case_new_runs_on_every_list_are_paced_after_the_at_once_relist()
     case_wait_for_lists_again_until_a_real_run_shows()
     case_wait_for_lists_until_the_deadline_and_no_further()
@@ -1916,6 +1985,7 @@ def main():
     case_folder_without_workflows_still_watches_the_pr_repo()
     case_exported_gh_repo_names_the_pr_repo()
     case_exported_gh_repo_is_cleared_by_unset_and_empty_export()
+    case_gh_repo_values_the_hook_cannot_read_fall_back_to_the_folder()
 
     # The PR read is REST: the proxy refuses GraphQL.
     case_pr_read_is_rest_for_every_selector()
