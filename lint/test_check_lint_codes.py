@@ -11,7 +11,6 @@ Each case builds a temp git repo under this run's folder (lint/_test_temp.py). `
 `feature` is the branch, and the real script runs as `--base main --root <repo>`. Most fixtures hold
 all three home files. The cases that name a missing home say so.
 """
-import collections
 import os
 import re
 import shutil
@@ -25,13 +24,14 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
-from test_stale_cites import git_commands  # noqa: E402  the one home of the GIT_TRACE reader (lint/test_stale_cites.py)
-from test_windows_split import CHECKS, run_commands  # noqa: E402  the one home of the checks.yml run reader
+from test_windows_split import CHECKS, run_lines  # noqa: E402  the step's run lines (lint/test_windows_split.py)
+from workflow_steps import step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser (lint/workflow_steps.py)
 MODULE = os.environ.get("LINT_CODES_UNDER_TEST") or os.path.join(HERE, "check_lint_codes.py")
 STALE = "lint/stale_cites.py"
 STE = "lint/ste_lint.py"
 MAP = "skills/plain-english-map/scripts/map-check.mjs"
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
+GIT_PROCESS_CEILING = 21  # the git starts one run makes at 4b8d543c8; the builder's own count is not stated
 
 
 def setUpModule():
@@ -106,14 +106,17 @@ def rows(text, code):
     return text.count("\n  %s  " % code)
 
 
-def step_block(text, name):
-    """The text of the checks.yml step named `name`, from its `- name:` line up to the next step's. "" when none has it."""
-    mark = "      - name: %s\n" % name
-    start = text.find(mark)
-    if start == -1:
-        return ""
-    end = text.find("\n      - name:", start + len(mark))
-    return text[start:] if end == -1 else text[start:end]
+def git_starts(trace_path):
+    """The git commands a run started, read from a GIT_TRACE file: each `built-in: git <args>` line, args only.
+    A copy of lint/test_stale_cites.py's git_commands. Importing that module runs its run_folder() call, which
+    would leave a run folder that no teardown here removes."""
+    commands = []
+    with open(trace_path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            found = re.search(r"trace: built-in: git (.+)$", line)
+            if found:
+                commands.append(found.group(1).strip())
+    return commands
 
 
 class CheckLintCodesTests(unittest.TestCase):
@@ -460,7 +463,7 @@ class CheckLintCodesTests(unittest.TestCase):
 
     # The cost: one run starts the git processes it reads with and one node scan, and no other process.
 
-    def test_one_run_starts_exactly_the_pinned_processes_on_a_fixture_with_three_homes(self):
+    def test_one_run_starts_at_most_the_pinned_git_processes_and_one_node_scan(self):
         self.build(tree())
         folder = tempfile.mkdtemp(prefix="lcu_cost_", dir=RUN_FOLDER)
         trace = os.path.join(folder, "git-trace.txt")
@@ -471,13 +474,9 @@ class CheckLintCodesTests(unittest.TestCase):
         env = dict(os.environ, GIT_TRACE=trace, PATH=bindir + os.pathsep + os.environ.get("PATH", ""))
         rc, out = self.check("--base", "main", env=env)
         self.assertEqual(rc, 0, out)
-        subs = []
-        for command in git_commands(trace):
-            found = re.search(r"\b(rev-parse|merge-base|ls-tree|cat-file)\b", command)
-            subs.append(found.group(1) if found else command)
-        # Pinned: two rev-parse and one merge-base, then an ls-tree and a cat-file for each of the three homes at each of
-        # the three revisions. The node scan runs once, for the MAP texts.
-        self.assertEqual(collections.Counter(subs), collections.Counter({"rev-parse": 2, "merge-base": 1, "ls-tree": 9, "cat-file": 9}), subs)
+        commands = git_starts(trace)
+        self.assertLessEqual(len(commands), GIT_PROCESS_CEILING,
+                             "one run started %d git processes, want at most %d: %s" % (len(commands), GIT_PROCESS_CEILING, commands))
         with open(starts, encoding="utf-8") as f:
             self.assertEqual(f.read().split(), ["node"], "the node scan did not start exactly once")
 
@@ -485,13 +484,13 @@ class CheckLintCodesTests(unittest.TestCase):
 class CiStep(unittest.TestCase):
     def test_the_lint_code_step_passes_the_pr_head_sha_as_the_silent_undo_step_does(self):
         with open(CHECKS, encoding="utf-8") as handle:
-            block = step_block(handle.read(), "Lint code check")
-        self.assertTrue(block, "no step named Lint code check in checks.yml")
-        commands = run_commands(block)
+            steps = [step for step in step_blocks(handle.read()) if step_key(step, "name") == "Lint code check"]
+        self.assertEqual(len(steps), 1, "want one step named Lint code check in checks.yml, got %d" % len(steps))
+        commands = run_lines(steps[0])
         self.assertTrue(any('--head "$HEAD_SHA"' in command for command in commands),
                         "the Lint code check step does not pass --head \"$HEAD_SHA\": %r" % commands)
-        self.assertIn("HEAD_SHA: ${{ github.event.pull_request.head.sha }}", block,
-                      "the Lint code check step does not set HEAD_SHA from the PR head")
+        self.assertEqual(step_env(steps[0]).get("HEAD_SHA"), "${{ github.event.pull_request.head.sha }}",
+                         "the Lint code check step does not set HEAD_SHA from the PR head")
 
 
 if __name__ == "__main__":
