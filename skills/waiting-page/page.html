@@ -1117,7 +1117,7 @@ function freezeSeen() {
   state.seen = new Set(state.items.filter(old).map((it) => it.id));
 }
 // Sunk, worked out once and kept like seen: an item with a saved answer when the items and answers loaded (isSaved reads no receipts).
-// A Send on the open page, or a receipt that arrives later, moves no card (ux-order-holds-still); a reload works it out again.
+// A Send on the open page, or a receipt that arrives later, moves no card; a reload works it out again.
 // A Change keeps the card in the section (isSaved turns false under it), so membership never reads isSaved after this.
 // A group sinks only when every member is in the set, so it never splits.
 const isSunk = (it) => !!state.sunk && mates(it).every((x) => state.sunk.has(x.id));
