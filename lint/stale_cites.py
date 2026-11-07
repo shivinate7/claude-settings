@@ -37,6 +37,15 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             that changes the rows file also reports each prose line at head that cites a row id it removes. It prints
             as `stale-cites: report, path:line: STALE005 ...` and never changes the exit code, so it ships dark
             (decision source-prose-lint-ships-dark). A line marked `<!-- ste-disable-line STALE005 -->` is left out.
+  STALE009  (range mode only, report only) a SENTENCE of an added line of a decision record (`docs/decisions/*.md`) that
+            states what code does or does not do: a code subject (a noun such as tool, ledger, script, hook, guard,
+            check, or one source file) and a behaviour verb (reads, writes, prints, calls, refuses, counts, runs,
+            checks; also after never, only, or does not). It passes when it cites `file.py` `name`, (file.py name) or
+            a test node id, as STALE002 reads them, and each cited name is bound in that file at head (`names_in`).
+            A cite to a name or file absent at head is reported as dead. A cite to a .mjs, .js, .cjs, .ts or .sh file
+            prints the unknown form of STALE002. Paragraphs, sentences and the mark come from STALE005. It prints as
+            `stale-cites: report, path:line: STALE009 ...` and never changes the exit code (decision
+            source-prose-lint-ships-dark). A line marked `<!-- ste-disable-line STALE009 -->` is left out.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
 `<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004). Fenced blocks count as prose.
@@ -402,6 +411,7 @@ class Range:
         self.base, self.head, self.removed, self.renamed, self.batch = base, head, removed, renamed, batch
         self.added_lines = lines or {}  # the .md lines the range adds, by path
         self.unknowns = []
+        self.bound_names = {}  # path -> names bound at head (CodeClaimReader), read once
         self.tree = None  # the head tree entries once a read listed the whole tree; the report reuses it
         self.changed = set(removed) | set(renamed) | set(renamed.values()) | set(modified) | set(added)
         self.py_files = {p: p for p in modified if p.endswith(".py")}
@@ -498,7 +508,11 @@ ROWS_AT_HEAD = os.path.relpath(route_match.ROUTE_ROWS_FILE, os.path.join(os.path
 HTML_COMMENT = re.compile(r"<!--.*?-->")
 # Text in straight or curly double quotes, or a bare file path (a folder part and an extension): a mention, no claim.
 BARE_PATH = r"(?<![\w./@+~-])(?:[\w.@+~-]+/)+[\w.@+~-]*\.\w+"  # a file path with a folder part and an extension
-MENTION = re.compile(r'"[^"]*"|\u201c[^\u201d]*\u201d|' + BARE_PATH)
+QUOTED = r'"[^"]*"|\u201c[^\u201d]*\u201d'
+MENTION = re.compile(QUOTED + "|" + BARE_PATH)
+QUOTED_ONLY = re.compile(QUOTED)
+CODE_EXT = r"(?:py|mjs|cjs|js|ts|sh)"  # a source file a sentence can name as the subject of a code claim
+SOURCE_SPAN = re.compile(r"[\w./@+~-]+\.%s\Z" % CODE_EXT)
 PATH_SPAN = re.compile(BARE_PATH + r"\Z")
 HEADING_OR_QUOTE = re.compile(r"^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>)")
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
@@ -681,13 +695,15 @@ def named_excerpt(names, text, around=3, limit=40):
     return "\n".join(out)
 
 
-def blanked(text):
+def blanked(text, subjects=False):
     """(outside, route): `text` twice, each the same length, with the newlines kept.
     outside: each code span and HTML comment blanked, so a verb or a sentence end inside one is a mention.
     route: the same, except the words of a code span that names no path stay: a route word used as the subject,
     "`gh` cannot close", still counts. A span with a `/` or `.` names a file, so its words are not a route.
     Both also blank text in straight or curly double quotes and a bare file path, the same way: each is a mention.
-    An apostrophe is no quote and a lone quote pairs with none; single quotes are left as they are."""
+    An apostrophe is no quote and a lone quote pairs with none; single quotes are left as they are.
+    `subjects=True` is the view a code claim reads (CodeClaimReader): a code span that is one source file and a bare
+    file path stay in `outside`, since a path can be the subject of a claim; quotes and comments are still blanked."""
     outside, route = list(text), list(text)
 
     def blank(chars, start, end):
@@ -697,13 +713,15 @@ def blanked(text):
     for match in CODE_SPAN.finditer(text):
         start, end = match.span()
         ticks = len(match.group(1))
+        if subjects and SOURCE_SPAN.match(text[start + ticks:end - ticks].strip()):
+            continue
         blank(outside, start, end)
         if "/" in text[start:end] or "." in text[start:end]:
             blank(route, start, end)
         else:
             blank(route, start, start + ticks)
             blank(route, end - ticks, end)
-    for match in MENTION.finditer("".join(outside)):
+    for match in (QUOTED_ONLY if subjects else MENTION).finditer("".join(outside)):
         blank(outside, *match.span())
         blank(route, *match.span())
     for match in HTML_COMMENT.finditer("".join(outside)):
@@ -780,8 +798,7 @@ class RouteClaimReader:
         found, rows_at_head = {}, []
         for path in sorted(files):
             added = dict(files[path])
-            if not any(VERB.search(HTML_COMMENT.sub(" ", t)) or ROUTE_WORD.search(HTML_COMMENT.sub(" ", t))
-                       for t in added.values()):
+            if not any(self.worth_reading(t) for t in added.values()):
                 continue
             blob = rng.batch.get("%s:%s" % (rng.head, path))
             rows = (blob or b"").decode("utf-8", "replace").replace("\r\n", "\n").split("\n")
@@ -790,24 +807,37 @@ class RouteClaimReader:
                 i = bisect.bisect_left(numbers, first)
                 if i == len(numbers) or numbers[i] >= first + len(block):
                     continue  # the range adds no line to this paragraph
-                for number, message in self.judge_paragraph(rng, first, block, set(numbers), rows_at_head):
+                for number, message in self.judge_paragraph(rng, first, block, set(numbers), rows_at_head, path):
                     found[(path, number)] = message
         if rows_changed:
             self.removed_rows(rng, found, rows_at_head)
         return [(path, number, message) for (path, number), message in found.items()]
 
-    def judge_paragraph(self, rng, first, block, added, rows_at_head):
+    def worth_reading(self, row):
+        """True when an added row may hold a claim, so the file's head blob is read. A loose pre-check."""
+        row = HTML_COMMENT.sub(" ", row)
+        return bool(VERB.search(row) or ROUTE_WORD.search(row))
+
+    def view(self, text):
+        """(outside, route) of a paragraph, as `blanked` gives them."""
+        return blanked(text)
+
+    def states_claim(self, outside, route):
+        """True when a sentence, as `view` gives it, states what this reader judges."""
+        return bool(VERB.search(outside) and ROUTE_WORD.search(route))
+
+    def judge_paragraph(self, rng, first, block, added, rows_at_head, path=None):
         """[(first row number of the sentence, message)] for each unbacked claim sentence of the paragraph that
-        holds an added row and carries no `ste-disable-line STALE005` mark."""
+        holds an added row and carries no `ste-disable-line` mark for this reader's code."""
         text = "\n".join(block)
-        outside, route = blanked(text)
+        outside, route = self.view(text)
         starts, offset = [], 0
         for row in block:
             starts.append(offset)
             offset += len(row) + 1
         out = []
         for a, b in sentences(text, outside):
-            if not (VERB.search(outside[a:b]) and ROUTE_WORD.search(route[a:b])):
+            if not self.states_claim(outside[a:b], route[a:b]):
                 continue
             top, bottom = (first + bisect.bisect_right(starts, x) - 1 for x in (a, b - 1))
             if not any(n in added for n in range(top, bottom + 1)):
@@ -815,13 +845,13 @@ class RouteClaimReader:
             if any("ste-disable-line" in block[n - first] and self.code in disabled(block[n - first])
                    for n in range(top, bottom + 1)):
                 continue
-            message = self.judge(rng, text[a:b], rows_at_head)
+            message = self.judge(rng, text[a:b], rows_at_head, (path, top))
             if message:
                 out.append((top, message))
         return out
 
-    def judge(self, rng, sentence, rows_at_head):
-        """The message for one claim sentence, or None when it is backed."""
+    def judge(self, rng, sentence, rows_at_head, where=None):
+        """The message for one claim sentence, or None when it is backed. `where` is (path, line) of the sentence."""
         backed, dead, dead_files, unchecked = False, [], [], []
         for cite in paren_cites(sentence):
             kind, rest = cite_kind(cite)
@@ -879,6 +909,83 @@ class RouteClaimReader:
                     found.setdefault((md, number), "cites %s, a route row this range removes" % ", ".join(ids))
 
 
+# STALE009: a code subject, then a behaviour verb. A subject is a noun below or one source file (`hooks/x.py`, build.py).
+CODE_NOUNS = r"(?:tool|ledger|script|hook|guard|check|lint|linter|command|module|function|program|parser|scanner)"
+BEHAVIOUR_VERBS = ("read", "write", "print", "call", "refuse", "count", "run", "check")  # the base forms
+PRESENT_VERBS = ("reads", "writes", "prints", "calls", "refuses", "counts", "runs", "checks")
+CLAIM_END = r"(?![\w@+~/-]|\.\w)"  # a verb that opens a path (`reads.py`) is no verb
+CODE_CLAIM = re.compile(
+    r"(?:\b%s|(?<![\w./@+~-])`?[\w./@+~-]+\.%s`?)\s+(?:(?:never|only|always|also|just)\s+)*"
+    r"(?:%s|(?:does\s+not|doesn['\u2019]t)\s+%s)%s"
+    % (CODE_NOUNS, CODE_EXT, "|".join(PRESENT_VERBS), "(?:%s)" % "|".join(BEHAVIOUR_VERBS), CLAIM_END), re.I)
+CODE_VERB_WORD = re.compile(r"\b(?:%s)\b" % "|".join(BEHAVIOUR_VERBS + PRESENT_VERBS), re.I)  # the loose pre-check
+
+
+class CodeClaimReader(RouteClaimReader):
+    """STALE009: a sentence an added line of a decision record states about what code does or does not do (a code
+    subject and a behaviour verb) and that cites no name bound at head. A cite is STALE002's: "`file.py` `name`",
+    "(file.py name)" or a test node id. A cite of a .mjs, .js, .cjs, .ts or .sh file is read as unknown. Report only
+    (decision source-prose-lint-ships-dark). Paragraphs, sentences and the disable mark are RouteClaimReader's."""
+    code = "STALE009"
+
+    def prepare(self, rng):
+        """(files, False), or None. files: {path: [(number, text)]} of the decision records the range adds lines to."""
+        folders = set(decision_folders())
+        excludes = exclude_patterns(".")
+        files = {p: rows for p, rows in rng.added_lines.items()
+                 if rows and governed(p, excludes) and posixpath.dirname(p) in folders}
+        return (files, False) if files else None
+
+    def worth_reading(self, row):
+        return bool(CODE_VERB_WORD.search(row))  # no comment strip: a `<!--` in a code span must hide nothing
+
+    def view(self, text):
+        outside, _ = blanked(text, subjects=True)
+        return outside, outside
+
+    def states_claim(self, outside, route):
+        return bool(CODE_CLAIM.search(outside))
+
+    def bound(self, rng, path):
+        """The names `path` binds at head, [] for a file absent at head, or None when it does not parse."""
+        if path not in rng.bound_names:
+            blob = rng.batch.get("%s:%s" % (rng.head, posixpath.normpath(path)))
+            if blob is None:
+                rng.bound_names[path] = []
+            else:
+                names = names_in(blob.decode("utf-8", "replace"))
+                if names is None:
+                    rng.unknowns.append("%s does not parse at head; cites of its names were not checked" % path)
+                rng.bound_names[path] = names
+        return rng.bound_names[path]
+
+    def judge(self, rng, sentence, rows_at_head, where=None):
+        cites = [(m.group(1), m.group(2)) for pair in PAIR_RES for m in pair.finditer(sentence)]
+        for node in NODE_RE.finditer(sentence):
+            cites += [(node.group(1), name) for name in node.group(2).split("::")]
+        for pair in FOREIGN_PAIR_RES:
+            for m in pair.finditer(sentence):
+                note = "%s:%d: %s %s: JavaScript and shell names are not checked" % (where + (m.group(1), m.group(2)))
+                if note not in rng.unknowns:
+                    rng.unknowns.append(note)
+        dead, unchecked, backed = [], False, False
+        for path, name in cites:
+            names = self.bound(rng, path)
+            if names is None:
+                unchecked = True
+            elif name in names:
+                backed = True
+            else:
+                dead.append("%s %s, %s" % (path, name, "a file with no such name at head" if names else "a file absent at head"))
+        if dead:
+            return "cites %s" % "; ".join(dead)
+        if backed or unchecked:
+            return None
+        if any(True for pair in FOREIGN_PAIR_RES for _ in pair.finditer(sentence)):
+            return None
+        return "states what code does or does not do with no cite; cite `file.py` `name` or (file.py name), a name bound at head"
+
+
 def route_ids(rng, cache):
     """(ids, why) of the route rows at head, read once. ids is the set of row ids, or None with `why` ("absent" or
     "unreadable") when the file is missing or is not {"rows": [...]}: one unknown is noted, and no id is called dead.
@@ -907,7 +1014,7 @@ def route_ids(rng, cache):
 # reader already cited there). A reader with `unknown = True` reports its messages as unknown, not as findings.
 # A reader with `scope = "added"` reads the lines the range adds instead: `prepare(rng)` and `claims(rng, state)`, and
 # its messages are report lines, never findings. A new check adds one entry.
-READERS = (PathReader(), NameReader(), ForeignReader(), RouteClaimReader())
+READERS = (PathReader(), NameReader(), ForeignReader(), RouteClaimReader(), CodeClaimReader())
 
 
 def tracked_entries(rev, *paths):
