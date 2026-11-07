@@ -21,6 +21,24 @@ tier_line() {
   fi
 }
 
+# Cloud containers leave TMPDIR unset, so `$TMPDIR/x` lands at `/x` (incident 2026-11-07, /base_run.txt).
+if [ -z "${TMPDIR:-}" ] && [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+  if [ -d /tmp ] && [ -w /tmp ]; then
+    tmpdir_pick=/tmp
+  else
+    tmpdir_pick=$(python3 -c 'import tempfile; print(tempfile.gettempdir())' 2>/dev/null)
+  fi
+  # An absolute path other than `/`; a path with a single quote is skipped, so the quoted export stays valid.
+  case "$tmpdir_pick" in
+    *"'"*) ;;
+    /?*)
+      if [ -d "$tmpdir_pick" ] && [ -w "$tmpdir_pick" ]; then
+        printf "export TMPDIR='%s'\n" "$tmpdir_pick" >>"$CLAUDE_ENV_FILE" 2>/dev/null
+      fi
+      ;;
+  esac
+fi
+
 command -v git >/dev/null 2>&1 || { tier_line; exit 0; }
 
 # bounded_git <dir> <outfile> <git args...>: runs git in <dir>, stdout to <outfile>, killed after
