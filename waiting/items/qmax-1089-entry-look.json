@@ -4,6 +4,12 @@
   "home": "runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
   "id": "qmax-1089-entry-look",
   "kind": "decision",
+  "lane": "runner 9",
+  "lastAnswer": {
+    "at": "2026-11-07T21:06:57Z",
+    "choice": "a",
+    "note": ""
+  },
   "links": [
     {
       "label": "q_max PR #1089",
@@ -29,6 +35,7 @@
   "pick": "a",
   "rank": 2,
   "ref": "q_max #1089; q_max entry the-map-build-is-a-skill; step qmax-harness-copies-resolve",
+  "reply": "a, 15:06 CST: #1089 merges with the rewritten entry. Relayed to runner 9, which merges it in its next q_max batch; this closes on its merge report.",
   "short": "q_max #1089: merge the rewritten entry, or hold",
   "status": "open",
   "title": "May q_max #1089 merge with its rewritten map-build entry?",
