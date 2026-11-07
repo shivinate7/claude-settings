@@ -7,7 +7,7 @@ Each name below is an exact old file name, record slug, rule anchor, identifier,
 message of groups 1 and 5 to 9 of the plan: guard and check, grant and override, record, finding and
 safety hole, refuse, round.
 Each is distinctive, so a whole-word match in a tracked file is the old name coming back. This
-file, GLOSSARY.md, whose "Not" cells list them, and the generated docs/records.md are the exceptions. A HISTORY
+file and the files that lint/copy_exclusions.py names (GLOSSARY.md, whose "Not" cells list them, and the generated docs/records.md) are the exceptions. A HISTORY
 file may keep its name only on a line whose comment holds the opt-out marker. A retired word in plain
 prose ("the test will pass") is a reviewer's call, not this test's. The widened glossary check will replace this list.
 """
@@ -21,12 +21,11 @@ import unittest
 
 import _test_temp  # test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 from check_glossary import OPT_OUT  # the one home of the opt-out marker, a line that holds it is skipped
+from copy_exclusions import EXCLUDED_FILES  # the one home of the tracked files the prose checks never read
 
 RUN_FOLDER = _test_temp.run_folder()
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SELF = "lint/test_retired_names.py"
-GLOSSARY = "GLOSSARY.md"  # its "Not" cells name retired words on purpose
-RECORDS_PAGE = "docs/records.md"  # generated; the merge tool rebuilds it from the renamed sources (records-index-at-merge)
 
 # old name -> the name that replaced it
 RETIRED = {
@@ -86,8 +85,8 @@ def marked_lines(path):
 def hits(repo, name):
     """Tracked files that hold name as a whole word, any case, less the exceptions. None when git
     cannot run. A HISTORY file's line is not a hit when its comment holds OPT_OUT."""
-    run = subprocess.run(["git", "-C", repo, "grep", "-n", "-i", "-w", "-F", "-e", name, "--", ".", ":!" + SELF,
-                          ":!" + GLOSSARY, ":!" + RECORDS_PAGE],
+    run = subprocess.run(["git", "-C", repo, "grep", "-n", "-i", "-w", "-F", "-e", name, "--", ".", ":!" + SELF]
+                         + [":!" + path for path in EXCLUDED_FILES],
                          capture_output=True, encoding="utf-8", errors="replace")
     if run.returncode not in (0, 1):  # 1 means no match; anything else is no reading
         return None
