@@ -164,8 +164,8 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     n (the Pages proof). Its item lines do not stand in for the send. Prose that merely holds a number
     passes, and so does a pick in a repo with no waiting page, and "1 y, 2 n", whose letters are no pick.
   - Grants (F47, F31). An owner block whose text holds a grant word (approval, approve, approved, grant,
-    granted, permission to, permissions to, authorize, authorized, authorised, go ahead, go-ahead; whole
-    words, any case) and, in the same message outside any fence, an act or scope word (merge, push, delete,
+    granted, permission to, permissions to, authorize, authorized, authorised, go ahead, go-ahead, ok to merge,
+    you can merge, fine to merge, merge away; whole words, any case) and, in the same message outside any fence, an act or scope word (merge, push, delete,
     deploy, release, publish, always, standing, from now on, and all, any or every before repo, repos, PR,
     PRs, branch or branches) blocks unless
     the block has a `[ruling]` item whose home passes, a `[page] -> page:<n>` item with its send, or a
