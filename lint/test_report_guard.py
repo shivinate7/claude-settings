@@ -33,6 +33,7 @@ import ste_lint  # noqa: E402
 import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (one home)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
+import shared_names  # noqa: E402  the task-notification tag, one home (hooks/shared_names.py)
 import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
@@ -87,6 +88,13 @@ def tearDownModule():
 
 def human(text):
     return {"type": "user", "isSidechain": False, "message": {"role": "user", "content": text}}
+
+
+def task_notice(task_id="a1"):
+    """An agent completion notice. Claude Code writes it as a user record, so is_last_human reads it as a
+    human message, though no one typed it."""
+    return human("%s\n<task-id>%s</task-id>\n<status>completed</status>\n</task-notification>"
+                 % (shared_names.TASK_NOTIFICATION_TAG, task_id))
 
 
 def peer_msg(body, stamp=None, from_session="local_fixture"):
@@ -848,12 +856,13 @@ class DoneNamesModelsTests(unittest.TestCase):
     """reports-done-names-models, in report_guard.py's Stop hook."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
+        self.tmp = tempfile.mkdtemp(dir=RUN_FOLDER)  # test-temp-standard: the run's folder, removed at teardown
 
-    def verdict(self, reply, spawns, denied=()):
+    def verdict(self, reply, spawns, denied=(), between=()):
         records = [human("do the task")]
-        for spawn in spawns:
+        for i, spawn in enumerate(spawns):
+            if i:  # `between` goes before every spawn after the first
+                records += between
             records += [tool_use_msg("Agent", spawn), tool_result_msg()]
         for spawn in denied:
             use = tool_use_msg("Agent", spawn)
@@ -863,7 +872,7 @@ class DoneNamesModelsTests(unittest.TestCase):
             records += [use, result]
         records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
                     assistant_text(reply)]
-        path = write_transcript(records, self.tmp.name)
+        path = write_transcript(records, self.tmp)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
         env = dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
         run = run_guard(REPORT_GUARD, hook, env=env)
@@ -871,7 +880,10 @@ class DoneNamesModelsTests(unittest.TestCase):
         return json.loads(run.stdout) if run.stdout.strip() else None
 
     BUILDER = {"subagent_type": "builder", "prompt": "build it"}
+    REVIEWER_R1 = {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}  # no model: the agents/reviewer.md pin, haiku
     REVIEWER_R2 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
+    FIX_CHECK = {"subagent_type": "reviewer", "prompt": "Fix check of round 2"}  # no model: haiku
+    REVIEWER_OPUS = {"subagent_type": "reviewer", "model": "opus", "prompt": "Round 1 of 3"}
 
     def test_dm_red_builder_unnamed_blocks(self):
         out = self.verdict("> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none", [self.BUILDER])
@@ -930,21 +942,54 @@ class DoneNamesModelsTests(unittest.TestCase):
             "> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none",
             [{"subagent_type": "Explore", "prompt": "find x"}, {"subagent_type": "Plan", "prompt": "plan"}]))
 
+    def test_dm_false_alarm_task_notice_between_spawns_passes(self):
+        # Catches: a task-notification read as the owner's message moves the window past the haiku spawn,
+        # so the haiku named in Done matches no spawn and the report blocks.
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the guard, PR #5 (reviewer haiku, reviewer sonnet)\n> **Next** Unstarted: none",
+            [self.REVIEWER_R1, self.REVIEWER_R2], between=[task_notice()]))
+
+    def test_dm_false_alarm_task_notices_between_three_spawns_pass(self):
+        # Catches: each notice resets the window, leaving only the haiku fix check, so the sonnet named
+        # in Done matches no spawn.
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the guard, PR #5 (reviewer haiku, reviewer sonnet)\n> **Next** Unstarted: none",
+            [self.REVIEWER_R1, self.REVIEWER_R2, self.FIX_CHECK], between=[task_notice()]))
+
+    def test_dm_red_task_notice_does_not_back_an_unspawned_model_blocks(self):
+        # Catches: a notice between the spawns must not make a name that no reviewer spawn ran pass.
+        out = self.verdict(
+            "> **Done** BUILT the guard, PR #5 (reviewer opus)\n> **Next** Unstarted: none",
+            [self.REVIEWER_R1, self.REVIEWER_R2], between=[task_notice()])
+        self.assertIsNotNone(out, "the report passed: an opus name with no opus spawn was not blocked")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("matches no reviewer spawn", out["reason"])
+
+    def test_dm_red_spawn_before_an_owner_message_does_not_back_a_name_blocks(self):
+        # Catches: a spawn from an earlier task must not back a name in this turn's report. An owner message
+        # (not a notice) ends the window, so the opus spawn before it is out of the count.
+        out = self.verdict(
+            "> **Done** BUILT the guard, PR #5 (reviewer opus)\n> **Next** Unstarted: none",
+            [self.REVIEWER_OPUS, self.REVIEWER_R2], between=[human("also check the docs")])
+        self.assertIsNotNone(out, "the report passed: an opus spawn from before the owner message backed the name")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("matches no reviewer spawn", out["reason"])
+
 
 class UnstartedItemsTests(unittest.TestCase):
     """reports-name-unstarted-items, in report_guard.py's Stop hook."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
+        self.tmp = tempfile.mkdtemp(dir=RUN_FOLDER)  # test-temp-standard: the run's folder, removed at teardown
 
-    def verdict(self, reply, spawns):
+    def verdict(self, reply, spawns, after_spawns=()):
         records = [human("do the task")]
         for spawn in spawns:
             records += [tool_use_msg("Agent", spawn), tool_result_msg()]
+        records += after_spawns  # records after the last spawn and before the landing commit
         records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
                     assistant_text(reply)]
-        path = write_transcript(records, self.tmp.name)
+        path = write_transcript(records, self.tmp)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
         env = dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
         run = run_guard(REPORT_GUARD, hook, env=env)
@@ -992,6 +1037,14 @@ class UnstartedItemsTests(unittest.TestCase):
         for spawns, reply in rows:
             with self.subTest(reply=reply):
                 self.assertIsNone(self.verdict(reply, spawns))
+
+    def test_un_red_task_notice_after_a_builder_spawn_still_blocks(self):
+        # Catches: a task-notification read as the owner's message drops the builder spawn from the window,
+        # so a turn with no Unstarted line passes.
+        out = self.verdict(self.DONE + "> **Next** merge the batch", [self.BUILDER], after_spawns=[task_notice()])
+        self.assertIsNotNone(out, "the report passed: the notice hid the builder spawn from the Unstarted guard")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("Unstarted guard", out["reason"])
 
 
 class NoResendTests(unittest.TestCase):
