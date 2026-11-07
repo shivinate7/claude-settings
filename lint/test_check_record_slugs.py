@@ -656,6 +656,24 @@ class RecordSlugsTests(unittest.TestCase):
         self.put(d1, text)
         self.assert_tree(["%s:%d DEBT003 d1" % (d1, line_of(text, "**Decision.**"))])
 
+    def test_an_unbackticked_decision_slug_is_gloss001_and_a_gloss_clears_it(self):
+        # The Decision line names tap-lag with no backticks. Bare, with or without a period, it is a cite: GLOSS001.
+        # With a gloss it is clean. The decision names the three debts in glossed cites, so no DEBT finding.
+        self.decision("tap-lag", "# Tap lag\n\nThe debt `d-plain` (its finding) waits.\n"
+                                 "The debt `d-period` (its finding) waits.\n"
+                                 "The debt `d-gloss` (its finding) waits.\n")
+        plain = self.rel("debts", "d-plain.md")
+        text = "# Debt\n\n- **Decision.** tap-lag\n"
+        self.put(plain, text)
+        period = self.rel("debts", "d-period.md")
+        period_text = "# Debt\n\n- **Decision.** tap-lag.\n"
+        self.put(period, period_text)
+        self.put(self.rel("debts", "d-gloss.md"), "# Debt\n\n- **Decision.** tap-lag (tap feels slow).\n")
+        self.assert_tree([
+            "%s:%d GLOSS001 tap-lag" % (plain, line_of(text, "**Decision.**")),
+            "%s:%d GLOSS001 tap-lag" % (period, line_of(period_text, "**Decision.**")),
+        ])
+
     def test_a_named_decision_must_name_the_debt(self):
         # tap-lag names d-eight but not d-seven, so d-seven's decision line fails DEBT003.
         self.decision("tap-lag", "# Tap lag\n\nThe debt `d-eight` (its finding) waits.\n")
