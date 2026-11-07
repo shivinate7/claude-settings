@@ -230,13 +230,15 @@ def sets_options(write):
 
 def is_reask(write):
     """True for a judged set or update whose data has non-empty `options` and a `lastAnswer` dict with no `choice` or
-    choice "none", and a note that is a string, non-empty after strip."""
+    choice "none", no `done`, and a note that is a string, non-empty after strip."""
     if not sets_options(write):
         return False
     data = write["data"]
     answer = data.get("lastAnswer")
     if not isinstance(answer, dict) or answer.get("choice", "none") != "none":
         return False  # step 4 keeps a picked choice: that write is no "none of these" re-ask
+    if "done" in answer:
+        return False  # a task's answer: it gives no "none of these" direction
     note = answer.get("note")
     return isinstance(note, str) and bool(note.strip())
 
