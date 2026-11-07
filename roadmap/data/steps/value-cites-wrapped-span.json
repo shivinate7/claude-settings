@@ -1,0 +1,10 @@
+{
+  "title": "Value cites read a code span that wraps across a line break",
+  "why": "Lane value-cites-rebuild, 13:49 CST Nov 7 (PR #1430): a Markdown code span `file.py: NAME = v` that wraps across a line break is not read. Note stale-cites-value-span-wraps in docs/debts/notes.md.",
+  "note": "The stale_cites scanner joins spans at paragraph level, and respects strings and fences (rule building-scanner-respects-strings). Done check: a red test on a wrapped span. The check's verdict changes, so this is a build lane.",
+  "phase": "next",
+  "status": "todo",
+  "order": 261.20000000000005,
+  "owner": "coordinator",
+  "updatedAt": "2026-11-07T13:58:00-06:00"
+}

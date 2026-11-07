@@ -1,0 +1,10 @@
+{
+  "title": "Value cites read a constant bound inside a module-level if, try or tuple target",
+  "why": "Lane value-cites-rebuild, 13:49 CST Nov 7 (PR #1430, lint/stale_cites.py STALE008): skills/plain-english-map/scripts/lib/py-facts.py reads top-level Name targets only. A constant bound in a module-level `if` or `try`, or in a tuple target, gives a false alarm (\"assigns no module-level X\") or a missed change. Note stale-cites-value-top-level-only in docs/debts/notes.md.",
+  "note": "Fix in py-facts, the one home, with map parity. STALE002's names_in already reads into if and try. Done check: a red test on a constant bound in a module-level try. The check's verdict changes, so this is a build lane.",
+  "phase": "next",
+  "status": "todo",
+  "order": 261.1,
+  "owner": "coordinator",
+  "updatedAt": "2026-11-07T13:58:00-06:00"
+}
