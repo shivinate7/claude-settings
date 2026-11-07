@@ -59,11 +59,17 @@ Built on main, report-only. `merge/merge.py` selects prose lines and sends each 
 - Errors: a model error, a timeout or an unreadable reply reads UNKNOWN, never a pass (read merge/merge.py:2538-2543).
 - Report only: the call runs after the lock is released and refuses nothing (read merge/merge.py:2524).
 
-Not measured. `lint/route_claims_labelled.json` holds 21 rows, each with a file, line, label and summary. It has no line text and no commit, and its labels are not the judge's three verdicts. So nothing scores the judge yet. It stays report-only until it is measured on a labelled set that holds line text (read lint/route_claims_labelled.json:1-23).
+Scored. `lint/prove_route_judge.py` scores the judge on `lint/route_claims_labelled.json`. The file has 21 rows. Each row holds its line text and the commit it was judged at (read lint/route_claims_labelled.json:1-23). Only a `stale` verdict counts against the labels. A false alarm is a TRUE row judged stale. A hit is a STALE, PARTLY_STALE or HALF row judged stale (read lint/prove_route_judge.py:113-131). `unbacked` is counted apart, because no labelled row carries a backing cite. UNKNOWN and HISTORY rows are skipped, and so is a row with no rev (read lint/prove_route_judge.py:40, :113-116). Source: lane pick 2026-11-07 02:46 CST, process-only.
+
+Result, in the record's backing form: `(measured 2026-11-07, lint/prove_route_judge.py: false alarms 0/13 (0.0%), hits 0/4, unbacked 12/17, unknown 4 (model result carried no JSON verdict), skipped 4)`.
+
+What it shows: the judge raised no false alarm, but it found none of the 4 STALE, PARTLY_STALE or HALF rows. On lines without a backing cite it answers "unbacked", not "stale". So it stays report-only. Four such rows are too few for a rate. A score needs more stale rows, or rows that carry a backing cite.
 
 ## Re-measure on use
 
 Before a fallback route is used, the session tries one act that can be undone, once, and updates that route row.
+
+Not built, since no code reads a route row before a fallback is used.
 
 ## Unmeasured
 
@@ -95,12 +101,13 @@ Built on main:
 - The reply judge's route block (read hooks/reply_judge.py:146-152).
 - STALE005, report-only (read lint/stale_cites.py:705-710).
 - The merge's model judge, report-only (see Model judge at merge).
+- A labelled set that can score the merge judge (see Model judge at merge).
 
 Not built:
 
 - The generator that fills the route-rows table in `docs/decisions/auto-mode-owner-acts.md` from `hooks/route_rows.json`. The table is empty between its markers (read docs/decisions/auto-mode-owner-acts.md:31-32).
-- A labelled set that can score the merge judge (see Model judge at merge).
 - The row-age reader (see Unmeasured).
+- The judge is unmeasured beyond the run above (see Model judge at merge).
 
 Kind: build
 Plan: docs/plans/pointer-system.md#lanes (all)
