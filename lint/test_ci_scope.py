@@ -279,16 +279,21 @@ def _join_file(f, call, tracked, own_names, bound):
     return None, None
 
 
-def _key(node, parents):
-    """The key a load the derivation does not follow is listed under, after its file: the enclosing function (or <module>)
-    and the load's source as ast.unparse writes it. Neither holds a line number."""
-    scope, p = "<module>", node
-    while p in parents:
-        p = parents[p]
-        if isinstance(p, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            scope = p.name
-            break
-    return f"{scope}:{ast.unparse(node)}"
+def _keyed(named, parents):
+    """-> [(key, what)] for the loads the derivation does not follow, in source order. A key, after its file, is the scope
+    the load sits in (its classes and functions, qualified: Class.method, or <module>) and the load's source as ast.unparse
+    writes it. A repeat of one key in the file gets #N, N counting from 2, so no two keys are equal. Neither holds a line."""
+    seen, out = Counter(), []
+    for node, what in sorted(named, key=lambda nw: (nw[0].lineno, nw[0].col_offset)):
+        names, p = [], node
+        while p in parents:
+            p = parents[p]
+            if isinstance(p, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.append(p.name)
+        base = f"{'.'.join(reversed(names)) or '<module>'}:{ast.unparse(node)}"
+        seen[base] += 1
+        out.append((base if seen[base] == 1 else f"{base}#{seen[base]}", what))
+    return out
 
 
 def _refs(f, tree, tracked):
@@ -311,12 +316,12 @@ def _refs(f, tree, tracked):
                 if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
                     modules.add(node.args[0].value.split(".")[0])
                 else:
-                    unfollowed.append((_key(node, parents), "importlib.import_module of a name built at run time"))
+                    unfollowed.append((node, "importlib.import_module of a name built at run time"))
             elif name == "os.path.join":
                 c, kind = _join_file(f, node, tracked, own_names, bound)
                 if kind == "run-time":
                     if not test:  # a test's join under a run-time root is a fixture path, not a repo load
-                        unfollowed.append((_key(node, parents), f"os.path.join with a run-time root, then {c}"))
+                        unfollowed.append((node, f"os.path.join with a run-time root, then {c}"))
                 elif c:
                     paths.add(c)
             elif name.endswith("spec_from_file_location") or name.endswith("SourceFileLoader"):
@@ -326,17 +331,17 @@ def _refs(f, tree, tracked):
                     c, kind = _join_file(f, j, tracked, own_names, bound)
                     if kind == "run-time":
                         named = True
-                        unfollowed.append((_key(j, parents), f"a loader path with a run-time root, then {c}"))
+                        unfollowed.append((j, f"a loader path with a run-time root, then {c}"))
                     elif c:
                         hits.append(c)
                 loads.update(hits)
                 if not hits and not named:
-                    unfollowed.append((_key(arg if arg is not None else node, parents), "a loader path with no literal repo file"))
+                    unfollowed.append((arg if arg is not None else node, "a loader path with no literal repo file"))
         elif isinstance(node, ast.BinOp):  # a pathlib `/` load, read wherever it is written
             c = _repo_load(f, node, tracked, bound)
             if c:
                 paths.add(c)
-    return modules, paths, loads, unfollowed
+    return modules, paths, loads, _keyed(unfollowed, parents)
 
 
 def guard_closure():
