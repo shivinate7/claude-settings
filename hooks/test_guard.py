@@ -7809,21 +7809,34 @@ for _command in NM_OFF_LIST:
 
 # THE WORKSPACE FLAGS ON `npm version`. With a workspace flag, npm reifies the linked root, so the command
 # changes the install through the link. Without one it only rewrites package.json (a control below).
+# `verison` is npm's own alias of version, so it takes the same flags.
 NM_WORKSPACE_VERSION = (
     "npm version patch -w a", "npm version patch --workspaces", "npm version patch -ws",
-    "npm version patch --workspace=a", "npm -w a version patch",
+    "npm version patch --workspace=a", "npm -w a version patch", "npm verison patch -w a",
 )
 # THE DRY RUNS THAT STILL RUN INSTALL SCRIPTS. npm rebuild, rb and edit run install scripts even with
 # --dry-run, so a dry run is no no-change for them. `npm prune --dry-run` and `npm audit fix --dry-run`
-# stay allowed (a control below).
+# stay allowed (a control below). npm reads an unambiguous abbreviation as the full command, so `reb`,
+# `rebuil` and `edi` are these same writers.
 NM_DRY_RUN_WRITERS = (
     "npm rebuild --dry-run", "npm rb x --dry-run", "npm edit x --dry-run", "npm --dry-run rebuild",
+    "npm rebuil --dry-run", "npm reb --dry-run", "npm edi x --dry-run",
 )
 for _command in NM_WORKSPACE_VERSION + NM_DRY_RUN_WRITERS:
     nm_case("linked-nm: refuse " + _command + " (Bash) in a linked folder", _command, "deny", NMLINKED)
     nm_case("linked-nm: " + _command + " (Bash) in a real folder is allowed", _command, "allow", NMREAL)
     nm_case("linked-nm: " + _command + " (Bash) in a folder with no node_modules is allowed",
             _command, "allow", NMABSENT)
+
+# THE WORKSPACE-UPDATE FLAG. `--no-workspaces-update` turns npm's reify off, so a workspace flag with it changes no
+# install. `--workspaces-update=false` with no workspace flag never enters npm's workspace path, so it changes no
+# install either. The last case is a control: the positive flag with a workspace flag still reifies, so it is refused.
+nm_case("linked-nm: npm version patch -w a --no-workspaces-update (Bash) in a linked folder is allowed",
+        "npm version patch -w a --no-workspaces-update", "allow", NMLINKED)
+nm_case("linked-nm: npm version patch --workspaces-update=false (Bash) in a linked folder is allowed",
+        "npm version patch --workspaces-update=false", "allow", NMLINKED)
+nm_case("linked-nm: npm version patch -w a --workspaces-update (Bash) in a linked folder is refused",
+        "npm version patch -w a --workspaces-update", "deny", NMLINKED)
 
 # THE FALSE-ALARM CONTROLS in a linked folder. None of these changes the linked install, so none is refused.
 nm_case("linked-nm: npm i -g x (Bash) in a linked folder is allowed, a global install",
@@ -7841,7 +7854,7 @@ NM_READ_ONLY = (
     "npm", "npm -v", "npm ls", "npm list", "npm -C . ls", "npm view x", "npm outdated", "npm audit",
     "npm audit signatures", "npm explain x", "npm fund", "npm exec -- tsc", "npm config get registry",
     "npm help install", "npm prune --dry-run", "npm audit fix --dry-run", "npm version patch",
-    "npm rebuild --help", "npm run build", "npm test",
+    "npm rebuild --help", "npm run build", "npm test", "npm verison patch", "npm reb --help",
 )
 for _command in NM_READ_ONLY:
     nm_case("linked-nm: " + _command + " (Bash) in a linked folder is allowed", _command, "allow", NMLINKED)
@@ -7907,6 +7920,48 @@ nm_case("linked-nm: walk: cd into a sub folder with its own package.json, then n
         "cd own_pkg && npm ci", "allow", NMNEST)
 nm_case("linked-nm: walk: npm run build in a sub folder under a linked root is allowed",
         "npm run build", "allow", NM_SUB)
+
+
+# THE WORKSPACE PACKAGES. npm runs an install in a workspace package from the workspace root, so a package folder
+# with its own package.json still installs into the linked root above it. A folder that the root's workspaces field
+# does not name keeps its own tree, and so does every folder under a root with no workspaces field.
+NMWS = os.path.join(ROOT, "nmws")                       # a root with workspaces, whose node_modules is a link
+NMWSREAL = os.path.join(ROOT, "nmwsreal")               # the same root, whose node_modules is a real folder
+NMSTAND = os.path.join(ROOT, "nmstand")                 # a root with no workspaces field, whose node_modules is a link
+NM_WS_PKG = os.path.join(NMWS, "packages", "a")         # a workspace package, with its own package.json
+NM_WS_OUT = os.path.join(NMWS, "tools", "x")            # a folder the workspaces field does not name
+NM_STAND_NESTED = os.path.join(NMSTAND, "nested")       # a package under the root with no workspaces field
+NM_WS_ROOT_PKG = '{"name": "root", "private": true, "workspaces": ["packages/*"]}\n'
+NM_MEMBER_PKG = '{"name": "member", "version": "1.0.0"}\n'
+
+
+def _build_linked_nm_workspaces():
+    materialize(NMTARGET)  # the link's target is built by its own home first, so no link points at nothing
+    for root in (NMWS, NMWSREAL):
+        write(os.path.join(root, "package.json"), NM_WS_ROOT_PKG)
+        write(os.path.join(root, "packages", "a", "package.json"), NM_MEMBER_PKG)
+    write(os.path.join(NM_WS_OUT, "package.json"), NM_MEMBER_PKG)
+    _make_dir_link(NMTARGET, os.path.join(NMWS, "node_modules"))
+    write(os.path.join(NMWSREAL, "node_modules", "pkg.js"), "module.exports = {};\n")
+    write(os.path.join(NMSTAND, "package.json"), NM_PKG)
+    write(os.path.join(NM_STAND_NESTED, "package.json"), NM_MEMBER_PKG)
+    _make_dir_link(NMTARGET, os.path.join(NMSTAND, "node_modules"))
+
+
+lazy_fixture([NMWS, NMWSREAL, NMSTAND], _build_linked_nm_workspaces)
+
+nm_case("linked-nm: workspace: refuse cd packages/a, then npm install, from a linked workspace root",
+        "cd packages/a && npm install", "deny", NMWS)
+nm_case("linked-nm: workspace: refuse npm install with the workspace package as the working folder",
+        "npm install", "deny", NM_WS_PKG)
+# The controls. A real root under the same workspaces allows, a folder the workspaces field does not name allows,
+# and a standalone package under a root with no workspaces field allows.
+nm_case("linked-nm: workspace: cd packages/a, then npm install, under a real root is allowed",
+        "cd packages/a && npm install", "allow", NMWSREAL)
+nm_case("linked-nm: workspace: cd tools/x, then npm install, under a linked workspace root is allowed",
+        "cd tools/x && npm install", "allow", NMWS)
+nm_case("linked-nm: workspace: cd nested, then npm install, under a linked root with no workspaces field is allowed",
+        "cd nested && npm install", "allow", NMSTAND)
 
 
 # =========================================================================== 4. environment files
