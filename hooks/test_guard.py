@@ -8568,6 +8568,7 @@ FLAG_FALSE_ALARM_DENY = (
     VCS + " add " + ENV + "s",
     "cat " + ENV + "s",
     "jq -C . " + ENV + " f.json",
+    "gojq -C . " + ENV + " f.json",
     "yq -C . " + ENV + " f.yaml",
     "jq -rC .k " + ENV + " f.json",
     "jq -C -f " + ENV + " .",
