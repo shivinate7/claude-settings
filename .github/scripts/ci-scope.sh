@@ -4,19 +4,22 @@
 #   per suite: code (any non-docs file changed), guard_windows_full (the Windows guard suite runs in full shards on a pull_request: set by every repo file the guard suite loads, which GuardClosure in lint/test_ci_scope.py derives from the code and checks, by hooks/test_guard.py, hooks/mutate_guard.py and settings.json; every path that sets it also sets guard and code), mods (a path under mods/, or a .md path under skills/plain-english-map/: the mod tests and the
 #   map skill tests, one CI step in each of the `checks`, `checks-windows` and `checks-macos` jobs), guard (guard mutation test), sweep (janitor mutation test), shoot (the checks-shoot job: the bin/shoot suite, which installs a browser). The `checks` lint job and the checks-merge-install job always run, so they have no flag (their suites carry `code`). checks_macos gates both checks-macos and checks-macos-b.
 # guard_windows_slice is derived (after the loop, and outside ALL): guard on and guard_windows_full off. On a pull_request the Windows guard job runs the slice then, and the full shards only when guard_windows_full is on. Both are job outputs.
+# merge_windows_full (the Windows merge suite runs in full shards on a pull_request: set by every repo file the merge suite loads, which merge_closure in lint/test_ci_scope.py derives from merge/test_merge.py; every path that sets it also sets checks_windows_merge and code).
+# merge_windows_slice is derived (after the loop, and outside ALL): checks_windows_merge on and merge_windows_full off. On a pull_request the Windows merge job runs the slice then, and the full shards only when merge_windows_full is on. Both are job outputs.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
 # script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
 # BASE_SHA, HEAD_REF.
 set -u
 JOBS="checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos pointer_windows"
-ALL="$JOBS checks_guard code mods guard sweep shoot guard_windows_full"
+ALL="$JOBS checks_guard code mods guard sweep shoot guard_windows_full merge_windows_full"
 range=""
 [ "${EVENT:-}" = pull_request ] && [ -n "${BASE_SHA:-}" ] && range="$BASE_SHA...HEAD"
 on=" "
 # --no-renames lists the old path of a rename too, so a move out of a mapped path counts.
 if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name-only --no-renames "$range" 2>/dev/null) && [ -n "$files" ]; then
   F=guard_windows_full
+  MF=merge_windows_full
   W=checks_windows M=checks_windows_merge R=checks_windows_rest Z=checks_windows_sweep X=checks_macos S=shell_macos P=pointer_windows
   while IFS= read -r f; do
     case "$f" in
@@ -100,6 +103,36 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       *.md) ;;
       *) on="$on $ALL " ;;
     esac
+    # The files the merge suite loads (merge_closure in lint/test_ci_scope.py derives them from merge/test_merge.py) turn the full Windows merge
+    # shards on, with the merge job and code (the shards' checkouts and shard 1 read them). This second case adds to the arm above, so a path keeps
+    # every flag it sets there. A .md file the suite reads takes it too: a Windows checkout can change line endings.
+    case "$f" in
+      # guard_<family>.py modules are guard.py (it loads them); guard_test_* is not (it falls to hooks/* above).
+      hooks/guard_test_*) ;;
+      hooks/guard.py|hooks/guard_*.py|\
+      .github/stamp.json|\
+      README.md|install.sh|settings.json|\
+      actions/ci-alarm/clear_rule.py|actions/ci-alarm/events.json|\
+      actions/stamp/stamp.mjs|\
+      bin/ci-job|bin/sim-lease|bin/sim-test|\
+      docs/decisions/standing-merge-grant.md|\
+      hooks/_nowindow.py|hooks/call_judge.py|hooks/cc_compaction_baseline.json|hooks/config_watch.py|hooks/decision_watch.py|hooks/feedback_guard.py|\
+      hooks/git_bash.py|hooks/git_reads.py|\
+      hooks/local_time.py|hooks/mutate_js.mjs|hooks/mutate_shared.py|\
+      hooks/override.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/proc_env.py|hooks/question_form.py|hooks/reply_judge.py|\
+      hooks/required_check.py|hooks/reread_check.py|hooks/route_match.py|hooks/route_rows.json|hooks/ruling_home.py|hooks/shared_names.py|\
+      hooks/test_guard.py|\
+      janitor/sweep.py|janitor/temp_sweep.py|\
+      lint/_test_temp.py|lint/_transcript.py|lint/check_debt_retire.py|lint/check_record_slugs.py|lint/check_silent_undo.py|\
+      lint/check_skill_model_rows.py|lint/guard_log_report.py|lint/hook_catalog.py|lint/layout.json|lint/layout.py|lint/report_guard.py|\
+      lint/rule_audit.py|lint/stale_cites.py|lint/test_rule_audit.py|lint/workflow_steps.py|\
+      merge/cloud_allow.json|merge/install_from_main.sh|merge/merge.py|merge/test_merge.py|\
+      output-styles/shiv-stylisms.md|\
+      skills/impeccable/SKILL.md|\
+      skills/plain-english-map/scripts/lib/py-facts.py|\
+      skills/roadmap/build.py|\
+      skills/waiting-page/export_page.py|skills/waiting-page/page.html|skills/waiting-page/splice.py|skills/waiting-page/stale_pages.py|\
+      testing/shallow_clone.py) on="$on $M $MF code " ;; esac
   done <<< "$files"
   # A new file under a landed dir (landed-dirs.txt, the one list) changes what test_install_src and
   # the guard suite see. An unreadable or empty list turns everything on.
@@ -117,8 +150,10 @@ fi
 case "$on" in *" code "*) case "$on" in *" guard "*) on="$on checks_guard " ;; esac ;; esac
 # guard_windows_slice: guard on and guard_windows_full off. It is outside ALL, so no arm sets it and no fail-safe turns it on.
 case "$on" in *" guard "*) case "$on" in *" guard_windows_full "*) ;; *) on="$on guard_windows_slice " ;; esac ;; esac
+# merge_windows_slice: checks_windows_merge on and merge_windows_full off. It is outside ALL, like guard_windows_slice.
+case "$on" in *" checks_windows_merge "*) case "$on" in *" merge_windows_full "*) ;; *) on="$on merge_windows_slice " ;; esac ;; esac
 echo "CI scope: event=${EVENT:-} range=${range:-none} on=$on"
-for n in $ALL guard_windows_slice; do
+for n in $ALL guard_windows_slice merge_windows_slice; do
   case "$on" in *" $n "*) v=true ;; *) v=false ;; esac
   echo "$n=$v" >> "$GITHUB_OUTPUT"
 done

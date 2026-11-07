@@ -16,7 +16,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import (ALL_JOBS_PASSED_JOB, GUARD_JOB, all_jobs, eval_if, shard_base,  # noqa: E402  the one home of the scope condition and scalar parsers
+from test_windows_split import (ALL_JOBS_PASSED_JOB, all_jobs, eval_if, shard_base,  # noqa: E402  the one home of the scope condition and scalar parsers
                                 yaml_scalar)
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
 
@@ -166,18 +166,15 @@ def steps_problems(text):
 
 
 def off_problems(text):
-    """Only a shard job may stay off all-jobs-passed. A needed job has no job-level if, except scope (its draft rule). A guard
-    shard (a shard of GUARD_JOB) is a normal needed job: it runs on a ready PR and its steps decide. A merge shard runs off
-    pull_request only, so it stays off."""
+    """Only a shard job may stay off all-jobs-passed. A needed job has no job-level if, except scope (its draft rule). A shard
+    in needs (a guard or merge shard past the first) is a normal needed job: it runs on a ready PR and its steps decide."""
     jobs = all_jobs(text)
     needed, off, problems = split_jobs(text)
     for name in off:
         if not shard_base(name):
             problems.append(f"{name} is off all-jobs-passed but is not a shard: its job-level if skips it on a PR")
     for name in needed:
-        if shard_base(name) and shard_base(name) != GUARD_JOB:
-            problems.append(f"shard {name} is in all-jobs-passed's needs: a shard runs only off pull_request")
-        elif name != "scope" and jobs[name]["if"] is not None:
+        if name != "scope" and jobs[name]["if"] is not None:
             problems.append(f"{name} is needed and keeps a job-level if: all-jobs-passed reads its skip as red, "
                             "so its scope condition belongs in its steps")
     return problems
