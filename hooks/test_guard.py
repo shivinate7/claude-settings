@@ -10146,6 +10146,19 @@ for _name, _command in (
        "cite-by-id", carries="could not be read", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a PowerShell commit denies too", VCS + ' commit -m "cites ' + CITE + '"', "deny",
    "cite-by-id", tool="PowerShell", cwd=NOGIT, config=MERGECFG)
+# A PR TITLE AND A MERGE SUBJECT ARE READ TOO. A squash subject becomes the commit on main, and a title names
+# the pull request, so each one that cites a record by path is refused as a commit body is. The merge runs
+# on a green head, so only the cite rule can deny it.
+for _name, _command in (
+    ("a merge subject", 'gh pr merge 5 --squash --subject "fix, per ' + CITE + '"'),
+    ("a create title", 'gh pr create --draft --title "fix, per ' + CITE + '" --body x'),
+    ("an edit title in the short form", "gh pr edit 5 -t 'fix, per " + CITE + "'"),
+):
+    sh("cite-pr-title: %s denies" % _name, _command, "deny", "cite-by-id", cwd=NOGIT,
+       env_path=GREEN_ON, config=MERGECFG)
+sh("cite-pr-title: a create title naming the decisions folder, with no record path, is allowed",
+   'gh pr create --draft --title "fix, see the decisions folder" --body x', "allow", cwd=NOGIT,
+   config=MERGECFG)
 for _name, _command in (
     ("a code path", VCS + ' commit -m "guard: fix hooks/guard.py"'),
     ("a code path in bold", VCS + ' commit -m "guard: fix **hooks/guard.py**"'),
