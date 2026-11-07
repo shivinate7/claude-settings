@@ -2471,6 +2471,70 @@ def case_verdict_and_question_failures_give_one_refusal_naming_both():
               len(r.calls) == 1 and WORKTREE_MARK in r.calls[0]["prompt"], detail(r))
 
 
+# ------------------------------------------------------------------ verdict claim, round 3 (red on afdfa806d)
+#
+# The round 3 groups, red on the head this round starts from. Allowed: each sentence is a false alarm today, because its
+# verb acts on a pronoun or is passive, or its subject is a CI or a test name. Refused: each sentence is a miss today,
+# because its modal and verb are split by an adverb, the verb is missing from the list, the apostrophe is curly, or the
+# subject is a file path. The remedy of a refusal that names the read form also says what a read cite may name.
+# Each allowed sentence carries its own turn: the guard sentence names hooks/guard.py, and its turn ran that file.
+ROUND3_ALLOWED = (
+    ("a passive verb, CI as the subject", "The merge will be blocked until CI is green.", ()),
+    ("a passive verb, a guard as the subject", "The lane will be blocked on the guard.", ()),
+    ("block it, the check named in a clause", "I will block it until the check is green.", ()),
+    ("pass it to a reviewer, test as the subject", "I will pass it to the reviewer after the test run.", ()),
+    ("pass it to a lane number, CI as the subject", "I will pass it to lane #3 once CI is green.", ()),
+    ("pass it, test-author as a word", "The builder will pass it to the test-author.", ()),
+    ("should block it, the check named in a clause", "You should block it until the check is green.", ()),
+    ("a file in a cite, the turn ran that file", "The guard (hooks/guard.py) will refuse it.",
+     ("python3 hooks/guard.py --check",)),
+)
+ROUND3_REFUSED = (
+    ("an adverb between will and the verb", "the check will probably refuse it."),
+    ("an adverb between will and the verb, guard", "the guard will still refuse it."),
+    ("never between will and the verb", "the check will never let it through."),
+    ("a curly apostrophe in won't", "the check won’t let it through."),
+    ("a file path as the subject", "lint/stale_cites.py will refuse it."),
+    ("the verb flag", "the guard will flag it."),
+    ("the verb fail", "the check will fail it."),
+)
+
+
+def case_round3_allowed_claims_pass():
+    for index, (label, sentence, commands) in enumerate(ROUND3_ALLOWED):
+        transcript = write_transcript("r3-allowed-%d" % index, commands=commands)
+        for tool in SEND_TOOLS:
+            r = run_hook(send_input(tool, sentence, transcript=transcript), answer=ALLOW)
+            check("round 3 allowed (%s), via %s: the send is not refused" % (label, tool),
+                  r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_round3_refused_claims_are_refused():
+    transcript = write_transcript("r3-refused")
+    for label, sentence in ROUND3_REFUSED:
+        for tool in SEND_TOOLS:
+            r = run_hook(send_input(tool, sentence, transcript=transcript), answer=ALLOW)
+            check("round 3 refused (%s), via %s: the send is refused" % (label, tool),
+                  (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+
+
+def case_round3_refusal_remedy_says_what_a_read_may_name():
+    # A refusal whose remedy names `(read path:line)` says, after that form, that the file must be one the claim names,
+    # or the file that defines the named rule. Today's remedy names the read form and says neither.
+    transcript = write_transcript("r3-remedy")
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, INCIDENT_SENTENCE, transcript=transcript), answer=ALLOW)
+        reason = r.reason()
+        at = reason.find("(read path:line)")
+        check("round 3 remedy scope (%s): the send is refused and the remedy names the read form" % tool,
+              (r.deny() or {}).get("permissionDecision") == "deny" and at >= 0, detail(r))
+        tail = reason[at:] if at >= 0 else ""
+        check("round 3 remedy (%s): after the read form, the file must be one the claim names" % tool,
+              "the claim names" in tail, tail[:200])
+        check("round 3 remedy (%s): after the read form, or the file that defines the named rule" % tool,
+              "defines the named rule" in tail, tail[:200])
+
+
 def main():
     for case in (case_agent_refusal,case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -2521,7 +2585,9 @@ def main():
                  case_verdict_claim_cited_to_an_absent_file_is_refused, case_would_claim_is_refused,
                  case_round2_refused_claims_are_refused, case_round2_allowed_claims_pass,
                  case_run_before_a_peer_message_does_not_clear_a_later_claim, case_round2_cite_bar,
-                 case_verdict_and_question_failures_give_one_refusal_naming_both):
+                 case_verdict_and_question_failures_give_one_refusal_naming_both,
+                 case_round3_allowed_claims_pass, case_round3_refused_claims_are_refused,
+                 case_round3_refusal_remedy_says_what_a_read_may_name):
         try:
             case()
         except Exception as exc:
