@@ -1643,7 +1643,8 @@ test("canSendToClaude is asked before the answer write", async (t) => {
     const real = state.comments.canSendToClaude;
     state.comments.canSendToClaude = async () => { window.__order.push("can"); return real(); };
     const col = state.db.collection;
-    state.db.collection = (n) => { const x = col(n); const d = x.doc; x.doc = (id) => { const y = d(id); const set = y.set; y.set = async (b) => { window.__order.push("set"); return set(b); }; return y; }; return x; };
+    // Only the answer write is ordered here: the usage counter writes too, and its set is not this case's subject.
+    state.db.collection = (n) => { const x = col(n); const d = x.doc; x.doc = (id) => { const y = d(id); const set = y.set; y.set = async (b) => { if (n === "answers") window.__order.push("set"); return set(b); }; return y; }; return x; };
   });
   await send(page);
   await page.waitForFunction(() => window.__sent.length === 1);
