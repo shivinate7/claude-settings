@@ -108,6 +108,18 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
 - The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR.
 
+## The guard
+
+Rule `pr-review-record`, in `hooks/guard.py` (PreToolUse).
+
+- The mistake: a lane typed the Head by hand on PR #1475 (15:10 CST, 2026-11-07). The record named a head that was not the live one, so the batch runner read it as stale.
+- It judges a post of a comment whose body holds the marker: `mcp__github__add_issue_comment`, `gh pr comment` (`--body`, `-b`, `--body-file`, `-F`) and `gh api repos/O/R/issues/<n>/comments` (`-f`, `-F`, `--field`, `--raw-field` with `body=` or `body=@file`). A heredoc body counts. `--input` bodies are not read.
+- It refuses unless the body parses (`parse_review`), its `PR:` equals the target PR, and its `Head:` equals the PR's live head. The refusal prints the render command for the live head, `merge <pr> --review-record --head <live sha> ...`.
+- A malformed marked body is refused before any read.
+- It fails open. Three reads can fail: the live head, a body file, a body on stdin. Each one allows the post and prints one line on stderr that names the review record. A network blip must not block every post.
+- The cost: one PR read per marked post, none for any other comment. No file, no process, no log line. The test pins both counts.
+- The gap: `mcp__github__update_issue_comment` is not judged. Its input names a comment, not a PR, so a judge would need a second read per marked update. A record edited in place can still carry a hand-typed head.
+
 ## The limits
 
 - The lane-lint comment counts only from an `OWNER` author (`LANE_LINT_AUTHOR`). A cloud-session post on shivinate7/claude-settings reads back OWNER (measured pull request 2382, comment 6732994630, 2026-11-09 05:28 UTC). An org-owned repo or a non-OWNER token stays unmeasured, and refuses every join, leaving a done record at `no lint` (fail-closed). A PASS for an earlier head counts after claim-only commits, in the join only; `--reviewed` is exact-head (record `lanes-run-no-full-ci-job`; read merge/merge.py::lint_check).

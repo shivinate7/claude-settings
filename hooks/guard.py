@@ -584,7 +584,7 @@ while True:
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
-            undrafted_pr_create, uses_merge_tool, ready_page_hit,
+            undrafted_pr_create, uses_merge_tool, ready_page_hit, REVIEW_COMMENT_TOOL, review_record_hit, review_note,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -1662,6 +1662,7 @@ SHORT_FLAGS = {
                    m="value", p="value", r="value", R="value", T="value"),
     "edit": dict(b="text", F="file", t="title", B="value", m="value", R="value"),
     "merge": dict(b="text", F="file", t="title", A="value", R="value"),
+    "comment": dict(b="text", F="file", R="value"),
 }
 
 
@@ -1846,6 +1847,100 @@ def message_texts(segment: str, raw: str, where: str, before: int, titles: bool 
     if "<<" in segment:
         texts.extend(own_heredoc_bodies(segment, raw, before))
     return call is not None, texts, ""
+
+
+# ---- a review record posted as a comment (rule pr-review-record; the judge is guard_merge.review_record_hit)
+GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
+_COMMENTS_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/(\d+)/comments/?")
+PR_COMMENT_VALUE_FLAGS = {"-b", "--body", "-F", "--body-file", "-R", "--repo"}
+
+
+def _comment_target(args):
+    """Return (selector, repo) of a `gh pr comment` call: its first positional word ('' for the current branch) and its repo flag."""
+    selector, repo, index = "", "", 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg in ("-R", "--repo"):
+            repo = args[index] if index < len(args) else ""
+            index += 1
+        elif arg.startswith("--repo="):
+            repo = arg[len("--repo="):]
+        elif arg.startswith("-R") and not arg.startswith("--"):
+            repo = arg[2:].lstrip("=")
+        elif arg in PR_COMMENT_VALUE_FLAGS:
+            index += 1
+        elif not arg.startswith("-") and not selector:
+            selector = arg
+    return selector, repo
+
+
+def _api_post_bodies(args):
+    """Return (repo, number, texts, files, stdin) for a `gh api repos/O/R/issues/<n>/comments` call, else None. A `body` field
+    is text for -f and --raw-field, and for -F and --field text too unless it starts with `@`, which names a file (`@-` is stdin)."""
+    route = next((a for a in args if _COMMENTS_ROUTE.fullmatch(a)), None)
+    if route is None or args[:1] != ["api"]:
+        return None
+    repo, number = _COMMENTS_ROUTE.fullmatch(route).groups()
+    texts, files, stdin, index = [], [], False, 1
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        flag, equals, glued = arg.partition("=")
+        value = None
+        if arg in GH_API_FIELD_FLAGS:
+            value = args[index] if index < len(args) else ""
+            index += 1
+            typed = arg in ("-F", "--field")
+        elif flag in ("--field", "--raw-field") and equals:
+            value, typed = glued, flag == "--field"
+        elif re.match(r"^-[fF][^-]", arg):
+            value, typed = arg[2:], arg[1] == "F"
+        if value is None:
+            continue
+        key, _, text = value.partition("=")
+        if key != "body":
+            continue
+        if typed and text.startswith("@"):
+            if text == "@-":
+                stdin = True
+            else:
+                files.append(text[1:])
+        else:
+            texts.append(text)
+    return repo, int(number), texts, files, stdin
+
+
+def review_post_hit(segment: str, raw: str, where: str, before: int):
+    """Return (matched, reason) when this segment posts a review record the guard must refuse, else None. Judges `gh pr comment`
+    (--body, -b, --body-file, -F) and `gh api repos/O/R/issues/<n>/comments` (-f, -F, --field, --raw-field `body=`, `body=@file`),
+    each with the bodies of the heredocs its own header holds. A body file that cannot be read allows, with a note. Unmarked: no read."""
+    rest = gh_call_of(segment)
+    if rest is None:
+        return None
+    if rest[:2] == ["pr", "comment"]:
+        args = rest[2:]
+        selector, repo = _comment_target(args)
+        texts, files, stdin = message_sources(args, "comment")
+    elif rest[:1] == ["api"]:
+        posted = _api_post_bodies(rest)
+        if posted is None:
+            return None
+        repo, selector, texts, files, stdin = posted
+        selector = str(selector)
+    else:
+        return None
+    if "<<" in segment and "--input" not in rest:
+        texts.extend(own_heredoc_bodies(segment, raw, before))
+    for name in files:
+        try:
+            with open(os.path.normpath(_absolute(name, where)), encoding="utf-8", errors="replace") as handle:
+                texts.append(handle.read(MESSAGE_FILE_MAX))
+        except Exception:
+            review_note("the body file " + name + " could not be read")
+    if stdin:
+        review_note("the body comes from stdin and cannot be read")
+    return review_record_hit(texts, repo, selector, where)
 
 
 def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
@@ -4792,6 +4887,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
             refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
 
+    # 6b2. A review record posted as a comment with a hand-typed head or number (rule pr-review-record).
+    # Cost: one pull request read per post that holds the record marker, none for any other command.
+    for segment, before in zip(segments, heredoc_offsets(segments, ends, stripped == raw)):
+        hit = review_post_hit(segment, raw, cite_where, before) if segment.strip() else None
+        if hit:
+            refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
+
     # 6c. A lane commit of the generated records page (decision records-index-at-merge).
     matched = records_page_hit(stripped, cwd)
     if matched:
@@ -6924,6 +7026,17 @@ def judge(payload) -> None:
         target = tool_input.get("to")
         if isinstance(target, str) and target.startswith("session_"):
             refuse(tool, "deny", "sendmessage-session-id", SENDMESSAGE_REASON, target[:120])
+    # A review record posted through the MCP comment tool (rule pr-review-record). One pull request read per marked post.
+    if tool == REVIEW_COMMENT_TOOL:
+        owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "issue_number"))
+        repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
+        number = str(number) if isinstance(number, (int, str)) and not isinstance(number, bool) else ""
+        if number.isdigit():
+            hit = review_record_hit([tool_input.get("body")], repo, number, cwd)
+            if hit:
+                refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
+        elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:
+            review_note("the call names no pull request number")
 
     # A send_message whose header stamp is off the clock (rule message-time-matches-clock).
     stamped = stamp_hit(tool, tool_input)
