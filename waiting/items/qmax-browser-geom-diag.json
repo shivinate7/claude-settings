@@ -13,6 +13,7 @@
   "owner": "lane qmax-browser-main-red",
   "rank": 3,
   "ref": "q_max branch claude/browser-geom-diag (1905c25dd)",
+  "reply": "12:10 CST: Two things stop it. First, q_max's own rule says only you start browser.yml (q_max CLAUDE.md, Commands; D-748). A cloud session could press it with its GitHub tool if you drop that rule. Second, your new env var lets a lane run the checks in its own cloud copy, but it points at Neon, against your 12:04 ruling (item 331). I asked the coordinator to answer both here.",
   "short": "q_max: one diagnostic browser run",
   "status": "open",
   "title": "Start q_max's browser workflow once on branch claude/browser-geom-diag",

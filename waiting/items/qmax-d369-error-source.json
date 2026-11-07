@@ -24,6 +24,7 @@
   "pick": "a",
   "rank": 2,
   "ref": "q_max D-369; item 326",
+  "reply": "12:10 CST, plainly: when a q_max run fails, the screen shows why. Some reasons are our own server's sentences (safe to show). Some are raw text from the AI provider, which your 326 a said to hide. Today both land in one field, so the screen cannot tell them apart. a: tag each reason where it is made, then show ours and hide the provider's. Bigger, but right. b: show only three known sentences and hide all else. Small, but useful reasons stay hidden. Yes, your 326 a is the rule that makes this hard. If you drop it and show every reason, neither a nor b is needed. I sent your note to the lane.",
   "short": "q_max D-369: where the reason is sorted",
   "status": "open",
   "title": "q_max failed-run reason: mark provider errors at the server, or allow-list three sentences on the screen?",

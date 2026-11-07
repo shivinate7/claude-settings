@@ -11,6 +11,7 @@
   "owner": "triage",
   "rank": 3,
   "ref": "#1297; batch 40 (dbf548064)",
+  "reply": "12:10 CST: Noted that it is running. When it ends, paste the exit= line here and press Done.",
   "short": "Run the lint check once on Windows",
   "status": "open",
   "title": "Run the new local lint check once on your Windows laptop and paste the last line",
