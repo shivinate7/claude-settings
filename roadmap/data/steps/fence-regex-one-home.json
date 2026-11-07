@@ -1,0 +1,11 @@
+{
+  "title": "Six copied FENCE regexes move onto the shared fence home",
+  "phase": "next",
+  "status": "todo",
+  "order": 266.3,
+  "owner": "coordinator",
+  "lane": "session_013NEJKzbDHRpreufhWY48Vb",
+  "why": "Six copies of the FENCE regex break building-one-home-per-capability: ste_lint.py (two), check_ruling_kind.py, hook_catalog.py, check_skill_model_rows.py and feedback_guard.py (coordinator, 15:34 CST Nov 7).",
+  "note": "Stacked: the one-home-shared-fence lane builds it after its current step hands off. Done check: each file reads the shared fence home, and a grep finds no copy left.",
+  "updatedAt": "2026-11-07T15:34:00-06:00"
+}
