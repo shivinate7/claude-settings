@@ -11,7 +11,8 @@ A session never hands the owner an act that a session can do. When the cloud ref
   - The reason tells the session to ask a session on the owner's computer first, and to add the line.
   - It is built against a named incident, below. It landed 2026-10-29.
   - Cost: no new process. It runs inside the guard process that every `ArtifactData` call already starts. It writes no file unless it denies.
-  - Known limit: the guard sees the line, not whether its check is true. A line with a false check passes. No other check covers it. The reply judge (`hooks/reply_judge.py`) judges replies, never `ArtifactData` writes.
+  - Guard rule `task-why-cited` (same module and run) judges the line's cite. A capability reason (`CAPABILITY_RE` in `lint/report_guard.py`, the one home of the verbs) needs `(route <id>)`, an id from the route rows file whose row on this surface says refused or asks, or `(measured <YYYY-MM-DD>, <check and result>)`. It refuses a capability verb with no cite, a cite whose row says the act works, an id no row holds, and a measured cite with no date. The page reads no refusals file, so a tool name in backticks is no cite. A rows file that does not read, or a row only on another surface, passes. The verdict is `why_yours_verdict` in `lint/report_guard.py`, the one home the Stop hand-off check also calls (decision `claims-carry-backing`, part (v)). It judges the same writes as `task-names-check`. A line with no route cite reads no file.
+  - Known limit: the guard checks the cite, not whether the check it names was run. A route row cite or a dated measured cite with a false result passes. The owner can follow the cite to verify it. No check reads a row's age yet (decision `claims-carry-backing`, Not built).
   - Known limit: an update that carries `context` but no `kind` is not judged, because the guard cannot see the stored kind. The writer carries `kind: task` again on a context update.
 
 Incident:

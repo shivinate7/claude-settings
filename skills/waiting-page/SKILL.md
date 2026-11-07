@@ -113,6 +113,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     When the cloud refused the act, the session first asks a session on the owner's computer
     (`list_computer_folders`, then `request_computer_folder`), and the line names that outcome.
     The writer refuses a task with no such line (guard rule `task-names-check`).
+    When the line says a session cannot do the act (refused, denied, cannot, unavailable, 403), it ends with a cite: `(route <id>)`, an id from the route rows file whose row says refused or asks, or `(measured <YYYY-MM-DD>, <check and result>)`. A row that says the act works, an id no row holds, a measurement with no date, and a tool name in backticks are refused (guard rule `task-why-cited`).
   - `reply` (a string) is what the session says back to a comment or a note. The card shows it as "Reply: <text>".
     A reply over 220 characters folds to three lines, with a "More of the reply" button.
   - `replied` (an ISO time) is when the writer last wrote `reply` or changed `waits`. The writer sets it to now in the same update. A write of `lastAnswer` alone never sets it, because it copies the owner's own answer. Dropping `lane` sets none. The page
@@ -409,7 +410,7 @@ live page.
      Carry `port: true` again on each update to a port item: the guard cannot see the stored field.
    - On a task, add the "Why yours:" line to `context` first. When the cloud refused the act, ask a
      session on the owner's computer before you write the task (`list_computer_folders`, then
-     `request_computer_folder`), and name that outcome in the line. The writer refuses a task without it.
+     `request_computer_folder`), and name that outcome in the line. The writer refuses a task without it. A capability reason in the line ends with `(route <id>)` or `(measured <YYYY-MM-DD>, <check and result>)`; the writer refuses it otherwise.
      Carry `kind: task` again on a `context` update: the guard cannot see the stored field.
    - Fill `holds` (never on a port item) whenever a lane, a merge or a PR waits on the answer. Never guess an urgency:
      with nothing waiting, leave `holds` out.
