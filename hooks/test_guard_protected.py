@@ -419,5 +419,109 @@ class Cost(Guarded):
                              % opened)
 
 
+class ShellWriteVerbs(Guarded):
+    """Shell writes the first build missed: git's path forms of checkout and restore, rsync, perl -i, find -delete, and a
+    find that runs rm on a protected path. Each is a write to a path the repo lists, so each is denied."""
+
+    def test_git_checkout_double_dash_path_is_denied(self):
+        self.assertDenied(self.shell("git checkout -- fixtures/a"), "git checkout -- fixtures/a")
+
+    def test_git_checkout_head_double_dash_path_is_denied(self):
+        self.assertDenied(self.shell("git checkout HEAD -- fixtures/a"), "git checkout HEAD -- fixtures/a")
+
+    def test_git_restore_of_a_protected_file_is_denied(self):
+        self.assertDenied(self.shell("git restore fixtures/a"), "git restore fixtures/a")
+
+    def test_git_restore_with_a_source_is_denied(self):
+        self.assertDenied(self.shell("git restore --source=HEAD~1 fixtures/a"), "git restore --source=HEAD~1 fixtures/a")
+
+    def test_rsync_into_the_folder_is_denied(self):
+        self.assertDenied(self.shell("rsync -a src/ fixtures/"), "rsync -a src/ fixtures/")
+
+    def test_perl_in_place_edit_of_a_protected_file_is_denied(self):
+        self.assertDenied(self.shell("perl -pi -e s/a/b/ fixtures/a"), "perl -pi -e s/a/b/ fixtures/a")
+
+    def test_find_delete_under_the_folder_is_denied(self):
+        self.assertDenied(self.shell("find fixtures -name a -delete"), "find fixtures -name a -delete")
+
+    def test_find_exec_rm_of_a_protected_path_is_denied(self):
+        self.assertDenied(self.shell("find . -path ./fixtures/a -exec rm {} +"), "find . -path ./fixtures/a -exec rm {} +")
+
+
+class InterpreterRemovals(Guarded):
+    """A python script that removes or rewrites a protected path, run as `python3 -c` and as a heredoc. The path is
+    built in the script, through os, shutil and pathlib, so each form has to be read, not matched by name."""
+
+    def assertInterpreterDenied(self, code, form):
+        if form == "c":
+            command = 'python3 -c "import os, shutil; from pathlib import Path; %s"' % code
+        else:
+            command = "python3 - <<'EOF'\nimport os, shutil\nfrom pathlib import Path\n%s\nEOF" % code
+        self.assertDenied(self.shell(command), "python3 %s: %s" % ("-c" if form == "c" else "heredoc", code))
+
+    def test_python_c_os_remove_of_a_protected_file_is_denied(self):
+        self.assertInterpreterDenied("os.remove('fixtures/a')", "c")
+
+    def test_python_heredoc_os_remove_of_a_protected_file_is_denied(self):
+        self.assertInterpreterDenied("os.remove('fixtures/a')", "heredoc")
+
+    def test_python_c_os_unlink_of_a_protected_file_is_denied(self):
+        self.assertInterpreterDenied("os.unlink('fixtures/a')", "c")
+
+    def test_python_heredoc_os_unlink_of_a_protected_file_is_denied(self):
+        self.assertInterpreterDenied("os.unlink('fixtures/a')", "heredoc")
+
+    def test_python_c_shutil_rmtree_of_the_folder_is_denied(self):
+        self.assertInterpreterDenied("shutil.rmtree('fixtures')", "c")
+
+    def test_python_heredoc_shutil_rmtree_of_the_folder_is_denied(self):
+        self.assertInterpreterDenied("shutil.rmtree('fixtures')", "heredoc")
+
+    def test_python_c_pathlib_joinpath_write_text_is_denied(self):
+        self.assertInterpreterDenied("Path('fixtures').joinpath('a').write_text('x')", "c")
+
+    def test_python_heredoc_pathlib_joinpath_write_text_is_denied(self):
+        self.assertInterpreterDenied("Path('fixtures').joinpath('a').write_text('x')", "heredoc")
+
+    def test_python_c_pathlib_unlink_of_a_protected_file_is_denied(self):
+        self.assertInterpreterDenied("Path('fixtures/a').unlink()", "c")
+
+    def test_python_heredoc_pathlib_unlink_of_a_protected_file_is_denied(self):
+        self.assertInterpreterDenied("Path('fixtures/a').unlink()", "heredoc")
+
+
+class FalseAlarms(Guarded):
+    """Reads and history that name a protected path, or a write verb, and write nothing: each is allowed, under a live
+    control. A grep for a write verb such as `copy` or `touch`, or an rg for `rm -rf`, must not read as a write."""
+
+    def assertReadAllowed(self, command, label):
+        self.assertLive()
+        self.assertAllowed(self.shell(command), label)
+
+    def test_grep_for_copy_under_the_folder_is_allowed(self):
+        self.assertReadAllowed("grep -rn copy fixtures/", "grep -rn copy fixtures/")
+
+    def test_grep_for_touch_in_a_protected_file_is_allowed(self):
+        self.assertReadAllowed("grep -n touch fixtures/a.csv", "grep -n touch fixtures/a.csv")
+
+    def test_grep_for_move_in_an_unlisted_doc_is_allowed(self):
+        self.assertReadAllowed("grep -n move docs/x.md", "grep -n move docs/x.md")
+
+    def test_rg_for_rm_rf_under_the_folder_is_allowed(self):
+        self.assertReadAllowed('rg -n "rm -rf" fixtures/', 'rg -n "rm -rf" fixtures/')
+
+    def test_git_diff_of_a_protected_file_is_allowed(self):
+        self.assertReadAllowed("git diff -- fixtures/a", "git diff -- fixtures/a")
+
+    def test_git_log_of_a_protected_file_is_allowed(self):
+        self.assertReadAllowed("git log -- fixtures/a", "git log -- fixtures/a")
+
+    def test_git_checkout_of_a_branch_with_no_path_is_allowed(self):
+        self.assertReadAllowed("git checkout main", "git checkout main")
+
+    def test_git_show_of_a_protected_file_at_head_is_allowed(self):
+        self.assertReadAllowed("git show HEAD:fixtures/a", "git show HEAD:fixtures/a")
+
+
 if __name__ == "__main__":
     unittest.main()
