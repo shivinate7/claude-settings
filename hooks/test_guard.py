@@ -11599,6 +11599,25 @@ sh("frozen dup: cp from a dup before a frozen settings file stays frozen",
    "cp /tmp/x 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 sh("frozen dup: tee after a dup onto a frozen settings file stays frozen",
    "echo x | tee 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# THE AMPERSAND REDIRECT. `&>` and `&>>` send both streams to a file, so a copy into a frozen path with
+# one of them writes the frozen file. The `&` is a redirect, never a copy source. The forms that already
+# refuse stay refused, and a copy FROM a frozen file with `&>` is still a read.
+sh("frozen amp: cp onto a frozen hook with &> /dev/null stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &> /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with &>/dev/null, no space, stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &>/dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen settings file with &>> /dev/null stays denied",
+   "cp /tmp/x.json " + CFG_SETTINGS + " &>> /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with &> /dev/null, then a chained echo, stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &> /dev/null && echo done", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with > /dev/null stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " > /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with >& /dev/null stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " >& /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with 2>&1 stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " 2>&1", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp FROM a frozen hook to scratch with &> /dev/null is still a read",
+   "cp " + CFG_HOOK + " /tmp/guard.bak &> /dev/null", "allow", cwd=NOGIT)
 
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
