@@ -2646,6 +2646,12 @@ sh("shared tree: a stash from the PowerShell tool", VCS + " stash", "deny", "sha
    tool="PowerShell", cwd=NOGIT)
 
 sh("clean: -n only lists", VCS + " clean -n", "allow", cwd=NOGIT)
+# A DRY RUN THAT NAMES THE FORCE FLAG. `-n` makes the clean list only, so `-fdn` and `-nfd` delete
+# nothing. `-e` takes a value, so in `-fden` the `n` is an exclude pattern, and that clean deletes.
+sh("clean: -fdn is a dry run and is allowed", VCS + " clean -fdn", "allow", cwd=NOGIT)
+sh("clean: -nfd is a dry run and is allowed", VCS + " clean -nfd", "allow", cwd=NOGIT)
+sh("clean: -fden takes n as the exclude pattern and stays denied", VCS + " clean -fden", "deny",
+   "shared-tree", cwd=NOGIT)
 sh("checkout: a new branch keeps every file", VCS + " checkout -b claude/lane main", "allow",
    cwd=NOGIT)
 sh("checkout: a branch move keeps every file", VCS + " checkout main", "allow", cwd=NOGIT)
@@ -2832,6 +2838,21 @@ for _command in ("switch main", "switch -c newbranch"):
        "allow", cwd=GITMAIN)
     sh("looser-git-acts: %s is allowed in a worktree" % _command, VCS + " " + _command,
        "allow", cwd=GITWT)
+
+# `-C` takes the new branch's name, so the `f` in `-Cf` names the branch and is no force flag. A plain
+# `-f` (and `-fC`, `-fc`) still throws the local changes away, so it keeps the verdict above.
+sh("looser-git-acts: switch -Cf x is a branch create, allowed in the shared checkout",
+   VCS + " switch -Cf x", "allow", cwd=GITMAIN)
+sh("looser-git-acts: switch -Cf x is a branch create, allowed in a worktree",
+   VCS + " switch -Cf x", "allow", cwd=GITWT)
+sh("looser-git-acts: switch -fC x still denies in the shared checkout", VCS + " switch -fC x",
+   "deny", "shared-tree", cwd=GITMAIN)
+sh("looser-git-acts: switch -fC x still asks in a worktree", VCS + " switch -fC x", "ask",
+   "shared-tree", cwd=GITWT)
+sh("looser-git-acts: switch -fc x still denies in the shared checkout", VCS + " switch -fc x",
+   "deny", "shared-tree", cwd=GITMAIN)
+sh("looser-git-acts: switch -fc x still asks in a worktree", VCS + " switch -fc x", "ask",
+   "shared-tree", cwd=GITWT)
 
 # A FOLDER WITH NO `--`. Git reads a bare name as a path, so a folder is a whole-folder discard.
 sh("per-file deny: checkout of a folder with no -- in the shared checkout",
@@ -3831,6 +3852,18 @@ add("hand-made worktree: an Agent call with no isolation, whose prompt names a w
     prompt="Work in the worktree at ../lane-x. Run `git worktree add ../lane-x` first.")
 add("hand-made worktree: an Explore Agent call with no isolation passes", "allow", tool="Agent",
     cwd=HMMAIN, subagent_type="Explore", description="look", prompt="Read the repo.")
+
+# A LOOP THAT BUILDS THE TREE PATH FROM A VARIABLE. The path is `/tmp/.../wt-$c` and the ref is `$c`,
+# so each pass makes a tree outside the home folder, as the one-line form does. The one-line control
+# is refused on main already. A quoted word with a `#` in it is the same act: a scanner trap.
+hm_deny("the one-line form that makes a tree outside the home folder is refused",
+        HMADD + "-q --detach /tmp/claude-0/wt-A A")
+hm_deny("a for loop whose tree path holds a loop variable is refused",
+        "for c in A B; do " + HMADD + "-q --detach /tmp/claude-0/wt-$c $c; done")
+hm_deny("a for loop whose quoted tree path holds a # and a loop variable is refused",
+        'for c in A B; do ' + HMADD + '-q --detach "/tmp/claude-0/#wt-$c" $c; done')
+hm_allow("a for loop that builds its trees under the home folder passes",
+         "for c in A B; do " + HMADD + "-q --detach " + HMIN + "/.claude/worktrees/wt-$c $c; done")
 
 TEMP_DIR = None   # back to the system temp for the sections below
 
@@ -12009,6 +12042,25 @@ sh("frozen shell: fix F4, a <# #> block comment holding two ASCII quotes pairs t
    "echo <# \" #> ; " + _F4_WRITE + " ; <# \" #>", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
 
 
+# THE DESCRIPTOR INSIDE A SUBSHELL, A BACKTICK OR A BACKGROUND JOB. A `)`, a backtick or a `&` glued
+# after `&1` ends the descriptor word, not a path. Each ALLOW reads a descriptor. Each DENY still writes
+# a file. The last three are scanner traps: a `#` and an apostrophe inside quotes must not end the
+# quote early or open a comment that hides the write after them.
+sh("frozen dup: x=$(ls 2>&1) from the live pin is allowed", "x=$(ls 2>&1)", "allow", cwd=LIVE_PIN)
+sh("frozen dup: (ls 2>&1) from the live pin is allowed", "(ls 2>&1)", "allow", cwd=LIVE_PIN)
+sh("frozen dup: x=`ls 2>&1` from the live pin is allowed", "x=`ls 2>&1`", "allow", cwd=LIVE_PIN)
+sh("frozen dup: ls 2>&1& from the live pin is allowed", "ls 2>&1&", "allow", cwd=LIVE_PIN)
+sh("frozen dup: x=$(ls 2>&1) && echo x > f from the live pin stays frozen",
+   "x=$(ls 2>&1) && echo x > f", "deny", "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: ls > \"&1)\" from the live pin is a real file and stays frozen", 'ls > "&1)"',
+   "deny", "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: a # inside quotes beside a dup from the live pin is allowed",
+   'echo "a # b" 2>&1', "allow", cwd=LIVE_PIN)
+sh("frozen dup: a # in quotes does not hide a write after it, from the live pin",
+   'echo "#"; echo x > f', "deny", "frozen-path", cwd=LIVE_PIN)
+sh("frozen dup: an apostrophe inside double quotes beside a dup is allowed",
+   'echo "don\'t" 2>&1', "allow", cwd=LIVE_PIN)
+
 # ================================================================ 6a-2. cap-ask-fix (frozen)
 # Each case is a frozen write the guard reads as text, so each case names its safety hole. Each DENIES. The
 # cap-key twins of H2 and H3 are in the model-cap section below.
@@ -13351,6 +13403,20 @@ sh("builder-test: shell pathlib write to a test under Path.cwd() is refused",
 sh("builder-test: shell open-write to a test under os.getcwd() is refused",
    "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'x.py'), 'w').write('x')\nEOF",
    "deny", rule=BT, carries=("test-author",), **BR)
+
+# ---- a builder's cache cleanup. A Python cache folder is no test change, so `rm -rf` of
+# `__pycache__` or `.pytest_cache` under a test folder passes. Any other path under a test folder is
+# still a test path, including one reached through `..` from a cache folder.
+sh("builder-test: rm -rf tests/__pycache__ is cache cleanup and is allowed", "rm -rf tests/__pycache__",
+   "allow", **B)
+sh("builder-test: rm -rf tests/.pytest_cache is cache cleanup and is allowed",
+   "rm -rf tests/.pytest_cache", "allow", **B)
+sh("builder-test: rm -rf tests/test_x.py stays refused", "rm -rf tests/test_x.py", "deny", BT, **B)
+sh("builder-test: rm -rf tests stays refused", "rm -rf tests", "deny", BT, **B)
+sh("builder-test: rm -rf of a cache folder with a test file beside it stays refused",
+   "rm -rf tests/__pycache__ tests/test_x.py", "deny", BT, **B)
+sh("builder-test: rm -rf of a cache folder reached through .. to a test file stays refused",
+   "rm -rf tests/__pycache__/../test_x.py", "deny", BT, **B)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
@@ -21599,6 +21665,34 @@ LOG_CHECKS_EXTRA.append(("other-checkout: an owner override lifts a stranded cwd
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
 FAMILY = "misc"  # this literal mixes several rules, so its log checks are not one family
+
+# ---- stdin is read as UTF-8 (debt guard-stdin-not-utf8). guard_core._force_utf8_streams reconfigures
+# stdout and stderr only, so under a locale that is not UTF-8 the guard reads a non-ASCII payload
+# back changed. The locale is LC_ALL=C with locale coercion and UTF-8 mode off: plain LC_ALL=C gives
+# UTF-8 stdin on Linux (coercion), which would pass on main and show nothing. The probe runs the
+# reconfigure and one read in a child process. The ASCII payload is the control.
+STDIN_PROBE = ("import sys; sys.path.insert(0, %r); import guard_core; guard_core._force_utf8_streams(); "
+               "sys.stdout.write(ascii(sys.stdin.read()))" % HERE)
+NON_UTF8_LOCALE = dict(os.environ, LC_ALL="C", PYTHONCOERCECLOCALE="0", PYTHONUTF8="0")
+NON_UTF8_LOCALE.pop("PYTHONIOENCODING", None)
+
+
+def stdin_utf8_case():
+    """A non-ASCII stdin payload is read back unchanged under a non-UTF-8 locale; ASCII is the control."""
+    problems = []
+    for payload, want in (("café", "'caf\\xe9'"), ("abc", "'abc'")):
+        got = subprocess.run([sys.executable, "-c", STDIN_PROBE], input=payload.encode("utf-8"),
+                             env=NON_UTF8_LOCALE, capture_output=True, timeout=60)
+        text = got.stdout.decode("ascii", "replace")
+        if got.returncode != 0 or text != want:
+            problems.append("stdin %r read back as %s, want %s" % (payload, text[:60], want))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a non-ASCII stdin payload is read back unchanged under LC_ALL=C with coercion and UTF-8 mode off"
+
+
+LOG_CHECKS_EXTRA.append(("misc: the guard's stdin is read as UTF-8 under a non-UTF-8 locale, so a non-ASCII "
+                         "payload comes back unchanged", stdin_utf8_case))
 LOG_CHECKS = (
     ("log: one line per refusal and none for an allow", log_case),
     ("log: the refused file is named in the log and nowhere else", log_env_case),
@@ -22327,6 +22421,86 @@ LOG_CHECKS_EXTRA.append(("looser-git-acts: session-home: while lost, git clean -
                          "naming session-home and EnterWorktree", session_home_clean_refuses_case))
 LOG_CHECKS_EXTRA.append(("looser-git-acts: session-home: while lost, git clean -n and git status in the primary "
                          "pass", session_home_clean_reads_case))
+
+
+def session_home_clean_dry_run_case():
+    """Rule session-home: while the record is lost, `git clean -fdn` and `git clean -nfd` in the
+    primary checkout pass, since a dry run deletes nothing. In `-fden` the `n` is the exclude
+    pattern, so that clean still deletes and stays refused."""
+    primary = sh_new_primary("cleandry")
+    lane, branch = sh_add_lane(primary, "lane-cleandry")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    for command in (VCS + " clean -fdn", VCS + " clean -nfd"):
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        if got != "allow":
+            problems.append("%s: want allow, got %s (%s)" % (command, got, reason[:120]))
+    command = VCS + " clean -fden"
+    got, reason = _decide_full("Bash", primary, session=session, command=command)
+    problems += sh_refusal_problems(command, got, reason, primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "git clean -fdn and -nfd in the primary pass while the record is lost; -fden is refused"
+
+
+LOG_CHECKS_EXTRA.append(("looser-git-acts: session-home: while lost, git clean -fdn and -nfd in the primary "
+                         "are dry runs and pass; -fden is refused", session_home_clean_dry_run_case))
+
+
+def session_home_lane_visit_case():
+    """Rule session-home: a visit from a lane tree is no home once the session calls into the primary
+    while that lane's folder still stands. The primary call drops the record, so after the tree is
+    removed a primary Write passes."""
+    primary = sh_new_primary("lanevisit")
+    lane, branch = sh_add_lane(primary, "lane-visit")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    _decide_full("Bash", primary, session=session, command="echo hi")
+    sh_lose_lane(primary, lane, branch)
+    got, reason = _decide_full("Write", primary, session=session,
+                               file_path=os.path.join(primary, "src", "app.py"), content="x")
+    if got != "allow":
+        problems.append("a primary Write after the visit and the tree's removal: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a primary call while the lane stands drops the record; the primary Write passes after the removal"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: a call into the primary while a visited lane stands drops that lane's "
+                         "record, so the primary stays writable once the lane is removed",
+                         session_home_lane_visit_case))
+
+
+def session_home_lane_visit_kept_case():
+    """Rule session-home: a visit from a lane tree that never comes back to the primary stays the home.
+    Once the tree is removed, a primary Write is refused, as the rule refuses a lost home."""
+    primary = sh_new_primary("lanevisitkept")
+    lane, branch = sh_add_lane(primary, "lane-visit-kept")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    got, reason = _decide_full("Write", primary, session=session,
+                               file_path=os.path.join(primary, "src", "app.py"), content="x")
+    problems += sh_refusal_problems("a primary Write after a visit with no return", got, reason, primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a visit with no return to the primary keeps the lane as home: the primary Write is refused"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: a visit from a lane tree with no return to the primary keeps the lane "
+                         "as home, so a primary Write is refused once the lane is removed",
+                         session_home_lane_visit_kept_case))
 
 
 def session_home_agent_tree_inspect_case():
