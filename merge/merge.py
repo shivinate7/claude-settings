@@ -767,6 +767,10 @@ class Host:
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"reading {rel} from GitHub failed: {e}")
 
+    def pr_files(self, n):
+        """-> the changed files of pull request n, all pages, as `pulls/<n>/files` lists them. A failed read is a Stop, never an empty list."""
+        return self.pages(f"pulls/{n}/files")
+
     # The old GraphQL values the rest of the tool reads, from the REST fields.
     MERGEABLE = {True: "MERGEABLE", False: "CONFLICTING", None: "UNKNOWN"}  # mergeable is null while GitHub works it out
 
@@ -3157,6 +3161,34 @@ def review_state(rec, head):
         return "done", "docs-only change, no round owed"
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
+def guard_path_hits(files):
+    """-> the sorted paths of `files` (rows of a pull request's files read) that start with a guard path. RULE_DIRS in lint/stale_cites.py is the one
+    home of those paths. A rename counts on its new path and its old one."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    import stale_cites
+    paths = {p for f in files for p in (f.get("filename"), f.get("previous_filename")) if p}
+    return sorted(p for p in paths if p.startswith(stale_cites.RULE_DIRS))
+
+def path_claims(h, n, rec, state, why):
+    """-> (state, why) after the record's claims are read against the changed files (decision pr-review-record, the limits).
+    Guard or check no over a guard path, or Kind delete-only over an added line, turns the state bad and the why names the claim and the paths.
+    The files are read once, and only for a record that parsed, names pull request n, is not bad or stale, and says guard no or delete-only."""
+    if not rec or rec["n"] != n or state in ("bad", "stale") or not (rec["guard"] == "no" or rec["kind"] == "delete-only"):
+        return state, why
+    reasons = path_claim_reasons(rec["guard"], rec["kind"], h.pr_files(n))
+    return ("bad", "; ".join(reasons)) if reasons else (state, why)
+
+def path_claim_reasons(guard, kind, files):
+    """-> the reasons a record's claims fail against `files`, each naming the claim and its paths; empty when they hold."""
+    reasons = []
+    hits = guard_path_hits(files) if guard == "no" else []
+    if hits:
+        reasons.append(f"Guard or check is no, but the change touches guard paths: {', '.join(hits)}")
+    adds = sorted(f["filename"] for f in files if f.get("additions", 0) > 0) if kind == "delete-only" else []
+    if adds:
+        reasons.append(f"Kind is delete-only, but the change adds lines in: {', '.join(adds)}")
+    return reasons
+
 def reviewed_lines(h):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
@@ -3173,7 +3205,8 @@ def reviewed_lines(h):
             continue
         rec = parse_review(bodies[-1])
         state, why = review_state(rec if rec and rec["n"] == n else None, sha)
-        ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
+        state, why = path_claims(h, n, rec, state, why)
+        ci ="draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
         lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
     return lines + ([f"no record: {', '.join(bare)}"] if bare else [])
 
@@ -3374,6 +3407,10 @@ def main(argv, host=None, lock=None):
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
+            if a.guard == "no" or a.kind == "delete-only":
+                reasons = path_claim_reasons(a.guard, a.kind, h.pr_files(a.pr))
+                if reasons:
+                    raise Stop("; ".join(reasons) + ". " + REVIEW_CITE)
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0

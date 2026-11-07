@@ -969,8 +969,9 @@ def find_stale(rng):
 REPORT = "stale-cites: report, "
 MECHANISMS = "lint/rule_mechanisms.json"
 # Where a rule's guard, check or CI step lives. No other module holds this set (report_guard.ANSWERED_TOP_DIRS is the
-# top dirs a source path may start with, a different set), so it lives here.
-RULE_DIRS = ("hooks/", "lint/", "bin/", "actions/", ".github/")
+# top dirs a source path may start with, a different set), so it lives here. merge/merge.py reads it for a guard-no review
+# record; settings.json wires the hooks, so a change there is a guard change.
+RULE_DIRS = ("hooks/", "lint/", "bin/", "actions/", ".github/", "settings.json")
 HOME_LINE = re.compile(r"^Home:[ \t]*`?([^\s`]+)`?[ \t]*$", re.M)
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
 
