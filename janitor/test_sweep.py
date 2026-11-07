@@ -1900,8 +1900,8 @@ class SessionEndScopeTests(unittest.TestCase):
                          "the session-end run scanned loose processes %d time(s)" % seen["loose"])
 
     def test_the_session_end_run_reads_the_machine_pid_list_once(self):
-        """Cost: one machine pid-list read per session end (the dead-rooted read). The old run
-        reads it twice, once more for the loose-process scan."""
+        """Cost: one machine pid-list read per session end (the dead-rooted read). The flag skips
+        the loose-process scan, so the run reads the list once."""
         seen = sweep_over_fixture(self.fx, session_end=True)
         self.assertEqual(seen["pid_reads"], 1,
                          "the session-end run read the machine pid list %d times" % seen["pid_reads"])

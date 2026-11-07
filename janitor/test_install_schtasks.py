@@ -140,7 +140,7 @@ class GeneratesTaskXmlForAnOrdinaryCheckout(unittest.TestCase):
         self.assertEqual(root.find(trigger + "%sScheduleByDay/%sDaysInterval" % (NS, NS)).text, "1")
         arguments = root.find("%sActions/%sExec/%sArguments" % (NS, NS, NS)).text
         # Exactly sweep.py (not session_end_sweep.py), quoted whole, then the one flag. The daily
-        # job never carries --session-end: that flag scopes the SessionEnd run only.
+        # job never carries --session-end, which only skips the loose-process report. The root argument sets the scope.
         self.assertEqual(arguments, '"%s" --confirm' % os.path.join(repo, "janitor", "sweep.py"))
         self.assertNotIn("--session-end", arguments)
 
