@@ -1030,8 +1030,8 @@ class GuardRuleIdReadTests(unittest.TestCase):
         src = ('TABLE = (("table-rule-a", "why a"), ("table-rule-b", "why b"))\n'
                'def go(tool):\n    for hit in TABLE:\n        rule, why = hit\n'
                '        refuse(tool, "deny", rule, why, m)\n')
-        self.assertLessEqual({"table-rule-a", "table-rule-b"}, self.listed(src),
-                             "a literal table of (id, reason) rows names its ids; `rule, why = hit` lists none")
+        self.assertEqual(self.listed(src), {"table-rule-a", "table-rule-b"},
+                         "a literal table of (id, reason) rows names its ids and no reason text")
 
     def test_a_loop_unpack_of_a_dict_items_call_raises_with_path_and_line(self):
         # Scope first: the same loop over a literal table is read, empty or not, so the `.items()` call is the only gap.
