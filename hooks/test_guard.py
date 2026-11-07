@@ -11694,6 +11694,37 @@ sh("frozen write-word: a script that writes a shell file onto a frozen hook, the
 sh("frozen write-word: a script that writes a shell file onto a handoff, then a later segment runs it, is allowed",
    WW_HEREDOC % ("open(\"%s\", \"w\").write(\"cp /tmp/x %s\")" % (WW_RUN_SH, WW_HANDOFF)) + "\nsh " + WW_RUN_SH,
    "allow", cwd=NOGIT)
+# A handoff writer is not a script that runs a program because it imports `os` for a file or path call. Each
+# allow case names the install mirror path in a string and writes only the handoff. The pathlib case is the
+# same writer without `os`, kept beside them as a control. The deny cases are `os` calls aimed at the frozen
+# hook, which stay refused.
+sh("frozen write-word: a handoff writer that makes its folder with os.makedirs and names the mirror in a string is allowed",
+   WW_HEREDOC % ("import os\np = os.path.expanduser(\"%s\")\nos.makedirs(os.path.dirname(p), exist_ok=True)\n"
+                 "note = \"install the mirror at %s\"\nopen(p, \"w\").write(note)" % (WW_HANDOFF, CFG_HOOK)),
+   "allow", cwd=NOGIT)
+sh("frozen write-word: the same folder-making writer with pathlib in place of os is allowed",
+   WW_HEREDOC % ("from pathlib import Path\np = Path(\"%s\")\np.parent.mkdir(parents=True, exist_ok=True)\n"
+                 "note = \"install the mirror at %s\"\np.write_text(note)" % (WW_HANDOFF, CFG_HOOK)),
+   "allow", cwd=NOGIT)
+sh("frozen write-word: a handoff writer that reads HOME with os.environ.get and names the mirror in a string is allowed",
+   WW_HEREDOC % ("import os\nhome = os.environ.get(\"HOME\", \"/root\")\n"
+                 "p = os.path.join(home, \".claude\", \"handoffs\", \"s1.md\")\n"
+                 "note = \"copy the mirror to %s later\"\nopen(p, \"w\").write(note)" % CFG_HOOK),
+   "allow", cwd=NOGIT)
+sh("frozen write-word: a handoff writer that replaces its temp file into the handoff with os.replace is allowed",
+   WW_HEREDOC % ("import os\ntmp = \"%s.tmp\"\nopen(tmp, \"w\").write(\"install the mirror at %s\")\n"
+                 "os.replace(tmp, \"%s\")" % (WW_HANDOFF, CFG_HOOK, WW_HANDOFF)),
+   "allow", cwd=NOGIT)
+sh("frozen write-word: a handoff writer that lists the folder with os.listdir and os.getcwd and names the mirror is allowed",
+   WW_HEREDOC % ("import os\nfiles = os.listdir(os.getcwd())\n"
+                 "open(\"%s\", \"w\").write(\"install the mirror at %s \" + str(len(files)))" % (WW_HANDOFF, CFG_HOOK)),
+   "allow", cwd=NOGIT)
+sh("frozen write-word: os.chmod of a frozen hook in a python heredoc is refused",
+   WW_HEREDOC % ("import os\nos.chmod(\"%s\", 0o755)" % CFG_HOOK), "deny", "frozen-path", cwd=NOGIT)
+sh("frozen write-word: os.truncate of a frozen hook in a python heredoc is refused",
+   WW_HEREDOC % ("import os\nos.truncate(\"%s\", 0)" % CFG_HOOK), "deny", "frozen-path", cwd=NOGIT)
+sh("frozen write-word: os.rmdir of a frozen hook in a python heredoc is refused",
+   WW_HEREDOC % ("import os\nos.rmdir(\"%s\")" % CFG_HOOK), "deny", "frozen-path", cwd=NOGIT)
 
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
