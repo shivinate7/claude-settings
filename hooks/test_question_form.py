@@ -597,11 +597,17 @@ def case_claude_own_merge_needs_no_link():
                             "description": "Claude merges them after your pick. Gain: one batch lands at once. "
                                            "Lose: a second CI run."}, hold]),
          None)
-    # Claude asking the owner to press is the owner's press, however the clause starts with Claude.
+    # Claude asking the owner to press is the owner's press, however the clause starts with Claude, and however
+    # an adverb, "to", "please" or "for a click" stands between the owner's name and the act.
     for how in ("Claude merges them after your pick, then you click Merge on GitHub.",
                 "Shivam merges the lane PRs on GitHub.",
                 "Claude asks the owner to press Merge on GitHub.",
-                "Claude asks Shivam to click Merge on GitHub."):
+                "Claude asks Shivam to click Merge on GitHub.",
+                "Claude asks the owner to just click Merge.",
+                "Claude asks the owner to please click Merge.",
+                "Claude asks him to press Merge.",
+                "Claude asks the user to press Merge.",
+                "Claude asks the owner for a click on Merge."):
         page("%r, with no link, is refused as press-link" % how, "set",
              entry_of(page_item(options=[dict(claude, how=how), keep])), ("press-link", None))
         chat("%r, with no url, is refused as press-link" % how,
