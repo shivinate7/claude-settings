@@ -28,8 +28,12 @@ runs inside the MUTATE_JOBS cap, and a control that raises reads its mutants UNK
 The sixth part pins the split of checks-mutate-guard into legs (MUTATE_SHARD=i/n): parse_shard reads a value or refuses it,
 shard_entries gives each mutant one leg, a leg pays only for its own targets' controls, main refuses a malformed value before
 any suite runs and checks every mutant before a leg runs, and a suite child never inherits a shard value.
+
+The seventh part pins the guard target's suite list: guard_suites(folder) globs every test_guard*.py, sorted with
+test_guard.py first, and run_suite starts one process per listed file, a FAIL from any of them reaching the red lines.
 """
 import contextlib
+import glob
 import io
 import os
 import shutil
@@ -993,6 +997,94 @@ class ErrorBlockReportTests(unittest.TestCase):
                         "a FAIL line must still print under saw:, saw %r" % self.saw(lines))
         self.assertFalse(any(line.startswith("saw: ERROR:") for line in self.saw(lines)),
                          "a FAIL-only red printed an ERROR line under saw:, saw %r" % self.saw(lines))
+
+
+GUARD_FILES = ("test_guard.py", "test_guard_load_os.py", "test_guard_zz.py")
+
+
+def guard_suite_listing():
+    """mutate_guard.guard_suites, or None on a build without it. A missing name reads as a named red, never a crash."""
+    return getattr(mutate_guard, "guard_suites", None)
+
+
+class GuardSuiteListTests(unittest.TestCase):
+    """The guard target runs every hooks/test_guard*.py, not test_guard.py alone. guard_suites(folder) lists those files
+    by a glob, sorted, test_guard.py first. The guard, override and simlease targets pass that list to run_suite, which
+    starts one process per file and returns the FAIL lines of every process as red. Before this, a case in
+    test_guard_load_os.py could never kill a mutant, and no test failed when a test_guard_*.py was left out of the run."""
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+
+    def scratch(self, names):
+        """A hooks-style folder under this run's folder, holding one file per name."""
+        folder = os.path.join(self.run, "hooks")
+        os.makedirs(folder)
+        write_files(folder, {name: "# scratch guard test file\n" for name in names})
+        return folder
+
+    def guard_run(self, names, fail_in):
+        """Run the guard target's suite list over `names`, with _nowindow.run stubbed. The process for `fail_in` prints
+        one FAIL line and exits 1, and every other process prints one PASS line and exits 0. Return (the file names the
+        processes ran, in order, and run_suite's result)."""
+        folder = self.scratch(names)
+        listing = guard_suite_listing()
+        # The base takes one path, so it runs test_guard.py alone, as the guard target does today.
+        suites = listing(folder) if listing else os.path.join(folder, "test_guard.py")
+        started = []
+
+        def fake_run(argv, **kwargs):
+            started.append(os.path.basename(argv[-1]))
+            if started[-1] == fail_in:
+                return subprocess.CompletedProcess(argv, 1, stdout="FAIL  %s: a rule broke\n" % fail_in, stderr="")
+            return subprocess.CompletedProcess(argv, 0, stdout="PASS  %s: holds\n" % started[-1], stderr="")
+
+        config_dir = os.path.join(self.run, "cfg")
+        os.makedirs(config_dir)
+        with mock.patch.object(mutate_guard._nowindow, "run", side_effect=fake_run):
+            result = mutate_guard.run_suite(suites, "GUARD_UNDER_TEST", os.path.join(self.run, "copy.py"), config_dir)
+        return started, result
+
+    def test_guard_suites_lists_every_guard_test_file_in_order(self):
+        listing = guard_suite_listing()
+        self.assertIsNotNone(listing, "mutate_guard has no guard_suites(): the guard target runs test_guard.py alone")
+        folder = self.scratch(GUARD_FILES + ("test_config_watch.py",))
+        names = [os.path.basename(path) for path in listing(folder)]
+        self.assertEqual(names, list(GUARD_FILES),
+                         "guard_suites(folder) must list each test_guard*.py, sorted, test_guard.py first: got %r" % names)
+
+    def test_a_guard_run_starts_one_process_per_file(self):
+        started, _result = self.guard_run(("test_guard.py", "test_guard_zz.py"), fail_in=None)
+        self.assertEqual(started, ["test_guard.py", "test_guard_zz.py"],
+                         "a guard run must start one process per guard test file, test_guard.py first: started %r" % started)
+
+    def test_a_fail_from_the_second_file_reaches_the_red_lines(self):
+        _started, (_code, red, _ran, _diag) = self.guard_run(("test_guard.py", "test_guard_zz.py"),
+                                                             fail_in="test_guard_zz.py")
+        self.assertTrue(any("test_guard_zz.py" in line for line in red),
+                        "a FAIL printed only by test_guard_zz.py did not reach run_suite's red lines: %r" % red)
+
+    def test_a_fail_from_the_second_file_makes_the_run_exit_nonzero(self):
+        _started, (code, _red, _ran, _diag) = self.guard_run(("test_guard.py", "test_guard_zz.py"),
+                                                             fail_in="test_guard_zz.py")
+        self.assertNotEqual(code, 0, "a FAIL from test_guard_zz.py left the guard run's exit at 0, so a mutant it "
+                                     "kills reads as a survivor")
+
+    def test_control_a_single_file_fail_reaches_the_red_lines(self):
+        started, (code, red, _ran, _diag) = self.guard_run(("test_guard.py",), fail_in="test_guard.py")
+        self.assertEqual(started, ["test_guard.py"], "a one-file guard run must start that one file: started %r" % started)
+        self.assertTrue(any("test_guard.py" in line for line in red),
+                        "a FAIL from the one file did not reach run_suite's red lines: %r" % red)
+
+    def test_no_test_guard_file_on_disk_is_left_out_of_the_guard_list(self):
+        on_disk = sorted(glob.glob(os.path.join(HOOKS, "test_guard*.py")))
+        listing = guard_suite_listing()
+        self.assertIsNotNone(listing, "mutate_guard has no guard_suites(), so no target runs every test_guard*.py on disk: %s"
+                             % ", ".join(os.path.basename(path) for path in on_disk))
+        listed = {os.path.normcase(os.path.abspath(path)) for path in listing()}
+        left_out = [os.path.basename(path) for path in on_disk if os.path.normcase(os.path.abspath(path)) not in listed]
+        self.assertEqual(left_out, [], "test_guard*.py on disk that the guard target never runs: %s" % ", ".join(left_out))
 
 
 if __name__ == "__main__":
