@@ -145,6 +145,7 @@ LINUX_SUITES = {
     "python3 lint/test_retired_repos.py": (None, None),
     "python3 skills/waiting-page/test_stale_pages.py": (None, None),
     "python3 skills/waiting-page/test_splice.py": (None, None),
+    "python3 skills/waiting-page/test_field_table.py": (None, None),
     "python3 skills/waiting-page/test_export_page.py": (None, None),
     "python3 lint/test_check_artifact_cites.py": (None, None),
     "python3 skills/roadmap/test_build.py": (None, None),

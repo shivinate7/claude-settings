@@ -401,6 +401,8 @@ jobs:
         run: python3 skills/waiting-page/test_page_grant.py
       - name: Waiting page park relay prose suite
         run: python3 skills/waiting-page/test_skill_park_relay.py
+      - name: Waiting page item field table suite
+        run: python3 skills/waiting-page/test_field_table.py
       - name: Waiting page item field table check
         run: python3 skills/waiting-page/field_table.py --check
 
