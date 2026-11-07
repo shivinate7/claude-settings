@@ -27,9 +27,9 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
   relayed-grant-read-from-page).
 - One "Own Branch Lease Push:" entry quotes the lease push with a named sha and the guard remedy's
-  command form, read from PUSH_REASON. Its Covers text names the 9 lease-push refusals and requires
-  the branch was pushed earlier in this session. Its Never covers names each act in LEASE_REFUSED
-  (decision auto-mode-owner-acts).
+  command form, read from PUSH_REASON. Its Covers text names the 9 lease-push refusals, requires
+  the branch was pushed earlier in this session, and binds the sha to the tip this session last
+  pushed. Its Never covers names each act in LEASE_REFUSED (decision auto-mode-owner-acts).
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
@@ -106,9 +106,14 @@ LEASE_INCIDENT = "9 lease-push refusals"
 # (name, case-insensitive pattern) for each condition the lease Covers text must state.
 LEASE_SCOPE = (("earlier in this session", "earlier in this session"),
                ("pushed that same branch", "pushed that same branch"), ("same remote", "same remote"))
+# (name, case-insensitive pattern) for the sha the lease Covers text binds to the last tip pushed.
+LEASE_BINDING = (("sha is the tip this session last pushed",
+                  r"<sha> is the tip this session last pushed"),)
 # (name, case-insensitive pattern) for each act the lease "Never covers" must name. Backticks anchor
 # the flags, because --force-if-includes contains --force and -f.
 LEASE_REFUSED = (("--force", r"`--force`"), ("-f", r"`-f`"), ("+refspec", r"`\+refspec`"),
+                 ("a lease with neither --force-if-includes nor a named sha",
+                  r"lease with neither `--force-if-includes` nor a named sha"),
                  ("the default branch", "default branch"), ("archive/", r"`archive/`"),
                  ("roadmap", r"`roadmap`"), ("merge-lock", r"`merge-lock`"),
                  ("a branch this session did not push earlier", "did not push earlier"),
@@ -372,6 +377,11 @@ class OwnBranchLeasePushIsAllowed(unittest.TestCase):
     def test_covers_requires_a_push_earlier_in_this_session(self):
         missing = unnamed_terms(entry_part(self, LEASE), LEASE_SCOPE)
         self.assertFalse(missing, "Covers text does not require an earlier push this session: %r" % missing)
+
+    def test_covers_binds_the_sha_to_the_tip_last_pushed(self):
+        missing = unnamed_terms(entry_part(self, LEASE), LEASE_BINDING)
+        self.assertFalse(missing, "Covers text does not bind the lease sha to the tip this session last pushed: %r"
+                         % missing)
 
     def test_never_covers_names_each_refused_act(self):
         missing = unnamed_terms(entry_part(self, LEASE, never=True), LEASE_REFUSED)
