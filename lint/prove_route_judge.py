@@ -22,13 +22,13 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
 for folder in ("lint", "hooks", "merge"):
     sys.path.insert(0, os.path.join(ROOT, folder))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import decision_watch  # noqa: E402  invoke_model and LINE_VERDICTS: the one model caller (hooks/decision_watch.py)
 import merge  # noqa: E402  prose_judge_prompt and readable_verdicts: the one home of the judge (merge/merge.py)
 import stale_cites  # noqa: E402  paren_cites, cite_kind, backing_path: the one home of a cite (lint/stale_cites.py)
@@ -40,7 +40,7 @@ SPAN = re.compile(r"(\d+)(?:-(\d+))?")
 
 def git_out(*args):
     """git's stdout as bytes, or None when git fails: the repo is the child's cwd."""
-    run = subprocess.run(["git", *args], capture_output=True)
+    run = _nowindow.run(["git", *args], capture_output=True)
     return run.stdout if run.returncode == 0 else None
 
 
