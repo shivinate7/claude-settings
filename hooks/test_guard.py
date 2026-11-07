@@ -5954,6 +5954,11 @@ sh("wsl: a plain node script that is not a test",
    "wsl -e node script.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a plain node file whose name only starts like a test",
    "wsl -e node x.test.mjs.evil", "deny", rule=WSL_RULE, cwd=NOGIT)
+# A bracket glob is a glob: a plain node call with one takes more than one file, so it is refused like `*`.
+sh("wsl: a bracket glob in a plain node test path is refused",
+   "wsl -e node mods/[ab]/x.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a bracket glob in a --test node path is allowed",
+   "wsl -e node --test mods/[ab]/x.test.mjs", "allow", cwd=NOGIT)
 sh("wsl: plain node with an eval flag",
    'wsl -e node -e "console.log(1)"', "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a plain node test path that climbs",
