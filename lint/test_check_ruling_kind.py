@@ -495,6 +495,15 @@ class RulingKindTests(unittest.TestCase):
         self.assertRegex(out, r"\b0\b", "a zero-record run printed no count: %r" % out)
         self.assertIn("main", out, "a zero-record run did not name its base: %r" % out)
 
+    def test_one_record_run_prints_read_one_record(self):
+        # One record in the diff against main: the count line reads 1, so the count is not only a zero.
+        self.commit_base()
+        self.put(REC, record(BUILD_OK))
+        self.commit_change()
+        rc, out = self.lint("--base", "main")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("read 1 record(s)", out, "a one-record run did not print its count: %r" % out)
+
 
 if __name__ == "__main__":
     unittest.main()
