@@ -25,14 +25,17 @@ Head: <40-hex sha>
 Kind: normal|delete-only|docs-only
 Guard or check: yes|no
 Round <n>: <reviewer|design-reviewer>, <model>, <PASS|FAIL|PARTIAL>
-Fix check: <40-hex reviewed head>, reviewer, <model>, <PASS|FAIL>
+Fix check: <40-hex reviewed head>, reviewer, <model>, <PASS|FAIL|WIDE>
 Net value: not owed|zero|positive|negative
 CI: read live by merge --reviewed
 ```
 
 - The first line is the marker. A line `---` after the CI line ends the record, so the attribution footer may follow.
 - One `Round` line per reviewer. A round can hold more than one line.
-- The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. A PASS counts as its round passing in any round; after round 3 it keeps the net value round 3 gave; with no round recorded it reads open.
+- The `Fix check` line is optional, comes once after the Round lines, and a PASS is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A PASS counts as its round passing in any round; after round 3 it keeps the net value round 3 gave; with no round recorded it reads open.
+- A FAIL is open until the next record. It counts as the next round, N+1: that record carries `Round N+1: reviewer, <model>, FAIL` and no Fix check line, so `--fix-check` may follow again. A FAIL that counts as round 3 makes that record a round-3 record. After round 3 a FAIL is open: revert the fix to the reviewed head, or split it to a new lane.
+- A WIDE is open. Its fix starts a new lane at round 1.
+- No reset: when the record before the newest record on a PR has a FAIL `Fix check` and last round N, and the newest record's last round is below N+1, the PR reads open. Why: `a failed fix check on head <9-hex> counts as round N+1, but this record's last round is M`. A WIDE or a PASS sets no floor.
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
   PR as `CI draft, no run`, because a draft has no CI run.
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
@@ -65,6 +68,7 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 - Each ready PR that has a record adds three calls: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
 - `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
+- The no-reset check reads the comment list that `merge --reviewed` already reads. It adds zero gh calls.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
 - The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR.
 
@@ -74,7 +78,7 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 - Open: an integration PR has no record of its own.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
-- One fix check per record. A second fix on a fixed head starts a new lane at round 1. `--fix-check` refuses unless its reviewed head equals the Head of the newest earlier record on the PR and that record has no Fix check line.
+- One fix check per record. A second fix needs the next round's record first: a FAIL counts as that round, and the record that carries it has no Fix check line. A WIDE starts a new lane at round 1. `--fix-check` refuses unless its reviewed head equals the Head of the newest earlier record on the PR and that record has no Fix check line.
 
 ## Lane picks
 
