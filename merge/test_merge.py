@@ -12500,6 +12500,13 @@ def raises(exc):
     return answer
 
 
+def replies_with(stdout, returncode=0, stderr=""):
+    """A `claude` start that exits with `returncode` and the given output, as the subprocess result invoke_model reads."""
+    def answer(args):
+        return types.SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+    return answer
+
+
 def judge_lines(out, path, word):
     """The output lines that name `path` and carry `word`. A case pins a verdict on the line that names the file."""
     return [line for line in out.splitlines() if path in line and word in line]
@@ -12629,21 +12636,23 @@ class ProseJudge(Env):
         found = [(int(n), cause) for n, cause in re.findall(r"(\d+) (%s)\b" % "|".join(UNKNOWN_CAUSES), line)]
         self.assertEqual(found, causes, "causes in the UNKNOWN line: %r, want %r: %r" % (found, causes, line))
 
-    def real_judge(self, reply):
-        """The merge through the real invoke_model and its parse, with `claude` answered in this process by `reply` as the result text.
-        Every other program goes to the real runner, so git still runs. Call after setup_range. -> (claude starts, rc, out)."""
-        envelope = json.dumps({"result": reply})
+    def real_judge(self, reply=None, claude=None, isolation=None):
+        """The merge through the real invoke_model and its parse. Each `claude` start is answered in this process: by `claude(args)` when
+        given, a function that returns a result or raises, else by an envelope whose result text is `reply`. `isolation`, when given,
+        stands in for _judge_isolation: a function of no arguments that returns (cwd, env) or raises. Every other program goes to the
+        real runner, so git still runs. Call after setup_range. -> (claude starts, rc, out)."""
+        answer = claude or replies_with(json.dumps({"result": reply}))
         real_run, claude_calls = decision_watch._nowindow.run, []
 
         def run(args, **kwargs):
             if args and args[0] == "claude":
                 claude_calls.append(args)
-                return types.SimpleNamespace(returncode=0, stdout=envelope, stderr="")
+                return answer(args)
             return real_run(args, **kwargs)
 
         scratch = tempfile.mkdtemp(dir=self.t)  # the real invoke_model removes its own scratch folder; this one is inside the case's folder
         with unittest.mock.patch.object(decision_watch, "invoke_model", REAL_INVOKE_MODEL), \
-                unittest.mock.patch.object(decision_watch, "_judge_isolation", lambda: (scratch, {})), \
+                unittest.mock.patch.object(decision_watch, "_judge_isolation", isolation or (lambda: (scratch, {}))), \
                 unittest.mock.patch.object(decision_watch._nowindow, "run", run):
             rc, out = self.run_capped()
         return claude_calls, rc, out
@@ -12774,6 +12783,64 @@ class ProseJudge(Env):
         self.assert_unknown_count(out, 2, [(2, "no readable verdict")])
         self.assertFalse([line for line in out.splitlines() if "prose judge" in line and PROSE in line and "UNKNOWN" not in line],
                          "a non-UNKNOWN prose judge line names %s, so the wrong-shape reply was read as a verdict\n%s" % (PROSE, out))
+        self.assertEqual(rc, 0, out)
+
+    # Each case below is one error that decision_watch.invoke_model returns or raises, read through its real parse and the merge's bucket.
+    def test_a_non_json_reply_from_claude_reads_no_readable_verdict(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(claude=replies_with("not json at all"))
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assert_unknown_count(out, 1, [(1, "no readable verdict")])
+        self.assertEqual(rc, 0, out)
+
+    def test_an_envelope_with_no_result_text_reads_no_readable_verdict(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(claude=replies_with(json.dumps({"type": "result", "subtype": "success"})))
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assert_unknown_count(out, 1, [(1, "no readable verdict")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_result_text_with_no_json_reads_no_readable_verdict(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge("I cannot give a verdict on this line.")
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assert_unknown_count(out, 1, [(1, "no readable verdict")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_non_zero_claude_exit_reads_model_error(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(claude=replies_with("", returncode=1, stderr="claude: upstream exploded"))
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assertNotIn("upstream exploded", out, "the report prints claude's stderr, not a cause\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_claude_start_that_raises_reads_model_error(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(claude=raises(OSError("no such file: claude")))
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assertNotIn("no such file", out, "the report prints the start error's text, not a cause\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_an_unreadable_token_file_reads_model_error(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        isolated = []
+
+        def unreadable():
+            isolated.append(1)
+            raise decision_watch.TokenUnreadable()
+        claude_calls, rc, out = self.real_judge(isolation=unreadable)
+        self.assertEqual(len(isolated), 1, "isolation reads: %d, want 1: the real invoke_model did not reach the token read" % len(isolated))
+        self.assertEqual(claude_calls, [], "claude starts: %d, want 0: no model runs when the token cannot be read" % len(claude_calls))
+        self.assert_unknown_count(out, 1, [(1, "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_claude_timeout_reads_timed_out(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(claude=raises(subprocess.TimeoutExpired(["claude"], 1)))
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assert_unknown_count(out, 1, [(1, "timed out")])
         self.assertEqual(rc, 0, out)
 
     def test_a_system_exit_from_the_model_leaves_the_merge_whole(self):
