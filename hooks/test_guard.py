@@ -28797,6 +28797,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: the cd exemptions pass", "worktree-home"),
     ("worktree-home: an agent's write into its own red-run folder", "worktree-home"),
     ("worktree-home: the own red-run folder's root", "worktree-home"),
+    ("worktree-home: a call whose cwd is its own red-run folder", "worktree-home"),
     ("worktree-home: a red-run folder nested under another linked worktree", "worktree-home"),
     ("worktree-home: a write into the own red-run folder spelled", "worktree-home"),
     ("worktree-home: a cd in a comment, in quotes", "worktree-home"),
