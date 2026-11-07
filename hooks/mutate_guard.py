@@ -50,13 +50,13 @@ catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id 
 """
 
 import contextlib
+import functools
 import os
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
 
 import mutate_shared
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -2934,7 +2934,9 @@ def lay_out_guard_reads(root: str) -> None:
     hooks folder: the merge tool, the CI alarm's events, the impeccable skill, the waiting-page skill, bin/sim-lease
     and the sweep modules (the simulator refusal imports janitor/sweep.py and fails open without it).
     A guard copy gets its own `root`. The override copies sit one folder below `work`, so `main` calls this
-    once on `work`. Without these, arms that read them fail on every mutant alike, and the clean-layout
+    once on `work`. Cost (rule outcomes-mechanize-rules): per guard-family copy, the merge tool, one events file,
+    two sweep modules, bin/sim-lease, SKILL.md and the waiting-page skill folder minus its tests (13 files,
+    about 0.9 MB), and `main` makes one more under `work`. They stay until the run ends, when `work` is removed. Without these, arms that read them fail on every mutant alike, and the clean-layout
     control (`run_controls`) reads red."""
     os.makedirs(os.path.join(root, "bin"), exist_ok=True)
     shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
@@ -3022,29 +3024,26 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
 
 
 def run_controls(sources, work: str, entries):
-    """Start one full-suite control per target that has a mutation to run, and return {target: Future}.
+    """Return {target: function} with one full-suite control per target that has a mutation to run here.
 
     A control is `run_suite(..., only=None)` on the unmutated layout, built by `lay_out` with an identity
     mutation. It answers one question: does this layout pass its own suite? A layout that crashes (a missing
     sibling module, a wrong path) fails every case whatever a mutant changed, and each FAIL line reads as a kill.
-    A red control makes every mutant of that target UNKNOWN (`run_mutant`, `mutate_shared.control_verdict`).
-    `work` is `main`'s folder, after `main` has laid the shared guard family, lint and guard reads in it.
-    The futures come back before any mutant runs, so the controls run beside the mutants on their own threads,
-    and a mutant waits for its target's control only after its own suite has run.
+    `mutate_shared.run_mutants` takes these functions as its `controls`: it runs them in the same pool as the
+    mutants, ahead of them, under MUTATE_JOBS, and makes every mutant of a red or raising target UNKNOWN
+    (`mutate_shared.control_verdict`). `work` is `main`'s folder, after `main` has laid the shared guard family,
+    lint and guard reads in it.
 
-    Cost (rule outcomes-mechanize-rules): one extra suite process and one temp tree per target per run. It writes
-    no log and starts no timer or other long-lived process. The pool ends when the last control returns."""
+    Cost (rule outcomes-mechanize-rules): one extra full suite run and one temp tree per target per run, each
+    inside the job cap. A guard-suite target (guard, override, simlease) measured about 870 s alone beside the
+    other controls, so a run adds up to three such suites; the time added to the CI step is unmeasured. It
+    writes no log and starts no timer, thread or other long-lived process beyond the run's own pool."""
     targets = []
     for entry in entries:
         _label, _old, _new, target, _required, only_on = mutation_parts(entry)
         if target not in targets and not mutate_shared.skip_reason(only_on):
             targets.append(target)
-    if not targets:
-        return {}
-    pool = ThreadPoolExecutor(max_workers=len(targets))
-    futures = {target: pool.submit(run_control, sources, work, target) for target in targets}
-    pool.shutdown(wait=False)
-    return futures
+    return {target: functools.partial(run_control, sources, work, target) for target in targets}
 
 
 def control_name(target: str) -> str:
@@ -3062,19 +3061,16 @@ def run_control(sources, work: str, target: str):
     return run_suite(suite, variable, copy_path, config_dir, None)
 
 
-def run_mutant(sources, work: str, entry, controls=None):
+def run_mutant(sources, work: str, entry):
     """Apply one mutation, run its suite against it, and return (label, code, FAIL lines,
-    required, skip, ERROR lines[, unknown]).
+    required, skip, ERROR lines).
 
     `required` is the case name (or a distinctive fragment of it) the caller must find among the
     FAIL lines before trusting this mutant's death: see `mutate_shared.report_verdict`. `skip`,
     when not None, is why this mutant did not run on this platform at all: the caller reports it
-    and counts it as neither killed, survived, nor wrong cause.
-
-    `controls` is `run_controls`' {target: Future}. When this target's control is red, a seventh
-    field `unknown` holds why, and the sixth holds the first lines the control saw: the mutant's own
-    verdict is not trusted. The mutant runs first and waits for the control after, so a long control
-    does not hold a mutant thread idle while mutants could run."""
+    and counts it as neither killed, survived, nor wrong cause. This verdict is not yet trusted: `run_mutants`
+    judges it against its target's clean-layout control (`run_controls`).
+    """
     label, old, new, target, required, only_on = mutation_parts(entry)
     if required is None:
         raise ValueError("mutation carries no required case name: %s" % label)
@@ -3087,11 +3083,6 @@ def run_mutant(sources, work: str, entry, controls=None):
     os.makedirs(config_dir, exist_ok=True)
     code, red, seen = mutate_shared.staged_suite_seen(
         lambda only: run_suite(suite, variable, copy_path, config_dir, only), required)
-    if controls and target in controls:
-        control_code, control_red, _ran, control_seen = controls[target].result()
-        verdict = mutate_shared.control_verdict(control_code, control_red, control_seen)
-        if verdict:
-            return label, code, red, required, None, verdict[1], verdict[0]
     return label, code, red, required, None, seen
 
 
@@ -3193,9 +3184,9 @@ def main() -> int:
     lay_out_guard_reads(work)  # the override copies' ../merge, ../actions and ../skills
 
     try:
-        controls = run_controls(sources, work, MUTATIONS)
         return mutate_shared.run_mutants(
-            MUTATIONS, lambda entry: run_mutant(sources, work, entry, controls))
+            MUTATIONS, lambda entry: run_mutant(sources, work, entry),
+            controls=run_controls(sources, work, MUTATIONS), control_of=lambda entry: mutation_parts(entry)[3])
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

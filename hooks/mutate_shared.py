@@ -283,7 +283,7 @@ def staged_suite_seen(run, required: str):
     return code, red, list(last)
 
 
-def run_mutants(entries, run_one):
+def run_mutants(entries, run_one, controls=None, control_of=None):
     """Run every entry through `run_one`, in parallel, printing each mutant's verdict as it
     lands, then the tally line. Returns 0 when every mutant was killed (a caller's own `main`
     should return that, or 1 otherwise), so a caller can end with
@@ -299,23 +299,55 @@ def run_mutants(entries, run_one):
     `unknown`, the optional seventh field, is a reason this mutant's verdict cannot be trusted (see
     `control_verdict`). It prints `UNKNOWN <label> <reason>` with `seen` under it, counts in the tally, and
     exits 1 (decision `ci-unknown-is-red`). It is not `skip`: a skip means the mutant does not apply here and exits 0.
+
+    `controls` is {key: function returning run_suite's (code, red, ran, seen)}: one clean-layout control per
+    key, and `control_of(entry)` names the key whose control judges that entry. The controls go into the same
+    pool as the mutants, ahead of them, so they count in the job cap and no worker ever waits on one. Results
+    are read in submission order, so every control's result is in hand before the first mutant's is read. A red
+    control, or one that raises, makes every mutant of its key read UNKNOWN. An entry whose key has no control
+    raises KeyError: it never reads KILLED unchecked. A skipped entry has no control to ask for.
     """
     jobs = job_count()
+    controls = controls or {}
+    keys = list(controls)
     print("%d mutations, %d at a time" % (len(entries), jobs))
     survivors = 0
     wrong_cause = 0
     skipped = 0
     unknown = 0
+
+    def work(job):
+        kind, item = job
+        if kind == "mutant":
+            return run_one(item)
+        try:
+            return controls[item]()
+        except Exception as error:  # a control that crashes reads red for its key, never ends the run
+            return error
+
+    verdicts = {}
+    jobs_in_order = [("control", key) for key in keys] + [("mutant", entry) for entry in entries]
     with ThreadPoolExecutor(max_workers=jobs) as pool:
-        for label, code, red, required, skip, *more in pool.map(run_one, entries):
+        results = pool.map(work, jobs_in_order)
+        for key in keys:
+            result = next(results)
+            if isinstance(result, Exception):
+                verdicts[key] = ("clean layout raised %s: %s" % (type(result).__name__, result), [])
+            else:
+                code, red, _ran, seen = result
+                verdicts[key] = control_verdict(code, red, seen)
+        for entry, (label, code, red, required, skip, *more) in zip(entries, results):
             if skip:
                 skipped += 1
                 print("SKIPPED     %-62s %s" % (label, skip), flush=True)
                 continue
-            if len(more) > 1 and more[1]:
+            reason, lines = (more[1], list(more[0])) if len(more) > 1 and more[1] else (None, [])
+            if control_of is not None and not reason:
+                reason, lines = verdicts[control_of(entry)] or (None, [])
+            if reason:
                 unknown += 1
-                print("UNKNOWN     %-62s %s" % (label, more[1]), flush=True)
-                print_saw(list(more[0]))
+                print("UNKNOWN     %-62s %s" % (label, reason), flush=True)
+                print_saw(lines)
                 continue
             status = report_verdict(label, code, red, required, more[0] if more else ())
             if status == "survived":
