@@ -3179,10 +3179,12 @@ def review_state(rec, head):
         return "done", "docs-only change, no round owed"
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
-def reviewed_lines(h):
+def reviewed_lines(h, root):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
-    the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request."""
+    the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request.
+    A done record whose rounds are carried from an earlier head (carried_first_head) reads open when a guard or check path changed after that head;
+    that adds one git fetch for the pull request and no `gh` call."""
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
         return ["no open pull requests."]
@@ -3195,6 +3197,16 @@ def reviewed_lines(h):
             continue
         rec = parse_review(bodies[-1])
         state, why = review_state(rec if rec and rec["n"] == n else None, sha)
+        if state == "done":
+            earlier = [r if r and r["n"] == n else None for r in map(parse_review, bodies[:-1])]
+            h1 = carried_first_head(earlier, rec)
+            if h1:
+                try:
+                    reason = carried_refusal(root, d["base"]["ref"], h1, sha)
+                except Stop as e:  # fail closed: a check that could not run never reads done
+                    reason = str(e)
+                if reason:
+                    state, why = "open", reason
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
         lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
     return lines + ([f"no record: {', '.join(bare)}"] if bare else [])
@@ -3264,6 +3276,48 @@ def guard_hits(paths):
     guard change (decision hold-unsafe-after-round-3). hooks/guard.py is_test_rel is the one home of what a test path is."""
     import guard as hook_guard  # here, not at the top: it loads the whole guard set, and only the review record needs it
     return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in GUARD_FILES) and not hook_guard.is_test_rel(p))
+
+def carried_first_head(earlier, rec):
+    """-> H1, the Head of the oldest record in the unbroken run that carries `rec`'s rounds, or None when `rec` carries nothing. A record carries the
+    rounds of the one before it when its Round lines and Fix check equal that record's (decision pr-review-record, the limits). `earlier` is the
+    parsed records of the pull request before `rec`, oldest first; a body that does not parse is None and breaks the run."""
+    first, nxt = None, rec
+    for prev in reversed(earlier):
+        if prev is None or (prev["rounds"], prev["fix"]) != (nxt["rounds"], nxt["fix"]):
+            break
+        first, nxt = prev["head"], prev
+    return first
+
+def unreviewed_guard_paths(root, base, h1, h2):
+    """-> the guard or check paths (guard_hits) that changed after h1, the head a carried run was reviewed at, and were not read. A is h1 merged with
+    the base as h2 last saw it, so main's own commits and a clean merge of main cancel out; what is left between A and h2 is the lane's own work and
+    any conflict resolved by hand. One fetch of the base, h1 and h2, then local git reads. Raises Stop when it cannot tell (git older than 2.38,
+    a head that cannot be fetched, a failed merge-tree), so a caller fails closed."""
+    c, out = git(root, "--version")
+    ver = re.search(r"(\d+)\.(\d+)", out)
+    if c or not ver or tuple(map(int, ver.groups())) < (2, 38):
+        raise Stop("the carried rounds cannot be checked: git 2.38 or newer is needed for merge-tree --write-tree")
+    if h1 == h2:
+        return []
+    c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}", h1, h2)
+    if c:
+        raise Stop(f"the carried rounds cannot be checked: {h1[:9]} or {h2[:9]} cannot be fetched ({' '.join(out.split())[:200]})")
+    c, mb = git(root, "merge-base", h2, f"origin/{base}")
+    if c or not re.fullmatch(REVIEW_SHA, mb):
+        raise Stop(f"the carried rounds cannot be checked: no merge base of {h2[:9]} and origin/{base}")
+    c, out = git(root, "merge-tree", "--write-tree", "--no-messages", h1, mb)  # exit 1 is a conflict, and still prints the tree first
+    tree = out.splitlines()[0] if out else ""
+    if c not in (0, 1) or not re.fullmatch(REVIEW_SHA, tree):
+        raise Stop(f"the carried rounds cannot be checked: merge-tree of {h1[:9]} failed ({' '.join(out.split())[:200]})")
+    c, out = git(root, "diff", "--name-only", "--no-renames", "-z", tree, h2)
+    if c:
+        raise Stop(f"the carried rounds cannot be checked: the diff after {h1[:9]} failed ({' '.join(out.split())[:200]})")
+    return guard_hits([p for p in out.split("\0") if p])
+
+def carried_refusal(root, base, h1, h2):
+    """-> why the rounds carried from h1 to h2 are not covered, or None when they are. A guard or check path that changed after h1 was never read."""
+    paths = unreviewed_guard_paths(root, base, h1, h2)
+    return f"the rounds carried from {h1[:9]} never read {', '.join(paths)}, changed after it" if paths else None
 
 def kind_misfits(kind, files):
     """-> the sorted paths that break the kind, over (path, status) pairs. docs-only: a path not ending .md. delete-only: a status other than removed."""
@@ -3411,12 +3465,17 @@ def main(argv, host=None, lock=None):
             misfits = kind_misfits(a.kind, files)
             if misfits:
                 raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
+            earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]  # the one comment read
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
-                earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
                 last = earlier[-1] if earlier else None
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
+            h1 = carried_first_head(earlier, {"rounds": a.round, "fix": a.fix_check})
+            if h1:  # these rounds equal the earlier record's, so a guard or check path changed since its head was never read
+                reason = carried_refusal(root, info["base"], h1, a.head)
+                if reason:
+                    raise Stop(f"{reason}. Review the new head and write a new Round line, or a Fix check naming {h1[:9]}. " + REVIEW_CITE)
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
@@ -3428,7 +3487,7 @@ def main(argv, host=None, lock=None):
             if not host:
                 h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore_checks(cfg)
                 h.refuse_pinned_mismatch()
-            say(*reviewed_lines(h))
+            say(*reviewed_lines(h, root))
             return 0
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and cfg["merge"].get("standingGrant", True) is False:
             raise Stop("The owner's standing merge grant is off for this repo, so ask the owner to merge this PR. " + OFF_CITE)

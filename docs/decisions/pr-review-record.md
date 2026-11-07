@@ -37,9 +37,9 @@ CI: read live by merge --reviewed
   PR as `CI draft, no run`, because a draft has no CI run.
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
 - The newest record for a head counts. A record for an old head is stale.
-- `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints no body, so a push after the review never relabels old rounds as current.
+- `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints no body, so a record never names a head the review did not read. A later push can still reuse the rounds, as a new record for the new head with the same Round lines. The carried-run check in the limits covers that.
 - A lane posts the body with the GitHub MCP comment tool after each round. `gh pr comment` uses GraphQL, which the cloud refuses (route graphql-gh-api-cloud).
-- The one home of the form is the merge tool (`merge/merge.py`). `review_body` writes the body, `parse_review` reads it, and `review_state` gives each record's state. `reviewed_lines` prints the `--reviewed` list, `round_arg` reads `--round`, and `Host.review_comments` makes the one list read.
+- The one home of the form is the merge tool (`merge/merge.py`). `review_body` writes the body, `parse_review` reads it, and `review_state` gives each record's state. `reviewed_lines` prints the `--reviewed` list, `carried_first_head` and `unreviewed_guard_paths` make the carried-run check, `round_arg` reads `--round`, and `Host.review_comments` makes the one list read.
 
 ## The done rules
 
@@ -64,7 +64,8 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
 - Each ready PR that has a record adds three calls: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
-- `merge <pr> --review-record`: two reads per call, the PR and one paged list of its changed files. The test `ReviewGuardCost` pins them. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
+- `merge <pr> --review-record`: three `gh` reads per call, the PR, one paged list of its changed files and one paged list of the repo's issue comments since the PR opened. `--fix-check` reuses that comment read. The test `ReviewGuardCost` pins them. When the new record carries the rounds of an earlier one, the call also runs one `git fetch origin` (the base, the first head and the new head) and local git reads, and no more `gh` calls. It writes nothing.
+- The carried-run check adds one `git fetch origin` to `merge --reviewed` for each PR whose done record carries rounds, and no `gh` call. A PR with one record, or a record whose rounds are new, adds none.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
 - The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR.
 
@@ -76,7 +77,13 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
   - `agents/*.md` is not on the list. Only its `tools` lines are a guard, and a path cannot tell those apart from prompt text.
   - It refuses Kind `docs-only` when a path does not end in `.md`. It refuses Kind `delete-only` when a path is not removed.
   - Guard or check `yes` stays allowed with no hit, because a guard can live outside those paths.
-- The path check runs only when `--review-record` writes a record. `merge --reviewed` still trusts a record posted by hand. A read there would add one call per PR.
+- The files path check above (Guard or check `no`, Kind) runs only when `--review-record` writes a record. `merge --reviewed` does not read the PR's files. A record posted by hand is trusted for those two fields.
+- A review record carries the rounds of an earlier record when its Round lines and Fix check equal the newest earlier record's. A run of such records is unbroken. R is the newest record. H1 is the Head of the oldest record in R's unbroken run, and H2 is R's Head (for `--review-record`, the head it writes). `merge-tree --write-tree` merges H1 with the merge base of H2 and `origin/<base>`, giving tree A. Then main's own commits and a clean merge of main cancel out, and what is left between A and H2 is the lane's own work and any conflict resolved by hand.
+  - When a guard or check path (the list above) changed between A and H2, no reviewer read it. `--review-record` refuses with exit 1 and prints no body. `merge --reviewed` shows the PR `open`, and its reason names H1 and each path.
+  - Let through: a Fix check whose reviewed head is H1 (its Fix check line differs from the earlier one, so nothing is carried), and a new Round line (it breaks the run, so the run starts at that record).
+  - Fail closed: when H1 cannot be fetched, `merge-tree` fails, or git is older than 2.38, `--review-record` refuses and `--reviewed` shows `open`.
+  - A first record with no earlier record skips the check.
+  - Limit: a first record posted for a head nobody reviewed is unseen. No earlier record names an earlier head, so nothing is carried. A lane that posts a record for a head it did not review is a mistake the tool cannot see.
 - In another repo, a change under `hooks/`, `lint/`, `bin/`, `actions/`, `.github/`, `merge/` or `githooks/`, or to a root `settings.json`, must say Guard or check `yes`. It then owes the net-value test after round 3. A `.claude/settings.json` or `.claude/hooks/` path is not on the list.
 - The tool does not tell a record that files an owner ruling from other docs. Kind `normal` stays the lane's claim. Guards stop mistakes, not attackers (record `guard-guards-mistakes-only`).
 - Open: an integration PR has no record of its own.
