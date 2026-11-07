@@ -11627,6 +11627,35 @@ sh("frozen word: mkdir after && into the live pin is refused",
    "ls && mkdir " + slash(os.path.join(LIVE_PIN, "x")), "deny", "frozen-path", cwd=NOGIT)
 sh("frozen word: grep -rn mkdir redirected onto a frozen settings file is refused",
    "grep -rn mkdir " + LIVE_HOOKS + "/guard.py > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# A reader piped on to a tool that does not run its text reads its mutating word as an argument, so each
+# READ below is allowed. The pipe does not make the reader a program.
+sh("frozen word: grep -rn mkdir naming a hook piped to head is allowed",
+   "grep -rn mkdir " + LIVE_HOOKS + "/guard.py | head -5", "allow", cwd=NOGIT)
+sh("frozen word: grep -rn mkdir naming a hook piped to tail is allowed",
+   "grep -rn mkdir " + LIVE_HOOKS + "/guard.py | tail -5", "allow", cwd=NOGIT)
+sh("frozen word: grep -rn mkdir naming a hook piped to sort and uniq is allowed",
+   "grep -rn mkdir " + LIVE_HOOKS + "/guard.py | sort | uniq -c", "allow", cwd=NOGIT)
+sh("frozen word: grep -rn mkdir naming a hook piped to cut is allowed",
+   "grep -rn mkdir " + LIVE_HOOKS + "/guard.py | cut -c1-80", "allow", cwd=NOGIT)
+sh("frozen word: grep -rn mkdir naming a hook piped to tee /tmp/out is allowed",
+   "grep -rn mkdir " + LIVE_HOOKS + "/guard.py | tee /tmp/out", "allow", cwd=NOGIT)
+# A mutating word that a program runs as its text (a trap body, an interpreter's inline program, a
+# PowerShell argument, an awk system() call) is a write as well. Each DENIES.
+FROZEN_DIR_X = slash(os.path.join(LIVE_PIN, "x"))
+sh("frozen word: a trap body that mkdirs a frozen folder is refused",
+   "trap 'mkdir " + FROZEN_DIR_X + "' EXIT", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: py -3 -c os.mkdir of a frozen folder is refused",
+   "py -3 -c \"import os; os.mkdir('" + FROZEN_DIR_X + "')\"", "deny", "frozen-path", cwd=NOGIT)
+# -Wait keeps detached-launch from answering first, so the frozen check is the rule that reads the mkdir.
+sh("frozen word: Start-Process -Wait pwsh with a mkdir argument into a frozen folder is refused",
+   "Start-Process pwsh -Wait -ArgumentList 'mkdir " + FROZEN_DIR_X + "'", "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
+sh("frozen word: git -C with -c then mv into a frozen folder is refused",
+   "git -C /tmp -c core.x=1 mv a " + FROZEN_DIR_X, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: php -r mkdir of a frozen folder is refused",
+   "php -r \"mkdir('" + FROZEN_DIR_X + "');\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: awk system() mkdir of a frozen folder is refused",
+   "awk 'BEGIN{system(\"mkdir " + FROZEN_DIR_X + "\")}'", "deny", "frozen-path", cwd=NOGIT)
 
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
