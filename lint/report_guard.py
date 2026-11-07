@@ -723,10 +723,11 @@ CARRY_FORMS = {
     "Handoff gave": "`Handoff gave: <facts the handoff supplied that the summary did not>`, "
                     "or `Handoff gave: none`",
 }
-# A source word or form: git, page, digest, `commit <hex>`, `PR <n>` / `#<n>` (GitHub PR), a github.com link.
-# The hex must hold a digit, so a word such as "commit defaced" names no source.
-SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b|\bcommit\s+(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
-                       r"|\bPR\s+#?\d+\b|(?<![\w&])#\d+\b|\bgithub\.com/\S", re.I)
+# A source word or form, matched ignoring case: git, page, digest, `commit <hex>` (a colon or a backtick pair may
+# sit between), `PR <n>`, `PR #<n>`, `PR#<n>`, `issue #<n>`, a github.com link. A bare `#<n>` is no source. The hex
+# must hold a digit, so a word such as "commit defaced" names no source.
+SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b|\bcommit(?::\s*|\s+)`?(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
+                       r"|\bPR\s*#?\d+\b|\bissue\s*#\d+\b|\bgithub\.com/\S", re.I)
 NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
 
 
