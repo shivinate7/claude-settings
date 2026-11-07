@@ -2009,13 +2009,17 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
 ENTRY_OWN = re.compile(r"^commit(?: \((?:initial|amend|merge)\))?:")
 ENTRY_REBASE = re.compile(r"^(?:pull --)?rebase\b[^:(]*\(([^)]*)\)")
 ENTRY_RESOLVED = re.compile(r"^(?:commit \(cherry-pick\)|revert)\b")
+# A plain rebase pick, `rebase (pick): <message>` or `rebase -i (pick): <message>`: the replayed commit keeps its
+# message. A commit a rebase drops as already applied has no such entry.
+ENTRY_PICK = re.compile(r"^(?:pull --)?rebase(?: -i)? \(pick\): (.*)$")
+ENTRY_MESSAGE = re.compile(r"^commit(?: \([a-z]+\))?: (.*)$")
 REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")
 # A git-dir entry that shows a replay in progress: its staged change is git's copy plus what the agent
 # resolved. A MERGE_MSG without MERGE_HEAD is a `cherry-pick -n` or `revert -n`.
 REPLAY_MARKS = ("CHERRY_PICK_HEAD", "REVERT_HEAD", "SQUASH_MSG", "MERGE_MSG", "rebase-merge", "rebase-apply")
 # How a builder's test path in one change counts: refused, logged, or logged as the upstream side a
-# rebase kept.
-OWN, NOTED, KEPT = "own", "noted", "kept"
+# rebase kept. UNREAD ends the list: the changes before it were read, the replayed commits after them were not.
+OWN, NOTED, KEPT, UNREAD = "own", "noted", "kept", "unread"
 
 
 def entry_kind(subject: str) -> str:
@@ -2032,31 +2036,31 @@ def entry_kind(subject: str) -> str:
     return NOTED if ENTRY_RESOLVED.match(subject) else ""
 
 
-def git_names(root: str, *args):
+def git_names(root: str, *args, slow_retry: bool = True):
     """The NUL-separated names one git call prints, or None when git failed."""
-    answer = guard_core._git(root, *args, retry=True)
+    answer = guard_core._git(root, *args, retry=True, slow_retry=slow_retry)
     if answer is None or answer.returncode != 0:
         return None
     return [p for p in answer.stdout.split("\0") if p]
 
 
-def held_as_replay(root: str, sha: str):
-    """True when HEAD holds a commit with the same patch as `sha`, a commit HEAD no longer reaches: a rebase
-    replayed it as a new commit. False when none does; None when git failed. `git cherry` marks such a
-    commit `-` by its patch id."""
-    answer = guard_core._git(root, "cherry", "HEAD", sha, retry=True)
+def held_as_replay(root: str, sha: str, slow_retry: bool = True):
+    """True when HEAD holds a commit with the same patch as `sha`, a commit HEAD no longer reaches. False when
+    none does; None when git failed. `git cherry` marks such a commit `-` by its patch id. This reads the patch
+    only: a rebase pick in the reflog is what says HEAD got it by a replay (`own_changes`)."""
+    answer = guard_core._git(root, "cherry", "HEAD", sha, retry=True, slow_retry=slow_retry)
     if answer is None or answer.returncode != 0:
         return None
     return ("- " + sha) in answer.stdout.splitlines()
 
 
-def changed_paths(root: str, old: str, new=None):
+def changed_paths(root: str, old: str, new=None, slow_retry: bool = True):
     """The paths that differ from `old` (a commit or tree) to `new` (a commit), or to the working tree
     and its untracked files when `new` is None; None when git failed."""
     if new is not None:
-        return git_names(root, "diff", "--name-only", "-z", "--no-renames", old, new)
-    tracked = git_names(root, "diff", "--name-only", "-z", "--no-renames", old)
-    fresh = git_names(root, "ls-files", "--others", "--exclude-standard", "-z")
+        return git_names(root, "diff", "--name-only", "-z", "--no-renames", old, new, slow_retry=slow_retry)
+    tracked = git_names(root, "diff", "--name-only", "-z", "--no-renames", old, slow_retry=slow_retry)
+    fresh = git_names(root, "ls-files", "--others", "--exclude-standard", "-z", slow_retry=slow_retry)
     if tracked is None or fresh is None:
         return None
     return tracked + sorted(fresh)
@@ -2088,15 +2092,37 @@ def upstream_kept(root: str, orig: str, onto: str):
     return [p for p in replayed if p not in set(moved)]
 
 
-def own_changes(root: str):
+def commit_change(root: str, sha: str, kind: str, slow_retry: bool = True):
+    """One own commit as `(old, new, paths, kind)`, measured against its first parent, or against git's own
+    merge of its parents; None when git could not read it."""
+    parents = guard_core._git(root, "show", "-s", "--format=%P", sha, retry=True, slow_retry=slow_retry)
+    if parents is None or parents.returncode != 0:
+        return None
+    parents = parents.stdout.split()
+    if len(parents) > 2:
+        return None
+    old = merge_tree(root, *parents) if len(parents) == 2 else (parents[0] if parents else "")
+    if old is None:
+        return None
+    paths = (changed_paths(root, old, sha, slow_retry) if old else
+             git_names(root, "diff-tree", "--root", "-r", "--name-only", "--no-commit-id", "-z",
+                       "--no-renames", sha, slow_retry=slow_retry))
+    if paths is None:
+        return None
+    return (old, sha, paths, kind)
+
+
+def own_changes(root: str, slow_retry: bool = True):
     """The agent's own change, as a list of `(old, new, paths, kind)`; None when git could not answer:
     unknown, never clear. `new` None is the working tree, and `old` '' is no commit.
 
     OWN (a builder's test path in it is refused):
       - each commit the agent made (HEAD reflog `commit`, `commit (amend)`, `commit (merge)`) that HEAD
-        still holds, or whose patch a rebase replayed into HEAD (`held_as_replay`), against its first
-        parent. A merge commit is measured against git's own merge of
-        its parents, so only what the agent resolved or added counts;
+        still holds, or that a rebase replayed into HEAD, against its first parent. A merge commit is
+        measured against git's own merge of its parents, so only what the agent resolved or added counts.
+        A lost commit counts as replayed when the reflog holds a `rebase (pick)` of its message that HEAD
+        reaches, and `git cherry` does not say its patch is gone from HEAD (a failed cherry cannot veto).
+        A commit a rebase dropped as already applied has no pick, and is not held;
       - the working tree against HEAD, or, while a merge is in progress, against git's own merge of
         HEAD and MERGE_HEAD.
     NOTED (logged, never refused): a replay the agent resolved or chose (a hand-resolved cherry-pick, a
@@ -2105,56 +2131,60 @@ def own_changes(root: str):
     builder left it during the rebase. A write of those bytes after the rebase finished is its own change:
     the working tree or a commit of its own carries it, and that is refused.
     A plain cherry-pick or rebase pick, a clean merge, a reset, a checkout and a pull are other
-    people's commits, and are not read."""
-    log = guard_core._git(root, "reflog", "show", "--format=%H %gs", "HEAD", retry=True)
-    gitdir = guard_core._git(root, "rev-parse", "--absolute-git-dir", retry=True)
+    people's commits, and are not read.
+    Order: the commits HEAD holds, the working tree, KEPT, then the replayed commits. A replayed commit that
+    git could not read ends the list with UNREAD, so it never discards a refusal found before it.
+    `slow_retry` False is for SubagentStop: a read that times out is not run again (`git_reads._git`)."""
+    log = guard_core._git(root, "reflog", "show", "--format=%H %gs", "HEAD", retry=True, slow_retry=slow_retry)
+    if log is None or log.returncode:
+        return None
+    gitdir = guard_core._git(root, "rev-parse", "--absolute-git-dir", retry=True, slow_retry=slow_retry)
+    if gitdir is None or gitdir.returncode:
+        return None
     merging = guard_core._git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
-    if log is None or gitdir is None or merging is None or log.returncode or gitdir.returncode:
+    if merging is None:
         return None
     entries = [line.partition(" ")[::2] for line in log.stdout.splitlines() if line.strip()][::-1]
-    kinds = {}
+    kinds, messages, picks = {}, {}, {}
     for sha, subject in entries:
         kind = entry_kind(subject)
         if kind in (OWN, NOTED):
             kinds.setdefault(sha, kind)
+            said = ENTRY_MESSAGE.match(subject)
+            if said:
+                messages.setdefault(sha, said.group(1))
+        pick = ENTRY_PICK.match(subject)
+        if pick:
+            picks.setdefault(sha, pick.group(1))
     lost = set()
     if kinds:
-        # `kinds --not HEAD` lists what HEAD does not reach: a commit in it was reset or amended away.
-        answer = guard_core._git(root, "rev-list", *kinds, "--not", "HEAD", retry=True)
+        # `--not HEAD` lists what HEAD does not reach: an own commit in it was reset, amended or rebased away,
+        # and a pick in it was itself rebased away.
+        answer = guard_core._git(root, "rev-list", *dict.fromkeys([*kinds, *picks]), "--not", "HEAD",
+                                 retry=True, slow_retry=slow_retry)
         if answer is None or answer.returncode != 0:
             return None
         lost = set(answer.stdout.split())
-    changes = []
+    picked = {message for sha, message in picks.items() if sha not in lost}
+    changes, replayed = [], []
     for sha, kind in kinds.items():
-        if sha in lost:
-            # A rebase replays the agent's own commit as a plain pick: the new commit is another sha, and
-            # the original is gone from HEAD's history. The original still counts while HEAD holds its patch.
-            replayed = held_as_replay(root, sha) if kind == OWN else False
-            if replayed is None:
+        if sha not in lost:
+            change = commit_change(root, sha, kind, slow_retry)
+            if change is None:
                 return None
-            if not replayed:
-                continue
-        parents = guard_core._git(root, "show", "-s", "--format=%P", sha, retry=True)
-        if parents is None or parents.returncode != 0:
-            return None
-        parents = parents.stdout.split()
-        if len(parents) > 2:
-            return None
-        old = merge_tree(root, *parents) if len(parents) == 2 else (parents[0] if parents else "")
-        if old is None:
-            return None
-        paths = (changed_paths(root, old, sha) if old else
-                 git_names(root, "diff-tree", "--root", "-r", "--name-only", "--no-commit-id", "-z",
-                           "--no-renames", sha))
-        if paths is None:
-            return None
-        changes.append((old, sha, paths, kind))
+            changes.append(change)
+        elif kind == OWN and messages.get(sha) in picked:
+            # A rebase replays the agent's own commit as a plain pick: the new commit is another sha, and the
+            # original is gone from HEAD's history. A commit the rebase dropped has no pick entry. The patch
+            # check only vetoes: a rebase that changed the patch no longer holds the original.
+            if held_as_replay(root, sha, slow_retry) is not False:
+                replayed.append(sha)
     old = "HEAD"
     if merging.returncode == 0:
         old = merge_tree(root, "HEAD", merging.stdout.strip())
         if old is None:
             return None
-    paths = changed_paths(root, old)
+    paths = changed_paths(root, old, slow_retry=slow_retry)
     if paths is None:
         return None
     replaying = merging.returncode != 0 and any(
@@ -2167,6 +2197,12 @@ def own_changes(root: str):
                 return None
             if kept:
                 changes.append((sha, None, kept, KEPT))
+    for sha in replayed:
+        change = commit_change(root, sha, OWN, slow_retry)
+        if change is None:
+            changes.append((None, None, [], UNREAD))
+            break
+        changes.append(change)
     return changes
 
 
@@ -2262,18 +2298,22 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
     return found
 
 
-def diff_violation(root: str, role: str):
+def diff_violation(root: str, role: str, slow_retry: bool = True):
     """Judge the agent's own change (`own_changes`). Returns `(offence, noted)`: the first path the role
     may not change ('' when none, None when git could not answer: UNKNOWN, never clear), and the paths
     a builder changed that are logged and never refused. Every offence of another role is logged only."""
-    changes = own_changes(root)
-    top = guard_core._git(root, "rev-parse", "--show-toplevel", retry=True)
-    if changes is None or top is None or top.returncode != 0:
+    changes = own_changes(root, slow_retry)
+    if changes is None:
+        return None, []
+    top = guard_core._git(root, "rev-parse", "--show-toplevel", retry=True, slow_retry=slow_retry)
+    if top is None or top.returncode != 0:
         return None, []
     top = os.path.realpath(top.stdout.strip())
     builder = role == BUILDER_ROLE
     noted = []
     for old, new, paths, kind in changes:
+        if kind == UNREAD:
+            return None, []
         if kind == KEPT and not builder:
             continue
         found = role_offences(root, top, role, paths, old, new)
@@ -2334,7 +2374,8 @@ def judge_stop(payload) -> None:
     if is_worktree(where) is False:
         record("SubagentStop", "noted", "role-diff-main-checkout", where)
         return
-    found, noted = diff_violation(where, role)
+    # SubagentStop has a 20 s hook budget (settings.json): a read that times out is not run again.
+    found, noted = diff_violation(where, role, slow_retry=False)
     if found != "" and payload.get("stop_hook_active"):
         record("SubagentStop", "noted", "role-diff-unresolved", found or "unread")
     elif found is None:

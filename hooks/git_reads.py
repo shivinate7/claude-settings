@@ -25,10 +25,12 @@ from shared_names import config_dir  # noqa: E402  the one home, shared with the
 RETRY_TIMEOUT = 15  # seconds: the one retry of a read that timed out at the normal 10
 
 
-def _git(where: str, *args, retry: bool = False):
+def _git(where: str, *args, retry: bool = False, slow_retry: bool = True):
     """One `git` call: the finished process, or None when it could not start or timed out. `retry` is for a
     read whose non-zero exit also means "unread" (the guard's diff reads): a failed call runs once more, with
-    the longer RETRY_TIMEOUT after a timeout, before the caller treats the read as failed."""
+    the longer RETRY_TIMEOUT after a timeout, before the caller treats the read as failed. `slow_retry` False
+    is for a caller with a short hook budget: a read that timed out is not run again, and a read that failed
+    at once still is."""
     slow = False
     done = None
     for _attempt in range(2 if retry else 1):
@@ -39,6 +41,8 @@ def _git(where: str, *args, retry: bool = False):
             )
         except subprocess.TimeoutExpired:
             done, slow = None, True
+            if not slow_retry:
+                break
         except Exception:
             done = None
         if done is not None and done.returncode == 0:
