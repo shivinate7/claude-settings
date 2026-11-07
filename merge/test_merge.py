@@ -8819,10 +8819,10 @@ class ReadyRemedy(RecordsEnv):
     and gives the mark-ready routes. The ready checks are decision lanes-run-no-full-ci-job's."""
     SKIPPED = {"all-jobs-passed": [("skipping", "")], "scope": [("skipping", "")]}
 
-    def remedy(self, declared):
-        """-> the remedy of the refusal for a ready head whose checks all skipped, in a repo that declares ready checks or not."""
+    def remedy(self, declared, steps=("check invariants",)):
+        """-> the remedy of the refusal for a ready head whose checks all skipped, in a repo that declares ready checks (`steps`) or not."""
         if declared:  # the seed's base already holds CONFIG, so only the declared case writes a config
-            put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], readyChecks=["check invariants"]))))
+            put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], readyChecks=list(steps)))))
         self.on("feat", {merge.RECORDS_PAGE: page()})
         rc, out = self.run_merge("7", "--confirm", host=FakeReadsWaitHost(self.host, [REQUIRED_CHECK], self.SKIPPED))
         self.assertEqual(rc, 1, out)
@@ -8842,7 +8842,16 @@ class ReadyRemedy(RecordsEnv):
         self.assertIn("update_pull_request", text, f"control: the remedy names no mark-ready route: {text}")
         self.assertNotIn("ready check", text, f"a repo with no merge.readyChecks is sent to run ready checks: {text}")
 
-    READY_STEP = 'bin/ci-job checks --step "check invariants" --base origin/main'  # the run ready_check_step names for the one declared check
+    def test_the_remedy_names_the_exact_ci_job_command_that_runs_the_ready_check(self):  # a remedy that says `true` in its place fails here
+        text = self.remedy(declared=True)
+        self.assertIn(self.READY_STEP, text, f"the remedy names no ci-job run of the ready check: {text}")
+
+    def test_the_remedy_runs_every_declared_ready_check_in_one_ci_job_command(self):  # two declared checks: the step is given once for each
+        text = self.remedy(declared=True, steps=("check invariants", "check lint"))
+        self.assertIn('bin/ci-job checks --step "check invariants" --step "check lint" --base origin/main', text,
+                      f"the remedy does not run each ready check in one ci-job command: {text}")
+
+    READY_STEP ='bin/ci-job checks --step "check invariants" --base origin/main'  # the run ready_check_step names for the one declared check
 
     def ready_head(self, declared=True):
         """A host whose ready head's checks all skipped. `declared` sets the host's ready checks, as confirm reads them from the config."""
