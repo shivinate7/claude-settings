@@ -804,6 +804,30 @@ class IosApps(unittest.TestCase):
         found, out = self.device_codes("Draw the Duo folded after the Duo unfolded.")
         self.assertEqual(found, {"duo-order"}, out)
 
+    def test_unfolded_after_the_header_before_the_folded_duo_gets_duo_order(self):
+        found, out = self.device_codes("Draw the Duo unfolded after the header, before the folded Duo.")
+        self.assertEqual(found, {"duo-order"}, "unfolded is drawn before folded, so duo-order: " + out)
+
+    def test_unfolded_first_then_after_that_the_folded_duo_gets_duo_order(self):
+        found, out = self.device_codes("Draw the Duo unfolded first. After that, draw the Duo folded.")
+        self.assertEqual(found, {"duo-order"}, "unfolded is drawn before folded, so duo-order: " + out)
+
+    def test_unfolded_then_after_a_pause_the_folded_duo_gets_duo_order(self):
+        found, out = self.device_codes("Duo unfolded, then after a pause the folded Duo.")
+        self.assertEqual(found, {"duo-order"}, "unfolded is drawn before folded, so duo-order: " + out)
+
+    def test_unfolded_first_then_after_that_the_duo_folded_gets_duo_order(self):
+        found, out = self.device_codes("Draw the Duo unfolded first, then after that the Duo folded.")
+        self.assertEqual(found, {"duo-order"}, "unfolded is drawn before folded, so duo-order: " + out)
+
+    def test_folded_first_then_after_that_the_duo_unfolded_gets_no_duo_order(self):
+        found, out = self.device_codes("Draw the Duo folded first, then after that the Duo unfolded.")
+        self.assertEqual(found, set(), "folded is drawn before unfolded, so no duo-order: " + out)
+
+    def test_folded_after_the_header_before_the_unfolded_duo_gets_no_duo_order(self):
+        found, out = self.device_codes("Draw the folded Duo after the header, before the unfolded Duo.")
+        self.assertEqual(found, set(), "folded is drawn before unfolded, so no duo-order: " + out)
+
 
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
