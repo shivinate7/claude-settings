@@ -23,6 +23,7 @@ base.write, base.WATCH, base.SONNET, base.LIFT). Temp folders come from this run
 lint/_test_temp.py.
 """
 
+import importlib
 import itertools
 import json
 import os
@@ -44,12 +45,21 @@ FAIL_STUB = "tools/typecheck-stub.py"  # prints boom, its cwd and its argv, exit
 OK_STUB = "tools/typecheck-stub-ok.py"  # prints boom, exits 0: the exit code decides, not the output
 SILENT_STUB = "tools/typecheck-stub-silent.py"  # exits 1 with no output
 SECOND_STUB = "tools/typecheck-stub-second.py"  # prints bang, exits 1: the second matching entry's output
+SLOW_STUB = "tools/typecheck-stub-slow.py"  # sleeps SLOW_SECONDS, prints slow, exits 1
+BIG_STUB = "tools/typecheck-stub-big.py"  # prints BIG_SIZE characters, exits 1
+TEST_BUDGET = 2.0  # the total budget the shared-budget case patches in, in seconds
+SLOW_SECONDS = 1.5  # longer than half of TEST_BUDGET, so one command already uses most of the budget
+SLACK = 0.25  # timing margin on the second command's timeout
+BIG_SIZE = 100000  # characters the big stub prints
+TAIL_ALLOWANCE = 200  # the short tail line a capped report may end with
 STUBS = {
     FAIL_STUB: "import os, sys\nprint('boom')\nprint('cwd=' + os.getcwd())\n"
                "print('argv=' + repr(sys.argv[1:]))\nsys.exit(1)\n",
     OK_STUB: "print('boom')\n",
     SILENT_STUB: "import sys\nsys.exit(1)\n",
     SECOND_STUB: "import sys\nprint('bang')\nsys.exit(1)\n",
+    SLOW_STUB: "import sys, time\ntime.sleep(%r)\nprint('slow')\nsys.exit(1)\n" % SLOW_SECONDS,
+    BIG_STUB: "import sys\nsys.stdout.write('x' * %d)\nsys.exit(1)\n" % BIG_SIZE,
 }
 STUB_PREFIX = "typecheck-stub"  # every stub's file name starts with this; the cost cases count starts that name it
 POSIX = os.name != "nt"
@@ -58,7 +68,7 @@ _counter = itertools.count(1)
 # Runs the host under a recorder. `mode` "run" lets each subprocess run; "timeout" makes subprocess.run
 # raise TimeoutExpired at once, so a timeout case waits on no clock.
 PROBE = r"""
-import io, json, runpy, subprocess, sys
+import io, json, os, runpy, subprocess, sys
 hook, payload, side, mode = sys.argv[1:5]
 calls = []
 real_run = subprocess.run
@@ -85,6 +95,12 @@ def recording_run(args, *rest, **kwargs):
 subprocess.Popen = Recording
 subprocess.run = recording_run
 sys.stdin = io.StringIO(payload)
+if len(sys.argv) > 5 and sys.argv[5]:
+    # Patch the total budget small, so a case can show the shared budget without a long wait.
+    sys.path.insert(0, os.path.dirname(hook))
+    import repo_typecheck
+    if hasattr(repo_typecheck, "TOTAL_BUDGET"):
+        repo_typecheck.TOTAL_BUDGET = float(sys.argv[5])
 code = 0
 try:
     runpy.run_path(hook, run_name="__main__")
@@ -112,10 +128,12 @@ def run_raw(repo, text):
     return done.returncode, done.stdout, done.stderr
 
 
-def run_probe(repo, payload, mode="run"):
+def run_probe(repo, payload, mode="run", budget=None):
     side = os.path.join(RUN_FOLDER, "probe-%d.json" % next(_counter))
-    done = subprocess.run([sys.executable, "-c", PROBE, base.WATCH, json.dumps(payload), side, mode],
-                          capture_output=True, text=True, env=repo.project.env())
+    argv = [sys.executable, "-c", PROBE, base.WATCH, json.dumps(payload), side, mode]
+    if budget is not None:
+        argv.append(str(budget))
+    done = subprocess.run(argv, capture_output=True, text=True, env=repo.project.env())
     with open(side, encoding="utf-8") as handle:
         report = json.load(handle)
     return done.returncode, done.stdout, report
@@ -146,6 +164,14 @@ def check_timeouts(report):
     """The timeout each typecheck stub was run with, one entry per subprocess.run call."""
     return [c["timeout"] for c in report["calls"] if c["api"] == "run"
             and any(os.path.basename(a).startswith(STUB_PREFIX) for a in c["argv"])]
+
+
+def printed_cwd(reason):
+    """The cwd the stub printed into a block reason, or None when the reason holds no cwd line."""
+    for line in reason.splitlines():
+        if line.startswith("cwd="):
+            return line[len("cwd="):]
+    return None
 
 
 def ancestors(path):
@@ -300,8 +326,9 @@ class Command(CaseName):
         self.assertIsNotNone(block, "the command did not run for an absolute app/x.ts with another cwd")
         self.assertIn("argv=['$(touch MARK)']", block["reason"],
                       "the argument did not reach the command as literal text")
-        self.assertIn("cwd=" + os.path.realpath(repo.root), block["reason"],
-                      "the command did not run from the repo root")
+        cwd = printed_cwd(block["reason"])
+        self.assertIsNotNone(cwd, "the block reason holds no cwd line")
+        self.assertTrue(os.path.samefile(cwd, repo.root), "the command did not run from the repo root")
         self.assertFalse(os.path.exists(repo.abs("MARK")), "a shell expanded $(touch MARK): the command ran through a shell")
 
     @unittest.skipIf(not POSIX, "exec bits are POSIX")
@@ -314,8 +341,9 @@ class Command(CaseName):
         rc, out, err = run_host(repo, repo.payload(repo.abs("app/x.ts"), cwd=repo.elsewhere()))
         block = block_of(out)
         self.assertIsNotNone(block, "a relative command did not resolve against the repo root")
-        self.assertIn("cwd=" + os.path.realpath(repo.root), block["reason"],
-                      "the relative command ran from the payload cwd")
+        cwd = printed_cwd(block["reason"])
+        self.assertIsNotNone(cwd, "the block reason holds no cwd line")
+        self.assertTrue(os.path.samefile(cwd, repo.root), "the relative command ran from the payload cwd")
 
     def test_a_command_that_exits_zero_is_silent_even_with_output(self):
         repo = Repo(self.name())
@@ -356,6 +384,31 @@ class Command(CaseName):
         repo.declare(entry([FAIL_STUB]))
         rc, out, err = run_host(repo, repo.payload(repo.abs("app/x.ts")))
         self.assertEqual(out, "", "a command that cannot start printed output")
+
+    def test_the_block_reason_is_capped(self):
+        repo = Repo(self.name())
+        repo.declare(entry([sys.executable, BIG_STUB]))
+        rc, out, err = run_host(repo, repo.payload(repo.abs("app/x.ts")))
+        block = block_of(out)
+        self.assertIsNotNone(block, "a command printing 100 KB printed no block")
+        self.assertLess(len(block["reason"]), BIG_SIZE, "the block reason holds the whole 100 KB output")
+        cap = getattr(importlib.import_module("repo_typecheck"), "REPORT_CAP", None)
+        self.assertIsNotNone(cap, "repo_typecheck has no REPORT_CAP constant")
+        self.assertLessEqual(len(block["reason"]), cap + TAIL_ALLOWANCE,
+                             "the block reason is longer than REPORT_CAP plus a tail line")
+
+    def test_two_matching_entries_share_one_total_budget(self):
+        # Each command sleeps past half the budget. Per-command budgets would give the second command
+        # the full TEST_BUDGET, so its timeout would be TEST_BUDGET, not what is left after the first.
+        repo = Repo(self.name())
+        repo.declare(entry([sys.executable, SLOW_STUB], globs=("app/**/*.ts",)),
+                     entry([sys.executable, SLOW_STUB], globs=("app/**/*.ts",)))
+        rc, out, report = run_probe(repo, repo.payload(repo.abs("app/x.ts")), budget=TEST_BUDGET)
+        self.assertEqual(len(check_starts(report)), 2, "two matching entries did not both start, so the budget proves nothing")
+        timeouts = check_timeouts(report)
+        self.assertEqual(len(timeouts), 2, "the commands did not run through subprocess.run, so their timeouts are unknown")
+        self.assertLessEqual(timeouts[1], TEST_BUDGET - SLOW_SECONDS + SLACK,
+                             "the second command got a fresh budget, not what was left of the total after the first")
 
     def test_a_timeout_is_silent(self):
         repo = Repo(self.name())

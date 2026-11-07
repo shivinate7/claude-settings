@@ -1480,6 +1480,18 @@ class Typecheck(Tree):
                 with self.assertRaises(self.layout.LayoutError, msg=label):
                     self.layout.typecheck(self.tree)
 
+    def test_a_glob_with_braces_or_a_leading_dot_slash_is_a_layout_error(self):
+        bad = {
+            "an opening brace": "app/{a,b}/*.ts",
+            "a closing brace": "app/a}/*.ts",
+            "a leading ./": "./app/**/*.ts",
+        }
+        for label, glob in bad.items():
+            with self.subTest(shape=label):
+                self.declare([self.entry(globs=[glob])])
+                with self.assertRaises(self.layout.LayoutError, msg=label):
+                    self.layout.typecheck(self.tree)
+
 
 class MatchGlobs(Tree):
     """match_globs(rel_path, globs): the one glob home for the typecheck hook. `**` matches zero or more folders,
