@@ -3659,11 +3659,11 @@ sh("pointer-failed-cd-walk: a cd into the pointer checkout, a failed cd, then a 
 sh("pointer-failed-cd-walk: a failed cd from the pointer checkout, then a switch, is refused",
    "cd " + POINTER_NONEXIST + "; " + VCS + " switch other", "deny", "pointer-head",
    cwd=PTRMAIN, config=PTRCFG)
-# The control for the refusal above: the cd into the pointer checkout, with no failed cd after it, is refused today.
+# The control for the refusal above: with no failed cd after the cd into the pointer checkout, the switch is still refused.
 sh("pointer-failed-cd-walk: a cd into the pointer checkout, then a switch, is refused (control)",
    "cd " + slash(PTRMAIN) + "; " + VCS + " switch other", "deny", "pointer-head", cwd=NOGIT,
    config=PTRCFG)
-# Item 6: the cd out of the pointer checkout moves the shell to a folder that is not a checkout, so the switch runs there.
+# The first cd moves the shell out of the pointer checkout. The failed cd after it leaves the shell in a folder that is not a checkout, so the switch is allowed.
 sh("pointer-failed-cd-walk: a cd out of the pointer checkout, a failed cd, then a switch, is allowed",
    "cd " + slash(NOGIT) + "; cd " + POINTER_NONEXIST + "; " + VCS + " switch other",
    "allow", cwd=PTRMAIN, config=PTRCFG)
@@ -11885,7 +11885,7 @@ sh("perl-ruby-near-forms: a ruby heredoc File.read of a config hook, then a File
    "allow", cwd=NOGIT)
 sh("perl-ruby-near-forms: perl -e with a write call in a # comment is allowed",
    "perl -e 'print 1; # open(F, \">\", \"" + CFG_HOOK + "\")'", "allow", cwd=NOGIT)
-# Controls, green today: the apostrophe and the /* are text inside the string, and the write after the string is real.
+# Controls: the apostrophe and the /* are text inside the string, and the write after the string is real.
 sh("perl-ruby-near-forms: a /* and an apostrophe inside a perl string do not hide the write after it",
    "perl <<'EOF'\nprint \"don't /* not a comment\";\nopen(O, '>', '" + CFG_HOOK + "');\nEOF",
    "deny", "frozen-path", cwd=NOGIT)
@@ -11895,7 +11895,7 @@ sh("perl-ruby-near-forms: a # line inside a multi-line perl string does not end 
 sh("perl-ruby-near-forms: a write call inside a perl string is text, and the real write is refused",
    "perl <<'EOF'\nprint \"open(F, '>', '" + CFG_HOOK + "')\";\nopen(O, '>', '" + CFG_HOOK + "');\nEOF",
    "deny", "frozen-path", cwd=NOGIT)
-# Controls, green today. A # or a ruby #{...} on the write's own line is text, so the write beside it is still refused.
+# Controls: a # or a ruby #{...} on the write's own line is text, so the write beside it is still refused.
 sh("perl-ruby-near-forms: a # inside a perl heredoc string, on the write's own line, does not hide the write",
    "perl <<'EOF'\nprint \"#\"; open(O, '>', '" + CFG_HOOK + "');\nEOF", "deny", "frozen-path", cwd=NOGIT)
 sh("perl-ruby-near-forms: a ruby #{...} interpolation, on the write's own line, does not hide File.write",
