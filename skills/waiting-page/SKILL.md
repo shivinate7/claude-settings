@@ -38,8 +38,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   | --- | --- | --- |
   | `id` |  | Same string as the database key; the page warns on a missing or different one. |
   | `n` |  | A stable number the owner answers by. |
-  | `kind` | `port-question`, `question-form`, `task-names-check` | `decision` or `task`. |
-  | `status` | `question-form`, `rework-off-page` | `open` or `closed`. A closed item is exempt from the form rules. |
+  | `kind` | `command-in-item`, `gh-login-switch`, `option-letter-keys`, `owner-judge`, `port-question`, `press-link`, `question-departs`, `question-form`, `task-names-check`, `uniform-pick` | `decision` or `task`. Each rule in this row judges the kinds it names, so an update that a rule judges carries `kind`. |
+  | `status` | `option-letter-keys`, `owner-judge`, `question-departs`, `question-form`, `rework-off-page` | `open` or `closed`. A closed item passes every rule in this row. |
   | `added` |  | ISO time the item was added. |
   | `ref` |  | Each id with its plain name. |
   | `title` | `option-letter-keys`, `port-question`, `press-link`, `rework-off-page` | The item's name. |
@@ -75,8 +75,11 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 
   - An update carries again every field that a guard judges together with the field it sets, because the guard cannot see the stored fields.
     - `pick` carries `options`. `options` carries each option's `links`, `gain` and `lose`. `steps` carries `links`.
-    - `context` on a decision carries `kind: decision` and all of the question form's lines. `context` on a task carries `kind: task`.
+    - An update of `context` or `options` on a decision carries `kind: decision`, and `status: "closed"` when the item is closed.
+    - `context` on a decision also carries all of the question form's lines, and `stands: true` when the pick stands.
+    - `context` on a task carries `kind: task`.
     - An update to a port item carries `port: true`.
+  - A `str_replace` is judged on its `new_str`, in any field, for the rules `option-letter-keys` and `rework-off-page`.
   - The page derives the tier from these fields. Never write a tier.
     - `holds` (one plain sentence: what is stopped until the answer) puts the item in Blocking.
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.

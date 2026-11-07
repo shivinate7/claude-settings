@@ -1,8 +1,8 @@
 {
   "id": {"meaning": "Same string as the database key; the page warns on a missing or different one."},
   "n": {"meaning": "A stable number the owner answers by."},
-  "kind": {"meaning": "`decision` or `task`.", "rules": ["port-question", "question-form", "task-names-check"]},
-  "status": {"meaning": "`open` or `closed`. A closed item is exempt from the form rules.", "rules": ["question-form", "rework-off-page"]},
+  "kind": {"meaning": "`decision` or `task`. Each rule in this row judges the kinds it names, so an update that a rule judges carries `kind`.", "rules": ["command-in-item", "gh-login-switch", "option-letter-keys", "owner-judge", "port-question", "press-link", "question-departs", "question-form", "task-names-check", "uniform-pick"]},
+  "status": {"meaning": "`open` or `closed`. A closed item passes every rule in this row.", "rules": ["option-letter-keys", "owner-judge", "question-departs", "question-form", "rework-off-page"]},
   "added": {"meaning": "ISO time the item was added."},
   "ref": {"meaning": "Each id with its plain name."},
   "title": {"meaning": "The item's name.", "rules": ["option-letter-keys", "port-question", "press-link", "rework-off-page"]},
