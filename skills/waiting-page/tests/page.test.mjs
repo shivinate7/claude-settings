@@ -4013,7 +4013,8 @@ test("after a failed Undo, focus is on the ask box, not the body", async (t) => 
 });
 
 test("while an in-window Undo's delete runs, the hint says Send turns on when Undo is done, not when the count ends", async (t) => {
-  const page = await open(t, { hold: { delete: 0 } }); if (!page) return;
+  // The page's clock is fixed at LOAD_AT, so the Undo window cannot pass while the delete is held, however slow the runner.
+  const page = await open(t, { hold: { delete: 0 }, clock: LOAD_AT }); if (!page) return;
   await sendTyped(page, "Hint inside the window");
   await mustHave(page, ASK.undo, "Undo control");
   await page.click(ASK.undo);
