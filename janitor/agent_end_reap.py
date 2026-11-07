@@ -34,14 +34,19 @@ the hook KEEPS the ending agent's own worktree, with the row reason OWN_TREE_REA
 removes it once idle 30 minutes. It removes every other `.claude/worktrees/agent-*`
 worktree idle 30 minutes or more that `sweep.decide_agent_end_worktree` clears: clean (no dirty or
 untracked file), no process inside, no live lock, HEAD on a remote-tracking ref. A tree it cannot
-prove keeps. One lock is the exception (decision `when-a-worktree-may-be-removed`): a tree
-locked by this session's host is unlocked and removed only when the agent is proven finished
-(`agent_finished`: its own SubagentStop row is in the payload log and newer than its agent
-transcript, it is not listed as running in `background_tasks`, and the transcript is idle 30 minutes
-or more), the tree is clean and pushed, and no process is inside. A process inside keeps the tree:
-nothing is stopped, since no process can yet be shown to be the agent's own (debt
-`finished-agent-shells-keep-tree`). A failed lock re-read or unlock keeps the tree. The stage stops at WORKTREE_SECONDS or HOOK_BUDGET, so the hook stays inside its 60 s
-timeout.
+prove keeps. One lock and its processes are the exception (decision `when-a-worktree-may-be-removed`): a
+tree locked by this session's host is unlocked and removed only when the agent is
+proven finished (`agent_finished`: its own SubagentStop row is in the payload log and newer than its
+agent transcript, it is not listed as running in `background_tasks`, and the transcript is idle 30
+minutes or more) and the tree is clean and pushed. A process inside keeps the tree unless
+`sweep.host_child_stops` proves each one the agent's own: its parent chain reaches the host with
+every pid below it in the tree, and it holds the agent's marker, the exec-time `CLAUDE_AGENT_ID`
+equal to the 17-hex id in the tree's basename (`sweep.agent_mark`); only the call's own bash, the
+host's direct child, may be unmarked, and only when a marked pid climbs through it. The unlock comes
+first (`sweep.unlock_for_removal`); a failed one stops nothing. Pids are signalled deepest first, the
+process table is read again until empty (`stop_and_settle`), and any pid still alive puts the lock back
+and keeps the tree. A tree kept for another reason never has a process stopped. The stage stops at
+WORKTREE_SECONDS or HOOK_BUDGET, so the hook stays inside its 60 s timeout.
 
 Every run appends the raw payload and the decisions to
 `${CLAUDE_CONFIG_DIR:-~/.claude}/state/agent-end-payloads.jsonl`, so the payload fields the docs
@@ -598,13 +603,34 @@ def host_is_session_root(decision: dict) -> bool:
         return False
 
 
+SETTLE_POLL_SECONDS = 0.1  # pause between two reads of the process table while a stopped process exits
+
+
+def stop_and_settle(path: str, decision: dict, deadline: float):
+    """Called only after the unlock succeeded (`sweep.unlock_for_removal`). Signal each pid in
+    DECISION["stop_pids"], deepest first, then re-read `sweep.processes_in` until it is empty or
+    DEADLINE (a `time.monotonic` time). True only when it came back empty: a pid still alive, or a
+    read that failed, means False and the tree stays. Settling reads the process table, never
+    `pid_alive`: a stopped child nobody has waited on is a zombie, which `pid_alive` still reads as
+    alive and `processes_in` does not list."""
+    decision["signalled"] = [sweep.send_signal(pid) for pid in decision["stop_pids"]]
+    while True:
+        inside, _unreadable = sweep.processes_in(path)
+        if inside is not None and not inside:
+            return True
+        if inside is None or time.monotonic() >= deadline:
+            return False
+        time.sleep(SETTLE_POLL_SECONDS)
+
+
 def reap_worktrees(target: str, deadline: float, payload=None):
     """Keep TARGET (the ending agent's own worktree and its build folders; a later agent end removes
     them once idle) and remove every other finished `.claude/worktrees/agent-*` worktree of its
     repository, idle 30 minutes or more, that `sweep.decide_agent_end_worktree` clears. Each other
     tree it keeps gets a build pass when `build_keep` clears it. PAYLOAD is the SubagentStop
-    payload: a tree whose agent it proves finished (`agent_finished`) may lose its host lock and be
-    removed when no process is inside; nothing is ever stopped. Returns one row for TARGET, one per
+    payload: a tree whose agent it proves finished (`agent_finished`) may lose its host lock, and the
+    processes it holds that carry the agent's marker are stopped (`stop_and_settle`) before the
+    removal; any pid left alive keeps the tree. Returns one row for TARGET, one per
     other tree decided, plus one row when DEADLINE (a `time.monotonic` time) cut the stage short. A tree's row carries `buildDirs` (folders renamed)
     or `buildDirsKept` (why not)."""
     rows = [{"path": target, "action": "keep", "reason": OWN_TREE_REASON,
@@ -630,7 +656,18 @@ def reap_worktrees(target: str, deadline: float, payload=None):
             decision = sweep.decide_agent_end_worktree(root, entry, sweep.AGENT_END_IDLE_SECONDS)
             if decision["action"] == "reap" and decision.get("host_lock") and not host_is_session_root(decision):
                 decision.update(action="keep", reason="unreadable-subject: the session's host")
-                decision.pop("unlock", None)
+                for field in ("stop_pids", "unlock"):
+                    decision.pop(field, None)
+            if decision["action"] == "reap" and decision.get("stop_pids"):
+                # The unlock and its lock re-read come first: a failed one stops nothing.
+                if not sweep.unlock_for_removal(root, entry["path"], decision):
+                    decision.pop("stop_pids", None)
+                    if decision["action"] == "reap":
+                        decision.update(action="keep", reason="unreadable-subject: the unlock failed")
+                elif not stop_and_settle(entry["path"], decision, deadline):
+                    sweep.relock_worktree(root, entry["path"], decision)
+                    decision.update(action="keep", reason="process-inside: a stopped process is still alive")
+                    decision.pop("unlock", None)
             if decision["action"] == "reap":
                 sweep.remove_worktree(root, entry["path"], decision)
             elif time.monotonic() > deadline:
