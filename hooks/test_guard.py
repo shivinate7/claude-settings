@@ -20854,6 +20854,31 @@ def worktree_home_dotdot_cwd_case():
     return True, "a write into the primary from a .. cwd that resolves into the primary is denied"
 
 
+def worktree_home_primary_write_from_home_case():
+    """Rule 0, worktree-home and other-checkout, an agent's Bash call from its recorded home that creates
+    a directory, creates a file or redirects into the primary checkout, outside the home. The home is the
+    agent's write surface, so each call must be refused. A test-author's mkdir in the primary once passed,
+    and the guard refused the removal later."""
+    primary, home, _, _ = _cross_checkout_fixture(
+        "xcoprimw", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    problem = _red_cwd_record(primary, home)
+    if problem:
+        return False, problem
+    scratch_dir = os.path.join(primary, ".claude", "scratch-red")
+    scratch_file = os.path.join(primary, ".claude", "scratch-file.txt")
+    problems = _denied_from((
+        ("mkdir <primary>/.claude/scratch-red from the home", home, "Bash",
+         {"command": "mkdir %s" % slash(scratch_dir)}),
+        ("touch <primary>/.claude/scratch-file.txt from the home", home, "Bash",
+         {"command": "touch %s" % slash(scratch_file)}),
+        ("echo x > <primary>/.claude/scratch-file.txt from the home", home, "Bash",
+         {"command": "echo x > %s" % slash(scratch_file)}),
+    ))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a mkdir, a touch and a redirect into the primary checkout, from the agent's home, are denied"
+
+
 def worktree_home_red_nested_case():
     """Rule 0, other-checkout, the red-run folder is the primary's alone: a folder named
     `agent-<its id>-red` under another linked worktree's `.claude/worktrees/` belongs to that
@@ -21857,6 +21882,8 @@ LOG_CHECKS = (
      worktree_home_symlink_red_name_case),
     ("worktree-home: a Bash call from a cwd spelled with .. that resolves into the primary is refused",
      worktree_home_dotdot_cwd_case),
+    ("worktree-home: an agent's Bash call from its home cannot mkdir, touch or redirect into the primary checkout",
+     worktree_home_primary_write_from_home_case),
     ("worktree-home: a red-run folder nested under another linked worktree, not the primary's, is "
      "refused to a cd, a shell write and a Write", worktree_home_red_nested_case),
     ("worktree-home: a write into the own red-run folder spelled in other letters of case passes on "
@@ -28900,6 +28927,8 @@ LOG_RULE_FAMILY = (
     ("worktree-home: a Bash call from a symlink named agent-<id>-x into another agent's red-run folder is refused",
      "worktree-home"),
     ("worktree-home: a Bash call from a cwd spelled with .. that resolves into the primary is refused",
+     "worktree-home"),
+    ("worktree-home: an agent's Bash call from its home cannot mkdir, touch or redirect into the primary checkout",
      "worktree-home"),
     ("worktree-home: a red-run folder nested under another linked worktree", "worktree-home"),
     ("worktree-home: a write into the own red-run folder spelled", "worktree-home"),
