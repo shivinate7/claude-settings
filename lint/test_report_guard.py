@@ -1409,6 +1409,29 @@ class CompactionCarryTests(unittest.TestCase):
             with self.subTest(reply=reply):
                 self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), *([name] if name else []))
 
+    def test_cc_green_recovered_item_naming_a_commit_pr_or_url_passes(self):
+        # Catches: a Recovered item sourced as "commit <hex>", "PR <n>", "GitHub PR <n>" or a github.com URL is
+        # refused as sourceless. Each names where the fact came from.
+        items = [
+            "ruling X from commit abc1234",
+            "ruling X from PR #978",
+            "ruling X from GitHub PR 978",
+            "ruling X from https://github.com/shivinate7/claude-settings/pull/978",
+        ]
+        for item in items:
+            with self.subTest(item=item):
+                reply = report_lines("Recovered: " + item, "Handoff gave: none")
+                self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced Recovered item blocks: " + item)
+
+    def test_cc_red_recovered_item_with_no_source_still_blocks_with_the_new_forms(self):
+        # Catches: a widened source form passes an item with no source, such as a bare word "commit" or "memory".
+        items = ["ruling X", "ruling X from memory", "ruling X from a commit"]
+        for item in items:
+            with self.subTest(item=item):
+                out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
+                self.assertIsNotNone(out, "a sourceless Recovered item passes: " + item)
+                self.assertEqual(out["decision"], "block", item)
+
     def test_cc_red_source_word_must_match_a_whole_word(self):
         # Catches: "git" inside "gitlab", or "page" inside "pages", counts as a source.
         for item in ("fact Z (gitlab)", "fact Z (pages)"):
@@ -1679,6 +1702,33 @@ class PickGuardTests(unittest.TestCase):
     def test_pk_red_page_write_to_another_repo_blocks(self):
         out = self.verdict(self.PICK + "\n\n" + self.OTHER, [self.page_set(self.OTHER)])
         self.assertIsNotNone(out)
+
+    def test_pk_green_page_write_in_other_url_forms_passes(self):
+        # Catches: the page's own write refused when its URL is the /code/artifact/ form or carries a query.
+        # layout.is_waiting_page_url decides "same artifact"; the string compare in question_problem does not.
+        code_form = self.PAGE.replace("/artifact/", "/code/artifact/")
+        for url in (code_form, self.PAGE + "?tab=items", code_form + "/?tab=items"):
+            with self.subTest(url=url):
+                self.assertIsNone(self.verdict(self.PICK, [self.page_set(url)]), "the page's write blocks: " + url)
+
+    def test_pk_green_page_write_with_trailing_slash_passes(self):
+        # Catches: a trailing slash on the page's write refused. The string compare already strips it (a control).
+        self.assertIsNone(self.verdict(self.PICK, [self.page_set(self.PAGE + "/")]))
+
+    def test_pk_green_page_recorded_in_code_form_passes(self):
+        # Catches: a page recorded in the /code/artifact/ form refuses its own /artifact/ write. The setUp repo,
+        # re-pointed at the code form of the page.
+        with open(os.path.join(self.repo, ".claude", "layout-extras.json"), "w") as f:
+            json.dump({"kinds": {}, "waiting-page": self.PAGE.replace("/artifact/", "/code/artifact/")}, f)
+        self.assertIsNone(self.verdict(self.PICK, [self.page_set()]), "the page's own write blocks")
+
+    def test_pk_red_other_artifact_in_other_url_forms_blocks(self):
+        # Catches: a match by substring, or by the /code/artifact/ form alone, passes another artifact.
+        # "waitpage10" is another artifact, not the page with a digit added (a control).
+        other_code = self.OTHER.replace("/artifact/", "/code/artifact/")
+        for url in (other_code, self.OTHER + "?tab=items", self.PAGE + "0"):
+            with self.subTest(url=url):
+                self.assertIsNotNone(self.verdict(self.PICK, [self.page_set(url)]), "another artifact passes: " + url)
 
     def test_pk_green_page_write_without_link_passes(self):
         # The writer's items write is the send. It reaches the page without a link in the reply, so no link is needed.
