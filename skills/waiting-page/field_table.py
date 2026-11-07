@@ -83,7 +83,7 @@ def find_block(lines):
 
 def read(path):
     try:
-        with open(path, encoding="utf-8") as f:
+        with open(path, encoding="utf-8", newline="") as f:  # newline="": a CRLF file keeps its line endings
             return f.read()
     except OSError as e:
         print("cannot read %s: %s" % (path, e.strerror), file=sys.stderr)
@@ -103,6 +103,7 @@ def main(argv):
     except ValueError as e:
         print("cannot read %s: %s" % (args.data, e), file=sys.stderr)
         return 2
+    read(args.page)  # a page that cannot be opened is an unreadable input (exit 2), not an unreadable block
     fields = question_form._item_fields(args.page)
     found = problems(fields, data, question_form.PAGE_REASONS)
     if found:
@@ -117,7 +118,9 @@ def main(argv):
         return 2
     start, end = span
     fresh = render(fields, data)
-    current = "\n".join(lines[start:end + 1])
+    # The block takes the line ending its open marker has, so a CRLF file stays CRLF end to end.
+    cr = "\r" if lines[start].endswith("\r") else ""
+    current = "\n".join(l.rstrip("\r") for l in lines[start:end + 1])
     if current == fresh:
         return 0
     if args.check:
@@ -125,7 +128,7 @@ def main(argv):
         print(current)
         return 1
     with open(args.skill, "w", encoding="utf-8", newline="") as f:
-        f.write("\n".join(lines[:start] + fresh.split("\n") + lines[end + 1:]))
+        f.write("\n".join(lines[:start] + [l + cr for l in fresh.split("\n")] + lines[end + 1:]))
     return 0
 
 
