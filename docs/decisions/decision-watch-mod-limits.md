@@ -15,7 +15,7 @@ turn in the background, logs the verdict, and never refuses a turn.
 - The `claude -p` path stays the default of the script. `invoke_model(prompt, model, timeout, shape)` keeps its signature and return
   shape. `hooks/reply_judge.py` calls it. A bad flag combination on `decision_watch.py` makes the script use
   `invoke_model`, which can start a 120 s `claude -p` call. The fallback is pinned on purpose.
-- Owner, 22:00 CDT ("Fix, then swap"): `enabledPlugins` has `decision-watch@claude-settings`, and no Stop row runs
+- Owner, date not recorded, 22:00 CDT ("Fix, then swap"): `enabledPlugins` has `decision-watch@claude-settings`, and no Stop row runs
   `hooks/decision_watch.py`. The mod never enforces.
 
 Reason: a mod's `$.model.complete` ran in the desktop app with no CLI login.
@@ -47,7 +47,7 @@ Protected by `mods/decision-watch/decision-watch.test.mjs`, with one test for ea
 
 ## Unverified
 
-- Live: no "seen" line has been read in `shadow.log` after a real Windows turn. It is pending until the move lands. If no
+- Live: no "seen" line has been read in `shadow.log` after a real Windows turn. The move has landed: `enabledPlugins` names the mod, and no Stop row runs `decision_watch.py`. The owner has not closed the question. If no
   "seen" line shows, the owner chooses one: restore the Stop row, or accept the limit here.
 - Whether the installed app's sec-default matches the marketplace copy.
 - How long `$` lives after the handler returns, for a background judge that nothing awaits.

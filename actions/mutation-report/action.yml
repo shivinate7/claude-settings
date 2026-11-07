@@ -1,0 +1,114 @@
+name: Mutation report
+description: >
+  Reports how well the suites catch a wrong edit in the lines a change adds, then replays the known defects of the
+  caller's repository. Runs hooks/mutate_guard.py from this repo against the caller's checkout.
+  `--changed` mutates the lines the checkout adds past its merge base with the pull request base, runs the suites
+  the profile selects for each file, and writes the catch share and the untested lines to the job summary. A low
+  share never fails the action. `--known-defects` plants each defect of the list in a checkout of HEAD, installs the
+  profile's packages into it (a second install, because the `--changed` step removes its own) and runs its catcher suite, and fails when the list drops an id the base list holds, unless a commit of the change carries the
+  trailer `Known-defect-removed: <id>`, or changes an entry the base list holds, unless a commit carries
+  `Known-defect-changed: <id>`. A defect that is MISS or UNKNOWN, or an id that is MISSING or CHANGED, fails the action
+  (decision ci-unknown-is-red): that step is the only one that can. Both JSON logs go up as one artifact, `mutation-report`. The caller needs actions/checkout
+  with fetch-depth 0 so the history reaches the base. A workflow_dispatch run reads the default branch. A push or a
+  schedule has no batch to report, so the action skips there.
+inputs:
+  profile:
+    description: "A REPLAY_PROFILES name in hooks/mutate_guard.py: how to read the caller's repository."
+    required: true
+  known-defects:
+    description: "The caller's JSON list of planted defects. A missing file is UNKNOWN and fails the action. An empty list [] passes only when the base list names no entry."
+    required: false
+    default: .github/known-defects.json
+  limit:
+    description: Mutants in all. The default is the figure measured for this repository's profile.
+    required: false
+    default: "10"
+  budget:
+    description: Wall seconds per profile part. When they pass, running suites are killed and each mutant left counts as not run.
+    required: false
+    default: "300"
+  suite-timeout:
+    description: Seconds before one suite run is killed.
+    required: false
+    default: "180"
+runs:
+  using: composite
+  steps:
+    - name: Report the catch share of the changed lines
+      shell: bash
+      env:
+        TOOL: ${{ github.action_path }}/../../hooks/mutate_guard.py
+        PROFILE: ${{ inputs.profile }}
+        LIMIT: ${{ inputs.limit }}
+        BUDGET: ${{ inputs.budget }}
+        SUITE_TIMEOUT: ${{ inputs.suite-timeout }}
+        BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
+        EVENT: ${{ github.event_name }}
+        OUT: ${{ runner.temp }}/mutation-report
+      run: |
+        # A report, never a check: this step always exits 0. A run that could not read the change says so in
+        # the summary and as a warning. The base is the local origin/$BASE_REF when it exists; a fetch needs
+        # credentials a checkout with persist-credentials: false does not keep. The shell runs with -e and
+        # pipefail, so the exit code of the tool is read from PIPESTATUS, not by the shell.
+        set +e
+        case "$EVENT" in pull_request|workflow_dispatch) ;; *) echo "mutation-report: no batch pull request, skipped"; exit 0 ;; esac
+        mkdir -p "$OUT"
+        status=0
+        if ! git rev-parse --verify -q "refs/remotes/origin/$BASE_REF" > /dev/null; then
+          git fetch --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" || status=2
+        fi
+        if [ "$status" = 0 ]; then
+          python3 "$TOOL" --changed . --profile "$PROFILE" --base "origin/$BASE_REF" --limit "$LIMIT" \
+            --budget "$BUDGET" --suite-timeout "$SUITE_TIMEOUT" --log "$OUT/changed.json" 2>&1 | tee "$OUT/changed.txt"
+          status=${PIPESTATUS[0]}
+        else
+          echo "cannot fetch the base $BASE_REF" | tee "$OUT/changed.txt"
+        fi
+        {
+          echo "### Mutation catch share, lines this change adds"
+          echo
+          echo '```'
+          if [ "$status" = 0 ]; then
+            grep -E '^(catch share|untested):' "$OUT/changed.txt"
+          else
+            echo "UNKNOWN: the report did not run (exit $status)"
+          fi
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+        [ "$status" = 0 ] || echo "::warning title=Mutation report::the catch share could not be read (exit $status)"
+        exit 0
+
+    - name: Replay the known defects
+      shell: bash
+      env:
+        TOOL: ${{ github.action_path }}/../../hooks/mutate_guard.py
+        KNOWN_DEFECTS: ${{ inputs.known-defects }}
+        PROFILE: ${{ inputs.profile }}
+        SUITE_TIMEOUT: ${{ inputs.suite-timeout }}
+        BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
+        EVENT: ${{ github.event_name }}
+        OUT: ${{ runner.temp }}/mutation-report
+      run: |
+        set +e  # the summary is written before the step exits with the tool's code
+        case "$EVENT" in pull_request|workflow_dispatch) ;; *) echo "mutation-report: no batch pull request, skipped"; exit 0 ;; esac
+        mkdir -p "$OUT"
+        python3 "$TOOL" --known-defects "$KNOWN_DEFECTS" --repo . --profile "$PROFILE" --base "origin/$BASE_REF" \
+          --suite-timeout "$SUITE_TIMEOUT" --log "$OUT/known-defects.json" 2>&1 | tee "$OUT/known-defects.txt"
+        status=${PIPESTATUS[0]}
+        {
+          echo "### Known defects replayed"
+          echo
+          echo '```'
+          cat "$OUT/known-defects.txt"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+        exit "$status"
+
+    - name: Upload the logs
+      if: ${{ always() && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: mutation-report
+        path: ${{ runner.temp }}/mutation-report/*.json
+        if-no-files-found: warn
+        overwrite: true

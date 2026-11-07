@@ -12,6 +12,10 @@ An agent file's `model:` pin must equal its role's row in the role table. The ro
 as the guard keys it. A file with no pin, or a name with no row, is not flagged by that rule.
 Every agent file that can run Bash names TaskStop in its body, and its tools: allowlist lists it (debt
 agent-reports-with-live-watcher). The test reads each agents/*.md file, not a list of names.
+An agent body must not state the agent's own model in fixed text: a sentence with `your ... model` and a model name
+in it, or a backticked PASS/FAIL/PARTIAL header that names a model. A body whose report header has a model slot
+(`the model` or `<model>`) must also name the line that gives the model: `powered by the model named`. Each failure
+names its file and line as file:line.
 """
 import contextlib, io, os, re, shutil, sys, tempfile, time, unittest, uuid
 from unittest import mock
@@ -299,6 +303,163 @@ class TaskStopLine(unittest.TestCase):
                 if "tools" in keys and runs_bash(keys):
                     self.assertTrue("TaskStop" in tokens(keys["tools"]),
                                     "%s can run Bash and has a tools: allowlist with no TaskStop, so it cannot follow the stop line" % name)
+
+
+# The self-model rules read an agent file's body. The fixtures are agents/fixture.md with a name and no model pin, so
+# the pin and floor rules stay quiet and only the body rules can fail.
+PHRASE_LINE = "You are powered by the model named in your system prompt."
+SLOT = "Under Done, the first line is `PASS, round 1 of 3, <model>`."
+BARE_SLOT = "Under Done, the first line is PASS, FAIL, or PARTIAL, then the round and the model."
+
+
+def agent_text(body, description=None):
+    """A fixture agent file: a frontmatter block with a name, an optional description, then the body."""
+    keys = ["name: fixture"] + (["description: %s" % description] if description else [])
+    return "---\n%s\n---\n%s" % ("\n".join(keys), body)
+
+
+def line_of(text, needle):
+    """The 1-based numbers of the file lines that hold `needle`."""
+    return [number for number, line in enumerate(text.splitlines(), 1) if needle in line]
+
+
+def names_line(out, basename, numbers):
+    """True when one line of the check's output names the file and one of the numbers as file:line."""
+    wanted = ["%s:%d" % (basename, number) for number in numbers]
+    return any(re.search(re.escape(name) + r"(?!\d)", line) for line in out.splitlines() for name in wanted)
+
+
+class OwnModelInBody(unittest.TestCase):
+    def check(self, body):
+        return verdict("agents/fixture.md", text=agent_text(body))
+
+    def assertFlagged(self, body, needle):
+        """The body fails, and the failure names the file and the one line that holds `needle`."""
+        text = agent_text(body)
+        numbers = line_of(text, needle)
+        self.assertEqual(len(numbers), 1, "fixture error: %r is not on exactly one line" % needle)
+        code, out = verdict("agents/fixture.md", text=text)
+        self.assertEqual(code, 1, "a body that states the agent's own model passes the check: %r" % needle)
+        self.assertTrue(names_line(out, "fixture.md", numbers),
+                        "the failure does not name fixture.md:%d: %r" % (numbers[0], out))
+
+    def test_sentence_naming_the_agents_own_model_is_flagged(self):
+        for sentence in ("Round 1 runs on your frontmatter model, haiku.", "Your model is sonnet for this round.",
+                         "You run on your model: opus."):
+            with self.subTest(sentence=sentence):
+                self.assertFlagged("Intro.\n\n%s\n" % sentence, sentence)
+
+    def test_own_model_sentence_wrapped_over_two_lines_is_flagged(self):
+        text = agent_text("Round 1 runs on your frontmatter\nmodel, haiku.\n")
+        first = line_of(text, "your frontmatter")
+        self.assertEqual(len(first), 1, "fixture error: the wrap moved off one line")
+        code, out = verdict("agents/fixture.md", text=text)
+        self.assertEqual(code, 1, "a wrapped sentence that states the agent's own model passes the check")
+        self.assertTrue(names_line(out, "fixture.md", [first[0], first[0] + 1]),
+                        "the failure does not name the sentence's lines as fixture.md:N: %r" % out)
+
+    def test_report_header_naming_a_model_is_flagged(self):
+        for header in ("`PASS, fix check, haiku`", "`FAIL, round 2 of 3, sonnet`", "`PARTIAL, round 1 of 3, Opus`"):
+            with self.subTest(header=header):
+                self.assertFlagged("Under Done, the first line is %s.\n" % header, header)
+
+    def test_report_header_wrapped_onto_its_model_is_flagged(self):
+        # The header span crosses a line break before its model word, so a match on one line misses it.
+        for header, start in (("`FAIL, round 2 of 3,\nhaiku`", "FAIL, round 2 of 3,"),
+                              ("`PASS, fix check,\nsonnet`", "PASS, fix check,")):
+            with self.subTest(header=header):
+                text = agent_text("Under Done, the first line is %s.\n" % header)
+                first = line_of(text, start)
+                self.assertEqual(len(first), 1, "fixture error: the header start is not on one line")
+                code, out = verdict("agents/fixture.md", text=text)
+                self.assertEqual(code, 1, "a header wrapped onto its model passes the check: %r" % header)
+                self.assertTrue(names_line(out, "fixture.md", [first[0], first[0] + 1]),
+                                "the failure does not name fixture.md:%d for the header: %r" % (first[0], out))
+
+    def test_defect_after_a_comment_opener_or_a_stray_quote_is_flagged(self):
+        cases = (("It's the first round. Round 1 runs on your frontmatter model, haiku.\n", "your frontmatter model"),
+                 ("Use `//` and `#` in prose. Round 1 runs on your frontmatter model, haiku.\n",
+                  "your frontmatter model"),
+                 ("A stray ` mark opens no code span. Under Done, the first line is `PASS, fix check, haiku`.\n",
+                  "`PASS, fix check, haiku`"),
+                 ("# Notes // the lone \" quote stays. Your model is sonnet.\n", "Your model is sonnet"))
+        for body, needle in cases:
+            with self.subTest(needle=needle):
+                self.assertFlagged(body, needle)
+
+    def test_defect_on_the_last_line_of_a_long_body_is_flagged(self):
+        filler = "".join("Filler line %d.\n" % number for number in range(2000))
+        self.assertFlagged(filler + "Round 1 runs on your frontmatter model, haiku.\n", "your frontmatter model")
+
+    def test_other_roles_model_prose_is_not_flagged(self):
+        body = ("The orchestrator spawns rounds 2 and 3 on Sonnet, the ceiling.\n"
+                "Set `model: haiku` in the frontmatter.\n")
+        self.assertEqual(self.check(body), (0, ""), "prose about another role's model is flagged")
+
+    def test_own_model_and_a_model_name_in_separate_sentences_are_not_flagged(self):
+        body = "Your report names the model it used. Sonnet is the ceiling for the orchestrator.\n"
+        self.assertEqual(self.check(body), (0, ""), "a model name in the next sentence is flagged with the one before")
+
+    def test_empty_body_is_not_flagged(self):
+        self.assertEqual(self.check(""), (0, ""), "an agent file with no body is flagged")
+
+
+class ModelSlot(unittest.TestCase):
+    def check(self, body, description=None):
+        return verdict("agents/fixture.md", text=agent_text(body, description))
+
+    def test_model_slot_header_without_the_phrase_is_flagged(self):
+        for line in (SLOT, BARE_SLOT):
+            with self.subTest(line=line):
+                text = agent_text(line + "\n")
+                numbers = line_of(text, line)
+                self.assertEqual(len(numbers), 1, "fixture error: the header is not on one line")
+                code, out = verdict("agents/fixture.md", text=text)
+                self.assertEqual(code, 1, "a model-slot header passes with no `powered by the model named` line")
+                self.assertTrue(names_line(out, "fixture.md", numbers),
+                                "the failure does not name fixture.md:%d: %r" % (numbers[0], out))
+
+    def test_phrase_in_the_frontmatter_does_not_count(self):
+        text = agent_text(SLOT + "\n", description=PHRASE_LINE)
+        numbers = line_of(text, SLOT)
+        self.assertEqual(len(numbers), 1, "fixture error: the header is not on one line")
+        code, out = verdict("agents/fixture.md", text=text)
+        self.assertEqual(code, 1, "the phrase in the frontmatter satisfies the body rule")
+        self.assertTrue(names_line(out, "fixture.md", numbers),
+                        "the failure does not name fixture.md:%d: %r" % (numbers[0], out))
+
+    def test_model_slot_header_with_the_phrase_in_the_body_passes(self):
+        self.assertEqual(self.check(PHRASE_LINE + "\n\n" + SLOT + "\n"), (0, ""),
+                         "a <model> placeholder header with the phrase in the body is flagged")
+        self.assertEqual(self.check(PHRASE_LINE + "\n\n" + BARE_SLOT + "\n"), (0, ""),
+                         "a `the model` header with the phrase in the body is flagged")
+
+    def test_header_without_a_model_slot_needs_no_phrase(self):
+        self.assertEqual(self.check("Under Done, the first line is `PASS, fix check`.\n"), (0, ""),
+                         "a header with no model slot is flagged for the missing phrase")
+
+    def test_phrase_wrapped_over_a_line_break_still_counts(self):
+        # A line break inside the phrase is a space in the prose, so the wrapped phrase is in the body.
+        for wrapped in ("You are powered by the model\nnamed in your system prompt.",
+                        "You are powered by\nthe model named in your system prompt."):
+            with self.subTest(wrapped=wrapped):
+                self.assertEqual(self.check(wrapped + "\n\n" + SLOT + "\n"), (0, ""),
+                                 "a model-slot header is flagged for a phrase that wraps across a line break")
+
+
+class RealAgentFiles(unittest.TestCase):
+    # Each real agent file is checked alone, so a finding fails only that file's subtest, and the subtest names it.
+    def test_every_real_agent_file_passes_the_check(self):
+        folder = os.path.join(ROOT, "agents")
+        names = sorted(name for name in os.listdir(folder) if name.endswith(".md"))
+        self.assertTrue(names, "agents/ holds no agent file to check")
+        for name in names:
+            with self.subTest(agent=name):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    code = C.main([os.path.join(folder, name)])
+                self.assertEqual(code, 0, "agents/%s fails the check: %r" % (name, out.getvalue()))
+                self.assertEqual(out.getvalue(), "", "agents/%s exits 0 but prints a finding" % name)
 
 
 def tearDownModule():

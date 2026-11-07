@@ -297,7 +297,7 @@ def _in_items(d):
             or any(isinstance(d.get(k), str) and d[k].startswith("items/") for k in ("doc_id", "path")))
 
 
-def _is_write(d):
+def is_write(d):
     """False for a dict whose action or op is a verb other than set, update, batch."""
     verb = d.get("action", d.get("op"))
     return not isinstance(verb, str) or verb in WRITE_VERBS
@@ -311,7 +311,7 @@ def is_n(v, n):
 
 def _has_n(node, n):
     if isinstance(node, dict):
-        if not _is_write(node):
+        if not is_write(node):
             return False
         if is_n(node.get("n"), n):
             return True
@@ -322,7 +322,7 @@ def _has_n(node, n):
 def writes_n(node, n):
     """True when a write dict that names the items collection holds key n == n at any depth below it."""
     if isinstance(node, dict):
-        if not _is_write(node):
+        if not is_write(node):
             return False
         return (_in_items(node) and _has_n(node, n)) or any(writes_n(c, n) for c in node.values())
     return isinstance(node, list) and any(writes_n(c, n) for c in node)
@@ -332,7 +332,7 @@ def items_write(node):
     """True when a set, update or batch call writes under the items collection at any depth: the page
     writer's own write of an item. A get, a list or another collection is no write to items."""
     if isinstance(node, dict):
-        if not _is_write(node):
+        if not is_write(node):
             return False
         return _in_items(node) or any(items_write(c) for c in node.values())
     return isinstance(node, list) and any(items_write(c) for c in node)
@@ -346,7 +346,7 @@ def send_targets(use):
     return {v for v in (inp.get("session_id"), inp.get("to")) if isinstance(v, str)}
 
 
-def _result_text(block):
+def result_text(block):
     body = block.get("content")
     if isinstance(body, list):
         body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
@@ -385,7 +385,7 @@ def page_writer_id(records):
         content = (rec.get("message") or {}).get("content")
         for block in content if isinstance(content, list) else ():
             if isinstance(block, dict) and block.get("type") == "tool_result" and block.get("tool_use_id") in pending:
-                text = _result_text(block)
+                text = result_text(block)
                 try:
                     found = _finds_writer(json.loads(text))
                 except ValueError:

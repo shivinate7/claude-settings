@@ -134,11 +134,11 @@ class Scaffold(TempDest):
         text = tree(SKILL)["templates/operating-model.md"]
         bullet = re.search(r"- \*\*Triage\.\*\*.*?(?=\n- \*\*)", text, re.S).group(0)
         flat = " ".join(bullet.split())  # a line wrap must not split a phrase
-        # The roadmap is a block of the repo's one page, which the waiting-page writer publishes (skill roadmap).
+        # The roadmap is a block of the repo's one page, which the page writer publishes (skill roadmap).
         self.assertRegex(flat, r"builds? the roadmap block", "triage must build the roadmap block")
         self.assertIn("--block", flat)
         self.assertIn("--live", flat)
-        self.assertNotRegex(flat, r"(?i)roadmap page", "the roadmap is no page of its own: triage builds a block, the waiting-page writer publishes it")
+        self.assertNotRegex(flat, r"(?i)roadmap page", "the roadmap is no page of its own: triage builds a block, the page writer publishes it")
 
     def assertInOrder(self, flat, clauses):
         at = [flat.find(x) for x in clauses]
@@ -179,9 +179,47 @@ class Scaffold(TempDest):
         self.assertEqual(flat.count("coordinator starts the successor from"), 1,
                          "one hand-off, one bullet")
         self.assertIn("external_metadata.context_usage", flat)
-        self.assertIn("<triage limit>", flat)
-        self.assertIn("<batch runner limit>", flat)
+        # session-tiers (owner): no usage limit. A standing session runs until autocompact.
+        self.assertNotIn("<triage limit>", flat, "the rotation section still names the triage limit")
+        self.assertNotIn("<batch runner limit>", flat, "the rotation section still names the batch runner limit")
         self.assertIn("The coordinator never hands its own sessions to a successor", flat)
+
+    def rotation_flat(self):
+        """The rotation section, flattened. The scope comes first: a missing section fails here, once."""
+        text = tree(SKILL)["templates/operating-model.md"]
+        self.assertIn("## Rotation of standing sessions", text, "the operating model has no rotation section")
+        return " ".join(rotation_rule(text).split())
+
+    def test_rotation_follows_the_no_limit_ruling(self):
+        # session-tiers (owner): no usage limit. A standing session runs until
+        # autocompact, and the coordinator rotates it only when it goes stale or breaks.
+        flat = self.rotation_flat()
+        for clause in ("session-tiers", "goes stale or breaks", "runs until autocompact"):
+            with self.subTest(clause=clause):
+                self.assertIn(clause, flat, f"the rotation section does not say {clause!r}")
+        with self.subTest(clause="arbiter"):
+            self.assertRegex(flat, r"\barbiter\b", "the rotation section does not name the arbiter")
+
+    def test_rotation_names_no_limit_or_exemption(self):
+        # session-tiers (owner): no usage limit, so no limit to be at or to exempt from.
+        flat = self.rotation_flat()
+        self.assertIn("The coordinator never hands its own sessions to a successor", flat,
+                      "the rotation section lost its coordinator rule, so a cut-off section would pass")
+        for stale in ("<triage limit>", "<batch runner limit>", "at its limit", "phase change", "exempt"):
+            with self.subTest(stale=stale):
+                self.assertNotIn(stale, flat.lower(), f"the rotation section still names {stale!r}")
+
+    def test_roster_has_no_exemptions_line(self):
+        # session-tiers (owner): no usage limit, so the roster has no exemption line.
+        text = tree(SKILL)["templates/roster.md"]
+        self.assertIn("## Standing sessions", text, "the roster has no standing sessions section")
+        self.assertNotRegex(text, r"(?m)^Exemptions:", "the roster still has an Exemptions line")
+
+    def test_skill_names_no_usage_tally(self):
+        # session-tiers (owner): rotation runs until autocompact, not by a usage tally.
+        flat = " ".join(tree(SKILL)["SKILL.md"].split())
+        self.assertIn("name: project-ops", flat, "SKILL.md has no project-ops name")
+        self.assertNotRegex(flat, r"(?i)usage tally", "SKILL.md still names a usage tally")
 
     def test_handoff_template_has_the_open_items_and_watch_lines(self):
         # The two fixed forms that scripts/check_handoff.py reads. A placeholder stands in for the values.
