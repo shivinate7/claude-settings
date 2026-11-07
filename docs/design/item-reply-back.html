@@ -1090,7 +1090,7 @@ function myReply(mine, lab, labText) {
   const st = mine === "wait" ? `<p class="astate">Waiting for ${WRITER} to read it.</p>` : mine === "read" ? `<p class="astate">Read by ${RPA.owner} <span class="t">13:07</span>. Waiting for its answer.</p>` : "";
   return `<div class="myreply" id="${RP.id}"${lbl(lab, labText)}>${head}<p class="reply">${esc(RP.text)}</p>${st}</div>`;
 }
-// On an item card "answer" is the owner's word ("Your last answer", "Answered"), so the session's words to his reply read "Reply from" (notes item 5).
+// On an item card "answer" is the owner's own term ("Your last answer", "Answered"), so the session's words to his reply read "Reply from" (notes item 5).
 const sessionReply = () => `<p class="lhead">Reply from ${RPA.owner}, Nov 6, ${RPA.answered} CST</p><p class="reply">${esc(RPA.reply)}</p>`;
 const foldParts = (mine) => ["your note", "your last answer", mine === "answered" ? "the replies" : "the reply", mine === "none" ? null : "your reply"].filter(Boolean);
 function thread41({ mine = "none", inside = "", lab, tlab, tkind = "new", mlab }) {

@@ -161,15 +161,19 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   "Answered, filing pending" and the save time; with `filed`, "Answered, filed in <home>" (the item's `home`) and the
   filed time. In the Answered section, the same two read "Filing pending, sent" and "Filed in <home>". With only
   `read`, the card also says "Read by <owner>" and the time.
-- `asks/<id>`: one per ask typed in the page's Ask box, and one per reply the owner writes under an answer, never an item. The owner stacks asks with Add to list (nothing is
+- `asks/<id>`: one per ask typed in the page's Ask box, one per reply the owner writes under an answer, and one per reply he writes on an item's reply. The owner stacks asks with Add to list (nothing is
   written), then one Send writes every stacked ask and the typed box. The page writes `id` (the key,
   `ask-<base36 ms><2 chars>`), `text` (4000 characters or fewer, line breaks kept) and `at` (ISO time) once, at Send. A reply
-  also gets `re`, the id of the answered ask it follows, written once at Send. No session writes `re`. The page writes one more
+  also gets `re`, the id of the answered ask it follows, written once at Send. No session writes `re`. A reply on an item gets `item`
+  instead, the id of that item, written once at Send. It never has `re` as well. No session writes `item`. The page writes one more
   field later, at the owner's press: `dismissed` (ISO time), on a thread's root ask only, with `update` (Dismiss). Restore writes
   `dismissed: null` (the runtime has no field delete). It never deletes or replaces the owner's `text` or a `reply`. No session writes
   `dismissed`. A session answering a dismissed record uses `update`, which keeps it (see "Route an ask"). A reply goes through the same
   Send, Undo and wake comment as an ask. Its comment reads "Replied on the waiting page. Writer: <writer>. Ask <id> re <re id>,
-  answered by <owner of the ask `re` names>: <text>." The asks
+  answered by <owner of the ask `re` names>: <text>." An item reply's comment reads "Replied on the waiting page. Writer: <writer>.
+  Ask <id> on item No. <n>, owned by <owner of the item>: <text>." The page shows an item reply in its item's card, and never in the
+  Asks list or its count, while the item is on the page. Once the item is gone, the reply is its own Asks row, "Re: an item no longer on this page",
+  and it counts while it has no `reply`. The asks
   of one Send share one `at`, and their ids rise in the order the owner typed them, so the id breaks the tie: the highest
   id is the last typed. One Undo (8 seconds) deletes every ask of that Send; it checks the 8 seconds before each delete, and a Send waits until the Undo ends. One wake comment tells of the whole Send: "N asks:
   <id>: <text>; …", or "Ask <id>: <text>" for one. A session writes only `owner` (the session that has the ask), `read` (ISO time),
@@ -549,6 +553,9 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
    you read (`if_version`). Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
    in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page hides a closed
    item, so `lastAnswer` here is for the record only. The page shows it on an item left open (steps 3, 4 and a busy lane).
+   The writer holds this close while a record in `asks/` with `item` set to this item has no `reply`: the page would hide that reply
+   with its item. It holds for at most 7 days from that record's `at` (unmeasured). After that it closes the item, and the page shows
+   the reply as an Asks row.
 3. If the answer is `none` with no clear direction, and you write the new `options`, `pick` and `why` from the
    note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from
    the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete
@@ -611,6 +618,10 @@ ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the wr
 
 An ask with `re` is a reply to an answer. The writer routes it to the `owner` of `asks/<re>`, the session that gave that answer.
 If that session has ended, the writer takes it. The reply ask is answered like any ask, with steps 1 and 2.
+
+An ask with `item` is a reply on an item's reply. The writer routes it to the `owner` of `items/<item>`, the session that asked the item.
+If that session has ended, or the item is gone, the writer takes it. It is answered like any ask, with steps 1 and 2. The answer is the ask's own
+`reply`, never a write to the item's `reply`. The page shows it in the item's card as "Reply from <owner>".
 
 The owner may Dismiss an answered thread. That sets `dismissed` on its root ask. The page draws Dismiss off while a reply in the
 thread waits, and on only when every record of the thread has its `reply`. The writer never rewrites `dismissed`, and a record with it is routed and answered as any other, with `update`.

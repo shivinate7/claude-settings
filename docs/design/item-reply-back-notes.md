@@ -83,7 +83,7 @@ and opens a sunk card, as `replied` does today.
 - State `waiting`: "Read by lane page-upkeep 13:07. Waiting for its answer." or "Waiting for triage to read it." (today's `askWaitWords`).
   Reply stays at the end while a reply waits, for a second thought.
 - State `answered`: the session's words read "Reply from <owner>, <day, time>", then the text.
-- Words (ux-one-plain-name). On an item card, "answer" is the owner's word ("Your last answer", "Answered", "You chose").
+- Words (ux-one-plain-name). On an item card, "answer" is the owner's own term ("Your last answer", "Answered", "You chose").
   So the session's words to his reply read "Reply from", not the ask thread's "Answer from".
   - "Reply" as a noun is a message back, and the lhead says whose: "Reply from <owner>" or "Your reply". The button "Reply" is the act, with one name on asks and items.
   - Other option, not drawn: also redraw the item's own `Reply: <text>` as "Reply from <owner>, <replied time>", so each session message has one form.
