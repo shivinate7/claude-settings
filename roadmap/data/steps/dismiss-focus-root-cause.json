@@ -1,0 +1,10 @@
+{
+  "title": "Find the real cause of the dismiss-focus CI miss and remove the 2 s bandaid wait",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.49,
+  "owner": "coordinator",
+  "why": "Coordinator, 2026-11-07 05:01 CST: fix PR #1405 (lane dismiss-focus-main-red) is a named bandaid. It waits 2 s for focus, and the assert now names where focus went. A code read says the focus move is synchronous, so the cause of the CI miss is still not found.",
+  "note": "Under step ask-dismiss. When a run fails the waited assert, read the element it names and find the real cause. Then remove the bandaid wait. Done check: the 2 s wait is gone and the test passes 20 CI runs. No owner question.",
+  "updatedAt": "2026-11-07T11:01:00Z"
+}
