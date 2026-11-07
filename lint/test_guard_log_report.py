@@ -1060,13 +1060,65 @@ class OverrideDecisionTests(unittest.TestCase):
 
 # ------------------------------------------------------------ the rules that never fired
 #
-# No constant holds the rule ids. They are string literals where the guard writes a line, so the
-# expected set below is read from that source with `ast`, never copied into this file. A copy
+# No constant holds the rule ids. They are string literals, or module constants, where a hook writes a
+# line, so the expected set below is read from that source with `ast`, never copied into this file. A copy
 # would go stale the day a rule is added, and the cull would trust it.
 
-GUARD_SOURCES = sorted(glob.glob(os.path.join(HOOKS_DIR, "guard*.py"))) + [
-    os.path.join(HOOKS_DIR, "config_watch.py")]  # config_watch writes `agent-model-cap` reverts
+# Ruling (coordinator, 2026-11-07 13:48 CST, step rule-audit-constant-ids): the oracle reads the files
+# rule_audit reads, and resolves module constants. It is its own small ast pass; it never imports rule_audit.
 RULE_ARG = {"refuse": 2, "record": 2, "ask_command": 0}  # the position of the rule id in each call
+
+
+def _callee(call):
+    return call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", "")
+
+
+def log_writer_sources():
+    """Each non-test file under hooks/ and lint/ that calls record(), refuse() or ask_command(), found
+    by a scan. A new writer joins the oracle without an edit here."""
+    found = []
+    for folder in ("hooks", "lint"):
+        for path in sorted(glob.glob(os.path.join(REPO_ROOT, folder, "*.py"))):
+            if os.path.basename(path).startswith(("test_", "_test_")):
+                continue
+            with open(path, encoding="utf-8") as handle:
+                tree = ast.parse(handle.read())
+            if any(isinstance(n, ast.Call) and _callee(n) in RULE_ARG for n in ast.walk(tree)):
+                found.append(path)
+    return found
+
+
+def _module_strings(tree):
+    """{NAME: text} for each name the module binds exactly once, to a string literal. Any other binding
+    of the name (a second assignment, a def, an import) leaves it out, so a call that passes it names no id."""
+    count, text = {}, {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    count[target.id] = count.get(target.id, 0) + 1
+                    if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                        text[target.id] = node.value.value
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            count[node.name] = count.get(node.name, 0) + 1
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                name = (alias.asname or alias.name).split(".")[0]
+                count[name] = count.get(name, 0) + 1
+    return {name: value for name, value in text.items() if count[name] == 1}
+
+
+def _local_wrappers(tree):
+    """The file's own top-level record/refuse/ask_command whose id position is not a parameter named
+    `rule`. A bare call to one passes a message where the id would sit, so it names no id."""
+    out = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in RULE_ARG:
+            params = [a.arg for a in node.args.posonlyargs + node.args.args]
+            at = RULE_ARG[node.name]
+            if len(params) <= at or params[at] != "rule":
+                out.add(node.name)
+    return out
 
 
 def _text_constants(node):
@@ -1076,18 +1128,33 @@ def _text_constants(node):
 def emitted_guard_rules(source):
     """The rule ids one guard source can write to guard.log, read with `ast`.
 
-    Three shapes write an id: a literal in refuse()/record() (third argument) or ask_command()
-    (first argument); the table in diff_rule(); and the `code, why = {...}` role-scope table.
-    A call that passes a variable (`record(tool, decision, rule, ...)`) names no id.
+    Three shapes write an id: a literal in refuse()/record() (third argument, or `rule=`) or
+    ask_command() (first argument, or `rule=`); the table in diff_rule(); and the `code, why = {...}`
+    role-scope table. A Name in that position names the string of its module-level binding (see
+    _module_strings). A call that passes a variable with no such binding names no id, and so does a
+    bare call to a local wrapper (see _local_wrappers).
     """
+    tree = ast.parse(source)
+    strings, wrappers = _module_strings(tree), _local_wrappers(tree)
     ids = set()
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(tree):
         if isinstance(node, ast.Call):
-            name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
+            name = _callee(node)
             at = RULE_ARG.get(name)
-            if at is not None and len(node.args) > at and isinstance(node.args[at], ast.Constant) \
-                    and isinstance(node.args[at].value, str):
-                ids.add(node.args[at].value)
+            if at is None or (name in wrappers and isinstance(node.func, ast.Name)):
+                continue
+            if len(node.args) > at:
+                arg = node.args[at]
+            else:
+                arg = next((kw.value for kw in node.keywords if kw.arg == "rule"), None)
+            if isinstance(arg, ast.Name):
+                rule = strings.get(arg.id)
+            elif isinstance(arg, ast.Constant):
+                rule = arg.value
+            else:
+                rule = None
+            if isinstance(rule, str):
+                ids.add(rule)
         elif isinstance(node, ast.FunctionDef) and node.name == "diff_rule":
             for stmt in node.body:  # a docstring is a bare string statement: it names no id
                 if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)):
@@ -1102,7 +1169,7 @@ def emitted_rules():
     """Every id the guard writes. No STE id is emitted: no hook writes one now (decision
     ste-guard-fixes-not-nags), so an STE row of --all-rules comes from the log alone."""
     ids = set()
-    for path in GUARD_SOURCES:
+    for path in log_writer_sources():
         with open(path, encoding="utf-8") as handle:
             ids |= emitted_guard_rules(handle.read())
     return ids
