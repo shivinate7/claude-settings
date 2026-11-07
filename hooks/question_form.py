@@ -458,8 +458,9 @@ SESSION_HANDS_ON = re.compile(r"\b(?:ask|asks|asking|request|requests|requesting
 SESSION_PRESS_OWN = re.compile(r"^(\s*(?:(?:the|a|this)\s+session|claude)(?:\s+(?:then|also|\w+ly))*)"
                                r"\s+(?:clicks|presses|taps)\b", re.I)
 # "and approves" stays in its clause: "the owner reviews and approves it" is one owner act, not two clauses.
+# A bare "and approve" is an order to the owner, so it still starts a clause.
 _CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|but|so|or)\b"
-                           r"|\band\b(?!\s+approv(?:es?|ing)\b)", re.I)
+                           r"|\band\b(?!\s+approv(?:es|ing)\b)", re.I)
 # The clauses left after the excused ones are joined with `;`: PRESS_VERB reads it as a clause start, so
 # "... but you approve it" stays a press, and mark ... ready reads across it, as across the cut break.
 _CLAUSE_JOIN = "; "
@@ -468,13 +469,15 @@ OWNER_NAME = re.compile(r"\b(?:the\s+(?:owner|user)|shivam|he|him)\b", re.I)
 # The act is the verb the name is subject of: a modal, "to", "just", "please" or an -ly word may come
 # between, so "Shivam will approve it" and "the user to just click Merge" act, and "the owner clicked
 # Approve" (the button's name, after a past act) does not.
-# "the owner's merge" is a press not yet made, as "the owner's click" is; "has to", "needs to" and "reviews and"
-# stand before the act as a modal does.
+# "the owner's merge" and "the owner's approval" are presses not yet made, as "the owner's click" is, unless the
+# approval is already in ("the owner's approval is in") or the merge is a commit ("the owner's merge commit");
+# "has to", "needs to" and "reviews and" stand before the act as a modal does.
 OWNER_ACT = re.compile(r"(?:(?:\s+(?:will|can|must|should|may|then|also|first|now|to|just|please|has|have|needs?"
                        r"|\w+ly|\w+s\s+and))*\s+"
                        r"(?:press(?:es|ing)?|click(?:s|ing)?|tap(?:s|ping)?|approv(?:e|es|ing)"
                        r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)"
-                       r"|['\u2019]s\s+merge)\b" + _PAGE_BUTTON, re.I)
+                       r"|['\u2019]s\s+(?:merge(?!\s+commits?\b)"
+                       r"|approval(?!\s+(?:is|was|has|are|came|comes|arrives?)\b)))\b" + _PAGE_BUTTON, re.I)
 _PRESS_LEAD = frozenset(("you", "and", "then", "or", "please"))
 
 
