@@ -58,7 +58,7 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 
 ## The cost
 
-Counted as real `gh` calls. A list read makes one call per page, plus one for the empty page that ends it, so a read of one page makes two calls and an empty list makes one.
+Counted as real `gh` calls. A list read makes one call per page, plus one for the empty page that ends it. A read of one page makes two calls. An empty list makes one.
 
 - `merge --reviewed` makes two list reads per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
