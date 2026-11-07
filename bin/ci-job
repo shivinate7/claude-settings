@@ -46,7 +46,7 @@
 # of the job has prints one `unknown` line, and when any name is missing no step runs: exit 2. A named step that does not
 # run (an action, a false if:) is also one `unknown` line, never a pass. The merge's ready checks run its declared
 # merge.readyChecks this way. Exit codes as below.
-# --step runs in the claude-settings commit the workflow pins, as CI does: the one 40-hex sha of its
+# --step runs in the claude-settings commit the job pins, as CI does: the one 40-hex sha of its
 # `<owner>/claude-settings/actions/<name>@<sha>` uses: lines (lint/workflow_steps.py settings_pins), checked out as a
 # detached worktree of CI_JOB_SETTINGS_CLONE, else this file's own clone, else the clone the global rules file names;
 # the sha is fetched from that clone's origin when it lacks it. Each named step gets CLAUDE_SETTINGS_DIR set to that
@@ -63,12 +63,14 @@
 # stderr as it arrives, so a quiet step still feeds the stall watch (decision stall-watch: a quiet tool prints a
 # line at least every 120 s).
 # Cost: one process per step (bin/verdict and the step's shell), one log file; no timer, no lasting process. Under
-# --step with a pin: one worktree (a temp folder, removed after), a git fetch only when the sha is absent, and an
-# `npm ci --ignore-scripts` only when the pinned tree has a package-lock.json. Under
+# --step with a pin: one worktree (a temp folder named by this run's pid, removed after, on a SIGTERM too), a git fetch
+# only when the sha is absent, an `npm ci --ignore-scripts` only when the pinned tree has a package-lock.json, and one
+# `git worktree list` of the clone to remove the trees of dead runs (a SIGKILL leaves one; only a tree whose pid is not
+# alive goes). --plan with a pin reads the clone for the sha and makes no fetch and no worktree. Under
 # --lint each install CI step adds its processes, plus network and disk only when a job has one; a pip install writes to the active Python. Each `not run` line,
 # the summary and each step's `start: <name>` line on stderr (before it runs, so a caller sees which step is running)
 # are one print.
-import contextlib, os, re, shutil, subprocess, sys, tempfile
+import contextlib, os, re, shutil, signal, subprocess, sys, tempfile
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
@@ -390,43 +392,106 @@ def pin_of(text):
     return (refs[0] if refs else None), None
 
 
-@contextlib.contextmanager
-def pinned_tree(sha, clone):
-    """Yield (tree, why): a detached worktree of `clone` at `sha`, with its npm packages when it has a lockfile, or
-    (None, why) when it cannot be made. The sha is fetched from the clone's origin only when the clone lacks it. The
-    worktree is removed and pruned when the block ends, on every exit path."""
-    tmp = tree = None
+STALE_TREE = re.compile(r"[/\\]ci-job-pin-(\d+)-[^/\\]+[/\\]tree$")  # a pinned tree's path: its temp folder names the pid that owns it
+LIVE = []  # the step process now running: a SIGTERM ends it before the tree it runs in goes
+
+
+def pid_alive(pid):
+    if os.name == "nt":
+        return True  # os.kill cannot probe a pid there (it would end the process): leave the tree
     try:
-        if git("rev-parse", "--git-dir", cwd=clone) is None:
-            yield None, "pin %s: %s is no git clone" % (sha[:9], clone)
-            return
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # not ours to signal, so it exists
+    return True
+
+
+def drop_tree(clone, tree):
+    """Remove one pinned worktree: git's own removal (which also drops its record in the clone), then its temp folder."""
+    if os.path.isdir(clone):
+        _nowindow.run(["git", "worktree", "remove", "--force", tree], cwd=clone, capture_output=True, text=True)
+    shutil.rmtree(os.path.dirname(tree), ignore_errors=True)
+
+
+def sweep_stale(clone):
+    """Remove each pinned worktree of `clone` whose run is dead. A SIGKILL leaves its tree behind, and its temp folder
+    names the pid that made it, so a tree is removed only when that pid is not alive: a run in progress keeps its own."""
+    for line in (git("worktree", "list", "--porcelain", cwd=clone) or "").splitlines():
+        m = STALE_TREE.search(line[len("worktree "):]) if line.startswith("worktree ") else None
+        if m and int(m.group(1)) != os.getpid() and not pid_alive(int(m.group(1))):
+            drop_tree(clone, line[len("worktree "):])
+
+
+def clone_problem(sha, clone, fetch):
+    """Why `clone` cannot serve the pin `sha`, or None. Without `fetch` (--plan) a sha the clone lacks is a problem: it would
+    have to be fetched, which --plan does not do."""
+    if not os.path.isdir(clone):
+        return "pin %s: %s is not a folder (CI_JOB_SETTINGS_CLONE, else this clone, else the global rules file's checkout)" % (sha[:9], clone)
+    if git("rev-parse", "--git-dir", cwd=clone) is None:
+        return "pin %s: %s is no git clone" % (sha[:9], clone)
+    if not fetch and git("cat-file", "-e", sha + "^{commit}", cwd=clone) is None:
+        return "pin %s: %s does not hold it, and --plan does not fetch, so a run would git fetch origin %s first" % (sha[:9], clone, sha)
+    return None
+
+
+def make_tree(sha, clone, made):
+    """(tree, why): a detached worktree of `clone` at `sha`, with its npm packages when it has a lockfile, or (None, why).
+    The sha is fetched from the clone's origin only when the clone lacks it. Each folder made is appended to `made`."""
+    try:
+        why = clone_problem(sha, clone, True)
+        if why:
+            return None, why
+        sweep_stale(clone)
         if git("cat-file", "-e", sha + "^{commit}", cwd=clone) is None:
             got = _nowindow.run(["git", "fetch", "origin", sha], cwd=clone, capture_output=True, text=True,
                                 env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
             if got.returncode != 0:
-                yield None, "pin %s: git fetch origin %s failed in %s: %s" % (sha[:9], sha, clone, last_line(got))
-                return
-        tmp = tempfile.mkdtemp(prefix="ci-job-pin-")
+                return None, "pin %s: git fetch origin %s failed in %s: %s" % (sha[:9], sha, clone, last_line(got))
+        tmp = tempfile.mkdtemp(prefix="ci-job-pin-%d-" % os.getpid())  # the pid names the owner, for sweep_stale
         tree = os.path.join(tmp, "tree")
+        made.append(tree)
         added = _nowindow.run(["git", "worktree", "add", "--detach", tree, sha], cwd=clone, capture_output=True, text=True)
         if added.returncode != 0:
-            yield None, "pin %s: git worktree add failed: %s" % (sha[:9], last_line(added))
-            return
+            return None, "pin %s: git worktree add failed: %s" % (sha[:9], last_line(added))
         if os.path.isfile(os.path.join(tree, "package-lock.json")):
             if not shutil.which("npm"):
-                yield None, "pin %s: tool missing: npm (the pinned tree has a package-lock.json)" % sha[:9]
-                return
+                return None, "pin %s: tool missing: npm (the pinned tree has a package-lock.json)" % sha[:9]
             done = _nowindow.run(["npm", "ci", "--ignore-scripts"], cwd=tree, capture_output=True, text=True)
             if done.returncode != 0:
-                yield None, "pin %s: npm ci failed in the pinned tree: %s" % (sha[:9], last_line(done))
-                return
-        yield tree, None
+                return None, "pin %s: npm ci failed in the pinned tree: %s" % (sha[:9], last_line(done))
+        return tree, None
+    except OSError as e:
+        return None, "pin %s: %s" % (sha[:9], e)
+
+
+@contextlib.contextmanager
+def pinned_tree(sha, clone):
+    """Yield (tree, why), see make_tree. The worktree and its temp folder are removed when the block ends, on every exit
+    path that runs a `finally` (a SIGTERM is turned into one by end_on_sigterm; a SIGKILL is swept by the next run)."""
+    made = []
+    try:
+        yield make_tree(sha, clone, made)
     finally:
-        if tree and os.path.isdir(clone):
-            _nowindow.run(["git", "worktree", "remove", "--force", tree], cwd=clone, capture_output=True, text=True)
-            _nowindow.run(["git", "worktree", "prune"], cwd=clone, capture_output=True, text=True)
-        if tmp:
-            shutil.rmtree(tmp, ignore_errors=True)
+        for tree in made:
+            drop_tree(clone, tree)
+
+
+def end_on_sigterm(stack):
+    """Make a SIGTERM end the run through its `finally`s, as merge.py's release_on_signals does: the running step is ended
+    first, a second signal is ignored, and the handler is put back when `stack` closes. Off the main thread nothing changes."""
+    def stop(sig, frame):
+        signal.signal(sig, signal.SIG_IGN)
+        for proc in LIVE:
+            if proc.poll() is None:
+                proc.terminate()
+        raise SystemExit(128 + sig)
+    try:
+        before = signal.signal(signal.SIGTERM, stop)
+    except ValueError:
+        return
+    stack.callback(signal.signal, signal.SIGTERM, before)
 
 
 def main(argv):
@@ -485,8 +550,11 @@ def run(argv, stack):
         return 2
     pinned = None  # --step only: the tree the workflow pins claude-settings at; None runs as before
     if wanted:
-        sha, why = pin_of(text)
-        if sha and not dry:
+        sha, why = pin_of(block)  # the pins of this job's steps only
+        if sha and dry:
+            why = clone_problem(sha, settings_clone(), False)  # --plan makes no fetch and no worktree
+        elif sha:
+            end_on_sigterm(stack)  # before the tree exists, so a signal while it is made still removes it
             pinned, why = stack.enter_context(pinned_tree(sha, settings_clone()))
         if why:  # no tree to run in: a step run against other code would be a guess
             for w in dict.fromkeys(wanted):
@@ -569,6 +637,7 @@ def run(argv, stack):
                                       **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
                                       **({"CLAUDE_SETTINGS_DIR": pinned} if pinned else {}),
                                       **env, "VERDICT_LOG": log}) as proc:
+                LIVE[:] = [proc]
                 for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
                     if not line.startswith("verdict: still running"):
                         kept.append(line)

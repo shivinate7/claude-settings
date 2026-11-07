@@ -7,7 +7,7 @@ bin/ci-job runs a job's steps locally with it. It reads the layout checks.yml ke
 import re
 
 # A `uses:` of one of this repo's own actions at a ref: `<owner>/claude-settings/actions/<name>@<ref>`.
-SETTINGS_ACTION = re.compile(r"[\w.-]+/claude-settings/actions/([\w-]+)@(\S+)")
+SETTINGS_ACTION = re.compile(r"[\w.-]+/claude-settings/actions/([\w-]+)@([\w.+/-]+)")
 COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
 
 # The Linux jobs that hold the suites of the one old `checks` job, split for wall time. merge/merge.py reads suites from each.
@@ -31,6 +31,16 @@ def step_key(step, key):
     return m.group(1) if m else None
 
 
+def block_lines(lines, floor):
+    """The leading lines of `lines` that a block scalar owns: the blank lines and the lines indented `floor` spaces or deeper."""
+    body = []
+    for ln in lines:
+        if ln.strip() and len(ln) - len(ln.lstrip(" ")) < floor:
+            break
+        body.append(ln)
+    return body
+
+
 def block_scalar(style, lines, floor):
     """The text of a block scalar whose header is `style` (`|` or `>`, with an optional `-` or `+`) and whose body is
     `lines`, the lines after the header. The body is the blank lines and the lines indented `floor` spaces or deeper;
@@ -41,11 +51,7 @@ def block_scalar(style, lines, floor):
     kind = re.fullmatch(r"([|>])([+-]?)", style)
     if not kind:
         return None
-    body = []
-    for ln in lines:
-        if ln.strip() and len(ln) - len(ln.lstrip(" ")) < floor:
-            break
-        body.append(ln)
+    body = block_lines(lines, floor)
     first = next((ln for ln in body if ln.strip()), None)
     if first is None:
         return ""
@@ -134,15 +140,27 @@ def step_with(step):
 
 
 def settings_pins(text):
-    """[(action, ref, line)] for each step of a workflow whose `uses:` is `<owner>/claude-settings/actions/<name>@<ref>`,
-    in file order, `line` being the 1-based line of that `uses:`. A step's own key, so a `# uses:` comment and a line of
-    `run:` text are no pin; a trailing `# v1` is no part of the ref. The ref is whatever follows `@`: a caller that
+    """[(action, ref, line)] for each `<owner>/claude-settings/actions/<name>@<ref>` in a workflow, in file order, `line` being
+    its 1-based line. It reads every line, so a pin in a flow-style step (`- {uses: ...}`) or a steps list at another indent is
+    found; a line loses its comment (a `#` at the start or after a space, so `# v1` and `# - uses:` are no pin) and a step's
+    `run:` text is skipped, since it is a script and not a `uses:`. A pin-like token the parser cannot place as a step key is
+    still reported, never dropped. The ref is the characters after `@` up to a space, quote, comma or brace: a caller that
     needs a commit checks it against COMMIT_SHA."""
-    found, at = [], 0
+    lines = text.split("\n")
+    skip, at = set(), 0
     for st in step_blocks(text):
         at = text.index(st, at)  # the blocks are slices of `text` in order, so each search starts at the last
-        key = re.search(r"^(?:      - |        )uses:", st, re.M)
-        m = key and SETTINGS_ACTION.fullmatch(drop_comment(step_key(st, "uses")).strip("'\""))
-        if m:
-            found.append((m.group(1), m.group(2), text.count("\n", 0, at + key.start()) + 1))
+        first = text.count("\n", 0, at)
+        body = st.split("\n")
+        for i, ln in enumerate(body):
+            m = re.match(r"^(?:      - |        )run:[ \t]*(.*?)[ \t]*$", ln)
+            if m:
+                skip.update(range(first + i, first + i + 1 + (len(block_lines(body[i + 1:], 10)) if re.fullmatch(
+                    r"[|>][+-]?", m.group(1)) else 0)))
+                break
+    found = []
+    for n, ln in enumerate(lines):
+        if n not in skip:
+            for m in SETTINGS_ACTION.finditer(re.sub(r"(^|\s)#.*", "", ln)):
+                found.append((m.group(1), m.group(2), n + 1))
     return found
