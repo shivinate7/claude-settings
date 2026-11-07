@@ -3759,6 +3759,22 @@ def case_once_home_does_not_pass_a_standing_grant_however_worded():
     check("one-shot control, approved, merge PR 12: a once: home passes", out == [], out)
 
 
+STANDING_ONCE_TEXT = "approved, always merge green PRs"
+
+
+def case_standing_grant_reason_names_the_once_bar():
+    """When a standing word bars a `once:` home, the reason says so, and names the homes that fit a standing grant:
+    a ruling home or the page. Debt once-home-reason-silent-on-standing."""
+    mod = guard_module()
+    line = "- fb-0958-1 [note] -> once:merge-green-prs"
+    out = mod.problems(mod.parse(render_block(STANDING_ONCE_TEXT, items=(line,))), "")
+    reason = next((s for s in out if "has no home" in s), "")
+    check("standing once bar: the reason says a standing word bars the once: home",
+          "standing" in reason.lower() and "once:" in reason, reason)
+    check("standing once bar: the reason names a ruling home and the page for a standing grant",
+          "[ruling]" in reason and "page" in reason, reason)
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -3928,6 +3944,7 @@ CASES = (
     case_guard_home_tracked_in_the_stop_repo_passes_when_the_sidecar_names_another,
     case_guard_sidecar_in_no_git_folder_still_judges_the_stop_repo,
     case_once_home_does_not_pass_a_standing_grant_however_worded,
+    case_standing_grant_reason_names_the_once_bar,
 )
 
 
