@@ -7267,6 +7267,9 @@ sh("home-parent-delete: rm -rf /home, the folder holding every home folder, is r
    "rm -rf /home", "deny", "destructive-delete", cwd=NOGIT)
 sh("home-parent-delete: rm -rf /Users, the folder holding every macOS home folder, is refused",
    "rm -rf /Users", "deny", "destructive-delete", cwd=NOGIT)
+# home-parent-control: a folder inside a home folder is not a home folder, so a delete of one stays allowed.
+sh("home-parent-control: rm -rf of a project build folder, under a home folder, stays allowed",
+   "rm -rf /home/user/project/build", "allow", cwd=NOGIT)
 sh("delete: the working directory", "rm -rf .", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: a glob", "rm -rf *", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: a drive root", "rm -rf C:/", "deny", "destructive-delete", cwd=NOGIT)
