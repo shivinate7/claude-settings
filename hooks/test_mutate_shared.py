@@ -24,6 +24,10 @@ its own root, the folder beside its hooks/.
 The fifth part pins the clean-layout control: a target's mutants count as kills only after one full-suite
 run of the unmutated layout passes. A red control reads each mutant UNKNOWN, never KILLED. The control
 runs inside the MUTATE_JOBS cap, and a control that raises reads its mutants UNKNOWN too.
+
+The sixth part pins the split of checks-mutate-guard into legs (MUTATE_SHARD=i/n): parse_shard reads a value or refuses it,
+shard_entries gives each mutant one leg, a leg pays only for its own targets' controls, main refuses a malformed value before
+any suite runs and checks every mutant before a leg runs, and a suite child never inherits a shard value.
 """
 import contextlib
 import io
@@ -493,6 +497,259 @@ def scaffold_sources(**extra):
     }
     sources.update(extra)
     return sources
+
+
+# The split of checks-mutate-guard into legs: MUTATE_SHARD=i/n runs leg i of n. The cases run on the real MUTATIONS.
+# A build without the split (the base) reads MUTATE_SHARD as nothing, so each leg holds every mutant. shard_of and
+# parse_outcome model that reading, so a missing function fails by a named assert, never by a crash.
+SHARD_COUNTS = range(1, 7)
+
+
+def shard_of(entries, i, n):
+    """shard_entries(entries, i, n), or on a build without it the whole list, as the base runs it."""
+    shard = getattr(mutate_guard, "shard_entries", None)
+    return list(entries) if shard is None else list(shard(entries, i, n))
+
+
+def parse_outcome(value):
+    """("returned", parse_shard(value)), or ("raised", the ValueError's name) when it refuses `value`. A build without
+    parse_shard runs every value as the whole list, which is what the base does: it returns None."""
+    parse = getattr(mutate_guard, "parse_shard", None)
+    if parse is None:
+        return ("returned", None)
+    try:
+        return ("returned", parse(value))
+    except ValueError as error:
+        return ("raised", type(error).__name__)
+
+
+def summary(problems, message):
+    """The failure text for a list of problems: its count, then the first three, so a long list reads at a glance."""
+    return "%s: %d problem(s), first %s" % (message, len(problems), problems[:3])
+
+
+def label_of(entry):
+    return mutate_guard.mutation_parts(entry)[0]
+
+
+def target_of(entry):
+    return mutate_guard.mutation_parts(entry)[3]
+
+
+def targets_in_order():
+    """The targets in the order their first mutant appears in MUTATIONS."""
+    order = []
+    for entry in mutate_guard.MUTATIONS:
+        if target_of(entry) not in order:
+            order.append(target_of(entry))
+    return order
+
+
+def mutant_indices(entries):
+    """The places of `entries` in MUTATIONS, sorted. A mutant is named by its place, never by its label. -1 names an
+    entry MUTATIONS does not hold."""
+    where = {entry: k for k, entry in enumerate(mutate_guard.MUTATIONS)}
+    return sorted(where.get(entry, -1) for entry in entries)
+
+
+def legs_of(n):
+    """{place in MUTATIONS: [the legs 1 to n whose shard holds that mutant]}, from shard_of."""
+    where = {entry: k for k, entry in enumerate(mutate_guard.MUTATIONS)}
+    legs = {k: [] for k in range(len(mutate_guard.MUTATIONS))}
+    for i in range(1, n + 1):
+        for entry in shard_of(mutate_guard.MUTATIONS, i, n):
+            legs.setdefault(where.get(entry, -1), []).append(i)
+    return legs
+
+
+def runs_of(entry):
+    """The targets whose controls a leg holding `entry` must pay for: none when the mutant does not run on this platform."""
+    return None if mutate_shared.skip_reason(mutate_guard.mutation_parts(entry)[5]) else target_of(entry)
+
+
+class _LegRecorder:
+    """Stands in for mutate_shared.run_mutants: it keeps the entries and the control keys main hands it, and runs nothing."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, entries, run_one, controls=None, control_of=None):
+        self.calls.append((list(entries), sorted(controls or {})))
+        return 0
+
+
+def _no_suite(*args, **kwargs):
+    raise AssertionError("main ran a suite, but this case stops before any suite runs")
+
+
+class ShardSplitTests(MainRunHarness, unittest.TestCase):
+    """The split of checks-mutate-guard into legs. Each mutant runs in exactly one leg. A target other than guard stays in
+    one leg, and guard's mutants go round-robin by their place among guard's. A leg pays only for the controls of its own
+    targets. main checks every mutant before a leg runs, so a stale or colliding mutant fails whichever leg holds it. The
+    suite child never inherits a shard value, or a leaked GUARD_SHARD would shard every suite a mutant runs."""
+
+    def outside_leg_one(self, n=2):
+        """A mutant that leg 1 of n does not hold. A build without the split holds every mutant in leg 1, so it has none,
+        and the case fails by this named assert."""
+        held = shard_of(mutate_guard.MUTATIONS, 1, n)
+        outside = [entry for entry in mutate_guard.MUTATIONS if entry not in held]
+        self.assertTrue(outside, "leg 1 of %d holds every mutant: no mutant sits in another leg, so a stale or "
+                                 "colliding one there cannot be tested" % n)
+        return outside[0]
+
+    def test_a_shard_value_names_its_part(self):
+        self.assertEqual(parse_outcome("2/3"), ("returned", (2, 3)), "MUTATE_SHARD='2/3' must select leg 2 of 3")
+        self.assertEqual(parse_outcome("3/3"), ("returned", (3, 3)), "MUTATE_SHARD='3/3' must select leg 3 of 3")
+
+    def test_a_blank_shard_value_runs_every_mutant(self):
+        for value in (None, ""):
+            with self.subTest(value=value):
+                self.assertEqual(parse_outcome(value), ("returned", None), "a blank MUTATE_SHARD must run the whole list")
+
+    def test_a_malformed_shard_value_is_refused(self):
+        for value in ("0/3", "4/3", "x", "1/0", "none"):
+            with self.subTest(value=value):
+                self.assertEqual(parse_outcome(value), ("raised", "ValueError"),
+                                 "MUTATE_SHARD=%r must be refused, not run as every mutant" % value)
+
+    def test_each_mutant_runs_in_exactly_one_leg(self):
+        for n in SHARD_COUNTS:
+            with self.subTest(n=n):
+                problems = []
+                for k, legs in legs_of(n).items():
+                    label = label_of(mutate_guard.MUTATIONS[k])
+                    if not legs:
+                        problems.append("a mutant no leg runs: %s" % label)
+                    elif len(legs) > 1:
+                        problems.append("a mutant two legs run: %s runs in legs %s" % (label, legs))
+                self.assertFalse(problems, summary(problems, "the %d legs do not run each mutant once" % n))
+
+    def test_a_target_other_than_guard_stays_in_one_leg(self):
+        for n in SHARD_COUNTS:
+            with self.subTest(n=n):
+                legs = legs_of(n)
+                problems = []
+                for target in targets_in_order():
+                    if target == "guard":
+                        continue
+                    spans = {tuple(legs[k]) for k, entry in enumerate(mutate_guard.MUTATIONS) if target_of(entry) == target}
+                    if len(spans) != 1 or len(next(iter(spans))) != 1:
+                        problems.append("target %s spans legs %s, want one leg" % (target, sorted(spans)))
+                self.assertFalse(problems, summary(problems, "a target's mutants are split across legs of %d" % n))
+
+    def test_non_guard_targets_fill_legs_in_first_appearance_order(self):
+        others = [target for target in targets_in_order() if target != "guard"]
+        for n in SHARD_COUNTS:
+            with self.subTest(n=n):
+                legs = legs_of(n)
+                problems = []
+                for position, target in enumerate(others):
+                    want = [position % n + 1]
+                    for k, entry in enumerate(mutate_guard.MUTATIONS):
+                        if target_of(entry) == target and legs[k] != want:
+                            problems.append("%s sits in legs %s, want %s" % (label_of(entry), legs[k], want))
+                self.assertFalse(problems, summary(problems, "the non-guard targets do not fill legs of %d in order" % n))
+
+    def test_guard_mutants_go_round_robin_by_their_place_among_guard_mutants(self):
+        guard = [k for k, entry in enumerate(mutate_guard.MUTATIONS) if target_of(entry) == "guard"]
+        for n in SHARD_COUNTS:
+            with self.subTest(n=n):
+                legs = legs_of(n)
+                problems = []
+                for position, k in enumerate(guard):
+                    want = [position % n + 1]
+                    if legs[k] != want:
+                        problems.append("%s sits in legs %s, want %s" % (label_of(mutate_guard.MUTATIONS[k]), legs[k], want))
+                self.assertFalse(problems, summary(problems, "guard's mutants do not go round-robin over legs of %d" % n))
+
+    def test_a_leg_pays_only_for_the_controls_of_its_own_targets(self):
+        for n in SHARD_COUNTS:
+            for i in range(1, n + 1):
+                with self.subTest(leg=i, n=n):
+                    entries = shard_of(mutate_guard.MUTATIONS, i, n)
+                    controls = mutate_guard.run_controls({}, "", entries)
+                    want = {runs_of(entry) for entry in entries} - {None}
+                    self.assertEqual(set(controls), want,
+                                     "leg %d of %d pays for controls of targets it holds no mutant of" % (i, n))
+                    if n > 1:
+                        self.assertLess(len(entries), len(mutate_guard.MUTATIONS),
+                                        "leg %d of %d holds all %d mutants, so it pays for every control"
+                                        % (i, n, len(entries)))
+
+    def test_main_hands_each_leg_only_its_own_mutants_and_controls(self):
+        for n in (2, 3):
+            for i in range(1, n + 1):
+                with self.subTest(leg=i, n=n):
+                    recorder = _LegRecorder()
+                    code, lines, error = self.run_main_outcome(mutate_guard.MUTATIONS, _no_suite,
+                                                               shard="%d/%d" % (i, n), run_mutants=recorder)
+                    self.assertIsNone(error, "main raised %r for MUTATE_SHARD=%d/%d" % (error, i, n))
+                    self.assertEqual(len(recorder.calls), 1, "main must hand one leg to run_mutants: %r" % lines)
+                    entries, keys = recorder.calls[0]
+                    self.assertEqual(mutant_indices(entries), mutant_indices(shard_of(mutate_guard.MUTATIONS, i, n)),
+                                     "leg %d of %d was handed other mutants than its own" % (i, n))
+                    self.assertLess(len(entries), len(mutate_guard.MUTATIONS),
+                                    "leg %d of %d was handed all %d mutants: the split is not applied"
+                                    % (i, n, len(entries)))
+                    self.assertEqual(keys, sorted({runs_of(entry) for entry in entries} - {None}),
+                                     "leg %d of %d was handed controls for targets it holds no mutant of" % (i, n))
+
+    def test_main_refuses_a_malformed_shard_before_any_suite_runs(self):
+        entries = self.guard_entries("work-tree: the tree option goes unread", "pointer-head: the git directory option goes unread")
+        for value in ("0/3", "x", "none"):
+            with self.subTest(value=value):
+                suite = _FakeSuite(entries, control_passes=True)
+                code, lines, error = self.run_main_outcome(entries, suite, shard=value)
+                self.assertIsNone(error, "main raised %r for MUTATE_SHARD=%r" % (error, value))
+                self.assertTrue([line for line in lines if line.startswith("ERROR") and "MUTATE_SHARD" in line],
+                                "MUTATE_SHARD=%r printed no ERROR line naming it: %r" % (value, lines))
+                self.assertEqual(code, 1, "MUTATE_SHARD=%r must exit 1, not %r" % (value, code))
+                self.assertEqual(suite.calls, [], "MUTATE_SHARD=%r ran %d suite calls before refusing it"
+                                 % (value, len(suite.calls)))
+
+    def test_a_stale_mutant_in_another_leg_still_fails_leg_one(self):
+        victim = self.outside_leg_one()
+        label, _old, new, target, required, _only_on = mutate_guard.mutation_parts(victim)
+        stale = (label, "no such anchor text in any module", new, target, required)
+        entries = [stale if entry is victim else entry for entry in mutate_guard.MUTATIONS]
+        recorder = _LegRecorder()
+        code, lines, error = self.run_main_outcome(entries, _no_suite, shard="1/2", run_mutants=recorder)
+        self.assertIsNone(error, "main raised %r" % (error,))
+        self.assertTrue([line for line in lines if line.startswith("ERROR") and label in line],
+                        "leg 1 did not fail on the stale mutant in leg 2: %r" % lines)
+        self.assertEqual(code, 1, "a stale mutant must exit 1, not %r" % code)
+        self.assertEqual(recorder.calls, [], "leg 1 ran mutants although a mutant in another leg is stale")
+
+    def test_a_colliding_mutant_in_another_leg_still_fails_leg_one(self):
+        victim = self.outside_leg_one()
+        label = label_of(victim)
+        entries = list(mutate_guard.MUTATIONS) + [victim]  # a second mutation of the same name: one path, two mutations
+        recorder = _LegRecorder()
+        code, lines, error = self.run_main_outcome(entries, _no_suite, shard="1/2", run_mutants=recorder)
+        self.assertIsNone(error, "main raised %r" % (error,))
+        self.assertTrue([line for line in lines if line.startswith("ERROR") and "share one path" in line and label in line],
+                        "leg 1 did not fail on the collision in leg 2: %r" % lines)
+        self.assertEqual(code, 1, "a collision must exit 1, not %r" % code)
+        self.assertEqual(recorder.calls, [], "leg 1 ran mutants although a mutant in another leg collides")
+
+    def test_a_suite_child_never_inherits_a_shard_value(self):
+        copy_path = os.path.join(self.run, "copy.py")
+        config_dir = os.path.join(self.run, "cfg")
+        os.makedirs(config_dir)
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured.update(kwargs)
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+        leaked = {"MUTATE_SHARD": "1/2", "GUARD_SHARD": "1/2", "MERGE_SHARD": "1/5"}
+        with mock.patch.dict(os.environ, leaked), \
+                mock.patch.object(mutate_guard._nowindow, "run", side_effect=fake_run):
+            mutate_guard.run_suite(os.path.join(self.run, "test_suite.py"), "GUARD_UNDER_TEST", copy_path, config_dir)
+        env = captured.get("env", {})
+        for name in sorted(leaked):
+            self.assertNotIn(name, env, "%s reached the suite's env: every suite a mutant runs would shard with it" % name)
+        self.assertEqual(env.get("GUARD_UNDER_TEST"), copy_path, "the suite's own variable is not set in its env")
 
 
 class BuildScaffoldSiblingTests(unittest.TestCase):
