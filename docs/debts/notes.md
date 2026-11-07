@@ -138,6 +138,7 @@
 - install-sh-retry-untested: no case makes mv fail then succeed, or fail 25 times (hooks/test_install_src.sh)
 - install-skill-fail-exits-0: a failed skill folder copy is not retried and exits 0 (install.ps1). Fix: step:install-skill-fail-exit
 - install-skill-fail-log-kept: the log can say settings.json=kept after a recovery (install.ps1). Fix: none — rare and harmless. Until: 2026-11-21
+- install-skill-recover-untested: no case covers a skill folder that recovers on retry; deleting the retry loop in Resolve-Failures keeps skillfail1 green (install-no-gap.test.ps1). Fix: step:install-skill-recover-test
 - install-worktree-check-gaps: four small gaps in the installer's worktree check, including an empty catch that hides other errors (install.ps1)
 - install-writes-in-place: CLAUDE.md pointer, settings.json, skills folder, log and marker are written in place; non-guard hooks import guard modules with no reload (install.sh, install.ps1)
 - janitor-loop-no-alias-skip: bin/claude-janitor keeps the old loop with no Store alias skip; it is a user command (bin/claude-janitor)
