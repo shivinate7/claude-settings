@@ -1490,6 +1490,20 @@ def case_task_str_replace_rewords_the_reason():
           "new_str": "Why yours: a session on your desk was asked first"}, None)
 
 
+def case_task_str_replace_renames_the_label():
+    """A str_replace that renames the Why yours label to Why mine takes the label away, so it is refused as task-names-check."""
+    page("a str_replace that renames the Why yours label to Why mine is refused as task-names-check", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Why yours:", "new_str": "Why mine:"},
+         ("task-names-check", None))
+
+
+def case_task_str_replace_prose_label_passes():
+    """A prose mention of the label, not at a line start, is no Why yours line. Editing that prose passes."""
+    page('a str_replace that changes prose the "Why yours:" label to the label passes', "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context",
+          "old_str": 'the "Why yours:" label', "new_str": "the label"}, None)
+
+
 def test_press_link_links_true_or_a_number_on_a_step_is_no_link():
     _judged(case_press_link_links_not_a_list_on_a_step)
 
@@ -1508,6 +1522,14 @@ def test_str_replace_blank_prose_line_in_a_decision_passes():
 
 def test_task_str_replace_rewording_the_reason_passes():
     _judged(case_task_str_replace_rewords_the_reason)
+
+
+def test_task_str_replace_renaming_the_label_is_refused():
+    _judged(case_task_str_replace_renames_the_label)
+
+
+def test_task_str_replace_prose_label_mention_passes():
+    _judged(case_task_str_replace_prose_label_passes)
 
 
 def main():
@@ -1531,7 +1553,8 @@ def main():
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
                  case_task_str_replace_removes_only_the_label, case_str_replace_blank_prose_line_passes,
-                 case_task_str_replace_rewords_the_reason):
+                 case_task_str_replace_rewords_the_reason, case_task_str_replace_renames_the_label,
+                 case_task_str_replace_prose_label_passes):
         try:
             case()
         except Exception as exc:
