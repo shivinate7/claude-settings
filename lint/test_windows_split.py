@@ -321,7 +321,14 @@ GUARD_JOB = "checks-windows-guard"
 # A full leg runs its suite with SHARD_VAR=matrix.shard; the slice leg runs the slice env. matrix_problems checks the shape.
 MERGE_JOB = "checks-windows-merge"
 MATRIX_OUT = {GUARD_JOB: "guard_windows_shards", MERGE_JOB: "merge_windows_shards"}
-MATRIX_EXPR = {job: f"${{{{ fromJSON(needs.scope.outputs.{out}) }}}}" for job, out in MATRIX_OUT.items()}
+
+
+def shard_expr(out):
+    """The matrix value that reads one scope output's shard list."""
+    return f"${{{{ fromJSON(needs.scope.outputs.{out}) }}}}"
+
+
+MATRIX_EXPR = {job: shard_expr(out) for job, out in MATRIX_OUT.items()}
 SHARD_VAR = {GUARD_JOB: "GUARD_SHARD", MERGE_JOB: "MERGE_SHARD"}
 SHARD_CMD = {GUARD_JOB: "python hooks/test_guard.py", MERGE_JOB: "python merge/test_merge.py"}
 SLICE_LEG = "slice"
@@ -342,8 +349,8 @@ MERGE_CMD = SHARD_CMD[MERGE_JOB]  # the full step; the slice step is SLICE
 
 
 def shard_base(name):
-    """The base job of a leftover `<base>-<i>` job name (`checks-windows-guard-2` -> `checks-windows-guard`), or None. The matrix
-    replaced the shard jobs, so no job of checks.yml has such a name, and placement_problems names one that does."""
+    """The base job of a leftover `<base>-<i>` job name (`checks-windows-guard-2` -> `checks-windows-guard`), or None.
+    No job of checks.yml has such a name, since each suite is one matrix job, and placement_problems names one that does."""
     m = re.fullmatch(r"(.+)-([1-9][0-9]*)", name)
     return m.group(1) if m and m.group(1) in SHARD_VAR else None
 
@@ -1027,7 +1034,7 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(hardening_problems(doc(full=full_e.replace(" && needs.scope.outputs.code == 'true'", ""))))
 
     def test_checker_sees_the_shard_defects(self):
-        # Re-pointed from the -<i> shard jobs to the matrix job: one job, its legs from the scope list, each full step reads matrix.shard.
+        # One job, its legs from the scope list: each full step reads matrix.shard.
         def doc(**kw):
             return guard_matrix_doc(**kw)
 
@@ -1124,8 +1131,8 @@ class SplitJobs(unittest.TestCase):
 
     def test_a_macos_shard_value_outside_its_step_is_flagged(self):
         # The shard values are counted as homes in hardening_problems, so a stray one (here at job level) is a named problem.
-        # Re-pointed: the baseline is the file's own verdict, not []. The Windows cases own that verdict (WindowsSplit), and this
-        # case reads only the GUARD_SHARD problem the leak adds, so it holds on the file before and after the matrix change.
+        # The baseline is the file's own verdict. The Windows cases own that verdict (WindowsSplit): this case reads only
+        # the GUARD_SHARD problem the leak adds.
         leak = self.text.replace("    steps:\n", "    env:\n      GUARD_SHARD: 1/2\n    steps:\n", 1)
         baseline = hardening_problems(self.text)
         added = [p for p in hardening_problems(leak) if p not in baseline]
@@ -1811,18 +1818,23 @@ EVENT_ONLY = "${{ github.event_name != 'pull_request' }}"
 STRAY_GUARD_JOB = f"  {GUARD_JOB}-2:\n    runs-on: windows-latest\n    needs: scope\n    steps:\n      - run: echo shard\n"
 
 
+def matrix_job_block(job, job_if=None, fail_fast="false", out=None, strategy=True):
+    """The head of a Windows suite's matrix job, through its `steps:` line: runs-on, needs scope, the job-level if when given,
+    and the strategy whose shard matrix reads the scope list (`out`, or MATRIX_OUT[job]). Each matrix job fixture builds its head here."""
+    head = f"  {job}:\n    runs-on: windows-latest\n    needs: scope\n"
+    if job_if:
+        head += f"    if: {job_if}\n"
+    if strategy:
+        head += f"    strategy:\n      fail-fast: {fail_fast}\n      matrix:\n        shard: {shard_expr(out or MATRIX_OUT[job])}\n"
+    return head + "    steps:\n"
+
+
 def guard_matrix_doc(shard="${{ matrix.shard }}", fail_fast="false", out="guard_windows_shards", job_if=None, strategy=True, extra=""):
     """One guard matrix job as a fixture: a setup step, the full step and the slice step, each with the pinned condition. The
     defaults are the real shape, so a defect changes one argument."""
     scope = "needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request'"
     full_e, slice_e = unwrap(IF_PIN[GUARD_CMD]), unwrap(IF_PIN[GUARD_SLICE])
-    head = f"  {GUARD_JOB}:\n    runs-on: windows-latest\n    needs: scope\n"
-    if job_if:
-        head += f"    if: {job_if}\n"
-    if strategy:
-        head += (f"    strategy:\n      fail-fast: {fail_fast}\n      matrix:\n"
-                 f"        shard: ${{{{ fromJSON(needs.scope.outputs.{out}) }}}}\n")
-    return ("jobs:\n" + head + "    steps:\n"
+    return ("jobs:\n" + matrix_job_block(GUARD_JOB, job_if, fail_fast, out, strategy) +
             f"      - uses: actions/setup-python@abc # v6\n        if: ${{{{ {scope} }}}}\n"
             f"      - name: Full\n        if: ${{{{ ({scope}) && {full_e} }}}}\n        env:\n          GUARD_SHARD: {shard}\n"
             "        run: python hooks/test_guard.py\n"
@@ -1899,7 +1911,7 @@ class GuardMatrixSteps(unittest.TestCase):
 
 class GuardMatrixJobIf(unittest.TestCase):
     """matrix_problems on the guard matrix job's job-level if. The job has none: all-jobs-passed needs it, a draft skips it
-    through needs, and its steps decide per leg. Re-pointed from GuardShardJobIf (the -2 shard job)."""
+    through needs, and its steps decide per leg."""
 
     DRAFT = "${{ !github.event.pull_request.draft }}"
 
@@ -1927,18 +1939,14 @@ def merge_flags(merge="true", full="true", code="true"):
 
 def merge_matrix_doc(job_if=None):
     """A merge matrix job as a fixture, for the job-level if: the matrix is the real one, the steps are a stub."""
-    head = f"  {MERGE_JOB}:\n    runs-on: windows-latest\n    needs: scope\n"
-    if job_if:
-        head += f"    if: {job_if}\n"
-    return ("jobs:\n" + head + "    strategy:\n      fail-fast: false\n      matrix:\n"
-            f"        shard: {MATRIX_EXPR[MERGE_JOB]}\n" + "    steps:\n      - run: echo shard\n")
+    return "jobs:\n" + matrix_job_block(MERGE_JOB, job_if) + "      - run: echo shard\n"
 
 
 class MergeMatrixSteps(unittest.TestCase):
     """The merge suite's Windows steps in checks.yml, run per matrix leg with the scope outputs set. checks-windows-merge is one job
     whose legs are the merge_windows_shards list. The full step runs on each full leg, the slice step on the slice leg (on a
     pull_request only), and each launcher suite once: on the slice leg, or on the first full leg. The checkout and setup-python run
-    in every leg. Re-pointed from MergeShardSteps (the -2..-5 shard jobs)."""
+    in every leg."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -1996,7 +2004,7 @@ class MergeMatrixSteps(unittest.TestCase):
         self.assertEqual(self.runs_in(self.full, "pull_request", flags, SLICE_ONLY), [])
 
     def test_each_launcher_suite_runs_in_one_leg_only(self):
-        # Re-pointed from the launcher steps that ran once in the base job: each runs in one leg on every kind of run.
+        # Each launcher runs in one leg on every kind of run.
         for event, flags, legs in (("pull_request", merge_flags(full="true"), MERGE_LEGS),
                                    ("pull_request", merge_flags(full="false"), SLICE_ONLY),
                                    ("push", merge_flags(full="true"), MERGE_LEGS)):
@@ -2027,8 +2035,7 @@ class MergeMatrixSteps(unittest.TestCase):
 
 
 class MergeMatrixJobIf(unittest.TestCase):
-    """matrix_problems on the merge matrix job's job-level if. Re-pointed from MergeShardJobIf (the -2..-5 shard jobs): the job has
-    none, since all-jobs-passed needs it and the event-only if would skip it on a ready pull_request."""
+    """matrix_problems on the merge matrix job's job-level if. The job has none, since all-jobs-passed needs it and the event-only if would skip it on a ready pull_request."""
 
     DRAFT = "${{ !github.event.pull_request.draft }}"
 

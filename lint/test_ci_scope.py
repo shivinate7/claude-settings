@@ -63,7 +63,7 @@ BASH = shutil.which("bash")
 
 
 def pre_split(got):
-    """The outputs the script wrote before the splits: every output but GUARD_SPLIT, MERGE_SPLIT and LIST_SPLIT."""
+    """Every output ci-scope.sh writes except GUARD_SPLIT, MERGE_SPLIT and LIST_SPLIT."""
     return {n: v for n, v in got.items() if n not in GUARD_SPLIT + MERGE_SPLIT + LIST_SPLIT}
 
 

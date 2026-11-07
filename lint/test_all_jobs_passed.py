@@ -22,7 +22,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import ALL_JOBS_PASSED_JOB, CHECKS  # noqa: E402  the one home of the checks.yml path
+from test_windows_split import ALL_JOBS_PASSED_JOB, CHECKS, GUARD_JOB, MERGE_JOB, STRAY_GUARD_JOB, matrix_job_block  # noqa: E402  the one home of the checks.yml path, the job names and the matrix head
 from all_jobs_passed_rules import (FAN_IN, all_problems, child_problems, ci_done_problems, needs_of,  # noqa: E402  the one home of the rules
                                    needs_problems, off_problems, scope_if_problems, shape_problems, steps_problems)
 from workflow_steps import job_block  # noqa: E402  the one home of the step parser
@@ -161,7 +161,7 @@ class AllJobsPassedJob(unittest.TestCase):
 
 class GuardMatrixInNeeds(unittest.TestCase):
     """checks-windows-guard is one matrix job. It runs on a ready pull_request (its legs decide), so all-jobs-passed needs it, and
-    ci-done needs it. Re-pointed from GuardShardInNeeds (checks-windows-guard-2, the second of two shard jobs)."""
+    ci-done needs it."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -173,7 +173,7 @@ class GuardMatrixInNeeds(unittest.TestCase):
         self.assertIn("checks-windows-guard", self.needs, f"{ALL_JOBS_PASSED_JOB} does not need checks-windows-guard: {self.needs}")
 
     def test_all_jobs_passed_names_no_guard_shard_job(self):
-        # Named failure: a leftover checks-windows-guard-<i> job, a runner the matrix replaced, that all-jobs-passed still needs.
+        # Named failure: a leftover checks-windows-guard-<i> job starts a runner per shard, and all-jobs-passed still needs it.
         self.assertEqual([n for n in self.needs if n.startswith("checks-windows-guard-")], [],
                          f"{ALL_JOBS_PASSED_JOB} needs a shard job of the guard suite")
 
@@ -183,8 +183,7 @@ class GuardMatrixInNeeds(unittest.TestCase):
 
 
 class MergeMatrixInNeeds(unittest.TestCase):
-    """checks-windows-merge is one matrix job, needed by all-jobs-passed and ci-done for the same reason as the guard matrix job.
-    Re-pointed from MergeShardInNeeds (checks-windows-merge-2 to -5, the shard jobs)."""
+    """checks-windows-merge is one matrix job, needed by all-jobs-passed and ci-done for the same reason as the guard matrix job."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -222,16 +221,13 @@ class AllJobsPassedFixtures(unittest.TestCase):
 
 # The shape a sharded suite's matrix job takes on a ready pull_request: one job, no job-level if, needed by all-jobs-passed. Each
 # variant changes one place in the matrix, and the anchors must match, so a moved line is named.
-GUARD_MATRIX = ("  checks-windows-guard:\n    runs-on: windows-latest\n    needs: scope\n"
-                "    strategy:\n      fail-fast: false\n      matrix:\n"
-                "        shard: ${{ fromJSON(needs.scope.outputs.guard_windows_shards) }}\n"
-                "    steps:\n      - run: echo shard\n")
+GUARD_MATRIX = matrix_job_block(GUARD_JOB) + "      - run: echo shard\n"
 GUARD_MATRIX_DRAFT = GUARD_MATRIX.replace("    strategy:", "    if: ${{ !github.event.pull_request.draft }}\n    strategy:", 1)
 GUARD_MATRIX_FLAG = GUARD_MATRIX.replace("    strategy:", "    if: ${{ needs.scope.outputs.guard == 'true' }}\n    strategy:", 1)
-MERGE_MATRIX = GUARD_MATRIX.replace("checks-windows-guard", "checks-windows-merge").replace("guard_windows_shards", "merge_windows_shards")
+MERGE_MATRIX = matrix_job_block(MERGE_JOB) + "      - run: echo shard\n"
 MERGE_MATRIX_EVENT = MERGE_MATRIX.replace("    strategy:", "    if: ${{ github.event_name != 'pull_request' }}\n    strategy:", 1)
-# A leftover -<i> shard job. The matrix replaced these: a job that has one is refused, whether it is needed or off a pull_request.
-STRAY_GUARD_SHARD = "  checks-windows-guard-2:\n    runs-on: windows-latest\n    needs: scope\n    steps:\n      - run: echo shard\n"
+# A leftover -<i> shard job is refused, whether it is needed or off a pull_request.
+STRAY_GUARD_SHARD = STRAY_GUARD_JOB
 STRAY_MERGE_SHARD_OFF = ("  checks-windows-merge-2:\n    runs-on: windows-latest\n    needs: scope\n"
                          "    if: ${{ github.event_name != 'pull_request' }}\n    steps:\n      - run: echo shard\n")
 NEEDS_END = "      - checks-macos\n    steps:\n      - uses: actions/checkout"
@@ -246,8 +242,7 @@ def in_needs(text, name):
 
 class GuardMatrixInNeedsFixtures(unittest.TestCase):
     """The rules on a fixture. A matrix job that runs on a ready pull_request is needed, and has no job-level if. Red controls: a
-    job-level if on a needed matrix job, and a leftover -<i> shard job (needed, or off a pull_request). Re-pointed from
-    GuardShardInNeedsFixtures and its guard-2 and merge-2 variants."""
+    job-level if on a needed matrix job, and a leftover -<i> shard job (needed, or off a pull_request)."""
 
     def test_a_needed_guard_matrix_with_no_job_level_if_is_green(self):
         self.assertIn(GUARD_MATRIX, GOOD, "the fixture lost the guard matrix job")
@@ -281,7 +276,7 @@ class GuardMatrixInNeedsFixtures(unittest.TestCase):
         self.assertTrue(all_problems(text), "a leftover checks-windows-guard-2 job, needed by all-jobs-passed, is accepted")
 
     def test_a_leftover_merge_shard_job_off_all_jobs_passed_is_red(self):
-        # Named failure: a leftover checks-windows-merge-2 with the event-only if: a runner that the matrix replaced.
+        # Named failure: a leftover checks-windows-merge-2 with the event-only if starts a runner per shard.
         self.assertIn("  all-jobs-passed:\n", GOOD, "the fixture lost the all-jobs-passed job")
         text = GOOD.replace("  all-jobs-passed:\n", STRAY_MERGE_SHARD_OFF + "  all-jobs-passed:\n", 1)
         self.assertTrue(all_problems(text), "a leftover checks-windows-merge-2 job off all-jobs-passed is accepted")
