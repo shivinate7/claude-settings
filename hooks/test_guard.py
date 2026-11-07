@@ -13482,7 +13482,9 @@ DOTROOT = os.path.join(ROOT, "dotroot")
 
 def _build_dotroot():
     make_repo(DOTROOT, {"tests/test_a.py": "def test_a():\n    assert True\n",
-                        "src/app.py": "x = 1\n", "README.md": "base\n"})
+                        "src/app.py": "x = 1\n", "README.md": "base\n",
+                        # hooks/ holds a test beside product code, as this repo's hooks/ folder does.
+                        "hooks/test_a.py": "def test_a():\n    assert True\n", "hooks/guard.py": "x = 1\n"})
 
 
 lazy_fixture([DOTROOT], _build_dotroot)
@@ -13500,6 +13502,22 @@ DOT_ROOT_WRITES = (
     # A pathspec that matches a tracked test (tests/test_a.py) names it, at any depth.
     ("git ls-files '*.py' piped to xargs, sed -i", "git ls-files '*.py' | xargs sed -i s/a/b/"),
     ("git grep -l old -- '*.py' piped to xargs, sed -i", "git grep -l old -- '*.py' | xargs sed -i s/a/b/"),
+    # hooks/ holds a test, so a listing of that folder names one.
+    ("git ls-files of hooks, a folder that holds tests, piped to xargs, sed -i",
+     "git ls-files hooks | xargs sed -i s/a/b/"),
+    # Each pathspec below matches hooks/test_a.py at some depth, so the listing names a test.
+    ("git ls-files './*.py' piped to xargs, sed -i", "git ls-files './*.py' | xargs sed -i s/a/b/"),
+    ("git ls-files './hooks/*.py' piped to xargs, sed -i", "git ls-files './hooks/*.py' | xargs sed -i s/a/b/"),
+    ("git ls-files ':(glob)**/*.py' piped to xargs, sed -i",
+     "git ls-files ':(glob)**/*.py' | xargs sed -i s/a/b/"),
+    ("git ls-files a backslash-star glob piped to xargs, sed -i", r"git ls-files '\*.py' | xargs sed -i s/a/b/"),
+    # An exclude pathspec leaves the tests in the listing: README.md is the only thing it drops.
+    ("git ls-files ':!README.md' piped to xargs, sed -i", "git ls-files ':!README.md' | xargs sed -i s/a/b/"),
+    # Pinned by shape, as the 2>/dev/null case above: the redirect word is no pathspec.
+    ("git ls-files &>/dev/null piped to xargs, sed -i", "git ls-files &>/dev/null | xargs sed -i s/a/b/"),
+    # A shell glob target that matches a test in hooks/ is a test write, whatever folder the glob names.
+    ("sed -i over the hooks/*.py glob", "sed -i s/a/b/ hooks/*.py"),
+    ("perl -pi over the hooks/*.py glob", "perl -pi -e s/a/b/ hooks/*.py"),
 )
 for _name, _command in DOT_ROOT_WRITES:
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
@@ -13516,6 +13534,12 @@ sh("builder-test: shell write, git ls-files of src/*.py piped to xargs, sed -i, 
    "git ls-files 'src/*.py' | xargs sed -i s/a/b/", "allow", **DR)
 sh("builder-test: shell write, git ls-files of the src folder piped to xargs, sed -i, is allowed",
    "git ls-files src | xargs sed -i s/a/b/", "allow", **DR)
+# The exclude drops every *.py under src, and src holds no test, so the listing names no test.
+sh("builder-test: shell write, git ls-files -x '*.py' of src piped to xargs, sed -i, is allowed",
+   "git ls-files -x '*.py' src | xargs sed -i s/a/b/", "allow", **DR)
+# A glob over src names product files only, since src holds no test.
+sh("builder-test: shell write, sed -i over the src/*.py glob, is allowed",
+   "sed -i s/a/b/ src/*.py", "allow", **DR)
 # Pin for the `""` skip after a cd: the script word of sed -i is data, and the file it writes is
 # ../src/app.py, outside the tests folder the cd entered. Without the skip, the data word reads as a
 # test in tests/, so the case is refused.
