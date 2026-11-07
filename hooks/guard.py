@@ -86,8 +86,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec refuses. A push that reaches the default branch asks.
                        (stale-safe-force-push)
-  agent-branch-push    deny. A push whose destination is an agent's own worktree branch. A delete
-                       and a fetch pass. (agent-branch-never-pushed)
+  agent-branch-push    deny. A push whose destination is an agent's own worktree branch. A delete,
+                       a dry run and a fetch pass. (agent-branch-never-pushed)
   push-main            ask. A non-forced push whose destination is literally main or master,
                        `--all` included. The remote's HEAD is not read. A dry run passes.
   push-stray-branch    ask. A push with an implied destination (bare, `HEAD`, `@`, or a colon-less
@@ -3501,7 +3501,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     for segment in split_segments(stripped):
         for subcommand, args in git_calls(push_text(segment)):
             where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})
-            verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
+            verdict = push_verdict(args, where, overrides, read_verb("push", args)) if subcommand == "push" else ""
             if verdict == AGENT_PUSH_RULE:
                 # the rule id is a literal here: lint/rule_audit.py lists ids from literals only
                 refuse(tool, "deny", "agent-branch-push", AGENT_PUSH_REASON, "git push " + " ".join(args))

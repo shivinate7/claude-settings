@@ -245,18 +245,18 @@ def _agent_branch_push(plain, delete: bool, cwd: str, overrides=None) -> bool:
     return False
 
 
-def push_verdict(args, cwd: str, overrides=None) -> str:
+def push_verdict(args, cwd: str, overrides=None, dry_run: bool = False) -> str:
     """'' for an allowed push, else 'ask', 'deny' or AGENT_PUSH_RULE, for the `git push` arguments `args`.
 
     A destination that is an agent's own branch (AGENT_BRANCH_PREFIX): AGENT_PUSH_RULE, forced or
-    not. A delete never reaches it. Not forced: ''. Forced or deleting at the default branch, or at a destination this cannot
+    not. A delete never reaches it, and a dry run (`dry_run`, the caller's read of `--dry-run` or `-n`) skips it. Not forced: ''. Forced or deleting at the default branch, or at a destination this cannot
     resolve: 'ask'. Forced by `--force`, `-f`, a `--fo...` prefix or a `+refspec`: 'deny'. Forced
     by a lease: '' when `--force-if-includes` rides with it, or every lease names its own sha;
     else 'deny'. A deletion off the default branch is ''.
     """
     force, mirror, every, includes, unpinned, leased, delete, _upstream, remote, plain = _push_parse(args)
     plus = any(spec.startswith("+") for spec in plain)
-    if _agent_branch_push(plain, delete, cwd, overrides):
+    if not dry_run and _agent_branch_push(plain, delete, cwd, overrides):
         return AGENT_PUSH_RULE
     delete = delete or any(spec.startswith(":") for spec in plain)
     if not (force or leased or plus or mirror or delete):

@@ -369,15 +369,15 @@ MUTATIONS = [
     # call's place above the early return, the delete skips, the ref strip, the unknown answer, the
     # destination read, the forced path, the verdict, and the refusal itself.
     ("agent-branch-push: the call is dropped, so an unforced push to an agent branch passes",
-     '    if _agent_branch_push(plain, delete, cwd, overrides):\n        return AGENT_PUSH_RULE\n',
+     '    if not dry_run and _agent_branch_push(plain, delete, cwd, overrides):\n        return AGENT_PUSH_RULE\n',
      '', "guard", 'a plain push to worktree-agent-x denies, unforced'),
     ("agent-branch-push: the call moves below the early return, so an unforced push passes",
-     '    if _agent_branch_push(plain, delete, cwd, overrides):\n        return AGENT_PUSH_RULE\n'
+     '    if not dry_run and _agent_branch_push(plain, delete, cwd, overrides):\n        return AGENT_PUSH_RULE\n'
      '    delete = delete or any(spec.startswith(":") for spec in plain)\n'
      '    if not (force or leased or plus or mirror or delete):\n        return ""\n',
      '    delete = delete or any(spec.startswith(":") for spec in plain)\n'
      '    if not (force or leased or plus or mirror or delete):\n        return ""\n'
-     '    if _agent_branch_push(plain, delete, cwd, overrides):\n        return AGENT_PUSH_RULE\n',
+     '    if not dry_run and _agent_branch_push(plain, delete, cwd, overrides):\n        return AGENT_PUSH_RULE\n',
      "guard", 'a plain push to worktree-agent-x denies, unforced'),
     ("agent-branch-push: the --delete skip is dropped, so a delete of an agent branch is refused",
      '    if delete:\n        return False\n', '', "guard",
@@ -405,12 +405,12 @@ MUTATIONS = [
      '    target = target if colon else source', '    target = source', "guard",
      'worktree-agent-x:lane allows'),
     ("agent-branch-push: a forced push skips the agent rule and reaches the force rule",
-     '    if _agent_branch_push(plain, delete, cwd, overrides):',
-     '    if not force and _agent_branch_push(plain, delete, cwd, overrides):', "guard",
+     '    if not dry_run and _agent_branch_push(plain, delete, cwd, overrides):',
+     '    if not dry_run and not force and _agent_branch_push(plain, delete, cwd, overrides):', "guard",
      'a forced push to worktree-agent-x denies under the agent rule'),
     ("agent-branch-push: push_verdict answers deny, not the rule id, so the refusal names the force rule",
-     '    if _agent_branch_push(plain, delete, cwd, overrides):\n        return AGENT_PUSH_RULE\n',
-     '    if _agent_branch_push(plain, delete, cwd, overrides):\n        return "deny"\n', "guard",
+     '    if not dry_run and _agent_branch_push(plain, delete, cwd, overrides):\n        return AGENT_PUSH_RULE\n',
+     '    if not dry_run and _agent_branch_push(plain, delete, cwd, overrides):\n        return "deny"\n', "guard",
      'a plain push to worktree-agent-x denies, unforced'),
     ("agent-branch-push: judge_shell does not refuse the agent push",
      'refuse(tool, "deny", "agent-branch-push", AGENT_PUSH_REASON, "git push " + " ".join(args))',
