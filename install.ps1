@@ -516,8 +516,7 @@ function Install-File([string]$Src, [string]$Dest) {
 # $KeepOld: it is a backup). If the second rename fails the first is undone.
 # Named gap: Windows cannot swap a directory in one call, so a real directory replaced by a
 # link (or a link by a copy) is absent for the time between the two renames. Skills are not
-# guard scripts. A hook reads a skill file at its installed path; only guard.py's read of the
-# impeccable skill fails closed (a chained impeccable command is refused). Returns 'linked', 'copied', or 'failed'.
+# guard scripts. Returns 'linked', 'copied', or 'failed'.
 function Install-Dir([string]$Src, [string]$Dest, [string]$Old, [bool]$KeepOld) {
     $new = "$Dest.cs-new"
     $state = 'unchanged'   # unchanged | refreshing | moved-away | rollback-failed
@@ -915,9 +914,7 @@ if (-not (Get-Command python3 -ErrorAction SilentlyContinue) -and -not (Get-Comm
 # with a longer back-off (2, 4, 8 s), then re-reads the stamp of every copied guard.py and guard_*.py:
 # a copy that does not carry this run's id is a half install, so it is retried the same way. A file
 # or skill folder that still fails is named here and the run exits non-zero at its end. For a file
-# the guard then fails closed and its text names this installer as the remedy; a skill folder that
-# still fails is only named and sets the exit code. Only the impeccable skill read by guard.py fails
-# closed, so a failed impeccable copy makes the guard refuse a chained impeccable command.
+# the guard then fails closed and its text names this installer as the remedy.
 # Links are skipped: a link reads the repo file, and the repo copy holds the placeholder.
 $StillFailed = [ordered]@{}
 if ($GuardStageFailed) { $StillFailed['the new guard set'] = '' }

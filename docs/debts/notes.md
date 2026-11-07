@@ -136,7 +136,7 @@
 - install-sh-renames-no-retry: five mv calls outside put_file run once, so a Windows reader holding the file fails them (install.sh)
 - install-sh-retries-every-error: mv_retry retries any mv error where install.ps1 retries only codes 5 and 32; a real failure costs about 2.4 s (install.sh)
 - install-sh-retry-untested: no case makes mv fail then succeed, or fail 25 times (hooks/test_install_src.sh)
-- install-skill-copy-nests-dir: in Install-Dir's in-place refresh, `Get-ChildItem $Src | Copy-Item -Destination $Dest -Recurse -Force` may nest a source subfolder inside an existing one of the same name; the prune then keeps the old nested file and still reports "copied" (install.ps1). Unverified. Fix: none — needs a Windows run. Until: 2026-11-21
+- install-skill-copy-nests-dir: in Install-Dir's in-place refresh, `Get-ChildItem -LiteralPath $Src -Force | Copy-Item -Destination $Dest -Recurse -Force` may nest a source subfolder inside an existing one of the same name; the prune then removes the nested copy and keeps the old file, and the run still reports "copied" (install.ps1). Unverified. Fix: none — needs a Windows run. Until: 2026-11-21
 - install-skill-fail-exits-0: a failed skill folder copy is not retried and exits 0 (install.ps1). Fix: step:install-skill-fail-exit
 - install-skill-fail-log-kept: the log can say settings.json=kept after a recovery (install.ps1). Fix: none — rare and harmless. Until: 2026-11-21
 - install-skill-recover-untested: no case covers a skill folder that recovers on retry; deleting the retry loop in Resolve-Failures keeps skillfail1 green (install-no-gap.test.ps1). Fix: step:install-skill-recover-test
