@@ -239,12 +239,21 @@ WAITING_ROLE = "waiting-page"  # the role of the registry entry that is the repo
 ARTIFACT_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")  # a slug of 32 characters or fewer, as a record slug is (git-slug-then-claim-number)
 ROLE = re.compile(r"[a-z0-9][a-z0-9-]*")
 COLLECTION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
-# What the waiting page's database holds. The one home is skills/waiting-page/export_page.py COLLECTIONS, which never
-# imports lint/ (recovery must not depend on the repo it recovers). The skill folder sits at the same place relative to
-# lint/ in the repo and in a ~/.claude install.
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "skills", "waiting-page"))
-import export_page  # noqa: E402
-WAITING_COLLECTIONS = export_page.COLLECTIONS
+def _waiting_collections():
+    """What the waiting page's database holds. The one home is skills/waiting-page/export_page.py COLLECTIONS, which never
+    imports lint/ (recovery must not depend on the repo it recovers). The skill folder sits at the same place relative to
+    lint/ in the repo and in a ~/.claude install. Lazy: guard.py imports this module on every tool call, and a fixture
+    may copy lint/ without the skill."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "skills", "waiting-page"))
+    import export_page
+    return export_page.COLLECTIONS
+
+
+def __getattr__(name):
+    """PEP 562: `layout.WAITING_COLLECTIONS` reads the list on first use."""
+    if name == "WAITING_COLLECTIONS":
+        return _waiting_collections()
+    raise AttributeError("module %r has no attribute %r" % (__name__, name))
 
 
 def artifacts(root):
@@ -290,7 +299,7 @@ def artifacts(root):
         elif no_export:
             names = []
         elif role == WAITING_ROLE:
-            names = list(WAITING_COLLECTIONS)
+            names = list(_waiting_collections())
         else:
             raise LayoutError("%s: %s (id %s) has no collections to export" % (where, label, entry_id))
         if no_export:
