@@ -169,15 +169,21 @@ def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL):
 # ------------------------------------------------------------------ the page lookup from another checkout (page roots)
 #
 # The fixture of the waiting-page lookup (hooks/question_form.py page_item_hit: the cwd's page, else the pointer
-# checkout's, else a sibling's). One parent folder holds the pointer checkout, which the global rules file names on its
-# `@` line; a sibling child repo with its own waiting page; a roadmap repo with no extras file; a folder in no repo; and a
-# bare home whose config names no pointer. The pointer's registry holds its waiting page (role waiting-page) and a
-# reference entry, so the lookup must match a waiting-page entry by id. Built once per run under ROOT, and hermetic_home()
-# points HOME and the config at it, so no case reads the machine's real HOME.
+# checkout's, else a sibling's, else the main checkout's of a linked worktree). One parent folder holds the pointer
+# checkout, which the global rules file names on its `@` line; a sibling child repo with its own waiting page and a
+# decision record; a roadmap repo with no extras file, which holds a file_path item; a folder in no repo; a bare home
+# whose config names no pointer; and, under a separate parent so no sibling scan reaches it, a host checkout with its
+# own waiting page and a linked worktree of it (`linked`, which has no extras file). The pointer's registry holds its
+# waiting page (role waiting-page) and a reference entry, so the lookup must match a waiting-page entry by id. The
+# pointer checkout also holds a commit and origin/roadmap, as a page's record branch does. Built once per run under
+# ROOT, and hermetic_home() points HOME and the config at it, so no case reads the machine's real HOME.
 POINTER_PAGE_URL = "https://claude.ai/artifact/pointerpage"
 POINTER_REF_URL = "https://claude.ai/artifact/pointerref"
 CHILD_PAGE_URL = "https://claude.ai/artifact/childpage"
+HOST_PAGE_URL = "https://claude.ai/artifact/hostpage"
 UNRELATED_URL = "https://claude.ai/artifact/unrelatedpage"
+CHILD_RULING_MARK = "CHILDRULING-6b1f"  # the ruling text of the child repo's decision record, a marker a prompt can carry
+FOREIGN_ITEM = "foreign-item.json"  # a file_path item in the roadmap repo, read against the session's cwd
 POINTER_FIXTURE = {}
 
 
@@ -187,22 +193,45 @@ def write_extras(repo, artifacts):
         json.dump({"kinds": {}, "artifacts": artifacts}, f)
 
 
+def designed_item():
+    """A waiting-page decision that passes the form and carries a picture: one option has a `design`. The file_path
+    item of the fixture is this item, and the cases that need a picture inline use it too."""
+    item = good_page_item()
+    item["options"][0]["design"] = {"slug": "pick-a"}
+    return item
+
+
 def pointer_fixture():
     """The fixture's folders, built on first use: `home` and `config` (the hermetic home and its config, whose CLAUDE.md
-    names `settings`), `bare` (a home with no CLAUDE.md), `settings` (the pointer checkout), `child`, `roadmap` and `loose`."""
+    names `settings`), `bare` (a home with no CLAUDE.md), `settings` (the pointer checkout), `child`, `roadmap`, `loose`,
+    `host` (a main checkout with its own waiting page) and `linked` (a detached worktree of `host`)."""
     if not POINTER_FIXTURE:
         family = os.path.join(ROOT, "family")
+        elsewhere = os.path.join(ROOT, "elsewhere")  # not beside the pointer checkout, so only the main checkout reaches it
         found = {name: os.path.join(family, name) for name in ("settings", "child", "roadmap", "loose", "bare")}
-        found.update(home=os.path.join(family, "home"), config=os.path.join(family, "home", ".claude"))
-        for name in ("config", "bare", "loose", "child", "roadmap"):
+        found.update(home=os.path.join(family, "home"), config=os.path.join(family, "home", ".claude"),
+                     host=os.path.join(elsewhere, "host"), linked=os.path.join(elsewhere, "linked"))
+        for name in ("config", "bare", "loose", "child", "roadmap", "host"):
             os.makedirs(found[name])
         write_extras(found["settings"], [
             {"id": "settings-queue", "url": POINTER_PAGE_URL, "role": "waiting-page", "account": "current"},
             {"id": "settings-ref", "url": POINTER_REF_URL, "role": "reference", "account": "other", "export": False}])
         write_extras(found["child"], [
             {"id": "child-queue", "url": CHILD_PAGE_URL, "role": "waiting-page", "account": "current"}])
-        for name in ("settings", "child", "roadmap"):
+        write_extras(found["host"], [
+            {"id": "host-queue", "url": HOST_PAGE_URL, "role": "waiting-page", "account": "current"}])
+        for name in ("settings", "child", "roadmap", "host"):
             git(found[name], "init", "-q")
+        for name in ("settings", "host"):
+            git(found[name], "commit", "-q", "--allow-empty", "-m", "fixture")
+        git(found["settings"], "update-ref", "refs/remotes/origin/roadmap", "HEAD")
+        git(found["host"], "worktree", "add", "-q", "--detach", found["linked"])
+        decisions = os.path.join(found["child"], "docs", "decisions")
+        os.makedirs(decisions)
+        with open(os.path.join(decisions, "child-marker.md"), "w", encoding="utf-8") as f:
+            f.write("# child-marker\n\n## The ruling\n\n%s\n" % CHILD_RULING_MARK)
+        with open(os.path.join(found["roadmap"], FOREIGN_ITEM), "w", encoding="utf-8") as f:
+            json.dump(designed_item(), f)
         with open(os.path.join(found["config"], "CLAUDE.md"), "w", encoding="utf-8") as f:
             f.write("@%s/CLAUDE.md\n" % found["settings"])
         POINTER_FIXTURE.update(found)
@@ -960,6 +989,39 @@ def case_page_roadmap_cwd_is_judged_against_the_pointer_page():
           len(control.calls) == 1 and control.reason().startswith("question-judge: "), detail(control))
 
 
+def case_page_file_item_from_a_roadmap_cwd_gets_the_model_review():
+    # A file_path item (its data is in a file, read against the payload's cwd) written from the roadmap repo is judged
+    # as inline data is. The inline call is the control; the file call is red when the review reads the file from the
+    # hook's own cwd, where the file is not, so it makes no call.
+    fx = pointer_fixture()
+    inline = run_hook(page_input("set", designed_item(), url=POINTER_PAGE_URL, cwd=fx["roadmap"]), answer=PAGE_FLAG,
+                      pointer=fx["settings"])
+    check("page file control: inline data from the roadmap cwd gets one model call", len(inline.calls) == 1, detail(inline))
+    r = run_hook(page_input("set", None, url=POINTER_PAGE_URL, cwd=fx["roadmap"], file_path=FOREIGN_ITEM),
+                 answer=PAGE_FLAG, pointer=fx["settings"])
+    check("page file: the same item in a file, read against the roadmap cwd, gets one model call", len(r.calls) == 1,
+          detail(r))
+    check("page file: the judge's refusal denies that item, rule question-judge",
+          r.reason().startswith("question-judge: ") and "plain effect" in r.reason(), detail(r))
+
+
+def case_past_ruling_search_reads_the_matched_page_root():
+    # A write to the child repo's page from a non-repo folder: the past-ruling search reads the page's own repo, so the
+    # child's decision record is in the prompt. Under a mutant that passes no page root, the search reads the folder
+    # (no records), and the marker is missing. The control writes from the child repo itself.
+    fx = pointer_fixture()
+    own = run_hook(page_input("set", good_page_item(), url=CHILD_PAGE_URL, cwd=fx["child"]), answer=PAGE_FLAG,
+                   pointer=fx["settings"])
+    check("page root control: from the child repo, the write gets one model call", len(own.calls) == 1, detail(own))
+    check("page root control: the child's decision record is in that prompt",
+          len(own.calls) == 1 and CHILD_RULING_MARK in own.calls[0]["prompt"], detail(own))
+    r = run_hook(page_input("set", good_page_item(), url=CHILD_PAGE_URL, cwd=fx["loose"]), answer=PAGE_FLAG,
+                 pointer=fx["settings"])
+    check("page root: from a non-repo folder, the child's write gets one model call", len(r.calls) == 1, detail(r))
+    check("page root: the search reads the child's records, so its decision record is in the prompt",
+          len(r.calls) == 1 and CHILD_RULING_MARK in r.calls[0]["prompt"], detail(r))
+
+
 # ------------------------------------------------------------------ a re-ask of an answered item (ruled Nov 1 17:44 CST)
 #
 # An owner's "none of these" note that gives a direction closes the item and becomes a step, so a write that asks
@@ -1649,7 +1711,9 @@ def main():
                  case_unshown_id_takes_the_unvetted_path, case_marker_does_not_skip_the_check,
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
-                 case_page_roadmap_cwd_is_judged_against_the_pointer_page):
+                 case_page_roadmap_cwd_is_judged_against_the_pointer_page,
+                 case_page_file_item_from_a_roadmap_cwd_gets_the_model_review,
+                 case_past_ruling_search_reads_the_matched_page_root):
         try:
             case()
         except Exception as exc:
