@@ -1,0 +1,36 @@
+{
+  "added": "2026-11-07T23:54:00Z",
+  "context": "Goal: a builder cannot weaken the mutation tests that prove a guard works.\nProblem (rule): main lets builders edit hooks/mutate_guard.py (pinned by hooks/test_guard.py line 13028; hooks/agent_brief.py line 30 tells builders to add mutants). Decision builders-cannot-edit-tests refuses their edits to other test files.\nBased on (read): a probe on main 174b005c1. A builder's Edit, Write and sed -i on mutate_guard.py are all allowed.\nBased on (ruling): builders-cannot-edit-tests. Asked because it does not say whether a mutant file counts as a test file, and the builder brief tells builders to add mutants.\nDeparts from: main, where a builder may edit any mutant \u2014 c refuses a builder diff that removes or changes an existing mutant line.",
+  "home": "lane notes-fix-merge-ci (session_013NEJL17gMWcgUJ44gi3ZRs)",
+  "id": "mutate-guard-owner-unclear",
+  "kind": "decision",
+  "lane": "notes-fix-builder-mutants",
+  "n": 378,
+  "options": [
+    {
+      "gain": "Keeps the brief's add step, and stops a builder weakening a mutant.",
+      "key": "c",
+      "label": "Builders may add mutants only (recommended)",
+      "lose": "A builder whose fix moves a mutant's anchor needs a test-author pass."
+    },
+    {
+      "gain": "One rule for all test files.",
+      "key": "a",
+      "label": "Only test authors may change mutants",
+      "lose": "Every new mutant needs a test-author pass."
+    },
+    {
+      "gain": "No change.",
+      "key": "b",
+      "label": "Keep as is, and record it",
+      "lose": "A builder can weaken a mutant to get a green run."
+    }
+  ],
+  "owner": "lane notes-fix-merge-ci (session_013NEJL17gMWcgUJ44gi3ZRs)",
+  "rank": 2,
+  "ref": "decision builders-cannot-edit-tests; step notes-fix-builder-mutants; notes row mutate-guard-owner-unclear",
+  "short": "Who may change a guard's mutation tests",
+  "status": "open",
+  "title": "May a builder change the mutation tests that prove a guard works?",
+  "why": "Main lets builders edit hooks/mutate_guard.py, but refuses their edits to other test files. The lane parks this step until you pick."
+}

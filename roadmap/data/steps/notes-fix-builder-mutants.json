@@ -1,11 +1,11 @@
 {
   "title": "A builder cannot edit a test-author path such as hooks/mutate_guard.py",
-  "phase": "now",
-  "status": "doing",
+  "phase": "next",
+  "status": "todo",
   "order": 269.7,
   "owner": "coordinator",
   "lane": "session_013NEJL17gMWcgUJ44gi3ZRs",
   "why": "Builder agents edited hooks/mutate_guard.py, a test-author path (AUTHOR_MUTATION_TESTS in hooks/guard.py), and reported no refusal (lane notes-fix-merge-ci, 17:51 CST Nov 7). Rule roles-one-role-per-agent.",
-  "note": "The lane first checks whether main already refuses it, then writes red cases.",
-  "updatedAt": "2026-11-07T17:49:00-06:00"
+  "note": "The lane first checks whether main already refuses it, then writes red cases. Parked on owner page item 378 (mutate-guard-owner-unclear), 17:54 CST: main lets builders edit hooks/mutate_guard.py. c (recommended) lets builders add mutants only.",
+  "updatedAt": "2026-11-07T17:54:00-06:00"
 }
