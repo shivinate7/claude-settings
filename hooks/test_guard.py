@@ -10890,6 +10890,30 @@ records_allow("a chain that logs the generator's history, then add -A and commit
               VCS + " log --oneline -- lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
 records_allow("a chain that runs the generator with --print, then add -A and commit",
               GEN + " --print && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+
+# argparse reads a flag by any unambiguous prefix, and -h or --help exits before any write. So -h, --help,
+# --che (a prefix of --check) and --pri (a prefix of --print) read the generator and write no page. A --root
+# names the repo a run writes, so a run aimed at another repo writes none of this repo's page, in either form.
+# A run of this repo's generator still counts, whichever way it names this repo's root.
+OTHER_REPO = os.path.join(RECMORE, "other-repo")   # another repo: the --root target that is not this repo
+
+
+def _build_other_repo():
+    make_repo(OTHER_REPO, {"README.md": "another repo\n"})
+
+
+lazy_fixture([OTHER_REPO], _build_other_repo)
+for _flag in ("-h", "--help", "--che", "--pri"):
+    records_allow("a chain that runs the generator with %s, then add -A and commit" % _flag,
+                  GEN + " " + _flag + " && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a chain that runs the generator with --root at another repo, then add -A and commit",
+              GEN + " --root " + OTHER_REPO + " && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a chain that runs the generator with --root=another repo, then add -A and commit",
+              GEN + " --root=" + OTHER_REPO + " && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_deny("a chain that runs the generator with --root at this repo, then add -A and commit",
+             GEN + " --root " + REC_LANES["product"] + " && " + ADD_A + " && " + COMMIT_X, "product")
+records_deny("a chain that runs the generator with --root . in this repo, then add -A and commit",
+             GEN + " --root . && " + ADD_A + " && " + COMMIT_X, "product")
 records_deny("a chain that runs the generator as its own command word, then add -A and commit",
              "./lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, "product")
 records_deny("a chain that runs the generator through env, then add -A and commit",
