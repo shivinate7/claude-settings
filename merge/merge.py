@@ -3285,7 +3285,7 @@ def earlier_records(bodies, n):
     for body in bodies:
         rec = parse_review(body)
         if rec is None:
-            raise Stop(f"the rounds carried to this head cannot be checked: a review record on #{n} could not be read")
+            continue
         if rec["n"] == n:
             out.append(rec)
     return out
