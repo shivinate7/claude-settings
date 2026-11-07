@@ -19,6 +19,10 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   coordinator's grant. Its Never covers names permissions, settings, override, a merge ask to any
   other session or from a session that is not a coordinator, and a request to approve a pull
   request (decision auto-mode-owner-acts).
+  Its Covers text names the session that started this one as a target.
+  Its Covers text lets a message that asks for no act (pull request number, batch heads) through.
+  Its Covers text names a report that relays a grant or hands off an act, and `next: merge`, and
+  limits the already granted act to messages that ask.
 - One "Relayed Grant:" entry quotes page_grant.py's COMMAND and COUNTED_LINE, read from the
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
   relayed-grant-read-from-page).
@@ -81,6 +85,16 @@ RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page 
                    ("no counted line", "no `counted` line in this session"))
 MERGE_GO_REFUSED = (("any other session", "any other session"),
                     ("not a coordinator", "not a coordinator"))
+# The Covers text names the session that started this one, and the no-act report it lets through.
+MESSAGE_TARGET = (("the session that started this one", "the session that started this one"),)
+MESSAGE_REPORT = (("asks for no act", "asks for no act"), ("pull request number", "pull request number"),
+                  ("batch heads", "batch heads"))
+MESSAGE_QUESTION = (("a question about state", "a question about state"),)
+MESSAGE_REQUEST = (("ready to merge", "ready to merge"), ("however phrased", "however phrased"))
+MESSAGE_RELAY = (("relays a grant", "relays a grant"), ("hands off an act", "hands off an act"))
+MESSAGE_NEXT_MERGE = (("next: merge", "next: merge"),)
+MESSAGE_ONLY = (("only informs and asks for no act", "only informs and asks for no act"),)
+MESSAGE_OUTSIDE = (("never a session outside the owner's account", "never a session outside the owner's account"),)
 
 
 def auto_mode():
@@ -234,8 +248,11 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
         self.assertFalse(missing, "Never covers does not name %r" % missing)
 
     def test_covers_names_the_already_granted_act(self):
-        self.assertRegex(bounds_text(allow_entry(OWNER_MESSAGE)), r"(?i)already granted",
+        covers = bounds_text(allow_entry(OWNER_MESSAGE))
+        self.assertRegex(covers, r"(?i)already granted",
                          "Covers text must limit the message to acts already granted")
+        self.assertRegex(covers, r"(?i)the already granted limit applies to messages that ask",
+                         "Covers text must say the already granted limit applies to messages that ask")
 
     def test_never_covers_names_priority_now(self):
         self.assertRegex(never_covers(allow_entry(OWNER_MESSAGE)) or "", r"(?i)priority:\s*now",
@@ -254,6 +271,54 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the owner message entry")
         missing = unnamed_terms(clause, MERGE_GO_REFUSED)
         self.assertFalse(missing, "Never covers does not name the merge-ask limits %r" % missing)
+
+    def owner_message_part(self, never=False):
+        """The owner message's Never covers sentence (never=True), else its Covers text."""
+        entry = allow_entry(OWNER_MESSAGE)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWNER_MESSAGE)
+        self.assertIsNotNone(never_covers(entry), "need a 'Never covers' sentence to bound Covers")
+        return never_covers(entry) if never else bounds_text(entry)
+
+    def test_covers_names_the_session_that_started_this_one(self):
+        missing = unnamed_terms(self.owner_message_part(), MESSAGE_TARGET)
+        self.assertFalse(missing, "Covers text does not name the session that started this one: %r"
+                         % missing)
+
+    def test_covers_names_a_report_that_relays_or_hands_off(self):
+        missing = unnamed_terms(self.owner_message_part(), MESSAGE_RELAY)
+        self.assertFalse(missing,
+                         "Covers text does not say a report that relays a grant or hands off an act asks: %r"
+                         % missing)
+
+    def test_covers_names_the_next_merge_report(self):
+        missing = unnamed_terms(self.owner_message_part(), MESSAGE_NEXT_MERGE)
+        self.assertFalse(missing, "Covers text does not name the 'next: merge' report: %r" % missing)
+
+    def test_covers_names_the_no_act_report(self):
+        missing = unnamed_terms(self.owner_message_part(), MESSAGE_REPORT)
+        self.assertFalse(missing,
+                         "Covers text does not name the no-act report wording %r" % missing)
+
+    def test_covers_names_a_question_about_state(self):
+        missing = unnamed_terms(self.owner_message_part(), MESSAGE_QUESTION)
+        self.assertFalse(missing, "Covers text does not name a question about state: %r" % missing)
+
+    def test_covers_names_a_request_however_phrased(self):
+        missing = unnamed_terms(self.owner_message_part(), MESSAGE_REQUEST)
+        self.assertFalse(missing,
+                         "Covers text does not say a request is a message that asks: %r" % missing)
+
+    def test_covers_says_only_informs_and_asks_for_no_act(self):
+        missing = unnamed_terms(self.owner_message_part(), MESSAGE_ONLY)
+        self.assertFalse(missing,
+                         "Covers text does not say 'only informs and asks for no act': %r"
+                         % missing)
+
+    def test_never_covers_names_a_session_outside_the_owners_account(self):
+        missing = unnamed_terms(self.owner_message_part(never=True), MESSAGE_OUTSIDE)
+        self.assertFalse(missing,
+                         "Never covers does not name a session outside the owner's account: %r"
+                         % missing)
 
 
 class NeverCoversSentence(unittest.TestCase):

@@ -3,7 +3,7 @@
 Read this file before you write UI in a repo with screens. Each rule states only what Vercel
 web-interface-guidelines, impeccable and frontend-design do not state. Ruling: record
 ux-house-rules (house UX rules). A repo's own design records can add to a rule, never cancel it. Before you lay out a screen,
-also read [`layout.md`](layout.md).
+also read [`layout.md`](layout.md). An entry marked Guidance is not a house rule.
 
 ## ux-press-moves-nothing
 
@@ -22,6 +22,7 @@ it); ios-adblock `ios/App/AdBlockApp.swift` (the state icon has a fixed frame).
 
 ## ux-order-holds-still
 
+Guidance, not a house rule: a miss is advice, not a finding (record ux-house-rules).
 A list keeps a plain, predictable order, so the person reaches the next open row without a hunt
 and no other row changes its order. An act may move the row it acted on out of an open list,
 such as a sent card that sinks to Answered. Then the next open row, if any, takes its slot. No
@@ -34,13 +35,21 @@ nothing else jumps); owner, 2026-11-06 16:47 CST, item 313 a (a sent card may si
 
 ## ux-unknown-is-not-empty
 
-A screen shows loading, failed, unknown and loaded as different states.
+A screen shows loading, failed, unknown, empty and loaded as different states. An empty state is
+one sentence that says what fills it, and one control that fills it. A list that has no data yet
+hides its filters. A list that a filter emptied keeps its filters, and its one control clears the
+filter.
 Check: force a failed read and an unknown state. Pass when neither shows as empty, zero or done.
+Then empty each list. Pass when it shows one sentence and one control. With no data, the filters
+are hidden. When a filter emptied it, the filters show and the control clears the filter.
 Source: q_max D-255 (never assert an unreached state) and D-233 (a failed history read says so);
-ios-adblock `ios/App/AdBlockApp.swift` (`BlockerRow` has its own error and unknown states).
+ios-adblock `ios/App/AdBlockApp.swift` (`BlockerRow` has its own error and unknown states);
+banchi `CLAUDE.md` "Register" and `docs/DESIGN.md` `EmptyState`; q_max `specs/ux-plan-b.md` B2
+(owner confirmed, 2026-09-29).
 
 ## ux-statements-are-true
 
+Guidance, not a house rule: a miss is advice, not a finding (record ux-house-rules).
 Screen copy claims only what the product does and what the owner confirmed.
 Check: pass when each promise (a search scope, a feature, a figure, a trust line) is true now.
 Source: joyous `docs/design-brief.md` move 6 (no unsourced claim); sillage
@@ -49,6 +58,7 @@ Source: joyous `docs/design-brief.md` move 6 (no unsourced claim); sillage
 
 ## ux-machine-text-hidden
 
+Guidance, not a house rule: a miss is advice, not a finding (record ux-house-rules).
 A code, a path, a record id or raw server text shows only in a closed disclosure.
 Check: pass when each visible string is in the person's words, and machine text is behind a
 "What the server said" disclosure under a plain sentence.
@@ -57,6 +67,7 @@ disclosure); q_max D-640 (an error never shows the server's raw reason).
 
 ## ux-no-dead-end
 
+Guidance, not a house rule: a miss is advice, not a finding (record ux-house-rules).
 Each refusal, error and end page has a control on that screen that leads on: a fix, or another
 way such as a phone number.
 Check: pass when each one has that control. Prose that names a place is not a control.
@@ -64,28 +75,9 @@ Source: q_max D-261 (a refusal names a reachable fix) and D-226 (offer the desti
 prose); joyous `docs/design-brief.md` move 4 (no dead end, offer a call) and record
 custom-tour-booking (an unknown link shows Book a tour and the phone).
 
-## ux-empty-one-action
-
-An empty state is one sentence that says what fills it, and one control that fills it.
-A list that has no data yet hides its filters. A list that a filter emptied keeps its filters,
-and its one control clears the filter.
-Check: pass when an empty list shows one sentence and one control. With no data, the filters
-are hidden. When a filter emptied it, the filters show and the control clears the filter.
-Source: banchi `CLAUDE.md` "Register" and `docs/DESIGN.md` `EmptyState`; q_max
-`specs/ux-plan-b.md` B2 (owner confirmed, 2026-09-29).
-
-## ux-ask-or-undo
-
-A destructive press asks first when it cannot be undone, and acts and offers Undo when it can.
-Check: pass when no destructive press does both or neither, and each ask names the act and the
-count, with first focus on Cancel.
-Source: banchi `docs/DESIGN.md` ConfirmSheet row (first focus on Cancel) and UX-099 (ask first,
-or undo after; the ask names the count); banchi D57 (mark sold is one press, undoable); q_max
-D-497 (un-retire is an undo) and D-653 (a restore keeps the retirement in the log).
-
 ## ux-keep-what-was-made
 
-Never discard input that a person made and that no server can return.
+Input that a person made and that no server can return survives leaving and coming back.
 Check: type, then close, go back, change tabs and leave the app. Pass when the input is still
 there on return.
 Source: q_max D-399 (a screen with unrecoverable input stays mounted); sillage
@@ -121,6 +113,7 @@ times or more: too much verbiage).
 
 ## ux-a11y-floor
 
+Guidance, not a house rule: a miss is advice, not a finding (record ux-house-rules).
 Each screen meets the accessibility floor in `a11y.md`.
 Check: run the CI check in `a11y.md` on the changed screens, at each size and theme they ship in.
 Pass when it is green and the hand checks there pass.

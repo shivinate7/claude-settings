@@ -663,6 +663,14 @@ def _judge_isolation():
 VERDICT_SHAPE = {"verdict": ("ALLOW", "FLAG")}
 
 
+class EachOf(tuple):
+    """A shape's values for a reply that judges many items: its key holds a list, and each entry is an object with an
+    integer `line` and a `verdict` that is one of these values. The merge's prose judge asks in this shape."""
+
+
+LINE_VERDICTS = {"verdicts": EachOf(("holds", "stale", "unbacked"))}
+
+
 def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE, effort="xhigh"):
     """Run the judgment prompt through `claude -p`, isolated. Return (verdict_dict, error).
 
@@ -729,7 +737,15 @@ def parse_verdict(text, shape=VERDICT_SHAPE):
         verdict = json.loads(match.group(0))
     except Exception:
         return None, "model result's JSON verdict did not parse"
+    if not isinstance(verdict, dict):
+        return None, "model result's JSON verdict was not an object"
     (key, values), = shape.items()
+    if isinstance(values, EachOf):
+        entries = verdict.get(key)
+        if not isinstance(entries, list) or not all(
+                isinstance(e, dict) and type(e.get("line")) is int and e.get("verdict") in values for e in entries):
+            return None, "model result's %s was not a list of {line, verdict} with a verdict of %s" % (key, " or ".join(values))
+        return verdict, None
     if verdict.get(key) not in values:
         return None, "model result named neither %s" % " nor ".join(map(str, values))
     return verdict, None

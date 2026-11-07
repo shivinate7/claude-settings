@@ -14,10 +14,11 @@
 # Checkout: the clone this file lives in; a copy install (~/.claude/bin) has no actions/, so it uses the clone the
 # global CLAUDE.md names on its `@<dir>/CLAUDE.md` line (hooks/guard_pointer.pointer_checkout).
 # Windows: bin\ste-changed.cmd. Needs bash (Git for Windows has it) and python3 on PATH.
-import os, re, shutil, subprocess, sys
+import os, re, subprocess, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import git_reads  # noqa: E402  the one home of the ancestry read (hooks/git_reads.py)
+from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (hooks/git_bash.py)
 
 LINT_ACTION = os.path.join("actions", "ste-lint", "action.yml")
 
@@ -43,7 +44,8 @@ ACTION = os.path.join(ROOT, "actions", "ste-lint")
 # Every file of this repo the CI step runs: the action, run.sh's linter, and the linter's own imports.
 LINT_FILES = ("actions/ste-lint/action.yml", "actions/ste-lint/run.sh", "lint/ste_lint.py",
               "lint/layout.py", "lint/layout.json", "lint/ui_suffixes.py", "lint/stale_cites.py",
-              "lint/rule_audit.py", "hooks/_nowindow.py", "skills/plain-english-map/scripts/lib/py-facts.py")
+              "lint/rule_audit.py", "hooks/_nowindow.py", "hooks/precompact_handoff.py", "hooks/route_match.py",
+              "skills/plain-english-map/scripts/lib/py-facts.py")
 # The one table of pinned actions: {action: (files CI runs for it, what the verdict lines call them, the
 # remedy's clause on who may move the pin)}. The "with no question" grant is the owner's for ste-lint pins only.
 PINNED = {"ste-lint": (LINT_FILES, "lint", ", with no question (rule git-integration-branch-merge)"),
@@ -116,12 +118,7 @@ def default(text, name):
 def find_bash():
     if os.path.exists("/bin/bash"):
         return "/bin/bash"
-    git = shutil.which("git")  # a bare "bash" can be WSL's, which cannot run the step
-    if git:
-        gb = os.path.join(os.path.dirname(os.path.dirname(git)), "bin", "bash.exe")
-        if os.path.exists(gb):
-            return gb
-    return shutil.which("bash") or sys.exit("ste-changed: bash not found")
+    return find_git_bash() or sys.exit("ste-changed: bash not found")  # never the WSL launcher
 
 
 def main(argv):
