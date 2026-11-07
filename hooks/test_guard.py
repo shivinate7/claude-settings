@@ -13187,6 +13187,22 @@ SR = dict(B, cwd=SCRIPTREPO)
 TEST_WRITE_PY = "open('tests/x.py', 'w').write('x = 1\\n')\n"
 SRC_WRITE_PY = "open('src/app.py', 'w').write('x = 3\\n')\n"
 NODE_WRITE = "require('fs').writeFileSync('web/a.test.js', 'x')\n"
+# The node reader keeps a string, a template literal and a regex literal whole, and blanks a `//` or `/*` comment.
+# So a comment opener inside one of them must not blank the write after it. Each text puts the write on the same
+# line as the opener, or after a template's closing backtick, so a reader that blanks the opener's rest of its
+# line turns the case green. Governing rule: building-scanner-respects-strings (a scanner tests comment openers
+# inside strings, a multi-line template literal and a lone quote in text). Each text runs twice in the cases
+# below: as a file on disk that node runs, and as a quoted node heredoc.
+NODE_STRING_TEXTS = {
+    "str_slashes.js": "const a = \"http://x\"; " + NODE_WRITE,                   # `//` inside a double-quoted string
+    "str_star.js": "const b = \"/*\"; " + NODE_WRITE,                            # `/*` left open inside a string
+    "tpl_slashes.js": "const s = `a\n// b`; " + NODE_WRITE,                      # `//` in a template over two lines
+    "tpl_quote.js": "const h = `<p>Don't</p>\n// x`; " + NODE_WRITE,            # a lone quote, then `//`, in a template
+    # A regex literal whose `/*` or `//` is a pattern, not a comment: the write after it is code.
+    "re_star.js": r"const s = p.replace(/\/*$/, ''); " + NODE_WRITE,
+    "re_slashes.js": r"const s = p.replace(/\/\//g, ''); " + NODE_WRITE,
+    "re_control.js": "const s = p.replace('x', ''); " + NODE_WRITE,              # the same shape, no regex: the control
+}
 
 
 def guard_constant(name):
@@ -13224,8 +13240,18 @@ def _build_scriptrepo():
         "shell_lone.sh": "# don't touch this\necho x > tests/x.py\n",     # a lone quote in a comment
         "comment_only.py": "# open('tests/x.py', 'w')\nprint('tests/x.py')\n",
         "empty.py": "",
+        # A PowerShell script that writes a test path, one that writes product code, and a zsh script.
+        "pwsh_write.ps1": "Set-Content tests/x.ps1 x\n",
+        "pwsh_src.ps1": "Set-Content src/app.ps1 x\n",
+        "zsh_write.sh": "echo x > tests/x.py\n",
+        **NODE_STRING_TEXTS,
         "x/keep": "keep\n",
     })
+    # The regex cases must hold the regex bytes they name, so an escaping slip fails here, not as another red.
+    for name, literal in (("re_star.js", r"p.replace(/\/*$/, '')"), ("re_slashes.js", r"p.replace(/\/\//g, '')")):
+        with open(os.path.join(SCRIPTREPO, name), encoding="utf-8") as handle:
+            if literal not in handle.read():
+                sys.exit("fixture setup failed in _build_scriptrepo: %r lacks the regex literal %r" % (name, literal))
     os.chmod(os.path.join(SCRIPTREPO, "gen_shebang"), 0o755)
     for name, total in (("at_cap.py", cap), ("over_cap.py", cap + 1)):
         lead = "#" * (total - len(TEST_WRITE_PY) - 1) + "\n"   # a comment line that fills the file, then the write
@@ -13310,6 +13336,26 @@ for _name, _command in (
     sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
 sh("builder-test: script-file, test-author runs python3 gen.py, writing tests/x.py, is allowed",
    "python3 gen.py", "allow", agent_id="auth1", agent_type="test-author", cwd=SCRIPTREPO)
+
+# The node reader's strings (building-scanner-respects-strings, see NODE_STRING_TEXTS). Each text is refused both
+# as a file node runs and as a quoted heredoc node reads. The write it holds goes to a test path, so each must be
+# refused; a case goes green only when the reader blanks the write.
+for _name in NODE_STRING_TEXTS:
+    _shape = "a control, no regex" if _name == "re_control.js" else "a comment opener in a string or regex"
+    sh("builder-test: script-file, node runs %s, %s before a test write, is refused" % (_name, _shape),
+       "node " + _name, "deny", rule=BT, carries=("test-author",), **SR)
+    sh("builder-test: script-file, node heredoc of %s, %s before a test write, is refused" % (_name, _shape),
+       "node <<'EOF'\n" + NODE_STRING_TEXTS[_name] + "EOF", "deny", rule=BT, carries=("test-author",), **SR)
+
+# The shell reader's program name (`_SHELL_COMMAND`, the shell list of guard_core `_SHELLS`): a PowerShell or a zsh
+# script run by name is read as a shell script, so its write to a test path is refused, and its write to product
+# code is allowed.
+sh("builder-test: script-file, pwsh runs pwsh_write.ps1, Set-Content onto tests/x.ps1, is refused",
+   "pwsh pwsh_write.ps1", "deny", rule=BT, carries=("test-author",), **SR)
+sh("builder-test: script-file, pwsh runs pwsh_src.ps1, Set-Content onto src/app.ps1, is allowed",
+   "pwsh pwsh_src.ps1", "allow", **SR)
+sh("builder-test: script-file, zsh runs zsh_write.sh, echo redirect onto tests/x.py, is refused",
+   "zsh zsh_write.sh", "deny", rule=BT, carries=("test-author",), **SR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
