@@ -147,11 +147,11 @@ class RouteTests(RouteFixture, unittest.TestCase):
         self.assertIsNone(out, "a question sent after the parent's asking reply was blocked")
 
     def test_rt_green_asking_reply_keeps_other_targets_sends(self):
-        # Catches: a fix that reads the parent's asking reply as an answer and drops every send before it. The
-        # writer's ack that follows would then start a turn, and the question would ride on no send. Green on main;
-        # the asking branch on 06b781029 is the regression this pins.
+        # Catches: an asking reply that drops the sends made before it, so the writer's ack after it starts a turn with
+        # no send in it. Pins that the send to the writer, made before the parent's asking reply, still matches the
+        # writer's ack after it.
         out = self.lane(peer_msg("pick?"), *self.send(session_id="@parent"), *self.send(session_id=self.WRITER),
-                        peer_msg("Which repo?", from_session=self.PARENT),
+                        peer_msg("Which repo?", from_session=self.PARENT), *self.writer_read(self.WRITER),
                         *self.send(session_id="@parent"),
                         peer_msg("Recorded.", from_session=self.WRITER),
                         assistant_text(self.reply(self.QUESTION)))
