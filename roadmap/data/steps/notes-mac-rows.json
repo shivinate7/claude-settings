@@ -1,0 +1,10 @@
+{
+  "title": "Fix the 6 kept notes that need the Mac",
+  "phase": "next",
+  "status": "todo",
+  "order": 261.5,
+  "owner": "coordinator",
+  "why": "Coordinator, 14:25 CST Nov 7: notes-keep-reverify found 6 rows that need the Mac.",
+  "note": "Waits for a Mac session, like step guard-log-judge-export.",
+  "updatedAt": "2026-11-07T14:24:00-06:00"
+}

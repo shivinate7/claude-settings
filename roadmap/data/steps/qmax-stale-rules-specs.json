@@ -4,8 +4,8 @@
   "status": "doing",
   "order": 0.19,
   "owner": "coordinator",
-  "why": "Coordinator, 14:22 CST Nov 7: follows qmax-stale-rulings-redo. Two q_max owner questions will come from this lane.",
-  "note": "",
+  "why": "Coordinator, 14:22 CST Nov 7: follows qmax-stale-rulings-redo.",
+  "note": "Coordinator, 14:25 CST: no owner questions on q_max D-557 and D-155; main stands (past-ruling guard).",
   "lane": "qmax-stale-rulings-redo",
-  "updatedAt": "2026-11-07T14:23:00-06:00"
+  "updatedAt": "2026-11-07T14:24:00-06:00"
 }
