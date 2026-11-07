@@ -2024,6 +2024,16 @@ class ReadyAndDraftRows(UpkeepFixture):
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]))
 
+    def test_draft_on_a_lane_branch_with_a_live_step_is_not_listed(self):
+        # The head ref lane/c1 is the lane of step c1, as c1 is. Its live session carries the step's tag.
+        # lone-draft is the control: no live step, so it stays listed.
+        self.commit_step("c1", status="doing")
+        self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", self.REPO, "cs-step:c1")],
+                     pulls=[self.draft(1001, "lane/c1", self.created_before(780)),
+                            self.draft(1002, "lone-draft", self.created_before(780))])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]))
+
     def test_draft_whose_title_holds_a_live_step_id_is_still_listed(self):
         # Only the draft's branch can lane it. The title "Follow-up for c91" holds the live step c91 and stays listed.
         # c91 is the control: its branch is the step, so it is laned.
