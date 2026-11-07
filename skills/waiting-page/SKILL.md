@@ -242,8 +242,9 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
 
 1. Read the page with `Artifact` action `read`. Use the file the read names as the saved full page.
    A read that gives a summary, not the raw page, is `unknown`.
-2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out> --items <items> --answers <answers>`, where
-   `<items>` is what `ArtifactData list items` saved and `<answers>` is what `ArtifactData list answers` saved. It
+2. List the answers first: `ArtifactData list answers`, into its out_dir folder. Then run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out> --items <items> --answers <answers>`, where
+   `<items>` is what `ArtifactData list items` saved and `<answers>` is that out_dir folder. Always pass `--answers`.
+   When the list failed, pass the folder anyway: it has no `.complete`, so the run reads `unknown`, never silence. It
    compares the page's code outside `designData` with `skills/waiting-page/page.html` on
    claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
    read. Code outside main's page, other than the host's document skeleton, is `behind`. Then it prints one
@@ -418,7 +419,7 @@ live page.
 
 A save on the page sends a comment to Claude when the page allows it. The comment wakes the
 sessions that watch the page. Only the owning session reads, routes and closes its items, except that the writer closes an item on a park answer. On a `lane` item, the park branch has it tell first. It reads
-the answers at each wake, and at the start of each turn while it has an item open (the writer also
+the answers at each wake, and at the start of each turn while it has an item open, or a closed item that still carries `lane` (the writer also
 while `meta/page.parked` is not empty): `ArtifactData list answers`. That read is the fallback when no wake comes. A peer session never
 relays an answer's text. It sends only the page URL, the item id and the act, and the receiver checks the answer itself (decision relayed-grant-read-from-page). An answer typed in the chat counts the same. A chat answer to an open item: the
 writer adds the answer and its time to the item's `context`, and the writer closes it. Nothing is
