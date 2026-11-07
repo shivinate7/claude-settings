@@ -13,15 +13,24 @@ Each line a branch adds to `docs/debts/notes.md`, and each debt file it adds, ca
 - A notes line holds the field anywhere on the line; the last `Fix:` counts. A debt file holds it as a line that starts `Fix:` at column one, or after one leading `- `.
 - A notes line whose `- <slug>:` already exists at the merge base is an edit and passes. Old lines never turn red.
 - CI (`lint/check_record_slugs.py`) judges the form and, for a step, that it exists on `origin/roadmap`. It is the one home of the grammar. When the roadmap read cannot run, the check exits non-zero and says the read did not run.
-- The Stop guard (`lint/report_guard.py`) imports that grammar. On a landed turn whose Done has a RECORDED item, each `Fix: step:<slug>` the branch adds must have its slug in Done. The none and already-fixed forms pass.
+- The Stop guard (`lint/report_guard.py`) imports that grammar. On a landed turn whose Done has a RECORDED item, each `Fix: step:<slug>` that this turn's own commits add must have its slug in Done. The turn's commits are the `[branch sha] subject` lines that `git commit` printed in its tool results. An earlier turn's lines are not judged again. A sha git cannot read is skipped. The none and already-fixed forms pass.
+
+Three more parts, all on the notes file:
+
+- Ratchet. When a branch touches the notes file, the count of bullets with no valid Fix at HEAD may not exceed the count on `origin/main`. Both counts are read live, with no stored baseline. The check prints the total.
+- Until. A `Fix: none -- <reason>` line carries `Until: YYYY-MM-DD`. The check reads it on lines the branch adds or edits only. A missing date, a past date, or one more than `UNTIL_CAP_DAYS` (30) days from today is refused. A step line and an already-fixed line need no date. Today is the `FIXED_TODAY` variable when set, else the clock.
+- Upkeep. The roadmap build (`skills/roadmap/build.py`) prints one upkeep line per note whose Until date is past. It imports the grammar from `lint/check_record_slugs.py`. It adds no log or timer.
+
+Cost: the ratchet adds one ls-tree and one show per ref, only when a branch touches the notes file. The Stop check starts one git process per commit the turn printed, and none in a checkout with no notes file. The upkeep line reads the notes file once.
 
 Why: on 2026-11-07 13:20 CST the coordinator wrote two fixable gaps into `docs/debts/notes.md`, reported them RECORDED, and started no fix. The owner asked "why not fix it then", and at 13:25 CST said "I want the guard itself". A gap in a file nobody reads never gets fixed. A note is meant for a finding too unlikely to hit, so a fixable gap there needs a step, or a stated reason that it needs none.
 
-Source: owner words 2026-11-07 13:20 CST ("why not fix it then") and 13:25 CST ("I want the guard itself"). Coordinator ruling 2026-11-07 13:30 CST (`step:` is the only form, since the PR ledger counts steps).
+Source: owner words 2026-11-07 13:20 CST ("why not fix it then") and 13:25 CST ("I want the guard itself"). Coordinator ruling 2026-11-07 13:30 CST (`step:` is the only form, since the PR ledger counts steps). Coordinator rulings 2026-11-07 13:58 CST (the ratchet; the Until date and its 30-day cap; the Stop check judges the turn's commits only) and 13:59 CST (the upkeep line, one home for the grammar).
 
 - Risk: incident. Landed 2026-11-07.
 
 Kind: process
 Home: lint/check_record_slugs.py
 Home: lint/report_guard.py
+Home: skills/roadmap/build.py
 Check: lint/check_record_slugs.py
