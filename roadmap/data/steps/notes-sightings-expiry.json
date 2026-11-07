@@ -1,11 +1,11 @@
 {
   "title": "A note counts its sightings and expires; each batch carries one debt-fix lane",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 263.1,
   "owner": "coordinator",
   "why": "Owner, item 358, 14:41 CST: a and b (not c).",
-  "note": "Builds sightings and expiry, plus one debt-fix lane per batch. Builds on step notes-name-their-fix, and must merge after it (lane, 14:51 CST).",
+  "note": "Builds sightings and expiry, plus one debt-fix lane per batch. Builds on step notes-name-their-fix, and must merge after it (lane, 14:51 CST). PR #1619, with the runner. It joins after #1516 (coordinator, 17:04 CST).",
   "lane": "session_013NEJL2vaREMqJHVJ16kbQf",
-  "updatedAt": "2026-11-07T14:52:00-06:00"
+  "updatedAt": "2026-11-07T17:04:00-06:00"
 }
