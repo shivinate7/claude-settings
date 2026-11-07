@@ -156,7 +156,7 @@ class AllJobsPassedJob(unittest.TestCase):
 
 class GuardShardInNeeds(unittest.TestCase):
     """checks-windows-guard-2 runs on a ready pull_request (its steps decide, on guard_windows_full), so all-jobs-passed needs it.
-    The merge shards run off pull_request only, so all-jobs-passed never needs them. ci-done needs every job, guard-2 included."""
+    ci-done needs every job, guard-2 included."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -167,15 +167,34 @@ class GuardShardInNeeds(unittest.TestCase):
         # Named failure: a red full guard shard on a ready pull_request would not block the merge.
         self.assertIn("checks-windows-guard-2", self.needs, f"{ALL_JOBS_PASSED_JOB} does not need checks-windows-guard-2: {self.needs}")
 
-    def test_all_jobs_passed_needs_no_merge_shard(self):
-        for n in range(2, 6):
-            name = f"checks-windows-merge-{n}"
-            with self.subTest(job=name):
-                self.assertNotIn(name, self.needs, f"{ALL_JOBS_PASSED_JOB} needs {name}, which runs off pull_request only")
-
     def test_ci_done_needs_the_guard_shard_2(self):
         # Control: ci-done needs every job that runs on a pull_request, guard-2 included.
         self.assertIn("checks-windows-guard-2", needs_of(job_block(self.text, FAN_IN)) or [], f"{FAN_IN} does not need checks-windows-guard-2")
+
+
+class MergeShardInNeeds(unittest.TestCase):
+    """checks-windows-merge-2 to -5 run on a ready pull_request (their steps decide, on merge_windows_full), so all-jobs-passed needs
+    each one, as it needs checks-windows-guard-2. ci-done needs every job, the merge shards included."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+        self.needs = needs_of(job_block(self.text, ALL_JOBS_PASSED_JOB)) or []
+
+    def test_all_jobs_passed_needs_the_merge_shards(self):
+        # Named failure: a red full merge shard on a ready pull_request would not block the merge.
+        for n in range(2, 6):
+            name = f"checks-windows-merge-{n}"
+            with self.subTest(job=name):
+                self.assertIn(name, self.needs, f"{ALL_JOBS_PASSED_JOB} does not need {name}: {self.needs}")
+
+    def test_ci_done_needs_the_merge_shards(self):
+        # Control: ci-done needs every job that runs on a pull_request, the merge shards included.
+        needs = needs_of(job_block(self.text, FAN_IN)) or []
+        for n in range(2, 6):
+            name = f"checks-windows-merge-{n}"
+            with self.subTest(job=name):
+                self.assertIn(name, needs, f"{FAN_IN} does not need {name}: {needs}")
 
 
 class AllJobsPassedFixtures(unittest.TestCase):
@@ -204,6 +223,7 @@ GUARD2_FLAG = ("  checks-windows-guard-2:\n    runs-on: windows-latest\n    need
                "    if: ${{ needs.scope.outputs.guard == 'true' }}\n")
 MERGE2 = ("  checks-windows-merge-2:\n    runs-on: windows-latest\n    needs: scope\n"
           "    if: ${{ github.event_name != 'pull_request' }}\n    steps:\n      - run: echo shard\n")
+MERGE2_NONE = "  checks-windows-merge-2:\n    runs-on: windows-latest\n    needs: scope\n    steps:\n      - run: echo shard\n"
 NEEDS_END = "      - checks-macos\n    steps:\n      - uses: actions/checkout"
 
 
@@ -216,7 +236,7 @@ def in_needs(text, name):
 
 class GuardShardInNeedsFixtures(unittest.TestCase):
     """The rules on a fixture. A guard shard that runs on a ready pull_request is needed, and its job-level if may hold the draft
-    guard only. Red controls: a merge shard in needs, and a needed guard shard whose job-level if reads a flag."""
+    guard only. Red controls: a needed merge shard that keeps the event-only if, and a needed guard shard whose job-level if reads a flag."""
 
     def test_a_needed_guard_shard_with_no_job_level_if_is_green(self):
         self.assertIn(GUARD2_OFF, GOOD, "the fixture lost checks-windows-guard-2's job-level if")
@@ -229,10 +249,17 @@ class GuardShardInNeedsFixtures(unittest.TestCase):
         text = in_needs(GOOD.replace(GUARD2_OFF, GUARD2_DRAFT, 1), "checks-windows-guard-2")
         self.assertTrue(all_problems(text), "a needed guard shard with the draft guard as its job-level if is accepted")
 
-    def test_a_merge_shard_in_needs_is_red(self):
+    def test_a_needed_merge_shard_with_no_job_level_if_is_green(self):
+        # The merge shards 2 to 5 take the guard shard's shape: no job-level if, and their steps decide on the full flag.
+        self.assertIn("  all-jobs-passed:\n", GOOD, "the fixture lost the all-jobs-passed job")
+        text = in_needs(GOOD.replace("  all-jobs-passed:\n", MERGE2_NONE + "  all-jobs-passed:\n", 1), "checks-windows-merge-2")
+        self.assertEqual(all_problems(text), [], "a needed merge shard with no job-level if is refused")
+
+    def test_a_needed_merge_shard_with_the_event_only_if_is_red(self):
+        # The event-only if skips the shard on a ready pull_request, so all-jobs-passed would read its skip as red.
         self.assertIn("  all-jobs-passed:\n", GOOD, "the fixture lost the all-jobs-passed job")
         text = in_needs(GOOD.replace("  all-jobs-passed:\n", MERGE2 + "  all-jobs-passed:\n", 1), "checks-windows-merge-2")
-        self.assertTrue(all_problems(text), "a merge shard in all-jobs-passed's needs is accepted")
+        self.assertTrue(all_problems(text), "a merge shard with the event-only if in all-jobs-passed's needs is accepted")
 
     def test_a_needed_guard_shard_whose_if_reads_a_flag_is_red(self):
         self.assertIn(GUARD2_OFF, GOOD, "the fixture lost checks-windows-guard-2's job-level if")
