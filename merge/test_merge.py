@@ -12256,7 +12256,7 @@ class ReviewFixRules(unittest.TestCase):
 
     def test_a_fix_pass_after_round_three_with_guard_yes_keeps_the_net_value_owed(self):
         # the fix check does not settle a net value that the third round left owed
-        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="yes", net="not owed")
+        state, why = fix_state(self, REVIEW_FIX_PASS_SONNET, rounds=REVIEW_FAILED_THREE, guard="yes", net="not owed")
         self.assertEqual(state, "open", f"a fix check settled a net value round 3 left owed: {why!r}")
 
     def test_a_fix_pass_after_round_three_with_guard_yes_is_held_for_a_negative_net_value(self):
