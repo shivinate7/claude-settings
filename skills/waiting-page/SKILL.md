@@ -38,7 +38,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   | --- | --- | --- |
   | `id` |  | Same string as the database key; the page warns on a missing or different one. |
   | `n` |  | A stable number the owner answers by. |
-  | `kind` | `command-in-item`, `gh-login-switch`, `option-letter-keys`, `owner-judge`, `port-question`, `press-link`, `question-departs`, `question-form`, `task-names-check`, `uniform-pick` | `decision` or `task`. Each rule in this row judges the kinds it names, so an update that a rule judges carries `kind`. |
+  | `kind` | `command-in-item`, `gh-login-switch`, `option-letter-keys`, `owner-judge`, `port-question`, `press-link`, `question-departs`, `question-form`, `task-names-check`, `uniform-pick` | `decision` or `task`. An update that `owner-judge`, `question-form`, `question-departs` or `task-names-check` judges carries `kind`. |
   | `status` | `option-letter-keys`, `owner-judge`, `question-departs`, `question-form`, `rework-off-page` | `open` or `closed`. A closed item passes every rule in this row. |
   | `added` |  | ISO time the item was added. |
   | `ref` |  | Each id with its plain name. |
@@ -47,34 +47,34 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   | `owner` |  | The session that reads the answer at its wake. |
   | `home` |  | The step, PR or record the answer goes to. A step is its bare step id, so the roadmap upkeep row can match it. |
   | `context` | `option-letter-keys`, `owner-judge`, `port-question`, `question-departs`, `question-form`, `rework-off-page`, `task-names-check` | Plain text, line breaks kept. Holds the question form's lines, the Departs from line and a task's Why yours line. |
-  | `holds` | `port-question` | One plain sentence: what is stopped until the answer. Puts the item in Blocking. Never on a port item. |
-  | `by` |  | An ISO deadline. Puts an item with no `holds` in Upcoming. |
-  | `stands` | `owner-judge`, `question-form` | `true` puts the item in the last section, Pick stands. |
+  | `holds` | `port-question` | What is stopped until the answer. |
+  | `by` |  | ISO deadline. |
+  | `stands` | `owner-judge` | `true`: the pick stands. |
   | `arbiter` |  | `true` marks a ruling the arbiter decided. |
   | `ruled` |  | ISO time of the ruling, on an arbiter item. |
-  | `rank` |  | Integer, lower first: the order inside a tier. Only the page's writer sets it. |
-  | `group` |  | A slug: the frame the item shares with the other items of that group (see `groups/<slug>`). |
-  | `port` | `port-question` | `true` marks a question about a port or redesign of an existing app; `false` where the word port means something else. |
-  | `look` |  | `true` marks a question about how something looks. Every option card with no picture then shows a warning. |
+  | `rank` |  | Order inside a tier. |
+  | `group` |  | Slug of the item's group. |
+  | `port` | `port-question` | A port or redesign question. |
+  | `look` |  | A question about how something looks. |
   | `designs` |  | A list of `{slug, label, file}`: the mockups. An option names its picture with `design`. |
   | `options` | `option-letter-keys`, `press-link`, `question-form`, `rework-off-page`, `uniform-pick` | A decision's list of `{key, label, how, gain, lose}`, plus optional `design`, `differs` and `widens`. |
   | `pick` | `uniform-pick` | The key you recommend; a list of keys on a `multi` item. Never names a `widens` option. |
   | `why` | `option-letter-keys`, `rework-off-page` | Why the pick. |
-  | `multi` |  | `true`: the options can all be done together; the owner ticks any number. |
-  | `ranked` |  | `true`: the owner also puts the ticked options in order. Implies `multi`. |
+  | `multi` |  | The owner ticks any number of options. |
+  | `ranked` |  | The owner also orders the ticked options. |
   | `steps` | `command-in-item`, `option-letter-keys`, `press-link`, `rework-off-page` | A task's list of strings. |
   | `links` | `press-link` | A task's list of `{label, url}`. A step that presses in a web app needs one. |
   | `command` | `command-in-item`, `gh-login-switch` | A task's `{powershell, mac}`, two strings, shown in a closed disclosure with a Copy button. |
-  | `minutes` |  | A task's time: a number, or text such as `3 min`. |
+  | `minutes` |  | A task's time. |
   | `reply` |  | What the session says back to a comment or a note. |
-  | `replied` |  | ISO time the writer last wrote `reply` or changed `waits`. Marks "New reply". |
+  | `replied` |  | ISO time of the last reply or `waits` change. |
   | `lastAnswer` |  | The owner's last answer: `{choice, note, at}`, `{done, note, at}` or `{act: "park", note, at}`. |
-  | `lane` |  | The receiver's branch slug or tier, set when an answer takes the busy-lane path. |
-  | `waits` |  | `{repo, run}` or `{repo, pr}`: set while the item waits on that CI run or PR. |
+  | `lane` |  | The busy lane the answer waits on. |
+  | `waits` |  | The CI run or PR the item waits on. |
   <!-- /gen -->
 
   - An update carries again every field that a guard judges together with the field it sets, because the guard cannot see the stored fields.
-    - `pick` carries `options`. `options` carries each option's `links`, `gain` and `lose`. `steps` carries `links`.
+    - `pick` carries `options`, and `options` carries `pick`. `options` carries each option's `links`, `gain` and `lose`. `steps` carries `links`.
     - An update of `context` or `options` on a decision carries `kind: decision`, and `status: "closed"` when the item is closed.
     - `context` on a decision also carries all of the question form's lines, and `stands: true` when the pick stands.
     - `context` on a task carries `kind: task`.
