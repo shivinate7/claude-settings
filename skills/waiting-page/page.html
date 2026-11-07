@@ -1126,8 +1126,9 @@ function fmt(iso, withDay = true) {
 }
 const CT = "America/Chicago";
 const dayKey = (d) => d.toLocaleDateString("en-CA", { timeZone: CT });
+const isToday = (d) => dayKey(d) === dayKey(new Date());
 // A time read today shows the clock only; any other US Central day adds its day. Spaces are no-break so the time never wraps inside.
-const fmtRecent = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : fmt(iso, dayKey(d) !== dayKey(new Date())).replace(/ /g, "\u00A0"); };
+const fmtRecent = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : fmt(iso, !isToday(d)).replace(/ /g, "\u00A0"); };
 const span = (ms) => { const hrs = Math.round(Math.abs(ms) / 36e5); if (hrs < 1) return "under an hour"; if (hrs < 24) return hrs + (hrs === 1 ? " hour" : " hours"); const d = Math.round(hrs / 24); return d + (d === 1 ? " day" : " days"); };
 const validT = (iso) => !isNaN(Date.parse(iso));
 const waited = (iso) => (validT(iso) ? "waited " + span(Date.now() - Date.parse(iso)) : "");
@@ -3047,7 +3048,7 @@ const when = (iso) => { const d = iso ? new Date(iso) : null; return d && !isNaN
 const dayLabel = (d) => d.toLocaleDateString("en-US", { timeZone: CT, weekday: "short", month: "short", day: "numeric" });
 const timeLabel = (d) => fmt(d.toISOString(), false);
 const ago = (iso) => { const d = when(iso); if (!d) return ""; const hrs = (Date.now() - d) / 36e5; if (hrs < 1) return "just now"; if (hrs < 24) return Math.round(hrs) + "h ago"; return Math.round(hrs / 24) + "d ago"; };
-const fresh = (iso) => { const d = when(iso); return !!d && dayKey(d) === dayKey(new Date()); };
+const fresh = (iso) => { const d = when(iso); return !!d && isToday(d); };
 const firstSentence = (t) => { if (!t) return ""; const m = String(t).match(/^.*?[.!?](\s|$)/); return (m ? m[0] : String(t)).trim(); };
 const pct = (a, b) => (a - b) / b * 100;
 const pctS = (v) => (v > 0 ? "+" : "") + v.toFixed(1) + "%";
