@@ -218,8 +218,8 @@ const shellWords = (text) => {
 // A place expression in a shell binding: a base, then literal `/..` or `/sub` pieces. A base is the test's own folder as the file names
 // it, `$(dirname "$0")` (or `dirname --`), or `${0%/*}`, each with `BASH_SOURCE[0]` or `BASH_SOURCE` for `$0`; or `$NAME` or `${NAME}`. A
 // `$(cd "<base><pieces>" && pwd)` (also `cd --`, and `pwd -P`) is the same place, and so is `$(readlink -f "<base><pieces>")` or
-// `$(realpath "<base><pieces>")`. A `$(dirname "<base><pieces>")` is the parent of that place. A piece holds no `/`, so each `/` starts
-// one piece and a failed match does not backtrack.
+// `$(realpath "<base><pieces>")`. A `$(dirname "<base><pieces>")` is the shell's text dirname of that place and its pieces, so
+// `dirname "$HERE/.."` is HERE itself. A piece holds no `/`, so each `/` starts one piece and a failed match does not backtrack.
 const SELF = '(?:\\$0|\\$\\{BASH_SOURCE(?:\\[0\\])?\\}|\\$BASH_SOURCE)';
 const HERE = `(?:\\$\\(dirname (?:-- )?"?${SELF}"?\\)|\\$\\{(?:0|BASH_SOURCE(?:\\[0\\])?)%/\\*\\})`;
 const SELF_FOLDER = new RegExp(`^${HERE}$`);
@@ -251,45 +251,56 @@ const boundPlace = (value, folder, placeOf) => {
   m = PARENT_PLACE.exec(v);
   if (!m) return null;
   const place = at(m[1]);
-  return place == null ? null : fromPlace(place, `${m[2]}/..`);
+  return place == null ? null : path.posix.normalize(path.posix.dirname(place + m[2]));
 };
 
-// The names that something other than a line's `NAME=` sets: `local`, `declare` or `typeset` of a name, `read` into a name, `for NAME in`,
-// and a `NAME=` after `&&` or `||`. Each takes its value at run time or on one branch only, so the name has no one static place. A
-// command's words run to the next `;`, `&`, `|` or newline.
-const REBINDERS = new Set(['local', 'declare', 'typeset', 'read', 'for']);
-const reboundNames = (code, words, starts) => {
-  const out = new Set();
+// The names that something other than a line's `NAME=` sets: `read` into a name, `for NAME in`, `unset NAME`, a `NAME+=`, a later name of
+// a `local`, `declare` or `typeset` with a value, and a `NAME=` after `&&` or `||`. Each takes its value at run time or on one branch
+// only, or has none, so the name has no one static place. A `declare`, `typeset` or `local` of a first name with a value is a bind
+// like any other (`bindPattern`), and without a value it changes nothing. A command's words run to the next `;`, `&`, `|` or newline.
+const REBINDERS = new Set(['read', 'for', 'unset']);
+const DECLARERS = new Set(['local', 'declare', 'typeset']);
+const reboundNames = (code, words, starts, plus) => {
+  const out = new Set(plus);
   for (const { w, at } of words) {
-    if (!REBINDERS.has(w)) continue;
+    const declares = DECLARERS.has(w);
+    if (!declares && !REBINDERS.has(w)) continue;
     const args = code.slice(at).split(/[;&|\n]/, 1)[0].split(/[ \t]+/).slice(1).filter((a) => !a.startsWith('-'));
-    for (const a of w === 'for' ? args.slice(0, 1) : args) {
+    for (const a of w === 'for' ? args.slice(0, 1) : declares ? args.slice(1) : args) {
       const m = /^([A-Za-z_]\w*)(=|$)/.exec(a);
-      if (m) out.add(m[1]);
+      if (m && (!declares || m[2] === '=')) out.add(m[1]);
     }
   }
-  for (const m of code.matchAll(/(?:&&|\|\|)[ \t]*(?:(?:export|readonly|local)[ \t]+)?([A-Za-z_]\w*)=/g)) {
+  for (const m of code.matchAll(/(?:&&|\|\|)[ \t]*(?:(?:export|readonly|local|declare|typeset)[ \t]+)?([A-Za-z_]\w*)=/g)) {
     if (starts.has(m.index + m[0].length - m[1].length - 1)) out.add(m[1]);
   }
   return out;
 };
 
+// A bind: a name and `=` at the start of a command, after `;`, `&`, `|`, `(`, `)`, `{`, `}` or a `then`, `else` or `do` word, with an
+// optional `export`, `readonly`, `declare`, `typeset` or `local` and its options. The `)` covers `case x)`. A `+=` is no bind but a rebind.
+const bindPattern = /(^|[;&|(){}]|\b(?:then|else|do)\b)[ \t]*(?:(?:export|readonly|declare|typeset|local)(?:[ \t]+-\S*)*[ \t]+)?([A-Za-z_]\w*)(\+?)=([^\n;]*)/gmd;
+
 // The tracked files that a shell file's words name, from the file's folder or the repository root. A leading `NAME=` is dropped, and a
 // word `${NAME:-$OTHER/tail}` or `${NAME:-literal/path}` is read as its default. A word with a `\`, a newline or a leading `/` is skipped.
 // A word with no `$` must equal the path after normalization. A word `$NAME/tail` or `${NAME}/tail`, its tail with no `$`, counts only
 // when the file binds NAME before the word, and every binding of NAME names one place (`boundPlace`); the tail then resolves from that
-// place alone. A binding is a line's `NAME=`, `export NAME=` or `readonly NAME=`. A name with two places, with a binding to no known
-// place, or with a rebind (`reboundNames`) counts for nothing.
+// place alone. A binding is a `NAME=` at the start of a command (`bindPattern`), with or without `export`, `readonly`, `declare` or `local`. A name with two places, with a binding to no known
+// place, or with a rebind (`reboundNames`) counts for nothing. A binding or rebind anywhere in the file counts, above or below the word.
 const shellLoads = (req, text, files) => {
   const folder = path.posix.dirname(req.file);
   const { code, words } = shellWords(text);
   const starts = new Set(words.map(({ at }) => at));
   const bindings = [];
-  for (const m of code.matchAll(/(?:^|;)[ \t]*(?:(?:export|readonly)[ \t]+)?([A-Za-z_]\w*)=([^\n;]*)/gm)) {
-    const at = m.index + m[0].length - m[2].length - m[1].length - 1;
-    if (starts.has(at)) bindings.push({ name: m[1], at, value: m[2].trim() });
+  const plus = [];
+  for (const m of code.matchAll(bindPattern)) {
+    const at = m.indices[2][0];
+    if (/^\w/.test(m[1]) && !starts.has(m.index)) continue;
+    if (!starts.has(at)) continue;
+    if (m[3]) plus.push(m[2]);
+    else bindings.push({ name: m[2], at, value: m[4].trim() });
   }
-  const rebound = reboundNames(code, words, starts);
+  const rebound = reboundNames(code, words, starts, plus);
   const bound = (name, before) => bindings.some((b) => b.name === name && b.at < before);
   const places = new Map();
   const placeOf = (name) => {
