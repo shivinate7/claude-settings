@@ -12547,6 +12547,29 @@ chained_prune("ask-alone: a newline inside a quoted argument adds no command, th
 chained_prune("ask-alone: a heredoc with a lone apostrophe in its body, after the prune, denies",
               PRUNE + "\ncat <<'EOF'\ndon't\nEOF")
 
+# THE HARMLESS TAILS HOLD STRINGS TOO (building-scanner-respects-strings). An output tail is no second
+# command, so a quoted `#`, a quoted `/*` or a lone apostrophe inside it must not turn the tail into a
+# chain. Each call asks once, as the bare prune does. A dry run is no ask command, so it still allows.
+sh("ask-tail-strings: an && echo tail holding a quoted # asks, the # is text",
+   PRUNE + ' && echo "a # b"', "ask", "shared-tree", cwd=WTPRUNE, lacks=(CHAIN_ASK,))
+sh("ask-tail-strings: an && echo tail holding a quoted /* asks, the /* is text",
+   PRUNE + " && echo '/* x'", "ask", "shared-tree", cwd=WTPRUNE, lacks=(CHAIN_ASK,))
+sh("ask-tail-strings: an && echo tail holding a lone apostrophe in double quotes asks",
+   PRUNE + ' && echo "don\'t"', "ask", "shared-tree", cwd=WTPRUNE, lacks=(CHAIN_ASK,))
+sh("ask-tail-strings: an && echo tail with a trailing comment holding a lone apostrophe asks",
+   PRUNE + " && echo x # don't", "ask", "shared-tree", cwd=WTPRUNE, lacks=(CHAIN_ASK,))
+sh("ask-tail-strings: a ; Write-Host tail holding a quoted # asks, the # is text",
+   PRUNE + "; Write-Host 'a # b'", "ask", "shared-tree", tool="PowerShell", cwd=WTPRUNE,
+   lacks=(CHAIN_ASK,))
+sh("ask-tail-strings: a ; Write-Host tail holding a quoted /* asks, the /* is text",
+   PRUNE + "; Write-Host '/* x'", "ask", "shared-tree", tool="PowerShell", cwd=WTPRUNE,
+   lacks=(CHAIN_ASK,))
+sh("ask-tail-strings: a ; Write-Host tail holding a lone apostrophe in double quotes asks",
+   PRUNE + '; Write-Host "don\'t"', "ask", "shared-tree", tool="PowerShell", cwd=WTPRUNE,
+   lacks=(CHAIN_ASK,))
+sh("ask-tail-strings: a dry-run prune chained with an echo holding a quoted # allows",
+   PRUNE + ' -n && echo "a # b"', "allow", cwd=WTPRUNE)
+
 # (b) A LONE ASK COMMAND STILL ASKS, whatever its text holds: a trailing newline, a comment line, a
 # trailing comment with && and a lone quote, a flag, a quoted flag value full of separators and
 # comment openers, a multi-line quoted flag value, and heredoc bodies with separators or a lone quote.
