@@ -832,29 +832,37 @@ PUSH_ASK_REASON = (
 )
 
 
-# ------------------------------------------------------------------ push-needs-fail-record
+# ------------------------------------------------------------------ push-needs-review-record
 #
 # A shell `git push` is refused while the session's own transcript shows a PR known to the session and a
-# reviewer or design-reviewer report with no later posted record that holds a line with that report's role
-# and verdict (decision push-needs-fail-record). Cost: one read of the transcript per push, failing open on
-# any error. The merge module loads only when the scan finds a report with the Done-line shape.
-FAIL_RECORD_REASON = (
-    "push-needs-fail-record: a reviewer report in this session has no posted review record, and a push now "
+# reviewer or design-reviewer report with no later posted record that holds a line with that report's role,
+# verdict and round (decision push-needs-review-record). Cost: one pass over the transcript per push, failing
+# open on any error. A line is parsed only when it holds a mark below, or a tool_result for a call already seen
+# (one dict lookup per id). The merge module loads only when the scan finds a report with the Done-line shape,
+# or a posted comment with a `Fix check:` line.
+REVIEW_RECORD_REASON = (
+    "push-needs-review-record: a reviewer report in this session has no posted review record, and a push now "
     "moves the head the review read. Before any push, render the record with "
     "`merge <pr> --review-record --head <reviewed sha>` (it refuses once the head moves), post it with the "
-    "GitHub MCP comment tool, then push. (decision push-needs-fail-record)"
+    "GitHub MCP comment tool, then push. (decision push-needs-review-record)"
 )
-FAIL_RECORD_FIX_REASON = (
-    "push-needs-fail-record: the posted review record for this pull request already holds a Fix check line, "
+REVIEW_RECORD_FIX_REASON = (
+    "push-needs-review-record: the posted review record for this pull request already holds a Fix check line, "
     "and the merge tool takes one fix check per record. Put the next fix on a new branch and open a new PR "
-    "for it, then push that branch. (decision push-needs-fail-record)"
+    "for it, then push that branch. (decision push-needs-review-record)"
 )
 _CREATE_PR_TOOL = "mcp__github__create_pull_request"
 _COMMENT_TOOL = "mcp__github__add_issue_comment"
 _AGENT_TOOL = "Agent"
-# A transcript line is parsed only when it holds one of these, or the id of a call already seen: tool names
-# sit in call lines, the notice and hand-back tags in message lines.
-_FAIL_RECORD_MARKS = ('"Agent"', _CREATE_PR_TOOL, _COMMENT_TOOL, TASK_NOTIFICATION_TAG, "agent-message")
+_SHELL_TOOLS = ("Bash", "PowerShell")
+# Tool names sit in call lines, the notice and hand-back tags in message lines, a gh call in its command text.
+_REVIEW_RECORD_MARKS = ('"Agent"', _CREATE_PR_TOOL, _COMMENT_TOOL, TASK_NOTIFICATION_TAG, "agent-message",
+                        "gh pr create", "gh pr comment", "gh api")
+_RESULT_IDS = re.compile(r'"tool_use_id":\s*"([^"]+)"')
+_GH_PR_CREATE = re.compile(r"\bgh\s+pr\s+create\b")
+_GH_POST = re.compile(r"\bgh\s+(?:pr\s+comment\b|api\b[^\n]*/comments)")
+_GH_HEAD = re.compile(r"(?:--head|-H)[ =]+[\"']?([^\s\"']+)")
+_PR_URL = re.compile(r"/pull/(\d+)")
 # The Done line, markdown leads and indent allowed. The verdict word is checked against the merge tool's own
 # constants once it loads, so none is named here.
 _DONE_LABEL = re.compile(r"[\s>*#_-]*Done\b[\s*_:]*")
@@ -873,10 +881,16 @@ def _blocks_text(content) -> str:
 
 
 def _done_verdict(text: str):
-    """(word, kind) of the verdict on the Done line of `text`, kind `round` or `fix`, else None. The Done line is
-    the first line after a `Done` label, or the label's own line. A finding line never counts."""
-    after = False
+    """(word, kind, round number or None) of the verdict on the Done line of `text`, kind `round` or `fix`, else None. The Done line is
+    the first line after a `Done` label, or the label's own line. A finding line never counts, and nor does
+    any line inside a ``` fence."""
+    after, fenced = False, False
     for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
         label = _DONE_LABEL.match(line)
         if label:
             line = line[label.end():]
@@ -887,7 +901,8 @@ def _done_verdict(text: str):
             continue
         found = _VERDICT_LINE.fullmatch(line)
         if found:
-            return found.group(1), "fix" if found.group(2) == "fix check" else "round"
+            number = re.search(r"\d+", found.group(2))
+            return found.group(1), "round" if number else "fix", int(number.group()) if number else None
         if after and line.strip():
             return None
     return None
@@ -915,13 +930,15 @@ def _notice_reports(record, roles, agents):
 
 
 def _transcript_events(path: str):
-    """The ordered events of a transcript that the rule reads: ("pr", number, head) for a create_pull_request that
-    returned no error, ("post", body) for a comment that returned none, and ("report", role, word, kind) for an Agent
-    report whose Done line has the verdict shape. Raises OSError when the file cannot be read."""
+    """The ordered events of a transcript that the rule reads: ("pr", number, head) for a create_pull_request or
+    a Bash `gh pr create` that returned no error, ("post", body, from_shell) for a comment call that returned
+    none (a shell call's body is its command text), and ("report", role, word, kind, round) for an Agent report
+    whose Done line has the verdict shape. Raises OSError when the file cannot be read."""
     events, calls, roles, agents, posts, pr_heads = [], {}, {}, {}, {}, {}
     with open(path, encoding="utf-8", errors="replace") as handle:
         for line in handle:
-            if not any(mark in line for mark in _FAIL_RECORD_MARKS) and not any(seen in line for seen in calls):
+            if not any(mark in line for mark in _REVIEW_RECORD_MARKS) and not (
+                    '"tool_result"' in line and any(call in calls for call in _RESULT_IDS.findall(line))):
                 continue
             try:
                 record = json.loads(line)
@@ -935,19 +952,27 @@ def _transcript_events(path: str):
                 if block.get("type") == "tool_use":
                     name, given = block.get("name"), block.get("input")
                     given = given if isinstance(given, dict) else {}
+                    command = given.get("command") if isinstance(given.get("command"), str) else ""
                     calls[block.get("id")] = name
                     if name == _AGENT_TOOL:
                         roles[block.get("id")] = given.get("subagent_type")
                     elif name == _CREATE_PR_TOOL and isinstance(given.get("head"), str):
                         pr_heads[block.get("id")] = given["head"].rpartition(":")[2]   # a fork's `owner:branch`
                     elif name == _COMMENT_TOOL and isinstance(given.get("body"), str):
-                        posts[block.get("id")] = given["body"]
+                        posts[block.get("id")] = (given["body"], False)
+                    elif name in _SHELL_TOOLS and _GH_PR_CREATE.search(command):
+                        head = _GH_HEAD.search(command)
+                        pr_heads[block.get("id")] = head.group(1).rpartition(":")[2] if head else None
+                        calls[block.get("id")] = _CREATE_PR_TOOL
+                    elif name in _SHELL_TOOLS and _GH_POST.search(command):
+                        posts[block.get("id")] = (command, True)
                 elif block.get("type") == "tool_result" and not block.get("is_error"):
                     call, body = block.get("tool_use_id"), _blocks_text(block.get("content"))
                     if calls.get(call) == _CREATE_PR_TOOL:
-                        events.append(("pr", _pr_number(body), pr_heads.get(call)))
+                        url = _PR_URL.search(body)
+                        events.append(("pr", int(url.group(1)) if url else _pr_number(body), pr_heads.get(call)))
                     elif call in posts:
-                        events.append(("post", posts[call]))
+                        events.append(("post",) + posts[call])
                     elif calls.get(call) == _AGENT_TOOL:
                         for agent in _AGENT_ID.findall(body):
                             agents[agent] = call
@@ -965,15 +990,25 @@ def _pr_number(body: str):
     return int(found.group(1)) if found else None
 
 
-def fail_record_hit(transcript: str, destinations=lambda: []):
+def _record_of(merge, text: str, from_shell: bool):
+    """The record `text` holds, parsed by the merge tool's parse_review, else None. A comment tool's body is the
+    record itself. A shell call's text holds it between the marker line and the CI line, inside the command."""
+    if not from_shell:
+        return merge.parse_review(text)
+    start = text.find(merge.REVIEW_MARKER)
+    end = text.find(merge.REVIEW_CI_LINE, start) if start >= 0 else -1
+    return merge.parse_review(text[start:end + len(merge.REVIEW_CI_LINE)]) if end >= 0 else None
+
+
+def review_record_hit(transcript: str, destinations=lambda: []):
     """Return (label, reason) for the first refusal the transcript earns, else ("", ""). `destinations()` gives the
     branch names the push writes; it runs only when a posted record holds a Fix check line.
     1. A PR known to the session and a reviewer report with no later posted record holding a line with that
-       report's role and verdict. A report before the PR is known is not read. A design-reviewer fix check is
-       not read: a record holds a Fix check line for the reviewer only.
+       report's role, verdict and round (a fix check: the Fix check line's role and verdict). A report before the
+       PR is known is not read. A design-reviewer fix check is not read: a record holds a Fix check line for the
+       reviewer only.
     2. A posted record, accepted by parse_review, with a Fix check line for PR n, and a push to n's head branch
-       (from a create_pull_request call's `head` and result number). With n's head unknown, any push, unless a
-       create_pull_request comes after that record.
+       (from a PR-opening call's `head` and its result's number). With n's head unknown, the push passes.
     An unreadable transcript, or an unloadable merge module, passes."""
     if not transcript:
         return "", ""
@@ -985,37 +1020,34 @@ def fail_record_hit(transcript: str, destinations=lambda: []):
         merge = merge_module()
         if merge is None:
             return "", ""
-        known, pending, fixed, heads = False, [], [], {}   # fixed: (PR number, position of its record)
-        for position, event in enumerate(events):
+        known, pending, fixed, heads = False, [], [], {}   # fixed: the PR numbers whose record holds a Fix check
+        for event in events:
             if event[0] == "pr":
                 known = True
                 if event[1] is not None and event[2]:
                     heads[event[1]] = event[2]
             elif event[0] == "report":
-                _, role, word, kind = event
+                _, role, word, kind, number = event
                 verdicts = merge.REVIEW_FIX_VERDICTS if kind == "fix" else merge.REVIEW_VERDICTS
                 if (known and role in merge.REVIEW_ROLES and word in verdicts
                         and (kind == "round" or role == merge.REVIEW_ROLES[0])):
-                    pending.append((role, word, kind))
+                    pending.append((role, word, kind, number))
             else:
-                record = merge.parse_review(event[1])
+                record = _record_of(merge, event[1], event[2])
                 if record is None:
                     continue
                 known = True
-                held = {(role, word, "round") for _, role, _, word in record["rounds"]}
+                held = {(role, word, "round", number) for number, role, _, word in record["rounds"]}
                 if record["fix"]:
-                    held.add((record["fix"][1], record["fix"][3], "fix"))
-                    fixed.append((record["n"], position))
+                    held.add((record["fix"][1], record["fix"][3], "fix", None))
+                    fixed.append(record["n"])
                 pending = [report for report in pending if report not in held]
         if pending:
-            return "%s %s %s report, no posted record" % pending[0], FAIL_RECORD_REASON
-        for number, position in fixed:
-            opened_later = any(event[0] == "pr" for event in events[position + 1:])
+            return "%s %s %s report, no posted record" % pending[0][:3], REVIEW_RECORD_REASON
+        for number in fixed:
             if number in heads:
                 if heads[number] in destinations():
-                    return "push to the head branch of PR %d, fix check recorded" % number, FAIL_RECORD_FIX_REASON
-            elif not opened_later:
-                return "push after the fix check of PR %d, its head unknown" % number, FAIL_RECORD_FIX_REASON
+                    return "push to the head branch of PR %d, fix check recorded" % number, REVIEW_RECORD_FIX_REASON
     except Exception:
         pass
     return "", ""
