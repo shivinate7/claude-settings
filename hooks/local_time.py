@@ -103,7 +103,8 @@ def override_line(result):
     if kind == "opus-off":
         return "Opus override: ended."
     if kind == "opus":
-        who = "%s spawns" % result[2] if result[2] else "spawns"
+        roles = " and ".join(result[2]) if isinstance(result[2], list) else result[2]  # one role, or a list of 2 or more
+        who = "%s spawns" % roles if roles else "spawns"
         return "Opus override: Opus %s go through without the ask until %s." % (who, central_hhmm(until))
     if kind == "once":
         return "Override: the next refused act goes through, once. It ends at %s if unused." % central_hhmm(until)
@@ -311,11 +312,20 @@ def page_note(raw):
 def grant_override(raw, at):
     """Owner prompt `override`, `override <reason>`, `override <n>[m|h]`, `override off` or the Opus word
     (`opus <n>[m|h]`, `opus <role> <n>[m|h]`, `opus off`; decision owner-override): grants or ends
-    the session's override and prints one line. Any failure is one stderr line, no override."""
+    the session's override and prints one line. A prompt no keyword form grants goes to
+    override.grant_opus_ask, the plain Opus ask (`send opus judges`): one model call, only for an owner prompt
+    that carries the word `opus`, none otherwise. An ask that names no role also reads the owner's earlier typed
+    prompts for the roles they name: one more model call, only after a yes and only when such a prompt exists; no
+    role named means every role (decision owner-override). Those calls are why the
+    settings.json row has "timeout": 30. Any failure is one stderr line, no override."""
     try:
         hook = json.loads(raw.decode("utf-8"))
         import override
         result = override.grant(hook.get("session_id"), hook.get("prompt"), at)
+        if result is None:
+            result = override.grant_opus_ask(hook.get("session_id"), hook.get("prompt"), at,
+                                             transcript=hook.get("transcript_path"),
+                                             source=hook.get("source"))
         if result:
             print(override_line(result))
     except (ValueError, AttributeError):

@@ -329,6 +329,9 @@ WIDENS_MARK = re.compile("|".join(_words_pattern(t) for t in (WIDENS_TEXT, LEGAC
 RECOMMENDED = re.compile(r"\(Recommended\)", re.I)
 
 
+WIDENS_KEY = "widens"  # the Python home of the mark's key; call_judge.WIDENING_RULE names it too, and skills/waiting-page/page.html reads the literal in JS
+
+
 def widens_pick_hit(data) -> str:
     """The matched text when this write's `pick` (a str, or a list of keys) names an option it marks
     `widens: true`. An update that carries `pick` without `options` cannot see the stored options and passes."""
@@ -341,7 +344,7 @@ def widens_pick_hit(data) -> str:
         return ""  # an absent or null pick picks nothing, so it never matches a keyless option
     keys = {p for p in pick if isinstance(p, str)}
     if any(isinstance(o, dict) and isinstance(o.get("key"), str) and o["key"] in keys
-           and o.get("widens") is True for o in options):
+           and o.get(WIDENS_KEY) is True for o in options):
         return "pick names a widening option"
     return ""
 
@@ -958,15 +961,38 @@ def _git_root_of(cwd):
         here = parent
 
 
-def waiting_page_root(tool_input, cwd):
-    """The git root of cwd's repo when the call's url is that repo's waiting page (lint/layout.py, the one
-    home), else None. A repo with no page reads as unknown; only the none-key check judges its calls."""
+def _layout():
+    """lint/layout.py, the one home of the layout and the mockup home."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
     import layout
+    return layout
+
+
+def waiting_page_root(tool_input, cwd):
+    """The git root of cwd's repo when the call's url is that repo's waiting page (lint/layout.py, the one
+    home), else None. A repo with no page reads as unknown; only the none-key check judges its calls."""
+    layout = _layout()
     root = _git_root_of(cwd)
     return root if root and layout.is_waiting_page_url(root, tool_input.get("url")) else None
+
+
+def design_file_problems(writes, root):
+    """[(doc_id, slug, sentence)] for each `designs` entry in `writes` (design_writes' picture writes) that has no
+    `file`, or whose `file` lint/layout.py mockup_home_problem refuses against this machine's home. The sentence names
+    the design folder and the field, never the refused path. An entry that is no dict has no file. Judges the shape
+    only: it does not ask origin, and starts no process (rule mockup-home)."""
+    layout = _layout()
+    found = []
+    for _op, doc_id, data in design_writes(writes):
+        designs = data.get("designs")
+        for entry in designs if isinstance(designs, list) else []:
+            entry = entry if isinstance(entry, dict) else {}
+            problem = layout.mockup_home_problem(root, entry.get("file"))
+            if problem:
+                found.append((doc_id, str(entry.get("slug") or "?"), problem))
+    return found
 
 
 def is_waiting_page(tool_input, cwd) -> bool:
@@ -1124,7 +1150,7 @@ NONE_KEY_HIT = "option keyed none"
 
 
 def _open_decision(data) -> bool:
-    """True for the data of an open decision. A task, a note and a closed item are not judged. The one gate
+    """True for the data of an open decision. A task, a note and a closed item are not judged. The one filter
     of option_letter_hit and keyed_options_hit."""
     return isinstance(data, dict) and data.get("kind", "decision") == "decision" and data.get("status") != "closed"
 
