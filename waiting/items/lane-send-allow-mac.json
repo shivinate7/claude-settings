@@ -5,18 +5,13 @@
   "home": "decision auto-mode-allow",
   "id": "lane-send-allow-mac",
   "kind": "task",
-  "lane": "coordinator",
   "n": 307,
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 3,
   "ref": "item 301 a (15:24 CST Nov 6)",
-  "reply": "#1364 failed its first review at 16:51 CST (batch runner 8). It carries a second commit, 8cf80e2d6, which adds the own-branch lease-push line (items 239 a and 257 c) with no test for it. So it is not batched. The coordinator has the fix to ask for. This item stays open until a clean replacement PR merges.",
+  "reply": "Done: batch 44 (#1389) merged at 21:39 CST as c9d2e5e0a. It adds the send_message allow line to settings.json and the auto-mode-owner-acts record (batch runner 8). Home: decision auto-mode-allow.",
   "short": "Mac: send_message allow line",
-  "status": "open",
+  "status": "closed",
   "title": "On your Mac: add the send_message allow line (your item 301 pick a)",
-  "waits": {
-    "pr": 1364,
-    "repo": "shivinate7/claude-settings"
-  },
   "why": "Cloud auto mode refuses settings.json edits, so a session on your Mac makes this one edit."
 }
