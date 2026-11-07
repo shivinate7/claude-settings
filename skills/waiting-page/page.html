@@ -420,7 +420,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 body.sheet-open { overflow: hidden; }
 
 /* Status tab: the roadmap's layout in this page's tokens, under .sv. The names page.html also uses
-   (.bar, .rail, .card, .tabs, .steps, .g, .top, .big, .sub, .empty) are renamed here, so no rule above reaches status. */
+   (.bar, .rail, .card, .tabs, .steps, .g, .top, .big, .empty) are renamed here, so no rule above reaches status. */
 .tabs .tl { display: flex; gap: 4px; }
 .tabs .cnt:empty { display: none; }
 .tabs .cnt { display: inline-block; min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: start; }
@@ -1500,8 +1500,9 @@ function ruledOf(it) {
   const ks = pickKeys(it) || [], lab = (k) => String(((it.options || []).find((o) => o.key === k) || {}).label || k);
   return { letters: ks.map((k) => letterOf(it, k)).join(", "), label: ks.length ? ks.map(lab).join(" and ") : "an option" };
 }
-// The words, without a stop, for a chosen option or options. A key that is no longer in options never shows raw. Shared by receipt() and lastAnswerEl().
+// The words, without a stop, for a chosen option or options. No choice (null or missing) reads "an option". A key that is no longer in options reads "no longer listed", never raw. Shared by receipt() and lastAnswerEl().
 function choseWords(it, c) {
+  if (c == null) return "You chose an option";
   if (isMulti(it) && !validKeys(it, c)) return "You chose options that are no longer listed";
   const o = (it.options || []).find((x) => x.key === c);
   return o ? "You chose " + letterOf(it, o.key) + ": " + o.label : "You chose an option that is no longer listed";
@@ -1530,7 +1531,7 @@ function receipt(it, noNote) {
 const lastOf = (it) => (it.lastAnswer && typeof it.lastAnswer === "object" && !Array.isArray(it.lastAnswer) ? it.lastAnswer : null);
 const replyOf = (it) => (typeof it.reply === "string" ? it.reply.trim() : "");
 const laneOf = (it) => (typeof it.lane === "string" ? it.lane.trim() : "");
-// receipt()'s words for what was chosen. A key that is no longer in options never shows raw.
+// The last answer's receipt. Its choice words come from choseWords(). An answer with no choice draws no answer line.
 function lastAnswerEl(it) {
   const la = lastOf(it), c = la.choice, t = fmt(la.at);
   let what = null, picks = null;

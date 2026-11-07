@@ -45,8 +45,8 @@ Ruling: coordinator, 2026-11-07 13:56 CST. Drop the rail's "N ready to send" lin
 
 ## 6. For the builder (outside the design folder)
 
-- Delete the dead CSS with the line: `.ov-prog .sub`, `.ov-prog .sub.none` and `.ov-prog .sw`. Leave the Status tab rail alone (its own `renderRail`, and its renamed `.sub`).
-- Tests: no test reads the rail's ready line. The chip's aria-label also says "ready to send" and stays. The receipt has no test for the one-choice fallback.
+- Delete the dead CSS with the line: `.ov-prog .sub`, `.ov-prog .sub.none` and `.ov-prog .sw`. Leave the Status tab rail alone (its own `renderRail`).
+- Tests: no test reads the rail's ready line. The chip's aria-label also says "ready to send" and stays. A test pins the receipt words for the one-choice fallback.
 - Out of scope: in forced-colors mode the track's segments lose their backgrounds, today as after (`ux-forced-colors-hold`). The words carry both counts.
 
 ## 7. Measured verdicts
