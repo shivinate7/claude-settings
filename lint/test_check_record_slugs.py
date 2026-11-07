@@ -788,6 +788,14 @@ class RecordSlugsTests(unittest.TestCase):
         self.put(path, text)
         self.assert_tree(["%s:%d GLOSS001 session-tiers" % (path, line_of(text, "session-tiers"))])
 
+    def test_a_bare_id_in_a_multi_line_span_is_not_a_cite(self):
+        # The span runs over a line break, and the id is on its second line. The cite after the span still counts.
+        self.decision("session-tiers")
+        path = self.rel("decisions", "wrapped-span.md")
+        text = "# W\n\nRun `open\nsession-tiers` first.\n\nSee session-tiers for more.\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 session-tiers" % (path, line_of(text, "See session-tiers"))])
+
     def test_a_bare_id_in_a_link_target_is_not_a_cite(self):
         self.decision("session-tiers")
         self.put(self.rel("decisions", "linked.md"),
