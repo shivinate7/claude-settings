@@ -226,13 +226,34 @@ _RUNS_ITS_ARGUMENTS = {"find", "eval", "exec", "pwsh", "powershell", "cmd"}
 def _mutates_as_command(command: str, words) -> bool:
     """True when the segment's own command (`command`, its resolved name) changes the files it names:
     a word of MUTATING_COMMAND or a `mv` or `rm` of the version control tool. A command that runs its
-    arguments counts too, as it always did, so a shell `-c "rm x"` and `find -exec rm` stay seen."""
-    if command in _RUNS_ITS_ARGUMENTS or command in guard_core.INLINE_SCRIPT_SHELLS:
+    arguments counts too, as it always did, so `find -exec rm` stays seen. A shell `-c` script is read at
+    its own command positions, so `bash -c "pytest -k install t.py"` reads and `bash -c "rm x"` writes."""
+    if command in guard_core.INLINE_SCRIPT_SHELLS:
+        return _script_mutates(guard_core.inline_script([command, *words]))
+    if command in _RUNS_ITS_ARGUMENTS:
         return True
     if command == "git":
         rest = [word for word in words if not word.startswith("-")]
         return any(word in ("mv", "rm") for word in rest[:2])
     return bool(re.fullmatch(MUTATING_COMMAND, command))
+
+
+# A character that lets a script run text the segment split cannot see: a substitution, a group, a brace.
+_SCRIPT_RUNS_HIDDEN = re.compile(r"[$`(){}]")
+
+
+def _script_mutates(script: str) -> bool:
+    """True when a `sh -c` script may change files through a command of its own. No script found, or one
+    with a substitution or group in it, counts as a write, as it always did."""
+    if not script or _SCRIPT_RUNS_HIDDEN.search(script):
+        return True
+    for segment in split_segments(script):
+        command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment)])
+        # `sed -i` is no mutating word: `writes_to` reads it by its own pattern, so it must get that far.
+        if _mutates_as_command(command, rest) or (
+                command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)):
+            return True
+    return False
 
 
 def writes_to(path: str, cmd: str, command=None, words=()) -> bool:

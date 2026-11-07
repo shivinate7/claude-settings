@@ -441,13 +441,13 @@ def _flat_text(value) -> str:
     return ""
 
 
-# A clause whose subject is the session ("The session merges it after your pick.") and that names
+# A clause whose subject is the session ("The session merges it after your pick.", "Claude merges it ...") and that names
 # no `you` and no owner who acts ("the owner clicks Approve", "Shivam approves it"): the session makes
 # that press, so the owner presses nothing. Only that clause is excused. A press in another clause
 # stays ("..., then press Merge", "...: press Merge", "... but click Merge"). An owner's name with no
 # act after it ("as the owner asked", "after Shivam's OK"), a past act ("after he approved it") and a
 # press of the page's own button ("after he hits Send") ask the owner for nothing.
-SESSION_PRESS = re.compile(r"^\s*(?:the|a|this)\s+session\b", re.I)
+SESSION_PRESS = re.compile(r"^\s*(?:(?:the|a|this)\s+session|claude)\b", re.I)
 _CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|and|but|so|or)\b", re.I)
 # The clauses left after the excused ones are joined with `;`: PRESS_VERB reads it as a clause start, so
 # "... but you approve it" stays a press, and mark ... ready reads across it, as across the cut break.
