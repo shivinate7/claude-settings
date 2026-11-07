@@ -3650,6 +3650,24 @@ sh("guard-cd-walk-extra-reading: a switch in the pointer checkout, then a cd aft
 sh("guard-cd-walk-extra-reading: a cd out, then a switch there, is allowed",
    "cd " + slash(NOGIT) + " && " + VCS + " switch other", "allow", cwd=PTRMAIN, config=PTRCFG)
 
+# pointer-failed-cd-walk: a cd that fails leaves the shell where it was, so the switch after it still runs in
+# the folder the shell stood in. A folder that does not exist is never entered. POINTER_NONEXIST is one.
+POINTER_NONEXIST = slash(os.path.join(ROOT, "no-such-folder"))
+sh("pointer-failed-cd-walk: a cd into the pointer checkout, a failed cd, then a switch, is refused",
+   "cd " + slash(PTRMAIN) + "; cd " + POINTER_NONEXIST + "; " + VCS + " switch other",
+   "deny", "pointer-head", cwd=NOGIT, config=PTRCFG)
+sh("pointer-failed-cd-walk: a failed cd from the pointer checkout, then a switch, is refused",
+   "cd " + POINTER_NONEXIST + "; " + VCS + " switch other", "deny", "pointer-head",
+   cwd=PTRMAIN, config=PTRCFG)
+# The control for the refusal above: the cd into the pointer checkout, with no failed cd after it, is refused today.
+sh("pointer-failed-cd-walk: a cd into the pointer checkout, then a switch, is refused (control)",
+   "cd " + slash(PTRMAIN) + "; " + VCS + " switch other", "deny", "pointer-head", cwd=NOGIT,
+   config=PTRCFG)
+# Item 6: the cd out of the pointer checkout moves the shell to a folder that is not a checkout, so the switch runs there.
+sh("pointer-failed-cd-walk: a cd out of the pointer checkout, a failed cd, then a switch, is allowed",
+   "cd " + slash(NOGIT) + "; cd " + POINTER_NONEXIST + "; " + VCS + " switch other",
+   "allow", cwd=PTRMAIN, config=PTRCFG)
+
 # guard-first-c-reads-wrong-tree: the pointer rule judges the checkout each git call RUNS in. A -C on
 # another call is that call's folder, so the first -C of the line does not decide for the switch.
 sh("guard-first-c-reads-wrong-tree: a status of another folder, then a switch -C of the pointer checkout, is refused",
