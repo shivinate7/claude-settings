@@ -12591,6 +12591,15 @@ class ReviewFixBase(ReviewEnv):
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
         self.assert_refused(rc, out, err)
 
+    def test_a_malformed_newest_earlier_record_is_named_as_unreadable(self):
+        # the refusal names #7 and says its newest record could not be read, so the reader knows which record to look at
+        older = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        malformed = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, kind="bogus"))
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
+        self.assert_refused(rc, out, err)
+        self.assertIn("#7", err, "the refusal does not name #7, the pull request whose newest record cannot be read:\n" + err)
+        self.assertIn("could not be read", err, "the refusal does not say the newest record could not be read:\n" + err)
+
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
     record parse, the newest-record rule and the states are the real code. Output: one line per open pull request whose newest record parses,
@@ -13278,8 +13287,10 @@ class UnreviewedGuardWriter(UnreviewedGuardEnv):
         self.assertEqual(out, "", "a refused record was printed")
 
 class UnreviewedGuardFailsClosed(UnreviewedGuardEnv):
-    """A carried run the carried-run check cannot read reads open. Each case makes one git call of the check fail and keeps the rest real. The
-    run adds only a docs change, so the real check reads done: that is the control in each case, and removing the stubbed branch reads done too."""
+    """A carried run the carried-run check cannot read reads open, and the writer refuses it. A run is unreadable when one git call of the check
+    fails, or when a record of this pull request between its records does not parse. Each git case makes one call fail and keeps the rest real.
+    The run adds only a docs change, so the real check reads done: that is the control in each case, and removing the stub or the bad record
+    reads done too."""
 
     def clean_carried_run(self):
         """A carried run whose second head adds only a docs change. -> (h2, the first record, the second record)."""
@@ -13319,6 +13330,77 @@ class UnreviewedGuardFailsClosed(UnreviewedGuardEnv):
                 return None
             return fetch_fails
         self.assert_fails_closed(stub_for, "a second head that cannot be fetched read the carried run as done", "cannot be fetched")
+
+    def test_a_malformed_record_of_this_pr_in_a_clean_carried_run_reads_open(self):
+        # The run adds only docs, so no guard path is crossed: the open can come only from the unreadable record of #7 between the good ones.
+        h0 = self.lane_commit("docs/lane.md", "reviewed\n", "lane: docs, reviewed")
+        h1 = self.lane_commit("docs/middle.md", "middle\n", "lane: docs, between the records")
+        h2 = self.lane_commit("docs/after.md", "after\n", "lane: docs after the review")
+        bad_body = record_text(head=h1, net="sometimes")  # the net value is not in REVIEW_NETS, so the record does not parse
+        self.assertIsNone(review_fn(self, "parse_review")(bad_body), "the malformed body parses, so this case does not test an unparsed record")
+        first, second = review_comment(1, 7, record_text(head=h0)), review_comment(3, 7, record_text(head=h2))
+        self.assert_done(self.reviewed_line(h2, first, second), h2, "control: a clean carried run with no unreadable record should read done")
+        line = self.reviewed_line(h2, first, review_comment(2, 7, bad_body), second)
+        self.assert_open(line, h2, "the carried rounds read done, though a record of #7 between them could not be read, so the check cannot tell what they carry")
+        self.assertRegex(line, r"open: [^;]*#7[^;]*could not be read", f"the open reason does not name #7 and say its record could not be read:\n{line}")
+
+    def test_a_malformed_record_of_this_pr_in_a_clean_carried_run_refuses_the_writer(self):
+        h0 = self.lane_commit("docs/lane.md", "reviewed\n", "lane: docs, reviewed")
+        h1 = self.lane_commit("docs/middle.md", "middle\n", "lane: docs, between the records")
+        h2 = self.lane_commit("docs/after.md", "after\n", "lane: docs after the review")
+        files = [pr_file("docs/lane.md"), pr_file("docs/middle.md"), pr_file("docs/after.md")]
+        bad_body = record_text(head=h1, net="sometimes")  # the net value is not in REVIEW_NETS, so the record does not parse
+        self.assertIsNone(review_fn(self, "parse_review")(bad_body), "the malformed body parses, so this case does not test an unparsed record")
+        first, second = review_comment(1, 7, record_text(head=h0)), review_comment(3, 7, record_text(head=h2))
+
+        def write_record(*comments):
+            host = PullsHost([batch_pull(7, h2)], {}, comments=list(comments), files=files)
+            return self.run_args("7", "--review-record", "--head", h2, "--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:PASS", host=host)
+
+        rc, out, err = write_record(first, second)
+        self.assertEqual(rc, 0, "control: a clean carried run with no unreadable record should print its record:\n" + out + err)
+        rc, out, err = write_record(first, review_comment(2, 7, bad_body), second)
+        self.assertEqual(rc, 1, "the writer printed a record over a record of #7 it could not read:\n" + out + err)
+        self.assertEqual(out, "", "a refused record was printed")
+        self.assertRegex(err, r"#7[^\n]*could not be read", f"the refusal does not name #7 and say its record could not be read:\n{err}")
+
+class UnreviewedGuardPredecessor(UnreviewedGuardEnv):
+    """Who may be a predecessor. A record that names another pull request is a stray paste: it carries no rounds of this pull request, and
+    `--fix-check` takes its base from the newest record of this pull request alone. Each case puts a stray record where it would carry a guard
+    commit, or would be the base, if it were counted."""
+
+    def test_a_stray_record_naming_another_pr_on_this_thread_carries_no_rounds(self):
+        # The stray names #8 and its head lies before a guard commit. Counted, it would carry the rounds of #7 across that commit. No record of
+        # #7 comes before the newest one, so the run is otherwise clean.
+        stray_head = self.lane_commit("docs/stray.md", "stray\n", "lane: docs, the head a stray #8 record names")
+        self.lane_commit("lint/check_x.py", "x = 1\n", "lane: guard change after the stray head")
+        h2 = self.lane_commit("docs/after.md", "after\n", "lane: docs after the guard change")
+        stray = review_comment(1, 7, record_text(n=8, head=stray_head, rounds=REVIEW_PASS))
+        newest = review_comment(2, 7, record_text(head=h2, guard="yes", rounds=REVIEW_PASS))
+        self.assert_done(self.reviewed_line(h2, stray, newest), h2,
+                         "a record that names #8 is no predecessor of #7, so no rounds are carried across the guard commit, and the line should read done")
+        files = [pr_file("docs/stray.md"), pr_file("lint/check_x.py"), pr_file("docs/after.md")]
+        host = PullsHost([batch_pull(7, h2)], {}, comments=[stray, newest], files=files)
+        rc, out, err = self.run_args("7", "--review-record", "--head", h2, "--kind", "normal", "--guard", "yes", "--round", "1:reviewer:sonnet:PASS", host=host)
+        self.assertEqual(rc, 0, "the writer refused a record over a stray #8 record, so the stray was counted as a predecessor:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["n"], 7, "the printed record is not for #7:\n" + out)
+
+    def test_a_stray_record_newest_on_this_thread_is_not_the_fix_check_base(self):
+        # The base is the head of #7's own record, h0. After it, a stray #8 record names x, a head before a guard commit, and carries the same
+        # rounds and fix line as the new record. Taken as the base, or as a predecessor, it would refuse the fix check.
+        x = self.lane_commit("docs/stray.md", "stray\n", "lane: docs, the head a stray #8 record names")
+        self.lane_commit("lint/check_x.py", "x = 1\n", "lane: guard change after the stray head")
+        h0 = self.lane_commit("docs/lane.md", "reviewed\n", "lane: docs, reviewed")
+        newhead = self.lane_commit("docs/after.md", "after\n", "lane: docs after the review")
+        first = review_comment(1, 7, record_text(head=h0))
+        stray = review_comment(2, 7, record_text(n=8, head=x, rounds=REVIEW_PASS, fix=(fix_check_line(head=h0),)))
+        files = [pr_file("docs/stray.md"), pr_file("lint/check_x.py"), pr_file("docs/lane.md"), pr_file("docs/after.md")]
+        host = PullsHost([batch_pull(7, newhead)], {}, comments=[first, stray], files=files)
+        rc, out, err = self.run_args("7", "--review-record", "--head", newhead, "--kind", "normal", "--guard", "yes", "--round", "1:reviewer:sonnet:PASS",
+                                     "--fix-check", f"{h0}:reviewer:haiku:PASS", host=host)
+        self.assertEqual(rc, 0, "the fix check was refused, so the stray #8 record was taken as the base or as a predecessor:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (h0, "reviewer", "haiku", "PASS"),
+                         "the printed record does not carry the fix check on the head of #7's newest record")
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
 # cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
