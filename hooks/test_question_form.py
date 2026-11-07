@@ -66,6 +66,7 @@ import os
 import re
 import inspect
 import shutil
+import subprocess
 import sys
 from unittest import mock
 
@@ -78,6 +79,8 @@ RUN_FOLDER = tcj.ROOT
 os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(RUN_FOLDER, "config")
 check, FAILED = tcj.check, tcj.FAILED
 
+import feedback_guard  # noqa: E402  waiting_copy: the branch and folder of the waiting copy, as its readers resolve them
+import layout  # noqa: E402  lint/layout.py, the one home of a layout path
 import guard  # noqa: E402
 import reply_judge  # noqa: E402  the reply judge's instructions, which carry the widening sentence
 import route_match  # noqa: E402  the rows-file reader; the task-why cases count its reads
@@ -188,9 +191,9 @@ def call(name, *args):
         return ("RAISED", "%s: %s" % (type(exc).__name__, exc))
 
 
-def guard_hit(op, entry):
+def guard_hit(op, entry, repo=PAGE_REPO):
     try:
-        return guard.data_tool_hit(dict(entry, url=PAGE_URL, action=op), PAGE_REPO)
+        return guard.data_tool_hit(dict(entry, url=PAGE_URL, action=op), repo)
     except Exception as exc:  # a crash is a wrong verdict, shown by name, as call() shows it
         return ("RAISED", "%s: %s" % (type(exc).__name__, exc))
 
@@ -359,6 +362,43 @@ def case_older_rules_keep_their_ids():
          entry_of(dict(task, context="Nothing here.")), ("task-names-check", None))
 
 
+# ------------------------------------------------------------------ a press link needs a string label
+
+def case_press_link_label_is_a_string():
+    # Row press-link-unlabelled-link (the notes file): a link counts when it has a url, but the page draws a link
+    # only when its label is a string too (skills/waiting-page/page.html isLink). A press whose only link has no
+    # string label shows the owner no link, so it is refused. A link to the page with an empty-string label is still
+    # a string, so it passes. A labelled link to another PR does not stand for the page, so an unlabelled link to
+    # the page beside it does not save the press.
+    pr, other = "https://github.com/shivinate7/home/pull/374", "https://github.com/shivinate7/home/pull/999"
+    # The option names PR #374, so a link must reach that page: with no number in the text any link passes.
+    base = copy.deepcopy(ITEM92["options"])
+    base[1].update(label="Merge PR #374", how="Press Merge in GitHub.")
+
+    def with_links(links):
+        options = copy.deepcopy(base)
+        options[1]["links"] = links
+        return entry_of(page_item(options=options))
+
+    page("a press whose link to the page has no label is refused as press-link", "set",
+         with_links([{"url": pr}]), ("press-link", None))
+    page("a press whose link to the page has a null label is refused as press-link", "set",
+         with_links([{"label": None, "url": pr}]), ("press-link", None))
+    page("a press whose link to the page has a numeric label is refused as press-link", "set",
+         with_links([{"label": 5, "url": pr}]), ("press-link", None))
+    page("a press with an unlabelled link to the page beside a labelled link to another PR is refused as press-link",
+         "set", with_links([{"label": "the other pull request", "url": other}, {"url": pr}]), ("press-link", None))
+    page("a press with only a labelled link to another PR stays refused as press-link", "set",
+         with_links([{"label": "the other pull request", "url": other}]), ("press-link", None))
+    page("a press whose link to the page has an empty-string label passes", "set",
+         with_links([{"label": "", "url": pr}]), None)
+    task = task_item(["Open PR #374 on GitHub", "Press Merge."], links=[{"url": pr}])
+    page("a task whose step presses in GitHub, with an unlabelled link to the page, is refused as press-link", "set",
+         entry_of(task), ("press-link", None))
+    page("a task whose step presses in GitHub, with a labelled link to the page, passes", "set",
+         entry_of(dict(task, links=[{"label": "PR #374", "url": pr}])), None)
+
+
 # ------------------------------------------------------------------ closed items, stood picks, updates
 
 def case_closed_stood_and_updates():
@@ -427,7 +467,7 @@ def case_batch():
             (FORM_RULE, "Problem"))
 
 
-# ------------------------------------------------------------------ a task's Why yours line cites what it claims
+#------------------------------------------------------------------ a task's Why yours line cites what it claims
 #
 # Rule task-why-cited (decision claims-carry-backing, part (v)). The Why yours line of a waiting-page task
 # is judged on its cite: a capability reason needs one, and the cite must hold on this surface. The page accepts a
@@ -649,6 +689,69 @@ def case_task_why_cited_greens():
                   entry_of(task_item(STEPS, context="Why yours: this needs your login.")), None)
     check("task why cited: a Why yours line with no route cite never reads the rows file", not reads,
           "the rows file was read %d times" % len(reads))
+
+
+#------------------------------------------------------------------ a str_replace on a stored item, judged by its status and kind
+
+def stored_item(repo, doc_id):
+    """(branch, folder, data) of the waiting copy's item `doc_id` in `repo`. The branch and folder come from
+    feedback_guard.waiting_copy, and git reads the item on origin/<branch>, as the copy's filing check reads it.
+    `data` is None when the repo holds no copy or no item for the doc."""
+    branch, folder = feedback_guard.waiting_copy(layout, repo)
+    try:
+        text = tcj.git(repo, "show", "refs/remotes/origin/%s:%s/items/%s.json" % (branch, folder, doc_id)).stdout
+    except subprocess.CalledProcessError:
+        return branch, folder, None
+    return branch, folder, json.loads(text)
+
+
+def page_at(name, repo, op, entry, want):
+    """page() for the waiting copy in `repo`: item_hit gets the repo as its cwd, and the guard judges that repo's write."""
+    verdict("page item_hit: " + name, call("item_hit", op, entry, repo), want)
+    verdict("page guard: " + name, guard_hit(op, entry, repo), want)
+
+
+def text_edit(new):
+    """A str_replace on a context line of item DOC that adds `new`. It carries no status or kind."""
+    return {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Context.", "new_str": new}
+
+
+def case_text_rules_judge_the_stored_item():
+    # Row text-rules-str-replace-unseen (the notes file): item_hit runs key_named_hit and reworked_hit on new_str with no
+    # stored status or kind, so a str_replace that adds a key or "being reworked" to a closed decision, a task or a note
+    # is refused. The stored item is read from the waiting copy: a closed decision, a task and a note pass both text
+    # rules. An open decision keeps the refusal, and so does a copy with no item for the doc (the empty state) and a
+    # repo with no readable copy, since an unreadable copy keeps today's refusal.
+    reworked, keyed = "The lane is being reworked.", "Pick option e2 for the lane."
+    stored = {"closed": {"kind": "decision", "status": "closed"},
+              "task": {"kind": "task", "status": "open"},
+              "note": {"kind": "note", "status": "open"},
+              "open": {"kind": "decision", "status": "open"}}
+    kinds = {"closed": "a closed decision", "task": "a task", "note": "a note", "open": "an open decision"}
+    repos = {state: tcj.make_repo("nfp-" + state, items={DOC: data}) for state, data in stored.items()}
+    repos["empty"] = tcj.make_repo("nfp-empty", items={"other-doc": stored["open"]})
+    repos["nocopy"] = tcj.make_repo("nfp-nocopy")
+    # Scope before subject (P7): each repo's copy resolves, and holds its item as written, before any verdict on it.
+    for state, data in stored.items():
+        branch, folder, got = stored_item(repos[state], DOC)
+        check("the copy of %s reads back its item" % kinds[state], got == data,
+              "want %r at %s on %s, got %r" % (data, folder, branch, got))
+    branch, folder, got = stored_item(repos["empty"], DOC)
+    check("the copy with no item for the doc reads back no item", got is None, "got %r at %s on %s" % (got, folder, branch))
+    check("the repo with no copy reads back no item", stored_item(repos["nocopy"], DOC)[2] is None)
+    for state in ("closed", "task", "note"):
+        page_at("a str_replace that adds 'being reworked' to %s passes" % kinds[state], repos[state], "str_replace",
+                text_edit(reworked), None)
+        page_at("a str_replace that adds option e2 to %s passes" % kinds[state], repos[state], "str_replace",
+                text_edit(keyed), None)
+    page_at("a str_replace that adds 'being reworked' to an open decision stays refused", repos["open"],
+            "str_replace", text_edit(reworked), ("rework-off-page", "being reworked"))
+    page_at("a str_replace that adds option e2 to an open decision stays refused", repos["open"],
+            "str_replace", text_edit(keyed), ("option-letter-keys", "option e2"))
+    page_at("a str_replace that adds 'being reworked' to a copy with no item for the doc stays refused",
+            repos["empty"], "str_replace", text_edit(reworked), ("rework-off-page", "being reworked"))
+    page_at("a str_replace that adds 'being reworked' with no readable copy stays refused", repos["nocopy"],
+            "str_replace", text_edit(reworked), ("rework-off-page", "being reworked"))
 
 
 # ------------------------------------------------------------------ chat only
@@ -1271,6 +1374,53 @@ def case_command_in_item_spans():
              entry_of(task_item(["Check the output of `%s`" % span])), ("command-in-item", "shell line"))
     page("a fence holding grep x a | head is refused as a shell line", "set",
          entry_of(task_item(["Check the output:\n```\ngrep x a | head\n```"])), ("command-in-item", "shell line"))
+
+
+# ------------------------------------------------------------------ a PowerShell string and a step's shell span
+
+def ps_task(ps, mac="git log -1"):
+    """A task whose command is {powershell: ps, mac}, with no gh in either, so only the bash-operator check judges it."""
+    return task_item(["Open PowerShell", "Paste the command below and run it"], command={"powershell": ps, "mac": mac})
+
+
+def case_powershell_bash_forms():
+    # Row ps-command-misses-bash (the debt file): PS_BASH_OPERATOR reads only &&, ||, <<, /dev/null and export, so a
+    # bash form in a PowerShell string passes. Each bash form is refused, and its PowerShell twin passes. The traps
+    # are PowerShell text that looks like a bash form: a cast, a regex escape, a pipe in a string or a comment, and a
+    # backslash path that ends a line.
+    for name, ps in (("a pipe to head", "git log | head -5"), ("a pipe to grep", "git log --oneline | grep -i fix"),
+                     ("a leading NAME=value", "FOO=1 git push"),
+                     ("a bracket test", "if [ -f x ]; then git push; fi"),
+                     ("a backslash line end", "git push origin \\\nmain")):
+        page("a PowerShell command with %s is refused as a bash operator" % name, "set",
+             entry_of(ps_task(ps)), ("command-in-item", "bash operator"))
+    for name, ps in (("a Select-Object pipe", "Get-ChildItem | Select-Object -First 5"),
+                     ("a PowerShell variable assignment", '$env:FOO = "1"; git push'),
+                     ("a PowerShell if test", "if (Test-Path x) { git push }"),
+                     ("a backtick line continuation", "git push origin `\nmain")):
+        page("a PowerShell twin with %s passes" % name, "set", entry_of(ps_task(ps)), None)
+    for name, ps in (("a backslash path that ends a line", "Set-Location C:\\repo\\\ngit push origin main"),
+                     ("a cast and a regex escape", "[int]$n = 5; if ('a[b' -match '\\[') { git push }"),
+                     ("a pipe inside a string", 'Write-Host "a | head"'),
+                     ("a pipe after a comment opener", "git log # | head"),
+                     ("a here-string holding a pipe", "@'\n| head\n'@")):
+        page("a PowerShell trap, %s, passes" % name, "set", entry_of(ps_task(ps)), None)
+
+
+def case_step_shell_programs_partial():
+    # Row step-shell-programs-partial (the debt file): a single-span step is a shell line only when its first word is in
+    # SHELL_PROGRAMS, so a cloud CLI, a span with a flag after its word, or chmod passes. Each of the six spans the debt
+    # names is refused. Controls pass: a bare tool name, a flag alone and a minus between two words. The chained span
+    # stays refused, as on main.
+    for span in ("gsutil ls", "yarn install", "kubectl get pods", "terraform plan", "chmod +x f", "grep -r x"):
+        page("a step holding `%s` is refused as a shell line" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), ("command-in-item", "shell line"))
+    for span in ("kubectl", "--force", "a - b"):
+        page("a step holding `%s` alone is text and passes" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), None)
+    page("a fence holding a chained terraform plan with a pipe stays a shell line", "set",
+         entry_of(task_item(["Check the output:\n```\nterraform plan | tee plan.txt\n```"])),
+         ("command-in-item", "shell line"))
 
 
 # ------------------------------------------------------------------ a question says how it departs from main
@@ -2535,7 +2685,8 @@ def main():
                  case_cross_repo_writer_guard_path, case_cross_repo_writer_page_item_hit,
                  case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo,
                  case_judged_relative_file_path_read_at_cwd, case_judged_absolute_and_empty_are_unchanged,
-                 case_judged_mixed_writes_all_returned):
+                 case_judged_mixed_writes_all_returned, case_press_link_label_is_a_string,
+                 case_text_rules_judge_the_stored_item, case_powershell_bash_forms, case_step_shell_programs_partial):
         try:
             case()
         except Exception as exc:
