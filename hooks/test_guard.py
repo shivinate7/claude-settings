@@ -20698,6 +20698,71 @@ def worktree_home_red_root_case():
     return True, "the red-run folder's root is refused to rm, mv and a Write; a cp into it and a write inside it pass"
 
 
+def worktree_home_red_cwd_case():
+    """Rule 0, worktree-home, a call whose shell cwd is the caller's own red-run folder.
+    agents/test-author.md says the guard lets the agent cd into that folder and write there, and
+    decision an-agent-outside-its-home-tree-must-stop passes a cd into it and a Write or Edit inside it.
+    A Bash call run from inside the folder writes nothing outside it, so a test run, git status, a
+    `git -C <red> checkout`, a relative write and a Write inside it each pass. On main worktree-home
+    refuses each Bash call, because the cwd sits outside the recorded home. Its reason also says the
+    working tree is gone, which is untrue here. Controls stay refused from that cwd: a cd into a
+    sibling's red-run folder or sibling checkout, rm -rf of the folder, a shell write into the home or
+    the primary, and a Write into a sibling's folder. The lone cd back into the home stays allowed."""
+    primary, home, sibling_home, _ = _cross_checkout_fixture(
+        "xcoredcwd", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    red = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "-red")[0]
+    sibling_red = sh_add_lane(primary, "agent-" + CD_AGENT_SIBLING + "-red")[0]
+    head = run_vcs(primary, "rev-parse", "HEAD").stdout.strip()
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow" or not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        return False, "the agent's recording call: want allow and a home record, got %s (%s)" % (
+            got, reason[:120])
+    cases = (
+        # Must pass: each writes nothing outside the caller's own red-run folder.
+        ("pytest from its red-run folder", "allow", "Bash", red,
+         {"command": "python3 -m pytest -q"}),
+        ("git status from its red-run folder", "allow", "Bash", red,
+         {"command": "git status"}),
+        ("git -C red checkout from its red-run folder", "allow", "Bash", red,
+         {"command": "git -C %s checkout %s -- src/app.py" % (slash(red), head)}),
+        ("relative write from its red-run folder", "allow", "Bash", red,
+         {"command": "echo x > f.txt"}),
+        ("Write inside its red-run folder, from the red cwd", "allow", "Write", red,
+         {"file_path": os.path.join(red, "f.txt"), "content": "x"}),
+        ("lone cd back into the home, from the red cwd", "allow", "Bash", red,
+         {"command": "cd %s" % slash(home)}),
+        # The doc's own form, from the home. Passes on main, and must keep passing.
+        ("cd into the red-run folder chained to git status, from the home", "allow", "Bash", home,
+         {"command": "cd %s && git status" % slash(red)}),
+        ("git -C red checkout, from the home", "allow", "Bash", home,
+         {"command": "git -C %s checkout %s -- src/app.py" % (slash(red), head)}),
+        # Must stay refused from the red cwd: another checkout, the folder root, the home, the primary.
+        ("cd into a sibling's red-run folder, from the red cwd", "deny", "Bash", red,
+         {"command": "cd %s" % slash(sibling_red)}),
+        ("cd into a sibling checkout, from the red cwd", "deny", "Bash", red,
+         {"command": "cd %s" % slash(sibling_home)}),
+        ("rm -rf of its own red-run folder, from the red cwd", "deny", "Bash", red,
+         {"command": "rm -rf %s" % slash(red)}),
+        ("shell write into the home, from the red cwd", "deny", "Bash", red,
+         {"command": "echo x > %s" % slash(os.path.join(home, "f.txt"))}),
+        ("shell write into the primary, from the red cwd", "deny", "Bash", red,
+         {"command": "echo x > %s" % slash(os.path.join(primary, "src", "app.py"))}),
+        ("Write into a sibling's red-run folder, from the red cwd", "deny", "Write", red,
+         {"file_path": os.path.join(sibling_red, "f.txt"), "content": "x"}),
+    )
+    problems = []
+    for label, expect, tool, cwd, tool_input in cases:
+        got, reason = _decide_full(tool, cwd, agent_id=CD_AGENT_HOME, **tool_input)
+        if got != expect:
+            problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
+        elif expect == "deny" and any(text in reason for text in (ROOT, slash(ROOT))):
+            problems.append("%s: the refusal names a path (%s)" % (label, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, ("a test run, git status, a git -C checkout, a relative write and a Write from the red-run "
+                  "folder pass; the cd, rm, shell and Write controls stay refused")
+
+
 def worktree_home_red_nested_case():
     """Rule 0, other-checkout, the red-run folder is the primary's alone: a folder named
     `agent-<its id>-red` under another linked worktree's `.claude/worktrees/` belongs to that
@@ -21692,6 +21757,9 @@ LOG_CHECKS = (
      "the primary, or with no agent_id are refused", worktree_home_red_write_case),
     ("worktree-home: the own red-run folder's root is refused to rm, mv and a Write, and a cp into it "
      "or a write inside it passes", worktree_home_red_root_case),
+    ("worktree-home: a call whose cwd is its own red-run folder passes for a test run, git status, a "
+     "git -C checkout, a relative write and a Write inside it; a cd into another checkout, rm of the "
+     "folder and a shell write into the home or primary stay refused", worktree_home_red_cwd_case),
     ("worktree-home: a red-run folder nested under another linked worktree, not the primary's, is "
      "refused to a cd, a shell write and a Write", worktree_home_red_nested_case),
     ("worktree-home: a write into the own red-run folder spelled in other letters of case passes on "
