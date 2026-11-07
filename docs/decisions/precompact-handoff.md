@@ -45,6 +45,10 @@ Reason for items 8 and 9: after /clear or a fork a session started blind. After 
 
 A handoff is a short-term note. It is never a ruling's only home (`memory-is-never-a-rulings-only-home`, memory never sole home for rulings).
 
+Debts:
+- `carry-source-words` (Recovered source words too few): open debt.
+- `refusal-shapes-missed` (refusal lines from one build missed): open debt.
+
 Kind: process
 Home: hooks/precompact_handoff.py
 Home: hooks/reread_check.py

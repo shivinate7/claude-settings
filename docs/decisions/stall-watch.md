@@ -120,5 +120,8 @@ one home (`building-one-home-per-capability`, each capability has one home).
 Reason: the PreToolUse path runs only at a tool call, and on Windows it does nothing. No process id
 exists for the job, so the age of its output file is the signal.
 
+Debts:
+- `test-guard-no-progress-line` (silent guard test looks stalled): open debt.
+
 Kind: process
 Home: hooks/stall_watch.py

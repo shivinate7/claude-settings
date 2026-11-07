@@ -165,6 +165,11 @@ Mechanics that carry out the rulings above. They are not owner rulings.
 
 Open: the context limit for each tier. The route works (waiting item 53, pick a, tested 17:46 and 17:53); the limit values are not ruled.
 
+Debts:
+- `local-triage-tier-proof` (local triage cannot prove its tier): open debt.
+- `brief-no-topic-wrong-steer` (no-Topic brief gets wrong steer): open debt.
+- `fork-step-grants-read-roadmap` (fork step grants read main's roadmap): open debt.
+
 Kind: process
 Home: docs/decisions/session-tiers.md
 Home: rule:roles-pick-mode-from-request

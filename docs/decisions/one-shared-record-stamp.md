@@ -20,6 +20,10 @@ tree after a rejected push, which four separate tools do not.
   fails `check`. The fix is any pull request through the merge tool.
 - Other repos adopt the stamp and the merge tool, each in its own session.
 
+Debts:
+- `banchi-build-steps` (Banchi build steps not claimed): open debt.
+- `sharables-adopts-the-stamp` (claude-sharables keeps its own claim tool): open debt.
+
 Kind: process
 Home: rule:git-slug-then-claim-number
 Home: actions/stamp/stamp.mjs

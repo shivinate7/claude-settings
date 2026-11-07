@@ -19,5 +19,8 @@ Git is each artifact's home (owner ruling fb-1458-1, 2026-11-02 14:58 CST, optio
   - Every other call: nothing.
 - Known limit: the guard judges shape, not existence. A design-folder path to a file never written passes at write. The build reads it as a miss once origin lacks the file. A link whose target file holds the link's own target-path text reads as ok.
 
+Debts:
+- `mockup-cost-test-miss-path-only` (mockup cost test covers miss path): open debt.
+
 Kind: process
 Home: rule:questions-go-to-owner

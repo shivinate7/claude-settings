@@ -46,5 +46,8 @@ Each agent runs `git diff --cached --stat` before each commit. The list names on
 
 Risk kind: incident, 2026-11-01 22:41 CST, worktree of lane `merge-lock-record-drift`.
 
+Debts:
+- `worktree-guard-loop-var` (hand-made worktree guard misses loop variables): open debt.
+
 Kind: build
 Plan: docs/decisions/lanes-start-in-tool-worktrees.md#the-ruling (all)

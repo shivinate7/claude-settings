@@ -69,5 +69,8 @@ way out that does not depend on the check is the reason flag
 ruling, Cockpit item 178 a, 2026-11-03 22:31 CST). Each lift is printed and written to the merge
 commit message as `Reason flag: --undo-check-unknown-ok: <reason>`. It never excuses a finding.
 
+Debts:
+- `inplace-edit-under-0-9-flagged` (in-place edits of main lines flagged): open debt.
+
 Kind: process
 Home: lint/check_silent_undo.py

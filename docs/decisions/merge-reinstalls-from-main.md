@@ -23,6 +23,9 @@ newer start's lock (debt `refresh-lock-untested`, session-start refresh lock lac
 Reason: a merge that adds a file must reach `~/.claude` with no hand install. Links to the clone itself would follow its
 checked-out lane branch, so unreviewed hooks would go live.
 
+Debts:
+- `pin-missing-files-no-install` (pin with missing files blocks install): open debt.
+
 Kind: build
 Plan: docs/decisions/merge-reinstalls-from-main.md#the-ruling (all)
 Home: merge/install_from_main.sh

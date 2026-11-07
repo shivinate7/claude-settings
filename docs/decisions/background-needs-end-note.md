@@ -19,6 +19,9 @@ Owner, 2026-10-13 23:41 CDT: "End condition at start."
 
 Why: a server or watcher can run long after its work ends, and nothing in the start call says when it stops. No background job should run unattended for a day with no stated reason.
 
+Debts:
+- `bg-end-false-alarms` (script names read as servers): open debt.
+
 Kind: process
 Home: hooks/guard_stream.py
 Home: hooks/stall_watch.py

@@ -32,5 +32,8 @@ A cloud session has no `gh` and no PostToolUse hook, so it waits through the PR 
 - Measured 2026-10-27: a red run's `ci-done` comment by `github-actions[bot]` reached the watching session as `issue_comment.created`, about 2 minutes after the post. A run that a newer push cancelled posted no comment, as designed.
 - The fallback: a session that waits on CI sets a `send_later` check-in when it starts to wait, and again after each red job, each wider apart (rule `git-ci-wait-checks-in`, waiting sessions set timed check-ins). A check-in costs one read, and it catches a lost wake.
 
+Debts:
+- `ci-wake-lists-runs-once` (CI wake relists runs each pass): open debt.
+
 Kind: build
 Plan: docs/decisions/ci-wait-reads-run-status.md#the-ruling (all)

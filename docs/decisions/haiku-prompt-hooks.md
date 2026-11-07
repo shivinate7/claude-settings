@@ -24,5 +24,8 @@ The model and effort of each hook named here are rows of the model table (decisi
 
 A prompt hook names a full model id, because the prompt-hook evaluator rejects the alias `haiku`. When the model retires, change the `model` value in the judge hooks of `settings.json`, the one place. `lint/test_settings_matcher.py` pins it.
 
+Debts:
+- `hooks-to-mods-judges` (judge moves from hooks to mods): open debt.
+
 Kind: process
 Home: settings.json

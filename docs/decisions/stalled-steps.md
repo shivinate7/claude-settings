@@ -50,6 +50,9 @@ No process or timer. Per Stop, the hold adds:
 
 `build` reads the live file triage already writes.
 
+Debts:
+- `stale-draft-lane-head` (stale-draft check misses lane branches): open debt.
+
 Kind: build
 Plan: docs/decisions/stalled-steps.md#the-ruling (all)
 Home: skills/roadmap/build.py

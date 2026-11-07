@@ -5,7 +5,7 @@
 The session-board mod (`mods/session-board`, commands `/board` and `/safe-stop`) gives one view of all
 sessions and a safe stopping point, with no typing of "status?" into each one. Reason: each record is
 small. It holds names and counts, no prompt and no file content. `/safe-stop` is in
-`safe-stop-queues-one-prompt` (/safe-stop queues one prompt).
+`safe-stop-queues-one-prompt` (the safe-stop command queues one prompt).
 
 Update-ready holds only when all five conditions hold (the owner's definition):
 

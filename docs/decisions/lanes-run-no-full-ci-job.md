@@ -17,5 +17,8 @@ The ready checks (incident 2026-11-07 05:28 CST, q_max batch 1064): the batch we
 
 Why: a full local run per lane proves again what the batch run proves, and costs a lane its time. A fixture that copies a changed file is caught by the batch run, and the fixtures now copy what git tracks, so a new shared module no longer breaks them.
 
+Debts:
+- `ready-checks-skipped-by-mcp` (ready mark by MCP skips checks): open debt.
+
 Kind: process
 Home: rule:roles-each-layer-proves-once

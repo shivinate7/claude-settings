@@ -28,5 +28,8 @@ Residual risk: some suites that read a doc are not hit. One reads it through a m
 
 Risk: likely. Batches run while other batches merge, so main often moves under a green head. Landed 2026-10-27; the small move 2026-10-28; the empty move 2026-11-02.
 
+Debts:
+- `merge-records-stale-base` (stale base reported too late): open debt.
+
 Kind: process
 Home: merge/merge.py

@@ -52,6 +52,9 @@ Reason: the tools disagreed on where records live. `lint/ste_lint.py` read `docs
 and this repo keeps its records in `docs/decisions/`, so its gloss collapse never ran here. Four tools held
 four copies of the path (building-allow-list-is-the-constant).
 
+Debts:
+- `layout-kind-repeats-extras` (new core kind breaks extras files): open debt.
+
 Kind: process
 Home: lint/layout.json
 Home: lint/check_layout.py

@@ -28,5 +28,10 @@ Incidents:
 - 2026-10-31 14:52 CDT: a session handed the owner a branch-protection PATCH that needs admin. His PC has two gh logins: shivinate7 (owns the repos, admin) and ssemwal-cdc (work, push only). He did not know which login was active until `gh auth switch` printed it.
 - 2026-10-30 14:40 CDT, waiting-page item 78: a bash-only command under "any terminal works" failed in his Windows PowerShell 5.1 on `&&` and `<<<`.
 
+Debts:
+- `press-clause-hides-owner-press` (session clause hides an owner press): open debt.
+- `ps-command-misses-bash` (PowerShell check misses bash-only forms): open debt.
+- `step-shell-programs-partial` (step scan knows only some programs): open debt.
+
 Kind: process
 Home: rule:style-press-has-link

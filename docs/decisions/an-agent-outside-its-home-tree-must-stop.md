@@ -69,5 +69,10 @@ Owner ask, 2026-10-29 16:49 CDT: a resumed top-level session whose worktree was 
 - **Unreadable is not a hit.** No git, no common directory, an unreadable record, or a `cwd` in no checkout allows (`verification-report-unknown-reads`, report an unrunnable read as unknown).
 - **The predicate is the act** (`predicate-is-the-act`, the predicate is the act). The rule reads `agent_id`, `cwd` and the write target.
 
+Debts:
+- `exit-worktree-hook-unmeasured` (ExitWorktree reaching the guard unmeasured): open debt.
+- `other-checkout-cwd-outside` (a cwd outside any checkout passes): open debt.
+- `session-home-lane-visit` (lane visit sets the session home): open debt.
+
 Kind: build
 Plan: docs/decisions/an-agent-outside-its-home-tree-must-stop.md#the-ruling (all)

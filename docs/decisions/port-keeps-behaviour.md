@@ -38,5 +38,8 @@ Incidents:
 - 2026-10-27 15:51 CDT: an orchestrator asked the owner to merge although its repo held a standing merge grant, and asked about a "Take all" detail a reviewer had held.
 - 2026-10-30: a lane's "departures" said "Opus above a role's row stays the existing ask", which restates decision agent-model-cap.
 
+Debts:
+- `departs-word-list-limits` (Departs from word list misses restatements): open debt.
+
 Kind: process
 Home: rule:building-port-keeps-behaviour

@@ -74,5 +74,9 @@ Orchestrator's call, not an owner grant: the required unit, the role list, and t
 
 Why: the owner needs a way to force through a refusal that stops real work. Two examples are the removal of an unrecognized worktree and the stop of a runaway process.
 
+Debts:
+- `opus-ask-exclusion-words` (exclusion words grant excluded roles): open debt.
+- `opus-ask-scheduled-text` (scheduled text reaches plain Opus judge): open debt.
+
 Kind: build
 Plan: docs/decisions/owner-override.md#the-ruling (all)

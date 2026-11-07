@@ -37,7 +37,7 @@ No new process. MAP11's reads join the one `readFacts` call of a check run, so o
 
 Debts:
 - `map-tested-by-no-shell` (MAP11 cannot read shell tests) (MAP11 cannot read a shell test, so a tested-by line naming one fails).
-- `map-import-alias-unread` (MAP11, MAP9 miss path-alias imports) (a test that imports by a path alias, such as `@/src/y`, fails MAP11).
+- `map-import-alias-unread` (path-alias imports miss MAP11 and MAP9) (a test that imports by a path alias, such as `@/src/y`, fails MAP11).
 - `map-tested-by-path-pieces` (MAP11 misses paths built from pieces) (a test that builds the path by `os.path.join` or `path.join` fails MAP11).
 - `map-py-base-name-match` (Python import reader matches base name) (a test with stdlib `import queue` passes for a mapped `jobs/queue.py`; MAP9 shares the reader).
 

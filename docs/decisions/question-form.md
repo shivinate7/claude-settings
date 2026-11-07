@@ -42,5 +42,8 @@ Cost: no new long-lived process and no file written. `hooks/question_form.py` lo
 
 Known limit: code reads words. An unmarked widening option, a false stake and a premise that does not match its kind pass. The question judge model and the reply judge read what code cannot. A `str_replace` is judged on its fragment only, so a fragment cannot be flagged for a line or option it leaves out.
 
+Debts:
+- `bold-option-keys-missed` (bold and inline option keys missed): open debt.
+
 Kind: process
 Home: rule:style-question-form

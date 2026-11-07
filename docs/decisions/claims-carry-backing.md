@@ -109,6 +109,13 @@ Not built:
 - The row-age reader (see Unmeasured).
 - The judge is unmeasured beyond the run above (see Model judge at merge).
 
+Debts:
+- `handoff-choice-exempts-line` (choice phrase exempts the whole line): open debt.
+- `handoff-verb-list-closed` (hand-off verb list misses capability forms): open debt.
+- `route-flag-stop-untested` (route_flag rows untested through Stop): open debt.
+- `route-match-limits-untested` (route matcher size limits untested): open debt.
+- `stale005-quoted-text-alarm` (STALE005 reads quoted text as claims): open debt.
+
 Kind: build
 Plan: docs/plans/pointer-system.md#lanes (all)
 Home: lint/stale_cites.py

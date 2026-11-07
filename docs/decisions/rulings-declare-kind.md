@@ -33,5 +33,8 @@ task, because nothing linked the ruling to a plan. The line format is in `lint/c
   adds a second ruling section to a record, with the remedy "its own record". It never refuses for a
   `Kind:` line: the lint counts them, and the lint is the one home for that count.
 
+Debts:
+- `ruling-kind-vacuous-local-pass` (ruling-kind lint passes on zero files): open debt.
+
 Kind: process
 Home: lint/check_ruling_kind.py

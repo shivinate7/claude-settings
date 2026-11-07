@@ -67,5 +67,12 @@ The shell check does not replace the act. The act stays a test path in the build
 - Landed: 2026-11-02.
 - Cost: no process, no file, no timer. The scan runs inside the guard hook that already runs for a builder's shell call. `ast` is imported only when a python body is read. A refusal writes its one guard.log line, as every refusal does. A scan error in the python or node reader is no hit. Any other scan error ends the judge: the guard logs `guard-crash` and allows the call.
 
+Debts:
+- `bash-c-read-false-alarm` (bash -c reads refused as writes): open debt.
+- `find-xargs-test-write` (writes through find or xargs unread): open debt.
+- `pycache-rm-false-alarm` (cache cleanup in tests refused): open debt.
+- `script-file-runs-test-write` (script run by name writes tests): open debt.
+- `workflow-wrapped-test-run` (wrapped test runs refused as dropped): open debt.
+
 Kind: process
 Home: hooks/guard.py
