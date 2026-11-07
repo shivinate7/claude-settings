@@ -534,7 +534,8 @@ def answered_problem(text):
 # A role missing from Done is excused when Next names it with every model it ran, since a spawn may
 # run on past the report. Next pairs are never mismatch-checked: a Next line can plan a later spawn on
 # another model. The excuse applies only when no builder, test-author or record-writer spawned, or
-# every BUILT Done item names some role and model. Any pair satisfies that gate, not the builder's own.
+# every BUILT or ref-carrying Done item names a builder, test-author or record-writer pair, since a
+# finished agent build is a Done item with a ref. A reviewer-only pair does not count.
 NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
 SPAWN_TOOLS = {"Agent", "Task"}
 MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
@@ -621,7 +622,10 @@ def done_models_problem(text, spawned):
     next_named = _role_models(report_section(text, "Next"))
     missing = sorted(r for r in spawned if not any(nr == r for nr, _ in named))
     builds = spawned.keys() & {"builder", "test-author", "record-writer"}
-    if missing and (not builds or all(ROLE_MODEL_RE.search(i) for i in items if "BUILT" in DONE_KIND_RE.findall(i))):
+    def names_builder(i):
+        return any(r != "reviewer" for r, _ in _role_models(i))
+    if missing and (not builds or all(names_builder(i) for i in items
+                                      if "BUILT" in DONE_KIND_RE.findall(i) or DONE_REF_RE.search(i))):
         def named_next(role):
             ran = spawned[role] - {""}
             models = {m for r, m in next_named if r == role}
