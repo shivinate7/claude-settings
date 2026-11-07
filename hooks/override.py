@@ -37,8 +37,8 @@ rule's settings-write ask, and it reaches agents.
     - `claude` is never a role word here. The keyword form `opus claude 2h` keeps it.
     - The roles the ask names are granted, two or more as a list, only when a plain list joins them (PLAIN_LIST:
       commas, and, or, &, plus); any other words between two roles: no grant. A role word with a NEGATIONS word (not,
-      no, don't, never, except, without, or an exclusion word such as skip or instead) within three words before or
-      after it: no grant (`builders, no problem` grants nothing too).
+      no, don't, never, except, without, or an exclusion word such as skip, but, other, apart, aside, leave, stay or
+      instead) within three words before or after it: no grant (`builders, no problem` grants nothing too).
     - An ask that names no role takes its roles from the owner's earlier typed prompts (decision owner-override:
       scope from context, fall back to every role), before the ask only. _context_prompts reads them from
       the one tail read (_tail_prompts), through the one owner-turn test (_owner_text), each through _strip_blocks,
@@ -106,7 +106,8 @@ BLOCKS = re.compile(PASTED + "|" + MACHINE_BLOCKS, re.I | re.S)
 OPUS_ASK_SOURCES = (None, "user")  # the payload `source` values a plain ask may carry: absent, null or the owner
 ROLE_WORDS = re.compile(r"[A-Za-z][\w\u2019'-]*")
 NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t",
-             "excluding", "exclude", "skip", "ignore", "instead", "rather", "besides", "minus"}
+             "excluding", "exclude", "skip", "ignore", "instead", "rather", "besides", "minus",
+             "but", "other", "apart", "aside", "leave", "stay", "stays"}
 NEGATION_SPAN = 3  # a negation within this many words before or after a role word negates it
 PLAIN_LIST = re.compile(r"(?:[\s,&]|\b(?:and|or|plus)\b)*", re.I)  # the only text that may join two role words
 SPELLED_UNIT = r"h(?:ours?|rs?)|m(?:ins?|inutes?)"
@@ -136,7 +137,8 @@ OPUS_UNREAD = "opus-unread"  # the log decision when an Opus override file canno
 STEP_LIFTED = "step-grant"  # the log decision of an Opus spawn a grant on the lane's roadmap step lifted
 STEP_UNREAD = "step-grant-unread"  # the log decision when a step record that names the lane cannot be read
 LIFTS = (LIFTED, OPUS_LIFTED, STEP_LIFTED)  # the take() results that let the act through
-STEP_REF = "refs/remotes/origin/roadmap"  # the record branch as the lane last fetched it; never fetched here
+STEP_REF = "refs/remotes/origin/roadmap"  # main's record branch as the lane last fetched it; never fetched here
+STEP_REF_PREFIX = "refs/remotes/origin/"  # a fork's record branch (lint/layout.py record_branch) follows it
 STEP_DIR = "roadmap/data/steps/"
 LANE_ENV, LANE_ENV_PREFIX, LANE_PREFIX = "CLAUDE_CODE_REMOTE_SESSION_ID", "cse_", "session_"
 _step_read = None  # the step id the last take() read for its step decision, for the log line
@@ -587,6 +589,24 @@ def _grant_role(grant):
     return role
 
 
+def _step_ref(cwd):
+    """The ref of the record branch of the checkout that holds `cwd`, as the lane last fetched it: STEP_REF_PREFIX
+    and lint/layout.py record_branch (a fork names its own in the extras file, else `roadmap`). None when the
+    checkout or its layout cannot be read, so no step is read and no grant lifts."""
+    import git_reads
+    top = git_reads._git(cwd, "rev-parse", "--show-toplevel")
+    if top is None or top.returncode != 0 or not top.stdout.strip():
+        return None
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import layout
+    try:
+        return STEP_REF_PREFIX + layout.record_branch(top.stdout.strip())
+    except Exception:
+        return None
+
+
 def _take_step(session_id, spawn_role, cwd):
     """STEP_LIFTED when the one step bound to this lane grants an Opus spawn of spawn_role, STEP_UNREAD
     when a record that names the lane cannot be read or has the wrong shape, else None. Sets _step_read
@@ -597,7 +617,10 @@ def _take_step(session_id, spawn_role, cwd):
     if lane is None or not isinstance(cwd, str) or not cwd:
         return None
     import git_reads  # lazy: only an Opus spawn refusal that no Opus override lifted needs it
-    hits = git_reads._git(cwd, "grep", "-l", "-F", "-e", lane, STEP_REF, "--", STEP_DIR)
+    ref = _step_ref(cwd)
+    if ref is None:
+        return None
+    hits = git_reads._git(cwd, "grep", "-l", "-F", "-e", lane, ref, "--", STEP_DIR)
     if hits is None or hits.returncode != 0:
         return None  # no ref, no repository, no hit or a git error: no lift
     bound = []

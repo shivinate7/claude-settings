@@ -176,10 +176,17 @@ DEPARTS_RULE = "question-departs"
 DEPARTS_LINE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?(?:\*\*)?Departs from(?:\*\*)?:(?:\*\*)?([^\n]*)", re.I | re.M)
 # The separator: an em dash, spaced or not, or " - " or " -- ". The first one splits the line.
 DEPARTS_SEPARATOR = re.compile(r"\s*\u2014\s*|\s+--?\s+")
-# Whole words and phrases that say the change side restates main. "stay", "remain" and "kept" are not
-# here: "Suspense cards stay in Suspense" is a port change that names where a thing goes.
+# Whole words and phrases that say the change side restates main. A bare "stay" or "remain" is not here:
+# "Suspense cards stay in Suspense" is a port change that names where a thing goes. "remains as it is" and
+# "is still the same" say nothing moves, and so do "no-op", "not changed" and "is kept".
 NO_CHANGE = re.compile(r"(?<![\w/-])(?:none|nothing|n/a|no changes?|no difference|unchanged|stays|keeps|as today"
-                       r"|as on main|as before|same as|identical to|already)(?![\w/-])", re.I)
+                       r"|as on main|as before|same as|identical to|already|no-?op|not changed|(?:is|are) kept"
+                       r"|remains?\s+(?:as\s+(?:it|is|today|before)|the\s+same|unchanged)"
+                       r"|(?:is|are)\s+still\s+(?:the\s+same|as\s+(?:it|is|today|before)|unchanged))(?![\w/-])", re.I)
+# A verb after the no-change word that names a real change: "keeps Suspense cards and adds Reset", "none of the
+# screens change; adds a new tab". "adds nothing" restates.
+CHANGE_AFTER = re.compile(r"\b(?:adds?(?!\s+(?:nothing|none|no)\b)|added|mov(?:es?|ed)|remov(?:es?|ed)"
+                          r"|drops?|dropped|replac(?:es?|ed)|renam(?:es?|ed))\b", re.I)
 # The new-thing change side, "adds <X>": group 1 is X.
 PORT_NEW_THING = re.compile(r"adds\b\s*(.*\S)", re.I)
 DEPARTS_REASON = ("A question to the owner says how the work departs from main, in a line that starts "
@@ -201,7 +208,8 @@ def departs_hit(text) -> str:
     """The miss reason when `text` lacks a valid Departs from line, else "". Every such line must hold a
     non-empty side on each side of the first separator (see DEPARTS_SEPARATOR), neither side only a
     placeholder, and no no-change word in the first clause of the change side: the part before its first
-    ";", or the whole side with none. A word after the ";" says what the change does."""
+    ";", or the whole side with none, unless a change verb (CHANGE_AFTER) follows that word. A word after the
+    ";" says what the change does."""
     text = str(text or "")
     lines = DEPARTS_LINE.findall(text)
     if not lines:
@@ -216,7 +224,7 @@ def departs_hit(text) -> str:
         if is_placeholder(main) or is_placeholder(change) or (added and is_placeholder(added.group(1))):
             return "Departs from line with a side that is only a placeholder: write the real text"
         word = NO_CHANGE.search(change.split(";", 1)[0])
-        if word:
+        if word and not CHANGE_AFTER.search(change[word.end():]):
             return "Departs from line whose change side says no change (%r): it restates main" % word.group(0)
     return ""
 
@@ -442,8 +450,8 @@ def _flat_text(value) -> str:
 
 
 # A clause whose subject is the session ("The session merges it after your pick.") and that names
-# no `you` and no owner who acts ("the owner clicks Approve", "Shivam approves it"): the session makes
-# that press, so the owner presses nothing. Only that clause is excused. A press in another clause
+# no `you`, no owner who acts ("the owner clicks Approve", "Shivam approves it") and no other press
+# verb ("after clicking Approve"): the session makes that press, so the owner presses nothing. Only that clause is excused. A press in another clause
 # stays ("..., then press Merge", "...: press Merge", "... but click Merge"). An owner's name with no
 # act after it ("as the owner asked", "after Shivam's OK"), a past act ("after he approved it") and a
 # press of the page's own button ("after he hits Send") ask the owner for nothing.
@@ -467,6 +475,25 @@ def _owner_acts(clause) -> bool:
     return any(OWNER_ACT.match(clause, m.end()) for m in OWNER_NAME.finditer(clause))
 
 
+# The verb a session clause's own subject presses ("the session clicks Merge"), and a past press by the owner
+# ("the owner clicked Approve", "he has already pressed it"), which asks him for nothing.
+_SESSION_SUBJECT = re.compile(r"\bsession\s+(?:\w+ly\s+)?$", re.I)
+_PAST_OWNER_PRESS = re.compile(OWNER_NAME.pattern + r"\s+(?:(?:has|had|already)\s+)*$", re.I)
+_PAST_PRESS = re.compile(r"(?:press|click|tap)(?:ed|ped)\b", re.I)
+
+
+def _owner_press_in(clause) -> bool:
+    """True when `clause` holds a press verb that the session does not make: one the session's own subject
+    is not directly before, and no past press by the owner. "after clicking Approve", "after Approve is
+    clicked", "after your Merge click" and "after the owner has to click Approve" each hold one."""
+    for m in PRESS_VERB.finditer(clause):
+        before = clause[:m.start()]
+        if _SESSION_SUBJECT.search(before) or (_PAST_PRESS.match(m.group()) and _PAST_OWNER_PRESS.search(before)):
+            continue
+        return True
+    return False
+
+
 def _owner_press_text(label, how) -> tuple:
     """(text, press_text) of one option, for _press_field_ok. `text` is the label and the how, one
     text. `press_text` is the label and the how without each clause of the how that the session
@@ -476,7 +503,7 @@ def _owner_press_text(label, how) -> tuple:
     text = label + ". " + how
     clauses = [c for c in _CLAUSE_BREAK.split(how) if c and c.strip()]
     session = [c for c in clauses if SESSION_PRESS.search(c) and not OWNER_YOU.search(c)
-               and not _owner_acts(c)]
+               and not _owner_acts(c) and not _owner_press_in(c)]
     if not session:
         return text, text
     done = " ".join(session).lower()
@@ -1643,10 +1670,29 @@ OPTION_KEY = re.compile(r"^[ \t]*(?P<bullet>[-*+][ \t]+)?(?:\*\*|\()?(?P<key>\d*
                         r"(?:\*\*)?[ \t]+\S", re.M)
 
 
+# An inline key, `Q? a) x b) y`: a letter and `)` set off from the word before it, with text after. A line with no
+# key at its start holds inline keys only when it holds two, so `(see a) below` is no key.
+INLINE_KEY = re.compile(r"(?<![\w'\"(])(?P<key>[A-Za-z])\)(?=[ \t]+\S)")
+
+
+def _line_keys(line, match):
+    """(text before the first key, [(key, option text)]) for one line. `match` is the line's OPTION_KEY match or
+    None. A line-start key is a key alone; each inline key after it, or after no key at all, is one too. The
+    option text runs to the next key on the line."""
+    found = [(match.group("key"), match.start("key"), match.end() - 1)] if match else []
+    found += [(m.group("key"), m.start("key"), m.end()) for m in INLINE_KEY.finditer(line, match.end() if match else 0)]
+    if not match and len(found) < 2:
+        return "", []
+    ends = [at for _, at, _ in found[1:]] + [len(line)]
+    head = "" if match else line[:found[0][1]]
+    return head, [(key, " ".join(line[begin:end].lower().split())) for (key, _, begin), end in zip(found, ends)]
+
+
 def _option_keys(reply) -> list:
     """(key, question line, option text) for each option line of the reply's Input Needed item. The question line
     is the last non-option line with a `?` before the option, else the item's first line. The option text is the
-    line after its key. Both are lowercased with spaces folded."""
+    line after its key. Both are lowercased with spaces folded. A line with inline keys (`Q? a) x b) y`) gives one
+    entry per key, and its text before the first key is a question line."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
@@ -1654,9 +1700,15 @@ def _option_keys(reply) -> list:
     found, asked, first = [], "", ""
     for line in input_needed_section(reply).splitlines():
         match = OPTION_KEY.match(line)
-        if match and not (match.group("bullet") and match.group("close") == ":"):
-            option = " ".join(line[match.end() - 1:].lower().split())
-            found.append((match.group("key").lower(), asked or first, option))
+        if match and match.group("bullet") and match.group("close") == ":":
+            match = None
+        head, keys = _line_keys(line, match)
+        if keys:
+            head = " ".join(head.lower().split())
+            if head:
+                first = first or head
+                asked = head if "?" in head else asked
+            found += [(key.lower(), asked or first, option) for key, option in keys]
             continue
         plain = " ".join(line.lower().split())
         if plain:

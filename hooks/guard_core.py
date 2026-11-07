@@ -819,16 +819,44 @@ def _plain_words(words):
     return [word[2:] if word.startswith("./") else word for word in words if not re.match(r"\w+=", word)]
 
 
+# A word that only wraps another command, and a flag or a duration (`-x`, `5`, `30s`) that a runner may take
+# before its operand.
+_WRAPPER = re.compile(r"(?:xargs|sudo|env|timeout|nohup|nice|command|time|ssh)(?:\.exe|\.cmd)?").fullmatch
+_FLAG_OR_DURATION = re.compile(r"-\S*|\d+[smhd]?").fullmatch
+# A substitution hands a command's output to a runner (`eval "$(cat f)"`), which no word order shows.
+_SUBSTITUTION = re.compile(r"\$\(|`|<\(")
+
+
+def _runs_stdin(words) -> bool:
+    """True when a pipe stage with these words runs the script on its input: its command, past wrappers, flags
+    and durations, is a shell or an interpreter, or only wrappers are left (`xargs`). `xargs wc` runs a reader."""
+    rest = [word for word in words if not _FLAG_OR_DURATION(word)]
+    while rest and _WRAPPER(rest[0].rsplit("/", 1)[-1]):
+        rest = rest[1:]
+    return bool(_RUNNER(rest[0].rsplit("/", 1)[-1])) if rest else bool(words)
+
+
 def _runs_written_file(text: str, headers) -> bool:
-    """True when a file a heredoc writes is run later: its pipeline holds a shell, an interpreter or a runner
-    (`sh < f`, `cat f | sh`, `timeout 5 sh f`), or it is the command itself (`./f`). A read such as `wc -c f`
-    runs nothing. The word is compared as written, so `$HOME/f` matches only itself."""
+    """True when a file a heredoc writes is run later: it is the command itself (`./f`), it follows a runner
+    in its stage (`sh f`, `timeout 5 sh f`, `sh < f`), a later stage runs its input (`cat f | sh`), or the
+    pipeline holds a substitution and a runner. A runner word elsewhere in the pipeline runs another file:
+    `python3 check.py f`, `sudo cat f` and `ls f | xargs wc` read f. The word is compared as written, so
+    `$HOME/f` matches only itself."""
     written = {word for header in headers for word in _plain_words(_WRITE_TARGET.findall(header))}
     for pipeline in re.split(r"\n|;|&&|\|\||&", _WRITE_TARGET.sub(" ", text)) if written else ():
         stages = [_plain_words(_WORDS(stage)) for stage in pipeline.split("|")]
-        runs = any(_RUNNER(word.rsplit("/", 1)[-1]) for words in stages for word in words)
-        if any(word in written and (runs or at == 0) for words in stages for at, word in enumerate(words)):
-            return True
+        if _SUBSTITUTION.search(pipeline) and any(
+                _RUNNER(word.rsplit("/", 1)[-1]) for words in stages for word in words):
+            if any(word in written for words in stages for word in words):
+                return True
+        for stage, words in enumerate(stages):
+            for at, word in enumerate(words):
+                if word not in written:
+                    continue
+                before = [w for w in words[:at] if not _FLAG_OR_DURATION(w)]
+                if at == 0 or (before and _RUNNER(before[-1].rsplit("/", 1)[-1])) or any(
+                        _runs_stdin(later) for later in stages[stage + 1:]):
+                    return True
     return False
 
 

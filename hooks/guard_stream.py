@@ -275,8 +275,14 @@ RUNNER_VERBS = ("run", "run-script", "exec", "dlx", "x")
 RUNNER_VALUE_FLAGS = ("--prefix", "-w", "--workspace", "-C", "--dir", "--filter", "-F", "--cwd",
                       "-p", "--package")
 SERVER_SCRIPTS = ("dev", "serve", "start", "watch", "preview")
+# A script that opens with one of these is a build, a test or a one-shot task that ends (`build:dev`,
+# `test-watch-ci`, `db-upgrade`). It is a watcher only when its last part says so (`build:watch`).
+ONE_SHOT_SCRIPTS = ("build", "test", "lint", "ci", "db", "migrate", "upgrade", "format", "check", "typecheck", "clean")
+CONTINUOUS_PARTS = ("watch", "serve", "preview")
 SERVER_PROGRAMS = ("serve", "http-server", "live-server", "nodemon", "uvicorn", "http.server")
 # A program that serves when its first positional word is one of these verbs.
+# Flask options whose next word is their value, so the value is no verb: `flask --app run db upgrade`.
+FLASK_VALUE_FLAGS = ("-A", "--app", "-e", "--env-file")
 SERVER_VERBS = {"next": ("dev", "start"), "deno": ("serve",), "jupyter": ("lab", "notebook"),
                 "webpack": ("serve",), "astro": ("dev",), "rails": ("s", "server"),
                 "streamlit": ("run",)}
@@ -297,8 +303,12 @@ def program_name(token: str) -> str:
 
 
 def server_script(name: str) -> bool:
-    """True for a script name with a part, split on `:` and `-`, that serves or watches."""
-    return any(part in SERVER_SCRIPTS for part in re.split(r"[:-]", name))
+    """True for a script name with a part, split on `:` and `-`, that serves or watches. A name that opens with
+    a one-shot word (ONE_SHOT_SCRIPTS) counts only when its last part is one of CONTINUOUS_PARTS."""
+    parts = re.split(r"[:-]", name)
+    if parts[0] in ONE_SHOT_SCRIPTS:
+        return parts[-1] in CONTINUOUS_PARTS
+    return any(part in SERVER_SCRIPTS for part in parts)
 
 
 def server_program(word: str, args) -> bool:
@@ -321,7 +331,13 @@ def server_program(word: str, args) -> bool:
     if word in SERVER_VERBS:
         return positional[:1] != [] and positional[0] in SERVER_VERBS[word]
     if word == "flask":  # `flask --app hello run` puts an option value before the verb
-        return "run" in positional
+        words = iter(args)
+        for a in words:
+            if a in FLASK_VALUE_FLAGS:
+                next(words, None)
+            elif not a.startswith("-"):
+                return a == "run"
+        return False
     if word == "tsc":
         return "-w" in args
     return False

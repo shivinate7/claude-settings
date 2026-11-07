@@ -1083,6 +1083,12 @@ BRIEF_TOPIC_REASON = (
     "`Lane brief: <step>. Topic: <topic>.` with the lane's own cs-topic. Work on another topic goes to a new "
     "lane: start one with create_session. (decision session-tiers, a lane holds one topic)"
 )
+BRIEF_NO_TOPIC_REASON = (
+    "this brief names no Topic the guard can read, so it cannot tell which topic the brief is for. A brief's first "
+    "line is `Lane brief: <step>. Topic: <topic>.` with the lane's own cs-topic (%s) as a plain slug, no backticks. "
+    "Remedy: put `Topic: <slug>.` on the first line, then send it again. (decision session-tiers, a lane holds one "
+    "topic)"
+)
 BRIEF_STEP_REASON = (
     "this brief names a step the lane does not carry, and the lane has no cs-topic tag to judge its Topic by. "
     "Work on another step goes to a new lane: start one with create_session. "
@@ -1095,8 +1101,9 @@ def brief_hit(tool: str, tool_input, transcript: str):
     hold, else None. Only a message whose first non-blank line starts with LANE_BRIEF_MARKER is read; the
     transcript is read for that message alone. A target whose newest record (get_session, or the
     create_session that made it) has no cs-build:lane tag passes. A lane with a cs-topic tag is judged by the
-    brief's Topic, an older lane without one by the brief's step against its cs-step tags. Fails closed: any
-    error in the reads is a refusal, because the guard-wide crash path fails open."""
+    brief's Topic (a brief with no readable Topic is told to put one on its first line), an older lane without one
+    by the brief's step against its cs-step tags. Fails closed: any error in the reads is a refusal, because the
+    guard-wide crash path fails open."""
     if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
         return None
     message = tool_input.get("message")
@@ -1120,7 +1127,9 @@ def brief_hit(tool: str, tool_input, transcript: str):
     topics = [str(t)[len(TOPIC_TAG_PREFIX):].strip() for t in tags if str(t).startswith(TOPIC_TAG_PREFIX)]
     topics = [t for t in topics if t]
     if topics:
-        if (topic or "").lower() not in [t.lower() for t in topics]:
+        if not topic:
+            return "lane brief with no readable topic to a lane on " + ", ".join(topics), BRIEF_NO_TOPIC_REASON % ", ".join(topics)
+        if topic.lower() not in [t.lower() for t in topics]:
             return "lane brief for topic " + str(topic) + " to a lane on " + ", ".join(topics), BRIEF_TOPIC_REASON
         return None
     steps = [str(t)[len(ARCHIVE_STEP_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_STEP_PREFIX)]
