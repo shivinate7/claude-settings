@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Measure the merge-time prose judge against lint/route_claims_labelled.json. Cost: one model call per scored (rev, file)
-group, run on demand, with no timer and no log. It writes no file and exits 0 whatever it finds.
+"""Cost: one model call per scored (rev, file) group, run on demand, with no timer and no log. It measures the merge-time
+prose judge against lint/route_claims_labelled.json, writes no file, and exits 0 whatever it finds.
 
     python3 lint/prove_route_judge.py [--labelled PATH] [--max-calls N]
 
