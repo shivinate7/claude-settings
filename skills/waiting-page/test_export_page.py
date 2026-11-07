@@ -51,6 +51,17 @@ MARKER = ".complete"  # the session touches it in each collection folder after t
 ARTIFACT = "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"
 SENTINEL = 1000000000  # a fixed mtime for a file a run must not rewrite; no clock is read
 TAIL = "aB3" * 12  # 36 characters, the body of a GitHub token
+TG_TAIL = "aB3" * 11 + "Qz"  # 35 characters, the body of a Telegram bot token
+# A line of base64 in an armored PGP key block, built from parts. A key block's header is what the scan keys on; the body
+# is only the line after it, with no shape of its own.
+PGP_BODY = "mQINBFa3pQ8BEADk7Yq2Rv9Lw1Tn5Hs8" + "Jb4Ke6Fa0Pd3Gu7Mi2Oz5Xr9Ct1Vw8Ny4Qe6Lm"
+# Letters only, built from parts: a credential value with no digit. The length rule counts characters, digits or not.
+LETTERS_11 = "QwErTyUi" + "OpA"  # one short of the credential length
+LETTERS_12 = LETTERS_11 + "s"  # the credential length
+LETTERS_14 = "lkjhgfds" + "amnbvc"  # lower case
+LETTERS_16 = "xKqPzLmR" + "tWbNvYcH"
+CLIENT_LETTERS_16 = "BnMvCxZl" + "KjHgFdSa"
+HUMP_AFTER_TWO_16 = "abCdefgh" + "ijklmnop"  # a capital after two lower-case letters: random, not a camelCase word
 DESIGN = re.compile(r'(<script type="application/json" id="designData">)(.*?)(</script>)', re.S)
 DESIGN_BODY = '{"a": "\\u003cp>mockup\\u003c/p>", "b": "<i>raw</i>"}'
 META = {"title": "Queue", "version": 1}
@@ -79,6 +90,12 @@ CDN_SNIPPET = ('<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react
 PROSE_SNIPPET = ("<p>Don't use /* or // or # here.</p>\n<!-- a note for the reader -->\n"
                  "<script>\nconst s = `line one\nline two`;\n</script>\n")
 
+# Parts of the postal-address and credential-name rows. A credential value is joined from parts, as TAIL is.
+STREET = "123 Main Street"
+API_VALUE = "abcdefgh" + "12345678"
+SESSION_VALUE = "q9W8e7R6" + "t5Y4u3I2"
+CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
+
 # (label, the note's value, the text that must never be printed). A dict or a list nests the secret.
 RED = [
     ("GitHub token", "ghp_" + TAIL, "ghp_" + TAIL),
@@ -94,9 +111,22 @@ RED = [
     ("Slack token", "xoxb-" + "123456789012-abcdefABCDEF", "xoxb-" + "123456789012-abcdefABCDEF"),
     ("Google API key", "AIzaSy" + "aB3" * 11, "AIzaSy" + "aB3" * 11),
     ("Stripe live key", "sk_live_" + "aB3" * 8, "sk_live_" + "aB3" * 8),
+    ("Stripe test key", "sk_test_" + "aB3" * 6, "sk_test_" + "aB3" * 6),
+    ("Stripe restricted test key", "rk_test_" + "aB3" * 6, "rk_test_" + "aB3" * 6),
+    ("Stripe test key of 16 characters", "sk_test_" + "aB3" * 5 + "a", "sk_test_" + "aB3" * 5 + "a"),
+    ("Docker Hub PAT", "dckr_pat_" + "aB3" * 7, "dckr_pat_" + "aB3" * 7),
+    ("Docker Hub PAT of 20 characters", "dckr_pat_" + "aB3" * 6 + "aB", "dckr_pat_" + "aB3" * 6 + "aB"),
+    # A Telegram token is digits, a colon and 35 characters. In the bot API URL the digits follow `bot` with no word boundary.
+    ("Telegram bot token of 10 digits", "1234567890:" + TG_TAIL, "1234567890:" + TG_TAIL),
+    ("Telegram bot token after a label", "Bot token: " + "12345678:" + TG_TAIL, "12345678:" + TG_TAIL),
+    ("Telegram bot API URL", "https://api.telegram.org/bot" + "123456789:" + TG_TAIL + "/getMe",
+     "123456789:" + TG_TAIL),
     ("GitLab token", "glpat-" + "aB3" * 6 + "Qz", "glpat-" + "aB3" * 6 + "Qz"),
     ("PEM private key header", "-----BEGIN " + "RSA " + "PRIVATE KEY-----", "-----BEGIN " + "RSA " + "PRIVATE KEY-----"),
     ("PEM OpenSSH key header", "-----BEGIN " + "OPENSSH " + "PRIVATE KEY-----", "-----BEGIN " + "OPENSSH " + "PRIVATE KEY-----"),
+    # A PGP header has BLOCK between KEY and the dashes, so a shape that ends at PRIVATE KEY----- misses it.
+    ("PGP private key block header with a body line",
+     "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----" + "\n" + PGP_BODY, "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----"),
     ("JWT", "eyJ" + "hbGciOiJIUzI1NiJ9" + "." + "eyJzdWIiOiJ1c3IifQ" + "." + "c2lnbmF0dXJl",
      "eyJ" + "hbGciOiJIUzI1NiJ9" + "." + "eyJzdWIiOiJ1c3IifQ" + "." + "c2lnbmF0dXJl"),
     ("Authorization Bearer header", "Authorization: Bearer " + "xq7Lp2Vw9Rt4Ys8Zn1Mh", "xq7Lp2Vw9Rt4Ys8Zn1Mh"),
@@ -137,6 +167,52 @@ RED = [
     ("token after a comment opener", "see /* " + "ghp_" + TAIL, "ghp_" + TAIL),
     ("token after a lone quote", "Don't paste " + "ghp_" + TAIL, "ghp_" + TAIL),
     ("token in a multi-line string", "first line\nsecond line " + "ghp_" + TAIL + "\nthird line", "ghp_" + TAIL),
+    ("street address", STREET, STREET),
+    ("PO box", "PO BOX 1234", "PO BOX 1234"),
+    ("P.O. box", "P.O. Box 1234", "P.O. Box 1234"),
+    ("city, state and ZIP", "AUSTIN, TX 78701", "AUSTIN, TX 78701"),
+    ("city, state and ZIP+4", "Austin, TX 78701-1234", "Austin, TX 78701-1234"),
+    ("street address in a full line", "Send it to " + STREET + ", Austin, TX 78701", STREET),
+    ("API_SECRET assignment", "API_SECRET=" + API_VALUE, API_VALUE),
+    ("SESSION_TOKEN assignment", "SESSION_TOKEN=" + SESSION_VALUE, SESSION_VALUE),
+    ("CLIENT_SECRET assignment with a colon", "CLIENT_SECRET: " + CLIENT_VALUE, CLIENT_VALUE),
+    ("cf_clearance cookie value", "cf_clearance=" + "c3c3c3c3" + "c3c3c3c3", "c3c3c3c3" + "c3c3c3c3"),
+    ("sessionid cookie value", "sessionid=" + "abcdef0123" + "456789abcd", "abcdef0123" + "456789abcd"),
+    ("SESSION_COOKIE assignment", "SESSION_COOKIE=" + "abcdefgh" + "12345678", "abcdefgh" + "12345678"),
+    ("bare Bearer token with no header name", "Bearer " + "abcdefghijkl" + "mnopqrstuvwx", "abcdefghijkl" + "mnopqrstuvwx"),
+    ("TCG_TRACKING_KEY assignment", "TCG_TRACKING_KEY=" + "k9Qx7vLm" + "2Npw4Rt8", "k9Qx7vLm" + "2Npw4Rt8"),
+    ("X-API-Key header", "X-API-Key: " + "abcdef" + "1234567890", "abcdef" + "1234567890"),
+    ("secret: value", "secret: " + "abcd1234" + "efgh", "abcd1234" + "efgh"),
+    ("token: value", "token: " + "abcd1234" + "efgh", "abcd1234" + "efgh"),
+    ("bare Basic credential", "Basic " + "abcdefghij" + "klmnopqrst", "abcdefghij" + "klmnopqrst"),
+    ("csrftoken cookie value", "csrftoken=" + "a1b2c3d4" + "e5f6g7h8", "a1b2c3d4" + "e5f6g7h8"),
+    ("sid cookie value", "sid=" + "a1b2c3d4" + "e5f6g7h8", "a1b2c3d4" + "e5f6g7h8"),
+    ("apiKey camelCase name", "apiKey: " + "abcd1234" + "efgh5678", "abcd1234" + "efgh5678"),
+    ("clientSecret camelCase name", "clientSecret: " + CLIENT_VALUE, CLIENT_VALUE),
+    ("apikey with no separator", "apikey=" + API_VALUE, API_VALUE),
+    ("authtoken with a colon", "authtoken: " + SESSION_VALUE, SESSION_VALUE),
+    ("SECRET_KEY_BASE assignment", "SECRET_KEY_BASE=" + "w8Kd2Lp9" + "Vx4Qz7Mn", "w8Kd2Lp9" + "Vx4Qz7Mn"),
+    ("API_KEY_V2 assignment", "API_KEY_V2=" + "Hk3Lm9Qp" + "Wz7Rt2Yc", "Hk3Lm9Qp" + "Wz7Rt2Yc"),
+    ("clientSecret as a JSON pair", '"clientSecret": "' + CLIENT_VALUE + '"', CLIENT_VALUE),
+    # A credential name set to a value of 12 or more characters is refused, digits or not. These values have no digit.
+    ("API_KEY assignment of 12 letters", "API_KEY=" + LETTERS_12, LETTERS_12),
+    ("GITHUB_TOKEN assignment of 16 letters", "GITHUB_TOKEN=" + LETTERS_16, LETTERS_16),
+    ("CLIENT_SECRET with a colon and 16 letters", "CLIENT_SECRET: " + CLIENT_LETTERS_16, CLIENT_LETTERS_16),
+    ("lower-case api_key in quotes of 14 letters", 'api_key = "' + LETTERS_14 + '"', LETTERS_14),
+    # Raw JSON text: the closing quote of the name sits before the separator, so the name is not followed by = or :.
+    ("raw JSON api_key pair of 16 letters", '"api_key": "' + LETTERS_16 + '"', LETTERS_16),
+    ("raw JSON GITHUB_TOKEN pair of 16 letters", '"GITHUB_TOKEN": "' + LETTERS_16 + '"', LETTERS_16),
+    # The letters-only branch of the credential-name shape, at the ends of its value: a comma, a newline, a semicolon, a
+    # hump after two letters. Each value has no digit, so the digit branch does not refuse it.
+    ("raw JSON api_key pair followed by a comma and a number", '{"api_key": "' + LETTERS_16 + '", "n": 1}', LETTERS_16),
+    ("API_KEY of 12 letters before a newline", "API_KEY=" + LETTERS_12 + "\nOTHER=1", LETTERS_12),
+    ("API_KEY of 12 letters before a CRLF", "API_KEY=" + LETTERS_12 + "\r\nOTHER=1", LETTERS_12),
+    ("api_key in quotes followed by a semicolon", 'api_key = "' + LETTERS_14 + '";', LETTERS_14),
+    ("api_key with a hump after only two lower-case letters", "api_key: " + HUMP_AFTER_TWO_16, HUMP_AFTER_TWO_16),
+    ("street with the suffix Park", "1400 Lakeshore Park", "1400 Lakeshore Park"),
+    ("street with the suffix Trail", "2500 Maple Trail", "2500 Maple Trail"),
+    ("street with the suffix Cir", "1200 Oak Cir", "1200 Oak Cir"),
+    ("street with the suffix Ter", "400 Pine Ter", "400 Pine Ter"),
     # Over-widening guard: a placeholder or a tool value must not open these real-looking values.
     ("password with a real-looking value", "password: " + "S3cr3t!x9", "S3cr3t!x9"),
     ("pwd assignment with a real-looking value", "pwd=" + "hunter2x", "hunter2x"),
@@ -161,6 +237,8 @@ GREEN = [
     ("token budget", "token budget"),
     ("password manager", "password manager"),
     ("private key rotation", "rotate the private key"),
+    # A public key block is not a secret. A fix that drops PRIVATE from the shape would refuse it.
+    ("PGP public key block header with a body line", "-----BEGIN " + "PGP PUBLIC KEY BLOCK-----" + "\n" + PGP_BODY),
     ("owner's first name", "Shivam"),
     ("comment openers and a lone quote", "Don't use /* or // or # here"),
     ("multi-line text", "line one\nline two"),
@@ -181,6 +259,38 @@ GREEN = [
     ("u_ id of 24 characters", "u_Qm4xT7bR2nKs9LfW0aZcYe"),
     ("a key named token", {"token": "budget"}),
     ("a number with 14 digits, not a string", {"n": 20261102110400, "note": "budget"}),
+    # Near misses of the address and credential shapes: a street word, a state code before a five-digit number, a rule name.
+    ("step number of three digits", "step 123"),
+    ("a street name with no number", "Main Street"),
+    ("PR number before the word lane", "PR 1167 batch lane"),
+    ("a digit before the word road", "step 3 on the road map"),
+    ("a digit before the word way", "a 2 way merge"),
+    ("a digit before a hyphenated word", "lane 4 drive-by fix"),
+    ("PR with a five-digit number", "merged, PR 12345"),
+    ("OK with a five-digit number", "done, OK 12345"),
+    ("a bare rule name in caps with TOKEN", "TOKEN_BUDGET"),
+    ("a TOKENS setting with a number", "CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000"),
+    ("a MAX_TOKENS setting with a number", "MAX_TOKENS=200000"),
+    ("a model setting", "CLAUDE_CODE_SUBAGENT_MODEL=sonnet"),
+    ("a CI secret reference", "GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}"),
+    ("an env-var reference in a secret name", "API_SECRET=$API_SECRET"),
+    ("a rule anchor name", "rule roles-review-cap-three"),
+    ("a count of records", "3 records in place"),
+    ("a count of cards", "5 cards in this lane"),
+    ("a join key label with a colon", "join key:"),
+    ("a JSX key prop", "key={item.id}"),
+    ("a token label with a plain word", "token: budget"),
+    ("a secret label with no value", "secret: none"),
+    ("the word Basic in prose", "Basic idea: keep it short"),
+    ("the word sid in prose", "sid is the session id"),
+    ("a token budget label with a number", "token budget: 200000"),
+    ("a KEY label with prose", "KEY: see the record"),
+    # Prose with a time or a number before a street word or a key word is no address and no credential name, so it passes.
+    ("a time and a street word in prose", "Meeting 13:44 CDT. Lane 2 is open"),
+    ("a time with PM and a street word in prose", "Due 5 PM. Way forward is clear"),
+    ("a number before the word Park in prose", "Phase 2 Park the lane"),
+    ("a key inside a longer word", "turnkey solution"),
+    ("a keyboard label with a number", "keyboard: 104 keys"),
     # A shell variable, an ssh remote, a no-reply address, and the placeholders and masks: none names a secret.
     ("password word with optional", "password: " + "optional"),
     ("shell working-dir variable", "PWD" + "=" + "/Users/x"),
@@ -204,6 +314,28 @@ GREEN = [
     ("single-quoted optional after a password word", "password: " + "'optional'"),
     ("parenthesized none after a password word", "password: " + "(none)"),
     ("none with a period after a password word", "password: " + "none."),
+    # Near misses of the three new shapes: a digit count, a tail length, a prefix inside a word, and a clock time pass.
+    ("Telegram token with 11 digits before the colon", "12345678901:" + TG_TAIL),
+    ("Telegram token with a 34-character tail", "123456789:" + TG_TAIL[:34]),
+    ("Telegram token with a 36-character tail", "123456789:" + TG_TAIL + "x"),
+    ("a clock time", "standup at 10:30"),
+    ("Docker Hub PAT with 19 characters", "dckr_pat_" + "aB3" * 6 + "a"),
+    ("Stripe test key with 15 characters", "sk_test_" + "aB3" * 5),
+    ("a word that holds the Stripe test prefix", "risk_test_coverage_plan"),
+    ("a word that holds the Stripe test prefix before a long body", "risk_test_" + "aB3" * 7),
+    # A credential name below 12 characters, a placeholder, a variable reference, a plain word and prose pass.
+    ("API_KEY with 11 letters", "API_KEY=" + LETTERS_11),
+    ("API_KEY set to a placeholder", "API_KEY=<your-api-key>"),
+    ("API_KEY set to a long variable reference", "API_KEY=${MY_LONG_API_KEY_NAME}"),
+    ("MY_TOKEN set to a plain word", "MY_TOKEN=optional"),
+    ("MY_TOKEN set to a long placeholder", "MY_TOKEN=<your-long-token-here>"),
+    ("prose with the word secret before a name", "the secret santa list"),
+    # The names that do not count under the rule (bare token, camelCase, a hyphenated or a non-credential name) pass.
+    # These four are false alarms today: each refuses on its value's length, so they are red on the builder's head.
+    ("destructured token alias", "const { token: accessTokenValue } = await getSession();"),
+    ("camelCase accessToken key with a call", "accessToken: localStorage.getItem('accessToken')"),
+    ("CSS custom property ending in token", "--color-token: rgba(0,0,0,0.5);"),
+    ("prose with Token before a sentence", "Token: Authorization needed before we continue"),
 ]
 
 
@@ -1077,6 +1209,59 @@ class All(Base):
         self.assertTrue(os.path.isfile(landed), "img/logo@2x.png was not exported under page/files/. Output:\n" + shown(r))
         self.assertEqual(read_bytes(landed), png, "img/logo@2x.png is not byte-identical")
         self.assertVerdictOf(r, self.QUEUE, r"changed\s+3\b")  # one item, the page, and the file
+
+    def test_the_switch_steps_out_dir_fetch_exports_each_artifact_changed(self):
+        # Step 2 of "Before you switch Claude accounts" names out_dir and the marker's path in backticks. ArtifactData
+        # writes each doc to <out_dir>/<collection>/<doc_id>.json. The marker is touched where the step names it, and an
+        # empty collection gets a folder only where the step says to make one by hand. The text is read from SKILL.md,
+        # never copied here, so a change to that step is what this case checks.
+        sections = read_text(os.path.join(HERE, "SKILL.md")).split("## Before you switch Claude accounts", 1)
+        self.assertEqual(len(sections), 2, "SKILL.md has no 'Before you switch Claude accounts' section")
+        steps = sections[1].split("\n## ", 1)[0].split("\n2. ", 1)
+        self.assertEqual(len(steps), 2, "the 'Before you switch Claude accounts' section has no step 2")
+        step2 = steps[1].split("\n3. ", 1)[0]
+        found = re.search(r"`out_dir`\s+(?:set\s+to|=)\s*`([^`]+)`", step2)
+        self.assertTrue(found, "step 2 names no out_dir path, so the fetch layout cannot be read from the skill")
+        template = found.group(1)
+        self.assertTrue("<folder>" in template and "<id>" in template,
+                        "step 2's out_dir %r lacks <folder> or <id>" % template)
+        marked = re.search(r"`([^`]*/\.complete)`", step2)
+        self.assertTrue(marked, "step 2 names no backticked path ending in /.complete, so the marker's place cannot be read")
+        marker = marked.group(1)
+        by_hand = re.search(r"\bmake\b[^.]*\bby\s+hand\b", step2, re.I)
+
+        def place(text, artifact_id, collection):
+            names = {"folder": fetched, "id": artifact_id, "collection": collection}
+            return re.sub(r"<(folder|id|collection)>", lambda m: names[m.group(1)], text)
+
+        root = self.repo()
+        registry = json.loads(read_text(os.path.join(root, ".claude", "layout-extras.json")))["artifacts"]
+        pages = {self.WAIT: PAGE_BYTES, self.QUEUE: QUEUE_PAGE}
+        docs = self.docs()
+        docs[self.WAIT]["groups"] = {}  # an empty collection: the tool writes no file for it
+        fetched = os.path.join(self.tmp.name, "switch")
+        for entry in registry:
+            artifact_id = entry["id"]
+            for collection in entry.get("collections", COLLECTIONS):
+                out_dir = place(template, artifact_id, collection)
+                for doc_id, data in (docs[artifact_id].get(collection) or {}).items():
+                    write_text(os.path.join(out_dir, collection, doc_id + ".json"), canonical(data))
+                folder = os.path.dirname(place(marker, artifact_id, collection))
+                if by_hand and not os.path.isdir(folder):
+                    os.makedirs(folder)  # the step makes the folder of a collection the tool wrote nothing to
+                if os.path.isdir(folder):
+                    write_text(place(marker, artifact_id, collection), "")  # touch: a missing folder cannot be touched
+            write_bytes(os.path.join(fetched, artifact_id, "page.html"), pages[artifact_id])
+
+        worktree = self.out("worktree")
+        r = self.run_all(root, fetched, worktree)
+        for entry in registry:
+            artifact_id = entry["id"]
+            line = self.verdict_of(r, artifact_id)  # the scope: the artifact's own verdict line
+            self.assertRegex(line, r"changed\s+\d+",
+                             "%s: not changed after the switch step's out_dir %r and marker %r. Its line:\n%s"
+                             % (artifact_id, template, marker, line))
+        self.assertEqual(r.returncode, 0, shown(r))
 
 
 class NoExport(Base):

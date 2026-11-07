@@ -12,6 +12,8 @@ The report (decision stale-cites-at-merge) prints after the findings and never c
 each anchor whose sentence changed in CLAUDE.md or the output style, with its rule_mechanisms.json row and the changed
 files under hooks/, lint/, bin/, actions/ and .github/ (no touched or untouched verdict), and each changed code file
 with the decisions whose Home names it and the rows that name it.
+STALE005 (range mode only) reports an added governed line that states a capability by route with no backing. It is
+report only: the exit code does not change (RouteClaimTests).
 
 
 `--tree [REV]` reads every tracked Markdown file at REV instead of a range: STALE003 for a path cite that names
@@ -24,6 +26,7 @@ actions/ste-lint/run.sh with the step's env. TMPDIR is the case folder, so temp 
 import ast
 import atexit
 import collections
+import importlib.util
 import json
 import os
 import re
@@ -369,7 +372,7 @@ class MoveTests(StaleCase):
         def change(repo):
             git(repo, "rm", "-q", "hooks/guard_core.py")
             commit(repo)
-        self.assert_passes(self.make_range(base_files("# Notes\n\n- the gate is in `hooks/guard`\n"), change))
+        self.assert_passes(self.make_range(base_files("# Notes\n\n- the guard is in `hooks/guard`\n"), change))
 
     def test_generated_records_page_is_never_checked(self):
         def change(repo):
@@ -692,6 +695,21 @@ class SymbolTests(StaleCase):
                                                    statement + "\n\ndef keep():\n    return 1\n")
 
 
+    def test_route_claim_node_id_cite_of_a_removed_test_is_flagged_stale002(self):
+        base_src = "def case_y():\n    return 1\n\n\ndef keep():\n    return 2\n"
+        head_src = "def keep():\n    return 2\n"
+
+        def change(repo):
+            write(repo, "lint/test_x.py", head_src)
+            write(repo, NOTES, "# Notes\n\n- the case is `lint/test_x.py::case_y`\n"
+                               "- the case is `lint/test_x.py::keep`\n")
+            commit(repo)
+        rng = self.make_range(base_files(extra={"lint/test_x.py": base_src}), change)
+        self.assertEqual(binding_kind(base_src, "case_y"), "def")  # scope: bound at base, unbound at head
+        self.assertIsNone(binding_kind(head_src, "case_y"))
+        self.assert_flags(rng, [(NOTES, 3, "STALE002")])
+
+
 class StepTests(StaleCase):
     def test_code_only_pr_fails_the_step_on_the_stale_line(self):
         def change(repo):
@@ -795,7 +813,8 @@ class PinTests(unittest.TestCase):
 
 class CostTests(StaleCase):
     """The check's cost is a contract. A range that removes or renames no path, and changes only Markdown outside
-    the rule files, starts three git processes and reads no blob. A removed or renamed path makes the check read the
+    the rule files, starts three git processes and reads no blob, or one more when it adds a governed line: STALE005
+    reads the added lines once. A removed or renamed path makes the check read the
     tracked Markdown files. So does a name that a touched .py no longer defines. A changed file that is not Markdown
     also reads the repo's decision records for its Home line, even when nothing was removed. No run writes a file."""
 
@@ -816,7 +835,7 @@ class CostTests(StaleCase):
         self.assertLessEqual(len(subs), 4, subs)
         self.assertTrue(set(subs) <= {"rev-parse", "merge-base", "diff", "ls-tree"}, subs)
 
-    def test_a_range_that_edits_only_a_non_rule_markdown_file_starts_three_git_processes_and_reads_no_blob(self):
+    def test_a_range_that_edits_only_a_non_rule_markdown_file_starts_exactly_three_git_processes_and_reads_no_blob(self):
         def change(repo):
             write(repo, NOTES, "# Notes\n\n- a debt note, edited\n")
             commit(repo)
@@ -824,11 +843,14 @@ class CostTests(StaleCase):
         rc, out, commands = self.run_traced_commands(rng)
         self.assertEqual(rc, 0, out)
         subs = [command.split()[0] for command in commands]
-        # The findings and the report both return before a blob read for a Markdown file outside the rule files.
-        self.assertEqual(sorted(subs), ["diff", "merge-base", "rev-parse"],
-                         "a Markdown edit outside the rule files started a git process beyond the check's three: %s" % subs)
+        # No added line holds a claim candidate, so no blob is read: the three starts of the check, exactly.
+        self.assertEqual(len(subs), 3, subs)
+        self.assertNotIn("cat-file", subs, subs)
+        self.assertTrue(set(subs) <= {"diff", "merge-base", "rev-parse"}, subs)
 
     def test_a_touched_py_that_removes_nothing_starts_five_git_processes_with_one_ls_tree_of_the_decisions(self):
+        """Guards the code-only pin: the report's backing scan reuses the reads home_report already makes (the decisions
+        ls-tree and cat-file), so this range starts no git process beyond the pinned five. The exact pin stays."""
         def change(repo):
             write(repo, "hooks/guard.py", GUARD.replace("return 1", "return 2"))
             commit(repo)
@@ -844,6 +866,8 @@ class CostTests(StaleCase):
         self.assertIn("docs/decisions", listing[0], commands)
 
     def test_a_changed_non_python_non_markdown_file_starts_one_ls_tree_and_one_cat_file_for_its_decisions(self):
+        """Guards the code-only pin: the report's backing scan reuses the reads home_report already makes (the decisions
+        ls-tree and cat-file), so this range starts no git process beyond the pinned five. The exact pin stays."""
         extra = decisions(("tool-home-record", "config/tool.toml"))
 
         def change(repo):
@@ -861,6 +885,8 @@ class CostTests(StaleCase):
         self.assertIn("docs/decisions", listing[0], commands)
 
     def test_a_lone_touched_mjs_starts_four_git_processes_with_the_reports_ls_tree_and_prints_no_unknown_line(self):
+        """Guards the code-only pin: the report's backing scan reuses the reads home_report already makes (the decisions
+        ls-tree and cat-file), so this range starts no git process beyond the pinned four. The exact pin stays."""
         def change(repo):
             write(repo, "hooks/lib.mjs", LIB + "export const more = 1;\n")
             commit(repo)
@@ -879,6 +905,55 @@ class CostTests(StaleCase):
         rc, out, subs = self.run_traced(rng)
         self.assertEqual(rc, 1, out)
         self.assertLessEqual(len(subs), 5, subs)
+
+    def test_route_claim_markdown_only_range_with_a_claim_candidate_starts_exactly_four_git_processes(self):
+        text, flagged = rows_text([
+            ("# Notes", False),
+            ("- The cloud cannot push to main (route cloud-push).", False),  # backed by a row: silent
+            ("- The classifier cannot push to main.", True),
+        ])
+
+        def change(repo):
+            write(repo, NOTES, text)
+            commit(repo)
+        rng = self.make_range(base_files(extra={ROUTE_ROWS: route_rows_text("cloud-push")}), change)
+        rc, out, subs = self.run_traced(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(stale005_lines(out, NOTES), flagged, out)  # the check ran: the unbacked line prints
+        # The three starts of a Markdown-only range, and one cat-file that reads the added lines' blob.
+        self.assertEqual(len(subs), 4, subs)
+
+    def test_route_claim_read_backing_checks_its_file_in_the_same_git_start(self):
+        text, flagged = rows_text([
+            ("# Notes", False),
+            ("- The cloud cannot push to main (read hooks/guard.py:2).", False),  # the file exists at head: silent
+            ("- The cloud cannot merge to main.", True),
+        ])
+
+        def change(repo):
+            write(repo, NOTES, text)
+            commit(repo)
+        rng = self.make_range(base_files(), change)
+        rc, out, subs = self.run_traced(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(stale005_lines(out, NOTES), flagged, out)  # the check ran: the unbacked line prints
+        # The existence of hooks/guard.py is read from the same cat-file as the line: no extra git start.
+        self.assertEqual(len(subs), 4, subs)
+
+    def test_route_claim_with_a_removed_path_and_a_claim_candidate_starts_exactly_five_git_processes(self):
+        def change(repo):
+            move(repo, "hooks/lib.mjs", MOVED)
+            write(repo, NOTES, "# Notes\n\n- The cloud cannot push to main (route cloud-push).\n"
+                               "- The classifier cannot push to main.\n")
+            commit(repo)
+        rng = self.make_range(base_files("# Notes\n", extra={ROUTE_ROWS: route_rows_text("cloud-push")}), change)
+        self.assertIn(MOVED, touched(rng))  # scope: the range renames hooks/lib.mjs away, so a path is removed
+        rc, out, subs = self.run_traced(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(stale005_lines(out, NOTES), [4], out)  # the check read the candidate: the unbacked line fires
+        # The removed path makes the check read the Markdown at head (one ls-tree, one cat-file). The candidate line
+        # reads its backing from that same cat-file, so the count is five and no more.
+        self.assertEqual(len(subs), 5, subs)
 
     def test_a_run_writes_no_file_in_the_repo_or_next_to_the_script(self):
         def change(repo):
@@ -943,9 +1018,9 @@ class ForeignFileTests(StaleCase):
         self.assertEqual(rc, 0, out)
         self.assertEqual(unknown_lines(out), [], out)
 
-    def test_an_anchor_only_edit_starts_a_pinned_count_of_git_processes_and_no_ls_tree_of_hooks(self):
-        # Pinned to the count the report starts today for an edit to CLAUDE.md alone, measured with GIT_TRACE. No code
-        # file changed, so the report reads the rule file's blobs and the mechanisms file, and no ls-tree names hooks/.
+    def test_an_anchor_only_edit_starts_exactly_four_git_processes_and_no_ls_tree_of_hooks(self):
+        # No code file changed, so the report reads the rule file's blobs and the mechanisms file through one cat-file,
+        # and no ls-tree names hooks/. The added line holds no claim candidate, so it adds no start.
         base_claude = "Main moves only by pull request. <!-- rule:git-main-only-by-pr -->\n"
         head_claude = "Main moves only by a reviewed pull request. <!-- rule:git-main-only-by-pr -->\n"
         mech = mechanisms({"git-main-only-by-pr": {"kind": "guard", "ref": "main-moves-by-pull-request"}})
@@ -956,7 +1031,7 @@ class ForeignFileTests(StaleCase):
         rng = self.make_range(base_files(extra={CLAUDE: base_claude, MECH: mech}), change)
         rc, out, commands = self.run_traced_commands(rng)
         self.assertEqual(rc, 0, out)
-        self.assertEqual(len(commands), 4, commands)  # PINNED: today's count for this edit
+        self.assertEqual(len(commands), 4, commands)
         self.assertFalse(any(command.startswith("ls-tree") and "hooks/" in command for command in commands), commands)
 
     def test_an_anchor_edit_with_a_code_change_starts_at_most_one_more_git_process(self):
@@ -1343,6 +1418,28 @@ class ReportTests(StaleCase):
         self.assertEqual(rc, 0, out)
 
 
+    def test_route_claim_changed_code_file_lists_each_prose_line_its_backing_points_at(self):
+        # The prose is a decision record: the backing scan reads only what home_report already reads, the decisions.
+        record = "docs/decisions/route-backing.md"
+        decision = ("# Route backing\n\n"
+                    "- the gate is read at (read hooks/guard.py:2)\n"  # line 3
+                    "- the case is checked at (test lint/test_x.py::keep)\n"  # line 4
+                    "- the other gate is read at (read hooks/other.py:1)\n")  # line 5: its file is not changed
+        base_test = "def keep():\n    return 1\n"
+
+        def change(repo):
+            write(repo, "hooks/guard.py", GUARD_EDIT)
+            write(repo, "lint/test_x.py", "def keep():\n    return 2\n")
+            commit(repo)
+        rng = self.make_range(base_files(extra={"lint/test_x.py": base_test, record: decision}), change)
+        self.assertTrue({"hooks/guard.py", "lint/test_x.py"} <= touched(rng))  # scope: both files changed
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertIn(record + ":3", report_prose(out, "hooks/guard.py"), out)
+        self.assertIn(record + ":4", report_prose(out, "lint/test_x.py"), out)
+        self.assertNotIn(record + ":5", report_prose(out, "hooks/guard.py") | report_prose(out, "lint/test_x.py"), out)
+
+
 # A guard module whose refuse() call names the rule: rule_audit reads the rule id from the third argument.
 GUARD_REFUSE = GUARD + "\n\ndef gate(ctx):\n    return refuse(ctx, 'no push to main', 'main-moves-by-pull-request')\n"
 STREAM = "def stream():\n    return 4\n"
@@ -1354,7 +1451,7 @@ class TreeTests(StaleCase):
     The guard.py in CODE has six lines; the cases below use that count."""
 
     def test_a_dead_path_cite_is_flagged_stale003(self):
-        found = self.assert_tree_flags(self.tree("# Notes\n\n- the gate is in `hooks/gone.py`\n"),
+        found = self.assert_tree_flags(self.tree("# Notes\n\n- the guard is in `hooks/gone.py`\n"),
                                        [(NOTES, 3, "STALE003")])
         self.assertIn("hooks/gone.py", found[0][3])
         self.assertNotIn("did you mean", found[0][3])
@@ -1364,7 +1461,7 @@ class TreeTests(StaleCase):
         self.assert_tree_flags(self.tree(notes), [(NOTES, 3, "STALE003"), (NOTES, 4, "STALE003")])
 
     def test_a_live_path_cite_is_silent(self):
-        self.assert_tree_passes(self.tree("# Notes\n\n- the gate is in `hooks/guard.py`\n- and `lint/x.py`\n"))
+        self.assert_tree_passes(self.tree("# Notes\n\n- the guard is in `hooks/guard.py`\n- and `lint/x.py`\n"))
 
     def test_a_path_resolved_from_the_md_file_folder_is_silent(self):
         extra = {"mods/session-board/notes.md": "- see `hooks/tool.py`\n",
@@ -1504,6 +1601,584 @@ class TreeTests(StaleCase):
         rng = self.make_range(base_files("# Notes\n\n- see `hooks/tool.py`\n"), change)
         self.assert_tree_flags(rng, [(NOTES, 3, "STALE003")])  # HEAD: the file is gone
         self.assert_tree_passes(rng, rev="HEAD~1")  # HEAD~1: the file is tracked
+
+
+ROUTE_ROWS = "hooks/route_rows.json"  # a route id is a row of this file at head
+PREMISE_HOME = os.path.join(ROOT, "hooks", "precompact_handoff.py")  # PREMISE_KINDS is read here, never copied
+FIXTURE = os.path.join(HERE, "route_claims_labelled.json")
+LABELS = ("STALE", "PARTLY_STALE", "HALF", "TRUE", "HISTORY", "UNKNOWN")
+
+
+def route_rows_text(*ids):
+    """hooks/route_rows.json as a linted repo holds it: {"rows": [...]}, one row per route id, in the row shape the
+    route-claims lane uses (id, act, route, surface, outcome, measured, cc_version, evidence, by)."""
+    rows = [{"id": route, "act": "push", "route": "cloud", "surface": "cloud", "outcome": "refused",
+             "measured": "2026-11-06", "cc_version": "2.1.0", "evidence": "fixture", "by": "test-author"}
+            for route in ids]
+    return json.dumps({"rows": rows}, indent=2) + "\n"
+
+
+def read_repo_file(repo, path):
+    with open(os.path.join(repo, *path.split("/")), encoding="utf-8") as f:
+        return f.read()
+
+
+def stale005_hits(out):
+    """(path, line, text) for each output line that carries STALE005 and names a Markdown `path:line`. A finding line
+    and a report line both count, so a case pins the lines a reader gets, never the form they print in."""
+    hits = []
+    for line in out.splitlines():
+        if "STALE005" in line:
+            hits.extend((path, int(number), line) for path, number in re.findall(r"([\w./@+~-]+\.md):(\d+)", line))
+    return hits
+
+
+def stale005_lines(out, path):
+    """The line numbers of `path` that STALE005 names in the output, sorted."""
+    return sorted(number for hit, number, _ in stale005_hits(out) if hit == path)
+
+
+def report_prose(out, changed):
+    """The `path.md:line` cites on each report line that names the changed file `changed`."""
+    cites = set()
+    for line in out.splitlines():
+        if line.startswith("stale-cites: report, ") and changed in line:
+            cites.update(re.findall(r"[\w./@+~-]+\.md:\d+", line))
+    return cites
+
+
+class RouteClaimTests(StaleCase):
+    """STALE005, range mode only, report only. An ADDED line of governed prose states a capability by route when it
+    holds a capability verb and a route word. It is backed by a premise kind from PREMISE_KINDS with its source, or by a
+    route id that is a row of hooks/route_rows.json. The exit code never changes."""
+
+    def route_range(self, rows, extra=None, base_notes="# Notes\n"):
+        """A range that rewrites NOTES as `rows`, given as (line, flagged) pairs. Returns (range, flagged lines)."""
+        text, flagged = rows_text(rows)
+
+        def change(repo):
+            write(repo, NOTES, text)
+            commit(repo)
+        return self.make_range(base_files(base_notes, extra=extra), change), flagged
+
+    def assert_route_claims(self, rng, expected, path=NOTES):
+        """Scope first: the range touched `path`. Then the exit is 0, the verdict is PASS, and the STALE005 lines that
+        name `path` are exactly `expected`. Returns the output."""
+        self.assertIn(path, touched(rng))
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+        self.assertEqual(stale005_lines(out, path), sorted(expected), out)
+        return out
+
+    def test_route_claim_fires_on_each_verb_and_route_word_and_not_on_a_part_of_a_word(self):
+        rows = [
+            ("- The cloud cannot push to main.", True),
+            ("- The cloud can't push to main.", True),
+            ("- The cloud refuses pushes to main.", True),
+            ("- Pushes to main are refused by the cloud.", True),
+            ("- The cloud blocks pushes to main.", True),
+            ("- Auto mode is not available for this branch.", True),
+            ("- The cloud works for read-only tasks.", True),
+            ("- Local sessions cannot push to main.", True),
+            ("- Auto mode cannot push to main.", True),
+            ("- The classifier cannot push to main.", True),
+            ("- gh cannot push to main.", True),
+            ("- gh api cannot push to main.", True),
+            ("- The MCP server cannot push to main.", True),
+            ("- The proxy cannot push to main.", True),
+            ("- The harness cannot push to main.", True),
+            ("- The cloud runs the nightly job.", False),  # a route word and no verb
+            ("- The sandbox cannot push to main.", False),  # a verb and no route word
+            ("- The local networks are fine.", False),  # `works` sits inside `networks`
+            ("- The highway cannot be used.", False),  # `gh` sits inside `highway`
+            ("- The cloud runs the job.", False),  # two sentences: the route word in one, the verb in the other
+            ("  The job cannot push to main.", False),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_is_silent_in_a_heading_a_quote_a_fence_and_a_span_that_holds_the_whole_claim(self):
+        rows = [
+            ("## The cloud cannot push to main.", False),  # a heading
+            ("> The cloud cannot push to main.", False),  # a quote line
+            ("```", False),
+            ("The cloud cannot push to main.", False),  # inside a fence
+            ("```", False),
+            ("The cloud cannot push to main, after the fence.", True),  # prose again after the closing fence
+            ("- `The cloud cannot push to main.`", False),  # a code span holds the whole claim
+            ("- Use `cannot` and `cloud` only in code.", False),  # a verb in a span is a mention (lane ruling 12:47 CST)
+            ("- The cloud cannot push to main; see `hooks/guard.py`.", True),  # the words sit outside the span
+            ("- Open a fence with `` ``` `` and the cloud cannot push to main.", True),  # no fence opens in a span
+            ("- Open a comment with `<!--`. The cloud cannot push to main.", True),  # a comment opener in a span
+            ("- Don't read `hooks/guard.py` for this. The cloud cannot push to main.", True),  # a lone quote
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_fires_on_a_code_span_used_as_the_subject_and_skips_only_a_span_holding_the_whole_claim(self):
+        rows = [
+            ("- `gh` cannot close a pull request.", True),  # the span is the subject; the claim is outside the span
+            ("- `The cloud` cannot push to main.", True),
+            ("- The cloud cannot push to `main`.", True),  # the span is an object; the claim is outside it
+            ("- `gh cannot close a pull request.`", False),  # the whole claim sits in the span
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_is_silent_on_a_local_branch_because_local_alone_is_no_route_word(self):
+        rows = [
+            ("- A local branch cannot hold the record.", False),  # `local` alone names no route
+            ("- Local runs cannot push to main.", False),  # `local runs` is no route word (lane ruling 12:47 CST)
+            ("- The cloud cannot hold the record.", True),  # the same verb with a route word fires
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_reads_locally_on_the_owners_computer_and_a_local_session_as_route_words(self):
+        sentences = [
+            "- Locally, the push cannot reach main.",
+            "- On the owner's computer, the push cannot reach main.",
+            "- On the owner’s computer, the push cannot reach main.",
+            "- A local session cannot hold the record.",
+        ]
+        for sentence in sentences:
+            with self.subTest(sentence=sentence):
+                rng, flagged = self.route_range([("# Notes", False), ("", False), (sentence, True)])
+                self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_past_tense_incident_is_silent_beside_a_present_claim(self):
+        rows = [
+            ("- The cloud refused the push on 2026-10-30.", False),  # a dated incident
+            ("- The cloud refuses pushes to main.", True),  # the same route in the present tense
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_fires_on_each_capability_verb_it_names(self):
+        sentences = [  # each holds one verb and the route word `cloud` (or `classifier`, `proxy`): the verb decides
+            "- The cloud isn't available for merges.",
+            "- The cloud isn’t available for merges.",
+            "- The cloud does not work for pushes to main.",
+            "- The cloud doesn't work for pushes to main.",
+            "- The classifier won't merge to main.",
+            "- Pushes to main are blocked by the proxy.",
+            "- The proxy denies pushes to main.",
+            "- The cloud gets a 403 on pushes to main.",
+        ]
+        for sentence in sentences:
+            with self.subTest(sentence=sentence):
+                rng, flagged = self.route_range([("# Notes", False), ("", False), (sentence, True)])
+                self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_counts_a_hyphenated_auto_mode_as_a_route_word(self):
+        sentences = [  # the verb `cannot` decides; `Auto-mode` is the route word
+            "- Auto-mode cannot push to main.",
+            "- auto-mode cannot push to main.",
+        ]
+        for sentence in sentences:
+            with self.subTest(sentence=sentence):
+                rng, flagged = self.route_range([("# Notes", False), ("", False), (sentence, True)])
+                self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_wrapped_over_two_lines_fires_on_its_first_line(self):
+        rows = [
+            ("# Notes", False),
+            ("", False),
+            ("- The cloud", True),  # the route word on this row, the verb on the next: one sentence
+            ("  cannot close a pull request.", False),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_wrapped_with_the_verb_on_the_first_line_fires_on_its_first_line(self):
+        rows = [
+            ("# Notes", False),
+            ("", False),
+            ("- Pushes to main are refused", True),
+            ("  by the cloud.", False),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_backing_on_the_next_line_of_its_sentence_silences_it(self):
+        rows = [
+            ("# Notes", False),
+            ("", False),
+            ("- The cloud cannot close a pull request", False),  # the claim and its backing: one sentence, silent
+            ("  (read hooks/guard.py:2).", False),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_backing_in_another_sentence_of_the_paragraph_does_not_silence_it(self):
+        rows = [
+            ("# Notes", False),
+            ("", False),
+            ("- The cloud cannot close a pull request. It is recorded (read hooks/guard.py:2).", True),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_split_by_a_blank_line_is_two_paragraphs_and_stays_silent(self):
+        rows = [
+            ("# Notes", False),
+            ("", False),
+            ("- The cloud", False),
+            ("", False),
+            ("  cannot close a pull request.", False),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_code_span_crossing_a_line_break_that_holds_the_claim_is_silent(self):
+        rows = [
+            ("# Notes", False),
+            ("", False),
+            ("- `The cloud", False),  # the whole claim sits in a code span that crosses the line break
+            ("  cannot close a pull request.`", False),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_wrapped_after_a_lone_quote_and_a_comment_opener_in_a_span_fires(self):
+        rows = [
+            ("# Notes", False),
+            ("", False),
+            ("- Don't read `<!--` as a comment. The cloud", True),  # a lone quote, an opener in a span, then the claim
+            ("  cannot close a pull request.", False),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_disable_mark_names_stale005_and_no_other_code(self):
+        rows = [
+            ("- The cloud cannot push to main. <!-- ste-disable-line STALE005 -->", False),
+            ("- The cloud cannot push to main. <!-- ste-disable-line STALE001 -->", True),
+            ("- The cloud cannot push to main.", True),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_is_backed_by_a_strong_premise_kind_with_its_source_and_a_weak_one_is_not(self):
+        kinds = tuple_named(PREMISE_HOME, "PREMISE_KINDS")
+        weak = {"notes", "assumed"}
+        self.assertTrue({"ruling", "measured", "read"} <= kinds, kinds)  # scope: the strong kinds this check reads
+        self.assertTrue(weak <= kinds, kinds)  # scope: the weak kinds are premise kinds the home file names
+        self.assertNotIn("guess", kinds)
+        rows = [("- The cloud cannot push to main (%s hooks/guard.py:12)." % kind, False)
+                for kind in sorted(kinds - weak)]
+        rows += [("- The cloud cannot push to main (%s hooks/guard.py:12)." % kind, True) for kind in sorted(weak)]
+        rows += [
+            ("- The cloud cannot push to main (measured 2026-11-06, hooks/guard.py:12).", False),
+            ("- The cloud cannot push to main (guess hooks/guard.py:12).", True),  # a kind outside PREMISE_KINDS
+            ("- The cloud cannot push to main (measured 2026-11-06).", True),  # a kind with no source
+            ("- The cloud cannot push to main.", True),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_is_backed_by_a_test_node_id_and_stays_silent(self):
+        rows = [
+            ("- The cloud cannot push to main (test lint/test_x.py::keep).", False),  # backed by a test node id
+            ("- The cloud cannot push to main (test lint/test_x.py::keep) and merge.", False),
+            ("- The cloud cannot merge to main.", True),  # no backing at all
+        ]
+        rng, flagged = self.route_range(rows, extra={"lint/test_x.py": "def keep():\n    return 1\n"})  # the file exists
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_read_or_test_backing_naming_a_file_absent_at_head_is_a_dead_backing(self):
+        rows = [
+            ("- The cloud cannot push to main (read hooks/guard.py:12).", False),  # the file exists at head: backed
+            ("- The cloud cannot push to main (read hooks/gone.py:12).", True),  # no such file: a dead backing
+            ("- The cloud cannot push to main (test lint/test_gone.py::keep).", True),  # no such file: a dead backing
+        ]
+        rng, flagged = self.route_range(rows)
+        tracked = git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split()
+        self.assertIn("hooks/guard.py", tracked, "scope: the backing that exists is tracked at head")
+        self.assertNotIn("hooks/gone.py", tracked, "scope: the read backing is absent at head")
+        self.assertNotIn("lint/test_gone.py", tracked, "scope: the test backing is absent at head")
+        out = self.assert_route_claims(rng, flagged)
+        texts = {number: text for path, number, text in stale005_hits(out) if path == NOTES}
+        self.assertIn("hooks/gone.py", texts.get(flagged[0], ""), out)  # the report names the file it cannot find
+        self.assertIn("lint/test_gone.py", texts.get(flagged[1], ""), out)
+
+    def test_route_claim_cites_a_route_id_that_is_a_row_at_head_and_names_a_dead_one(self):
+        rows = [
+            ("- The cloud cannot push to main (route cloud-push).", False),
+            ("- The cloud cannot merge to main (route gone).", True),  # no such row: a dead route
+        ]
+        rng, flagged = self.route_range(rows, extra={ROUTE_ROWS: route_rows_text("cloud-push")})
+        out = self.assert_route_claims(rng, flagged)
+        texts = [text for path, number, text in stale005_hits(out) if path == NOTES and number == flagged[0]]
+        self.assertTrue(texts and "gone" in texts[0] and "dead route" in texts[0], out)
+
+    def test_route_claim_with_an_empty_rows_file_makes_every_route_cite_a_dead_route(self):
+        rows = [("- The cloud cannot push to main (route cloud-push).", True)]
+        rng, flagged = self.route_range(rows, extra={ROUTE_ROWS: route_rows_text()})
+        self.assertEqual(json.loads(read_repo_file(rng.repo, ROUTE_ROWS))["rows"], [])  # scope: the file holds no row
+        out = self.assert_route_claims(rng, flagged)
+        texts = [text for path, number, text in stale005_hits(out) if path == NOTES and number == flagged[0]]
+        self.assertTrue(texts and "cloud-push" in texts[0] and "dead route" in texts[0], out)
+
+    def test_route_claim_with_no_rows_file_at_head_reads_unknown_once_and_names_no_dead_route(self):
+        rows = [
+            ("- The cloud cannot push to main (route cloud-push).", True),
+            ("- The cloud cannot merge to main (route cloud-other).", True),
+        ]
+        rng, flagged = self.route_range(rows)  # no rows file in the fixture
+        tracked = git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split()
+        self.assertNotIn(ROUTE_ROWS, tracked, "scope: the rows file is absent at head")
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+        self.assertFalse([line for line in out.splitlines() if "dead route" in line], out)  # an absent file is not dead
+        named = [line for line in out.splitlines() if ROUTE_ROWS in line]
+        self.assertEqual(len(named), 1, out)  # one report line for the absent file, however many claims cite a route
+        self.assertIn("absent", named[0], out)
+
+    def test_route_claim_reads_the_route_rows_at_head_not_at_base(self):
+        text, flagged = rows_text([
+            ("# Notes", False),
+            ("", False),
+            ("- The cloud cannot push to main (route cloud-push).", False),  # the row is added in this range
+            ("- The classifier cannot push to main.", True),
+        ])
+
+        def change(repo):
+            write(repo, ROUTE_ROWS, route_rows_text("cloud-push"))
+            write(repo, NOTES, text)
+            commit(repo)
+        rng = self.make_range(base_files(extra={ROUTE_ROWS: route_rows_text()}), change)
+        self.assertEqual([row["id"] for row in json.loads(read_repo_file(rng.repo, ROUTE_ROWS))["rows"]], ["cloud-push"])
+        self.assertIn(ROUTE_ROWS, touched(rng))  # scope: the rows file changed in this range
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_row_removed_in_the_range_reports_each_prose_line_at_head_that_cites_it(self):
+        notes = ("# Notes\n\n- The cloud cannot push to main (route cloud-push).\n"
+                 "- The cloud cannot merge to main (route cloud-other).\n")
+        record = "# Decision\n\n## The ruling\n\nThe cloud cannot push to main (route cloud-push).\n"
+        extra = {ROUTE_ROWS: route_rows_text("cloud-push", "cloud-other"), "docs/decisions/route-note.md": record}
+
+        def change(repo):
+            write(repo, ROUTE_ROWS, route_rows_text("cloud-other"))  # the range removes the cloud-push row
+            commit(repo)
+        rng = self.make_range(base_files(notes, extra=extra), change)
+        self.assertIn(ROUTE_ROWS, touched(rng))  # scope: the rows file changed in this range
+        self.assertNotIn(NOTES, touched(rng))  # scope: the prose that cites the row is not in the range
+        ids_at_base = {row["id"] for row in json.loads(git(rng.repo, "show", "%s:%s" % (rng.base, ROUTE_ROWS)))["rows"]}
+        ids_at_head = {row["id"] for row in json.loads(read_repo_file(rng.repo, ROUTE_ROWS))["rows"]}
+        self.assertEqual(ids_at_base - ids_at_head, {"cloud-push"}, "scope: the range removes one row id")
+        rc, out, commands = self.run_traced_commands(rng)
+        subs = [command.split()[0] for command in commands]
+        self.assertEqual(rc, 0, out)  # report only: the exit code does not change
+        self.assertIn("stale-cites: PASS", out)
+        self.assertEqual(stale005_lines(out, NOTES), [3], out)  # the prose line that cites the removed id
+        self.assertEqual(stale005_lines(out, "docs/decisions/route-note.md"), [5], out)  # and a decision record's line
+        self.assertLessEqual(len(subs), 5, subs)  # within the pin for a range that removes a path
+
+    def test_route_claim_fires_only_on_a_line_the_range_adds(self):
+        base = "# Notes\n\n- The cloud cannot push to main.\n- Auto mode cannot merge.\n"
+
+        def change(repo):
+            write(repo, NOTES, "# Notes\n\n- The cloud cannot push to main.\n- The classifier refuses merges.\n")
+            commit(repo)
+        rng = self.make_range(base_files(base), change)
+        # Line 3 was on main and the range does not touch it, so it is silent. Line 4 is added.
+        self.assert_route_claims(rng, [4])
+
+    def test_route_claim_fires_in_a_markdown_file_the_range_adds(self):
+        def change(repo):
+            write(repo, "docs/new-note.md", "# New note\n\n- The cloud cannot push to main.\n")
+            commit(repo)
+        self.assert_route_claims(self.make_range(base_files(), change), [3], path="docs/new-note.md")
+
+    def test_route_claim_is_not_reported_in_the_records_page_or_an_excluded_file(self):
+        extra = {".ste-lint-exclude": "third_party/**\n"}
+        page = "# Page\n\n- The cloud cannot push to main.\n"
+
+        def change(repo):
+            write(repo, NOTES, "# Notes\n\n- The cloud cannot push to main.\n")
+            write(repo, "docs/records.md", page)
+            write(repo, "third_party/notes.md", page)
+            commit(repo)
+        rng = self.make_range(base_files(extra=extra), change)
+        self.assertTrue({"docs/records.md", "third_party/notes.md"} <= touched(rng))  # scope: both files changed
+        out = self.assert_route_claims(rng, [3])
+        self.assertEqual([path for path, _, _ in stale005_hits(out) if path != NOTES], [], out)
+
+    def test_route_claim_leaves_the_exit_code_to_the_other_findings(self):
+        def change(repo):
+            move(repo, "hooks/lib.mjs", MOVED)
+            write(repo, NOTES, "# Notes\n\n- refusal list in `hooks/lib.mjs`\n- The classifier refuses merges.\n")
+            commit(repo)
+        rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n"), change)
+        self.assertIn(NOTES, touched(rng))  # scope
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("stale-cites: FAIL, 1 finding(s)", out)
+        self.assertEqual([(path, n, code) for path, n, code, _ in parse(out)], [(NOTES, 3, "STALE001")], out)
+        self.assertEqual(stale005_lines(out, NOTES), [4], out)
+
+    def test_route_claim_is_reported_on_an_added_line_and_not_when_the_range_adds_none(self):
+        def add(repo):
+            write(repo, NOTES, "# Notes\n\n- The cloud cannot push to main.\n")
+            commit(repo)
+        self.assert_route_claims(self.make_range(base_files(), add), [3])  # the range adds the claim
+
+        def drop(repo):
+            write(repo, NOTES, "# Notes\n")
+            commit(repo)
+        self.assert_route_claims(self.make_range(base_files("# Notes\n\n- The cloud cannot push to main.\n"), drop), [])
+
+    def test_route_claim_full_size_file_reports_each_unbacked_claim_by_its_own_line(self):
+        rows = [("- The cloud cannot push to main.", True) if n % 100 == 0 else ("- Filler line %d." % n, False)
+                for n in range(1, 1201)]
+        rng, flagged = self.route_range(rows)
+        self.assertEqual(len(flagged), 12)  # scope: twelve claim lines in 1,200
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_is_not_reported_by_tree_mode(self):
+        rng, flagged = self.route_range([("# Notes", False), ("- The cloud cannot push to main.", True)])
+        self.assert_route_claims(rng, flagged)  # the range run reports the added line
+        _, out = self.run_tree(rng)
+        self.assertEqual(stale005_hits(out), [], out)
+
+    def test_route_claim_is_silent_on_a_claim_in_straight_or_curly_double_quotes(self):
+        rows = [
+            ('- The old rule said "The cloud cannot close a pull request".', False),  # a quoted old claim
+            ("- The old rule said “The cloud cannot close a pull request”.", False),  # the same, in curly quotes
+            ('- The grant "Acts the cloud refuses" stays in force.', False),  # a quoted grant title
+            ('- The old rule said "The cloud cannot', False),  # a quote wrapped over two lines of one sentence
+            ('  close a pull request" and it is gone.', False),
+            ('- A lone " is no quote, and the cloud cannot push to main.', True),  # an unclosed quote opens nothing
+            ('- The "<!--" marker is quoted, and the cloud cannot push to main.', True),  # a comment opener in quotes
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_is_silent_on_a_file_path_that_holds_a_route_word_and_a_verb(self):
+        rows = [
+            ("- See docs/decisions/cloud-cannot-send.md for the ruling.", False),  # a bare path names a file, no claim
+            ("- The ruling docs/decisions/cloud-cannot-send.md is kept.", False),  # the same path mid-sentence
+            ("- See `docs/decisions/cloud-cannot-send.md` for the ruling.", False),  # a span, already silent
+            ("- See docs/decisions/cloud-cannot-send.md. The cloud cannot push to main.", True),  # a real claim fires
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_fires_on_an_unquoted_claim_beside_a_quote_and_a_verb_inside_a_quote_is_a_mention(self):
+        rows = [
+            ('- The cloud is the subject; the rule "cannot close a pull request" is old.', False),  # the verb is quoted
+            ('- The cloud cannot push to main; the rule "Acts the cloud refuses" is old.', True),  # the unquoted claim
+            ('- The old rule said "The cloud cannot close a pull request", and the cloud cannot push to main.', True),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_apostrophe_opens_no_quote_so_a_claim_after_it_still_fires(self):
+        rows = [
+            ("- Don't rely on the cloud; it cannot push to main.", True),  # a straight apostrophe before the claim
+            ("- Don’t rely on the cloud; it cannot push to main.", True),  # a curly apostrophe before the claim
+            ("- Don't rely on the cloud; it cannot push to main. The cloud can't push either.", True),  # two apostrophes
+            ('- The old rule said "The cloud can\'t push to main".', False),  # an apostrophe inside a quote
+            ('- Don\'t cite "The cloud cannot close a pull request" as current.', False),  # a quote after an apostrophe
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_unclosed_quote_in_a_table_row_does_not_hide_the_next_row(self):
+        rows = [
+            ("| Route | Claim |", False),
+            ("|---|---|", False),
+            ('| a | "doesn\'t this mean |', False),  # an unclosed straight quote; its run ends at the next `|` row
+            ("| b | the auto-mode classifier refuses a tool call |", True),  # the claim the quote must not hide
+            ('| c | "quoted" |', False),  # a later quote, which an open run would pair with across rows
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_header_row_of_a_table_does_not_flag_for_a_claim_in_a_data_row(self):
+        rows = [
+            ("| Route | Claim |", False),  # a header row names columns; it states no claim
+            ("|---|---|", False),
+            ("| a | the auto-mode classifier refuses a tool call |", True),  # the claim is flagged on its own row
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+
+class RouteClaimFixtureTests(unittest.TestCase):
+    """The labelled route claims, hand-judged stale or true, that measure the judge's false alarms: one entry per labelled line.
+    A span is one entry at its first line, and `line` is a string, such as "16" or "16-20"."""
+
+    def test_route_claims_fixture_has_the_audited_shape(self):
+        self.assertTrue(os.path.isfile(FIXTURE), "fixture absent: %s" % FIXTURE)
+        with open(FIXTURE, encoding="utf-8") as f:
+            rows = json.load(f)
+        self.assertIsInstance(rows, list)
+        for row in rows:
+            self.assertEqual(sorted(row), ["file", "label", "line", "text_summary"], row)
+            self.assertRegex(row["file"], r"^(?:docs|\.claude)/\S+\.md$", row)  # a full repo-relative path
+            self.assertRegex(row["line"], r"^[1-9][0-9]*(?:-[1-9][0-9]*)?$", row)
+            self.assertIn(row["label"], LABELS, row)
+            self.assertTrue(row["text_summary"].strip(), row)
+        self.assertEqual(len({(row["file"], row["line"]) for row in rows}), len(rows), "a (file, line) repeats")
+        self.assertEqual(collections.Counter(row["label"] for row in rows),
+                         collections.Counter({"STALE": 2, "PARTLY_STALE": 1, "HALF": 1, "TRUE": 13,
+                                              "HISTORY": 1, "UNKNOWN": 3}))
+
+
+def load_module_under_test():
+    """The module under test, loaded from MODULE, so STALE_CITES_UNDER_TEST can point a run at another copy."""
+    spec = importlib.util.spec_from_file_location("stale_cites_under_test", MODULE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class CitedExcerptTests(unittest.TestCase):
+    """cited_excerpt: the numbered lines of a backing file that a cite points at. A prose judge sends them beside the line."""
+    TEXT = "a = 1\nb = 2\nc = 3\nd = 4\ne = 5\n"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.stale = load_module_under_test()
+
+    def test_a_line_range_gives_those_lines(self):
+        shown = self.stale.cited_excerpt("read src/widget.py:2-3", self.TEXT)
+        self.assertEqual(shown, "2: b = 2\n3: c = 3", "a read cite of lines 2-3 gives those two lines, numbered")
+
+    def test_a_test_cite_starts_at_the_def_of_its_name(self):
+        text = "import os\n\n\ndef helper():\n    pass\n\n\ndef test_add():\n    assert 1\n"
+        shown = self.stale.cited_excerpt("test tests/test_widget.py::test_add", text)
+        self.assertEqual(shown.split("\n")[0], "8: def test_add():", "a test cite does not start at the def of its name")
+
+    def test_a_lone_quote_in_a_comment_does_not_move_the_start(self):
+        # The def scan reads source text. A quote in a comment is text, and must not move where the scan starts.
+        text = "# don't touch this\ndef target():\n    return 1\n"
+        shown = self.stale.cited_excerpt("test lint/widget.py::target", text)
+        self.assertEqual(shown.split("\n")[0], "2: def target():", "a lone quote in a comment moved the start off the def")
+
+    def test_a_def_name_inside_a_string_literal_is_not_the_start(self):
+        # The string opens with '#', so a scan that drops comments first would still see a def name inside it.
+        text = 'MSG = "# see def target below"\n\ndef target():\n    return 1\n'
+        shown = self.stale.cited_excerpt("test lint/widget.py::target", text)
+        self.assertEqual(shown.split("\n")[0], "3: def target():", "the excerpt starts at a string that names the def, not at the def")
+
+    def test_a_def_name_inside_a_docstring_is_not_the_start(self):
+        text = '"""\nNotes: def target() moved.\n"""\ndef target():\n    return 1\n'
+        shown = self.stale.cited_excerpt("test lint/widget.py::target", text)
+        self.assertEqual(shown.split("\n")[0], "4: def target():", "the excerpt starts inside a docstring that names the def, not at the def")
+
+    def test_a_def_name_in_a_comment_is_not_the_start(self):
+        text = "# def target moved below\n\ndef target():\n    return 1\n"
+        shown = self.stale.cited_excerpt("test lint/widget.py::target", text)
+        self.assertEqual(shown.split("\n")[0], "3: def target():", "the excerpt starts at a comment that names the def, not at the def")
+
+    def test_a_cite_that_names_no_backing_path_gives_none(self):
+        shown = self.stale.cited_excerpt("read the top of the file", self.TEXT)
+        self.assertIsNone(shown, "a read cite with no backing path gives %r, want None" % (shown,))
 
 
 if __name__ == "__main__":

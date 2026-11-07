@@ -4,7 +4,8 @@
 //   .ts .tsx .mjs .js ...  the typescript parser, through lazy-typescript.mjs, module-level declarations only
 //   any other extension    a line regex over the text with comments AND strings blanked. It is no parser: a stated limit.
 // A request is { file, symbol } for a value. Internal callers add `op`: 'defines' (is the symbol bound at module level)
-// or 'uses' (does `file` import the tracked file `target`, and refer to `symbol`).
+// 'uses' (does `file` import the tracked file `target`, and refer to `symbol`) or 'loads' (the tracked files that `file` loads at runtime, as
+// { imports, named }: the files it imports without a type-only import, and the files a string in its code equals, from its folder or the root).
 // A result is { file, symbol, ok: true, value } or { file, symbol, ok: false, reason, gone? }. `gone: true` means the file was
 // read and the symbol is not in it. A failure without `gone` is unknown: the caller must never read it as a pass.
 import { spawnSync } from 'node:child_process';
@@ -43,7 +44,7 @@ const walk = (value, parts) => {
 const readJson = (req, text) => {
   let data;
   try { data = JSON.parse(text); } catch (e) { return fail(req, `${req.file} does not parse as JSON: ${e.message}`); }
-  if (req.op === 'uses') return fail(req, `a uses fact is read for Python and JavaScript files, and ${req.file} is JSON`);
+  if (req.op === 'uses' || req.op === 'loads') return fail(req, `a ${req.op} fact is read for Python and JavaScript files, and ${req.file} is JSON`);
   const found = walk(data, req.symbol.split('.'));
   if (!found.length) return gone(req);
   if (req.op === 'defines') return good(req, true);
@@ -142,11 +143,31 @@ const identifiers = (sf, aliases) => {
   return names;
 };
 
-const readTs = (req, text, tracked) => {
+// The tracked files that a string in the code equals, from the file's folder or the repository root. A module specifier of an import or
+// an export is no code string, and neither is a type: `import type x from './a.ts'` names a file and loads none.
+const namedFiles = (sf, file, files) => {
+  const folder = path.posix.dirname(file);
+  const out = new Set();
+  const visit = (n) => {
+    if (ts.isLiteralTypeNode(n) || ts.isImportTypeNode(n)) return;
+    if ((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier) return;
+    if (ts.isExternalModuleReference(n)) return;
+    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
+      const s = n.text;
+      if (s && !s.includes('\n') && !s.startsWith('/'))
+        for (const c of [path.posix.normalize(path.posix.join(folder, s)), path.posix.normalize(s)]) if (c !== file && files.has(c)) out.add(c);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return [...out].sort();
+};
+
+const readTs = (req, text, files) => {
   let sf;
   try { sf = ts.createSourceFile(req.file, text, ts.ScriptTarget.Latest, true); } catch (e) { return fail(req, `${req.file} cannot be parsed: ${e.message}`); }
+  if (req.op === 'loads') return good(req, { imports: importTargets(req.file, text, files, { types: false }).filter((f) => f !== req.file), named: namedFiles(sf, req.file, files) });
   if (req.op === 'uses') {
-    const files = new Set(tracked);
     const imports = importTargets(req.file, text, files).includes(req.target);
     const uses = req.symbol == null ? null : identifiers(sf, targetAliases(sf, req.file, req.target, files)).has(req.symbol);
     return good(req, { imports, uses });
@@ -167,7 +188,7 @@ const readTs = (req, text, tracked) => {
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const readRegex = (req, text) => {
-  if (req.op === 'uses') return fail(req, `a uses fact is read for Python and JavaScript files, and ${req.file} is neither`);
+  if (req.op === 'uses' || req.op === 'loads') return fail(req, `a ${req.op} fact is read for Python and JavaScript files, and ${req.file} is neither`);
   // The blanked text keeps every offset, so a match there names the same span of the original, where a string value is still text.
   // A shell file has its own scanner (blankShell): a string may span lines, `#` opens a comment only at the start of a word, and a heredoc body is text.
   // Another `#` file blanks each full-line `#` comment first: the C-style scanner would read a lone quote in it as a string that hides real code.
@@ -201,17 +222,18 @@ const readPython = (reqs, root, tracked) => {
 
 /**
  * One result for each request, in order. Every Python request of the call goes to one `python3` start, and a call with
- * none starts no process. `tracked` (the tracked files of `root`) is needed by a `uses` request on a Python file only.
+ * none starts no process. `tracked` (the tracked files of `root`) is needed by a `uses` or `loads` request.
  */
 export const readFacts = (requests, root, { tracked = [] } = {}) => {
   const results = new Array(requests.length);
+  const files = new Set(tracked);
   const py = [];
   requests.forEach((req, i) => {
     if (req.file.endsWith('.py')) { py.push(i); return; }
     let text;
     try { text = readFileSync(path.join(root, req.file), 'utf8'); } catch (e) { results[i] = fail(req, `${req.file} cannot be read: ${e.code ?? e.message}`); return; }
     try {
-      results[i] = req.file.endsWith('.json') ? readJson(req, text) : TS_EXT.test(req.file) ? readTs(req, text, tracked) : readRegex(req, text);
+      results[i] = req.file.endsWith('.json') ? readJson(req, text) : TS_EXT.test(req.file) ? readTs(req, text, files) : readRegex(req, text);
     } catch (e) {
       results[i] = fail(req, `${req.file} could not be read: ${e.message}`);
     }
