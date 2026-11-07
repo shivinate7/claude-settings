@@ -184,6 +184,10 @@ class RecordSlugsTests(unittest.TestCase):
         return subprocess.run(["git", "-C", self.tree, "rev-parse", "origin/main"], check=True,
                               capture_output=True, text=True).stdout.strip()
 
+    def head_sha(self):
+        return subprocess.run(["git", "-C", self.tree, "rev-parse", "--short=7", "HEAD"], check=True,
+                              capture_output=True, text=True).stdout.strip()
+
     def failed_about(self, out, *needles):
         """True when a FAIL line of the check names one of `needles`."""
         return any(line.startswith("check_record_slugs: FAIL:") and any(n in line for n in needles)
@@ -521,6 +525,71 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
         self.assertTrue(self.failed_about(out, "fixed-note", DEBT_NOTES), out)
+
+    def test_already_fixed_on_main_with_a_made_up_sha_is_red(self):
+        # 1234567 is hex, so the grammar reads it. No commit on main has it, so the Fix names no real commit.
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "- fixed-note: a gap. Fix: already fixed on main 1234567\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "fixed-note", DEBT_NOTES), out)
+
+    def test_already_fixed_on_main_with_a_branch_only_sha_is_red(self):
+        # The sha is a commit of this branch, not an ancestor of origin/main, so the Fix names no fix on main.
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put("branch-only.txt", "only on the branch\n")
+        self.commit_change()
+        sha = self.head_sha()
+        self.put(DEBT_NOTES, NOTES_HEAD + "- fixed-note: a gap. Fix: already fixed on main %s\n" % sha)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "fixed-note", DEBT_NOTES), out)
+
+    def test_already_fixed_on_an_older_main_commit_passes(self):
+        # The sha is an ancestor of origin/main, not its tip: any commit on main is a real fix.
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        older = self.base_sha()[:7]
+        self.put("later.txt", "a later commit on main\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "later")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.put(DEBT_NOTES, NOTES_HEAD + "- fixed-note: a gap. Fix: already fixed on main %s\n" % older)
+        self.commit_change()
+        self.assert_passes()
+
+    def test_swapped_note_without_a_fix_is_red_under_diff_noprefix(self):
+        # The swap keeps the unfixed count level, so only the diff reads the new line. With diff.noprefix the diff's file
+        # headers carry no b/ prefix, and the added line must still be read.
+        self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE)
+        self.commit_base()
+        self.git("config", "diff.noprefix", "true")
+        self.put(DEBT_NOTES, NOTES_HEAD + NEW_NO_FIX)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES), out)
+
+    def test_swapped_note_with_a_fix_under_diff_noprefix_passes(self):
+        # The control for the case above: the same swap and config, with a valid Fix on the new line, passes.
+        self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE)
+        self.commit_base()
+        self.git("config", "diff.noprefix", "true")
+        self.put(DEBT_NOTES, NOTES_HEAD + NEW_VALID_NONE)
+        self.commit_change()
+        self.assert_passes()
+
+    def test_none_reason_for_a_windows_run_passes(self):
+        # A reason the coordinator added: a Windows run. Red until the check lists it.
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "- win-note: a gap. Fix: none — needs a Windows run Until: 2026-11-20\n")
+        self.commit_change()
+        self.assert_passes()
 
     def test_lone_quote_and_comment_opener_in_the_note_text_do_not_hide_the_fix(self):
         # The apostrophe and the comment openers are text. The valid line passes; the prose line is red.
