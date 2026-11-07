@@ -703,9 +703,11 @@ The guard runs `check_designs.mjs` on the published page at each item write that
 
 The mockup leaves the page when its question closes and the page is next republished with
 `stale_pages.py --write --items`, which calls `splice.prune_designs`. That drops a slug only when every item that names it
-(`designs[].slug` or `options[].design`) is closed and is not an arbiter ruling, since an Overturn reopens a ruling. A
-slug no item names stays, and so does every slug when the items list is not complete (no `.complete` marker).
-`splice.carry` and `splice.py --block` never prune. The page
+(`designs[].slug` or `options[].design`) is closed, is not an arbiter ruling (an Overturn reopens a ruling), and was not
+parked (`lastAnswer.act` `park`: an Unpark reopens the item with no design restore). An item with no `status` counts as open.
+A slug no item names stays. A JSON list file counts as the whole list. A saved folder counts only with the `.complete` marker
+the session leaves after the last list page; without it nothing is pruned. The prune re-serialises the kept mockups: their
+values stay equal, their bytes may differ. `splice.carry` and `splice.py --block` never prune. The page
 holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another artifact.
 
 ## Update the roadmap block

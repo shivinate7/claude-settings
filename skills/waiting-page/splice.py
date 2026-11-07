@@ -24,7 +24,8 @@ A marker counts only as a comment in the page's markup. Text inside <script>, <s
 is not a block.
 The splice refuses, and writes no file, when the live page has no block, an unclosed block, or more
 than one block, and when FILE is not one marked block. The message names the roadmap block.
-prune_designs(text, items) is the one home of dropping a closed item's mockups from a page's designData block
+prune_designs(text, items) is the one home of dropping a closed item's mockups (not a parked item's) from a page's designData block;
+the prune re-serialises the block, so the kept mockups' values stay equal and their bytes may differ
 (stale_pages.py --write --items calls it after carry; carry and --block never prune).
 Cost: one read of each file and one write; no process starts.
 """
@@ -138,12 +139,19 @@ def named_slugs(item):
     return slugs
 
 
+def parked(item):
+    """True when `item` was closed by a Park."""
+    answer = item.get("lastAnswer")
+    return isinstance(answer, dict) and answer.get("act") == "park"
+
+
 def prune_designs(text, items):
-    """`text` with the mockups of closed items dropped from its designData block; every other byte stays.
-    A slug goes only when each item that names it is closed (status "closed") and is not an arbiter ruling (`arbiter` true),
-    since an Overturn reopens a ruling. A slug no item names stays: the writer publishes a mockup before its item. A slug named
-    by an open item as well stays. The block is rewritten only when a slug goes, as one JSON object with each `<` written as
-    \\u003c (so no string can close the script); an unreadable block, or one that is no object, is left as is. SystemExit
+    """`text` with the mockups of closed items dropped from its designData block; every byte outside the block stays.
+    A slug goes only when each item that names it is closed (status "closed"), is not an arbiter ruling (`arbiter` true),
+    since an Overturn reopens a ruling, and was not parked (`lastAnswer.act` "park"), since an Unpark reopens it with no
+    design restore. A slug no item names stays: the writer publishes a mockup before its item. A slug named
+    by an open item as well stays. The block is rewritten only when a slug goes, as one JSON object (the kept mockups' values
+    stay equal, their bytes may differ) with each `<` written as \\u003c (so no string can close the script); an unreadable block, or one that is no object, is left as is. SystemExit
     when `text` has no single designData block. The caller passes a complete items list: a cut-short one would keep too little."""
     start, end = design_span(text, "the page")
     parts = DESIGN_ELEMENT.fullmatch(text[start:end])
@@ -155,7 +163,7 @@ def prune_designs(text, items):
         return text
     kept, dropped = set(), set()
     for item in items:
-        done = isinstance(item, dict) and item.get("status") == "closed" and item.get("arbiter") is not True
+        done = isinstance(item, dict) and item.get("status") == "closed" and item.get("arbiter") is not True and not parked(item)
         (dropped if done else kept).update(named_slugs(item))
     gone = {slug for slug in dropped - kept if slug in designs}
     if not gone:
