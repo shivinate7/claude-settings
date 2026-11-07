@@ -826,6 +826,8 @@ class UnknownTests(StaleCase):
         rc, out = self.run_check(rng, spec=spec)
         self.assertNotIn("stale-cites: UNKNOWN,", out, "a root commit's first push printed the exit-2 read failure\n" + out)
         self.assertEqual(rc, 0, "a root commit's first push (%s) in a full clone did not exit 0 as on main\n%s" % (spec, out))
+        self.assertIn("stale-cites: unknown", out, "a root commit's first push (%s) printed no unknown line, so its "
+                      "range was not named as unread\n%s" % (spec, out))
 
     def test_a_root_commit_range_in_a_full_clone_exits_zero_as_on_main(self):
         self.assert_root_range_exits_zero(self.root_repo(), "HEAD~1..HEAD")
@@ -836,6 +838,32 @@ class UnknownTests(StaleCase):
         for spec in ("HEAD^1..HEAD", "%s^1..%s" % (head, head)):
             with self.subTest(spec=spec):
                 self.assert_root_range_exits_zero(rng, spec)
+
+    def test_a_root_commit_range_with_its_parent_spelled_tilde_one_and_the_head_as_a_sha_exits_zero_as_on_main(self):
+        rng = self.root_repo()
+        self.assert_root_range_exits_zero(rng, "HEAD~1..%s" % rng.head)
+
+    def test_a_root_commit_three_dot_range_with_its_parent_spelled_tilde_one_exits_zero_as_on_main(self):
+        rng = self.root_repo()
+        self.assert_root_range_exits_zero(rng, "HEAD~1...%s" % rng.head)
+
+    def test_a_root_commit_range_with_the_head_spelled_at_sign_exits_zero_as_on_main(self):
+        self.assert_root_range_exits_zero(self.root_repo(), "@~1..HEAD")
+
+    def test_a_root_commit_range_with_its_parent_spelled_zero_padded_exits_zero_as_on_main(self):
+        self.assert_root_range_exits_zero(self.root_repo(), "HEAD~01..HEAD")
+
+    def test_the_first_parent_of_a_different_root_commit_exits_two_as_before(self):
+        """A control: a base that is the first parent of another root commit is not the first parent of HEAD, so
+        the range stays unread and exits 2."""
+        rng = self.root_repo()
+        other = git(rng.repo, "commit-tree", EMPTY_TREE, "-m", "a second root")
+        self.assertFalse(has_object(rng.repo, other + "^1"), "scope: the other commit is a root with no parent")
+        self.assertNotEqual(other, rng.head, "scope: the other commit is not HEAD")
+        rc, out = self.run_check(rng, spec="%s^1..HEAD" % other)
+        self.assertEqual(rc, 2, "the first parent of a different root commit exited %d, not 2\n%s" % (rc, out))
+        self.assertNotIn("stale-cites: PASS", out, "the first parent of a different root commit printed PASS\n" + out)
+        self.assertRegex(out, "(?i)unknown", out)
 
     def test_a_root_commit_range_in_a_depth_one_clone_prints_unknown_and_exits_zero(self):
         rng = self.tree("# Notes\n")._replace(base="HEAD~1")
@@ -894,6 +922,7 @@ class UnknownTests(StaleCase):
         self.assertEqual(rc, 2, "scope: the in-process run with the real rev-list does not exit 2\n" + out)
         with mock.patch.object(stale._nowindow, "run", rev_list_prints_head_then_fails):
             rc, out = self.main_in_process(stale, rng, "HEAD~1..HEAD")
+        self.assertTrue(starts, "the mocked rev-list never ran, so the case did not reach the rev-list it names\n" + out)
         self.assertEqual(rc, 2, "a rev-list that printed the head then exited non-zero was read as a root commit "
                          "(rev-list starts: %d)\n%s" % (len(starts), out))
         self.assertNotIn("stale-cites: PASS", out, "a rev-list that failed printed PASS\n" + out)
