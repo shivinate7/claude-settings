@@ -657,6 +657,14 @@ class Skips(unittest.TestCase):
         """A summary `SKIP: 3 checks` after three colon case lines adds no skip: the run skipped three, not four."""
         self.assert_skip(self.check(printing("SKIP: a: no display\nSKIP: b: no display\nSKIP: c: no display\nSKIP: 3 checks\n")), 3)
 
+    def test_colon_skip_line_naming_a_checkout_count_counts_as_one(self):
+        """`SKIP: 12 checkout cases not run` is one skip: a case line, not a summary, though it starts with a count."""
+        self.assert_skip(self.check(printing("PASS first\nSKIP: 12 checkout cases not run\nPASS second\n")), 1)
+
+    def test_colon_skip_line_naming_checksums_counts_as_one(self):
+        """`SKIP: 7 checksums unavailable` is one skip: "checksums" starts with the word "check", and it is a case line."""
+        self.assert_skip(self.check(printing("PASS first\nSKIP: 7 checksums unavailable\nPASS second\n")), 1)
+
     def test_a_summary_in_the_chunk_overlap_counts_once(self):
         """bin/verdict reads 1 MiB chunks that overlap by 256 bytes, so a summary in the overlap is read twice."""
         ok_at = UT_ONE_SKIP.index("OK (skipped=1)")
