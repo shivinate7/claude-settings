@@ -2180,3 +2180,5 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- draft-claim-line-no-ready-checks-test: the draft preview's claim line for a repo with no readyChecks has no test of its exact wording (merge/test_merge.py pins only "refuses"). Also on main. Decision: lanes-run-no-full-ci-job (the lane-check decision).
+- usage-keys-untested-paths: Ctrl+Enter, the arrow-key tab and view switches, and an empty Send ask or Send answers press are counted (or not) by reading the code, not by a test (skills/waiting-page/page.html). Decision: page-usage-counters.

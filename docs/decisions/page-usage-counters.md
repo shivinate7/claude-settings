@@ -10,7 +10,7 @@
   - Step `page-status-cut-unread` (cut the Status tiles, trend and burn if unread) reads the Status counts.
 - Keys:
   - `ask-add`: Add to list.
-  - `ask-send`: Send ask.
+  - `ask-send`: Send ask, in the Ask box. Send reply in a thread is not counted: step `page-ask-box-one-send` weighs the box against Send answers, not thread replies.
   - `answers-send`: Send answers.
   - `copy-answers`: Copy answers.
   - `status-tab`: Status tab opened.
@@ -18,7 +18,7 @@
   - `tile-<key>`: a Status tile opened. The key is lowercased. A character outside `[a-z0-9-]` becomes `_`.
 - Code home: one helper, `countUse`, in `skills/waiting-page/page.html`. Every counted press calls it (rule `building-one-home-per-capability`).
 - Readers:
-  - Step `page-ask-box-one-send` reads `ask-add`, `ask-send` and `answers-send`.
+  - Step `page-ask-box-one-send` reads `ask-add`, `ask-send`, `answers-send` and `copy-answers`. Copy answers sits on the Send answers row that step reshapes.
   - Step `page-status-cut-unread` reads `status-tab`, `view-*` and `tile-*`.
   - Query: `ArtifactData` action `list`, collection `usage`, `url` set to the repo's waiting page.
 - Export: the copy does not include `usage`. The export's five collections are `items`, `answers`, `groups`, `asks` and `meta`. None of them is `usage`.
@@ -33,7 +33,9 @@
 - Known limit: trend and burn have no control. A view opening means "shown", not "read". Step `page-status-cut-unread` must not cut on view counts alone.
 - Known limit: the Ask box has no open control. Presses are counted, not opens.
 - Known limit: store down. Copy answers shows mostly when the store is unreachable, and nothing is counted then. A low `copy-answers` count does not mean unused.
-- Known limit: get, then set, across two tabs. The database has no atomic increment. Two open views that press at once can both read the same `n`, and one count is lost.
+- Known limit: get, then set. The database has no atomic increment. Two presses whose writes overlap read the same `n`, and one count is lost: two open tabs, or one fast repeat in one tab.
+- Known limit: a press counts before its writes land. A Send answers press that only withdraws, or whose every write fails, still counts once.
+- Known limit: two tile keys that differ only outside `[a-z0-9-]` share one count.
 - Known limit: counts start at merge. Earlier use is unknown.
 - Coordinator ruling, 2026-11-07 12:11 CST: picks accepted.
 
