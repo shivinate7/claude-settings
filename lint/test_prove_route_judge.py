@@ -6,7 +6,7 @@ lint/route_claims_labelled.json. Standard library only.
 
 The script runs as a child with the git repo that holds the rows' revs as its cwd. Interface pinned here:
 `--labelled PATH` (the rows file; default lint/route_claims_labelled.json beside the script) and `--max-calls N`.
-It prints one verdict line, e.g. `false alarms 1/13 (7.7%), hits 3/4, unbacked 5/17, unknown 0, skipped 4`, exits 0,
+It prints one verdict line of the form `false alarms X/H (R%), hits Y/F, unbacked Z/S, unknown K, skipped P`, exits 0,
 and writes no file and no log. PROVE_ROUTE_JUDGE_UNDER_TEST names another copy of the script.
 
 Scoring: TRUE rows are holds rows. STALE, PARTLY_STALE and HALF rows are stale-family rows. UNKNOWN and HISTORY
@@ -43,6 +43,8 @@ ROOT = os.path.normpath(os.path.join(HERE, ".."))
 SCRIPT = os.environ.get("PROVE_ROUTE_JUDGE_UNDER_TEST") or os.path.join(HERE, "prove_route_judge.py")
 LABELLED = os.path.join(HERE, "route_claims_labelled.json")
 LABELS = ("TRUE", "STALE", "PARTLY_STALE", "HALF", "UNKNOWN", "HISTORY")
+HOLDS_LABELS = ("TRUE",)  # this test's own reading of the labels that score, for its expected lines
+FLAGGED_LABELS = ("STALE", "PARTLY_STALE", "HALF")
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "hooks"))
 sys.path.insert(0, os.path.join(ROOT, "merge"))
@@ -57,9 +59,9 @@ import merge  # noqa: E402  prose_judge_prompt: the one home of the judge's prom
 RUN_FOLDER = _test_temp.run_folder()
 atexit.register(tracked_tree.rm_tree, RUN_FOLDER)
 
-# The model's answers on the labelled file that make the example line: one TRUE row judged stale (the false alarm),
-# three of the four stale-family rows flagged (the one it misses is judged holds), and five TRUE rows judged unbacked.
-# Every other row is judged holds.
+# The model's answers on the labelled file that make the example line: each TRUE row judged stale is a false alarm, each
+# stale-family row judged stale is a hit, and each TRUE row judged unbacked is unbacked. Every other row is judged holds,
+# so a row added to the file later is judged holds until it is named here.
 FULL_FILE_VERDICTS = {
     ("docs/debts/notes.md", "830"): "stale",
     ("docs/decisions/session-tiers.md", "64"): "holds",
@@ -220,13 +222,10 @@ class Base(unittest.TestCase):
 class ControlTests(Base):
     """Green on the old code. They prove the fixture, the stub and the homes the other cases rely on."""
 
-    def test_labelled_file_has_21_rows_in_11_groups_with_distinct_texts(self):
-        with open(LABELLED, encoding="utf-8") as f:
-            rows = json.load(f)
-        self.assertEqual(len(rows), 21, "the labelled file's row count moved, and the full-file case pins its example line")
+    def test_labelled_file_has_the_six_labels_distinct_texts_and_readable_revs(self):
+        rows = labelled_rows()
         self.assertEqual(sorted({r["label"] for r in rows}), sorted(LABELS), "the labels in the file are not the six the score maps")
-        self.assertEqual(len({(r["rev"], r["file"]) for r in rows}), 11, "the rows no longer make 11 (rev, file) groups")
-        self.assertEqual(len({" ".join(r["text"].split()) for r in rows}), 21,
+        self.assertEqual(len({" ".join(r["text"].split()) for r in rows}), len(rows),
                          "two rows share a text once whitespace is collapsed, so a text cannot key a model answer")
         missing = [rev for rev in {r["rev"] for r in rows}
                    if subprocess.run(["git", "cat-file", "-e", rev + "^{commit}"], cwd=ROOT, capture_output=True).returncode]
@@ -432,31 +431,57 @@ class RunTests(Base):
         self.assertEqual(files_under(os.path.join(case, "config")), [], "the run wrote into the config folder")
 
 
+def labelled_rows():
+    with open(LABELLED, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def scored_rows(rows):
+    """The rows the score counts: a holds or stale-family label, with a rev. The rest are skipped."""
+    return [r for r in rows if r["label"] in HOLDS_LABELS + FLAGGED_LABELS and r.get("rev")]
+
+
+def expected_line(rows, alarms, hits, unbacked, unknown=0, error=None):
+    """The verdict line for the labelled `rows` with these counts. The denominators come from the rows' labels, so the
+    line keeps its exact format as the file grows; the numerators are the counts the test's answers make."""
+    scored = scored_rows(rows)
+    holds = [r for r in scored if r["label"] in HOLDS_LABELS]
+    flagged = [r for r in scored if r["label"] in FLAGGED_LABELS]
+    unknown_text = "%d (model error: %s)" % (unknown, error) if unknown and error else str(unknown)
+    return "false alarms %d/%d (%.1f%%), hits %d/%d, unbacked %d/%d, unknown %s, skipped %d" % (
+        alarms, len(holds), 100.0 * alarms / len(holds), hits, len(flagged), unbacked, len(scored), unknown_text,
+        len(rows) - len(scored))
+
+
 def full_file_run(case, answer_for):
     """Run the script on the whole labelled file, each row answered by answer_for(row). -> Run."""
-    with open(LABELLED, encoding="utf-8") as f:
-        rows = json.load(f)
-    answers = {" ".join(r["text"].split()): answer_for(r) for r in rows}
+    answers = {" ".join(r["text"].split()): answer_for(r) for r in labelled_rows()}
     return judge(case, ROOT, answers, labelled=LABELLED)
 
 
 class FullFileTests(Base):
     def test_full_labelled_file_gives_the_example_line(self):
+        rows = labelled_rows()
         run = full_file_run(self.case(), lambda r: FULL_FILE_VERDICTS.get((r["file"], r["line"]), "holds"))
-        self.assertEqual(run.lines(), ["false alarms 1/13 (7.7%), hits 3/4, unbacked 5/17, unknown 0, skipped 4"],
+        self.assertEqual(run.lines(), [expected_line(rows, alarms=1, hits=3, unbacked=5)],
                          "the score of the full labelled file is not the example line")
         self.assertEqual(run.code, 0, "the full labelled file's run must exit 0")
+        self.assertEqual(len(run.calls), len({(r["rev"], r["file"]) for r in scored_rows(rows)}),
+                         "the full labelled file must make one judge call per scored (rev, file) group")
 
     def test_judge_that_says_unbacked_to_every_line_scores_no_false_alarm(self):
+        rows = labelled_rows()
         run = full_file_run(self.case(), lambda r: "unbacked")
-        self.assertEqual(run.lines(), ["false alarms 0/13 (0.0%), hits 0/4, unbacked 17/17, unknown 0, skipped 4"],
-                         "a judge that says unbacked to every line must score 0 false alarms and 0 hits, with 17 unbacked")
+        self.assertEqual(run.lines(), [expected_line(rows, alarms=0, hits=0, unbacked=len(scored_rows(rows)))],
+                         "a judge that says unbacked to every line must score 0 false alarms and 0 hits, "
+                         "with every scored row unbacked")
         self.assertEqual(run.code, 0, "the every-line-unbacked run must exit 0")
 
     def test_model_error_carries_its_first_line_on_the_unknown_count(self):
+        rows = labelled_rows()
         run = full_file_run(self.case(), lambda r: "ERROR")
-        self.assertEqual(run.lines(), ["false alarms 0/13 (0.0%), hits 0/4, unbacked 0/17, unknown 17 (model error: "
-                                       "model exited 1: stub: the model failed), skipped 4"],
+        self.assertEqual(run.lines(), [expected_line(rows, alarms=0, hits=0, unbacked=0, unknown=len(scored_rows(rows)),
+                                                    error="model exited 1: stub: the model failed")],
                          "every row whose model call failed must be UNKNOWN, and the count must carry the call's first error line")
         self.assertNotIn("second line of stderr", run.out,
                          "the verdict line carries the error's second line, not only its first")

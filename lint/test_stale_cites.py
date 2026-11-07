@@ -2108,6 +2108,19 @@ class RouteClaimTests(StaleCase):
         self.assert_route_claims(rng, flagged)
 
 
+EVIDENCE_SHAPE = r"^[0-9a-f]{40}: \S.*\.$"  # an optional row's evidence: the fix commit's sha, then a sentence
+
+
+def repo_relative_md(path):
+    """A full repo-relative path to a Markdown file: no leading slash, and no empty, `.` or `..` segment."""
+    return (path.endswith(".md") and not any(part in ("", ".", "..") for part in path.split("/"))
+            and not re.search(r"\s", path))
+
+
+def known_commit(sha):
+    return subprocess.run(["git", "cat-file", "-e", sha + "^{commit}"], cwd=ROOT, capture_output=True).returncode == 0
+
+
 class RouteClaimFixtureTests(unittest.TestCase):
     """The labelled route claims, hand-judged stale or true, that measure the judge's false alarms: one entry per labelled line.
     A span is one entry at its first line, and `line` is a string, such as "16" or "16-20"."""
@@ -2119,21 +2132,26 @@ class RouteClaimFixtureTests(unittest.TestCase):
         self.assertIsInstance(rows, list)
         for row in rows:
             self.assertIn("rev", row, row)  # the commit the row was judged at, or null
+            keys = sorted(set(row) - {"evidence"})  # evidence is optional: the fix commit that made the line false, and why
             if row["rev"] is None:
-                self.assertEqual(sorted(row), ["file", "label", "line", "note", "rev", "text_summary"], row)
+                self.assertEqual(keys, ["file", "label", "line", "note", "rev", "text_summary"], row)
                 self.assertTrue(row["note"].strip(), row)  # a null rev says why
             else:
-                self.assertEqual(sorted(row), ["file", "label", "line", "rev", "text", "text_summary"], row)
+                self.assertEqual(keys, ["file", "label", "line", "rev", "text", "text_summary"], row)
                 self.assertRegex(row["rev"], r"^[0-9a-f]{7,40}$", row)
                 self.assertIsInstance(row["text"], str, row)
-            self.assertRegex(row["file"], r"^(?:docs|\.claude)/\S+\.md$", row)  # a full repo-relative path
+            if "evidence" in row:
+                self.assertRegex(row["evidence"], EVIDENCE_SHAPE, row)
+            self.assertTrue(repo_relative_md(row["file"]), row)  # a full repo-relative path to a Markdown file
             self.assertRegex(row["line"], r"^[1-9][0-9]*(?:-[1-9][0-9]*)?$", row)
             self.assertIn(row["label"], LABELS, row)
             self.assertTrue(row["text_summary"].strip(), row)
-        self.assertEqual(len({(row["file"], row["line"]) for row in rows}), len(rows), "a (file, line) repeats")
-        self.assertEqual(collections.Counter(row["label"] for row in rows),
-                         collections.Counter({"STALE": 2, "PARTLY_STALE": 1, "HALF": 1, "TRUE": 13,
-                                              "HISTORY": 1, "UNKNOWN": 3}))
+        self.assertEqual(len({(row["file"], row["line"], row["rev"]) for row in rows}), len(rows),
+                         "a (file, line, rev) repeats")  # one line judged at two revs is two rows
+        unknown = [row["evidence"][:40] for row in rows if "evidence" in row and not known_commit(row["evidence"][:40])]
+        if unknown and git(ROOT, "rev-parse", "--is-shallow-repository") == "true":
+            self.skipTest("evidence sha missing from this shallow clone: %s" % ", ".join(unknown))
+        self.assertEqual(unknown, [], "evidence sha is not a commit of this repo")
 
 
 def fixture_rows():
@@ -2160,8 +2178,7 @@ class RouteClaimRevTests(unittest.TestCase):
             if row["rev"] is None:
                 continue
             with self.subTest(row=row["file"] + ":" + row["line"]):
-                known = subprocess.run(["git", "cat-file", "-e", row["rev"] + "^{commit}"], cwd=ROOT,
-                                       capture_output=True).returncode == 0
+                known = known_commit(row["rev"])
                 if not known and shallow:
                     self.skipTest("rev %s is missing from this shallow clone" % row["rev"])
                 self.assertTrue(known, "rev %s is not a commit of this repo" % row["rev"])
