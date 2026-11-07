@@ -3005,6 +3005,7 @@ class GhLockTest(unittest.TestCase):
 #   - the cloud agent proxy refuses a numeric-ID path: when a case sets `proxy_refuses_paged`, a `--paginate` read of more than one page
 #     answers HTTP 403 on `repositories/<id>/...`, the path gh follows from the Link header. Off unless a case sets it.
 #   - `issues/comments` answers a case's `issue_comments` (oldest first) once the case sets them; with none set it stays a 404.
+#   - a case's `fail_page` ({"page", "text"}) answers every read of that page with the error text (rest_err), so a later page of a list read fails.
 GH_REST_LIB = r'''
 import json, re
 
@@ -3230,6 +3231,9 @@ try:
     repo, rel = m.group(1), m.group(2) or ""
     cap = S.get("page_cap", 100)
     refuse = "repositories/%d/%s?page=2" % (REPO_NUMERIC_ID, rel) if S.get("proxy_refuses_paged") else None  # the second page's numeric path, when the proxy refuses it
+    fp = S.get("fail_page")  # {"page", "text"}: every read of that page answers the error text, so a later page of a list read fails (the listing is cut there)
+    if fp and str(params.get("page", 1)) == str(fp["page"]) and method == "GET":
+        raise Refused(fp["text"])
     num = S.get("pr_number", 7)
     rows = S.get("open_prs", [])
     numbered = {(r[3] if len(r) > 3 else 101 + i): r for i, r in enumerate(rows)}
@@ -5341,6 +5345,33 @@ class RestRoutes(Env):
         except merge.Stop as e:
             self.fail(f"review record read of 150 issue comments stopped: {e}")
         self.assertEqual(sorted(found), list(range(1, 151)), "a review record on some pull request was not read")
+
+    # A later page that fails (a 403 the proxy gives, or a 502 gh retries) must stop the read. A reader that keeps the items of the pages before it
+    # would return a short list, which reads as fewer open pull requests or check runs than there are.
+    LATER_PAGE_FAILURES = ((403, "Resource not accessible by integration"), (502, "Bad Gateway"))
+
+    def test_a_later_page_that_fails_stops_the_open_pr_read_and_returns_nothing(self):
+        for code, text in self.LATER_PAGE_FAILURES:
+            with self.subTest(code=code):
+                self.set(open_prs=self.open_pr_rows(194), fail_page={"page": 2, "text": rest_err(code, text)})
+                got, stopped = None, False
+                try:
+                    got = self.gh_host().pages("pulls", fields={"state": "open"})
+                except merge.Stop:
+                    stopped = True
+                self.assertTrue(stopped, f"page 2 answered {code}, and the read returned {len(got or [])} open pull requests instead of stopping")
+
+    def test_a_later_page_that_fails_stops_the_check_run_read_and_returns_nothing(self):
+        names = [f"run{i:03d}" for i in range(194)]
+        for code, text in self.LATER_PAGE_FAILURES:
+            with self.subTest(code=code):
+                self.set(checks_seq=[[(name, "pass", "") for name in names]], fail_page={"page": 2, "text": rest_err(code, text)})
+                got, stopped = None, False
+                try:
+                    got = self.gh_host().checks(7, warn=False)
+                except merge.Stop:
+                    stopped = True
+                self.assertTrue(stopped, f"page 2 answered {code}, and the read returned {len(got or {})} check runs instead of stopping")
 
     # ---- every conclusion and state lands in one bucket
 
