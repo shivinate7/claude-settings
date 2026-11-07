@@ -7864,7 +7864,7 @@ NM_READ_ONLY = (
     "npm", "npm -v", "npm ls", "npm list", "npm -C . ls", "npm view x", "npm outdated", "npm audit",
     "npm audit signatures", "npm explain x", "npm fund", "npm exec -- tsc", "npm config get registry",
     "npm help install", "npm prune --dry-run", "npm audit fix --dry-run", "npm version patch",
-    "npm rebuild --help", "npm run build", "npm test", "npm verison patch", "npm reb --help",
+    "npm version", "npm rebuild --help", "npm run build", "npm test", "npm verison patch", "npm reb --help",
 )
 for _command in NM_READ_ONLY:
     nm_case("linked-nm: " + _command + " (Bash) in a linked folder is allowed", _command, "allow", NMLINKED)
@@ -7983,6 +7983,10 @@ nm_case("linked-nm: workspace: refuse npm install with the workspace package as 
 # npm version without a workspace flag, run in a workspace package, takes npm's workspace path and reifies the root.
 nm_case("linked-nm: workspace: refuse cd packages/a, then npm version patch, from a linked workspace root",
         "cd packages/a && npm version patch", "deny", NMWS)
+# A BARE `npm version` names no bump, so it only lists the versions and reifies nothing (npm 10.9.9). The bump from
+# the same member, the case above, is the control that stays refused.
+nm_case("linked-nm: workspace: cd packages/a, then bare npm version, from a linked workspace root is allowed",
+        "cd packages/a && npm version", "allow", NMWS)
 # The controls. A real root under the same workspaces allows, a folder the workspaces field does not name allows,
 # and a standalone package under a root with no workspaces field allows, for an install and for a version bump.
 nm_case("linked-nm: workspace: cd packages/a, then npm install, under a real root is allowed",
