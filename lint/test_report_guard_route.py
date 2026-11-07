@@ -137,12 +137,13 @@ class RouteTests(RouteFixture, unittest.TestCase):
                 self.assertIsNone(out, "an ack with a ? in quotes, backticks or a blockquote ended the turn")
 
     def test_rt_green_asking_reply_then_own_send_passes(self):
-        # Catches: the parent's question, which starts a turn, dropping the lane's own send made after it. The
-        # lane's question then has its route and must pass. A false-alarm control, green on main by design.
-        out = self.lane(peer_msg("pick?"), peer_msg("Which repo, a or b?", from_session=self.PARENT),
+        # Catches: a fix that reads the parent's asking reply to a send as an answer, then drops the send the lane
+        # made after it. The reply follows a send, so it is the ack's position. A false-alarm control, green on main.
+        out = self.lane(peer_msg("pick?"), *self.send(session_id="@parent"),
+                        peer_msg("Which repo, a or b?", from_session=self.PARENT),
                         *self.send(session_id="@parent"),
                         assistant_text(self.reply(self.QUESTION)))
-        self.assertIsNone(out, "a question sent after the parent's question was blocked")
+        self.assertIsNone(out, "a question sent after the parent's asking reply was blocked")
 
     # The owner-facing session. Its own record, with no lane tag and no parent, makes it owner-facing: a send to
     # @parent reaches no one there, so the question needs the page writer.
