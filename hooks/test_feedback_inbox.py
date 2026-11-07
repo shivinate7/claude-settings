@@ -290,7 +290,8 @@ def run(path, raw, cfg, args=(), extra_env=None):
     home = os.path.join(os.path.dirname(cfg), "home")
     os.makedirs(home, exist_ok=True)
     env = dict(os.environ)
-    for name in ("PYTHONUTF8", "PYTHONIOENCODING", "CLAUDE_CONFIG_DIR", "LOCAL_TIME_NOW"):
+    # A cloud run sets the session env. A case that means "no cloud session" must not inherit it: it sets it with extra_env.
+    for name in ("PYTHONUTF8", "PYTHONIOENCODING", "CLAUDE_CONFIG_DIR", "LOCAL_TIME_NOW", "CLAUDE_CODE_REMOTE_SESSION_ID"):
         env.pop(name, None)
     env.update(CLAUDE_CONFIG_DIR=cfg, HOME=home, USERPROFILE=home)
     env.update(extra_env or {})
@@ -2705,12 +2706,13 @@ def tool_input(action, collection="answers", doc_id="a-7k2", **extra):
     return obj
 
 
-def page_note(cfg, sid, response, inp=None, tool_name="ArtifactData"):
-    """Runs the page-note mode as PostToolUse does, for one ArtifactData call."""
+def page_note(cfg, sid, response, inp=None, tool_name="ArtifactData", extra_env=None):
+    """Runs the page-note mode as PostToolUse does, for one ArtifactData call. `extra_env` adds variables
+    for this run, such as CLAUDE_CODE_REMOTE_SESSION_ID for a cloud session."""
     inp = inp if inp is not None else tool_input("get")
     raw = payload({"hook_event_name": "PostToolUse", "session_id": sid, "tool_name": tool_name,
                    "tool_input": inp, "tool_response": response, "cwd": cfg})
-    return run(LT_PATH, raw, cfg, args=("--page-note",))
+    return run(LT_PATH, raw, cfg, args=("--page-note",), extra_env=extra_env)
 
 
 def ran_page_note(p):
@@ -2950,6 +2952,82 @@ def case_page_note_u2028_in_at_saves_once():
     check("page note U+2028 in at: the same get again saves nothing more",
           ran_page_note(again) and captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
           captured_texts(cfg, sid))
+
+
+# --------------------------------------------------------------------------- page note session cases
+# An answer's `session` names the session that reads it. In a cloud session (env CLAUDE_CODE_REMOTE_SESSION_ID
+# cse_<x>, own id session_<x>), the note of an answer for another session saves nothing here. Every other answer saves.
+
+OWN_SESSION = "session_mine01"
+OWN_ENV = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_mine01"}
+OTHER_SESSION = "session_other02"
+
+
+def case_page_note_other_sessions_answer_saves_nothing():
+    """An answer whose `session` names another session is that session's note: this session saves none of it."""
+    cfg, sid = new_cfg(), "pn-other"
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data(session=OTHER_SESSION))]), extra_env=OWN_ENV)
+    check("page note other session: the mode ran", ran_page_note(p), p.desc())
+    check("page note other session: saves nothing", captured_texts(cfg, sid) == [], captured_texts(cfg, sid))
+
+
+def case_page_note_skip_is_per_answer():
+    """The skip is per answer: in one get, the other session's answer saves nothing and this session's saves."""
+    cfg, sid = new_cfg(), "pn-mixed"
+    theirs = answer_data(session=OTHER_SESSION)
+    mine = answer_data(item="it-9b", n=4, note="take the Thursday slot", session=OWN_SESSION)
+    p = page_note(cfg, sid, response_of([("a-7k2", theirs), ("b-9x1", mine)]), extra_env=OWN_ENV)
+    check("page note per answer: the mode ran", ran_page_note(p), p.desc())
+    check("page note per answer: only this session's note is saved",
+          captured_texts(cfg, sid) == [label_of(4, "it-9b", "take the Thursday slot")], captured_texts(cfg, sid))
+
+
+def case_page_note_own_session_answer_saves():
+    """An answer whose `session` is this session's own id saves its note."""
+    cfg, sid = new_cfg(), "pn-own"
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data(session=OWN_SESSION))]), extra_env=OWN_ENV)
+    check("page note own session: the mode ran", ran_page_note(p), p.desc())
+    check("page note own session: saves the note", captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
+          captured_texts(cfg, sid))
+
+
+def case_page_note_answer_without_session_saves():
+    """An answer with no `session` saves its note, in a cloud session too."""
+    cfg, sid = new_cfg(), "pn-none"
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data())]), extra_env=OWN_ENV)
+    check("page note no session: the mode ran", ran_page_note(p), p.desc())
+    check("page note no session: saves the note", captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
+          captured_texts(cfg, sid))
+
+
+def case_page_note_unset_env_saves_a_session_answer():
+    """With the session env unset, this is not a cloud session: an answer for another session still saves."""
+    cfg, sid = new_cfg(), "pn-unset"
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data(session=OTHER_SESSION))]))
+    check("page note env unset: the mode ran", ran_page_note(p), p.desc())
+    check("page note env unset: saves the note", captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
+          captured_texts(cfg, sid))
+
+
+def case_page_note_env_without_an_id_saves_a_session_answer():
+    """An env value that names no session (no cse_ prefix, or no id after it) leaves the own id unknown: every answer saves."""
+    for label, value in (("no prefix", "mine01"), ("empty id", "cse_")):
+        cfg, sid = new_cfg(), "pn-noid"
+        p = page_note(cfg, sid, response_of([("a-7k2", answer_data(session=OTHER_SESSION))]),
+                      extra_env={"CLAUDE_CODE_REMOTE_SESSION_ID": value})
+        check("page note env %s: the mode ran" % label, ran_page_note(p), p.desc())
+        check("page note env %s: saves the note" % label, captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
+              captured_texts(cfg, sid))
+
+
+def case_page_note_non_string_session_saves():
+    """Only a string `session` skips a note: a number or null names no session, so the note saves."""
+    for label, value in (("number", 7), ("null", None)):
+        cfg, sid = new_cfg(), "pn-nonstr"
+        p = page_note(cfg, sid, response_of([("a-7k2", answer_data(session=value))]), extra_env=OWN_ENV)
+        check("page note session %s: the mode ran" % label, ran_page_note(p), p.desc())
+        check("page note session %s: saves the note" % label, captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
+              captured_texts(cfg, sid))
 
 
 # --------------------------------------------------------------------------- repeat cases
@@ -3754,6 +3832,13 @@ CASES = (
     case_page_note_u2028_in_note_saves_verbatim,
     case_page_note_u0085_in_note_saves_verbatim,
     case_page_note_u2028_in_at_saves_once,
+    case_page_note_other_sessions_answer_saves_nothing,
+    case_page_note_skip_is_per_answer,
+    case_page_note_own_session_answer_saves,
+    case_page_note_answer_without_session_saves,
+    case_page_note_unset_env_saves_a_session_answer,
+    case_page_note_env_without_an_id_saves_a_session_answer,
+    case_page_note_non_string_session_saves,
     case_repeat_roadmap_step_marks_the_item_and_blocks,
     case_repeat_stop_hook_active_marks_and_tells_the_owner,
     case_repeat_judged_items_are_not_judged_again,
