@@ -67,6 +67,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   cite-by-id          deny. A commit message or PR body that cites a record by its path.
   lane-by-slug         deny. A commit message or PR text that names a lane by a session number.
                        (lane-by-slug)
+  branch-slug-no-git   deny. A git act that creates a branch whose name has `git` as a whole part
+                       (split on `- _ / .`, any case): switch -c|-C, checkout -b|-B, branch <new>,
+                       worktree add -b|-B. A rename, a delete, a listing and a switch to an existing
+                       branch pass. (branch-slug-no-git)
   machine-wide-kill    deny. A kill by name or pattern, or of a pid that is not a descendant of
                        this session. (a-kill-by-pid-needs-an-owned-pid)
   detached-launch      deny. A command that starts a process and detaches it from the session.
@@ -846,6 +850,78 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
     if path_is_inside(tree, os.path.join(primary, ".claude", "worktrees")) is True:
         return ""
     return target
+
+
+# ---- a new branch whose name has `git` as a whole part (decision branch-slug-no-git)
+BRANCH_NAME_SPLIT = re.compile(r"[-_/.]")
+BRANCH_CREATE_FLAGS = {"switch": ("-c", "-C", "--create", "--force-create"),
+                       "checkout": ("-b", "-B")}
+# `branch <new>` takes these and no others; any other flag means a list, a delete, a rename or an edit.
+BRANCH_NEW_FLAGS = ("-f", "--force", "-q", "--quiet", "-t", "--no-track", "--track")
+BRANCH_SLUG_REASON = (
+    "Rule (Git): a new branch name has no `git` part. Claude Code's isolation check refuses an "
+    "isolated agent's command that names git twice, so a branch like that cannot be pushed or "
+    "opened from a lane's worktree. "
+    "Remedy: name the branch with a slug that has no \"git\" part, such as \"push-after-failed-commit\". "
+    "Existing branches keep their names: push one with `HEAD:<branch>` and fetch with the default "
+    "refspec. (decision branch-slug-no-git, a new branch name has no git part)"
+)
+
+
+def git_named(name: str) -> bool:
+    """True when `name` has `git` as a whole part, split on `-`, `_`, `/` and `.`, any case."""
+    return "git" in BRANCH_NAME_SPLIT.split(name.lower())
+
+
+def flagged_values(args, flags):
+    """Every value a flag in `flags` takes in `args`: the next word, `--flag=value`, or a short
+    flag with its value attached (`-bname`). Stops at `--`."""
+    values = []
+    for cursor, arg in enumerate(args):
+        if arg == "--":
+            break
+        for flag in flags:
+            if arg == flag and cursor + 1 < len(args):
+                values.append(args[cursor + 1])
+            elif flag.startswith("--") and arg.startswith(flag + "="):
+                values.append(arg[len(flag) + 1:])
+            elif not flag.startswith("--") and arg.startswith(flag) and len(arg) > len(flag):
+                values.append(arg[len(flag):])
+    return values
+
+
+def branch_new_name(args):
+    """The new name of a `git branch` call, else None for a list, delete, rename, copy or edit."""
+    words, ended = [], False
+    for arg in args:
+        if ended or not arg.startswith("-") or arg == "-":
+            words.append(arg)
+        elif arg == "--":
+            ended = True
+        elif arg.startswith("--track=") or arg in BRANCH_NEW_FLAGS:
+            continue
+        elif not arg.startswith("--") and set(arg[1:]) <= set("ftq"):
+            continue
+        else:
+            return None
+    return words[0] if words else None
+
+
+def git_named_branch_hit(segment: str) -> str:
+    """The act, without its name, when `segment` creates a branch whose name has a `git` part."""
+    for subcommand, args in git_calls(segment):
+        if subcommand in BRANCH_CREATE_FLAGS:
+            names, act = flagged_values(args, BRANCH_CREATE_FLAGS[subcommand]), subcommand
+        elif subcommand == "branch":
+            new = branch_new_name(args)
+            names, act = ([new] if new else []), subcommand
+        elif subcommand == "worktree" and args and args[0] == "add":
+            names, act = flagged_values(args[1:], ("-b", "-B")), "worktree add"
+        else:
+            continue
+        if any(git_named(name) for name in names):
+            return "git " + act + " (new branch name has a git part)"
+    return ""
 
 
 WORKTREE_HAND_MADE_REASON = (
@@ -3373,6 +3449,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             matched = hand_made_worktree_hit(segments, number, cwd, ends)
             if matched:
                 refuse(tool, "deny", "hand-made-worktree", WORKTREE_HAND_MADE_REASON, matched)
+
+    # 1c3. A new branch whose name has `git` as a whole part (decision branch-slug-no-git).
+    for segment in segments:
+        if segment.strip():
+            matched = git_named_branch_hit(segment)
+            if matched:
+                refuse(tool, "deny", "branch-slug-no-git", BRANCH_SLUG_REASON, matched)
 
     # 1e. The impeccable skill's build and settings-writer commands (design-skills record).
     matched = impeccable_command_hit(raw)
