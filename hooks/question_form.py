@@ -470,13 +470,16 @@ OWNER_NAME = re.compile(r"\b(?:the\s+(?:owner|user)|shivam|he|him)\b", re.I)
 # between, so "Shivam will approve it" and "the user to just click Merge" act, and "the owner clicked
 # Approve" (the button's name, after a past act) does not.
 # "the owner's merge" and "the owner's approval" are presses not yet made, as "the owner's click" is, unless the
-# approval is already in ("the owner's approval is in") or the merge is a commit ("the owner's merge commit");
-# "has to", "needs to" and "reviews and" stand before the act as a modal does.
-OWNER_ACT = re.compile(r"(?:(?:\s+(?:will|can|must|should|may|then|also|first|now|to|just|please|has|have|needs?"
-                       r"|\w+ly|\w+s\s+and))*\s+"
+# approval is already in ("the owner's approval is in"). "merge" is a press only as the last word of its phrase:
+# a noun after it ("the owner's merge commit", "merge queue", "merge button") names a thing, not his act.
+# "has to", "needs to" and "reviews and" stand before the act as a modal does. A bare "has" does not: "the owner
+# has merge rights" names no act, and "the owner has hit Merge" is a past one.
+OWNER_ACT = re.compile(r"(?:(?:\s+(?:will|can|must|should|may|then|also|first|now|to|just|please"
+                       r"|(?:has|have|needs?)\s+to|\w+ly|\w+s\s+and))*\s+"
                        r"(?:press(?:es|ing)?|click(?:s|ing)?|tap(?:s|ping)?|approv(?:e|es|ing)"
                        r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)"
-                       r"|['\u2019]s\s+(?:merge(?!\s+commits?\b)"
+                       r"|['\u2019]s\s+(?:merge(?=\s*(?:[^\w\s]|$)|\s+(?:on|in|at|of|by|for|from|with|before|after"
+                       r"|first|and|or|then|so|but|once|when)\b)"
                        r"|approval(?!\s+(?:is|was|has|are|came|comes|arrives?)\b)))\b" + _PAGE_BUTTON, re.I)
 _PRESS_LEAD = frozenset(("you", "and", "then", "or", "please"))
 
@@ -498,7 +501,8 @@ def _owner_press_text(label, how) -> tuple:
                and not SESSION_HANDS_ON.search(SESSION_PRESS_OWN.sub(r"\1", c, count=1)) and not _owner_acts(c)]
     if not session:
         return text, text
-    done = " ".join(session).lower()
+    # The session's own click ("The session clicks Merge") excuses no "Click" in the label: that asks the owner.
+    done = " ".join(SESSION_PRESS_OWN.sub(r"\1", c, count=1) for c in session).lower()
     verbs = [next((w for w in re.findall(r"[a-z]+", m.group().lower()) if w not in _PRESS_LEAD), "")
              for m in PRESS_VERB.finditer(label)]
     label_ok = all(v and re.search(r"\b" + v, done) for v in verbs)
