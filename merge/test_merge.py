@@ -12768,6 +12768,130 @@ class ReviewGuardCost(ReviewEnv):
                 self.assertEqual(parse_text(self, posted_body(self, out))["guard"], guard)
                 self.assertEqual(host.gh_calls, ["pulls/7", "pulls/7/files"], "the record's gh reads, in order")
 
+# The carried-run check of `--reviewed` (decision pr-review-record). A record whose Round lines and Fix check equal the newest earlier record's
+# carries those rounds, and they were read at the first head of that run, H1. A guard or check path that changed between H1 and the newest
+# record's head, H2, was never read, so the pull request reads open and its reason names H1 and the path. These records are posted by hand:
+# `--review-record` already refuses `--guard no` for a diff that holds a guard path, but `--reviewed` trusts a posted record.
+
+UNFETCHABLE = "9c" * 20  # a head that no clone and no origin holds
+
+class UnreviewedGuardEnv(ReviewEnv):
+    """The carried-run cases' one home: a lane branch in co whose commits are pushed to origin, so each head is fetchable, and the main commits
+    a lane merges. `reviewed_line` runs `merge --reviewed` over the comments given, oldest first, and returns the line of pull request 7.
+    No test lives here."""
+
+    def setUp(self):
+        super().setUp()
+        sh(self.co, "git", "fetch", "-q", "origin")
+        sh(self.co, "git", "checkout", "-q", "-B", "lane", "origin/feat")
+
+    def lane_commit(self, path, text, message="lane change"):
+        """One commit on the lane, pushed so its head is on origin. -> its sha."""
+        put(os.path.join(self.co, path), text)
+        sh(self.co, "git", "add", "-A")
+        sh(self.co, "git", "commit", "-q", "-m", message)
+        sh(self.co, "git", "push", "-q", "origin", "HEAD:refs/heads/lane")
+        return sh(self.co, "git", "rev-parse", "HEAD")
+
+    def main_commit(self, path, text):
+        """One commit on origin's main, made in the other clone and pushed. The lane's clone reads it at its next fetch."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", "main change")
+        sh(o, "git", "push", "-q", "origin", "main")
+
+    def merge_main(self, resolve=None):
+        """Merge origin's main into the lane in co, and push. A clean merge commits here. With `resolve` (path, text) the merge conflicts, and the
+        file is resolved by hand and committed. -> the sha of the lane's head."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        r = subprocess.run(["git", "merge", "--no-edit", "origin/main"], cwd=self.co, capture_output=True, text=True)
+        if resolve is None:
+            assert r.returncode == 0, r.stdout + r.stderr
+        else:
+            assert r.returncode != 0, "the merge of main did not conflict, so there is no conflict to resolve by hand"
+            path, text = resolve
+            put(os.path.join(self.co, path), text)
+            sh(self.co, "git", "add", "-A")
+            sh(self.co, "git", "commit", "-q", "-m", "merge main, conflict resolved by hand")
+        sh(self.co, "git", "push", "-q", "origin", "HEAD:refs/heads/lane")
+        return sh(self.co, "git", "rev-parse", "HEAD")
+
+    def reviewed_line(self, sha, *comments):
+        """`merge --reviewed` with pull request 7 at `sha` and the comments given, oldest first. -> the list line of pull request 7; the run exits 0."""
+        host = PullsHost([batch_pull(7, sha)], {}, comments=list(comments))
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, out + err)
+        return list_line(self, out, 7)
+
+    def assert_open_names(self, line, sha, h1, *paths):
+        """The line reads open for `sha`, and its reason names H1, the first head of the carried run, and each path changed after it."""
+        self.assertRegex(line, rf"^#7 feat7 {sha[:9]} open: ",
+                         f"the rounds carried from {h1[:7]} read done, though a guard path changed after {h1[:7]} and no reviewer read it:\n{line}")
+        self.assertIn(h1[:7], line, f"the open reason does not name {h1[:7]}, the head the carried rounds were read at:\n{line}")
+        for path in paths:
+            self.assertIn(path, line, f"the open reason does not name {path}, the guard path changed after {h1[:7]}:\n{line}")
+
+    def assert_done(self, line, sha, cause):
+        """The line reads done for `sha`. `cause` names what should let the carried rounds stand."""
+        self.assertRegex(line, rf"^#7 feat7 {sha[:9]} done: ", f"{cause}:\n{line}")
+
+class UnreviewedGuardRefused(UnreviewedGuardEnv):
+    """A carried record for a head that changed a guard or check path after the first head of its run reads open. The reason names that first
+    head and the path. A first head that cannot be fetched reads open too, and fails closed."""
+
+    def test_a_one_parent_commit_on_a_guard_path_after_the_reviewed_head_reads_open(self):
+        h1 = self.lane_commit("docs/lane.md", "reviewed\n", "lane: docs, reviewed")
+        h2 = self.lane_commit("lint/check_x.py", "x = 1\n", "lane: guard change after the review")
+        line = self.reviewed_line(h2, review_comment(1, 7, record_text(head=h1)), review_comment(2, 7, record_text(head=h2)))
+        self.assert_open_names(line, h2, h1, "lint/check_x.py")
+
+    def test_a_merge_of_main_with_a_guard_conflict_resolved_by_hand_reads_open(self):
+        h1 = self.lane_commit("lint/check_x.py", "x = 1\n", "lane: guard change, reviewed")
+        self.main_commit("lint/check_x.py", "x = 2\n")
+        h2 = self.merge_main(resolve=("lint/check_x.py", "x = 3\n"))
+        line = self.reviewed_line(h2, review_comment(1, 7, record_text(head=h1, guard="yes")), review_comment(2, 7, record_text(head=h2)))
+        self.assert_open_names(line, h2, h1, "lint/check_x.py")
+
+    def test_a_first_head_that_cannot_be_fetched_reads_open(self):
+        h2 = self.lane_commit("docs/lane.md", "after\n", "lane: docs after the carried review")
+        line = self.reviewed_line(h2, review_comment(1, 7, record_text(head=UNFETCHABLE)), review_comment(2, 7, record_text(head=h2)))
+        self.assertRegex(line, rf"^#7 feat7 {h2[:9]} open: ",
+                         f"the carried rounds read done, though their first head {UNFETCHABLE[:7]} cannot be fetched, so the check fails open:\n{line}")
+        self.assertIn(UNFETCHABLE[:7], line, f"the open reason does not name {UNFETCHABLE[:7]}, the first head that cannot be fetched:\n{line}")
+        self.assertRegex(line, r"fetch", f"the open reason does not say the first head cannot be fetched:\n{line}")
+
+class UnreviewedGuardAllowed(UnreviewedGuardEnv):
+    """A carried record stays done when nothing unread changed. A clean merge of main brings only main's own change. A fix check names the first
+    head. A first record has no earlier head. A test path is no guard change."""
+
+    def test_a_clean_merge_of_main_that_brings_main_guard_change_stays_done(self):
+        h1 = self.lane_commit("docs/lane.md", "reviewed\n", "lane: docs, reviewed")
+        self.main_commit("lint/check_y.py", "y = 1\n")
+        h2 = self.merge_main()
+        line = self.reviewed_line(h2, review_comment(1, 7, record_text(head=h1)), review_comment(2, 7, record_text(head=h2)))
+        self.assert_done(line, h2, "the carried rounds read open, though main's own lint change came in by a clean merge, which no reviewer owes")
+
+    def test_a_fix_check_naming_the_first_head_stays_done(self):
+        h1 = self.lane_commit("docs/lane.md", "reviewed\n", "lane: docs, reviewed")
+        h2 = self.lane_commit("lint/check_x.py", "x = 1\n", "lane: guard change after the review")
+        fixed = record_text(head=h2, fix=(fix_check_line(verdict="PASS", head=h1),))
+        line = self.reviewed_line(h2, review_comment(1, 7, record_text(head=h1)), review_comment(2, 7, fixed))
+        self.assert_done(line, h2, "the fix check names the first head, so the guard change after it is reviewed, and the line should read done")
+
+    def test_a_first_record_with_no_earlier_record_stays_done(self):
+        h2 = self.lane_commit("lint/check_x.py", "x = 1\n", "lane: guard change, first review")
+        line = self.reviewed_line(h2, review_comment(1, 7, record_text(head=h2, guard="yes")))
+        self.assert_done(line, h2, "the only record reads its own head, so no head is carried, and the line should read done")
+
+    def test_a_test_path_commit_after_the_first_head_stays_done(self):
+        h1 = self.lane_commit("docs/lane.md", "reviewed\n", "lane: docs, reviewed")
+        h2 = self.lane_commit("merge/test_lane.py", "def test_lane():\n    pass\n")
+        line = self.reviewed_line(h2, review_comment(1, 7, record_text(head=h1)), review_comment(2, 7, record_text(head=h2)))
+        self.assert_done(line, h2, "a test path is no guard change, so the carried rounds should stand")
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
         # A run waiting on its checks for a minute, for a signal to reach. It prints READY once it holds the lock.
