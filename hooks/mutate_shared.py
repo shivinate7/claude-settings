@@ -658,6 +658,10 @@ def score_target(root: str, target: str, tests, limit: int = 10, timeout=None, j
         with ThreadPoolExecutor(max_workers=jobs) as pool:
             broken_kinds = list(pool.map(lambda rel: run_suite_file(broken, rel, bound)[0], usable))
         unloaded = [rel for rel, kind in zip(usable, broken_kinds) if kind == "pass"]
+        row["unloaded"] = unloaded
+        if len(unloaded) == len(usable):  # no suite is shown to load the file, so a rate would score suites that never ran it
+            row["reason"] = "every usable suite stays green on a wholly broken copy of the file"
+            return row
 
         def one(item):
             number, (_label, text) = item
