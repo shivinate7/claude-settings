@@ -904,6 +904,46 @@ class GuardRuleIdReadTests(unittest.TestCase):
         self.assertIn(WATCH_ONLY, out.getvalue())
 
 
+# ------------------------------------------------------------ parse cache
+# `_parsed` keeps one tree per test file, keyed on its path, size and mtime. A file rewritten in place
+# gets a new key, so the audit reads the new content.
+
+class ParseCacheTests(unittest.TestCase):
+    """A cited test file that is rewritten is parsed again, never served from the cache."""
+
+    CITED = os.path.join("tests", "test_cited.py")
+    CITED_ID = "tests/test_cited.py::CitedTests.test_aaaa"
+    BODY = ("import unittest\n\n\nclass CitedTests(unittest.TestCase):\n"
+            "    def test_aaaa(self):\n        self.assertTrue(True)\n")
+
+    def cited_root(self):
+        root = GuardTextTests.tree(self, {self.CITED: self.BODY})
+        self.assertIsNone(rule_audit.citation_problem(self.CITED_ID, root), "control: the cited test resolves")
+        return root
+
+    def rewrite(self, root, body, mtime_ns):
+        path = os.path.join(root, self.CITED)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(body)
+        os.utime(path, ns=(mtime_ns, mtime_ns))  # an explicit mtime: no clock is read
+
+    def test_a_rewrite_that_changes_the_size_is_read_fresh(self):
+        root = self.cited_root()
+        mtime = os.stat(os.path.join(root, self.CITED)).st_mtime_ns
+        self.rewrite(root, self.BODY.replace("test_aaaa", "test_renamed_longer"), mtime)  # same mtime, new size
+        why = rule_audit.citation_problem(self.CITED_ID, root)
+        self.assertIsNotNone(why, "the rewritten file still resolves test_aaaa: a stale tree was served")
+        self.assertIsNone(rule_audit.citation_problem("tests/test_cited.py::CitedTests.test_renamed_longer", root))
+
+    def test_a_same_size_rewrite_with_a_new_mtime_is_read_fresh(self):
+        root = self.cited_root()
+        mtime = os.stat(os.path.join(root, self.CITED)).st_mtime_ns
+        self.rewrite(root, self.BODY.replace("test_aaaa", "test_bbbb"), mtime + 1_000_000_000)  # same size, new mtime
+        why = rule_audit.citation_problem(self.CITED_ID, root)
+        self.assertIsNotNone(why, "the rewritten file still resolves test_aaaa: a stale tree was served")
+        self.assertIsNone(rule_audit.citation_problem("tests/test_cited.py::CitedTests.test_bbbb", root))
+
+
 # ------------------------------------------------------------ refusal cites
 # A refusal prints a cite: `decision <slug>` for a file in docs/decisions/, or `rule <anchor>` for
 # a `<!-- rule:<anchor> -->` in CLAUDE.md or output-styles/*.md. Both sets are read live. A refusal
