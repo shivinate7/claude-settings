@@ -1353,59 +1353,79 @@ def format_changed(rows) -> str:
     return "\n".join(lines)
 
 
-def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeout: float = 120, notes=None) -> list:
+def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeout: float = 120) -> list:
     """Replay planted defects against a clone's HEAD. Each defect is {id, name, file, old, new, argv, classify}: `old` is the one
     text in `file` that the plant replaces with `new`, and `argv` is the catcher suite, read by the classifier `classify`.
     Returns [{id, name, verdict, reason}] with the verdict CAUGHT (the suite prints an assertion on the planted copy), MISS
     (the suite passed, crashed or timed out on it) or UNKNOWN (the anchor is stale or ambiguous, the entry is malformed, the
-    suite is not green on the clean copy, an install failed, or a link failed). Only an assertion catches, as in a replay. The
-    run is in a checkout of HEAD made like a replay's, so the working tree and the repository are left as found.
+    suite is not green on the clean copy, an install it needs failed, or a link failed). Only an assertion catches, as in a
+    replay. The run is in a checkout of HEAD made like a replay's, so the working tree and the repository are left as found.
     The checkout is prepared as `--changed` prepares its own. For each part of `profile` (the values of a `parts` profile, else
     the profile itself) the install runs under `deps`, a folder the caller removes, and its folder is linked beside the
     lockfile. Parts with one lockfile and one install share one install and one link; any other install runs once more.
-    A failed install does not stop the run: the later parts still install and every defect runs. A defect that read CAUGHT
-    stays CAUGHT, because an assertion on the planted copy needs no package that failed to install. Any other verdict becomes
-    UNKNOWN, because the missing package may be what the suite needed, and its reason names the install and the cause. Each
-    failed install's reason is also appended to `notes`, so the caller can report an install that cost nothing. A failed
-    link leaves the checkout unusable, so every defect reads UNKNOWN and its reason names the cause."""
+    A failed install does not stop the later parts. A defect needs a part's install when the part's `code` regex matches the
+    defect's `file` or its `tests` regex matches an element of the defect's `argv`; a part with neither regex is needed by
+    every defect, and a defect that no part claims needs every install. A defect that needs a failed install is not run: it
+    reads UNKNOWN and its reason names the install, because a suite whose package is missing can read CAUGHT or MISS for the
+    wrong cause. Any other defect runs as usual. A failed link leaves the checkout unusable, so every defect reads UNKNOWN."""
     if not defects:
         return []
     sha = _git(repo, "rev-parse", "HEAD").strip()
     own = tempfile.mkdtemp(prefix="mutate_defects_")
     dest = os.path.join(own, "w")
     results = []
-    failed = []
+    failed = {}  # part name -> the reason its install failed
 
     def all_unknown(reason: str) -> list:
-        return [{"id": str(d.get("id", "?")) if isinstance(d, dict) else "?",
-                 "name": str(d.get("name", "")) if isinstance(d, dict) else "", "verdict": "UNKNOWN", "reason": reason}
-                for d in defects]
+        return [_unrun_defect(d, reason) for d in defects]
 
+    parts = profile["parts"] if "parts" in profile else {None: profile}
     try:
         _make_checkout(repo, sha, dest, set(), {}, None, {})
-        for part in (list(profile["parts"].values()) if "parts" in profile else [profile]):
+        for name, part in parts.items():
             folder, why = _ensure_deps(repo, sha, part, deps)
             if why:
-                failed.append("the install of the profile failed: %s" % why)
+                failed[name] = why
                 continue
             try:
                 _link_deps(dest, folder, part)
             except OSError as error:
                 return all_unknown("the install could not be linked into the checkout: %s" % error)
         for defect in defects:
-            results.append(_known_defect(dest, defect, suite_timeout))
+            needed = [name for name in _needed_parts(defect, parts) if name in failed]
+            if needed:
+                results.append(_unrun_defect(defect, "; ".join(
+                    "the install of %s failed: %s" % ("the profile" if name is None else "part " + name, failed[name])
+                    for name in needed)))
+            else:
+                results.append(_known_defect(dest, defect, suite_timeout))
     finally:
         _drop_checkout(repo, dest)
         shutil.rmtree(own, ignore_errors=True)
-    if failed:
-        # Without the failed install a clean run or a red control proves nothing, so only a caught plant keeps its verdict.
-        for row in results:
-            if row["verdict"] != "CAUGHT":
-                seen = "it read %s" % row["verdict"] + (" (%s)" % row["reason"] if row["reason"] else "")
-                row.update(verdict="UNKNOWN", reason="%s; %s" % ("; ".join(failed), seen))
-        if notes is not None:
-            notes.extend(failed)
     return results
+
+
+def _needed_parts(defect, parts: dict) -> list:
+    """The names of the parts whose install `defect` needs: the parts that claim it by their `code` regex on its `file` (less
+    `code_not`) or their `tests` regex on an element of its `argv`, and every part with neither regex. No claim, or a defect
+    too malformed to read, needs every part."""
+    try:
+        file, argv = str(defect["file"]), [str(item) for item in defect["argv"]]
+    except (KeyError, TypeError):
+        return list(parts)
+    claimed = [name for name, part in parts.items()
+               if (part.get("code") and re.search(part["code"], file)
+                   and not (part.get("code_not") and re.search(part["code_not"], file)))
+               or (part.get("tests") and any(re.search(part["tests"], item) for item in argv))]
+    open_ = [name for name, part in parts.items() if not part.get("code") and not part.get("tests")]
+    return [name for name in parts if name in claimed or name in open_] if claimed else list(parts)
+
+
+def _unrun_defect(defect, reason: str) -> dict:
+    """The UNKNOWN row of a defect that was not run."""
+    isdict = isinstance(defect, dict)
+    return {"id": str(defect.get("id", "?")) if isdict else "?", "name": str(defect.get("name", "")) if isdict else "",
+            "verdict": "UNKNOWN", "reason": reason}
 
 
 def _known_defect(dest: str, defect: dict, suite_timeout: float) -> dict:

@@ -2668,9 +2668,8 @@ def _known_defects_base_entries(repo: str, list_path: str, base: str):
 
 def known_defects_main(argv) -> int:
     """Replay the planted defects of a list (`.github/known-defects.json`) against a repository's HEAD. One line per defect:
-    `CAUGHT`, `MISS` or `UNKNOWN`. Exit 1 when any defect is MISS or UNKNOWN (decision ci-unknown-is-red). A failed install
-    keeps each CAUGHT and turns every other verdict UNKNOWN (`run_known_defects`); when every defect is CAUGHT it exits 0 and
-    prints one `info:` line naming the failed install. A missing list file
+    `CAUGHT`, `MISS` or `UNKNOWN`. Exit 1 when any defect is MISS or UNKNOWN (decision ci-unknown-is-red). A defect that
+    needs a failed install is not run and reads UNKNOWN (`run_known_defects` says which defects need which install). A missing list file
     prints one UNKNOWN line that names its path and exits 1; an empty list exits 0 (with `--base`, only when REF's list names
     no entry); a list or a profile that cannot be read exits 2.
     `--profile` or `--profile-file` is required: the checkout gets the profile's install, as `--changed` does.
@@ -2716,17 +2715,13 @@ def known_defects_main(argv) -> int:
             print("%s %s" % problem)
             return 2 if problem[0] == "ERROR" else 1
     deps = tempfile.mkdtemp(prefix="mutate_deps_")
-    install_notes = []
     with stop_on_signals():
         try:
             results = mutate_shared.run_known_defects(os.path.abspath(args.repo), defects, profile, deps,
-                                                      suite_timeout=args.suite_timeout, notes=install_notes)
+                                                      suite_timeout=args.suite_timeout)
         finally:
             shutil.rmtree(deps, ignore_errors=True)
     print(mutate_shared.format_known_defects(results))
-    if results and install_notes and all(result["verdict"] == "CAUGHT" for result in results):
-        # Only here: with a non-CAUGHT defect, its UNKNOWN reason already names the install.
-        print("info: %s; every defect read CAUGHT without it" % "; ".join(install_notes))
     missing, changed = [], []
     if base_entries:
         try:
