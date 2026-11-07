@@ -483,10 +483,9 @@ def __getattr__(name):
 
 # ------------------------------------------------------------------ the silent write
 #
-# Rule 1c. CLAUDE.md (Git): "Never discard a command's output." A discarding REDIRECT is refused on
-# every one of these six subcommands, whatever the subcommand does with its own output: the shell
-# throws the stream away before git ever gets a say, so a hook's refusal and git's own proof of
-# landing are both gone, together, always.
+# A discarding REDIRECT is refused on each of these seven subcommands, whatever the subcommand does
+# with its own output: the shell throws the stream away before git speaks, so a hook's refusal and
+# git's own proof of landing are both lost.
 SILENT_WRITE_SUBCOMMANDS = ("commit", "push", "merge", "tag", "rebase", "cherry-pick", "pull")
 
 # Gap roster. Each one moves a ref or lands a merge, so each is a write when its
