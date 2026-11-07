@@ -112,7 +112,8 @@ a turn end in these cases:
     or moved page then loses those items (decision waiting-data-in-repo). The reason names export_page.py and
     the waiting-page skill section "Keep a copy in the repo". A transcript that cannot be read passes. A
     failed read of the layout or the ref after a page write passes with the systemMessage "Feedback guard:
-    waiting copy export not checked". With stop_hook_active the reason goes to systemMessage and nothing
+    waiting copy export not checked". The collection list is read before the transcript scan, so a failed
+    read of it gives that note at every Stop, page write or not. With stop_hook_active the reason goes to systemMessage and nothing
     blocks. Cost: the transcript read at each Stop. A writer's write of an exported collection to any artifact
     then makes one rev-parse and one is_waiting_page_url read per distinct url; one git log follows only
     when a write is to the waiting page. All inside the Stop process; no process or file of its own (rule
