@@ -281,13 +281,31 @@ def _keyword_rest(rest):
     return len(words) > 1 and opus_role(words[0]) is not None and OPUS_LENGTH.match(words[1]) is not None
 
 
+def _ask_lengths(text, bare=None):
+    """The lengths in a plain ask `text` as (number, unit letter) pairs, plus `bare` (a pair) when given, or None when
+    they are unclear: two or more, a decimal or a compound length. The one length check of both plain asks."""
+    found = [(m.group(1), (m.group(2) or m.group(3))[0]) for m in ASK_LENGTH.finditer(text)]
+    if bare:
+        found.append(bare)
+    if len(found) > 1 or UNCLEAR_LENGTH.search(text):
+        return None
+    return found
+
+
+def _near_negation(names, at, negations):
+    """True when a word of `negations` stands within NEGATION_SPAN words before or after the word at names[at]. The one
+    negation check of both plain asks."""
+    near = names[max(0, at - NEGATION_SPAN):at] + names[at + 1:at + 1 + NEGATION_SPAN]
+    return bool(negations & {w.lower() for w in near})
+
+
 def _ask_scope(text):
     """(length, roles) a plain ask names, or None when the words are unclear: two lengths, a decimal or compound
     length, a role with a negation within NEGATION_SPAN words before or after it, or two role words joined by
     anything but a plain list (PLAIN_LIST). `roles` is the sorted list of the roles it names, empty when it names
     none."""
-    lengths = ASK_LENGTH.findall(text)
-    if len(lengths) > 1 or UNCLEAR_LENGTH.search(text):
+    lengths = _ask_lengths(text)
+    if lengths is None:
         return None
     matches = list(ROLE_WORDS.finditer(text))
     words = [m.group() for m in matches]
@@ -296,18 +314,13 @@ def _ask_scope(text):
         role = opus_role(word)
         if role not in ASK_ROLES:
             continue
-        near = words[max(0, at - NEGATION_SPAN):at] + words[at + 1:at + 1 + NEGATION_SPAN]
-        if NEGATIONS & {w.lower() for w in near}:
+        if _near_negation(words, at, NEGATIONS):
             return None
         if last_end is not None and not PLAIN_LIST.fullmatch(text, last_end, matches[at].start()):
             return None
         roles.add(role)
         last_end = matches[at].end()
-    length = DEFAULT_ASK_LENGTH
-    if lengths:
-        number, short, spelled = lengths[0]
-        length = (number, (short or spelled)[0])
-    return length, sorted(roles)
+    return (lengths[0] if lengths else DEFAULT_ASK_LENGTH), sorted(roles)
 
 
 def _file_role(roles):
@@ -556,29 +569,19 @@ def _override_wanted(text):
         return False
     words = list(ROLE_WORDS.finditer(clean))
     names = [m.group().lower() for m in words]
-    for at, match in enumerate(words):
-        if match.start() in starts:
-            near = names[max(0, at - NEGATION_SPAN):at] + names[at + 1:at + 1 + NEGATION_SPAN]
-            if OVERRIDE_NEGATIONS & set(near):
-                return False
-    return True
+    return not any(_near_negation(names, at, OVERRIDE_NEGATIONS)
+                   for at, match in enumerate(words) if match.start() in starts)
 
 
 def _override_length(text):
     """(number, unit) of the one length in the plain override ask `text`, None for no length, False for words that are
-    unclear: two lengths, a decimal or a compound length. A bare number right after a first word `override` is
-    minutes. Code spans do not count."""
-    clean = _outside_code(text)
-    if UNCLEAR_LENGTH.search(clean):
-        return False
-    found = [(m.start(1), m.group(1), (m.group(2) or m.group(3))[0]) for m in ASK_LENGTH.finditer(clean)]
-    first = PROMPT.match(clean)
-    bare = BARE_NUMBER.match(first.group(1)) if first else None
-    if bare and first.start(1) not in {at for at, _, _ in found}:
-        found.append((first.start(1), bare.group(1), "m"))
-    if len(found) > 1:
-        return False
-    return found[0][1:] if found else None
+    unclear (_ask_lengths). A bare number right after the prompt's own first word `override` is minutes: that word is
+    read on `text` as typed, so a code span before it makes no first word. Code spans do not count."""
+    first = PROMPT.match(text)
+    rest = first.group(1) if first else ""
+    bare = BARE_NUMBER.match(rest)
+    lengths = _ask_lengths(_outside_code(text), (bare.group(1), "m") if bare and not ASK_LENGTH.match(rest) else None)
+    return False if lengths is None else lengths[0] if lengths else None
 
 
 def grant_override_ask(session_id, prompt, at, judge=None, transcript=None, source=None):
@@ -608,9 +611,9 @@ def grant_override_ask(session_id, prompt, at, judge=None, transcript=None, sour
         return main()
     if gated is None or length is False:
         return main()
-    if judge is None:
-        from call_judge import override_ask as judge
     try:
+        if judge is None:
+            from call_judge import override_ask as judge
         said_yes = judge(gated[0]) is True
     except Exception as exc:
         print("override: plain ask grants nothing new: %s" % " ".join(str(exc).split()), file=sys.stderr)
@@ -618,7 +621,9 @@ def grant_override_ask(session_id, prompt, at, judge=None, transcript=None, sour
     if not said_yes or (length is None and keyword):
         return main()
     if length is None:
-        return _write_override(session_id, path, "once", at + ONCE_WINDOW)
+        done = _write_override(session_id, path, "once", at + ONCE_WINDOW)
+        _log_reason(session_id, " ".join(gated[0].split()), at)  # the keyword once logs its reason the same way
+        return done
     return _write_override(session_id, path, "timed", _length_end(at, *length))
 
 
