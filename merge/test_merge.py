@@ -45,9 +45,9 @@ def run_folder():
 
 os.environ.update(LC_ALL="C", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
-# CI sets none of these and a cloud session sets all three. A cloud session's values would make every `--confirm` case below meet the
+# CI sets none of these and a cloud session sets all four. A cloud session's values would make every `--confirm` case below meet the
 # merge-role check and make a role writer write the live session's role file. A case that needs one sets it (CloudSession.cloud).
-for _name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CONFIG_DIR"):
+for _name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR"):
     os.environ.pop(_name, None)
 
 def windows_slice(x):
@@ -11151,6 +11151,8 @@ class BatchBrake(Env):
         self.assertIn("#2", lines[0])
 
 ROLE_SESSION = "cse_role_check_test"
+OWNER_SESSION = "5b1c7e2a-0d3f-4e8a-9c6b-1a2b3c4d5e6f"  # CLAUDE_CODE_SESSION_ID of an owner-started session: the id its solo-owner file names
+OTHER_SESSION = "9a8b7c6d-5e4f-4321-8765-fedcba987654"  # another session's CLAUDE_CODE_SESSION_ID
 OLD_PARSER_ERRORS = ("unrecognized arguments", "invalid int value")  # what merge.py's parser says to `--role` before the writer exists
 
 class CloudSession(Env):
@@ -11256,8 +11258,9 @@ class MergeRoleCheck(CloudSession):
 
     # ---- the constants and the reader
     # decision session-tiers: only a batch runner merges
-    def test_the_merge_roles_are_the_batch_runner_only(self):
-        self.assertEqual(set(merge.MERGE_ROLES), {"batch-runner"})
+    def test_the_merge_roles_are_the_batch_runner_and_the_owner_started_solo(self):
+        # decision session-tiers: the coordinator never merges. Ruling C (2026-11-07 16:32 CST) adds the owner-started solo role.
+        self.assertEqual(set(merge.MERGE_ROLES), {"batch-runner", "solo-owner"})
 
     def test_the_role_path_is_the_state_file_under_the_config_dir(self):
         with self.cloud():
@@ -11374,6 +11377,35 @@ class MergeRoleCheck(CloudSession):
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(self.host.merged)
 
+    # ---- the owner-started solo role: its file names the session's own CLAUDE_CODE_SESSION_ID (ruling C, 2026-11-07 16:32 CST).
+    # A lane or a child is judged by the guard, which refuses a `merge --role solo-owner` from either before a file exists.
+    def test_a_solo_owner_file_with_the_callers_own_id_passes_the_cloud_confirm(self):
+        self.put_role("solo-owner", session=OWNER_SESSION)
+        self.assert_reaches_host("7", "--confirm", CLAUDE_CODE_SESSION_ID=OWNER_SESSION)
+
+    def test_a_solo_owner_file_from_another_id_refuses(self):
+        self.put_role("solo-owner", session=OTHER_SESSION)
+        self.assert_refused(CLAUDE_CODE_SESSION_ID=OWNER_SESSION)
+
+    def test_a_solo_owner_file_that_names_the_remote_session_id_refuses(self):
+        # the owner-started id is CLAUDE_CODE_SESSION_ID; the remote session id is the batch runner's, so it proves nothing here
+        self.put_role("solo-owner", session=ROLE_SESSION)
+        self.assert_refused(CLAUDE_CODE_SESSION_ID=OWNER_SESSION)
+
+    def test_no_session_id_in_the_environment_refuses_a_solo_owner_file(self):
+        # absent never equals absent: an absent or empty id refuses even against an equal-looking recorded one
+        for session, recorded in ((None, OWNER_SESSION), ("", ""), (None, None), (None, "")):
+            with self.subTest(session=session, recorded=recorded):
+                self.put_role("solo-owner", session=recorded)
+                self.assert_refused(CLAUDE_CODE_SESSION_ID=session)
+
+    def test_the_reader_gives_solo_owner_only_for_the_callers_own_id(self):
+        with self.cloud(CLAUDE_CODE_SESSION_ID=OWNER_SESSION):
+            self.put_role("solo-owner", session=OWNER_SESSION)
+            self.assertEqual(merge.read_merge_role(), "solo-owner")
+            self.put_role("solo-owner", session=OTHER_SESSION)
+            self.assertIsNone(merge.read_merge_role())
+
     # ---- not checked: these pass before the role check exists, and stop a check that is too wide
     def test_a_preview_in_the_cloud_needs_no_role(self):
         for role in (None, "lane"):
@@ -11409,6 +11441,18 @@ class MergeRoleCheck(CloudSession):
         with self.cloud():
             self.assertEqual(merge.read_merge_role(), "batch-runner")
         self.assertEqual(self.host.pr_calls, [])  # the writer reads no host
+
+    def test_role_writes_solo_owner_with_the_callers_session_id(self):
+        # ruling C (2026-11-07 16:32 CST): the file names the writer's CLAUDE_CODE_SESSION_ID, not the remote session id
+        rc, out, err = self.run_main("--role", "solo-owner", CLAUDE_CODE_SESSION_ID=OWNER_SESSION)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(self.read_role_file(), (OWNER_SESSION, "solo-owner"))
+        with self.cloud(CLAUDE_CODE_SESSION_ID=OWNER_SESSION):
+            self.assertEqual(merge.read_merge_role(), "solo-owner")
+        self.assertEqual(self.host.pr_calls, [])
+
+    def test_role_solo_owner_without_a_session_id_writes_nothing(self):
+        self.assert_writer_refused("--role", "solo-owner", CLAUDE_CODE_SESSION_ID=None)
 
     # decision session-tiers: the writer refuses the coordinator tier as it refuses any non-merge tier, and names no tier
     def test_role_refuses_the_coordinator_tier_and_names_no_tier(self):

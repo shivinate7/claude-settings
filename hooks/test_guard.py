@@ -674,6 +674,11 @@ def write(path, text):
         handle.write(text)
 
 
+def write_rules(folder):
+    """A config folder's rules file: the guard finds the merge tool through the clone it points at."""
+    write(os.path.join(folder, "CLAUDE.md"), "@" + slash(REPO) + "/CLAUDE.md\n")
+
+
 def run_vcs(cwd, *args):
     return subprocess.run([VCS, *args], cwd=cwd, capture_output=True, text=True)
 
@@ -1315,7 +1320,7 @@ def build_fixtures():
     write(os.path.join(WFREPO, ".github", "workflows", "checks.yml"), "name: checks\n")
     # The guard finds the merge tool beside its own real path, or in the clone the global rules
     # file points at. A mutant copy of the guard sits in a temp folder and takes the second way.
-    write(os.path.join(MERGECFG, "CLAUDE.md"), "@" + slash(REPO) + "/CLAUDE.md\n")
+    write_rules(MERGECFG)
     # GHDEV alone gets the delay: it is the one base whose logged/not-logged answer the timeout
     # mutant can flip (GHMAIN and GHNONE both expect "logged" either way), so it is the one fixture
     # whose instant reply could race that mutant's shrunk timeout. See make_fake_gh's docstring.
@@ -9209,6 +9214,8 @@ ROLE_OWN = "session_ROLEOWN01"
 ROLE_OTHER = "session_ROLEOTHER01"
 ROLE_RUN = "session_ROLERUN01"  # a batch runner whose role file is recorded: its own id, so no other case reads that file
 ROLE_RUN_ID = "cse_ROLERUN01"
+SOLO_UUID = "5b1c7e2a-0d3f-4e8a-9c6b-1a2b3c4d5e6f"  # CLAUDE_CODE_SESSION_ID of an owner-started session: the id its solo-owner file names
+OTHER_UUID = "9a8b7c6d-5e4f-4321-8765-fedcba987654"  # another session's CLAUDE_CODE_SESSION_ID
 ROLE_ENV = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_ROLEOWN01"}
 ROLE_DIR = os.path.join(ROOT, "rolerec")
 GET_SESSION = "mcp__claude-code-remote__get_session"
@@ -9451,17 +9458,30 @@ def role_path(name):
 
 
 def write_role_transcripts():
-    """Write each fixture as JSONL. `unreadable` is a folder, so the guard's open() fails on it. The role file
-    the merge tool reads (<config dir>/state/merge-role.json) names ROLE_RUN_ID only, in MERGECFG, so the other
-    cases, which name ROLE_OWN, find no role file there."""
+    """Write each fixture as JSONL. `unreadable` is a folder, so the guard's open() fails on it."""
     os.makedirs(ROLE_DIR, exist_ok=True)
     for name, lines in ROLE_LINES.items():
         with open(role_path(name), "w", encoding="utf-8") as handle:
             handle.write("\n".join(lines) + "\n")
     os.makedirs(role_path("unreadable"), exist_ok=True)
-    os.makedirs(os.path.join(MERGECFG, "state"), exist_ok=True)
-    with open(os.path.join(MERGECFG, "state", "merge-role.json"), "w", encoding="utf-8") as handle:
-        handle.write(json.dumps({"session": ROLE_RUN_ID, "role": "batch-runner"}))
+
+
+# A config folder that holds one role file (state/merge-role.json). A folder holds one file, so each role file has its
+# own folder, with the rules file of MERGECFG. MERGECFG itself holds no role file: a case there has no recorded role.
+RUN_CFG = os.path.join(ROOT, "runcfg")          # a batch runner that recorded its role
+SOLO_CFG = os.path.join(ROOT, "solocfg")        # an owner-started session's solo-owner file, naming its own id
+FOREIGN_CFG = os.path.join(ROOT, "foreigncfg")  # a solo-owner file that names another session
+ROLE_CONFIGS = {RUN_CFG: ("batch-runner", ROLE_RUN_ID), SOLO_CFG: ("solo-owner", SOLO_UUID),
+                FOREIGN_CFG: ("solo-owner", OTHER_UUID)}
+
+
+def write_role_configs():
+    for folder, (role, session) in ROLE_CONFIGS.items():
+        write_rules(folder)
+        write(os.path.join(folder, "state", "merge-role.json"), json.dumps({"session": session, "role": role}))
+
+
+lazy_fixture(list(ROLE_CONFIGS), write_role_configs)
 
 
 lazy_fixture([role_path(name) for name in ROLE_LINES] + [role_path("unreadable")], write_role_transcripts)
@@ -9481,6 +9501,12 @@ def role_allow(name, command, transcript, env=ROLE_ENV, **kw):
 
 # A record's own tier is allowed. Any other tier is refused, both ways round.
 role_allow("a batch runner records batch-runner", MERGE_SHIM + " --role batch-runner", role_path("runner"))
+# The owner-started solo role: its record shows no parent_session_id and no cs-build tag, so only that record records it.
+# A lane and a child with no cs-build tag are refused (ruling C, 2026-11-07 16:32 CST).
+role_allow("an owner-started session records solo-owner", MERGE_SHIM + " --role solo-owner", role_path("owner-solo"))
+role_refuse("a lane records solo-owner and is refused", MERGE_SHIM + " --role solo-owner", role_path("lane"))
+role_refuse("a child with no cs-build tag records solo-owner and is refused", MERGE_SHIM + " --role solo-owner",
+            role_path("child-untagged"))
 # decision session-tiers: the coordinator never merges, so its own record does not allow the coordinator role.
 role_refuse("a coordinator records coordinator and is refused: the coordinator never merges", MERGE_SHIM + " --role coordinator",
           role_path("coordinator"))
@@ -9863,14 +9889,16 @@ trust_allow("an unrelated remote tool (list_sessions) in a lane session allows",
 
 # merge-role-raw (debt merge-role-skips-raw-merge; decision session-tiers: the coordinator never merges). A raw
 # `gh pr merge` and the host's merge tool are judged on CI alone, so a lane, a coordinator or a triage session can
-# merge a green head. Those tiers are refused on both paths. The batch runner keeps its ask, and so does an owner-started
-# session (no parent_session_id, no cs-build tag). A child session with no cs-build tag is refused: it is not owner-started
-# (ruling C, 2026-11-07 16:07 CST). A red head stays refused by merge-checks. The merge tool's own confirm is judged by the
-# tool, so this rule never fires on it.
+# merge a green head. Those tiers are refused on both paths. The merge role is the role file the merge tool reads
+# (read_merge_role): a batch runner's file, or an owner-started session's solo-owner file that names its own
+# CLAUDE_CODE_SESSION_ID. No file, or a file that names another id, is refused, and so is a child with no cs-build tag.
+# The get_session tag fallback is gone (ruling C, 2026-11-07 16:32 CST). A red head stays refused by merge-checks. The
+# merge tool's own confirm is judged by the tool, so this rule never fires on it.
 RAW_ROLE_RULE = "merge-role-raw"
 MCP_MERGE = "mcp__github__merge_pull_request"
 CLOUD_ROLE_ENV = dict(ROLE_ENV, CLAUDE_CODE_REMOTE="true")   # merge.py's role check runs in a cloud session
 RUNNER_FILE_ENV = dict(CLOUD_ROLE_ENV, CLAUDE_CODE_REMOTE_SESSION_ID=ROLE_RUN_ID)   # the batch runner whose role file is recorded
+SOLO_ENV = dict(CLOUD_ROLE_ENV, CLAUDE_CODE_SESSION_ID=SOLO_UUID)   # an owner-started session: the id its solo-owner file names
 
 for _raw_who, _raw_record in (
     ("a lane", role_path("lane")),
@@ -9901,23 +9929,41 @@ sh("merge-role-raw: gh pr merge in a child session with no cs-build tag on a gre
 add("merge-role-raw: the merge tool of the host in a child session with no cs-build tag on a green head is refused",
     "deny", RAW_ROLE_RULE, tool=MCP_MERGE, cwd=NOGIT, pullNumber=12, repo="x", owner="y",
     env_path=GREEN_ON, config=MERGECFG, env=CLOUD_ROLE_ENV, transcript=role_path("child-untagged"))
-# An owner-started session (no parent, no cs-build tag) merges its own PR (the session-start hook, tier-boundaries-enforced).
-sh("merge-role-raw: gh pr merge in an owner-started session on a green head keeps its ask",
-   "gh pr merge 12 --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, env=CLOUD_ROLE_ENV,
-   transcript=role_path("owner-solo"), **_BARE_GUARD)
-add("merge-role-raw: the merge tool of the host in an owner-started session on a green head allows", "allow", silent=True,
-    tool=MCP_MERGE, cwd=NOGIT, pullNumber=12, repo="x", owner="y", env_path=GREEN_ON, config=MERGECFG,
-    env=CLOUD_ROLE_ENV, transcript=role_path("owner-solo"))
-for _kept_who, _kept_env, _kept_record in (
-    ("the batch runner", CLOUD_ROLE_ENV, role_path("runner")),
-    ("the batch runner with its role file", RUNNER_FILE_ENV, role_path("runner-file")),
-):
-    sh("merge-role-raw: gh pr merge in %s on a green head keeps its ask" % _kept_who,
-       "gh pr merge 12 --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, env=_kept_env,
-       transcript=_kept_record, **_BARE_GUARD)
-    add("merge-role-raw: the merge tool of the host in %s on a green head allows" % _kept_who, "allow", silent=True,
-        tool=MCP_MERGE, cwd=NOGIT, pullNumber=12, repo="x", owner="y", env_path=GREEN_ON, config=MERGECFG,
-        env=_kept_env, transcript=_kept_record)
+# An owner-started session (no parent, no cs-build tag) has no tag proof any more: with no role file it is refused.
+sh("merge-role-raw: gh pr merge in an owner-started session with no role file on a green head is refused",
+   "gh pr merge 12 --squash", "deny", RAW_ROLE_RULE, cwd=STAMPREPO, env=SOLO_ENV, transcript=role_path("owner-solo"),
+   **_BARE_GUARD)
+add("merge-role-raw: the merge tool of the host in an owner-started session with no role file on a green head is refused",
+    "deny", RAW_ROLE_RULE, tool=MCP_MERGE, cwd=NOGIT, pullNumber=12, repo="x", owner="y",
+    env_path=GREEN_ON, config=MERGECFG, env=SOLO_ENV, transcript=role_path("owner-solo"))
+# Its solo-owner file names its own CLAUDE_CODE_SESSION_ID: the merge tool's reader allows it, so the raw path keeps the ask.
+sh("merge-role-raw: gh pr merge in an owner-started session with its solo-owner file on a green head keeps its ask",
+   "gh pr merge 12 --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, env=SOLO_ENV,
+   transcript=role_path("owner-solo"), env_path=GREEN_ON, config=SOLO_CFG)
+add("merge-role-raw: the merge tool of the host in an owner-started session with its solo-owner file on a green head allows",
+    "allow", silent=True, tool=MCP_MERGE, cwd=NOGIT, pullNumber=12, repo="x", owner="y", env_path=GREEN_ON,
+    config=SOLO_CFG, env=SOLO_ENV, transcript=role_path("owner-solo"))
+# A solo-owner file that names another session's id is refused: it is no proof for this session.
+sh("merge-role-raw: gh pr merge in an owner-started session with a solo-owner file of another id on a green head is refused",
+   "gh pr merge 12 --squash", "deny", RAW_ROLE_RULE, cwd=STAMPREPO, env=SOLO_ENV, transcript=role_path("owner-solo"),
+   env_path=GREEN_ON, config=FOREIGN_CFG)
+add("merge-role-raw: the merge tool of the host in an owner-started session with a solo-owner file of another id is refused",
+    "deny", RAW_ROLE_RULE, tool=MCP_MERGE, cwd=NOGIT, pullNumber=12, repo="x", owner="y", env_path=GREEN_ON,
+    config=FOREIGN_CFG, env=SOLO_ENV, transcript=role_path("owner-solo"))
+# The batch runner by its tags alone has no role file, so it is refused too: the tag fallback is gone.
+sh("merge-role-raw: gh pr merge in the batch runner by its tags alone, with no role file, on a green head is refused",
+   "gh pr merge 12 --squash", "deny", RAW_ROLE_RULE, cwd=STAMPREPO, env=CLOUD_ROLE_ENV,
+   transcript=role_path("runner"), **_BARE_GUARD)
+add("merge-role-raw: the merge tool of the host in the batch runner by its tags alone, with no role file, is refused", "deny",
+    RAW_ROLE_RULE, tool=MCP_MERGE, cwd=NOGIT, pullNumber=12, repo="x", owner="y", env_path=GREEN_ON, config=MERGECFG,
+    env=CLOUD_ROLE_ENV, transcript=role_path("runner"))
+# The batch runner with its recorded role file keeps its ask on the raw path and allows on the merge tool's.
+sh("merge-role-raw: gh pr merge in the batch runner with its role file on a green head keeps its ask",
+   "gh pr merge 12 --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, env=RUNNER_FILE_ENV,
+   transcript=role_path("runner-file"), env_path=GREEN_ON, config=RUN_CFG)
+add("merge-role-raw: the merge tool of the host in the batch runner with its role file on a green head allows", "allow",
+    silent=True, tool=MCP_MERGE, cwd=NOGIT, pullNumber=12, repo="x", owner="y", env_path=GREEN_ON, config=RUN_CFG,
+    env=RUNNER_FILE_ENV, transcript=role_path("runner-file"))
 # Red CI still denies by merge-checks, whatever the tier: the role rule adds a refusal and takes none away.
 sh("merge-role-raw: gh pr merge in a lane on a pending head is still denied by merge-checks",
    "gh pr merge 12 --squash", "deny", "merge-checks", carries="pending", cwd=STAMPREPO, env=CLOUD_ROLE_ENV,
