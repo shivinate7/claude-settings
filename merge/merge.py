@@ -773,11 +773,14 @@ class Host:
                 if not isinstance(page, list):
                     raise TypeError(f"expected a list, got {type(page).__name__}")
             except (ValueError, KeyError, TypeError) as e:
-                raise Stop(f"reading {rel} from GitHub failed on page {n}: {e}")
+                why = f" on page {n}: {e}"
+                break
             if not page:
                 return items
             items += page
-        raise Stop(f"reading {rel} from GitHub failed: more than {PAGE_CEILING} pages of 100")
+        else:
+            why = f": more than {PAGE_CEILING} pages of 100"
+        raise Stop(f"reading {rel} from GitHub failed{why}")
 
     # The old GraphQL values the rest of the tool reads, from the REST fields.
     MERGEABLE = {True: "MERGEABLE", False: "CONFLICTING", None: "UNKNOWN"}  # mergeable is null while GitHub works it out
