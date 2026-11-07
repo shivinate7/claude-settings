@@ -20,7 +20,7 @@ stop_hook_active; no process, timer or log. A correction block leaves no marker,
 
 On a turn that pushed a branch head (git push, not a dry run, a delete or a tag push; or the GitHub MCP push_files,
 create_or_update_file or delete_file), it reads that head's CI state once through hooks/ci_wake.py head_state and
-holds the report until it names it (decision ci-wait-reads-run-status, section "A report after a push"). Pending:
+holds the report until it names it (decision push-report-names-ci, a report after a push names its CI). Pending:
 `CI running on <sha7>` under Next and no BUILT or RECORDED Done item that names the head. Red: `CI red on <sha7>`.
 A read that failed or ran out of budget: `CI unknown on <sha7>`. Green, a draft PR and a branch with no PR need no
 line. Only the newest head of each branch counts. Cost: only on a Stop after a push that is not a stop_hook_active
@@ -140,7 +140,6 @@ import datetime
 import json
 import os
 import re
-import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -317,8 +316,10 @@ def turn_landed(records):
     return False
 
 
-# The CI check after a push (decision ci-wait-reads-run-status, section "A report after a push"). A turn that
+# The CI check after a push (decision push-report-names-ci, a report after a push names its CI). A turn that
 # pushed a head holds its report until that head's CI state is known. Merges are out: merge-checks covers them.
+# A check that did not run on a push turn is a note, never a block (rule verification-report-unknown-reads).
+PUSH_UNKNOWN_NOTE = "Push-CI guard: UNKNOWN, the check did not run (%s)."
 PUSH_TOOLS = LANDING_TOOLS - {"mcp__github__merge_pull_request", "mcp__github__create_pull_request",
                               "mcp__github__enable_pr_auto_merge"}
 # Per state the guard names, the word of the report line `CI <word> on <sha7>`.
@@ -361,11 +362,12 @@ def _push_folder(segments, number, ends, cwd):
     return folder
 
 
-def _branch_of(refspec, folder, budget):
-    """The remote branch a push refspec updates, or "" for a tag or a ref it does not name."""
+def _branch_of(refspec, folder, budget, ci_wake):
+    """The remote branch a push refspec updates, or "" for a tag or a ref it does not name. A `HEAD` refspec reads
+    the folder's branch (ci_wake.current_branch, inside the Stop's budget); a failed read raises ci_wake.Unknown."""
     dst = refspec.lstrip("+").split(":")[-1]
     if refspec.lstrip("+") == "HEAD":
-        dst = _symbolic_branch(folder, budget)
+        dst = ci_wake.current_branch(folder, budget.next_timeout())
     dst = dst[len("refs/heads/"):] if dst.startswith("refs/heads/") else dst
     return "" if not dst or dst.startswith("refs/") or dst == "HEAD" else dst
 
@@ -393,7 +395,8 @@ def _heads_of_git_push(args, output, folder, ci_wake, budget):
 
     if not seen:
         try:
-            names = [_branch_of(r, folder, budget) for r in refspecs] if refspecs else [_symbolic_branch(folder, budget)]
+            names = ([_branch_of(r, folder, budget, ci_wake) for r in refspecs] if refspecs
+                     else [ci_wake.current_branch(folder, budget.next_timeout())])
         except ci_wake.Unknown:
             return [(None, (refspecs[0].lstrip("+").split(":")[-1] if refspecs else "HEAD") or "HEAD")]
         seen = [(None, n) for n in names if n]
@@ -411,17 +414,6 @@ def _heads_of_git_push(args, output, folder, ci_wake, budget):
         if sha:
             heads.append((sha, branch))
     return heads
-
-
-def _symbolic_branch(folder, budget):
-    """The branch the folder has checked out, or "" for a detached HEAD or a failed read. The read is inside
-    the Stop's budget: it raises ci_wake.Unknown once the total is spent."""
-    try:
-        done = subprocess.run(["git", "symbolic-ref", "--short", "-q", "HEAD"], cwd=folder, capture_output=True,
-                              text=True, timeout=budget.next_timeout(), stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.TimeoutExpired):
-        return ""
-    return done.stdout.strip() if done.returncode == 0 else ""
 
 
 def _mcp_head(name, tool_input, text):
@@ -478,6 +470,21 @@ def pushed_heads(after, cwd, budget, ci_wake):
                 if head:
                     record(head[0], head[1], cwd)
     return [(sha, branch, folder) for (folder, branch), sha in found.items()]
+
+
+def may_push(records):
+    """True when a tool call in `records` may be a push, read without the shell parser: a push tool, or a Bash command
+    whose words hold git and push. It gates only the UNKNOWN note of a check that did not run (PUSH_UNKNOWN_NOTE),
+    when guard.py cannot parse or the check raised, so a loose read costs a note, never a block."""
+    for rec in records:
+        for use in tool_uses(rec):
+            name = use.get("name")
+            if name in PUSH_TOOLS:
+                return True
+            command = (use.get("input") or {}).get("command") if name == "Bash" else None
+            if isinstance(command, str) and {"git", "push"} <= set(re.findall(r"[\w-]+", command)):
+                return True
+    return False
 
 
 def push_ci_states(after, hook, budget=None):
@@ -2210,7 +2217,11 @@ def main():
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
         except Exception:
             pass
-    if last_human_idx is None or not turn_landed(after):
+    landed = last_human_idx is not None and turn_landed(after)
+    if last_human_idx is not None and guard is None and may_push(after):
+        # turn_landed reads no landing when guard.py did not load, so the push check never runs.
+        note = " ".join(filter(None, [note, PUSH_UNKNOWN_NOTE % "guard.py did not load"]))
+    if not landed:
         # An unlanded turn is judged on the question check and the Departs from check alone. An error in
         # either fails open on its own: the Departs from check never drops the question refusal.
         pick = [pick_reason]
@@ -2256,8 +2267,10 @@ def main():
         ci = push_ci_problem(text, states)
         if ci:
             reasons.append(ci)
-    except Exception as exc:  # a read that could not run is no block: the check fails open
+    except Exception as exc:  # a read that could not run is UNKNOWN, never clear, and no block
         print("push CI check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+        if may_push(after):
+            note = " ".join(filter(None, [note, PUSH_UNKNOWN_NOTE % type(exc).__name__]))
     if pick_reason:
         reasons.append(pick_reason)
     try:

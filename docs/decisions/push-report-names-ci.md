@@ -18,7 +18,9 @@ A turn that pushes a head names that head's CI state in its report. This closes 
 
 Cost: only on a Stop after a push that is not a `stop_hook_active` Stop, inside the Stop hook already running. At most 3 gh processes per head (the PR read, the run list, and the workflow list only when the run list is empty), and up to 2 git processes for `git push origin HEAD` with no ref line (the branch, then its remote ref) or 1 for a short head on main. All reads, git and gh, are inside one 20 s budget with 8 s at most each (`ci_wake.Budget`, a clock seam), under the 35 s Stop timeout in `settings.json`. It writes only the existing marker file. It starts no timer and no long-lived process.
 
-Known limit: the shape of a `push_files` result is unmeasured. The guard reads a 40-hex `sha`, then `commit.sha`, then `object.sha`; a result with none of these is not checked. `update_pull_request_branch` names no branch, so it yields no head. A stale PR head right after a push (the REST read lags the push) reads none, so the report may pass unchecked; unmeasured.
+Known limit: the shape of a `push_files` result is unmeasured. The guard reads a 40-hex `sha`, then `commit.sha`, then `object.sha`; a result with none of these is not checked. `update_pull_request_branch` names no branch, so it yields no head. A stale PR head right after a push (the REST read lags the push) reads none, so the report may pass unchecked; unmeasured. An unquoted `echo git push ...` and `cd <missing dir> && git push` read as pushes, a rare false alarm. A `cd $VAR` is not resolved: the push reads the hook's cwd.
+
+A check that did not run reads `Push-CI guard: UNKNOWN, the check did not run` in the systemMessage, a note and never a block (rule `verification-report-unknown-reads`). It fires when the CI check raises, and when `guard.py` does not load on a turn that may push. Without the parser, a Bash command whose words hold git and push counts as a push for the note alone.
 
 Why: a session could report a push as done while its checks still ran or had failed.
 

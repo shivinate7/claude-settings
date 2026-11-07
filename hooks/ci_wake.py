@@ -282,8 +282,9 @@ def pr_fields(p):
             "state": "MERGED" if p.get("merged") or p.get("merged_at") else p["state"].upper()}
 
 
-def current_branch(cwd):
-    """The folder's branch, for `gh pr ready` with no selector. A detached HEAD names none."""
+def current_branch(cwd, timeout=READ_TIMEOUT):
+    """The folder's branch, for `gh pr ready` with no selector and for a push of `HEAD` (lint/report_guard.py, which
+    passes a timeout from its Budget). A detached HEAD names none."""
     try:
         import _nowindow
     except ImportError:
@@ -293,7 +294,7 @@ def current_branch(cwd):
         raise Unknown("git branch read failed: git is not on PATH")
     try:
         p = _nowindow.run([exe, "symbolic-ref", "--short", "-q", "HEAD"], cwd=cwd, stdin=subprocess.DEVNULL,
-                          capture_output=True, text=True, timeout=READ_TIMEOUT)
+                          capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as e:
         raise Unknown("git branch read failed: %s" % type(e).__name__)
     if p.returncode != 0 or not p.stdout.strip():
