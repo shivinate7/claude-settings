@@ -29,10 +29,53 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 
 - `items/<id>`: one per waiting item. The database key and the `id` field must be the same
   string. The page keys on the database key, and warns on an item whose `id` field is missing or
-  different. Fields: `id`, `n` (a stable number the owner answers by),
-  `kind` (`decision` or `task`), `status` (`open` or `closed`), `added` (ISO time), `ref` (each id
-  with its plain name), `title`, `short` (optional, 24 characters or fewer: the name on the wide left list; longer or missing, the list shows `title` cut with an ellipsis), `owner` (the session that reads the answer at its wake), `home` (the step, PR or
-  record the answer goes to; a step is its bare step id, so the roadmap upkeep row can match it), `context` (plain text, line breaks kept).
+  different. Each field, with the guard rules that judge it (the table is generated: `python3 skills/waiting-page/field_table.py`):
+
+  <!-- gen:item-fields -->
+  Guard rule `item-field-rendered` judges every field name: a write names only the fields below.
+
+  | Field | Guard rules | Meaning |
+  | --- | --- | --- |
+  | `id` |  | Same string as the database key; the page warns on a missing or different one. |
+  | `n` |  | A stable number the owner answers by. |
+  | `kind` | `port-question`, `question-form`, `task-names-check` | `decision` or `task`. |
+  | `status` | `question-form`, `rework-off-page` | `open` or `closed`. A closed item is exempt from the form rules. |
+  | `added` |  | ISO time the item was added. |
+  | `ref` |  | Each id with its plain name. |
+  | `title` | `option-letter-keys`, `port-question`, `press-link`, `rework-off-page` | The item's name. |
+  | `short` |  | Optional, 24 characters or fewer: the name on the wide left list. Longer or missing, the list shows `title` cut with an ellipsis. |
+  | `owner` |  | The session that reads the answer at its wake. |
+  | `home` |  | The step, PR or record the answer goes to. A step is its bare step id, so the roadmap upkeep row can match it. |
+  | `context` | `option-letter-keys`, `owner-judge`, `port-question`, `question-departs`, `question-form`, `rework-off-page`, `task-names-check` | Plain text, line breaks kept. Holds the question form's lines, the Departs from line and a task's Why yours line. |
+  | `holds` | `port-question` | One plain sentence: what is stopped until the answer. Puts the item in Blocking. Never on a port item. |
+  | `by` |  | An ISO deadline. Puts an item with no `holds` in Upcoming. |
+  | `stands` | `owner-judge`, `question-form` | `true` puts the item in the last section, Pick stands. |
+  | `arbiter` |  | `true` marks a ruling the arbiter decided. |
+  | `ruled` |  | ISO time of the ruling, on an arbiter item. |
+  | `rank` |  | Integer, lower first: the order inside a tier. Only the page's writer sets it. |
+  | `group` |  | A slug: the frame the item shares with the other items of that group (see `groups/<slug>`). |
+  | `port` | `port-question` | `true` marks a question about a port or redesign of an existing app; `false` where the word port means something else. |
+  | `look` |  | `true` marks a question about how something looks. Every option card with no picture then shows a warning. |
+  | `designs` |  | A list of `{slug, label, file}`: the mockups. An option names its picture with `design`. |
+  | `options` | `option-letter-keys`, `press-link`, `question-form`, `rework-off-page`, `uniform-pick` | A decision's list of `{key, label, how, gain, lose}`, plus optional `design`, `differs` and `widens`. |
+  | `pick` | `uniform-pick` | The key you recommend; a list of keys on a `multi` item. Never names a `widens` option. |
+  | `why` | `option-letter-keys`, `rework-off-page` | Why the pick. |
+  | `multi` |  | `true`: the options can all be done together; the owner ticks any number. |
+  | `ranked` |  | `true`: the owner also puts the ticked options in order. Implies `multi`. |
+  | `steps` | `command-in-item`, `option-letter-keys`, `press-link`, `rework-off-page` | A task's list of strings. |
+  | `links` | `press-link` | A task's list of `{label, url}`. A step that presses in a web app needs one. |
+  | `command` | `command-in-item`, `gh-login-switch` | A task's `{powershell, mac}`, two strings, shown in a closed disclosure with a Copy button. |
+  | `minutes` |  | A task's time: a number, or text such as `3 min`. |
+  | `reply` |  | What the session says back to a comment or a note. |
+  | `replied` |  | ISO time the writer last wrote `reply` or changed `waits`. Marks "New reply". |
+  | `lastAnswer` |  | The owner's last answer: `{choice, note, at}`, `{done, note, at}` or `{act: "park", note, at}`. |
+  | `lane` |  | The receiver's branch slug or tier, set when an answer takes the busy-lane path. |
+  | `waits` |  | `{repo, run}` or `{repo, pr}`: set while the item waits on that CI run or PR. |
+  <!-- /gen -->
+
+  - An update carries again every field that a guard judges together with the field it sets, because the guard cannot see the stored fields:
+    `options` with `pick`; each option's `links`, `gain` and `lose` with `options`; `links` with `steps`; the question form's lines with `context`
+    on a `decision`, and `kind: task` with `context` on a task; `port: true` with any update to a port item.
   - The page derives the tier from these fields. Never write a tier.
     - `holds` (one plain sentence: what is stopped until the answer) puts the item in Blocking.
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.
@@ -77,11 +120,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   - `widens: true` on an option marks one that widens what a shared tool accepts: a second accepted form,
     an allow-list entry or a per-repo exception. Its card shows "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo": a repo
     that differs from a shared format changes to match it. `pick` never names such an option, and a list `pick` never holds its key. The writer refuses
-    it (guard rule `uniform-pick`). An update that sets `pick` carries `options` again: the guard cannot see the stored field.
+    it (guard rule `uniform-pick`).
   - An option may carry `links` (a list of `{label, url}`): its card shows them, and each opens in a new tab. An option that
     asks the owner to press in a web app carries a link to that exact page (for a pull request or an issue, its number in the url).
-    The writer refuses it otherwise (guard rule `press-link`). An update that sets `options` carries each option's `links` again,
-    and an update that sets `steps` carries `links` again: the guard cannot see the stored fields.
+    The writer refuses it otherwise (guard rule `press-link`).
   - `look: true` marks a question about how something looks. Every option card with no picture then
     shows a warning. Never set it on any other question.
   - `designs` (a list of `{slug, label, file}`; the guard requires `file`) shows mockups (see "Add a design"). An option names its picture with `design` (a slug in `designs`),
@@ -98,9 +140,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
   - A decision carries the question form of rule `style-question-form`. The lines go in `context`, and each option has a non-empty
     `gain` and `lose`. `context` also has a line that starts "Departs from: <what on main> — <what changes>"; a change that restates main does not count. The writer refuses a decision without it (guard rules `question-form`, `owner-judge` and `question-departs`). A decision with
-    `status: "closed"` needs none; decision `question-form` holds the other exemptions. An update that
-    carries `kind: decision` and `context` carries the lines again, and one that carries `options` carries each `gain` and `lose` again:
-    the guard cannot see the stored fields.
+    `status: "closed"` needs none; decision `question-form` holds the other exemptions.
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`), `command` (`{powershell, mac}`, two
     strings) and `minutes` (a number, or text such as `3 min`). `powershell` is PowerShell 5.1-safe: no `&&`, `||`,
     `<<`, `<<<`, `/dev/null` or `export`. `mac` is bash or zsh. Never mix shells in one. The item shows each in a closed disclosure with a Copy
@@ -147,9 +187,9 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   instead. A note typed with no option picked is the same answer: `choice: "none"` plus the note.
   On an item whose pick stands, a note with no new pick sends the stood pick plus the note.
   A changed answer that the owner leaves empty is withdrawn: Send reads "Withdraw answer" and
-  deletes `answers/<id>`. The page re-reads the record first and leaves one that changed. A withdraw
-  has the same 8-second Undo as a Send, and tells no session. Undo (8 seconds after a Send) deletes the
-  records that Send wrote, or puts back the answer they replaced.
+  deletes `answers/<id>`. The page re-reads the record first and leaves one that changed. Undo
+  (for 8 seconds after a Send) deletes the records that Send wrote, or puts back the answer they replaced.
+  A withdraw has the same Undo as a Send, and tells no session.
   A Park press on an open decision or task card writes `{item, n, at, act: "park", note}`: no `choice`, no `done`, no `parked`.
   It goes to the page's writer ("Route and close"), because only the writer writes `meta/page`.
 - `answers/park.<id>`: the page writes it when the owner presses Send on a "Parked by you" line. Fields: `parked: true`,
@@ -171,7 +211,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   Send, Undo and wake comment as an ask. Its comment reads "Replied on the waiting page. Writer: <writer>. Ask <id> re <re id>,
   answered by <owner of the ask `re` names>: <text>." The asks
   of one Send share one `at`, and their ids rise in the order the owner typed them, so the id breaks the tie: the highest
-  id is the last typed. One Undo (8 seconds) deletes every ask of that Send; it checks the 8 seconds before each delete, and a Send waits until the Undo ends. One wake comment tells of the whole Send: "N asks:
+  id is the last typed. One Undo (see `answers/<id>`) deletes every ask of that Send; it checks the Undo window before each delete, and a Send waits until the Undo ends. One wake comment tells of the whole Send: "N asks:
   <id>: <text>; …", or "Ask <id>: <text>" for one. A session writes only `owner` (the session that has the ask), `read` (ISO time),
   `reply` (plain text, line breaks kept), `answered` (ISO time of `reply`), `home` and `filed` (where a feedback ask
   went, in plain words, and when). Never write `text` or `at`: ArtifactData writes as the owner, so this sentence is the only
@@ -406,11 +446,9 @@ live page.
      A question that changes nothing is not asked: act on main's behaviour.
    - On a port or redesign, write only a departure: set `port: true`, add the "Departs from:" line to `context`,
      and leave `holds` out. The work goes on with the existing app's behaviour meanwhile.
-     Carry `port: true` again on each update to a port item: the guard cannot see the stored field.
    - On a task, add the "Why yours:" line to `context` first. When the cloud refused the act, ask a
      session on the owner's computer before you write the task (`list_computer_folders`, then
      `request_computer_folder`), and name that outcome in the line. The writer refuses a task without it.
-     Carry `kind: task` again on a `context` update: the guard cannot see the stored field.
    - Fill `holds` (never on a port item) whenever a lane, a merge or a PR waits on the answer. Never guess an urgency:
      with nothing waiting, leave `holds` out.
    - Fill `by` when something reads the answer at a set time.
@@ -445,7 +483,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   items also rewrites each item's `owner` to itself: `owner` is the session that reads the answer.
   It stops watching (`ArtifactComments` action `watch` with `on: false` and the page URL) when it
   has no open item and is not the writer, and at step 1 of a project-ops rotation.
-- The owner can Undo a Send for 8 seconds, and Undo deletes the answers. Wait 10 seconds after an
+- Undo deletes the answers it takes back (see `answers/<id>`). Wait 10 seconds after an
   answer's `at` before you route it. An "Undone on the waiting page" notice withdraws the items it
   names.
 - On a comment wake, read `answers/` for your own items only (by `owner` and `n`). Route them as
