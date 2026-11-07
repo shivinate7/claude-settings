@@ -1455,11 +1455,6 @@ class PinnedSettings(Job):
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
         return done.returncode, lines, done.stdout + done.stderr
 
-    @staticmethod
-    def verdict_of(lines, name):
-        line = line_of(lines, name)
-        return line.split()[0] if line else None
-
     def test_a_step_reads_the_pinned_tree_and_its_twin_reads_the_local_one(self):
         self.settings()
         rc, lines, out = self.run_pinned(
@@ -1467,9 +1462,9 @@ class PinnedSettings(Job):
             step("read pinned marker", READ_PINNED),
             step("read local marker", READ_LOCAL),
             args=("--step", "read pinned marker", "--step", "read local marker"))
-        self.assertEqual(self.verdict_of(lines, "read pinned marker"), "PASS",
+        self.assertEqual(by_step(lines).get("read pinned marker"), "PASS",
                          "the pinned step failed: it did not read the pinned tree\n" + out)
-        self.assertEqual(self.verdict_of(lines, "read local marker"), "FAIL",
+        self.assertEqual(by_step(lines).get("read local marker"), "FAIL",
                          "the local twin passed: the step read the local tree, not the pinned one\n" + out)
 
     def test_one_real_pin_past_repeats_comments_and_run_text_still_pins_the_tree(self):
@@ -1481,9 +1476,10 @@ class PinnedSettings(Job):
             step("notes", 'echo "# uses: shivinate7/claude-settings/actions/code-check@%s"\necho "don\'t stop"' % self.sha_b),
             step("read pinned marker", READ_PINNED),
             args=("--step", "read pinned marker"))
-        self.assertEqual(self.verdict_of(lines, "read pinned marker"), "PASS",
-                         "the scan counted something other than one real pin: " + str(line_of(lines, "read pinned marker"))
-                         + "\n" + out)
+        self.assertNotEqual(by_step(lines).get("read pinned marker"), "unknown",
+                            "the pin scan counted more than one pin: " + str(line_of(lines, "read pinned marker")))
+        self.assertEqual(by_step(lines).get("read pinned marker"), "PASS",
+                         "the step did not read the pinned tree (one pin, comments and run text ignored):\n" + out)
 
     def test_two_distinct_pins_make_every_named_step_unknown_and_run_none(self):
         self.settings()
@@ -1493,7 +1489,7 @@ class PinnedSettings(Job):
             step("one", "echo one > one.txt"),
             step("two", "echo two > two.txt"),
             args=("--step", "one", "--step", "two"))
-        self.assertEqual((rc, self.verdict_of(lines, "one"), self.verdict_of(lines, "two")), (2, "unknown", "unknown"),
+        self.assertEqual((rc, by_step(lines).get("one"), by_step(lines).get("two")), (2, "unknown", "unknown"),
                          "two distinct pins must make each named step unknown, exit 2:\n" + out)
         self.assertIn("pin", (line_of(lines, "one") or "").lower(), "the unknown line must name the pins: " + out)
         for name in ("one.txt", "two.txt"):
@@ -1505,7 +1501,7 @@ class PinnedSettings(Job):
             step("pin", uses=PIN_USES % "main"),
             step("write", "echo ran > ran.txt"),
             args=("--step", "write"))
-        self.assertEqual((rc, self.verdict_of(lines, "write")), (2, "unknown"),
+        self.assertEqual((rc, by_step(lines).get("write")), (2, "unknown"),
                          "a pin on @main must make the named step unknown, exit 2:\n" + out)
         line = line_of(lines, "write") or ""
         self.assertTrue("main" in line or "sha" in line.lower(), "the unknown line must name the ref: " + line)
@@ -1517,7 +1513,7 @@ class PinnedSettings(Job):
             step("pin", uses=PIN_USES % ABSENT_SHA),
             step("write", "echo ran > ran.txt"),
             args=("--step", "write"))
-        self.assertEqual((rc, self.verdict_of(lines, "write")), (2, "unknown"),
+        self.assertEqual((rc, by_step(lines).get("write")), (2, "unknown"),
                          "a pin that cannot be fetched must make the named step unknown, exit 2:\n" + out)
         line = line_of(lines, "write") or ""
         self.assertTrue("fetch" in line.lower() or ABSENT_SHA in line, "the unknown line must name the fetch: " + line)
@@ -1528,7 +1524,7 @@ class PinnedSettings(Job):
         rc, lines, out = self.run_pinned(
             step("plain", 'test "$CLAUDE_SETTINGS_DIR" = "%s"' % self.decoy),
             args=("--step", "plain"))
-        self.assertEqual((rc, self.verdict_of(lines, "plain")), (0, "PASS"),
+        self.assertEqual((rc, by_step(lines).get("plain")), (0, "PASS"),
                          "with no pin, ci-job must not change CLAUDE_SETTINGS_DIR:\n" + out)
 
     def test_a_plain_run_with_a_pin_leaves_the_settings_dir_alone(self):  # control: --step alone pins, not a plain run
@@ -1536,7 +1532,7 @@ class PinnedSettings(Job):
         rc, lines, out = self.run_pinned(
             step("pin", uses=PIN_USES % self.sha_a),
             step("plain", 'test "$CLAUDE_SETTINGS_DIR" = "%s"' % self.decoy))
-        self.assertEqual(self.verdict_of(lines, "plain"), "PASS",
+        self.assertEqual(by_step(lines).get("plain"), "PASS",
                          "a plain run must not set CLAUDE_SETTINGS_DIR to the pinned tree:\n" + out)
 
     def test_the_pinned_tree_is_gone_after_the_run(self):
@@ -1563,9 +1559,9 @@ class PinnedSettings(Job):
             step("own env", 'test "$CLAUDE_SETTINGS_DIR" = own-env-x', env={"CLAUDE_SETTINGS_DIR": "own-env-x"}),
             step("no env", READ_PINNED),
             args=("--step", "own env", "--step", "no env"))
-        self.assertEqual(self.verdict_of(lines, "own env"), "PASS",
+        self.assertEqual(by_step(lines).get("own env"), "PASS",
                          "a step's own env: CLAUDE_SETTINGS_DIR was replaced:\n" + out)
-        self.assertEqual(self.verdict_of(lines, "no env"), "PASS",
+        self.assertEqual(by_step(lines).get("no env"), "PASS",
                          "a step without env: did not read the pinned tree:\n" + out)
 
     def test_a_remote_code_check_runs_from_the_pinned_tree_only(self):
@@ -1588,9 +1584,10 @@ class PinnedSettings(Job):
             step("pin", uses=PIN_USES % self.sha_a),
             step("read pinned marker", READ_PINNED),
             args=("--step", "read pinned marker"))
-        self.assertEqual(self.verdict_of(lines, "read pinned marker"), "PASS",
-                         "the pin was not fetched from its origin and read: " + str(line_of(lines, "read pinned marker"))
-                         + "\n" + out)
+        self.assertNotEqual(by_step(lines).get("read pinned marker"), "unknown",
+                            "the pin was not fetched from its origin: " + str(line_of(lines, "read pinned marker")))
+        self.assertEqual(by_step(lines).get("read pinned marker"), "PASS",
+                         "the step did not read the fetched pin's tree:\n" + out)
 
 
 if __name__ == "__main__":
