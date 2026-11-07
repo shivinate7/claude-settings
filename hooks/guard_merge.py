@@ -7,6 +7,7 @@ import fnmatch
 import json
 import os
 import re
+from datetime import datetime, timedelta, timezone
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
@@ -1127,6 +1128,54 @@ def brief_hit(tool: str, tool_input, transcript: str):
     if step not in steps:
         return "lane brief for step " + str(step) + " to a lane with no topic tag", BRIEF_STEP_REASON
     return None
+
+
+# ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)
+STAMP_LIMIT_MINUTES = 3  # a header stamp this far off the clock, ahead or behind, passes; one more minute is refused
+# A header is a label of 1 to 3 words, `,` or `:`, an optional date, then `HH:MM CST|CDT`. Anything may follow.
+_STAMP_HEADER = re.compile(
+    _MARKDOWN_LEAD + r"[^\s,:]+(?:\s+[^\s,:]+){0,2}[,:]\s*(?:(?P<date>\d{4}-\d{2}-\d{2})\s+)?"
+    r"(?P<hour>\d{2}):(?P<minute>\d{2})\s+(?P<zone>CST|CDT)\b")
+_STAMP_OFFSET_HOURS = {"CST": -6, "CDT": -5}
+STAMP_REASON = (
+    "this message's header stamp is {off} minutes off the clock, and the limit is " + str(STAMP_LIMIT_MINUTES) + ". "
+    "The time is {now}: re-stamp the header with that time, then send it again."
+)
+
+
+def stamp_hit(tool: str, tool_input):
+    """Return (matched, reason) when this send_message opens with a header stamp more than STAMP_LIMIT_MINUTES
+    off the clock, else None. Only the first non-blank line is read, and only its header stamp. A dated stamp is
+    compared as an instant with its zone's offset; an undated one as minute of day modulo 1440, in its own zone.
+    The clock is local_time.clock(), and the reason's time comes from local_time.central_hhmm: one home of the
+    clock and its DST rule. Cost: one clock read, no transcript, no file, no process. Fails open: the stamp is
+    advice about a time, so a missing clock module or an impossible date lets the message through."""
+    if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
+        return None
+    message = tool_input.get("message")
+    first = next((ln.strip() for ln in message.splitlines() if ln.strip()), "") if isinstance(message, str) else ""
+    found = _STAMP_HEADER.match(first)
+    if not found:
+        return None
+    try:
+        import local_time
+        now = local_time.clock()
+        zone = timezone(timedelta(hours=_STAMP_OFFSET_HOURS[found.group("zone")]))
+        hour, minute = int(found.group("hour")), int(found.group("minute"))
+        if found.group("date"):
+            stamped = datetime.fromisoformat(found.group("date")).replace(hour=hour, minute=minute, tzinfo=zone)
+            off = abs(round((stamped - now).total_seconds() / 60))
+        else:
+            if hour > 23 or minute > 59:
+                return None
+            there = now.astimezone(zone)
+            gap = abs(hour * 60 + minute - (there.hour * 60 + there.minute)) % 1440
+            off = min(gap, 1440 - gap)
+        if off <= STAMP_LIMIT_MINUTES:
+            return None
+        return "header stamp " + found.group(0).strip(), STAMP_REASON.format(off=off, now=local_time.central_hhmm(now))
+    except (ImportError, ValueError, OverflowError):
+        return None
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
