@@ -379,8 +379,8 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
-            conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            DRAFT_PR_REASON, MERGE_TOOLS, RAW_ROLE_REASON, RECORDS_PAGE_REASON, ROLE_REASON,
+            conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, raw_role_hit, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
@@ -3541,6 +3541,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "gh pr merge " + merging[0] + " " + verdict)
+        # A green head from a cloud session the merge tool would refuse by role (rule merge-role-raw); before the ask.
+        if raw_role_hit(transcript):
+            refuse(tool, "deny", "merge-role-raw", RAW_ROLE_REASON, "gh pr merge " + merging[0])
         # A green bare merge in a repo that uses the merge tool asks; a deny above still wins.
         if cite_where and uses_merge_tool(cite_where):
             ask_command("bare-merge", BARE_MERGE_REASON, "gh pr merge " + merging[0], "bare merge")
@@ -4867,6 +4870,9 @@ def judge(payload) -> None:
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "merge tool " + verdict)
+        merge_transcript = payload.get("transcript_path")
+        if raw_role_hit(merge_transcript if isinstance(merge_transcript, str) else ""):  # rule merge-role-raw
+            refuse(tool, "deny", "merge-role-raw", RAW_ROLE_REASON, "merge tool")
 
     # The MCP create tool carries its own `draft` field.
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:

@@ -10,7 +10,7 @@ import re
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
-    git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    git_calls, inline_script, inner_commands, is_cloud, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -797,8 +797,17 @@ def conflict_markers_hit(stripped: str, cwd: str):
 
 
 # ---- merge --role: the tier is read from this session's own get_session record
-ROLE_TIERS = ("batch-runner",)
 ROLE_TAG_PREFIX = "cs-build:"
+
+
+def merge_roles():
+    """The tiers that may merge, read from the merge tool's own MERGE_ROLES (merge/merge.py), never copied here.
+    Empty when the tool cannot be loaded, so every tier then fails closed."""
+    module = merge_module()
+    roles = getattr(module, "MERGE_ROLES", None) if module else None
+    return frozenset(roles) if isinstance(roles, (set, frozenset, tuple, list)) else frozenset()
+
+
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
     "If this session is the batch runner: run get_session (no argument) alone in its own "
@@ -862,12 +871,50 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
             own_id = remote_session_id()
             if own_id and transcript:
                 tags = _own_get_session_tags(transcript, own_id)
-                if tier in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + tier in tags:
+                if tier in merge_roles() and tags is not None and ROLE_TAG_PREFIX + tier in tags:
                     continue
         except Exception:
             pass
         return "merge role " + tier
     return ""
+
+
+# ---- a raw merge outside the merge tool: the same role check the tool applies before a confirm (rule merge-role-raw)
+RAW_ROLE_REASON = (
+    "merge-role-raw: this session's own record does not prove a tier that may merge. In a cloud session only the "
+    "batch runner merges, and the merge tool refuses every other tier before a confirm; a raw `gh pr merge` or the "
+    "host's merge tool gets the same refusal. If this session is the batch runner: run get_session (no argument) alone in "
+    "its own turn, then retry. Any other session: post the review record on the PR for your branch; the batch runner "
+    "finds it (list_sessions, tag cs-build:batch-runner, same cs-repo, names the runner). "
+    "(decision session-tiers, the coordinator never merges; decision merge-practices)"
+)
+
+
+def raw_role_hit(transcript: str) -> bool:
+    """True when a raw merge in a cloud session comes from a session the merge tool would refuse. Local sessions are never
+    refused here: the tool's role check runs in the cloud only. A role the tool records for this session
+    (read_merge_role) allows. Otherwise the own get_session record decides: it must be readable and current, and carry no
+    cs-build tier outside MERGE_ROLES. A session with no cs-build tag keeps today's verdict. Fails closed: an unreadable
+    record, a missing id or any error is a refusal, because the guard-wide crash path fails open.
+    Cost: one module read, one small file read, and one transcript read, only on a cloud merge."""
+    if not is_cloud():
+        return False
+    try:
+        module = merge_module()
+        if module is not None and module.read_merge_role():
+            return False
+        from override import remote_session_id
+        own_id = remote_session_id()
+        roles = merge_roles()
+        if own_id and transcript and roles:
+            tags, tagged_after = _own_session_read(transcript, own_id)
+            if tags is not None and not tagged_after:
+                tiers = [str(t)[len(ROLE_TAG_PREFIX):] for t in tags if str(t).startswith(ROLE_TAG_PREFIX)]
+                if all(tier in roles for tier in tiers):
+                    return False
+    except Exception:
+        pass
+    return True
 
 
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
