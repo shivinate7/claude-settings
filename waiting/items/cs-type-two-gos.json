@@ -19,8 +19,8 @@
   "owner": "coordinator",
   "rank": 1,
   "ref": "item 352; item 350; items 257 and 278; steps lease-push-c-and-d and auto-mode-middle-ground",
-  "short": "Type 1 go in lease-push-c-and-d",
+  "short": "Lease go withdrawn? Confirm in lease-push-c-and-d",
   "status": "open",
   "title": "Type one go line in lane lease-push-c-and-d's chat",
-  "why": "You pressed Done at 13:41 CST, but no go line was typed in lane lease-push-c-and-d's chat after 13:28 CST (coordinator, 13:46 CST). A settings.json change needs words you type in the acting session's own chat, so pressing Done here cannot grant it. The lease push entry is already done: you typed its go at 13:28 CST, and PR #1429 builds it."
+  "why": "Not granted. At 14:43 CST you typed \"disregard that command - accident\" in lane lease-push-c-and-d. The lane reads that as withdrawing your 13:28 CST go for the lease push entry. So nothing here counts as granted until you confirm in that lane's chat. Runner 8 holds PR #1429 (the lease push entry) and PR #1316 stays held. Two things are open in that chat: (1) confirm or withdraw the 13:28 CST lease go; (2) the line below, which you have not typed yet. A settings.json change needs words you type in the acting session's own chat, so pressing Done here cannot grant it."
 }
