@@ -199,6 +199,15 @@ Other tools, in `judge` order:
                        shorthand key is not seen. A regex literal after `)`, `return` or
                        `typeof` that holds a quote can hide an `agent()` call.
                        (agent-model-cap)
+  brief-claim-has-probe
+                       deny. An Agent or Task brief to a builder or a test-author with a sentence that says what
+                       `main`, `origin/main` or `today` passes, allows, accepts or refuses (subject word, up to
+                       four words, then the verb; any case) for a backticked input, when no command line names that
+                       input with a result line right under it. A command line is a line of its own in a fence, in
+                       backticks, or after `$ `, led by python, python3, git, verdict, bash, sh, node, npm, npx, pytest,
+                       gh, grep, rg or jq. Only backticks open an input; a lone one reads to the line's end. A claim
+                       sentence with no backticked input is not judged. Other roles pass. An override lifts it.
+                       (brief-claim-has-probe)
   lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose prompt is
                        not exactly `/effort medium` (LANE_EFFORT), with no trimming. A lane tag is
                        any tag that, stripped and casefolded, is `cs-build:lane`; `tags` may be a
@@ -2565,6 +2574,111 @@ def builder_third_round(brief) -> bool:
     return any(kind.lower() in BUILDER_MARKERS and n == "3" for kind, n in brief_markers(brief))
 
 
+# BRIEF CLAIMS NEED A PROBE (rule brief-claim-has-probe, decision brief-claim-has-probe). A brief to a builder or a
+# test-author that says what main, origin/main or "today" passes, allows, accepts or refuses for an input must carry the
+# probe that showed it: a command line that names the input, and a result line under it. The scan reads the brief in one
+# pass, line by line, and only backticks open an input, so a lone quote or a lone backtick (read to the line's end) can
+# hide nothing. A claim is a sentence with a subject word, up to four words, then the verb; its inputs are the code spans
+# after the verb, else every span in the sentence. A sentence with no span names no input and is not judged. Cost: pure
+# text work inside the one guard call. No process, no file.
+BRIEF_CLAIM_ROLES = ("builder", "test-author")
+BRIEF_CLAIM_CLAUSE = re.compile(
+    r"(?<![\w/.-])(?:origin/main|main|today)(?![\w/-])(?!\.\w)(?:\s+\S+){0,4}?\s+"
+    r"(?:passes|passed|allows|allowed|accepts|accepted|refuses|refused)\b", re.IGNORECASE)
+BRIEF_CLAIM_SPAN = re.compile(r"(`+)(.+?)\1(?!`)|`+(.*)$")   # a closed span, else a lone backtick up to the line's end
+BRIEF_CLAIM_MASK = re.compile(r"\x00(\d+)\x00")
+BRIEF_CLAIM_COMMAND = re.compile(
+    r"(?:\S*/)?(?:python3?|git|verdict|bash|sh|node|npm|npx|pytest|gh|grep|rg|jq)(?=\s|$)")
+BRIEF_CLAIM_INLINE = re.compile(r"`([^`]+)`(.*)$")
+BRIEF_CLAIM_REASON = (
+    "The brief says what main, origin/main or today does with an input, and carries no probe for it. Add the probe, "
+    "or drop the claim. The probe is the command you ran, on a line of its own, that names the input (in a fence, in "
+    "backticks, or after `$ `): for example `python3 ...`, `git show origin/main:<path>` piped into it, or "
+    "`verdict ...`; and its result line right under it. The input with no probe: %s. "
+    "(decision brief-claim-has-probe, a brief's claim about main carries the probe that showed it)"
+)
+
+
+def _claim_rows(brief: str) -> list:
+    """The rows of a brief, in line order, for brief_claim_gaps: ("claim", [inputs]), ("cmd", text, result or None),
+    ("out", text) and ("fence", None). A result is only the row right after its command, so a fence marker or another
+    claim ends it. A fence marker with no partner is a plain line."""
+    lines = brief.split("\n")
+    marks = [i for i, line in enumerate(lines) if line.strip().startswith("```")]
+    if len(marks) % 2:
+        marks.pop()
+    marks = set(marks)
+    rows, fenced = [], False
+    for i, line in enumerate(lines):
+        if i in marks:
+            fenced = not fenced
+            rows.append(("fence", None))
+            continue
+        text = line.strip()
+        if not text:
+            continue
+        if fenced:
+            rows.append(("cmd", text, None) if BRIEF_CLAIM_COMMAND.match(text.lstrip("$> ")) else ("out", text))
+            continue
+        inline = BRIEF_CLAIM_INLINE.match(text) if text.startswith("`") else None
+        if inline and BRIEF_CLAIM_COMMAND.match(inline.group(1).lstrip("$> ")):
+            rows.append(("cmd", inline.group(1), inline.group(2).strip(" -:=>–—→") or None))
+            continue
+        if text[:2] in ("$ ", "> ") and BRIEF_CLAIM_COMMAND.match(text[2:].lstrip()):
+            rows.append(("cmd", text[2:], None))
+            continue
+        spans = []
+
+        def mask(hit):
+            spans.append((hit.group(2) if hit.group(1) else hit.group(3) or "").strip())
+            return "\x00%d\x00" % (len(spans) - 1)
+
+        plain = BRIEF_CLAIM_SPAN.sub(mask, text)
+        inputs = []
+        for sentence in re.split(r"(?<=[.!?;])\s+", plain):
+            clause = BRIEF_CLAIM_CLAUSE.search(sentence)
+            if not clause:
+                continue
+            after = [int(m.group(1)) for m in BRIEF_CLAIM_MASK.finditer(sentence, clause.end())]
+            near = after or [int(m.group(1)) for m in BRIEF_CLAIM_MASK.finditer(sentence)]
+            inputs.extend(spans[n] for n in near if spans[n])
+        rows.append(("claim", inputs) if inputs else ("out", text))
+    return rows
+
+
+def brief_claim_gaps(brief) -> list:
+    """The inputs a brief claims something about for main or today, with no probe, in the order claimed. An input has a
+    probe when a command line holds it, or the result line right under that command does, and that result line is
+    there. A brief that is not text claims nothing. Pure."""
+    if not isinstance(brief, str):
+        return []
+    rows = _claim_rows(brief)
+    probes = []
+    for i, row in enumerate(rows):
+        if row[0] != "cmd":
+            continue
+        result = row[2]
+        if result is None and i + 1 < len(rows) and rows[i + 1][0] == "out":
+            result = rows[i + 1][1]
+        if result is not None:
+            probes.append(" ".join((row[1] + " " + result).split()))
+    gaps = []
+    for row in rows:
+        for item in row[1] if row[0] == "claim" else ():
+            key = " ".join(item.split())
+            if item not in gaps and not any(key in probe for probe in probes):
+                gaps.append(item)
+    return gaps
+
+
+def brief_claim_hit(tool: str, tool_input) -> str:
+    """The first input an Agent or Task brief to a builder or a test-author claims about main with no probe, or ""."""
+    if tool not in SPAWN_TOOLS or role_key(tool_input.get("subagent_type")) not in BRIEF_CLAIM_ROLES:
+        return ""
+    gaps = brief_claim_gaps(tool_input.get("prompt"))
+    return gaps[0] if gaps else ""
+
+
 # A Workflow agent() call is read statically; one whose prompt or model the scan cannot read passes.
 def step_up_hit(tool: str, tool_input) -> str:
     """The step-up reason for a spawn whose marker and model disagree, or "". Only a line
@@ -4858,6 +4972,13 @@ def judge(payload) -> None:
                   if opus_unread else ""),
                opus_model,
                spawn_role=opus_role or "general-purpose")
+
+    # 9e. A builder's or test-author's brief that claims what main or today does with an input carries the probe that
+    # showed it (rule brief-claim-has-probe). An override lifts it: the owner may mean the brief as it stands.
+    claimed = brief_claim_hit(tool, tool_input)
+    if claimed:
+        refuse(tool, "deny", "brief-claim-has-probe", BRIEF_CLAIM_REASON % ("`" + claimed[:120].replace("`", "'") + "`"),
+               claimed[:120])
 
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
     if tool in MERGE_TOOLS:
