@@ -50,7 +50,8 @@
 # `<owner>/claude-settings/actions/<name>@<sha>` uses: lines (lint/workflow_steps.py settings_pins), checked out as a
 # detached worktree of CI_JOB_SETTINGS_CLONE, else this file's own clone, else the clone the global rules file names;
 # the sha is fetched from that clone's origin when it lacks it. Each named step gets CLAUDE_SETTINGS_DIR set to that
-# tree (the step's own env: wins), and a remote code-check or zizmor action is read from it only. With no pin, a step
+# tree (the step's own env: wins), and a remote ste-lint, code-check or zizmor action runs from it only (ste-lint as its
+# bin/ste-changed). With no pin, a step
 # runs as before. Two pinned refs, a ref that is no sha, a sha that cannot be fetched or a failed `npm ci` makes each
 # named step one `unknown` line naming the reason, exit 2, and none runs. The worktree is removed on every exit.
 # --plan prints each step's verdict-to-be and runs nothing. Output of each run: $VERDICT_LOG, else one new
@@ -319,7 +320,12 @@ def plan(step, pr, values, top, pinned=None):
             if not path:
                 return "unknown", "no code_check.py: looked for %s" % looked, None, None, None
             return "run", 'python3 "%s" --base "%s"' % (slashed(path), values["base"]), shell_argv(None), {}, None
-        return "run", '"%s" "%s"' % (slashed(os.path.join(BIN, "ste-changed")), values["base"]), shell_argv(None), {}, None
+        ste = os.path.join(BIN, "ste-changed")
+        if pinned and not LOCAL_ACTION.fullmatch(uses(step)):  # CI runs the pinned commit's lint, so its command is the one to run
+            ste, looked = action_file(top, step, os.path.join("bin", "ste-changed"), pinned)
+            if not ste:
+                return "unknown", "no bin/ste-changed in the pinned tree: looked for %s" % looked, None, None, None
+        return "run", '"%s" "%s"' % (slashed(ste), values["base"]), shell_argv(None), {}, None
     if step_key(step, "uses") is not None:
         return "not run locally", "an action (uses: %s); CI runs it" % step_key(step, "uses").split(" #")[0], None, None, None
     cond = condition(step_key(step, "if"), pr)
