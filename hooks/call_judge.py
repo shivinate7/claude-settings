@@ -44,7 +44,7 @@ Stop hook's): Sonnet, item 8 alone, PAST_RULING_TIMEOUT s.
   whoever the target is. A refusal is rule `past-ruling`. Any other send exits before a heavy import. The form lines
   are read outside code, after the marks a page uses (bold, bullet, quote) are cut. Cap rule (send_question): a
   message over report_guard.ASK_TEXT_MAX characters goes as that many characters from its first form line, so the
-  Goal and Problem lines always reach the call; the `Unvetted:` line is read in the whole message.
+  text sent starts at the first form line; the `Unvetted:` line is read in the whole message.
 When the check cannot run (a model error, a source that exists and cannot be read, or a refusal that cites a record
 the model was not shown), the question is refused with the Unvetted remedy, unless its own text carries an
 `Unvetted:` line. An absent source allows, with one stderr line.
@@ -403,17 +403,20 @@ def past_ruling_context(payload, units):
 PAST_RULING_RULE_NAME = "past-ruling"  # question_form.PAST_RULING_RULE, here so a send needs no import to name it
 
 
-def past_ruling_check(payload, asked, marked):
+def past_ruling_check(payload, asked, marked, tool=None):
     """The dedicated past-ruling call (item 8 alone) for the question text `asked`: (rule, refusal text), or None when
     nothing settles it. The one judge is lint/report_guard.py past_ruling_problem, also the Stop hook's: it makes the git
     read and the Sonnet call, and its text is the relay remedy, or the Unvetted remedy for a check that could not run
-    (unless `marked`: every question in the call carries its own `Unvetted:` line). `asked` is sent whole."""
+    (unless `marked`: every question in the call carries its own `Unvetted:` line). `asked` is sent whole. For a page
+    write (`tool` is the data tool) the Unvetted remedy also says where the line goes."""
     sys.path.insert(0, os.path.join(HERE, "..", "lint"))
     import report_guard
     problem = report_guard.past_ruling_problem(asked, payload.get("cwd") or "", marked)
     if not problem:
         return None
     relay = problem.startswith(report_guard.RELAY_RULE_REASON.split("%", 1)[0])
+    if not relay and tool == DATA_TOOL:
+        problem += " For a page item, put the line in `context`."
     return (PAST_RULING_RULE_NAME if relay else QUESTION_RULE), problem
 
 
@@ -421,8 +424,8 @@ def send_question(message):
     """(text for the dedicated call, whether its Unvetted line is there) for a send that is an owner question: a Goal
     line and a stake Problem line in its prose, else None. Plain string tests first, so a send without the form never
     imports question_form or report_guard. The form lines are read after the marks a page uses are cut (`**`, `*`, `_`,
-    a list bullet; prose_lines cuts `>`), and outside a code fence, an indented block and a code span's line, through
-    report_guard.prose_lines, the one reader of what is code. question_form's regexes are unchanged.
+    a list bullet; prose_lines cuts `>`), and outside a code fence, through report_guard.prose_lines, the one reader
+    of what is code. question_form's regexes are unchanged.
     The cap rule: a message up to report_guard.ASK_TEXT_MAX characters goes whole. A longer one goes as the
     ASK_TEXT_MAX characters that start at its first form line (the first Goal or Problem line), because the question
     sits there and the tail of a long send is its log. The `Unvetted:` line is read in the whole message."""
@@ -498,7 +501,7 @@ def main():
             units = question_form.page_units(judged)
             # Every write's text goes to the dedicated call, uncut. Each question needs its own Unvetted line.
             found = past_ruling_check(payload, "\n".join(words for _, words in units),
-                                      all(question_form.has_unvetted(marker) for marker, _ in units))
+                                      all(question_form.has_unvetted(marker) for marker, _ in units), tool)
             if found:  # item 8 refused it, or could not run: no form-judge call
                 return refuse(payload, tool, args, found[0], found[1])
             reask = any(is_reask(w) for w in judged)
