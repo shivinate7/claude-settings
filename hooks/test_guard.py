@@ -7337,6 +7337,19 @@ sh("delete: pwsh -Command of a PowerShell delete at a drive root still denies",
    'pwsh -Command "Remove-Item -Recurse -Force C:/"', "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: pwsh -Command of a PowerShell delete at a drive root with no -Force denies",
    'pwsh -Command "Remove-Item -Recurse C:/"', "deny", "destructive-delete", cwd=NOGIT)
+# THE SPLIT-FLAG DELETE IN A WRAPPER'S STRING. parallel, script -qc, watch and runuser each run their quoted
+# text as a shell command, so `rm -r -f .` inside the quotes deletes the working folder, as bash -c's does.
+for _name, _command in (
+    ("parallel", 'parallel "rm -r -f ." ::: a'),
+    ("script -qc", 'script -qc "rm -r -f ." /dev/null'),
+    ("watch", 'watch "rm -r -f ."'),
+    ("runuser -c", 'runuser -c "rm -r -f ." u'),
+):
+    sh("delete: the split-flag rm at the working folder behind " + _name + " denies", _command, "deny",
+       "destructive-delete", cwd=NOGIT)
+# A single-quoted substitution is text, as the echo of the split-flag rm above is. It runs nothing.
+sh("delete: an echo of a single-quoted $(rm -r -f .) calls nothing",
+   "echo '$(rm -r -f .)'", "allow", cwd=NOGIT)
 # A LIVE SUBSTITUTION INSIDE DOUBLE QUOTES. `"$( )"` runs the command inside it, so a delete there is a
 # command, not text. The echo cases above stay allowed, since their delete is not inside `$( )`. A `#`, a
 # line break or a lone apostrophe around the substitution does not hide it.
@@ -11674,6 +11687,13 @@ sh("frozen amp: cp FROM a frozen hook to scratch with &> to a build log is still
    "cp " + CFG_HOOK + " /tmp/x &> /tmp/build.log", "allow", cwd=NOGIT)
 sh("frozen amp: cp onto a frozen hook with &> to a build log stays denied",
    "cp /tmp/x.py " + CFG_HOOK + " &> /tmp/build.log", "deny", "frozen-path", cwd=NOGIT)
+# THE LONE >& REDIRECT. `>&` sends both streams to a file, as `&>` does. A copy FROM a frozen hook with `>&` to a
+# build log reads the frozen file and writes scratch, so it is allowed. A copy onto a frozen hook with the same
+# redirect still denies.
+sh("frozen amp: cp FROM a frozen hook to scratch with >& to a build log is still a read",
+   "cp " + CFG_HOOK + " /tmp/x >& /tmp/l", "allow", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with >& to a build log stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " >& /tmp/l", "deny", "frozen-path", cwd=NOGIT)
 
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
@@ -13131,6 +13151,25 @@ sh("builder join: a temp folder from mkstemp joined to hooks in python -c is all
    "allow", **B)
 sh("builder join: a temp folder from TemporaryDirectory joined to hooks in python -c is allowed",
    '''python3 -c "import os, tempfile; with tempfile.TemporaryDirectory() as tmp: open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+# THE dir= ARGUMENT OF mkdtemp. `dir='.'` and `dir=os.getcwd()` put the temp folder in the working folder, so a
+# join to tests from it is a repo test path and refuses. Only the system temp folder is no repo folder. The inline
+# join from the same call refuses too. A bare mkdtemp() inline stays allowed, as its held form does.
+sh("builder join: a temp folder from mkdtemp(dir='.') held in a variable, joined to tests still refuses",
+   '''python3 -c "import os, tempfile; d = tempfile.mkdtemp(dir='.'); open(os.path.join(d, 'tests', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp(dir=os.getcwd()) held in a variable, joined to tests still refuses",
+   '''python3 -c "import os, tempfile; d = tempfile.mkdtemp(dir=os.getcwd()); open(os.path.join(d, 'tests', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp(dir='.') joined inline to tests still refuses",
+   '''python3 -c "import os, tempfile; open(os.path.join(tempfile.mkdtemp(dir='.'), 'tests', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp() joined inline to tests is allowed",
+   '''python3 -c "import os, tempfile; open(os.path.join(tempfile.mkdtemp(), 'tests', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+# A TemporaryDirectory held in a variable and joined through its .name is still a system temp folder: allowed.
+sh("builder join: a TemporaryDirectory held in a variable, joined through .name to tests is allowed",
+   '''python3 -c "import os, tempfile; td = tempfile.TemporaryDirectory(); open(os.path.join(td.name, 'tests', 'test_x.py'), 'w')"''',
    "allow", **B)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
