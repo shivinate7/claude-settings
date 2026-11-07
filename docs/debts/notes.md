@@ -64,6 +64,7 @@
 - git-env-lower-case-fold: lower-case git env names fold to the rule; no record names this as accepted (guard hooks)
 - git-env-set-indirect-forms: indirect sets (function wrapper, iex, EncodedCommand, run-time names) pass the git-env guard (hooks/guard_kill.py)
 - git-env-set-untested-forms: no case pins the PowerShell backtick escape, group-opener pattern or heredoc quote text (hooks/test_guard.py)
+- git-env-stored-printed-block: a printed block stored and never called (`$b = Write-Output {...}` with a set inside) is refused by git-env, as on main, while the waiter allows the same shape. Fix: none — the narrowest change passes no later text to the git-env walk; refusing is the safe side, and no case asks for the allow (hooks/guard_core.py block_is_printed)
 - git-env-warn-session-start: the git env warning runs at session start only, so mid-session damage shows at next start (guard hooks)
 - glued-subshell-unread: (rm -rf .) and x=$(tail -f y) pass because the closing parenthesis is glued to the last word (guard_push_delete, guard_stream)
 - guard-abtests-test-path: native/ABTests/ reads as a test folder, so a builder cannot edit product code there (hooks/guard.py)
