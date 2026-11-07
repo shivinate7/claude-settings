@@ -139,7 +139,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     PR 293 (the Windows merge-test slice), is the case for it. A CI step's `if:` names only its own
     scope flag, or a non-PR event (step 19).
 17. **Slice tests on a slow platform.** On PRs, run a platform-specific test slice. Run the full suite
-    on main and nightly.
+    on main and nightly. A PR whose diff touches the sliced suite's own code runs the full suite in its
+    shards: the conflict-marker commit refusal (PR 1402) passed its slice, then a case outside it failed
+    on main.
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If the saving is
     under 20%, stop.
 19. **Run one scope job first.** Make it a cheap Linux job named `scope`. Every other job needs it.

@@ -12,11 +12,13 @@ protection. GitHub's branch protection setting is the owner's to change.
 - `all-jobs-passed` needs every job that runs on a pull request, except `ci-done`, which needs it. It fails
   when a needed job failed, was cancelled or was skipped. `lint/test_all_jobs_passed.py` goes red when such a
   job is missing from its `needs`.
-- `all-jobs-passed` runs only on a pull request. The five Windows shard jobs run only off a pull request, so
-  they are not in its `needs`. On main their own job results are the verdict.
+- `all-jobs-passed` runs only on a pull request. The four Windows merge shard jobs (`checks-windows-merge-2`
+  to `-5`) run only off a pull request, so they are not in its `needs`. On main their own job results are
+  the verdict. `checks-windows-guard-2` is in its `needs`; its steps run on a pull request only when the
+  `guard_windows_full` scope flag is on.
 - A job that a scope flag turns off skips its steps, not the job, so it ends green, not skipped. Cost: a
-  pull request that turns every flag off starts 11 runners (6 Windows, 2 macOS, 3 Linux) that skip every
-  step.
+  pull request that turns every flag off still starts every job that runs on pull requests, and each suite
+  or lint step skips.
 - A draft PR runs no CI: `scope` skips on a draft, and every other job skips with it.
 - A merge needs a pull request and no approval.
 - `strict` is false: GitHub merges a PR that lacks main's newest commit. The `merge` tool refuses it (`merge-needs-current-base`, a merge needs a green run on the current base).
