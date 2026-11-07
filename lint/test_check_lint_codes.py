@@ -8,10 +8,12 @@ is a row of the module docstring table in lint/stale_cites.py, a line matching `
 code is a `MAP<n>: () => {` key of the body in skills/plain-english-map/scripts/map-check.mjs.
 
 Each case builds a temp git repo under this run's folder (lint/_test_temp.py). `main` is the ref,
-`feature` is the branch, and the real script runs as `--base main --root <repo>`. Every fixture holds
-all three home files, so no case pins what a missing home file means.
+`feature` is the branch, and the real script runs as `--base main --root <repo>`. Most fixtures hold
+all three home files. The cases that name a missing home say so.
 """
+import collections
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -23,6 +25,8 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+from test_stale_cites import git_commands  # noqa: E402  the one home of the GIT_TRACE reader (lint/test_stale_cites.py)
+from test_windows_split import CHECKS, run_commands  # noqa: E402  the one home of the checks.yml run reader
 MODULE = os.environ.get("LINT_CODES_UNDER_TEST") or os.path.join(HERE, "check_lint_codes.py")
 STALE = "lint/stale_cites.py"
 STE = "lint/ste_lint.py"
@@ -75,30 +79,41 @@ def ste_module(codes, top=()):
     return "\n".join(lines) + "\n"
 
 
-def map_module(keys, top=()):
+def map_module(keys, top=(), body=()):
     """A stand-in for skills/plain-english-map/scripts/map-check.mjs: one `MAP<n>: () => {` key per
-    entry of the body object. `top` lines sit above the object."""
+    entry of the body object. `top` lines sit above the object; `body` lines sit inside it, after the keys."""
     lines = ['// The plain-English map checks. A stand-in for the body object.',
              'const cfg = { title: "stand-in" };', ''] + list(top)
     lines += ['export function bodies(files) {', '  return {']
     for key in keys:
         lines += ['    %s: () => {' % key, '      return true;', '    },', '']
+    lines += list(body)
     lines += ['  };', '}', '']
     return "\n".join(lines)
 
 
 def tree(stale=("STALE001", "STALE002"), ste=("STE001",), maps=("MAP1", "MAP2"),
-         stale_note=(), stale_tail=(), stale_text=None, ste_top=(), map_top=()):
+         stale_note=(), stale_tail=(), stale_text=None, ste_top=(), map_top=(), map_body=()):
     """The three home files of one commit. Every fixture holds all three."""
     text = {} if stale_text is None else {"text": stale_text}
     return {STALE: stale_module(stale, stale_note, stale_tail, **text),
             STE: ste_module(ste, ste_top),
-            MAP: map_module(maps, map_top)}
+            MAP: map_module(maps, map_top, map_body)}
 
 
 def rows(text, code):
     """How many table rows of `code` a stale_cites.py text holds, counted by the row form."""
     return text.count("\n  %s  " % code)
+
+
+def step_block(text, name):
+    """The text of the checks.yml step named `name`, from its `- name:` line up to the next step's. "" when none has it."""
+    mark = "      - name: %s\n" % name
+    start = text.find(mark)
+    if start == -1:
+        return ""
+    end = text.find("\n      - name:", start + len(mark))
+    return text[start:] if end == -1 else text[start:end]
 
 
 class CheckLintCodesTests(unittest.TestCase):
@@ -116,6 +131,9 @@ class CheckLintCodesTests(unittest.TestCase):
     def commit(self, files, message):
         for rel, text in files.items():
             path = os.path.join(self.tree, *rel.split("/"))
+            if text is None:  # a deletion: `git add -A` stages the path gone
+                os.remove(path)
+                continue
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(text)
@@ -138,11 +156,22 @@ class CheckLintCodesTests(unittest.TestCase):
         if merge_ref:
             self.git("merge", "-q", "--no-edit", "main")
 
-    def check(self, *args, root=None):
+    def tool_dir(self, node=None):
+        """A folder to be the whole PATH: a link to git, and a `node` file holding `node` when given."""
+        bindir = tempfile.mkdtemp(prefix="lcu_bin_", dir=RUN_FOLDER)
+        os.symlink(shutil.which("git"), os.path.join(bindir, "git"))
+        if node is not None:
+            shim = os.path.join(bindir, "node")
+            with open(shim, "w", encoding="utf-8", newline="\n") as f:
+                f.write(node)
+            os.chmod(shim, 0o755)
+        return bindir
+
+    def check(self, *args, root=None, env=None):
         """Run the real script on the fixture. Returns (exit code, output). A missing module fails here."""
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_lint_codes.py")
         cmd = [sys.executable, MODULE, *args, "--root", root or self.tree]
-        r = subprocess.run(cmd, cwd=self.tree, capture_output=True, text=True, encoding="utf-8",
+        r = subprocess.run(cmd, cwd=self.tree, env=env, capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=120)
         return r.returncode, r.stdout + r.stderr
 
@@ -227,6 +256,48 @@ class CheckLintCodesTests(unittest.TestCase):
                       "fixture: the prose line is not in the docstring")
         self.assert_passes("codes named in docstring prose are counted as table rows")
 
+    # A home the base tip holds is judged at HEAD: absent there is UNKNOWN, never no codes.
+
+    def test_a_home_the_base_tip_holds_and_the_head_moved_away_is_unknown_and_names_it(self):
+        ref = tree(stale=("STALE001", "STALE002", "STALE003"))  # main defines STALE003 after the branch point
+        moved = stale_module(("STALE001", "STALE002", "STALE003"))  # the branch moves the home and adds the colliding row
+        self.build(tree(), ref=ref, head={STALE: None, "elsewhere/stale_cites.py": moved})
+        self.assertNotIn(STALE, self.git("ls-tree", "-r", "--name-only", "HEAD"), "fixture: the head still holds the home")
+        self.assertIn(STALE, self.git("ls-tree", "-r", "--name-only", "main"), "fixture: main lacks the home")
+        rc, out = self.check("--base", "main")
+        self.assertEqual(rc, 2, "a home the base tip holds and HEAD lacks: exit %d, want 2\n%s" % (rc, out))
+        self.assertIn("UNKNOWN", out, "the moved home is not named UNKNOWN\n%s" % out)
+        self.assertIn(STALE, out, "the UNKNOWN line does not name the moved home\n%s" % out)
+
+    def test_a_home_that_the_base_tip_and_the_head_both_lack_passes(self):
+        self.build({STE: ste_module(("STE001",)), MAP: map_module(("MAP1",))},
+                   head={"notes/lane.md": "# Lane\n\nNotes only.\n"})
+        self.assertNotIn(STALE, self.git("ls-tree", "-r", "--name-only", "HEAD"), "fixture: a revision holds the stale home")
+        self.assert_passes("a home that neither the base tip nor the head holds is not read as no codes")
+
+    # The row form: a row has whitespace around its code, so any spacing is still a row.
+
+    def test_a_stale_row_with_one_space_after_its_code_counts_as_a_row(self):
+        self.build(tree(), head=tree(stale=("STALE001", "STALE002", "STALE003"), stale_note=["  STALE003 x"]))
+        text = self.git("show", "HEAD:" + STALE)
+        self.assertIn("\n  STALE003 x\n", text, "fixture: the one-space row is not in the docstring")
+        self.assertEqual(rows(text, "STALE003"), 1, "fixture: one standard STALE003 row")
+        self.assert_flags("STALE003", "a one-space STALE003 row beside a standard one is not counted as a second row")
+
+    def test_a_stale_row_with_three_spaces_before_its_code_counts_as_a_row(self):
+        self.build(tree(), head=tree(stale=("STALE001", "STALE002", "STALE003"), stale_note=["   STALE003  x"]))
+        text = self.git("show", "HEAD:" + STALE)
+        self.assertIn("\n   STALE003  x\n", text, "fixture: the three-space row is not in the docstring")
+        self.assertEqual(rows(text, "STALE003"), 1, "fixture: one standard STALE003 row")
+        self.assert_flags("STALE003", "a three-space STALE003 row beside a standard one is not counted as a second row")
+
+    def test_a_stale_row_with_a_tab_before_its_code_counts_as_a_row(self):
+        self.build(tree(), head=tree(stale=("STALE001", "STALE002", "STALE003"), stale_note=["\tSTALE003  x"]))
+        text = self.git("show", "HEAD:" + STALE)
+        self.assertIn("\n\tSTALE003  x\n", text, "fixture: the tab row is not in the docstring")
+        self.assertEqual(rows(text, "STALE003"), 1, "fixture: one standard STALE003 row")
+        self.assert_flags("STALE003", "a tab-led STALE003 row beside a standard one is not counted as a second row")
+
     # The collisions: a code the branch adds that the ref already defines.
 
     def test_branch_adds_a_stale_code_the_ref_defines_fails(self):
@@ -273,6 +344,21 @@ class CheckLintCodesTests(unittest.TestCase):
         self.assertEqual(self.git("show", "HEAD:" + STE).count('"rule-ste060"'), 2, "fixture: STE060 is not in two calls")
         self.assert_flags("STE060", "a second _rule call for STE060 at the end of a full table is not flagged")
 
+    def test_a_duplicate_the_base_tip_already_holds_does_not_fail_a_branch_that_contains_it(self):
+        # CI's merge ref: the branch holds main, and main already defines STALE004 twice.
+        ref = tree(stale=("STALE001", "STALE002", "STALE004", "STALE004"))
+        self.build(tree(), ref=ref, head={"notes/lane.md": "# Lane\n\nNotes only.\n"}, merge_ref=True)
+        self.assertEqual(rows(self.git("show", "main:" + STALE), "STALE004"), 2, "fixture: main does not hold the duplicate")
+        self.assertEqual(rows(self.git("show", "HEAD:" + STALE), "STALE004"), 2, "fixture: the branch does not hold the duplicate")
+        self.assert_passes("a duplicate the base tip already holds fails a branch that holds it")
+
+    def test_a_new_duplicate_fails_even_when_the_base_tip_holds_another(self):
+        ref = tree(stale=("STALE001", "STALE002", "STALE004", "STALE004"))
+        self.build(tree(), ref=ref, head=tree(stale=("STALE001", "STALE002", "STALE005", "STALE005")))
+        self.assertEqual(rows(self.git("show", "main:" + STALE), "STALE005"), 0, "fixture: main already defines STALE005")
+        self.assertEqual(rows(self.git("show", "HEAD:" + STALE), "STALE005"), 2, "fixture: the branch does not define STALE005 twice")
+        self.assert_flags("STALE005", "a new duplicate in the branch is not flagged")
+
     # The scanner traps: a text reader of a home must not stop at a quote, an opener or a template.
 
     def test_lone_quote_in_the_docstring_does_not_hide_a_stale_row_fails(self):
@@ -304,6 +390,28 @@ class CheckLintCodesTests(unittest.TestCase):
         self.assertLess(ref_text.index("check's"), ref_text.index("    MAP3: () => {"), "fixture: the quote is not above MAP3")
         self.assert_flags("MAP3", "a lone quote in a comment hides MAP3 on the ref")
 
+    # The MAP key forms: a key with no space after its colon, and the two method forms.
+
+    def test_a_no_space_map_key_counts_as_a_definition(self):
+        head = tree(maps=("MAP1", "MAP2"), map_body=["    MAP2:() => {", "      return true;", "    },"])
+        self.build(tree(), head=head)
+        self.assertEqual(self.git("show", "HEAD:" + MAP).count("MAP2:() => {"), 1, "fixture: the no-space key is not in the body")
+        self.assert_flags("MAP2", "a no-space MAP2 key beside a standard one is not counted as a second definition")
+
+    def test_an_async_map_method_counts_as_a_definition(self):
+        self.build(tree(), ref=tree(maps=("MAP1", "MAP2", "MAP3")),
+                   head=tree(maps=("MAP1", "MAP2"), map_body=["    async MAP3() {", "      return true;", "    },"]))
+        self.assertEqual(self.git("show", "main:" + MAP).count("    MAP3: () => {"), 1, "fixture: main lacks MAP3")
+        self.assertEqual(self.git("show", "HEAD:" + MAP).count("async MAP3() {"), 1, "fixture: the branch lacks the async method")
+        self.assert_flags("MAP3", "an async MAP3 method the branch adds is not counted as the key main already defines")
+
+    def test_a_plain_map_method_counts_as_a_definition(self):
+        self.build(tree(), ref=tree(maps=("MAP1", "MAP2", "MAP4")),
+                   head=tree(maps=("MAP1", "MAP2"), map_body=["    MAP4() {", "      return true;", "    },"]))
+        self.assertEqual(self.git("show", "main:" + MAP).count("    MAP4: () => {"), 1, "fixture: main lacks MAP4")
+        self.assertEqual(self.git("show", "HEAD:" + MAP).count("    MAP4() {"), 1, "fixture: the branch lacks the method")
+        self.assert_flags("MAP4", "a MAP4 method the branch adds is not counted as the key main already defines")
+
     # The exit-2 cases: a git read that fails is UNKNOWN, never 0.
 
     def test_unknown_base_ref_exits_2_with_unknown(self):
@@ -332,6 +440,58 @@ class CheckLintCodesTests(unittest.TestCase):
         rc, out = self.check("--base", "main")
         self.assertEqual(rc, 2, "an unreadable base blob: exit %d, want 2\n%s" % (rc, out))
         self.assertIn("UNKNOWN", out, "an unreadable base blob is not named UNKNOWN\n%s" % out)
+
+    def test_a_missing_node_prints_unknown_and_exits_2_never_a_traceback(self):
+        self.build(tree())
+        bindir = self.tool_dir()  # PATH holds git only: the MAP scan has no node to start
+        self.assertIsNone(shutil.which("node", path=bindir), "fixture: node is on the PATH")
+        rc, out = self.check("--base", "main", env=dict(os.environ, PATH=bindir))
+        self.assertEqual(rc, 2, "a missing node: exit %d, want 2\n%s" % (rc, out))
+        self.assertIn("UNKNOWN", out, "a missing node is not named UNKNOWN\n%s" % out)
+        self.assertNotIn("Traceback", out, "a missing node printed a traceback\n%s" % out)
+
+    def test_a_failing_node_prints_unknown_and_exits_2(self):
+        self.build(tree())
+        bindir = self.tool_dir(node="#!/bin/sh\necho scan failed >&2\nexit 3\n")
+        rc, out = self.check("--base", "main", env=dict(os.environ, PATH=bindir))
+        self.assertEqual(rc, 2, "a failing node: exit %d, want 2\n%s" % (rc, out))
+        self.assertIn("UNKNOWN", out, "a failing node is not named UNKNOWN\n%s" % out)
+        self.assertNotIn("Traceback", out, "a failing node printed a traceback\n%s" % out)
+
+    # The cost: one run starts the git processes it reads with and one node scan, and no other process.
+
+    def test_one_run_starts_exactly_the_pinned_processes_on_a_fixture_with_three_homes(self):
+        self.build(tree())
+        folder = tempfile.mkdtemp(prefix="lcu_cost_", dir=RUN_FOLDER)
+        trace = os.path.join(folder, "git-trace.txt")
+        starts = os.path.join(folder, "node-starts.txt")
+        real_node = shutil.which("node")
+        self.assertTrue(real_node, "fixture: node is not on the PATH")
+        bindir = self.tool_dir(node='#!/bin/sh\necho node >> "%s"\nexec "%s" "$@"\n' % (starts, real_node))
+        env = dict(os.environ, GIT_TRACE=trace, PATH=bindir + os.pathsep + os.environ.get("PATH", ""))
+        rc, out = self.check("--base", "main", env=env)
+        self.assertEqual(rc, 0, out)
+        subs = []
+        for command in git_commands(trace):
+            found = re.search(r"\b(rev-parse|merge-base|ls-tree|cat-file)\b", command)
+            subs.append(found.group(1) if found else command)
+        # Pinned: two rev-parse and one merge-base, then an ls-tree and a cat-file for each of the three homes at each of
+        # the three revisions. The node scan runs once, for the MAP texts.
+        self.assertEqual(collections.Counter(subs), collections.Counter({"rev-parse": 2, "merge-base": 1, "ls-tree": 9, "cat-file": 9}), subs)
+        with open(starts, encoding="utf-8") as f:
+            self.assertEqual(f.read().split(), ["node"], "the node scan did not start exactly once")
+
+
+class CiStep(unittest.TestCase):
+    def test_the_lint_code_step_passes_the_pr_head_sha_as_the_silent_undo_step_does(self):
+        with open(CHECKS, encoding="utf-8") as handle:
+            block = step_block(handle.read(), "Lint code check")
+        self.assertTrue(block, "no step named Lint code check in checks.yml")
+        commands = run_commands(block)
+        self.assertTrue(any('--head "$HEAD_SHA"' in command for command in commands),
+                        "the Lint code check step does not pass --head \"$HEAD_SHA\": %r" % commands)
+        self.assertIn("HEAD_SHA: ${{ github.event.pull_request.head.sha }}", block,
+                      "the Lint code check step does not set HEAD_SHA from the PR head")
 
 
 if __name__ == "__main__":
