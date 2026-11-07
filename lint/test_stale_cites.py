@@ -2339,6 +2339,11 @@ BRIEF_GROWN = "**Brief.** Write the brief, for each lane, to the task and the fi
 BRIEF_LINE = "Write the brief to the task and the files only. Start with the point.\n"
 BATCH_BASE = "**Batch.** Main may merge only by a pull request.<!-- rule:batch-merge -->\n"
 BATCH_GROWN = "**Batch.** Main, when the checks pass, may merge only by a pull request.<!-- rule:batch-merge -->\n"
+# Growth that adds an exception changes what the rule allows, so it is a reword. Each word is its own case.
+BRIEF_UNLESS = "**Brief.** Write the brief, unless the owner asks, to the task and the files only.<!-- rule:brief-scope -->\n"
+BRIEF_EXCEPT = "**Brief.** Write the brief, except when the owner asks, to the task and the files only.<!-- rule:brief-scope -->\n"
+BRIEF_WITHOUT = ("**Brief.** Write the brief, without a note from the owner, to the task and the files only."
+                 "<!-- rule:brief-scope -->\n")
 
 
 class RewordSkipTests(RewordCase):
@@ -2373,6 +2378,14 @@ class RewordSkipTests(RewordCase):
         rc, out = self.run_check(rng)
         self.assertEqual(self.listed(out), [("agents/notes.md", 1)], out)
         self.assertEqual(rc, 1, out)
+
+    def test_a_rule_grown_by_an_exception_word_is_listed(self):
+        # The exception is in the middle of the sentence, so the old runs across it are lost, as a reword's are.
+        for word, head in (("unless", BRIEF_UNLESS), ("except", BRIEF_EXCEPT), ("without", BRIEF_WITHOUT)):
+            with self.subTest(word=word):
+                rc, out = self.run_check(self.reword(BRIEF_BASE, head, BRIEF_LINE))
+                self.assertEqual(self.listed(out), [("agents/notes.md", 1)], out)
+                self.assertEqual(rc, 1, out)
 
 
 if __name__ == "__main__":
