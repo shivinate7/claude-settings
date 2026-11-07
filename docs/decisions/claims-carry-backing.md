@@ -14,8 +14,8 @@ Code spans, 2026-11-06 12:28 CST, process-only: a code span used as a claim's su
 
 Part (v), the owner hand-off check. Coordinator agreed 2026-11-06 12:00 and 12:21 CST, process-only.
 
-- (a) At Stop, report_guard (the Stop check in `lint/report_guard.py`) will refuse an owner hand-off whose "Why yours" line gives a capability reason, unless the line carries a cite that the rulings below allow. It ships as its own PR.
-- (b) `hooks/reply_judge.py` (the reply judge) will judge the cite against the route row and the act's alternates. Evidence: PR #1299 (a commit cherry-picked to a new branch, with no refusal).
+- (a) At Stop, report_guard (the Stop check in `lint/report_guard.py`) refuses an owner hand-off whose "Why yours" line gives a capability reason, unless the line carries a cite that the rulings below allow (read lint/report_guard.py:1461-1470).
+- (b) `hooks/reply_judge.py` (the reply judge) judges the hand-off's cite against the cited route row and the act's alternates. When the cited id has no row on this surface, it reads the act from the other surface's row and carries neither that row nor its alternates (read hooks/reply_judge.py:146-152; read hooks/reply_judge.py:174-176).
 
 Lane ruling, 2026-11-06 12:34 CST, process-only: layer (a) checks only "Why yours" lines. A route cite passes only when the row's outcome is refused or asks. A row whose outcome is works refuses the cite. An unknown outcome reads UNKNOWN.
 
@@ -51,19 +51,41 @@ When an act contradicts a route row, the falsifier notes it: `hooks/refusal_note
 
 ## Model judge at merge
 
-`merge/merge.py` will call `invoke_model` (in `hooks/decision_watch.py`) on each line that the reverse map of `lint/stale_cites.py` selects. The reverse map (code to the prose lines that cite it) is planned. The judge is report-only until it is measured on the labelled set. No labelled set exists yet. An error from the model means UNKNOWN, never a pass.
+Built, report-only. `merge/merge.py` selects prose lines and sends each file to the model once (read merge/merge.py:2415-2452; read merge/merge.py:2497-2513; read merge/merge.py:2525-2559).
+
+- Selection: each line that cites a changed backing file, from `backed_lines`, the reverse map of code to the prose that cites it (read lint/stale_cites.py:611-628). Plus each non-heading line the range adds to a governed file (read merge/merge.py:2439-2445).
+- Call: `decision_watch.invoke_model` with the `LINE_VERDICTS` shape, which reads `holds`, `stale` or `unbacked` per line (read hooks/decision_watch.py:671; read merge/merge.py:2540).
+- Cap: 3 files per merge (read merge/merge.py:2412). A file past the cap reads UNKNOWN (read merge/merge.py:2507-2508). The report prints at most 20 lines, then one count line (read merge/merge.py:2557-2558).
+- Errors: a model error, a timeout or an unreadable reply reads UNKNOWN, never a pass (read merge/merge.py:2539-2545).
+- Report only: the call runs after the lock is released and refuses nothing (read merge/merge.py:2526-2529).
+
+Scored. `lint/prove_route_judge.py` scores the judge on `lint/route_claims_labelled.json`. The file has 21 rows. Each row holds its line text and the commit it was judged at (read lint/route_claims_labelled.json:1-23). Only a `stale` verdict counts against the labels. A false alarm is a TRUE row judged stale. A hit is a STALE, PARTLY_STALE or HALF row judged stale (read lint/prove_route_judge.py:113-131). `unbacked` is counted apart, because no labelled row carries a backing cite. UNKNOWN and HISTORY rows are skipped, and so is a row with no rev (read lint/prove_route_judge.py:39-40, :115-116). Source: "only a 'stale' verdict scores against the labels; 'unbacked' is counted on its own" (lane pick, 2026-11-07 02:46 CST, process-only).
+
+Result, in the record's backing form: `(measured 2026-11-07, lint/prove_route_judge.py: false alarms 0/13 (0.0%), hits 0/4, unbacked 12/17, unknown 4 (model result carried no JSON verdict), skipped 4)`.
+
+What it shows: the judge raised no false alarm, but it found none of the 4 STALE, PARTLY_STALE or HALF rows. On lines without a backing cite it answers "unbacked", not "stale". So it stays report-only. Four such rows are too few for a rate. A score needs more stale rows, or rows that carry a backing cite.
 
 ## Re-measure on use
 
 Before a fallback route is used, the session tries one act that can be undone, once, and updates that route row.
 
+Not built, since no code reads a route row before a fallback is used.
+
 ## Unmeasured
 
-A route row is read as unmeasured when its `measured` date is more than N days old. The reader computes the age at read time, so no timer runs. N is unset.
+A route row is read as unmeasured when its `measured` date is more than N days old. Not built: `read_rows` returns each row as written, with no age check (read hooks/route_match.py:61-70). N is unset.
 
 ## Cost
 
-No long-lived process and no timer. Planned cost: one `git diff -U0`-style diff replaces the name-status diff. One `cat-file` read happens only when a line is a claim candidate. A range that changes `hooks/route_rows.json` opens one `cat-file`. When a row id is removed, it also runs one `ls-tree` and reads each tracked `.md`. The merge judge (`judge_paragraph`, `lint/stale_cites.py`) judges each claim sentence that holds an added row. It selects by added row, not by claim line. Model starts: up to 3 per merge, planned and unmeasured. The judge code on this branch starts no model.
+No daemon and no timer.
+
+- The range scan starts one `git diff -M --raw -p -z -U0`. It carries the changed names and the added lines that STALE005 reads (read lint/stale_cites.py:1066; read lint/stale_cites.py:257-266).
+- Blob reads share one `git cat-file --batch` process. It starts on the first read and closes at the end of the run (read lint/stale_cites.py:150-175; read lint/stale_cites.py:1077).
+- The head blob of a file is read only when one of its added lines holds a verb or a route word (read lint/stale_cites.py:722-743).
+- A range that changes `hooks/route_rows.json` reads it at base and at head (read lint/stale_cites.py:804-807). A sentence with a route cite reads the head blob once more (read lint/stale_cites.py:828-846).
+- When a row id is removed, one `git ls-tree` runs and each tracked `.md` is read (read lint/stale_cites.py:801-826; read lint/stale_cites.py:859-862).
+- STALE005's judge, `judge()`, is rule-based and starts no model (read lint/stale_cites.py:769-799).
+- The merge takes the changed names from a `--name-only` diff (read merge/merge.py:2859). The merge judge runs its own `git diff -U0` (read merge/merge.py:2436) and up to 3 model starts per merge (read merge/merge.py:2412). Its model starts are unmeasured.
 
 ## Owner-only
 
@@ -71,9 +93,21 @@ No long-lived process and no timer. Planned cost: one `git diff -U0`-style diff 
 
 ## Status
 
-Planned. Nothing above is built on main, except part (v) layer (a), built in `lint/report_guard.py` (`hand_off_problem`) on this branch and not yet on main. `hooks/route_rows.json` is absent on main.
+Built:
 
-Planned, not built: the generator that fills the route-rows table in `docs/decisions/auto-mode-owner-acts.md` from `hooks/route_rows.json`.
+- The route rows file, `hooks/route_rows.json`, and its one path reader, `rows_path()` (read hooks/route_match.py:40-42).
+- The falsifier flags: `route_flag` in `hooks/refusal_note.py` (read hooks/refusal_note.py:43) and the Stop read (read lint/report_guard.py:1327-1345).
+- Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1461-1470; read lint/report_guard.py:1928).
+- The reply judge's route block (read hooks/reply_judge.py:146-152).
+- STALE005, report-only (read lint/stale_cites.py:705-710).
+- The merge's model judge, report-only (see Model judge at merge).
+- A labelled set that can score the merge judge (see Model judge at merge).
+
+Not built:
+
+- The generator that fills the route-rows table in `docs/decisions/auto-mode-owner-acts.md` from `hooks/route_rows.json`. The table is empty between its markers (read docs/decisions/auto-mode-owner-acts.md:31-32).
+- The row-age reader (see Unmeasured).
+- The judge is unmeasured beyond the run above (see Model judge at merge).
 
 Kind: build
 Plan: docs/plans/pointer-system.md#lanes (all)
