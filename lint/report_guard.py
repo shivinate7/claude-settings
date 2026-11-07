@@ -228,6 +228,9 @@ SESSION_IMPERATIVES = frozenset((
 _UNIT_END = re.compile(r"(?<=[.!?;:,])\s+|\n+")
 _CONNECTORS = frozenset(("so", "then", "and", "but", "now", "first", "next", "also", "please"))
 _WORD = re.compile(r"[a-z][a-z'-]*")
+# A backtick span names a thing and holds no order. It may not cross a sentence end or a line, so a lone backtick
+# cannot pair with a later one and hide an order between them.
+_BACKTICK_SPAN = re.compile(r"`(?:[^`\n.!?;:]|[.!?;:](?!\s|$))*`")
 # A modal that binds the reader: "you should send it", "the reply must end with the report".
 _MODAL = re.compile(r"\b(?:must|should|need to|needs to|have to|has to|ought to)\b", re.IGNORECASE)
 
@@ -235,6 +238,7 @@ _MODAL = re.compile(r"\b(?:must|should|need to|needs to|have to|has to|ought to)
 def session_wording(text):
     """The phrase in `text` that tells the session what to do, or '' when `text` holds facts only: a listed phrase,
     a clause that opens with an order word, or a modal ("must", "should")."""
+    text = _BACKTICK_SPAN.sub(" ", text)
     low = text.lower()
     for phrase in SESSION_PHRASES:
         if phrase in low:
