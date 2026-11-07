@@ -163,10 +163,10 @@ none, `prefers-color-scheme` does.
 
 | Question | Option | File | State drawn | `focus` | Widths |
 |---|---|---|---|---|---|
-| Scene mapping (item 1) | Status floors | `docs/design/3d-browser-dummy/layout-a.html` | nothing picked | `#scene` | 390 (default), 1440 (`drawn: 1440`) |
-| Scene mapping (item 1) | Kind floors | `docs/design/3d-browser-dummy/layout-b.html` | nothing picked | `#scene` | 390 (default), 1440 (`drawn: 1440`) |
-| Phone detail (item 5) | Under the scene | `docs/design/3d-browser-dummy/phone-a.html` | item 279 picked | `#pickview` | 390 |
-| Phone detail (item 5) | Over the scene | `docs/design/3d-browser-dummy/phone-b.html` | item 279 picked | `#pickview` | 390 |
+| Scene mapping (item 1) | Status floors | `docs/design/3d-browser-dummy-layout-a.html` | nothing picked | `#scene` | 390 (default), 1440 (`drawn: 1440`) |
+| Scene mapping (item 1) | Kind floors | `docs/design/3d-browser-dummy-layout-b.html` | nothing picked | `#scene` | 390 (default), 1440 (`drawn: 1440`) |
+| Phone detail (item 5) | Under the scene | `docs/design/3d-browser-dummy-phone-a.html` | item 279 picked | `#pickview` | 390 |
+| Phone detail (item 5) | Over the scene | `docs/design/3d-browser-dummy-phone-b.html` | item 279 picked | `#pickview` | 390 |
 
 - `#scene` is the scene box. `#pickview` wraps the view switch, the scene and the picked card; it
   exists only in the two phone files (config `wrap`).
