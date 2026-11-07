@@ -3,8 +3,10 @@
 
     python3 lint/find_time_pinned.py <root> [--json]
 
-Decision test-strategy-reset, point 2: no test waits on a fixed sleep or a wall-clock bound. This
-tool lists the tests that do. It fixes none, and it writes nothing. Each finding has one category:
+Lists the tests whose verdict can move with the real clock: a fixed wait, a bound on elapsed time,
+a time limit, or a read of the real date. Decision test-strategy-reset, point 2, covers the first
+three (no fixed sleep, no wall-clock bound); decision test-practices P5 covers the date read. The
+tool fixes none, and it writes nothing. Each finding has one category:
 - sleep: a real wait in a test file.
 - elapsed-assert: an assert that reads a wall-clock reading or a difference of two.
 - test-cap: a per-test or per-suite time limit.
@@ -12,7 +14,9 @@ tool lists the tests that do. It fixes none, and it writes nothing. Each finding
   Kept apart because it may be fine. The plan decides case by case.
 - calendar: a read of the real date or zone with no time given (`datetime.now()`, `date.today()`,
   `time.localtime()`, `time.gmtime()`, `time.ctime()`, `time.asctime()`, `time.tzname`, `time.timezone`,
-  JS `new Date()` and any `Date(...)` call without `new`). Decision test-practices P5.
+  JS `new Date()`, `new Date(<clock>)` where the argument reads `Date.now` or `performance.now` directly
+  or through a name that holds one, and any `Date(...)` call without `new`). `new Date(0)` and
+  `new Date(EPOCH_MS)` with a declared constant read no clock and are not listed.
 
 Scanned: test files only. Python is `test_*.py`, `*_test.py`, `conftest.py` or any `.py` under a
 `tests` or `test` folder. JS and TS (`.js .mjs .cjs .jsx .ts .tsx .mts .cts`) is a `.test.` or
@@ -929,13 +933,16 @@ def scan_js(text):
             if got and is_num(m[got[1][-1][0]:got[1][-1][1]], True):
                 hits.add(mm.start(), "sleep")
 
-    for mm in re.finditer(r"(?<![\w$])new\s+Date\s*\(\s*\)", m):
-        hits.add(mm.start(), "calendar")
+    tainted = clock_taint(m, JS_DECL, JS_CLOCK, JS_PASS_THROUGH, js_function_returns)
+    for mm in re.finditer(r"(?<![\w$])new\s+Date\s*\(", m):
+        got = args_of(mm.end() - 1)  # `new Date(<clock>)` reads the real date as `new Date()` does
+        if got and (not m[mm.end():got[0]].strip()
+                    or reads_clock(m, mm.end(), got[0], JS_CLOCK, tainted, JS_PASS_THROUGH, False)):
+            hits.add(mm.start(), "calendar")
     for mm in re.finditer(r"(?<![\w$.])Date\s*\(", m):  # without `new`, Date(...) ignores its arguments
         if not re.search(r"(?<![\w$])(?:new|function)\s+$", m[max(0, mm.start() - 12):mm.start()]):
             hits.add(mm.start(), "calendar")
 
-    tainted = clock_taint(m, JS_DECL, JS_CLOCK, JS_PASS_THROUGH, js_function_returns)
     for mm in JS_ASSERT.finditer(m):
         got = args_of(mm.end() - 1)
         if got:
