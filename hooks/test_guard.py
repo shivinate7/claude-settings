@@ -462,6 +462,7 @@ GHRUNBLOCK = os.path.join(ROOT, "ghrunblock")    # pull request 2's workflow `ci
 GHRUNNONE = os.path.join(ROOT, "ghrunnone")      # pull request 2's workflow `ci-checks` is queued, and it has no check rows at all
 GHRUNDONE = os.path.join(ROOT, "ghrundone")      # pull request 2's workflow finished, and its required check passed
 GHRUNIGNORED = os.path.join(ROOT, "ghrunignored")  # pull request 2's only running workflow is `sync`, which STAMPIGNORE ignores
+GHSKIPPED = os.path.join(ROOT, "ghskipped")      # the head's one check is skipped, so no check ran on it: the all-skipped read
 
 
 def batch_other(*checks, runs=None):
@@ -1263,6 +1264,7 @@ def build_fixtures():
     write(PATHSPEC_LIST, "f.txt\n")
     make_fake_gh(GHPEND, "main", checks=[{"name": "checks", "bucket": "pending", "link": ""}])
     make_fake_gh(GHRED, "main", checks=[{"name": "checks", "bucket": "fail", "link": ""}])
+    make_fake_gh(GHSKIPPED, "main", checks=[{"name": "checks", "bucket": "skipping", "link": ""}])
     make_fake_gh(GHRUNPEND, "main",
                  runs=[{"status": "in_progress", "conclusion": "", "name": "checks"}])
     make_fake_gh(GHBROKEN, "main", broken=True)
@@ -9137,6 +9139,43 @@ add("merge-batch: the merge tool of the host is allowed past an ignored running 
 # A pinned merge.requiredChecks list is the required list: STAMPREPO pins `checks`, the protection says `gate`, so only the pin counts.
 add("merge-batch: a pinned merge.requiredChecks list is the required list, so a pending `gate` check on pr 2 does not block", "allow",
     tool="mcp__github__merge_pull_request", cwd=STAMPREPO, pullNumber=1, repo="x", owner="y", env_path=GHPINNED + os.pathsep + PY_PATH)
+
+# The ready-check remedy of an all-skipped head: a repo that declares merge.readyChecks gets the one command that runs
+# them, and the printed reason must carry that whole command. STAMPREADY declares one ready check and
+# STAMPREADY3 three; each merge block is otherwise STAMPREPO's, so only the ready checks differ.
+STAMPREADY = os.path.join(ROOT, "stamp_ready")          # stamp.json whose merge block declares one ready check
+STAMPREADY3 = os.path.join(ROOT, "stamp_ready3")        # the same, declaring three ready checks
+READY_CMD_1 = 'bin/ci-job checks --step "check invariants" --base origin/main'
+READY_CMD_3 = 'bin/ci-job checks --step "check invariants" --step "check lint" --step "check types" --base origin/main'
+
+
+def _build_ready_stamp_repos():
+    merge = {"method": "merge", "requiredChecks": ["checks"], "deadlineMinutes": 30, "deleteBranch": True}
+    for where, steps in ((STAMPREADY, ["check invariants"]),
+                         (STAMPREADY3, ["check invariants", "check lint", "check types"])):
+        stamp = {"defaultBranch": "main", "kinds": [], "merge": dict(merge, readyChecks=steps)}
+        make_repo(where, {".github/stamp.json": json.dumps(stamp) + "\n", "hooks/keep": "x\n"})
+
+
+lazy_fixture([STAMPREADY, STAMPREADY3], _build_ready_stamp_repos)
+# The scope first: the read reaches the all-skipped remedy. Then the subject: the whole command is printed, not a cut of it.
+sh("merge-checks: a ready head with every check skipped names the whole ready-check command for one ready check",
+   "gh pr merge 12 --squash", "deny", "merge-checks", carries=("no check ran on this head", READY_CMD_1),
+   cwd=STAMPREADY, env_path=GHSKIPPED + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: a ready head with every check skipped names the whole ready-check command for three ready checks",
+   "gh pr merge 12 --squash", "deny", "merge-checks", carries=("no check ran on this head", READY_CMD_3),
+   cwd=STAMPREADY3, env_path=GHSKIPPED + os.pathsep + PY_PATH, config=MERGECFG)
+# The wiring pin (guard_merge.merge_check sets host.ready_checks from merge.readyChecks). The step names open the remedy, well inside
+# the cap, so this case is green on the base and goes red only when that wiring is dropped.
+sh("merge-checks: a repo that declares merge.readyChecks names its ready step on an all-skipped head",
+   "gh pr merge 12 --squash", "deny", "merge-checks",
+   carries=("no check ran on this head", "First run the ready checks (check invariants)"),
+   cwd=STAMPREADY, env_path=GHSKIPPED + os.pathsep + PY_PATH, config=MERGECFG)
+# The control: STAMPREPO declares no merge.readyChecks, so the same all-skipped head names no ready step and no ready command.
+sh("merge-checks: a repo that declares no ready checks names no ready step on an all-skipped head",
+   "gh pr merge 12 --squash", "deny", "merge-checks", carries=("no check ran on this head",),
+   lacks=("First run the ready checks", "bin/ci-job checks"),
+   cwd=STAMPREPO, env_path=GHSKIPPED + os.pathsep + PY_PATH, config=MERGECFG)
 
 _BARE_GUARD = dict(env_path=GREEN_ON, config=MERGECFG)
 # ASK: the repo uses the merge tool, and the call skips it.
