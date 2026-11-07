@@ -16320,6 +16320,12 @@ UP_WIDE = {"key": "a", "label": "Let the stamp accept banchi's titles", "how": "
            "lose": "l", "widens": True}
 UP_MATCH = {"key": "b", "label": "Rename banchi's titles to the shared form", "how": "h", "gain": "g",
             "lose": "l"}
+# A plain third option. With UP_WIDE and UP_MATCH alone, the widening option is the only option besides the pick, and
+# a question like that is refused (owner ruling 2026-11-07 15:44 CST, decision uniform-over-variants). A case that
+# means "not refused" for the pick or the mark takes UP_THREE.
+UP_THIRD = {"key": "c", "label": "Keep banchi's titles and skip the stamp", "how": "h", "gain": "g",
+            "lose": "l"}
+UP_THREE = [UP_WIDE, UP_MATCH, UP_THIRD]
 
 
 # The line a waiting-page task carries (rule task-names-check, its cases below). It sits here, above its
@@ -16342,9 +16348,20 @@ def up(name, expected, item, action="set", **extra):
         tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})
 
 
+def up_refused(name, item):
+    """A deny by the widening rule whose id is the builder's (uniform-pick, or a new id): the case pins the ruling's
+    words in the reason, not the rule id. The item's form lines are valid, so no form rule is the cause."""
+    add("uniform pick: " + name, "deny", None, carries=("shared tool, never the tool to fit a repo",),
+        tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set", collection="items", doc_id="banchi-titles",
+        data=item)
+
+
 up("today's item (pick names the widening option) is denied", "deny", up_item())
-up("a pick of the option that matches the shared form is allowed", "allow", up_item(pick="b"))
-up("a widening option offered and not picked is allowed", "allow", up_item(pick="b", why="One form."))
+up("a pick of the option that matches the shared form is allowed", "allow", up_item(pick="b", options=UP_THREE))
+up_refused("a widening option offered and not picked, the only other option, is denied (ruling 2026-11-07 15:44 CST)",
+           up_item(pick="b", why="One form."))
+up("a widening option offered and not picked beside a plain third option is allowed", "allow",
+   up_item(pick="b", options=UP_THREE, why="One form."))
 up("an item with no pick is allowed", "allow", up_item(pick=None, why=None))
 up("widens false is not a widening option", "allow",
    up_item(options=[dict(UP_WIDE, widens=False), UP_MATCH]))
@@ -16364,9 +16381,6 @@ add("uniform pick: the refusal names the ruling and what to pick", "deny", "unif
 
 # Roadmap c135: a multi item (`multi: true`) or ranked item (`ranked: true`) holds `pick` as a list of
 # option keys. The list never holds a key of an option marked `widens: true`, as a string pick never does.
-UP_THIRD = {"key": "c", "label": "Keep banchi's titles and skip the stamp", "how": "h", "gain": "g",
-            "lose": "l"}
-UP_THREE = [UP_WIDE, UP_MATCH, UP_THIRD]
 
 up("a multi item whose list pick holds the widening option is denied", "deny",
    up_item(multi=True, options=UP_THREE, pick=["a", "b"]))

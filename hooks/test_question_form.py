@@ -28,6 +28,9 @@ Interface the module must match (the lane's form contract):
 - A widening option: page `widens: true`, never in `pick`; chat `Goes against your ruling: a repo changes to
   fit a shared tool, never the tool to fit a repo` in its label or description, and never `(Recommended)` in
   its label (rule uniform-pick).
+- A question whose only option besides the recommended one widens is refused, on both surfaces (owner ruling
+  2026-11-07 15:44 CST). The recommended option is the page's pick, or the one labelled (recommended); in the box,
+  the one labelled (Recommended). The rule id is the builder's, so those cases judge the cause, not the id.
 - A press in a web app: page `links`; chat an https:// url in that option's description (rule press-link).
   The chat scan skips an option's Gain and Lose text, as the page scan reads only label and how.
 - A chat refusal reason names its remedy and no field of the waiting page (no `stands`). Each page reason
@@ -105,6 +108,19 @@ BASED = ("Based on (measured): auto mode refused the runner's merge at 03:04 CDT
 THIRD = "Based on (ruling): your 16:54 CDT ruling says no owner step per merge."
 
 
+# A third, plain option (c). Rule uniform-pick refuses a question whose only option besides the recommended one
+# widens a shared tool (owner ruling 2026-11-07 15:44 CST, decision uniform-over-variants). So the form cases offer
+# a real choice beside the pick and the widening option. A case that needs the two-option shape says so.
+PLAIN_THIRD = {"gain": "The lane waits, and nothing changes.", "how": "The lane stays as it is until you answer.",
+               "key": "c", "label": "Wait and change nothing", "lose": "The lane waits a day."}
+
+# Incident item 376 (debt-close-test-span, closed 15:41 CST), its page data with status open. Two repairs make it
+# valid on main, so only the widening rule can refuse it: the Departs from line gets its separator (question-departs
+# refused the stored line), and the options are listed in letter order (option-letter-keys refused the stored order
+# b, a). The question, the options and the Based on (ruling) line are as stored. The record's bookkeeping keys (id,
+# n, lane, owner, home, ref, reply, short, rank, added) are left out: the page does not read them.
+ITEM376 = json.loads(r'''{"context":"Goal: closing a debt proves that its test catches the defect.\nProblem (rule): the close check runs the debt's named test file on the commit that made the debt, and needs it to fail. A shared test file (hooks/test_guard.py is named by two debts) can fail there for other reasons. Then the close passes whatever the named test does.\nBased on (read): a debt names its test by file path, and the check reads failures per file (lint debt-close code, the lane's read at 15:37 CST).\nBased on (ruling): a repo changes to fit a shared tool, never the tool to fit a repo. Asked again because this form is not for one repo. It makes the proof exact in every repo, so the ruling may not cover it.\nDeparts from: main, which judges a whole test file — option a adds a path::Class.test_name form.","kind":"decision","options":[{"gain":"A shared test file proves the right test.","key":"a","label":"Add a one-test form, and run only that test on both commits","lose":"A second form in a shared tool. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.","widens":true},{"gain":"The tool keeps one form.","key":"b","label":"Keep file paths only, and file a debt for the weak proof (recommended)","lose":"A debt that names a shared test file proves less than it seems to."}],"pick":"b","status":"open","title":"May a debt name one test in a shared test file, so its close proves that test?","why":"Option a adds a second accepted form to a shared tool, which your ruling keeps for you. The lane works with file paths only until you pick."}''')
+
 LINE_KEYS = ("goal", "problem", "based", "departs")
 
 
@@ -120,12 +136,14 @@ def form_text(goal=GOAL, problem=PROBLEM, based=BASED, departs=DEPARTS):
 
 
 def page_item(tail="", options=None, lines=None, **over):
-    """Item 92 in the form: the form lines in `context`, option b marked widens, the pick on a. `lines`
-    sets the whole context, one line each, for a case that changes the order of the lines."""
+    """Item 92 in the form: the form lines in `context`, option b marked widens, the pick on a, and the plain
+    third option c (PLAIN_THIRD). `lines` sets the whole context, one line each, for a case that changes the order
+    of the lines."""
     item = copy.deepcopy(ITEM92)
     item["context"] = "\n".join(lines) if lines is not None else form_text(
         **{k: v for k, v in over.items() if k in LINE_KEYS}) + tail
     item["options"][1]["widens"] = True
+    item["options"].append(copy.deepcopy(PLAIN_THIRD))
     if options is not None:
         item["options"] = options
     item.update({k: v for k, v in over.items() if k not in LINE_KEYS})
@@ -335,6 +353,77 @@ def case_older_rules_keep_their_ids():
          entry_of(dict(task, context="Nothing here.")), ("task-names-check", None))
 
 
+# ------------------------------------------------------------------ a question whose only alternative widens
+
+# Owner ruling 2026-11-07 15:44 CST, on decision uniform-over-variants: a question whose only option besides the
+# recommended one widens a shared tool is already answered, so it is refused, on the page and in the chat box. The
+# rule id is the builder's (uniform-pick, or a new id), so these cases judge the cause, not the id: each fixture's
+# form lines are valid, so a refusal by a form, departs or stake rule would be the wrong cause.
+NOT_THIS_CAUSE = (FORM_RULE, DEPARTS_RULE, "owner-judge", "MISSING", "RAISED")
+
+
+def widening_refusal(name, got):
+    rule = got[0] if isinstance(got, tuple) and got else ""
+    check(name, bool(rule) and rule not in NOT_THIS_CAUSE, "want a refusal by the widening rule, got %r" % (got,))
+
+
+def widening_page(name, op, entry):
+    widening_refusal("page item_hit: " + name, call("item_hit", op, entry))
+    widening_refusal("page guard: " + name, guard_hit(op, entry))
+
+
+def widening_chat(name, box):
+    widening_refusal("chat: " + name, call("chat_hit", box))
+
+
+def item376_box():
+    """Item 376 as a box question: its context is the question, its two options the choices, the recommended one
+    labelled (Recommended). Each option's description carries its gain and its lose, as a box option must."""
+    options = [{"label": o["label"].replace("(recommended)", "(Recommended)"),
+                "description": "Gain: %s Lose: %s" % (o["gain"], o["lose"])} for o in ITEM376["options"]]
+    return {"questions": [{"question": ITEM376["context"], "header": "Debt", "multiSelect": False, "options": options}]}
+
+
+def three_option_box():
+    """One recommended option, one widening option, one other plain option: a box that passes."""
+    options = [{"label": "Keep file paths only (Recommended)",
+                "description": "Gain: the tool keeps one form. Lose: a debt proves less."},
+               {"label": "Add a one-test form",
+                "description": "Gain: a shared test file proves the right test. Lose: a second form in a shared tool. "
+                               + WIDE + "."},
+               {"label": "Wait and change nothing", "description": "Gain: nothing changes. Lose: the lane waits a day."}]
+    return tcj.good_box(options=options)
+
+
+def case_only_alternative_widens_is_refused():
+    check("item 376 carries its Based on (ruling) line, which the refusal must not depend on",
+          "Based on (ruling):" in ITEM376["context"], "the fixture lost its Based on (ruling) line")
+    widening_page("item 376 as a page set, whose only alternative widens, is refused", "set", entry_of(ITEM376))
+    widening_chat("item 376 as a box question, whose only alternative widens, is refused", item376_box())
+
+
+def case_only_alternative_widens_controls_pass():
+    page("three options, one recommended, one widening, one other plain, passes", "set", entry_of(page_item()), None)
+    page("two options, neither widening, pass", "set", entry_of(page_item(options=copy.deepcopy(ITEM92["options"]))),
+         None)
+    page("an update that names the widening option as pick and carries no options passes (the stored options are "
+         "unseen)", "update", entry_of({"kind": "decision", "pick": "b", "status": "open"}), None)
+    chat("three options, one recommended, one widening, one other plain, passes", three_option_box(), None)
+    chat("two options, neither widening, pass", tcj.good_box(), None)
+
+
+def case_recommended_widening_is_refused_unchanged():
+    # The existing uniform-pick rule, unchanged: the widening option is the pick (page) or the Recommended one (box).
+    two = [copy.deepcopy(ITEM92["options"][0]), dict(ITEM92["options"][1], widens=True)]
+    page("two options, the pick is the widening option, is refused as uniform-pick", "set",
+         entry_of(page_item(options=two, pick="b")), ("uniform-pick", None))
+    options = [{"label": "Allow the second form (Recommended)",
+                "description": "Gain: it lands today. Lose: two forms stay. " + WIDE},
+               {"label": "Keep one form", "description": "Gain: one form stays. Lose: it waits."}]
+    chat("two options, the Recommended one widens, is refused as uniform-pick", tcj.good_box(options=options),
+         ("uniform-pick", None))
+
+
 # ------------------------------------------------------------------ closed items, stood picks, updates
 
 def case_closed_stood_and_updates():
@@ -432,8 +521,8 @@ def case_chat_boxes():
     options = [{"label": "Allow the second form",
                 "description": "Gain: it lands today. Lose: two forms stay. " + wide},
                {"label": "Keep one form (Recommended)", "description": "Gain: one form stays. Lose: it waits."}]
-    chat("a t18-marked option that is not Recommended passes beside a Recommended one",
-         tcj.good_box(options=options), None)
+    widening_chat("a t18-marked option that is the only other option beside a Recommended one is refused "
+                  "(ruling 2026-11-07 15:44 CST)", tcj.good_box(options=options))
 
     options = tcj.good_options()
     options[1] = {"label": "Press Merge in GitHub", "description": "Gain: it lands at once. Lose: nobody reads it first."}
@@ -1452,7 +1541,9 @@ def main():
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
-                 case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable):
+                 case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
+                 case_only_alternative_widens_is_refused, case_only_alternative_widens_controls_pass,
+                 case_recommended_widening_is_refused_unchanged):
         try:
             case()
         except Exception as exc:
