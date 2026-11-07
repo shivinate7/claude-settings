@@ -2,19 +2,23 @@
 """Owner-safe block reasons for report_guard.py (decision guard-remedy-not-to-owner).
 
 A Stop block reason reaches the owner in chat. So each reason opens with one plain line that names its check,
-cites the record guard-remedy-not-to-owner, and holds no order to the session. The steps for each check live in
-that record, under a heading for the check.
+cites the record guard-remedy-not-to-owner, and holds no order to the session. The detector for an order is
+report_guard.session_wording, one home for the phrase list and the order rule. The steps for each check live in
+that record, under a heading for the check, with at least one step line under each heading.
 
 Each block path that has a fixture below runs through report_guard as a Stop hook. Not fixtured: the hand-off
-guard's measured-premise-with-no-date and route-cite refusals, and the departs guard's separator, empty-side,
-placeholder and no-change misses. Each is one miss of a check that has a fixture. The transcript records and the
+guard's measured-premise-with-no-date and route-cite refusals, the departs guard's separator, empty-side,
+placeholder and no-change misses, and the Unvetted "the check failed with <Exc>" text, which only an exception
+inside the past-ruling check reaches. Each is one miss of a check that has a fixture. The transcript records and the
 guard runner come from lint/test_report_guard.py. The repo fixtures and the model stub come from
 hooks/test_call_judge.py. The triage records come from lint/test_report_guard_stalled.py.
 
-Case 1a checks that no reason holds a session phrase or a sentence that opens with an order to the session. Case
-1b checks the record cite. Case 1c checks that the first sentence names the check. Case 2 checks that each path
-still blocks, and that a clean report is not blocked. Case 3 checks that the record holds a step heading for each
-check name that report_guard passes to owner_line. Two controls pin the 1a helper on fact sentences and on orders.
+Case 1a checks that no reason holds a session phrase or an order to the session. Case 1b checks the record cite.
+Case 1c checks that the first sentence names the check. Case 2 checks that each path still blocks, and that a clean
+report is not blocked. Case 3 checks that the record holds a step heading for each check name that report_guard
+passes to owner_line, and a step line under each heading. Controls pin session_wording on fact sentences, on plain
+and mid-clause orders, and on the phrase list. A judge reason that carries an order is checked at the Stop boundary:
+the block still fires, the ruling id stays, and the order does not reach the owner word for word.
 
 Run it as:
 
@@ -33,39 +37,40 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HOOKS = os.path.join(HERE, "..", "hooks")
 sys.path.insert(0, HERE)
 sys.path.insert(0, HOOKS)
+import report_guard as RG  # noqa: E402  session_wording, the detector for an order to the session (one home)
 import test_report_guard as trg  # noqa: E402  the transcript records, the guard runner and the run folder (one home)
 import test_call_judge as tcj  # noqa: E402  the repo fixtures, the waiting-page url and the ruling (one home)
 import test_report_guard_stalled as trs  # noqa: E402  the triage wake's build run and own record (one home)
 
 CITE = "guard-remedy-not-to-owner"
 RECORD = os.path.join(HERE, "..", "docs", "decisions", CITE + ".md")
-# Phrases a block reason must not carry to the owner, matched case-insensitively. The last two reached the owner
-# in main's pick and keys reasons, and the order check below does not catch them when they sit mid-sentence.
-SESSION_PHRASES = (
-    "send it again", "send the report", "post only", "never send", "add the line", "remedy:",
-    "do not write it again", "keep the reply", "would reach the owner", "as the next thing you write",
-    "send it now", "send the questions again",
-)
-# A unit (a sentence, a clause after ";" or ":", or a line) that opens with one of these words is an order to the
-# session. "Pick" is left out on purpose: "Pick guard" is the check name of an owner line.
-IMPERATIVES = frozenset((
-    "add", "send", "post", "keep", "write", "drop", "give", "name", "move", "run", "never", "do", "don't", "resend",
-    "rewrite", "mark", "resume", "pause", "fix", "ship", "wait", "reply", "put", "cite", "check", "answer", "close",
-    "open", "update", "remove", "include", "set", "make", "stop", "let", "tell", "ask", "see", "read", "dispose",
-))
-UNIT_END = re.compile(r"(?<=[.!?;:])\s+|\n+")
-WORD = re.compile(r"[a-z][a-z'-]*")
-SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 FIXTURES = ("missing_report", "correction_tail", "done_format", "models", "unstarted", "unvetted",
             "past_ruling", "keys", "pick",
             "recovered", "departs_unlanded", "departs_landed", "answered", "mistake", "hand_off", "refusal",
             "lane", "pick_known_writer", "rewrite_stamp", "triage_hold", "unvetted_unreadable",
-            "unvetted_cited", "rewrite_model", "rewrite_unstarted", "rewrite_answered", "rewrite_recovered")
+            "unvetted_cited", "rewrite_model", "rewrite_unstarted", "rewrite_answered", "rewrite_recovered",
+            "recovered_no_source", "past_ruling_order")
 FACT_SENTENCES = ("Pick guard: the page writer is session session_writer1 (decision guard-remedy-not-to-owner).",
                   "Names of the checks sit in the record. Keys are one option set per question.",
                   "The check reads the transcript, and a Done line holds one kind.")
+# Plain orders: a sentence that opens with an order to the session.
 ORDER_SENTENCES = ("Send it now: the report.", "Two questions; send the questions again.",
                    "Give the line. Keep it short.", "Do not write it again.", "Post only the corrected line.")
+# Mid-clause orders: the order sits after a clause, so a check on the first word passes it. "so send it now" is also
+# in the phrase list, so the phrase list catches it alone.
+MID_CLAUSE_ORDERS = ("The question is old, so send it now.",
+                     "The reply names four labels, drop a label that does not apply.",
+                     "The ruling is old. You should send it.",
+                     "The reply is not the report, so the reply must end with the report.")
+# A sentence that only the phrase list catches: no order opens it, and PHRASE_PIN is in the phrase list.
+PHRASE_ONLY = "The fix would reach the owner before the review."
+PHRASE_PIN = "would reach the owner"
+# The order the past-ruling judge wrote into its reason in the boundary case, which must not reach the owner.
+JUDGE_ORDER = "Drop the question and send it again."
+# A step line is a bullet or a numbered item. A section ends at the next ## or ### heading.
+STEP_LINE = re.compile(r"(?m)^\s*(?:[-*+]|\d+[.)])\s+\S")
+SECTION_END = re.compile(r"(?m)^#{2,3} ")
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
 def setUpModule():
@@ -77,17 +82,9 @@ def tearDownModule():
     shutil.rmtree(tcj.ROOT, ignore_errors=True)  # the repo fixtures' run folder, which trg does not remove
 
 
-def session_problem(reason):
-    """The session phrase, or the sentence that orders the session, that `reason` holds. '' when it holds neither."""
-    low = reason.lower()
-    for phrase in SESSION_PHRASES:
-        if phrase in low:
-            return phrase
-    for unit in UNIT_END.split(reason):
-        words = WORD.findall(unit.lower())
-        if words and words[0] in IMPERATIVES:
-            return unit.strip()
-    return ""
+def judge_answer(reason):
+    """The past-ruling judge's answer that refuses with `reason`, as the model stub returns it."""
+    return json.dumps({"ok": False, "reason": reason})
 
 
 def owner_line_checks():
@@ -112,6 +109,23 @@ def owner_line_checks():
             else:
                 names.append(None)
     return names
+
+
+def record_problems(record, names):
+    """One problem per check name in `names` that has no `### <name>` heading in `record`, or whose section holds no
+    step line. A section runs from its heading to the next ## or ### heading."""
+    problems = []
+    for name in sorted(set(names)):
+        base = name.split(" (")[0].strip()
+        head = re.search(r"(?m)^### " + re.escape(base) + r"\b", record)
+        if not head:
+            problems.append("no step heading for %r" % base)
+            continue
+        rest = record[head.end():]
+        end = SECTION_END.search(rest)
+        if not STEP_LINE.search(rest[:end.start()] if end else rest):
+            problems.append("no step line under %r" % base)
+    return problems
 
 
 def landed(reply):
@@ -197,11 +211,19 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
             "past_ruling": lambda: case([trg.human("decide"), *self.sent_to_writer(),
                                          trg.assistant_text(trg.RELAY)], "past-ruling", decided,
                                         env={"CJ_ANSWER": trg.REFUSE_APPS}),
+            # The judge's reason carries an order. The block must still fire, with the ruling id, and no order.
+            "past_ruling_order": lambda: case([trg.human("decide"), *self.sent_to_writer(),
+                                               trg.assistant_text(trg.RELAY)], "past-ruling", decided,
+                                              env={"CJ_ANSWER": judge_answer(
+                                                  tcj.APPS_SLUG + " settles this. " + JUDGE_ORDER)}),
             "keys": lambda: case([trg.human("decide"), *self.sent_to_writer(), trg.assistant_text(trg.KEYS_SAME)],
                                  "key", bare),
             "pick": lambda: case([trg.human("decide"), trg.assistant_text(trg.RELAY)], "pick", bare),
             # Recovered: a landed report after a compaction that carries no Recovered line.
             "recovered": lambda: case(trg.CompactionCarryTests.compacted_turn(trg.REPORT_NO_LINE), "recovered", clean),
+            # Recovered, the item names no source: the item names neither git, a page nor a digest.
+            "recovered_no_source": lambda: case(trg.CompactionCarryTests.compacted_turn(
+                trg.report_lines("Recovered: the ruling from chat", "Handoff gave: none")), "recovered", clean),
             # Departs from: a pick with no Departs from line. The writer send keeps the question check quiet.
             "departs_unlanded": lambda: case([trg.human("decide"), *self.sent_to_writer(),
                                               trg.assistant_text(self.PICK)], "departs", clean),
@@ -291,7 +313,7 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
         return out["reason"], c["word"]
 
     def check_no_session_problem(self, name, reason):
-        problem = session_problem(reason)
+        problem = RG.session_wording(reason)
         self.assertEqual(problem, "", "%s: 1a the reason holds a session phrase or an order to the session: %r"
                          % (name, problem))
 
@@ -307,15 +329,44 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
         out = self.run_stop(case(landed(trg.GOOD_REPORT), "clean", tcj.make_repo("remedy-clean")))
         self.assertNotEqual(out.get("decision"), "block", "2 a clean report is blocked: %r" % out)
 
+    def test_past_ruling_order_keeps_the_id_and_drops_the_order(self):
+        out = self.run_stop(self.fixture("past_ruling_order"))
+        self.assertEqual(out.get("decision"), "block", "the past-ruling block did not fire: %r" % out)
+        reason = out["reason"]
+        self.assertIn(tcj.APPS_SLUG, reason, "the reason lost the ruling id: %r" % reason)
+        self.assertNotIn(JUDGE_ORDER, reason, "the judge's order reached the owner word for word: %r" % reason)
+        self.assertEqual(RG.session_wording(reason), "", "the reason holds an order to the session: %r" % reason)
+
+    def test_mid_clause_orders_from_the_judge_do_not_reach_the_owner(self):
+        decided = tcj.make_repo("remedy-decided-mid", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+        for order in MID_CLAUSE_ORDERS:
+            with self.subTest(order=order):
+                c = case([trg.human("decide"), *self.sent_to_writer(), trg.assistant_text(trg.RELAY)],
+                         "past-ruling", decided,
+                         env={"CJ_ANSWER": judge_answer(tcj.APPS_SLUG + " settles this. " + order)})
+                out = self.run_stop(c)
+                self.assertEqual(out.get("decision"), "block", "the past-ruling block did not fire: %r" % out)
+                reason = out["reason"]
+                self.assertIn(tcj.APPS_SLUG, reason, "the reason lost the ruling id: %r" % reason)
+                self.assertNotIn(order, reason, "the judge's mid-clause order reached the owner: %r" % reason)
+                self.assertEqual(RG.session_wording(reason), "", "the reason holds an order: %r" % reason)
+
     def test_1a_control_fact_sentences_are_not_flagged(self):
         for fact in FACT_SENTENCES:
-            self.assertEqual(session_problem(fact), "", "control: a fact sentence is flagged: %r" % fact)
+            with self.subTest(fact=fact):
+                self.assertEqual(RG.session_wording(fact), "", "control: a fact sentence is flagged: %r" % fact)
 
     def test_1a_control_orders_are_flagged(self):
-        for order in ORDER_SENTENCES:
-            self.assertNotEqual(session_problem(order), "", "control: an order is not flagged: %r" % order)
+        for order in ORDER_SENTENCES + MID_CLAUSE_ORDERS:
+            with self.subTest(order=order):
+                self.assertNotEqual(RG.session_wording(order), "", "control: an order is not flagged: %r" % order)
 
-    def test_3_record_has_a_step_heading_for_each_owner_line_check(self):
+    def test_1a_control_phrase_list_is_pinned(self):
+        found = RG.session_wording(PHRASE_ONLY)
+        self.assertIn(PHRASE_PIN, found.lower(),
+                      "control: the phrase list does not catch %r: %r" % (PHRASE_PIN, found))
+
+    def test_3_record_has_a_step_heading_and_step_line_for_each_owner_line_check(self):
         # The names come from report_guard.py's own source, the one place each owner_line call is written.
         names = owner_line_checks()
         self.assertTrue(names, "report_guard passes no check name to owner_line")
@@ -324,9 +375,16 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
         with open(RECORD, encoding="utf-8") as handle:
             record = handle.read()
         for name in sorted(set(names)):
-            base = name.split(" (")[0].strip()
-            self.assertRegex(record, r"(?m)^### " + re.escape(base) + r"\b",
-                             "the record holds no step heading for the check %r" % base)
+            with self.subTest(check=name):
+                self.assertEqual(record_problems(record, [name]), [],
+                                 "3 the record holds no step heading and step line for the check %r" % name)
+
+    def test_3_section_with_no_step_line_is_flagged(self):
+        # A section that holds its heading and prose, and no step, is a problem. A section with a step is not.
+        emptied = "### Recovered guard\n\nText: `RECOVERED_REASON`.\n\n### Pick guard\n\n- Pick the one.\n"
+        self.assertEqual(record_problems(emptied, ["Recovered guard", "Pick guard"]),
+                         ["no step line under 'Recovered guard'"])
+        self.assertEqual(record_problems(emptied, ["Unvetted guard"]), ["no step heading for 'Unvetted guard'"])
 
 
 def _case_1a(name):
