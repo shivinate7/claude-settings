@@ -39,7 +39,8 @@ TypeScript signal, and in a project thread it never ran.
 - Host: the `config_watch.py` PostToolUse entry, which already runs on each write call. No new hook
   entry, no new process per tool call, no long-lived process, no timer.
 - Each Write, Edit or MultiEdit: a few reads of `lint/layout.json`, one walk up from the edited file to
-  find the extras file, and one read of it when found. No file is written. NotebookEdit never runs it.
+  find the extras file, and one read of it when found. No file is written, except one `noted`
+  guard.log line per bad entry on each such edit under that repo. NotebookEdit never runs it.
 - The cap watch's fast path now also imports `hooks/repo_typecheck.py` and `lint/layout.py`. Both use
   the standard library only.
 - A process starts only when the edited file matches a declared glob: one per matching entry, all
@@ -55,3 +56,5 @@ TypeScript signal, and in a project thread it never ran.
   `typecheck` key turns the check off below it.
 - In a session that also runs the repo's own typecheck hook, the check runs twice until the repo drops
   its own entry.
+
+Kind: build

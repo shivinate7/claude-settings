@@ -302,12 +302,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `stale-cites-whole-tree` | `lint/stale_cites.py --tree [REV]` reads every tracked Markdown file at REV. | [`docs/decisions/stale-cites-whole-tree.md`](../docs/decisions/stale-cites-whole-tree.md) |
 | `stalled-steps` | `doing` is derived from live work, not typed. | [`docs/decisions/stalled-steps.md`](../docs/decisions/stalled-steps.md) |
 
-## Unsorted decisions
-
-| Slug | Gist | Link |
-|---|---|---|
-| `repo-typecheck-hook` | A repo declares its typecheck in its extras file, `.claude/layout-extras.json`, under the key `typecheck`. | [`docs/decisions/repo-typecheck-hook.md`](../docs/decisions/repo-typecheck-hook.md) |
-
 ## Debts
 
 | Slug | Gist | Link |
