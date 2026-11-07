@@ -974,6 +974,15 @@ class GuardRuleIdReadTests(unittest.TestCase):
         except ValueError as why:
             self.fail("the reader refused a def-local rule id: %s" % why)
 
+    def refused_at(self, call, line):
+        """`call()` raises the reader's ValueError at hooks/guard.py:`line`. A return that lists ids fails here, naming them."""
+        try:
+            ids = call()
+        except ValueError as why:
+            self.assertRegex(str(why), r"hooks[\\/]guard\.py:%d: refuse\(\) takes a rule id the reader cannot resolve" % line)
+            return
+        self.fail("the reader listed %s for a loop it cannot read; it must raise, or a cull never sees the id" % sorted(ids))
+
     def test_a_def_local_name_assigned_a_literal_lists_that_id(self):
         # Scope first: the same call with the literal inline is read, so the local line is the only gap.
         self.assertEqual(self.listed('def go():\n    refuse(tool, "deny", "zzz-local-new", R, m)\n'),
@@ -1023,6 +1032,26 @@ class GuardRuleIdReadTests(unittest.TestCase):
                '        refuse(tool, "deny", rule, why, m)\n')
         self.assertLessEqual({"table-rule-a", "table-rule-b"}, self.listed(src),
                              "a literal table of (id, reason) rows names its ids; `rule, why = hit` lists none")
+
+    def test_a_loop_unpack_of_a_dict_items_call_raises_with_path_and_line(self):
+        # Scope first: the same loop over a literal table is read, empty or not, so the `.items()` call is the only gap.
+        loop = 'def go(tool):\n    for rule, why in TABLE:\n        refuse(tool, "deny", rule, why, m)\n'
+        self.assertEqual(self.listed('TABLE = (("loop-rule-a", "why a"),)\n' + loop), {"loop-rule-a"},
+                         "control: a literal table loop is listed")
+        self.assertEqual(self.listed('TABLE = ()\n' + loop), set(), "control: an empty literal table lists no id")
+        src = ('RULES = {"loop-rule-b": "why b", "loop-rule-c": "why c"}\n'
+               'def go(tool):\n    for rule, why in RULES.items():\n        refuse(tool, "deny", rule, why, m)\n')
+        self.refused_at(lambda: rule_audit.guard_rule_names(src, "hooks/guard.py"), 4)
+
+    def test_a_loop_unpack_of_an_imported_table_raises_with_path_and_line(self):
+        # The table lives in a sibling module, so this module holds no rows the reader can read.
+        root = self.fixture({
+            os.path.join("hooks", "rule_table.py"): 'CHECKS = (("sibling-loop-a", "why a"),)\n',
+            os.path.join("hooks", "guard.py"):
+                'from rule_table import CHECKS\ndef go(tool):\n    for rule, why in CHECKS:\n'
+                '        refuse(tool, "deny", rule, why, m)\n',
+        })
+        self.refused_at(lambda: rule_audit.emitted_rule_ids(root), 4)
 
     def test_an_inline_conditional_of_two_literal_ids_lists_both(self):
         # A false alarm today: the reader refuses an inline conditional of two literals it could list.
