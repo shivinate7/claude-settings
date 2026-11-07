@@ -73,9 +73,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   | `waits` |  | `{repo, run}` or `{repo, pr}`: set while the item waits on that CI run or PR. |
   <!-- /gen -->
 
-  - An update carries again every field that a guard judges together with the field it sets, because the guard cannot see the stored fields:
-    `options` with `pick`; each option's `links`, `gain` and `lose` with `options`; `links` with `steps`; the question form's lines with `context`
-    on a `decision`, and `kind: task` with `context` on a task; `port: true` with any update to a port item.
+  - An update carries again every field that a guard judges together with the field it sets, because the guard cannot see the stored fields.
+    - `pick` carries `options`. `options` carries each option's `links`, `gain` and `lose`. `steps` carries `links`.
+    - `context` on a decision carries `kind: decision` and all of the question form's lines. `context` on a task carries `kind: task`.
+    - An update to a port item carries `port: true`.
   - The page derives the tier from these fields. Never write a tier.
     - `holds` (one plain sentence: what is stopped until the answer) puts the item in Blocking.
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.
