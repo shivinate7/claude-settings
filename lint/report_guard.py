@@ -155,6 +155,17 @@ checkout the global rules file names (the copied cloud layout); a tool it cannot
 blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
 process kept or timer. A stale record adds the clean-merge read (merge/merge.py clean_merges_after): one commit read and one compare per merge
 commit, local git starts, and at most one `git fetch origin`, all inside the review check's REVIEW_CHECK_BUDGET. A stop_hook_active rewrite is not checked.
+
+Notes-fix step check (decision `notes-name-their-fix`): on a landed turn with a well-formed report whose Done has a
+RECORDED item, each `Fix: step:<slug>` the branch adds to the debt notes file or to a new debt file must have its
+slug in Done as a whole word (`step:<slug>` or the bare slug; a longer slug that starts with it does not count). A
+branch that adds no such line, a checkout with no notes file on disk (it starts no git process), and the none and
+already-fixed forms pass. The Fix grammar
+lives in lint/check_record_slugs.py (parse_fix, added_fixes) and is imported here, never copied; CI judges whether the
+step exists, this check judges only that Done names it. Any error fails open. Cost: git reads only, on a landed
+Stop with a RECORDED item in a checkout that holds the notes file: one name-status diff for the added files, and for
+the notes file one ls-tree and one diff (plus a merge-base, an ls-tree and a show when it adds a bullet). No file
+written, no process left running, no timer.
 """
 import bisect
 import datetime
@@ -1173,6 +1184,34 @@ def mistake_problem(text):
             or any(MISTAKE_GUARD_WORD_RE.search(s) and DONE_REF_RE.search(s) for s in _sentences(deviations))):
         return ""
     return MISTAKE_REASON % repr(clause[:80])
+
+
+NOTES_FIX_REASON = (
+    "Notes-fix guard: this branch adds a Fix that names step %s, and Done does not name it. Name each step "
+    "the branch adds in Done, so the gap has a fix somebody sees (decision notes-name-their-fix).")
+
+
+def notes_fix_problem(text, cwd):
+    """The refusal text when Done has a RECORDED item and a `Fix: step:<slug>` the branch adds to the notes file or
+    a new debt file names a slug that Done does not, else ''. The step's existence is CI's to judge."""
+    if not any("RECORDED" in DONE_KIND_RE.findall(item) for item in done_items(block_text(text, keep_indent=True))):
+        return ""
+    root = repo_root(cwd)
+    if not root:
+        return ""
+    # A repo with no notes file keeps no notes: no git process starts for it.
+    if not any(os.path.isfile(os.path.join(root, p)) for p in layout.candidates(root, "debt-notes")):
+        return ""
+    import check_record_slugs  # the one home of the Fix grammar and of how the added lines are read
+    entries = check_record_slugs.added_fixes(root, check_record_slugs.added(root))
+    done = report_section(text, "Done")
+    missing = []
+    for _path, _label, fixes in entries:
+        for fix in fixes:
+            if fix and fix[0] == "step" and fix[1] not in missing \
+                    and not re.search(r"(?<![\w-])" + re.escape(fix[1]) + r"(?![\w-])", done):
+                missing.append(fix[1])
+    return " ".join(NOTES_FIX_REASON % ("`step:%s`" % slug) for slug in missing)
 
 
 def _own_lane_read(path, own_id):
@@ -3278,6 +3317,12 @@ def main():
                 reasons.append(mistake)
         except Exception as exc:
             print("mistake check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+        try:
+            notes_fix = notes_fix_problem(text, hook.get("cwd"))
+            if notes_fix:
+                reasons.append(notes_fix)
+        except Exception as exc:
+            print("notes-fix check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
     reasons += [r for r in relay if r]
     if hand_off:
         reasons.append(hand_off)
