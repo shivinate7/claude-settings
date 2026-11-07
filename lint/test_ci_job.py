@@ -21,6 +21,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1450,14 +1451,121 @@ class PinnedSettings(Job):
         self.assertEqual(absent, fetch_only, "the clone holds pin A" if fetch_only else "the clone lacks pin A")
         return self.clone
 
-    def run_pinned(self, *steps, args=()):
-        """One ci-job run of the job: the fixture clone is the pin's source, and the decoy is the caller's own value."""
-        argv, env = self.job_call(*steps, args=args)
-        env = {k: v for k, v in env.items() if k not in ("CLAUDE_SETTINGS_DIR", "CI_JOB_SETTINGS_CLONE")}
-        env.update(CLAUDE_SETTINGS_DIR=self.decoy, CI_JOB_SETTINGS_CLONE=self.clone)
-        done = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, env=env, timeout=120)
+    def pinned_env(self, clone=None):
+        """The env of one ci-job run: the decoy and the clone seam are the only settings values, and the run's temp
+        folder is under this run's folder, so a pinned tree a run leaves is swept with the fixture."""
+        tmp = os.path.join(self.fixture, "tmp")
+        os.makedirs(tmp, exist_ok=True)
+        env = {k: v for k, v in ENV.items() if k not in ("CLAUDE_SETTINGS_DIR", "CI_JOB_SETTINGS_CLONE", "TMPDIR")}
+        env.update(CLAUDE_SETTINGS_DIR=self.decoy, CI_JOB_SETTINGS_CLONE=self.clone if clone is None else clone,
+                   TMPDIR=tmp, VERDICT_LOG=self.log)
+        return env
+
+    def wf_argv(self, text, job, args=()):
+        """argv of one ci-job run of `job` in the workflow `text`, written into this run's throwaway repo."""
+        path = os.path.join(self.root, "wf.yml")
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        return [sys.executable, CI_JOB, job, "--workflow", path, *args]
+
+    def run_text(self, text, job, args=(), clone=None):
+        done = subprocess.run(self.wf_argv(text, job, args), cwd=self.root, capture_output=True, text=True,
+                              env=self.pinned_env(clone), timeout=120)
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
         return done.returncode, lines, done.stdout + done.stderr
+
+    def run_pinned(self, *steps, args=(), clone=None):
+        """One ci-job run of the job: the fixture clone is the pin's source, and the decoy is the caller's own value."""
+        return self.run_text(workflow(*steps), "lane", args, clone)
+
+    def start_pinned(self, *steps, args=()):
+        """Start one ci-job run in a process group of its own, output to a file. Cleanup kills the group, so a step a
+        test leaves running is not kept."""
+        handle = open(os.path.join(self.root, "job.out"), "wb")
+        self.addCleanup(handle.close)
+        proc = subprocess.Popen(self.wf_argv(workflow(*steps), "lane", args), cwd=self.root, env=self.pinned_env(),
+                                stdout=handle, stderr=subprocess.STDOUT, start_new_session=True)
+        self.addCleanup(self.kill_group, proc)
+        return proc
+
+    @staticmethod
+    def kill_group(proc):
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)  # the group this run started: its steps and nothing else
+        except ProcessLookupError:
+            pass
+        proc.wait()
+
+    @staticmethod
+    def wait_for_file(path, polls=600):
+        """Whether `path` appears within a bounded number of polls: a wait for a step to start, never an assert on time."""
+        for _ in range(polls):
+            if os.path.isfile(path):
+                return True
+            time.sleep(0.05)
+        return False
+
+    def worktrees(self):
+        """How many worktrees the fixture clone lists, its own folder included."""
+        listed = fixture_git(self.clone, "worktree", "list", "--porcelain")
+        return sum(1 for ln in listed.splitlines() if ln.startswith("worktree "))
+
+    @unittest.skipUnless(os.name == "posix", "the signal cases are posix only")
+    def test_a_sigterm_mid_step_leaves_no_pinned_tree_and_no_worktree(self):
+        self.settings()
+        proc = self.start_pinned(
+            step("pin", uses=PIN_USES % self.sha_a),
+            step("slow", 'echo "$CLAUDE_SETTINGS_DIR" > seen.txt\necho started > started.txt\nsleep 30'),
+            args=("--step", "slow"))
+        self.assertTrue(self.wait_for_file(os.path.join(self.root, "started.txt")), "the step never started")
+        seen = open(os.path.join(self.root, "seen.txt"), encoding="utf-8").read().strip()
+        self.assertTrue(os.path.isdir(seen), "precondition: no pinned tree while the step runs: " + seen)
+        proc.send_signal(signal.SIGTERM)
+        proc.wait(timeout=60)
+        self.assertFalse(os.path.exists(seen), "a SIGTERM left the pinned tree on disk: " + seen)
+        self.assertEqual(self.worktrees(), 1, "a SIGTERM left a worktree listed in the clone")
+
+    @unittest.skipUnless(os.name == "posix", "the signal cases are posix only")
+    def test_a_stale_pinned_tree_from_a_killed_run_is_removed_by_the_next_pinned_run(self):
+        self.settings()
+        proc = self.start_pinned(
+            step("pin", uses=PIN_USES % self.sha_a),
+            step("slow", "echo started > started.txt\nsleep 30"),
+            args=("--step", "slow"))
+        self.assertTrue(self.wait_for_file(os.path.join(self.root, "started.txt")), "the step never started")
+        proc.kill()  # SIGKILL: no handler runs, so the run leaves its worktree behind
+        proc.wait(timeout=60)
+        self.assertEqual(self.worktrees(), 2, "precondition: the killed run left its worktree listed")
+        rc, lines, out = self.run_pinned(step("pin", uses=PIN_USES % self.sha_a), step("quick", READ_PINNED),
+                                         args=("--step", "quick"))
+        self.assertEqual(by_step(lines).get("quick"), "PASS", "the next pinned run did not read its pin:\n" + out)
+        self.assertEqual(self.worktrees(), 1, "the next pinned run left the killed run's worktree listed:\n" + out)
+
+    def test_a_missing_settings_clone_is_unknown_with_exit_two_not_a_crash(self):
+        self.settings()
+        missing = os.path.join(self.fixture, "no-such-clone")
+        rc, lines, out = self.run_pinned(step("pin", uses=PIN_USES % self.sha_a), step("read pinned marker", READ_PINNED),
+                                         args=("--step", "read pinned marker"), clone=missing)
+        self.assertEqual((rc, by_step(lines).get("read pinned marker")), (2, "unknown"),
+                         "a missing CI_JOB_SETTINGS_CLONE must be one unknown line, exit 2:\n" + out)
+        self.assertNotIn("Traceback", out, "a missing CI_JOB_SETTINGS_CLONE crashed ci-job:\n" + out)
+
+    def test_plan_with_an_unfetchable_pin_plans_unknown_and_makes_no_worktree(self):
+        self.settings()
+        rc, lines, out = self.run_pinned(step("pin", uses=PIN_USES % ABSENT_SHA), step("write", "echo ran > ran.txt"),
+                                         args=("--step", "write", "--plan"))
+        self.assertEqual((rc, by_step(lines).get("write")), (2, "unknown"),
+                         "--plan must plan an unfetchable pin as unknown, not 'would run':\n" + out)
+        self.assertEqual(self.worktrees(), 1, "--plan made a worktree:\n" + out)
+
+    def test_a_step_uses_the_pin_of_its_own_job(self):
+        self.settings()
+        text = ("name: t\non: push\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
+                + step("pin", uses=PIN_USES % self.sha_a) + step("read pinned marker", READ_PINNED)
+                + "  other:\n    runs-on: ubuntu-latest\n    steps:\n" + step("pin b", uses=PIN_USES % self.sha_b))
+        rc, lines, out = self.run_text(text, "checks", args=("--step", "read pinned marker"))
+        self.assertEqual(by_step(lines).get("read pinned marker"), "PASS",
+                         "a step of `checks` must read job checks' pin (A), not unknown for the other job's B:\n" + out)
 
     def test_a_step_reads_the_pinned_tree_and_its_twin_reads_the_local_one(self):
         self.settings()
