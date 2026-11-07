@@ -1,0 +1,10 @@
+{
+  "title": "A wake that writes the page cannot end until the page is exported",
+  "phase": "now",
+  "status": "todo",
+  "order": 7,
+  "owner": "lane (hooks)",
+  "why": "Owner 19:02 CST Nov 6: a session wrote 'From now on, every wake that changes the page ends with an export. That step is in my handoff.' The owner: such a promise must be a mechanical change, not a line in a handoff (rule building-mistake-names-its-guard). Incident: a page writer changed items all day but exported only before a republish (decision waiting-data-in-repo says export after each wake).",
+  "note": "Build: a Stop check in the page writer's session refuses while an ArtifactData write to the repo's waiting page is newer than the last push of `waiting/` to origin/roadmap, with the export command as the remedy. Cost: one git read at Stop, only in a session that wrote the page this turn. Red test: write an item, stop without export, expect refusal. Also: a report line that promises 'from now on' with only a handoff as home should be refused or flagged (same rule).",
+  "updatedAt": "2026-11-07T01:04:00Z"
+}
