@@ -89,6 +89,7 @@ FAMILIES = {
     "worktree-home": "rule 0: an agent's shell call outside its recorded home, and the path forms it reads",
     "session-home": "rule session-home: a session whose worktree is gone is refused a write into the primary checkout; its record and its cost",
     "pointer": "the pointer HEAD checkout",
+    "stale-tree-commit": "a commit from a checkout whose branch moved under it: refused while the index holds the old copy of a file the move changed, passed after the acts that sync the index, and the git processes a commit or a read starts",
     "hand-made-worktree": "a worktree made by hand outside the agent home folder",
     "kill": "machine-wide kills and detached launches",
     "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
@@ -3723,6 +3724,472 @@ sh("pointer: a pointer naming a directory that is gone fires nothing",
    VCS + " switch somebranch", "allow", cwd=PTRMAIN, config=PTRGONECFG)
 sh("pointer: no global rules file at all fires nothing",
    VCS + " switch somebranch", "allow", cwd=PTRMAIN, config=PTRNOCFG)
+
+
+# =========================================================================== 1b-2. the stale-tree commit
+FAMILY = "stale-tree-commit"
+#
+# Decision stale-tree-commit, section "The ruling". A commit is refused when the branch moved under its
+# checkout and the index still holds the old copy of a file that the move changed. The stale state is
+# built the way git builds it: worktree B holds `feature`, and A moves `feature` with
+# `checkout --ignore-other-worktrees`, so B's index and its own HEAD reflog keep the old commit.
+#
+# Each scenario is one folder under STDIR, built with git itself. A builder checks the state its cases
+# need before any case runs (the scope first), so a refusal or an allow means what its case name says.
+
+STDIR = os.path.join(ROOT, "stalecommit")
+STALE_RULE = "stale-tree-commit"
+STALE_CARRY = "moved"   # the printed reason says the branch moved under this checkout
+STALE_LACKS = "detach"  # and it prints no git recipe: "detach, then check it out again" fails while a worktree holds the branch
+
+ST = os.path.join(STDIR, "sttree")          # a: a clone with a bare origin; b: a worktree on `feature`
+ST_A, ST_B = os.path.join(ST, "a"), os.path.join(ST, "b")
+NR = os.path.join(STDIR, "nrtree")          # the same pair, with no remote at all
+NR_A, NR_B = os.path.join(NR, "a"), os.path.join(NR, "b")
+SN = os.path.join(STDIR, "sntree")          # the stale pair, with a new file staged in b
+SN_B = os.path.join(SN, "b")
+LG = os.path.join(STDIR, "lgtree")          # full size: 25 lane commits in b's reflog, six stale files
+LG_B = os.path.join(LG, "b")
+RS = os.path.join(STDIR, "rstree")          # one checkout: reset --soft to a newer commit
+UR = os.path.join(STDIR, "urtree")          # one checkout: update-ref of the checked-out branch to a newer commit
+SQ = os.path.join(STDIR, "sqtree")          # one checkout: three commits, then reset --soft HEAD~3
+RV = os.path.join(STDIR, "rvtree")          # one checkout: a commit, then a deliberate revert of f.txt
+SY = os.path.join(STDIR, "sytree")          # the stale pair, with f.txt synced in b and a new file staged
+SY_B = os.path.join(SY, "b")
+PL = os.path.join(STDIR, "pltree")          # the stale pair with a bare origin: b pulls a fast-forward
+PL_A, PL_B = os.path.join(PL, "a"), os.path.join(PL, "b")
+MG = os.path.join(STDIR, "mgtree")          # the stale pair: b merges a side branch
+MG_B = os.path.join(MG, "b")
+RB = os.path.join(STDIR, "rbtree")          # the stale pair, with main moved on: b rebases
+RB_B = os.path.join(RB, "b")
+AM = os.path.join(STDIR, "amtree")          # the stale pair: b amends
+AM_B = os.path.join(AM, "b")
+RM = os.path.join(STDIR, "rmtree")          # the stale pair: b resets --mixed
+RM_B = os.path.join(RM, "b")
+DT = os.path.join(STDIR, "dttree")          # the pair, with b detached before A moves the branch
+DT_B = os.path.join(DT, "b")
+RF = os.path.join(STDIR, "rfmtree")         # the stale pair: b's HEAD reflog file is removed
+RF_B = os.path.join(RF, "b")
+RE = os.path.join(STDIR, "rfetree")         # the stale pair: b's HEAD reflog file is emptied
+RE_B = os.path.join(RE, "b")
+
+
+def _st_must(ok, what):
+    """Scope check for a fixture: stop the suite, naming WHAT, unless OK holds."""
+    if not ok:
+        sys.exit("fixture setup failed in stale-tree-commit: %s" % what)
+
+
+def _st_git(where, *args):
+    """git in WHERE, which must succeed. Returns its stdout."""
+    result = run_vcs(where, *args)
+    _st_must(result.returncode == 0,
+             "git %s in %r: %s" % (" ".join(args), where, result.stderr.strip()))
+    return result.stdout
+
+
+def _st_commit(where, message):
+    _st_git(where, *IDENT, "commit", "-q", "--allow-empty", "-m", message)
+
+
+def _st_head(where):
+    return _st_git(where, "rev-parse", "HEAD").strip()
+
+
+def _st_newest(where):
+    """(sha, message) of the newest HEAD reflog entry; ("", "") when that reflog is empty or missing."""
+    result = run_vcs(where, "reflog", "-1", "--format=%H %gs", "HEAD")
+    sha, _, message = (result.stdout.strip() if result.returncode == 0 else "").partition(" ")
+    return sha, message
+
+
+def _st_head_logs(where):
+    """The files git reads as WHERE's HEAD reflog: its own, and the clone's HEAD log and branch log. With the
+    worktree's own file gone, git reads the clone's entries instead, so all three must go for "no entries"."""
+    gitdir = _st_git(where, "rev-parse", "--git-dir").strip()
+    common = _st_git(where, "rev-parse", "--git-common-dir").strip()
+    branch = _st_git(where, "symbolic-ref", "-q", "HEAD").strip()
+    return [os.path.join(where, gitdir, "logs", "HEAD"),
+            os.path.join(where, common, "logs", "HEAD"),
+            os.path.join(where, common, "logs", branch)]
+
+
+def _st_require_moved(where, lane_head):
+    """Scope: the branch moved under WHERE. HEAD is past the lane's own commit, and that commit is the
+    newest HEAD entry, so the rule reads the lane commit as X."""
+    head = _st_head(where)
+    past = head != lane_head and run_vcs(where, "merge-base", "--is-ancestor", lane_head, head).returncode == 0
+    _st_must(past, "%r: HEAD %s is not past the lane commit %s" % (where, head, lane_head))
+    newest = _st_newest(where)[0]
+    _st_must(newest == lane_head, "%r: the newest HEAD entry is %s, want the lane commit %s"
+             % (where, newest, lane_head))
+
+
+def _st_require_entry(where, name, index_text, head_text, message_start):
+    """Scope: the index holds INDEX_TEXT for NAME, HEAD holds HEAD_TEXT, and the newest HEAD entry's
+    message starts with MESSAGE_START."""
+    staged = _st_git(where, "show", ":" + name)
+    _st_must(staged == index_text, "%r: the index holds %r for %s, want %r" % (where, staged, name, index_text))
+    committed = _st_git(where, "show", "HEAD:" + name)
+    _st_must(committed == head_text, "%r: HEAD holds %r for %s, want %r" % (where, committed, name, head_text))
+    message = _st_newest(where)[1]
+    _st_must(message.startswith(message_start),
+             "%r: the newest HEAD entry says %r, want it to start %r" % (where, message, message_start))
+
+
+def _st_pair(folder, names, lane_commits=1, remote=False, before_move=None, moved=True, stale=True):
+    """Build one scenario under FOLDER and return the lane's own commit.
+
+    A is a clone on `main`, and `feature` starts at its first commit. B is a worktree on `feature`, with
+    LANE_COMMITS empty commits of its own, so B's HEAD reflog holds them. Then A runs before_move(a, b),
+    if given, and moves `feature` under B: checkout --ignore-other-worktrees, and one commit that writes
+    "moved" to each of NAMES. `moved` checks that the branch moved under B. `stale` checks that B's index
+    still holds the base copies. A case that moves B itself turns both checks off.
+    """
+    a, b = os.path.join(folder, "a"), os.path.join(folder, "b")
+    make_repo(a, {name: "base\n" for name in names})
+    _st_git(a, "branch", "feature")
+    if remote:
+        origin = os.path.join(folder, "origin.git")
+        _st_git(folder, "init", "-q", "--bare", origin)
+        _st_git(a, "remote", "add", "origin", slash(origin))
+        _st_git(a, "push", "origin", "main", "feature")
+    _st_git(a, "worktree", "add", "-q", b, "feature")
+    for number in range(1, lane_commits + 1):
+        _st_commit(b, "lane %d" % number)
+    lane_head = _st_head(b)
+    if before_move:
+        before_move(a, b)
+    _st_git(a, "checkout", "-q", "--ignore-other-worktrees", "feature")
+    for name in names:
+        write(os.path.join(a, name), "moved\n")
+    _st_git(a, "add", "-A")
+    _st_commit(a, "move feature")
+    if moved:
+        _st_require_moved(b, lane_head)
+    if stale:
+        for name in names:
+            _st_require_entry(b, name, "base\n", "moved\n", "")
+    return lane_head
+
+
+def _build_sttree():
+    _st_pair(ST, ("f.txt",), remote=True)
+
+
+def _build_nrtree():
+    _st_pair(NR, ("f.txt",))
+
+
+def _build_sntree():
+    _st_pair(SN, ("f.txt",))
+    write(os.path.join(SN_B, "new.txt"), "new\n")
+    _st_git(SN_B, "add", "new.txt")
+    staged = sorted(_st_git(SN_B, "diff", "--cached", "--name-only").split())
+    _st_must(staged == ["f.txt", "new.txt"], "%r: the staged paths are %r, want f.txt and new.txt" % (SN_B, staged))
+
+
+def _build_lgtree():
+    _st_pair(LG, tuple("f%d.txt" % number for number in range(6)), lane_commits=25)
+
+
+def _build_rstree():
+    make_repo(RS, {"f.txt": "base\n"})
+    _st_git(RS, "checkout", "-q", "-b", "side")
+    write(os.path.join(RS, "f.txt"), "moved\n")
+    _st_git(RS, "add", "-A")
+    _st_commit(RS, "newer")
+    newer = _st_head(RS)
+    _st_git(RS, "checkout", "-q", "main")
+    _st_git(RS, "reset", "-q", "--soft", newer)
+    _st_require_entry(RS, "f.txt", "base\n", "moved\n", "reset:")
+    _st_must(_st_head(RS) == newer, "%r: HEAD is not the newer commit after reset --soft" % RS)
+
+
+def _build_urtree():
+    make_repo(UR, {"f.txt": "base\n"})
+    _st_git(UR, "checkout", "-q", "-b", "side")
+    write(os.path.join(UR, "f.txt"), "moved\n")
+    _st_git(UR, "add", "-A")
+    _st_commit(UR, "newer")
+    newer = _st_head(UR)
+    _st_git(UR, "checkout", "-q", "main")
+    _st_git(UR, "update-ref", "refs/heads/main", newer)
+    _st_must(_st_newest(UR) == (newer, ""),
+             "%r: the newest HEAD entry is %r, want the newer commit with an empty message" % (UR, _st_newest(UR)))
+    _st_require_entry(UR, "f.txt", "base\n", "moved\n", "")
+
+
+def _build_sqtree():
+    make_repo(SQ, {"f.txt": "base\n"})
+    for text in ("one\n", "two\n", "three\n"):
+        write(os.path.join(SQ, "f.txt"), text)
+        _st_git(SQ, "add", "-A")
+        _st_commit(SQ, "step")
+    _st_git(SQ, "reset", "-q", "--soft", "HEAD~3")
+    _st_require_entry(SQ, "f.txt", "three\n", "base\n", "reset:")
+
+
+def _build_rvtree():
+    make_repo(RV, {"f.txt": "base\n"})
+    write(os.path.join(RV, "f.txt"), "changed\n")
+    _st_git(RV, "add", "-A")
+    _st_commit(RV, "change f.txt")
+    _st_git(RV, "checkout", "HEAD~1", "--", "f.txt")
+    _st_require_entry(RV, "f.txt", "base\n", "changed\n", "commit")
+
+
+def _build_sytree():
+    lane_head = _st_pair(SY, ("f.txt",), stale=False)
+    _st_git(SY_B, "checkout", "HEAD", "--", "f.txt")    # syncs b's index and tree for f.txt; no HEAD entry
+    write(os.path.join(SY_B, "new.txt"), "new\n")
+    _st_git(SY_B, "add", "new.txt")
+    _st_require_moved(SY_B, lane_head)
+    _st_require_entry(SY_B, "f.txt", "moved\n", "moved\n", "")
+    staged = _st_git(SY_B, "diff", "--cached", "--name-only").split()
+    _st_must(staged == ["new.txt"], "%r: the staged paths are %r, want new.txt alone" % (SY_B, staged))
+
+
+def _build_pltree():
+    lane_head = _st_pair(PL, ("f.txt",), remote=True)
+    origin = os.path.join(PL, "origin.git")
+    _st_git(PL_A, "push", "origin", "feature")         # the moved branch reaches origin
+    clone = os.path.join(PL, "c")
+    _st_git(PL, "clone", "-q", slash(origin), clone)
+    _st_git(clone, "checkout", "-q", "-b", "feature", "origin/feature")
+    write(os.path.join(clone, "n2.txt"), "pulled\n")
+    _st_git(clone, "add", "-A")
+    _st_commit(clone, "pulled")
+    _st_git(clone, "push", "origin", "feature")        # one commit more on origin, for b to pull
+    _st_git(PL_B, "branch", "--set-upstream-to=origin/feature", "feature")
+    _st_git(PL_B, "pull", "-q", "--ff-only")
+    _st_must(_st_head(PL_B) != lane_head, "%r: the pull did not move HEAD" % PL_B)
+    _st_must(_st_newest(PL_B)[0] == _st_head(PL_B), "%r: the pull left no HEAD entry for the new HEAD" % PL_B)
+    # The fast-forward touched n2.txt only, so f.txt is still the stale copy: the pull's entry is what
+    # keeps the rule from reading the lane commit as X.
+    _st_require_entry(PL_B, "f.txt", "base\n", "moved\n", "pull")
+
+
+def _build_mgtree():
+    def side(a, _b):
+        _st_git(a, "checkout", "-q", "-b", "side")
+        write(os.path.join(a, "s.txt"), "side\n")
+        _st_git(a, "add", "-A")
+        _st_commit(a, "side work")
+        _st_git(a, "checkout", "-q", "main")
+
+    lane_head = _st_pair(MG, ("f.txt",), before_move=side)
+    _st_git(MG_B, "reset", "-q", "--hard")     # a merge needs a clean tree; the merge then supersedes this entry
+    _st_git(MG_B, *IDENT, "merge", "-q", "--no-edit", "side")
+    _st_git(MG_B, "checkout", lane_head, "--", "f.txt")
+    _st_require_entry(MG_B, "f.txt", "base\n", "moved\n", "merge")
+
+
+def _build_rbtree():
+    def main_moves(a, _b):
+        write(os.path.join(a, "m.txt"), "main\n")
+        _st_git(a, "add", "-A")
+        _st_commit(a, "main moves on")
+
+    lane_head = _st_pair(RB, ("f.txt",), before_move=main_moves)
+    _st_git(RB_B, "reset", "-q", "--hard")     # a rebase needs a clean tree; the rebase then supersedes this entry
+    _st_git(RB_B, *IDENT, "rebase", "-q", "main")
+    _st_git(RB_B, "checkout", lane_head, "--", "f.txt")
+    _st_require_entry(RB_B, "f.txt", "base\n", "moved\n", "rebase")
+
+
+def _build_amtree():
+    lane_head = _st_pair(AM, ("f.txt",))
+    write(os.path.join(AM_B, "f.txt"), "fixed\n")
+    _st_git(AM_B, "add", "-A")
+    _st_git(AM_B, *IDENT, "commit", "-q", "--amend", "-m", "amended")
+    _st_git(AM_B, "checkout", lane_head, "--", "f.txt")
+    _st_require_entry(AM_B, "f.txt", "base\n", "fixed\n", "commit (amend)")
+
+
+def _build_rmtree():
+    _st_pair(RM, ("f.txt",))
+    _st_git(RM_B, "reset", "-q", "--mixed")
+    _st_must(run_vcs(RM_B, "diff", "--cached", "--quiet").returncode == 0,
+             "%r: reset --mixed left staged paths" % RM_B)
+    _st_must(_st_newest(RM_B)[1].startswith("reset:"), "%r: the newest HEAD entry is not the reset" % RM_B)
+
+
+def _build_dttree():
+    def detach(_a, b):
+        _st_git(b, "checkout", "-q", "--detach")    # b leaves the branch before A moves it
+
+    lane_head = _st_pair(DT, ("f.txt",), before_move=detach, moved=False, stale=False)
+    _st_must(run_vcs(DT_B, "symbolic-ref", "-q", "HEAD").returncode != 0, "%r: HEAD still names a branch" % DT_B)
+    _st_must(_st_head(DT_B) == lane_head, "%r: the detached HEAD is not the lane commit" % DT_B)
+    write(os.path.join(DT_B, "new.txt"), "new\n")
+    _st_git(DT_B, "add", "new.txt")
+
+
+def _build_rfmtree():
+    _st_pair(RF, ("f.txt",))
+    logs = _st_head_logs(RF_B)
+    _st_must(os.path.isfile(logs[0]), "%r: no HEAD reflog file at %r to remove" % (RF_B, logs[0]))
+    for log in logs:
+        if os.path.exists(log):
+            os.remove(log)
+    _st_must(_st_newest(RF_B) == ("", ""), "%r: no HEAD log file is left, yet git reads %r"
+             % (RF_B, _st_newest(RF_B)))
+
+
+def _build_rfetree():
+    _st_pair(RE, ("f.txt",))
+    logs = _st_head_logs(RE_B)
+    _st_must(os.path.isfile(logs[0]), "%r: no HEAD reflog file at %r to empty" % (RE_B, logs[0]))
+    for log in logs:
+        if os.path.exists(log):
+            with open(log, "w", encoding="utf-8"):
+                pass
+    _st_must(_st_newest(RE_B) == ("", ""), "%r: every HEAD log is empty, yet git reads %r"
+             % (RE_B, _st_newest(RE_B)))
+
+
+lazy_fixture([ST_A, ST_B], _build_sttree)
+lazy_fixture([NR_A, NR_B], _build_nrtree)
+lazy_fixture([SN_B], _build_sntree)
+lazy_fixture([LG_B], _build_lgtree)
+lazy_fixture([RS], _build_rstree)
+lazy_fixture([UR], _build_urtree)
+lazy_fixture([SQ], _build_sqtree)
+lazy_fixture([RV], _build_rvtree)
+lazy_fixture([SY_B], _build_sytree)
+lazy_fixture([PL_A, PL_B], _build_pltree)
+lazy_fixture([MG_B], _build_mgtree)
+lazy_fixture([RB_B], _build_rbtree)
+lazy_fixture([AM_B], _build_amtree)
+lazy_fixture([RM_B], _build_rmtree)
+lazy_fixture([DT_B], _build_dttree)
+lazy_fixture([RF_B], _build_rfmtree)
+lazy_fixture([RE_B], _build_rfetree)
+
+
+def _st_refuse(name, command, cwd, **kw):
+    sh("stale-tree-commit: " + name, command, "deny", STALE_RULE, cwd=cwd, carries=STALE_CARRY,
+       lacks=STALE_LACKS, **kw)
+
+
+def _st_allow(name, command, cwd, **kw):
+    sh("stale-tree-commit: " + name, command, "allow", cwd=cwd, **kw)
+
+
+# THE REFUSALS. Each one names the rule and the printed reason says the branch moved. Each has a
+# control beside it below: the same command in the fresh checkout, which must be allowed.
+_st_refuse("a commit in a stale tree is refused", VCS + " commit -m x", ST_B)
+_st_refuse("commit -a in a stale tree is refused", VCS + " commit -a -m x", ST_B)
+_st_refuse("commit --amend in a stale tree is refused", VCS + " commit --amend -m x", ST_B)
+_st_refuse("-C naming a stale tree is refused from a cwd that is no git tree",
+           VCS + " -C " + slash(ST_B) + " commit -m x", NOGIT)
+_st_refuse("a cd into a stale tree before the commit is refused",
+           "cd " + slash(ST_B) + " && " + VCS + " commit -m x", NOGIT)
+_st_refuse("a stale tree that never had a remote is refused", VCS + " commit -m x", NR_B)
+_st_refuse("a stale file is refused even with a new file staged beside it", VCS + " commit -m x", SN_B)
+_st_refuse("full size: 25 lane commits and six stale files are refused", VCS + " commit -m x", LG_B)
+_st_refuse("reset --soft to a newer commit leaves the old files staged: refused",
+           VCS + " commit -m x", RS)
+_st_refuse("update-ref of the checked-out branch to a newer commit is refused", VCS + " commit -m x", UR)
+_st_refuse("a comment opener inside -m does not hide the commit", VCS + ' commit -m "fix # later"', ST_B)
+_st_refuse("a double slash inside -m does not hide the commit", VCS + ' commit -m "see // here"', ST_B)
+_st_refuse("a lone quote inside -m does not hide the commit", VCS + ' commit -m "don\'t fix"', ST_B)
+
+# THE CONTROLS. The same commands in the fresh checkouts, and a -C or cd that names one from a stale cwd.
+_st_allow("control: the same commit in the fresh checkout is allowed", VCS + " commit -m x", ST_A)
+_st_allow("control: the same commit with no remote, in its fresh checkout, is allowed",
+          VCS + " commit -m x", NR_A)
+_st_allow("control: a cd into the fresh checkout before the commit is allowed",
+          "cd " + slash(ST_A) + " && " + VCS + " commit -m x", NOGIT)
+_st_allow("control: -C naming the fresh checkout is judged there and allowed",
+          VCS + " -C " + slash(ST_A) + " commit -m x", ST_B)
+
+# THE PASSES. Each act that leaves no X, or an X the index does not hold, and the reads that must not refuse.
+_st_allow("a commit after git pull --ff-only in the same tree is allowed", VCS + " commit -m x", PL_B)
+_st_allow("a commit after a merge in the same tree is allowed", VCS + " commit -m x", MG_B)
+_st_allow("a commit after a rebase in the same tree is allowed", VCS + " commit -m x", RB_B)
+_st_allow("a squash back to an older commit (reset --soft HEAD~3) is allowed", VCS + " commit -m x", SQ)
+_st_allow("a commit after commit --amend in the same tree is allowed", VCS + " commit -m x", AM_B)
+_st_allow("a commit after reset --mixed, which syncs the index, is allowed", VCS + " commit -m x", RM_B)
+_st_allow("a detached HEAD is allowed", VCS + " commit -m x", DT_B)
+_st_allow("a worktree with no HEAD reflog file is allowed", VCS + " commit -m x", RF_B)
+_st_allow("a worktree with an empty HEAD reflog is allowed", VCS + " commit -m x", RE_B)
+_st_allow("a stale branch whose only staged path is a new file, once f.txt is synced, is allowed",
+          VCS + " commit -m x", SY_B)
+_st_allow("a deliberate revert after a normal commit is allowed", VCS + " commit -m x", RV)
+_st_allow("git status in a stale tree is allowed", VCS + " status", ST_B)
+_st_allow("git log in a stale tree is allowed", VCS + " log", ST_B)
+_st_allow("git push in a stale tree is allowed", VCS + " push origin feature", ST_B)
+_st_allow("ls in a stale tree is allowed", "ls", ST_B)
+_st_allow("a quoted commit line inside echo is not a commit and is allowed",
+          'echo "git commit -m x"', ST_B)
+
+
+# THE COST. A guard run's git processes are the `built-in: git` lines of its GIT_TRACE file. The rule's
+# reads are the reflog, HEAD and the staged paths, so a non-commit command must start none that reads the
+# reflog, and `ls` none at all. Each check judges its own run, so a shard that skips a case cannot skip it.
+def _st_traced(command, cwd, name):
+    """One guard judgement of COMMAND in CWD, with GIT_TRACE writing to a file of its own named NAME.
+    Returns (decision, reason, git_starts): one line per git process the guard started."""
+    os.makedirs(STDIR, exist_ok=True)
+    trace = os.path.join(STDIR, name + ".trace")
+    if os.path.exists(trace):
+        os.remove(trace)
+    got, reason = decide({"raw": None, "tool": "Bash", "cwd": cwd, "session": None, "env_path": None,
+                          "tool_input": {"command": command}, "env": {"GIT_TRACE": trace}})
+    starts = []
+    if os.path.exists(trace):
+        with open(trace, encoding="utf-8", errors="replace") as handle:
+            starts = [line.strip() for line in handle if "built-in: git " in line]
+    return got, reason, starts
+
+
+def stale_cost_ls_check():
+    got, reason, starts = _st_traced("ls", ST_B, "ls")
+    if got != "allow":
+        return False, "ls was judged %s, want allow: %s" % (got, reason[:90])
+    if starts:
+        return False, "ls started %d git process(es), want none: %s" % (len(starts), starts[0][:100])
+    return True, "ls is allowed and starts no git process in a stale tree"
+
+
+def _st_reflog_free(command, name, what):
+    """COMMAND, a non-commit command in the stale tree, is allowed and starts no git process that reads the reflog."""
+    got, reason, starts = _st_traced(command, ST_B, name)
+    if got != "allow":
+        return False, "%s was judged %s, want allow: %s" % (what, got, reason[:90])
+    named = [line for line in starts if "reflog" in line]
+    if named:
+        return False, "%s started a git process that reads the reflog: %s" % (what, named[0][:100])
+    return True, "%s is allowed, and none of its %d git processes reads the reflog" % (what, len(starts))
+
+
+def stale_cost_status_check():
+    return _st_reflog_free(VCS + " status", "status", "git status")
+
+
+def stale_cost_echo_check():
+    return _st_reflog_free('echo "git commit -m x"', "echo", "an echo of a commit line")
+
+
+def stale_cost_control_check():
+    _got, _reason, starts = _st_traced(VCS + " commit -m x", ST_B, "commit")
+    if not starts:
+        return False, "a commit in a stale tree started no traced git process, so the two checks above read no trace"
+    return True, "a commit in a stale tree started %d traced git process(es): the trace is live" % len(starts)
+
+
+STALE_COST_CHECKS = (
+    ("stale-tree-commit cost: ls in a stale tree starts no git process", stale_cost_ls_check),
+    ("stale-tree-commit cost: git status in a stale tree starts no git process that reads the reflog",
+     stale_cost_status_check),
+    ("stale-tree-commit cost: a quoted commit line in echo starts no git process that reads the reflog",
+     stale_cost_echo_check),
+    ("stale-tree-commit cost: a commit in a stale tree starts a traced git process, so the trace is live",
+     stale_cost_control_check),
+)
+FIXTURELESS_CHECKS.update(check for _label, check in STALE_COST_CHECKS)  # each builds only the folder it judges
 
 
 # =========================================================================== 1c. hand-made worktree
@@ -13719,6 +14186,11 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The stale-tree commit cost checks, registered here because LOG_CHECKS_EXTRA is defined here. Their
+# family is set by hand, as for the base-copy check above. MUTATE_ONLY="stale-tree-commit cost" runs them.
+for _label, _check in STALE_COST_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    LOG_FAMILY[_label] = "stale-tree-commit"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
