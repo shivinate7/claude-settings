@@ -59,6 +59,7 @@ sys.path.insert(0, LINT)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 import export_page  # noqa: E402  the in-process budget cases stub page_check's per-run seam
 import page_check  # noqa: E402
+import _nowindow  # noqa: E402  the answers cases stub its run, the one start of node (page_check imports it from hooks/)
 
 COLLECTIONS = ("items", "answers", "groups", "asks", "meta")
 MARKER = ".complete"  # the session touches it in each collection folder after the last list page
@@ -1890,6 +1891,43 @@ class CheckBudget(Copied):
             code = export_page.check_only(fetched, page)
         self.assertEqual(len(calls), 3, "--check checked %d of 3 pictured items: an overall budget stopped the rest" % len(calls))
         self.assertEqual(code, 4, "--check with three held items must exit 4. Output:\n" + printed.getvalue())
+
+
+class AnswersPassed(Copied):
+    """The export gives the checker its answers even when the map is empty, as `--answers` naming a file that holds {}.
+    The page's isAnswered reads those answers, so a map that is dropped on the way is a different check. The node start is
+    stubbed in process, so no Chromium starts. Not gated: no node runs."""
+
+    def started(self, call):
+        """Runs `call` with the checker's start stubbed. Returns what the start got: `command`, and `answers`, the text of
+        the --answers file, or None when the flag was not passed."""
+        seen = {"answers": None}
+
+        def start(command, *args, **kwargs):
+            seen["command"] = list(command)
+            if "--answers" in command:
+                with open(command[command.index("--answers") + 1], encoding="utf-8") as handle:
+                    seen["answers"] = handle.read()
+            return subprocess.CompletedProcess(command, 0, '{"problem": null}\n', "")
+
+        with mock.patch.object(_nowindow, "run", start), \
+                mock.patch.object(page_check.shutil, "which", return_value="/usr/bin/node"):
+            call()
+        return seen
+
+    def test_an_empty_answers_map_reaches_the_checker_as_answers(self):
+        waiting = picture_item(305, "wait-empty-map", waits={"repo": "owner/repo", "run": 12},
+                               lastAnswer={"at": "2026-10-02T10:00:00Z", "note": "Synthetic wait"})
+        control = self.started(lambda: page_check.run_check_designs(PAGE_FILE, waiting, answers=None))
+        self.assertIn("command", control, "control: the checker was not started with no answers")
+        self.assertIsNone(control["answers"], "control: no answers were given, yet --answers went to the checker: %s"
+                          % control["command"])
+        seen = self.started(lambda: export_page.picture_checks(PAGE_FILE, {"items": {waiting["id"]: waiting}, "answers": {}}))
+        self.assertIn("command", seen, "scope: the export path never started the checker, so the empty map was not tested")
+        self.assertIsNotNone(seen["answers"], "the export gave the checker an empty answers map, but no --answers flag went "
+                             "with it: page_check drops {} (`if answers:`), so the page's isAnswered reads no answers: %s"
+                             % seen["command"])
+        self.assertEqual(json.loads(seen["answers"]), {}, "the --answers file is not the empty map the export gave")
 
 
 if __name__ == "__main__":
