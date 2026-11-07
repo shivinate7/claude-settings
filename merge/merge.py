@@ -3053,7 +3053,7 @@ REVIEW_CI_LINE = "CI: read live by merge --reviewed"  # the comment never stores
 REVIEW_KINDS, REVIEW_GUARDS = ("normal", "delete-only", "docs-only"), ("yes", "no")
 REVIEW_ROLES, REVIEW_VERDICTS = ("reviewer", "design-reviewer"), ("PASS", "FAIL", "PARTIAL")
 REVIEW_NETS = ("not owed", "zero", "positive", "negative")
-REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+REVIEW_MODEL = r"(?!(?i:unknown)(?![A-Za-z0-9._-]))[A-Za-z0-9][A-Za-z0-9._-]*"  # the one home of the model word; the whole word `unknown` in any case is no model (owner page item 359), `unknown-x` and `my-unknown` are
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
 REVIEW_SHA = r"[0-9a-f]{40}"
 REVIEW_FIX_VERDICTS = (*REVIEW_VERDICTS[:2], "WIDE")  # a fix check is PASS, FAIL or WIDE, never PARTIAL (decision hold-unsafe-after-round-3)
@@ -3072,7 +3072,7 @@ def review_body(n, head, kind, guard, rounds, net, fix=None):
 
 def parse_review(text):
     """-> {n, head, kind, guard, rounds, net, fix}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
-    malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. `fix` is None, or the one optional
+    malformed or out of order, a model is the word `unknown` in any case (REVIEW_MODEL), round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. `fix` is None, or the one optional
     `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL|WIDE` line (after the rounds, before Net value) as a (head, role, model, verdict)
     tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. Trailing blank lines are allowed. The
     record ends at the first line that is exactly `---`; it and everything after it (the GitHub attribution footer) are ignored."""
@@ -3240,14 +3240,14 @@ def round_arg(text):
     """argparse type of --round N:ROLE:MODEL:VERDICT -> (N, role, model, verdict)."""
     m = re.fullmatch(rf"(\d+):({'|'.join(REVIEW_ROLES)}):({REVIEW_MODEL}):({'|'.join(REVIEW_VERDICTS)})", text, re.ASCII)
     if not m:
-        raise argparse.ArgumentTypeError(f"{text!r} is not N:ROLE:MODEL:VERDICT, with ROLE {'|'.join(REVIEW_ROLES)} and VERDICT {'|'.join(REVIEW_VERDICTS)}")
+        raise argparse.ArgumentTypeError(f"{text!r} is not N:ROLE:MODEL:VERDICT, with MODEL a model name other than `unknown`, ROLE {'|'.join(REVIEW_ROLES)} and VERDICT {'|'.join(REVIEW_VERDICTS)}")
     return (int(m.group(1)), *m.group(2, 3, 4))
 
 def fix_check_arg(text):
     """argparse type of --fix-check REVIEWED_HEAD:reviewer:MODEL:PASS|FAIL|WIDE -> (head, role, model, verdict)."""
     m = re.fullmatch(rf"({REVIEW_SHA}):({REVIEW_ROLES[0]}):({REVIEW_MODEL}):({'|'.join(REVIEW_FIX_VERDICTS)})", text, re.ASCII)
     if not m:
-        raise argparse.ArgumentTypeError(f"{text!r} is not REVIEWED_HEAD:{REVIEW_ROLES[0]}:MODEL:VERDICT, with a full 40-hex head and VERDICT {'|'.join(REVIEW_FIX_VERDICTS)}")
+        raise argparse.ArgumentTypeError(f"{text!r} is not REVIEWED_HEAD:{REVIEW_ROLES[0]}:MODEL:VERDICT, with a full 40-hex head, MODEL a model name other than `unknown`, and VERDICT {'|'.join(REVIEW_FIX_VERDICTS)}")
     return m.group(1, 2, 3, 4)
 
 MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
@@ -3343,7 +3343,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it")
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
-    p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
+    p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it; MODEL is the model that ran the review, never the word unknown")
     p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from; VERDICT is PASS, FAIL (counts as the next round) or WIDE (counts none, new lane at round 1)")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after round 3")
     a = p.parse_args(argv)
