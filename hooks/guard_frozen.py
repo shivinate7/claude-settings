@@ -839,29 +839,47 @@ def _py_hit(body: str, cwd: str, predicate) -> str:
     return ""
 
 
-_PY_RUN_MODULES = ("subprocess", "asyncio", "pty")
-_PY_RUN_BUILTINS = ("exec", "eval", "__import__")
+_PY_RUN_MODULES = ("subprocess", "asyncio", "pty", "importlib")
+_PY_RUN_BUILTINS = ("exec", "eval", "compile", "__import__")
+# `os` calls that run a program, plus chmod, truncate and rmdir: the shell scan refuses them by word, the interpreter scan does not read them.
+_OS_RUN_NAMES = ("system", "popen", "startfile", "chmod", "truncate", "rmdir")
+_OS_RUN_PREFIXES = ("exec", "spawn", "posix_spawn", "fork")
 # A heredoc header that sends the body's output onward: a pipe, a redirect to a file, a substitution.
 _ONWARD = re.compile(r"<<[^|>]*(?:\||>(?!&))|\$\(|`|<\(")
 
 
+def _os_runs(attr: str) -> bool:
+    return attr in _OS_RUN_NAMES or attr.startswith(_OS_RUN_PREFIXES)
+
+
 def _py_runs(tree) -> bool:
-    """True when a script can run a program: any use of `os` but `os.path`, `subprocess`, `asyncio`,
-    `pty`, `exec`, `eval` or `__import__`, however it is imported or renamed."""
+    """True when a script can run a program: an `os` call in `_OS_RUN_NAMES` or `_OS_RUN_PREFIXES`, `os`
+    passed as a value, any use of `_PY_RUN_MODULES`, or a `_PY_RUN_BUILTINS` name, however imported or
+    renamed."""
     import ast
     nodes = list(ast.walk(tree))
-    path_bases = {id(node.value) for node in nodes if isinstance(node, ast.Attribute) and node.attr == "path"}
+    os_names = {"os"}
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] in _PY_RUN_MODULES:
+                    return True
+                if alias.name == "os" and alias.asname:
+                    os_names.add(alias.asname)
+        elif isinstance(node, ast.ImportFrom):
+            if (node.module or "").split(".")[0] in _PY_RUN_MODULES:
+                return True
+            if node.module == "os" and any(alias.name == "*" or _os_runs(alias.name) for alias in node.names):
+                return True
+    os_attrs = {id(node.value): node.attr for node in nodes if isinstance(node, ast.Attribute)}
     for node in nodes:
         if isinstance(node, ast.Name):
-            if node.id in _PY_RUN_MODULES or node.id in _PY_RUN_BUILTINS or (node.id == "os" and id(node) not in path_bases):
+            if node.id in _PY_RUN_MODULES or node.id in _PY_RUN_BUILTINS:
                 return True
-        elif isinstance(node, ast.Import):
-            if any(alias.name.split(".")[0] in _PY_RUN_MODULES or (alias.name == "os" and alias.asname)
-                   for alias in node.names):
-                return True
-        elif isinstance(node, ast.ImportFrom):
-            if (node.module or "").split(".")[0] in _PY_RUN_MODULES or node.module == "os":
-                return True
+            if node.id in os_names:
+                attr = os_attrs.get(id(node))
+                if attr is None or _os_runs(attr):
+                    return True
     return False
 
 
