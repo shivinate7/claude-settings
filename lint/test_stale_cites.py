@@ -878,6 +878,35 @@ class CostTests(StaleCase):
         self.assertNotIn("cat-file", subs, subs)
         self.assertTrue(set(subs) <= {"diff", "merge-base", "rev-parse"}, subs)
 
+    def test_a_markdown_only_range_that_adds_a_python_value_cite_starts_exactly_four_git_processes_with_one_cat_file(self):
+        def change(repo):
+            write(repo, NOTES, cite_page(["%s: LIMIT = 4" % CONFIG]))
+            commit(repo)
+        rng = self.make_range(base_files(extra={CONFIG: LIMIT_BASE}), change)
+        self.assertEqual(git(rng.repo, "diff", "--name-only", rng.base, rng.head), NOTES)  # scope: the range changes Markdown only
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        subs = [command.split()[0] for command in commands]
+        # The added line holds a .py value cite, so the one cat-file the check opens reads the page: the three starts
+        # of a Markdown-only range, and that cat-file, exactly.
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "merge-base", "rev-parse"], subs)
+        self.assertEqual(whole_tree_listings(commands), [], commands)
+
+    def test_a_js_value_cite_on_an_added_markdown_line_starts_no_process_past_the_one_cat_file(self):
+        def change(repo):
+            write(repo, NOTES, cite_page(["hooks/lib.mjs: LIMIT = 4"]))
+            commit(repo)
+        rng = self.make_range(base_files(extra={"hooks/lib.mjs": MJS_BASE}), change)
+        self.assertEqual(git(rng.repo, "diff", "--name-only", rng.base, rng.head), NOTES)  # scope: the range changes Markdown only
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        subs = [command.split()[0] for command in commands]
+        # A .mjs value cite may read the page, but only through the one cat-file: no ls-tree, and no fifth start.
+        self.assertLessEqual(len(subs), 4, subs)
+        self.assertTrue(set(subs) <= {"rev-parse", "merge-base", "diff", "cat-file"}, subs)
+        self.assertLessEqual(subs.count("cat-file"), 1, subs)
+        self.assertEqual(whole_tree_listings(commands), [], commands)
+
     def test_a_touched_py_that_removes_nothing_starts_five_git_processes_with_one_ls_tree_of_the_decisions(self):
         """Guards the code-only pin: the report's backing scan reuses the reads home_report already makes (the decisions
         ls-tree and cat-file), so this range starts no git process beyond the pinned five. The exact pin stays."""
@@ -2219,6 +2248,20 @@ CITE_4 = "- retry limit `hooks/config.py: LIMIT = 4`"  # quotes LIMIT_BASE's val
 DOC_BASE = 'DOC = """\nLIMIT = 9\n"""\n\nLIMIT = 4\n\n\ndef keep():\n    return 1\n'  # a string spells a binding
 DOC_HEAD = DOC_BASE.replace("LIMIT = 4", "LIMIT = 5")
 MJS_BASE, MJS_HEAD = "export const LIMIT = 4;\n", "export const LIMIT = 5;\n"
+NO_JSON_VALUES = ("'a'", "True", "None", "0x4", "1_000", ".5", "4 seconds")  # values MAP9 reads as no JSON literal
+UNTRACKED_CITES = ("hooks/confg.py", "config.py")  # a typo of a tracked path, and a bare basename no tracked file has
+NONLIT_CONFIG = "LIMIT = 30 * 86400\nGATE = compute()\n\n\ndef keep():\n    return 1\n"  # names bound to no literal
+NONLIT_CITES = ("%s: LIMIT = 4" % CONFIG, "%s: GATE = 1" % CONFIG)  # cites of those names, with JSON literals
+
+
+def cite_page(cites):
+    """A Markdown page: a heading, a blank line, then one bulleted line per cite, the first cite on line 3."""
+    return "# Notes\n\n" + "".join("- retry limit `%s`\n" % cite for cite in cites)
+
+
+def unknown_counts(out, numbers):
+    """How many `stale-cites: unknown` lines name each NOTES line in `numbers`: {number: count}."""
+    return {n: sum("%s:%d: " % (NOTES, n) in line for line in unknown_lines(out)) for n in numbers}
 
 
 class ValueCiteTests(StaleCase):
@@ -2393,7 +2436,121 @@ class ValueCiteTests(StaleCase):
         missing = [row["cite"] for row, line in fire if (NOTES, line) not in flagged]
         self.assertEqual(missing, [], "STALE008 must flag each changed value on its own line:\n%s" % out)
 
+    # Fires on a value no JSON literal can hold, or on a path no tracked file has. The line is added, so each is a finding.
+
+    def test_an_added_python_cite_whose_value_is_no_json_literal_is_flagged_on_its_own_line(self):
+        for value in NO_JSON_VALUES:  # scope: each value is no JSON literal
+            self.assertRaises(ValueError, json.loads, value)
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4, so the cited name exists
+        cites = ["%s: LIMIT = %s" % (CONFIG, value) for value in NO_JSON_VALUES]
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n"}, {NOTES: cite_page(cites)})
+        rc, out = self.run_check(rng)
+        found = sorted((p, n, c) for p, n, c, _ in parse(out))
+        expected = sorted((NOTES, 3 + k, "STALE008") for k in range(len(cites)))
+        self.assertEqual(found, expected, "each added cite whose value is no JSON literal must print one STALE008 on its line\n%s" % out)
+        self.assertEqual(rc, 1, out)
+
+    def test_an_added_python_cite_naming_no_tracked_file_is_flagged_on_its_own_line(self):
+        for path in UNTRACKED_CITES:  # scope: no tracked file has the path
+            self.assertNotIn(path, base_files(extra={CONFIG: LIMIT_BASE}))
+        cites = ["%s: LIMIT = 4" % path for path in UNTRACKED_CITES]
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n"}, {NOTES: cite_page(cites)})
+        rc, out = self.run_check(rng)
+        found = sorted(parse(out))
+        self.assertEqual([(p, n, c) for p, n, c, _ in found], [(NOTES, 3 + k, "STALE008") for k in range(len(cites))],
+                         "each added cite of a path no tracked file has must print one STALE008 on its line\n%s" % out)
+        for (_, _, _, text), path in zip(found, UNTRACKED_CITES):
+            self.assertIn(path, text, "a finding must name the path it could not find: %s" % text)
+        self.assertEqual(rc, 1, out)
+
+    def test_an_added_non_json_value_after_a_lone_quote_or_holding_a_hash_is_flagged(self):
+        notes = "# Notes\n\n- don't trust `hooks/config.py: LIMIT = 'a'`\n- label `hooks/config.py: LIMIT = 'a # b'`\n"
+        self.assertEqual(notes.split("\n")[2].split("`")[0].count("'"), 1)  # scope: one lone single quote in the prose before the cite
+        self.assertIn("'a # b'", notes.split("\n")[3])  # scope: a hash inside the non-JSON value
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n"}, {NOTES: notes})
+        rc, out = self.run_check(rng)
+        self.assertEqual(sorted((p, n, c) for p, n, c, _ in parse(out)), [(NOTES, 3, "STALE008"), (NOTES, 4, "STALE008")],
+                         "a lone quote in the prose and a hash in the value must not hide either added cite\n%s" % out)
+        self.assertEqual(rc, 1, out)
+
+    # Unknown, never a finding: a cite the check cannot read prints one `stale-cites: unknown` line per cite, and the exit stays 0.
+
+    def test_an_untouched_non_json_or_untracked_cite_prints_one_unknown_line_on_a_whole_tree_read(self):
+        cites = (["%s: LIMIT = %s" % (CONFIG, value) for value in NO_JSON_VALUES]
+                 + ["%s: LIMIT = 4" % path for path in UNTRACKED_CITES])
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4
+        self.assertEqual(module_value(LIMIT_HEAD, "LIMIT"), 5)  # scope: the range changes LIMIT, so the whole tree is read
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: cite_page(cites)}, {CONFIG: LIMIT_HEAD})
+        rc, out = self.run_check(rng)
+        counts = unknown_counts(out, range(3, 3 + len(cites)))
+        self.assertEqual({n: c for n, c in counts.items() if c != 1}, {},
+                         "each untouched cite that is no JSON literal or names no tracked file must print one unknown line\n%s" % out)
+        self.assertEqual(parse(out), [], "an untouched cite the check cannot read is no finding\n%s" % out)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_added_js_value_cite_in_a_markdown_only_range_prints_one_unknown_line_naming_its_line(self):
+        rng = self.value_range({"hooks/lib.mjs": MJS_BASE, CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n"},
+                               {NOTES: cite_page(["hooks/lib.mjs: LIMIT = 4"])})
+        self.assertEqual(git(rng.repo, "diff", "--name-only", rng.base, rng.head), NOTES)  # scope: the range changes Markdown only
+        rc, out = self.run_check(rng)
+        named = [line for line in unknown_lines(out) if "%s:3: " % NOTES in line]
+        self.assertEqual(len(named), 1, "an added .mjs value cite must print one unknown line that names its line\n%s" % out)
+        self.assertIn("hooks/lib.mjs", named[0], out)
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_added_python_cite_of_a_name_bound_to_no_literal_at_head_prints_one_unknown_line_each(self):
+        for line in NONLIT_CONFIG.split("\n")[:2]:  # scope: each name is bound at module level to a value no literal reads
+            name, value = line.split(" = ")
+            self.assertEqual(binding_kind(NONLIT_CONFIG, name), "assign")
+            self.assertRaises(ValueError, ast.literal_eval, value)
+        rng = self.value_range({CONFIG: NONLIT_CONFIG, NOTES: "# Notes\n\n"}, {NOTES: cite_page(NONLIT_CITES)})
+        self.assertEqual(git(rng.repo, "diff", "--name-only", rng.base, rng.head), NOTES)  # scope: the range changes Markdown only
+        rc, out = self.run_check(rng)
+        counts = unknown_counts(out, (3, 4))
+        self.assertEqual({n: c for n, c in counts.items() if c != 1}, {},
+                         "each added cite of a name bound to no literal must print one unknown line\n%s" % out)
+        self.assertEqual(parse(out), [], "a cite of a name bound to no literal at head is no finding\n%s" % out)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_untouched_python_cite_of_a_name_bound_to_no_literal_at_head_prints_one_unknown_line_each(self):
+        base_cfg = "LIMIT = 30 * 86400\nGATE = compute()\nRETRIES = 2\n\n\ndef keep():\n    return 1\n"
+        head_cfg = base_cfg.replace("RETRIES = 2", "RETRIES = 3")
+        self.assertEqual(module_value(base_cfg, "RETRIES"), 2)  # scope: base binds RETRIES to 2
+        self.assertEqual(module_value(head_cfg, "RETRIES"), 3)  # scope: the range changes RETRIES, so the whole tree is read
+        for name in ("LIMIT", "GATE"):  # scope: head binds each name at module level to no literal
+            self.assertEqual(binding_kind(head_cfg, name), "assign")
+        self.assertRaises(ValueError, ast.literal_eval, "30 * 86400")
+        rng = self.value_range({CONFIG: base_cfg, NOTES: cite_page(NONLIT_CITES)}, {CONFIG: head_cfg})
+        rc, out = self.run_check(rng)
+        counts = unknown_counts(out, (3, 4))
+        self.assertEqual({n: c for n, c in counts.items() if c != 1}, {},
+                         "each untouched cite of a name bound to no literal must print one unknown line on a whole-tree read\n%s" % out)
+        self.assertEqual(parse(out), [], "an untouched cite of a name bound to no literal is no finding\n%s" % out)
+        self.assertEqual(rc, 0, out)
+
     # Controls: no fire. Each one is green on the old code, because the old code never reads a value cite.
+
+    def test_an_untouched_non_json_or_untracked_cite_prints_no_unknown_when_no_literal_changed(self):
+        head_cfg = LIMIT_BASE + "\n\ndef extra():\n    return 2\n"
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), module_value(head_cfg, "LIMIT"))  # scope: no module-level literal changes
+        cites = (["%s: LIMIT = %s" % (CONFIG, value) for value in NO_JSON_VALUES]
+                 + ["%s: LIMIT = 4" % path for path in UNTRACKED_CITES])
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: cite_page(cites)}, {CONFIG: head_cfg})
+        rc, out = self.run_check(rng)
+        self.assertEqual(unknown_lines(out), [], "an untouched cite prints unknown only when the range changes a literal\n%s" % out)
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_untouched_js_value_cite_in_a_markdown_only_range_prints_no_unknown_line(self):
+        base_page = cite_page(["hooks/lib.mjs: LIMIT = 4"])
+        rng = self.value_range({"hooks/lib.mjs": MJS_BASE, CONFIG: LIMIT_BASE, NOTES: base_page},
+                               {NOTES: base_page + "\nA new line.\n"})
+        self.assertEqual(git(rng.repo, "diff", "--name-only", rng.base, rng.head), NOTES)  # scope: the range changes Markdown only
+        rc, out = self.run_check(rng)
+        self.assertEqual(unknown_lines(out), [], "an untouched .mjs cite prints unknown only on a whole-tree read\n%s" % out)
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(rc, 0, out)
 
     def test_an_unchanged_value_quoted_by_a_line_passes(self):
         base_cfg, head_cfg = "LIMIT = 4\nRETRIES = 2\n", "LIMIT = 4\nRETRIES = 3\n"
