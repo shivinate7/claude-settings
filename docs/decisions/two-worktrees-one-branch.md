@@ -10,7 +10,7 @@ The guard rule `two-worktrees-one-branch` refuses a git command that checks out 
 - `git checkout --ignore-other-worktrees` and `git switch --ignore-other-worktrees`, with any branch.
 - `git worktree add -f` (or `--force`) for a branch.
 
-The guard reads `git worktree list --porcelain` once, only for these forms. It does not run for any other command. For `-B`, `-C` and a forced add, a branch that no other worktree holds passes. `--ignore-other-worktrees` is refused with any branch, because Claude has no need for it. The tree the command runs in is the `git -C <dir>` tree when the call names one, else the cwd. Only a worktree other than that tree counts. A read that fails refuses, because the act is not one Claude needs to make blind.
+The guard reads `git worktree list --porcelain` once, only for the `-B`, `-C` and forced-add forms (`git_reads.clone_worktrees`). It does not run for any other command. For `-B`, `-C` and a forced add, a branch that no other worktree holds passes. `--ignore-other-worktrees` is refused with any branch, because Claude has no need for it. The tree the command runs in is the `git -C <dir>` tree when the call names one, else the cwd. Only a worktree other than that tree counts. A read that fails refuses, because the act is not one Claude needs to make blind. A folder outside any clone passes, because git refuses the call there itself. A forced add reads the branch from `-b` or `-B`, else the commit-ish, else the path's last name, as git does.
 
 ## The incident
 
