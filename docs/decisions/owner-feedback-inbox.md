@@ -18,8 +18,10 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   hook on `ArtifactData` (`local_time.py --page-note`) acts on a `get`, `list` or `query` of `answers` only: the routing
   session's read of `answers`, just before it routes, so an undone or withdrawn answer is never saved. Each answer
   whose `data.note` is non-empty and not `accepted pick`, and that is not a parked-line act
-  (`parked: true`, whose note is the entry's own text), is appended as one block, except an answer whose `session` names another session than the reader's
-  (env `CLAUDE_CODE_REMOTE_SESSION_ID`) is skipped; an unknown id on either side saves as before. The block is stamped with the
+  (`parked: true`, whose note is the entry's own text), is appended as one block. An answer whose `session` names another session than the reader's
+  (env `CLAUDE_CODE_REMOTE_SESSION_ID`) is skipped; a session with no known own id also skips an answer that names a session. A `list` or `query` skips an
+  answer whose `at` is less than 10 seconds old (the writer's wait after a Send) and writes no key, so a later read
+  saves it; a `get` saves at once. A read with `out_dir` saves nothing. The block is stamped with the
   answer's `at` in Central, with the one-line text `Waiting page note, item <n> (<item>): <note>`.
   The label leaves out a missing n or item.
   The label adds no line, so a note is a burst by the Burst bullet's own test. The file `<session_id>.inbox.pagenotes` holds

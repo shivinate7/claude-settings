@@ -34,13 +34,17 @@ clock; tests set it.
 routes an answer, so an undone or withdrawn answer is never saved. A write or other tool saves nothing. It collects every string in `tool_response` (a str, content blocks, nested dicts). A
 line that loads as a JSON object with a dict `data` is a document. Only one-line JSON documents in
 text are read: a dict-shaped or pretty-printed document saves nothing. A document with `data.parked` true (a
-parked-line act, `answers/park.<id>`) saves nothing: its note is the entry's own text, not the owner's words. An answer whose `data.session` names another session than the reader's (env
-`CLAUDE_CODE_REMOTE_SESSION_ID`) saves nothing; an unknown id on either side saves as before. Each other
+parked-line act, `answers/park.<id>`) saves nothing: its note is the entry's own text, not the owner's words. An answer whose `data.session` is a string other than the reader's own id (env
+`CLAUDE_CODE_REMOTE_SESSION_ID`) saves nothing; that includes a reader whose own id is unknown (env unset or of
+another shape, or override.py not importable). An answer with no `session` saves. A `list` or `query` skips an
+answer whose `at` is less than 10 seconds before the clock (the undo wait, UNDO_WINDOW) and writes no key for it,
+so a later read saves it; exactly 10 seconds saves, and a `get` saves at once. A tool_input with `out_dir` saves
+nothing. Each other
 document whose `data.note` is
 a string, non-empty after strip and not `accepted pick`, becomes one inbox block, stamped with the
 answer's `data.at` in Central (the clock when `at` does not parse), with the text
 `Waiting page note, item <n> (<item>): <note>`. The label joins the note's first line, so it adds no
-line. A read with `out_dir` returns file paths only, so it saves nothing. Each saved note leaves a key
+line. Each saved note leaves a key
 `<url>|<doc_id>|<at>` in `<session_id>.inbox.pagenotes`, and a key already there saves nothing. A failed
 save prints a PostToolUse `additionalContext` saying the note was not saved. Cost: one process start
 per ArtifactData call (a get, list or query of `answers` adds no process). Files are written only when a read of `answers` returns a new note: the inbox
@@ -242,13 +246,23 @@ def _documents(response):
                 yield doc.get("id"), doc["data"]
 
 
-def _at_clock(at):
-    """The instant of an answer's `at` (ISO-8601, `Z` or an offset), else the hook's clock()."""
+def _parse_at(at):
+    """The instant of an answer's `at` (ISO-8601, `Z` or an offset), else None."""
     try:
         when = datetime.fromisoformat(at.replace("Z", "+00:00"))
         return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
     except (ValueError, AttributeError):
-        return clock()
+        return None
+
+
+def _at_clock(at):
+    """The instant of an answer's `at`, else the hook's clock()."""
+    return _parse_at(at) or clock()
+
+
+# The writer waits 10 s after a Send before it routes the answer (skill waiting-page, "Route and close"); the
+# page's Undo lasts 8 s. A list or query inside the wait may read an answer the owner is still undoing.
+UNDO_WINDOW = timedelta(seconds=10)
 
 
 def page_note_text(data):
@@ -268,7 +282,8 @@ def page_note(raw):
     hook = json.loads(raw.decode("utf-8"))
     inp = hook.get("tool_input")
     if (hook.get("tool_name") != "ArtifactData" or not isinstance(inp, dict)
-            or inp.get("action") not in ("get", "list", "query") or inp.get("collection") != "answers"):
+            or inp.get("action") not in ("get", "list", "query") or inp.get("collection") != "answers"
+            or "out_dir" in inp):  # an out_dir read returns file paths, not documents
         return
     paths = inbox_paths(hook.get("session_id"))
     try:
@@ -279,8 +294,8 @@ def page_note(raw):
     notes = []
     for doc_id, data in _documents(hook.get("tool_response")):
         note = data.get("note")
-        if isinstance(data.get("session"), str) and own is not None and data["session"] != own:
-            continue  # the note belongs to another session's item; that session captures it
+        if isinstance(data.get("session"), str) and data["session"] != own:
+            continue  # another session's item, or own id unknown: that session captures it
         if data.get("parked") is True:
             continue  # a parked act's note is the entry's own text, not the owner's words
         if isinstance(note, str) and note.strip() and note.strip() != "accepted pick":
@@ -299,6 +314,9 @@ def page_note(raw):
         key = "%s|%s|%s" % (inp.get("url"), doc_id, at)
         if "\n" in key or key in seen:
             continue
+        when = _parse_at(at)
+        if inp.get("action") != "get" and when is not None and clock() - when < UNDO_WINDOW:
+            continue  # inside the undo wait: no save and no key, a later read saves it
         stamp = line(lambda: _at_clock(at))[len("Local time: "):]
         err = save_message(paths[0], stamp, page_note_text(data))
         if err is not None:
