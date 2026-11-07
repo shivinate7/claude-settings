@@ -24,8 +24,10 @@
 //   T5   scanner traps. A path only in a TS comment (T5a) or a Python docstring (T5b) fails. `//` (T5c) and `#` (T5d) inside a string,
 //        before a real import on the same line, pass. A lone quote in a comment, TS (T5e) and Python (T5f), passes. A multi-line template
 //        literal that holds the import as text fails (T5g). The same template before a real import passes (T5h).
-//   T6   a shell test loads the file when it runs it by a literal path from the root (T6a) or from its own folder (T6c, T6m), or by a
-//        variable anchor and a literal tail (T6i, T6m). A `#` in a string, a comment or heredoc with a lone quote, `$#`, and a string over
+//   T6   a shell test loads the file when it runs it by a literal path from the root (T6a) or from its own folder (T6c), or by a
+//        variable anchor bound to a folder, then a literal tail (T6i, T6m, T6t, T6u, T6v). An unbound name, or one bound to a mktemp
+//        folder, is no anchor (T6r, T6s). The tail resolves from the bound place only (T6x). A literal path bound to NAME loads it (T6w).
+//        A `#` in a string, a comment or heredoc with a lone quote, `$#`, and a string over
 //        two lines do not hide the call (T6e, T6g, T6h, T6l, T6o). A path only in a comment (T6d) or a heredoc body (T6f), no path (T6k),
 //        or a non-literal tail (T6n), or a single-quoted word that stays literal (T6p), fails as a read that does not load, not as an
 //        unknown read. A `.zsh` test with a lone quote in its first-line comment is read as a shell test (T6q). A Ruby test stays an unknown read (T6j).
@@ -372,11 +374,12 @@ test('T6h. a shell test with a comment that holds a lone quote, then `python3 sr
   mustPass(check(dir));
 });
 
-test('T6i. a shell test with `python3 "$ROOT/src/retry.py"` passes: a variable anchor, then a literal tail that resolves from the root', () => {
+test('T6i. a shell test with `ROOT=$(dirname "$0")/..` then `python3 "$ROOT/src/retry.py"` passes: ROOT is bound to the test folder, and the tail resolves from the root', () => {
   needFile(REL);
   const dir = scratchRepo();
-  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\npython3 "$ROOT/src/retry.py"\n');
-  // The scope first: the tail resolves from the root only. src/src/retry.py must not exist, or the pass says nothing about the root.
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nROOT=$(dirname "$0")/..\npython3 "$ROOT/src/retry.py"\n');
+  // The scope first: ROOT is bound by an assignment, and the tail resolves from the root only. src/src/retry.py must not exist, or the pass says nothing about the root.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^ROOT=\$\(dirname "\$0"\)\/\.\.$/m, 'ROOT must be bound to the test folder and its parent');
   assert.match(readAt(dir, 'src/retry_check.sh'), /^python3 "\$ROOT\/src\/retry\.py"$/m, 'the shell test must run the file through $ROOT');
   assert.equal(existsSync(join(dir, 'src', 'src', 'retry.py')), false, 'src/src/retry.py must not exist');
   mustPass(check(dir));
@@ -410,11 +413,12 @@ test('T6l. a shell test with `[ $# -eq 0 ] && python3 src/retry.py` passes: $# i
   mustPass(check(dir));
 });
 
-test('T6m. a shell test in src/ with `python3 "${here}/retry.py"` passes: a variable anchor, then a literal tail that resolves from the test folder', () => {
+test('T6m. a shell test in src/ with `here=$(dirname "$0")` then `python3 "${here}/retry.py"` passes: here is bound to the test folder, and the tail resolves from it', () => {
   needFile(REL);
   const dir = scratchRepo();
-  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\npython3 "${here}/retry.py"\n');
-  // The scope first: the tail resolves from the test folder src/ only, so the root must hold no retry.py.
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nhere=$(dirname "$0")\npython3 "${here}/retry.py"\n');
+  // The scope first: here is bound by an assignment, and the tail resolves from the test folder src/ only, so the root must hold no retry.py.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^here=\$\(dirname "\$0"\)$/m, 'here must be bound to the test folder');
   assert.match(readAt(dir, 'src/retry_check.sh'), /^python3 "\$\{here\}\/retry\.py"$/m, 'the shell test must run the file through ${here}');
   assert.equal(existsSync(join(dir, 'retry.py')), false, 'the root must hold no retry.py');
   mustPass(check(dir));
@@ -454,6 +458,77 @@ test("T6q. a .zsh shell test whose first line is a comment with a lone quote, th
   // The scope first: the lone quote is on the first line, in a comment, and the call follows it.
   assert.match(readAt(dir, 'src/retry_check.zsh'), /^# don't\npython3 src\/retry\.py$/m, 'the lone quote must sit in a comment on the first line');
   mustPass(check(dir));
+});
+
+test('T6r. a shell test that binds `$dir` by mktemp and writes `$dir/src/retry.py` does not load the file: the name is no folder anchor, so MAP11 fails as a read that does not load', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\ndir=$(mktemp -d); printf x > "$dir/src/retry.py"\n');
+  // The scope first: src/retry.py exists, so a tail resolved from the root would load it. The shell test writes through $dir.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^dir=\$\(mktemp -d\); printf x > "\$dir\/src\/retry\.py"$/m, 'the shell test must write through $dir');
+  assert.ok(existsSync(join(dir, 'src/retry.py')), 'src/retry.py must exist, so the tail would resolve from the root');
+  mustNotLoad(check(dir), 'src/retry_check.sh');
+});
+
+test('T6s. a shell test with `python3 "$ROOT/src/retry.py"` and no ROOT assignment does not load the file: an unbound name is no anchor, so MAP11 fails as a read that does not load', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\npython3 "$ROOT/src/retry.py"\n');
+  // The scope first: no line of the test assigns ROOT, and the tail would resolve from the root, where src/retry.py is.
+  assert.doesNotMatch(readAt(dir, 'src/retry_check.sh'), /ROOT=/, 'the shell test must not assign ROOT');
+  assert.ok(existsSync(join(dir, 'src/retry.py')), 'src/retry.py must exist, so the tail would resolve from the root');
+  mustNotLoad(check(dir), 'src/retry_check.sh');
+});
+
+test('T6t. a shell test in src/ with `here=$(cd "$(dirname "$0")" && pwd); python3 "$here/retry.py"` passes: here is bound to the test folder, and the tail resolves from it', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nhere=$(cd "$(dirname "$0")" && pwd); python3 "$here/retry.py"\n');
+  // The scope first: the root must hold no retry.py, so only the test folder src/ can resolve the tail.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^here=\$\(cd "\$\(dirname "\$0"\)" && pwd\); python3 "\$here\/retry\.py"$/m, 'the shell test must bind here and run the file through it');
+  assert.equal(existsSync(join(dir, 'retry.py')), false, 'the root must hold no retry.py');
+  mustPass(check(dir));
+});
+
+test('T6u. a shell test in src/ with `ROOT=$(cd "$(dirname "$0")/.." && pwd); python3 "$ROOT/src/retry.py"` passes: ROOT is bound to the root, and the tail resolves from it', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nROOT=$(cd "$(dirname "$0")/.." && pwd); python3 "$ROOT/src/retry.py"\n');
+  // The scope first: src/src/retry.py must not exist, so only the root can resolve the tail.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^ROOT=\$\(cd "\$\(dirname "\$0"\)\/\.\." && pwd\); python3 "\$ROOT\/src\/retry\.py"$/m, 'the shell test must bind ROOT and run the file through it');
+  assert.equal(existsSync(join(dir, 'src', 'src', 'retry.py')), false, 'src/src/retry.py must not exist');
+  mustPass(check(dir));
+});
+
+test('T6v. a shell test in src/ with `ROOT="$(dirname "$0")/.."; python3 "$ROOT/src/retry.py"` passes: ROOT is bound to the root, and the tail resolves from it', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nROOT="$(dirname "$0")/.."; python3 "$ROOT/src/retry.py"\n');
+  // The scope first: src/src/retry.py must not exist, so only the root can resolve the tail.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^ROOT="\$\(dirname "\$0"\)\/\.\."; python3 "\$ROOT\/src\/retry\.py"$/m, 'the shell test must bind ROOT and run the file through it');
+  assert.equal(existsSync(join(dir, 'src', 'src', 'retry.py')), false, 'src/src/retry.py must not exist');
+  mustPass(check(dir));
+});
+
+test('T6w. a shell test in src/ with `SCRIPT=src/retry.py; python3 "$SCRIPT"` passes: the assignment value is a literal path word, and the NAME= drop reads it as that path', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nSCRIPT=src/retry.py; python3 "$SCRIPT"\n');
+  // The scope first: SCRIPT is bound to a literal path, not to a folder, and src/src/retry.py must not exist, so the path resolves from the root only.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^SCRIPT=src\/retry\.py; python3 "\$SCRIPT"$/m, 'the shell test must bind SCRIPT to a literal path');
+  assert.equal(existsSync(join(dir, 'src', 'src', 'retry.py')), false, 'src/src/retry.py must not exist');
+  mustPass(check(dir));
+});
+
+test('T6x. a shell test in src/ with `here=$(dirname "$0")` then `python3 "$here/src/retry.py"` does not load the file: the tail resolves from the bound folder only, so the root path src/retry.py is no candidate', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nhere=$(dirname "$0")\npython3 "$here/src/retry.py"\n');
+  // The scope first: src/retry.py exists, so a tail resolved from the root would load it, and src/src/retry.py does not exist.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^python3 "\$here\/src\/retry\.py"$/m, 'the shell test must run the file through $here/src');
+  assert.ok(existsSync(join(dir, 'src/retry.py')), 'src/retry.py must exist, so the root path would load it');
+  assert.equal(existsSync(join(dir, 'src', 'src', 'retry.py')), false, 'src/src/retry.py must not exist');
+  mustNotLoad(check(dir), 'src/retry_check.sh');
 });
 
 test('T7a. a tested-by line under a table line fails, and the output names the page', () => {
