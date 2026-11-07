@@ -2632,6 +2632,14 @@ MUTATIONS = [
      '                if command not in NPM_DRY_RUN_SAFE:',
      '                if False:',
      "guard", 'linked-nm: refuse npm rebuild --dry-run (Bash) in a linked folder'),
+    ('linked-node-modules: a workspace member test that is always false, so a member is read as its own prefix',
+     'def _workspace_member(root: str, folder: str) -> bool:',
+     'def _workspace_member(root: str, folder: str) -> bool:\n    return False',
+     "guard", 'linked-nm: workspace: refuse cd packages/a, then npm install, from a linked workspace root'),
+    ('linked-node-modules: a workspaces-update reify test that is always false, so a workspace version never reifies',
+     'def _workspace_reify(words) -> bool:',
+     'def _workspace_reify(words) -> bool:\n    return False',
+     "guard", 'linked-nm: npm version patch -w a --workspaces-update (Bash) in a linked folder is refused'),
     # ---- the always-silent stub. A hook whose main() exits 0 with no output passes every
     # "nothing printed" case on its own. Each suite pairs that silence with a known-bad input in
     # the same case (`known-bad pair`), and these mutants are the stub itself.
