@@ -955,6 +955,18 @@ class KnownDefectsTests(unittest.TestCase):
         self.assertEqual(len(info), 1, "one info line, beside the verdict lines and the totals line:\n" + out + err)
         self.assertIn("install", info[0], "the info line must name the failed install: " + info[0])
 
+    def test_a_failed_install_of_one_part_lets_a_later_part_install_and_its_catcher_reads_caught(self):
+        repo = defect_repo(extra_files={ROOT_LOCK: LOCK_TEXT, APP_LOCK: LOCK_TEXT, "test_oracle.py": ORACLE_SUITE})
+        profile = {"parts": {"a": {"install": FAILING_INSTALL, "lockfile": APP_LOCK},
+                             "b": {"install": ORACLE_INSTALL, "lockfile": ROOT_LOCK}}}
+        defects = [defect("kb-later", "return a + b", "return a - b", "test_oracle.py")]
+        code, out, err = known_run(defects, repo, profile=profile)
+        self.assertEqual(verdicts_of(out), {"kb-later": "CAUGHT"},
+                         "a failed install does not stop the run: part b still installs, so the catcher that needs "
+                         "part b reads CAUGHT\n" + out + err)
+        self.assertEqual(code, 0, "every defect caught exits 0 even when an install failed: exit %d\n%s%s"
+                         % (code, out, err))
+
     def test_a_tracked_file_at_the_link_path_reads_unknown_naming_the_path_and_never_runs_on_it(self):
         # The tracked node_modules/kb_oracle.py is the module itself. A run that silently used it would read CAUGHT.
         repo = defect_repo(extra_files={ROOT_LOCK: LOCK_TEXT, "test_oracle.py": ORACLE_SUITE,
