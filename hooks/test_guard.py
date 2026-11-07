@@ -9071,6 +9071,31 @@ for _label, _write, _run in (
 ):
     sh("env: heredoc-r3: a file written with bash <<EOF and an env read, then run by " + _label + ", denies",
        _write + "bash <<EOF\ncat " + ENV + "\nEOF\nOUT\n" + _run, "deny", "env-file", cwd=NOGIT)
+# The same body, in a file that the command only names as an operand or reads, is text: nothing runs it, so
+# each form allows. The deny loop above is the green control: it runs the same body, and the cases allow.
+for _label, _tail in (
+    ("python3 check.py on the file", "python3 check.py f"),
+    ("python3 -m json.tool on the file", "python3 -m json.tool f"),
+    ("sudo cat of the file", "sudo cat f"),
+    ("timeout 5 wc of the file", "timeout 5 wc f"),
+    ("ls piped into xargs wc", "ls f | xargs wc"),
+):
+    sh("env: heredoc-r3: a file written with bash <<EOF and an env read, then " + _label + ", is allowed",
+       "cat > f <<'OUT'\nbash <<EOF\ncat " + ENV + "\nEOF\nOUT\n" + _tail, "allow", cwd=NOGIT)
+sh("env: heredoc-r3: a file written with an env read in its body, then python3 check.py on it, is allowed",
+   "cat > f <<'OUT'\ncat " + ENV + "\nOUT\npython3 check.py f", "allow", cwd=NOGIT)
+sh("env: heredoc-r3: a file written with an env read in its body, then sh reads it on stdin, denies",
+   "cat > f <<'OUT'\ncat " + ENV + "\nOUT\nsh < f", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-r3: a file written with an env read in its body, then piped into sh, denies",
+   "cat > f <<'OUT'\ncat " + ENV + "\nOUT\ncat f | sh", "deny", "env-file", cwd=NOGIT)
+# python3 runs its file, so the body of a python run file stays under inspection, and an env read in it denies.
+# The twin adds a written file named as an operand: the run file's body still denies.
+sh("env: heredoc-r3: a python file written with an env read through subprocess, then python3 runs it, denies",
+   "cat > p.py <<'PY'\nimport subprocess\nsubprocess.run(['cat', '" + ENV + "'])\nPY\npython3 p.py",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-r3: a python file written with an env read through subprocess, then python3 runs it with a written operand, denies",
+   "cat > p.py <<'PY'\nimport subprocess\nsubprocess.run(['cat', '" + ENV + "'])\nPY\ncat > c.txt <<'TXT'\nhello\nTXT\npython3 p.py c.txt",
+   "deny", "env-file", cwd=NOGIT)
 sh("env: normalized, glob, heredoc or depth, cat <<EOF, heredoc-r3: a single quote before an unquoted substitution, denies",
    "cat > n.md <<EOF\n'$(cat " + ENV + ")'\nEOF", "deny", "env-file", cwd=NOGIT)
 sh("env: normalized, glob, heredoc or depth, cat <<EOF | sh, heredoc-r4: a single quote before an unquoted substitution, denies",
@@ -9496,6 +9521,90 @@ add("draft-pr: MCP create with draft false is refused", "deny", rule="draft-pr",
 add("draft-pr: MCP create with draft true is allowed", "allow",
     tool="mcp__github__create_pull_request", cwd=NOGIT, title="x", head="h", base="main",
     repo="x", owner="y", draft=True)
+# A heredoc body is judged the way impeccable_command_hit judges it (guard.py): a body a shell reads, or a file
+# a runner runs, keeps its lines in view. A file that a command only names as an operand is not run, and a run
+# file keeps only its own body. Red on main: the allow cases whose pull request sits in a python body, in a body
+# no runner runs, or in a file only named as an operand. Every other allow case, and each deny case, is green.
+sh("draft-pr: a file written with a pull request in its body, then named as a later operand of python3, is allowed",
+   "cat > c.txt <<'TXT'\ngh pr create --title x\nTXT\npython3 p.py c.txt", "allow", cwd=NOGIT)
+sh("draft-pr: a run file keeps its own body, and a file written after it, named as an operand, is allowed",
+   "cat > p.py <<'PY'\nprint(1)\nPY\ncat > c.txt <<'TXT'\ngh pr create --title x\nTXT\npython3 p.py c.txt",
+   "allow", cwd=NOGIT)
+sh("draft-pr: a run file run before a later write keeps only its own body, and that write is allowed",
+   "cat > p.py <<'PY'\nprint(1)\nPY\npython3 p.py\ncat > c.txt <<'TXT'\ngh pr create --title x\nTXT",
+   "allow", cwd=NOGIT)
+for _label, _command in (
+    ("with an argument", "python3 - \"x\" <<'EOF'\nd = {\"why\": \"a fetch of, and `gh pr create` with that head\"}\nEOF"),
+    ("without an argument", "python3 - <<'EOF'\nd = {\"why\": \"a fetch of, and `gh pr create` with that head\"}\nEOF"),
+    ("with a $() substitution", "python3 - <<'EOF'\nd = {\"why\": \"a fetch of, and $(gh pr create) with that head\"}\nEOF"),
+):
+    sh("draft-pr: a python body that quotes gh pr create in a string, " + _label + ", is allowed",
+       _command, "allow", cwd=NOGIT)
+sh("draft-pr: a quoted body that names gh pr create in backticks, is allowed",
+   "cat > n.md <<'EOF'\nuse `gh pr create` here\nEOF", "allow", cwd=NOGIT)
+sh("draft-pr: a quoted body with a backtick span across lines that names gh pr create, beside a run file, is allowed",
+   "cat > n.md <<'EOF'\nconst s = `one\ngh pr create --title x\n`;\nEOF\ncat > run.sh <<'EOF'\necho ok\nEOF\nbash run.sh",
+   "allow", cwd=NOGIT)
+sh("draft-pr: an unquoted body that runs gh pr create in backticks, is denied",
+   "cat > n.md <<EOF\nuse `gh pr create` here\nEOF", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a bash body that runs gh pr create in backticks, is denied",
+   "bash <<'EOF'\necho `gh pr create --title x`\nEOF", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a run file with a backtick span across lines that runs gh pr create, is denied",
+   "cat > run.sh <<'EOF'\necho `\ngh pr create --title x\n`\nEOF\nbash run.sh", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a pull request in a body that bash reads, is denied",
+   "bash <<'EOF'\ngh pr create --title x\nEOF", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a run file written then run by bash, is denied",
+   "cat > run.sh <<'EOF'\ngh pr create --title x\nEOF\nbash run.sh", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a run file read on stdin by sh, is denied",
+   "cat > f <<'OUT'\ngh pr create --title x\nOUT\nsh < f", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a run file piped into sh, is denied",
+   "cat > f <<'OUT'\ngh pr create --title x\nOUT\ncat f | sh", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a run file made executable and run as ./f, is denied",
+   "cat > f <<'OUT'\ngh pr create --title x\nOUT\nchmod +x f && ./f", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a run file beside an unrelated written notes file, is denied",
+   "cat > run.sh <<'EOF'\ngh pr create --title x\nEOF\ncat > notes.txt <<'TXT'\nhello\nTXT\nbash run.sh",
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a file that a run file sources runs with it, so its pull request is denied",
+   "cat > b.sh <<'B'\ngh pr create --title x\nB\ncat > a.sh <<'A'\nsource b.sh\nA\nbash a.sh", "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+chained_ask("draft-pr: a force push in a run file, is denied",
+            "cat > p.sh <<'SH'\ngit push --force origin main\nSH\nbash p.sh", cwd=NOGIT)
+# Scanner cases (building-scanner-respects-strings): a comment opener or a lone quote inside a string or a
+# data body must neither hide a live pull request nor make a quoted one live.
+sh("draft-pr: a double-slash in a string before a pull request in a run file, is denied",
+   "cat > run.sh <<'EOF'\necho \"//\"; gh pr create --title x\nEOF\nbash run.sh", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a slash-star in a string before a pull request in a run file, is denied",
+   "cat > run.sh <<'EOF'\necho \"/*\"; gh pr create --title x\nEOF\nbash run.sh", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a double-slash and a slash-star in strings beside a run file, are allowed",
+   "cat > run.sh <<'EOF'\necho ok\nEOF\necho \"//\" \"/*\" && bash run.sh", "allow", cwd=NOGIT)
+sh("draft-pr: a quoted pull request in an echo in a run file, is allowed",
+   "cat > run.sh <<'EOF'\necho \"gh pr create --title x\"\nEOF\nbash run.sh", "allow", cwd=NOGIT)
+sh("draft-pr: a pull request named in a comment in a run file, is allowed",
+   "cat > run.sh <<'EOF'\n# gh pr create --title x\necho ok\nEOF\nbash run.sh", "allow", cwd=NOGIT)
+sh("draft-pr: a lone quote in a data body does not hide a pull request in a later run file, is denied",
+   "cat > notes.md <<'EOF'\nDon't push\nEOF\ncat > run.sh <<'EOF'\ngh pr create --title x\nEOF\nbash run.sh",
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a lone quote in a data body that no runner runs, is allowed",
+   "cat > notes.md <<'EOF'\nDon't gh pr create here\nEOF\ncat > run.sh <<'EOF'\necho ok\nEOF\nbash run.sh",
+   "allow", cwd=NOGIT)
+# The lone quote above hides the pull request from the reader, so the line that follows, which holds it live,
+# is the case that the body's own drop decides.
+sh("draft-pr: a lone quote in a data body that no runner runs, with a pull request on the next line, is allowed",
+   "cat > notes.md <<'EOF'\nDon't push\ngh pr create --title x\nEOF\ncat > run.sh <<'EOF'\necho ok\nEOF\nbash run.sh",
+   "allow", cwd=NOGIT)
+sh("draft-pr: a run file with a pull request, run with a later written file as its operand, is denied",
+   "cat > run.sh <<'EOF'\ngh pr create --title x\nEOF\ncat > c.txt <<'TXT'\nhello\nTXT\nbash run.sh c.txt",
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `gh api -X POST .../pulls`,
 # `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
@@ -14454,6 +14563,41 @@ LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<rep
                          gh_root_repo_equals_check))
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --repo <repo> root flag",
                          gh_root_repo_spaced_check))
+
+
+# The unit checks for a file named only as an operand, and for a run file's body: the same command, with and
+# without a run of its second file. Scope first: each command must read as two heredoc bodies.
+_OPERAND_BODY_CMD = ("cat > p.py <<'PY'\nprint(1)\nPY\ncat > c.txt <<'TXT'\ngh pr create --title x\nTXT\n")
+
+
+def heredoc_operand_strip_case():
+    guard = _load_guard_module()
+    cmd = _OPERAND_BODY_CMD + "python3 p.py c.txt"
+    if len(guard._split_heredocs(cmd)[1]) != 2:
+        return False, "the command does not read as two heredoc bodies, so the case tests nothing"
+    kept = guard.strip_heredoc_bodies(cmd).split("\n")
+    if "gh pr create --title x" in kept:
+        return False, "strip_heredoc_bodies keeps the body of c.txt, which python3 p.py only names as an operand"
+    if "print(1)" not in kept:
+        return False, "strip_heredoc_bodies drops the body of p.py, which python3 p.py runs"
+    return True, "strip_heredoc_bodies drops the body of c.txt and keeps the body of p.py, which python3 p.py runs"
+
+
+def heredoc_operand_control_case():
+    guard = _load_guard_module()
+    cmd = _OPERAND_BODY_CMD + "bash c.txt"
+    if len(guard._split_heredocs(cmd)[1]) != 2:
+        return False, "the control command does not read as two heredoc bodies, so the control tests nothing"
+    if "gh pr create --title x" not in guard.strip_heredoc_bodies(cmd).split("\n"):
+        return False, "strip_heredoc_bodies drops the body of c.txt, which bash c.txt runs"
+    return True, "strip_heredoc_bodies keeps the body of c.txt, which bash c.txt runs"
+
+
+FIXTURELESS_CHECKS.update((heredoc_operand_strip_case, heredoc_operand_control_case))
+LOG_CHECKS_EXTRA.append(("merge: strip_heredoc_bodies drops a file's body that a command only names as an operand",
+                         heredoc_operand_strip_case))
+LOG_CHECKS_EXTRA.append(("merge: strip_heredoc_bodies keeps a file's body that bash runs, the control",
+                         heredoc_operand_control_case))
 
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
