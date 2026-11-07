@@ -13898,6 +13898,26 @@ class ProseJudgePrompt(unittest.TestCase):
                     want = "    %d: %s" % (n, source[n - 1])
                     self.assertTrue(want in prompt, "line %d names fn_%02d, and row %d of its window is not in the call" % (line, line - 1, n))
 
+    def test_packing_builds_each_line_once_not_once_per_candidate(self):
+        # Sixty lines, each naming its own def, packed in stable order. The packer tries each line in the call it is building. The
+        # prompt builder was handed every line packed so far for each new one, so its rows grew with the square of the line count.
+        # Counted on a spy, so no clock is read: the builder is handed about one row per line.
+        count = 60
+        text, starts = self.defs_file(count)
+        real_prompt_of = merge.prose_judge_prompt_of
+        handed = []
+
+        def spy(rows, body, memo):
+            handed.append(len(rows))
+            return real_prompt_of(rows, body, memo)
+        with unittest.mock.patch.object(merge, "prose_judge_prompt_of", spy):
+            jobs, past = self.pack(self.defs_picked(count), {self.DEFS: text})
+        packed = sum(len(rows) for _, rows, _ in jobs)
+        self.assertEqual(packed + past, count, "scope: %d lines are packed or past the calls, want %d" % (packed + past, count))
+        self.assertLessEqual(sum(handed), 2 * count,
+                             "the prompt builder was handed %d rows for %d lines, want at most %d: each line is built about once, "
+                             "not once per candidate" % (sum(handed), count, 2 * count))
+
 
 class OrderLock(merge.GitLock):
     """A GitLock that appends "release" to `events` on each release, so a case can order a model call against it."""
