@@ -42,6 +42,10 @@ class LayoutError(Exception):
     """The layout file or a repo's extras file cannot be read or has the wrong shape."""
 
 
+class RolledOutMarkError(LayoutError):
+    """The "rolled-out" mark is not JSON true or false. Only the answer to "rolled out?" is unknown."""
+
+
 class BranchNameError(LayoutError):
     """The extras file reads, and its "record-branch" key is not a branch name."""
 
@@ -88,15 +92,15 @@ def has_extras(root):
 def rolled_out(root):
     """True when `root` holds its extras file and the file's "rolled-out" key is true, so it keeps
     every kind at its layout path. An absent key or false reads as legacy. Any other value (a string,
-    a number, null) raises LayoutError: reading it as legacy would send a check to decisions/ and
-    pass over docs/decisions."""
+    a number, null) raises RolledOutMarkError: reading it as legacy would send a check to decisions/ and
+    pass over docs/decisions. A key that does not depend on the mark (the waiting keys) never calls this."""
     if not has_extras(root):
         return False
     data = _read(_extras(root))
     if ROLLED_OUT not in data:
         return False
     if not isinstance(data[ROLLED_OUT], bool):
-        raise LayoutError("%s: \"%s\" must be JSON true or false, not %s" % (_extras(root), ROLLED_OUT, json.dumps(data[ROLLED_OUT])))
+        raise RolledOutMarkError("%s: \"%s\" must be JSON true or false, not %s" % (_extras(root), ROLLED_OUT, json.dumps(data[ROLLED_OUT])))
     return data[ROLLED_OUT]
 
 
@@ -291,19 +295,21 @@ COLLECTION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta")  # what the waiting page's database holds
 
 
-def artifacts(root):
+def artifacts(root, exports=True):
     """[{id, url, role, account, collections, export}] from the "artifacts" key of `root`'s extras file, in order; []
-    for a repo with no extras file or no key. `collections` and `export` are filled in: the waiting-page role exports
+    for a repo with no extras file or no key. With `exports` False, an entry with no export key of its own reads `export`
+    None: the folder depends on the "rolled-out" mark, and a caller that wants ids, urls and roles never reads it.
+    `collections` and `export` are filled in: the waiting-page role exports
     the five waiting collections to the waiting-data folder of the record branch, any other role needs its own
     `collections` and exports to `artifacts/<id>/`. A page-only entry (any other role, `"collections": []`) exports its page
     and files and no database; an empty list is refused on the waiting-page role, and a missing key on any other. An entry with `"export": false` (never the waiting-page role) is held and never exported: it needs
     no collections and reads with `export` False and `collections` []. LayoutError, naming the entry by its id, for an email as account, a
     repeated id, an id over 32 characters, a url that is no artifact link, a second waiting-page role or an unsafe path."""
-    return _registry(root, _repo_keys(root).get(ARTIFACTS), _extras(root))
+    return _registry(root, _repo_keys(root).get(ARTIFACTS), _extras(root), exports)
 
 
-def _registry(root, found, where):
-    """artifacts(root) for the "artifacts" value `found`, read from `where` (a path, or a ref and path in an error)."""
+def _registry(root, found, where, exports=True):
+    """artifacts(root, exports) for the "artifacts" value `found`, read from `where` (a path, or a ref and path in an error)."""
     if found is None:
         return []
     if not isinstance(found, list):
@@ -348,6 +354,8 @@ def _registry(root, found, where):
             if not isinstance(target, str) or not target.strip("/") or target != target.strip():
                 raise LayoutError("%s: %s (id %s) export is not a path" % (where, label, entry_id))
             target = _safe(target, "%s: %s (id %s) export" % (where, label, entry_id)).strip("/")
+        elif not exports:
+            target = None
         else:
             target = path(root, "waiting-data") if role == WAITING_ROLE else "artifacts/" + entry_id
         out.append(dict(item, collections=list(names), export=target))
@@ -382,7 +390,7 @@ def _default_branch_extras(root):
 
 def _page_in(root, keys, where):
     """The waiting page URL held by the extras dict `keys` (read from `where`), else "unknown"."""
-    for entry in _registry(root, keys.get(ARTIFACTS), where):
+    for entry in _registry(root, keys.get(ARTIFACTS), where, exports=False):
         if entry["role"] == WAITING_ROLE:
             return entry["url"]
     found = keys.get(WAITING_PAGE)
@@ -416,11 +424,11 @@ def set_waiting_page(root, url):
         raise LayoutError("%s: %s %r is not a claude.ai artifact link with an id" % (_extras(root), WAITING_PAGE, url))
     if has_extras(root):
         data = _read(_extras(root))
-        held = next((e for e in artifacts(root) if e["role"] == WAITING_ROLE), None)
+        held = next((e for e in artifacts(root, exports=False) if e["role"] == WAITING_ROLE), None)
         if held is not None:
             if artifact_id(held["url"]) == artifact_id(url):
                 return False
-            data[ARTIFACTS][[e["id"] for e in artifacts(root)].index(held["id"])]["url"] = url
+            data[ARTIFACTS][[e["id"] for e in artifacts(root, exports=False)].index(held["id"])]["url"] = url
         elif data.get(WAITING_PAGE) is not None:
             return False
         else:
@@ -627,8 +635,12 @@ def _owner_home(home):
 
 def mockup_homes(root):
     """The folders a mockup may sit in, as a tuple of paths: the repo's design folder inside the checkout. Reads no
-    file and starts no process."""
-    return (os.path.join(root, *path(root, "design").split("/")),)
+    file and starts no process. A bad "rolled-out" mark reads the legacy place, which for design is the layout's."""
+    try:
+        where = path(root, "design")
+    except RolledOutMarkError:
+        where = legacy("design")
+    return (os.path.join(root, *where.split("/")),)
 
 
 def mockup_home_words(root):

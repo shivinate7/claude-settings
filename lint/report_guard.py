@@ -1205,6 +1205,11 @@ def _turn_acts(records, turn, acks):
     return uses, [send_targets(u) for u in uses]
 
 
+LAYOUT_UNREADABLE = (
+    "Owner-question guard: the check could not run (the layout is unreadable: %s), so this question would reach the "
+    "owner unchecked. Fix the layout file named above and send it again.")
+
+
 def question_problem(records, turn, text, hook):
     """(refusal, note) for a reply whose Input Needed item asks the owner a question (a pick or a "?"
     sentence), judged on `turn`, the records after the last incoming message (questions-reach-page). The
@@ -1253,7 +1258,10 @@ def question_problem(records, turn, text, hook):
             delivered = delivered_tool_use_ids(records)
             if any(writer in t and u.get("id") in delivered for u, t in zip(uses, sends)):
                 return "", ""
-    page = layout.waiting_page(root) if root else "unknown"
+    try:
+        page = layout.waiting_page(root) if root else "unknown"
+    except layout.LayoutError as err:
+        return LAYOUT_UNREADABLE % err, ""
     here = None if page == "unknown" else page.rstrip("/")
     for u in uses:
         inp = u.get("input")
