@@ -928,6 +928,33 @@ class StalledStep(UpkeepFixture):
         self.assertEqual(self.stalled_lines(out), ["stalled step: c2 (done: landed in #12)"])
         self.assertEqual(self.code, 1, "a stalled step must exit 1")
 
+    def test_doing_step_whose_only_lane_is_completed_or_failed_reads_stalled(self):
+        self.commit_step("c1", status="doing")  # control: an idle lane holds it live
+        self.commit_step("c2", status="doing", order=2)
+        self.commit_step("c3", status="doing", order=3)  # control: a review ready lane holds it live
+        for bucket in (BUCKET_COMPLETED, BUCKET_FAILED):  # coordinator 14:40 CST Nov 7: an ended lane is not live
+            with self.subTest(bucket=bucket):
+                self.publish(sessions=[
+                    self.session_in_repo("session_test01", "SESSION_STATUS_IDLE", "cs-step:c1"),
+                    session_row("session_test02", "SESSION_STATUS_IDLE", self.REPO, "cs-step:c2", status_bucket=bucket),
+                    session_row("session_test03", "SESSION_STATUS_IDLE", self.REPO, "cs-step:c3",
+                                status_bucket=BUCKET_REVIEW_READY),
+                ], items=[])
+                page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+                self.stalled_block(page)
+                self.assertEqual(self.stalled_lines(out), [self.RESUME],
+                                 "only c2 is stalled; the idle and review ready lanes hold c1 and c3")
+                self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_doing_step_with_a_trailing_space_on_its_cs_step_tag_is_not_stalled(self):
+        self.commit_step("c1", status="doing")  # control: no session, so it is stalled
+        self.commit_step("c2", status="doing", order=2)
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c2 ")], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.stalled_block(page)
+        self.assertEqual(self.stalled_lines(out), ["stalled step: c1 (resume, pause or done)"],
+                         "the stray space still names c2's lane, so c2 is not stalled")
+
     def test_valid_paused_field_exits_0_and_lists_the_step_as_paused(self):
         self.commit_step("c2", status="doing", order=2, paused=self.PAUSE)
         self.publish(sessions=[], items=[])
@@ -1206,11 +1233,13 @@ class ReadyFixture(UpkeepFixture):
 
 class ReadyNotStarted(ReadyFixture):
     """The ready-not-started view (plan: stalled steps, Part 2). A todo or ready step in phase now is listed in the
-    page's ready block when no live lane holds it (no cs-step session, no open pull on its id or lane/<id>), it has
+    page's ready block when no live lane holds it (no live cs-step session, no open pull on its id or lane/<id>), it has
     no valid `paused` field, and no open waiting-page item homed to it has a lane. Its age is whole hours from its
     updatedAt to the live read, or None. The build prints `ready not started: <id> (<age>h)` per step, or one
     `ready not started: <why>` when the read is unknown. A listed step inside the age limit never changes the exit
-    code; one over it does (ReadyNextAct). The limit and its exit 1 follow coordinator 12:56 and 13:40 CST Nov 7, part 3a."""
+    code; one over it does (ReadyNextAct). The limit and its exit 1 follow coordinator 12:56 and 13:40 CST Nov 7, part 3a.
+    A todo or ready step with a missing or wrongly cased phase prints an unknown line that names it, and the count reads
+    unknown. A completed or failed lane is not live, so it holds no step (coordinator 14:40 CST Nov 7)."""
 
     def test_todo_step_in_phase_now_with_no_lane_is_listed(self):
         self.ready_step("c2", order=2)
@@ -1432,6 +1461,71 @@ class ReadyNotStarted(ReadyFixture):
         page, _ = self.build_from_main("--live", str(self.live))
         self.assertEqual(self.ready_ids(self.ready_block(page)), ["c3"], "an empty lane is unanswered, so it holds c2 back")
 
+    def test_cs_step_tag_with_a_trailing_space_holds_the_step_back(self):
+        self.ready_step("c2", order=2)
+        self.ready_step("c3", order=3)  # control: no session names it
+        # idle_lanes strips the step id from the tag, so the live read must too: the stray space still names c2.
+        self.known_read(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c2 ")])
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.ready_ids(self.ready_block(page)), ["c3"], "a cs-step:c2 tag with a trailing space holds c2")
+
+    def test_todo_step_whose_only_lane_is_completed_or_failed_is_ready_and_starts_a_lane(self):
+        self.ready_step("c2", order=2)  # coordinator 14:40 CST Nov 7: an ended lane holds no step
+        for bucket in (BUCKET_COMPLETED, BUCKET_FAILED):
+            with self.subTest(bucket=bucket):
+                ended = session_row("session_test01", "SESSION_STATUS_IDLE", self.REPO, "cs-step:c2", status_bucket=bucket)
+                self.known_read(sessions=[ended])
+                page, out = self.build_from_main("--live", str(self.live))
+                ready = self.ready_block(page)
+                self.assertEqual(self.ready_ids(ready), ["c2"], "the ended lane holds no step, so c2 is ready")
+                self.assertEqual([s["act"] for s in ready["steps"]], ["start lane"], "the ready step's next act is start lane")
+                self.assertEqual(self.ready_lines(out), ["ready not started: c2 (3h)"], "the step prints its ready line")
+                self.assertEqual(count_lines(out), [ready_line("count", n=1)], "the ready count counts the step")
+
+    def test_idle_and_review_ready_lanes_still_hold_the_step_back(self):
+        self.ready_step("c2", order=2)  # held by an idle lane with no bucket, as the IDLE pin reads it
+        self.ready_step("c3", order=3)  # held by a review ready lane
+        self.ready_step("c4", order=4)  # control: no lane
+        self.known_read(sessions=[
+            self.session_in_repo("session_test01", "SESSION_STATUS_IDLE", "cs-step:c2"),
+            session_row("session_test02", "SESSION_STATUS_IDLE", self.REPO, "cs-step:c3", status_bucket=BUCKET_REVIEW_READY),
+        ])  # coordinator 14:40 CST Nov 7: only a completed or failed lane ends its hold
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.ready_ids(self.ready_block(page)), ["c4"], "an idle lane and a review ready lane hold their steps")
+
+    def test_todo_step_with_a_landed_mark_does_not_read_start_lane(self):
+        # Coordinator 13:20 CST Nov 7: a step that landed on main has no lane to start.
+        self.land("c2", 12, status="todo", phase="now", order=2, updatedAt=self.before(190))
+        self.ready_step("c3", order=3)  # control: no landing, so it reads start lane
+        self.known_read()
+        page, _ = self.build_from_main("--live", str(self.live))
+        ready = self.ready_block(page)
+        self.assertIn("c3", self.ready_ids(ready), "the control step is listed")
+        acts = {s["id"]: s["act"] for s in ready["steps"]}
+        self.assertEqual(acts["c3"], "start lane", "control: a step with no landing reads start lane")
+        self.assertNotEqual(acts.get("c2"), "start lane", "a todo step that landed on main does not read start lane")
+
+    def test_wrongly_cased_phase_prints_an_unknown_line_that_names_the_step(self):
+        self.ready_step("c2", order=2, phase="Now")  # not `now`, so the step must not drop out silently
+        self.known_read()
+        _, out = self.build_from_main("--live", str(self.live))
+        self.assert_unknown_phase(out, "c2")
+
+    def test_missing_phase_prints_an_unknown_line_that_names_the_step(self):
+        self.ready_step("c2", order=2, phase=_ABSENT)
+        self.known_read()
+        _, out = self.build_from_main("--live", str(self.live))
+        self.assert_unknown_phase(out, "c2")
+
+    def assert_unknown_phase(self, out, sid):
+        """A todo step with no usable phase prints one unknown ready line that names it, and the count reads unknown."""
+        named = [line for line in out.splitlines()
+                 if line.startswith("ready not started: unknown (") and re.search(r"\b%s\b" % sid, line)]
+        self.assertEqual(len(named), 1, "%s prints one unknown ready line that names it" % sid)
+        counts = count_lines(out)
+        self.assertEqual(len(counts), 1, "the count line prints once")
+        self.assertTrue(counts[0].startswith("ready not started count: unknown ("), "the count reads unknown, never 0: %r" % counts[0])
+
     def test_steps_unknown_prints_one_unknown_ready_line(self):
         self.on_main()
         code, out = run_build("--repo", str(self.repo), "--record-branch", "no-such-branch", "--out", str(self.out))
@@ -1443,12 +1537,13 @@ class ReadyNotStarted(ReadyFixture):
 # The age limit of a ready step (READY_AGE_LIMIT_HOURS in build.py). Read with getattr, so a missing name fails the one
 # constant case by name and every other case still goes red on its behaviour, not as an import error.
 LIMIT_HOURS = getattr(build, "READY_AGE_LIMIT_HOURS", 24)
-# The one home of the exact text of the next-act lines. `count unknown` takes the ready block's why, which already reads
-# `unknown (<why>)`, as the ready-not-started line does.
+# The one home of the exact text of the next-act lines. The count line does not start `ready not started: <id>`, so it
+# never reads as a per-step line. `count unknown` takes the ready block's why, which already reads `unknown (<why>)`, as
+# the ready-not-started line does.
 READY_LINE_FORMATS = {
     "over": "ready over limit: {id} (start lane; owner {owner}; age {age}h)",
-    "count": "ready with no lane: {n}",
-    "count unknown": "ready with no lane: {why}",
+    "count": "ready not started count: {n}",
+    "count unknown": "ready not started count: {why}",
 }
 NEXT_ACT_KEYS = ("id", "act", "owner", "age")  # the keys a doing entry and a ready entry share
 
@@ -1463,15 +1558,15 @@ def over_lines(out):
 
 
 def count_lines(out):
-    return re.findall(r"^ready with no lane: .*$", out, re.M)
+    return re.findall(r"^ready not started count: .*$", out, re.M)
 
 
 class ReadyNextAct(ReadyFixture):
     """The next act, owner and age limit of the ready steps (the PR-ledger design, part 3a). A ready step's next act is
     `start lane`. A doing or active step with no lane takes its act from the same next-act function, so the stalled
     entries and the ready entries carry the same keys. A ready step more than LIMIT_HOURS whole hours past its
-    updatedAt prints one `ready over limit` line and the build exits 1. The build always prints `ready with no lane: <N>`,
-    zero included, or `ready with no lane: <why>` when the read is unknown. Each exclusion case also holds an over-limit
+    updatedAt prints one `ready over limit` line and the build exits 1. The build always prints `ready not started count: <N>`,
+    zero included, or `ready not started count: <why>` when the read is unknown. Each exclusion case also holds an over-limit
     control step, so the case goes red on the old code where the control's line is missing."""
 
     def aged(self, hours):
@@ -1491,6 +1586,15 @@ class ReadyNextAct(ReadyFixture):
         self.assertEqual(over_lines(out), [ready_line("over", id="c2", owner="coordinator", age=LIMIT_HOURS + 1)],
                          "one red line for the step over the limit, none for the one inside it")
         self.assertEqual(self.code, 1, "a ready step over the limit exits 1")
+
+    def test_a_ready_step_at_24_h_10_min_is_inside_the_limit(self):
+        self.ready_step("c2", order=2, updatedAt=self.aged(LIMIT_HOURS))  # age 24: 24 whole hours is not over a 24 h limit
+        self.ready_step("c3", order=3, updatedAt=self.aged(LIMIT_HOURS + 1))  # control: age 25, over
+        self.known_read()
+        page, out = self.build_from_main("--live", str(self.live), expect=(1,))
+        self.assertIn("ready not started: c2 (24h)", out.splitlines(), "c2 is listed at age 24")
+        self.assertEqual(over_lines(out), [ready_line("over", id="c3", owner="coordinator", age=LIMIT_HOURS + 1)],
+                         "only the control is over; a limit read as 24 or more would also mark c2")
 
     def test_a_ready_step_over_the_limit_names_its_owner_and_an_absent_owner_reads_coordinator(self):
         self.ready_step("c2", order=2, updatedAt=self.aged(LIMIT_HOURS + 1), owner="triage")
