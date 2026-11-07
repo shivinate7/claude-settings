@@ -1194,6 +1194,23 @@ class EmittedRuleReaderTests(unittest.TestCase):
         src = 'RID = "const-rule-id"\ndef go(RID):\n    refuse(tool, "deny", RID, R, m)\n'
         self.assertEqual(emitted_guard_rules(src), set())
 
+    def test_a_def_local_name_assigned_a_literal_lists_that_id(self):
+        src = 'def go():\n    rid = "oracle-local-rule"\n    refuse(tool, "deny", rid, R, m)\n'
+        self.assertEqual(emitted_guard_rules(src), {"oracle-local-rule"})
+
+    def test_a_def_local_name_assigned_a_conditional_of_literals_lists_both(self):
+        src = 'def go(c):\n    rid = "oracle-a" if c else "oracle-b"\n    refuse(tool, "deny", rid, R, m)\n'
+        self.assertEqual(emitted_guard_rules(src), {"oracle-a", "oracle-b"})
+
+    def test_the_oracle_lists_the_ids_of_the_hooks_outside_the_guard_modules(self):
+        if HOOKS_DIR not in sys.path:
+            sys.path.insert(0, HOOKS_DIR)
+        import blind_brief
+        import call_judge
+        wanted = {blind_brief.RULE, call_judge.SPAWN_RULE, call_judge.QUESTION_RULE}
+        self.assertEqual(sorted(wanted - emitted_rules()), [],
+                         "the oracle reads only guard*.py and config_watch.py, so these ids are not in its list")
+
 
 def run_cli(argv):
     """Run main(argv); return (exit code, stdout, stderr). A refused flag exits 2 and is a result."""
