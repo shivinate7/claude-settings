@@ -830,7 +830,17 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .atext { margin: 0; max-width: 70ch; white-space: pre-line; overflow-wrap: anywhere; font-size: 16px; }
 .astate { margin: 0; font-size: 14.5px; color: var(--ink); font-weight: 600; }
 .astate .t { color: var(--muted); font-weight: 400; }
-.newmark { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; }
+/* The one "new since your baseline" mark: an ask's New answer, a card's New reply, a step's Updated. Green, the answered colour. */
+.newmark { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 12px; border: 1.5px solid var(--good); color: var(--good); font-weight: 600; white-space: nowrap; }
+/* Each later mark on a screen: a filled dot in an outline pill wider than tall, so it never reads as a radio button beside the options.
+   The chart legend's .dot (a filled square, 8px high) shares the class name, so this rule resets its ground, height and corner. */
+.newmark.dot { padding: 0; width: 34px; height: 22px; border-radius: 12px; background: none; justify-content: center; }
+.newmark.dot::before, .newmark.ct::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+/* A count of updated steps, on the phase rail and the done fold: the dot, then the number. */
+.newmark.ct { padding: 0 7px; gap: 5px; font: 600 12px/20px var(--mono); }
+.rrow .meta .newmark { font-size: 12.5px; line-height: 19px; min-height: 0; }
+.prail .nm .newmark, .fold .newmark { min-height: 0; }
+.prail .nmr { display: inline-flex; align-items: center; gap: 6px; }
 .askc .thread .lhead { margin: 0; font-size: 14px; color: var(--muted); }
 .askc .thread .reply { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
 .askc .thread .filed { margin: 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
@@ -956,7 +966,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 
 <!-- The one list of top-level item fields. The page warns on a field outside it, and the guard (rule item-field-rendered) refuses a write of one.
      Add a field here when the page draws it. A key inside options or steps is not listed. -->
-<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "lastAnswer", "lane", "waits"]</script>
+<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits"]</script>
 
 <!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The page writer replaces it on each publish
      (splice.py) and keeps designData. Empty, the Status tab says the plan is unknown. -->
@@ -964,7 +974,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 <!-- /roadmap:data -->
 
 <script>
-const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answeredOpen: true, sunk: null, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
+const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answeredOpen: true, sunk: null, known: null, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, sendAt: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
@@ -1121,6 +1131,9 @@ const waited = (iso) => (validT(iso) ? "waited " + span(Date.now() - Date.parse(
 /* ---------- Tiers: what holds up work, then what has a deadline, then the rest by age ---------- */
 const TIERS = [{ k: "holds", name: "Blocking" }, { k: "due", name: "Upcoming" }, { k: "calm", name: "Whenever" }, { k: "stands", name: "Pick stands" }];
 const RANK = { holds: 0, due: 1, calm: 2, stands: 3 };
+// What a Send does to the card it sends (owner, page item 311; one switch). "sink": the card moves to the Answered section, folded, and the next open card takes its place.
+// "stay": the card keeps its place in its tier until reload.
+const SENT_MOVE = "sink";
 const ts = (iso) => { const t = Date.parse(iso); return isNaN(t) ? Infinity : t; };
 // A pick stands only for a decision with a valid pick that sits in no group, so it is always in the last section where the owner sees it.
 const standsOk = (it) => it.stands === true && !it.group && it.kind === "decision" && !!pickKeys(it);
@@ -1128,8 +1141,20 @@ const rawTier = (it) => (standsOk(it) ? "stands" : it.holds ? "holds" : it.by &&
 const mates = (it) => (it.group && !isRuling(it) ? state.items.filter((x) => x.group === it.group) : [it]);
 // A group sits in the most urgent tier of any member, so its items never split across tiers.
 const tierOf = (it) => mates(it).map(rawTier).sort((a, b) => RANK[a] - RANK[b])[0];
+// One home for a viewer's time stamp in local storage (an ISO time): the asks' seen mark and the visit. A blocked store reads as no stamp and drops the write.
+const readStamp = (key) => { try { const t = Date.parse(localStorage.getItem(key)); return isNaN(t) ? null : t; } catch (e) { return null; } };
+const writeStamp = (key) => { try { localStorage.setItem(key, new Date().toISOString()); } catch (e) {} };
+// The owner's last visit, read once and kept, so a mark lasts the whole visit. With no stamp (a first visit, or a blocked store) no step is marked, and an item is new by the last Send alone.
+// The load's own time is written after the read, so the next load marks only what came later.
+const VISIT = readStamp("waiting.visit");
+writeStamp("waiting.visit");
+// A reply is new when the writer's `replied` time is later than the last Send (state.sendAt, kept by freezeSeen) and than the last visit. It reads no set, so a reply
+// that arrives on the open page is new too, and a Send moves no mark.
+const newReply = (it) => state.sendAt !== null && !isRuling(it) && Date.parse(it.replied) > Math.max(state.sendAt, VISIT ?? -Infinity);
+// A folded card of a new reply opens in place; a press on its fold wins for the rest of the visit.
+const foldOpen = (it) => (it.id in state.unfold ? !!state.unfold[it.id] : newReply(it));
 // Seen, worked out once (freezeSeen) and kept: an open item with no saved answer that was added before the owner's last Send. A later item is new,
-// and a Send on the open page re-sorts nothing (ux-order-holds-still). A reload works it out again.
+// and a Send on the open page re-sorts no tier. A reload works it out again.
 // A group is seen only while every member is in the frozen set, so a member that arrives after load makes the whole group new.
 const isSeen = (it) => !!state.seen && mates(it).every((x) => state.seen.has(x.id));
 // feed.receipts only records that the receipts arrived (a test waits on it); no freeze reads it.
@@ -1139,11 +1164,15 @@ function freezeSeen() {
   // The last Send is the newest answer anywhere, a closed item's last answer included.
   const times = [...Object.values(state.answers).map((a) => a && a.at), ...feed.all.map((i) => i && lastOf(i) && lastOf(i).at)].map(ts).filter(Number.isFinite);
   const last = times.length ? Math.max(...times) : -Infinity;
+  state.sendAt = last;
   const old = (it) => !isRuling(it) && !state.answers[it.id] && !answeredByWait(it) && ts(it.added) < last;
   state.seen = new Set(state.items.filter(old).map((it) => it.id));
+  // Known, kept beside seen: every item present at load. An item outside it arrived later and sorts first in its tier; a group is known only while every member is.
+  state.known = new Set(state.items.map((it) => it.id));
 }
+const isArrival = (it) => !!state.known && !mates(it).every((x) => state.known.has(x.id));
 // Sunk, worked out once and kept like seen: an item with a saved answer when the items and answers loaded (isSaved reads no receipts).
-// A Send on the open page, or a receipt that arrives later, moves no card (ux-order-holds-still); a reload works it out again.
+// A receipt that arrives later moves no card. A Send moves the sent card into this set under SENT_MOVE "sink" (sinkSent; Undo takes it out) and moves nothing under "stay". A reload works it out again.
 // A Change keeps the card in the section (isSaved turns false under it), so membership never reads isSaved after this.
 // A group sinks only when every member is in the set, so it never splits.
 const isSunk = (it) => !!state.sunk && mates(it).every((x) => state.sunk.has(x.id));
@@ -1151,6 +1180,12 @@ function freezeSunk() {
   if (state.sunk || !feed.items || !feed.answers) return;
   state.sunk = new Set(state.items.filter((it) => !isRuling(it) && (isSaved(it) || answeredByWait(it))).map((it) => it.id));
 }
+// A card sent on this visit joins the set under "sink", and the write records it, so Undo leaves a card that was already sunk where it is.
+function sinkSent(it) {
+  if (SENT_MOVE !== "sink" || !state.sunk || it.park || isRuling(it) || state.sunk.has(it.id)) return false;
+  state.sunk.add(it.id); return true;
+}
+const unsinkSent = (w) => { if (w.sank && state.sunk) state.sunk.delete(w.it.id); };
 function sorted() {
   const by = { holds: [], due: [], calm: [], stands: [], answered: [] };
   state.items.forEach((it) => by[isSunk(it) ? "answered" : tierOf(it)].push(it));
@@ -1163,8 +1198,8 @@ function sorted() {
   // The writer's `rank` (lower first) orders items inside a tier; an unranked item follows the ranked ones. A group takes its best member's rank.
   const rk = (it) => Math.min(...mates(it).map((x) => (Number.isFinite(x.rank) ? x.rank : Infinity)));
   const byRank = (a, b) => { const x = rk(a), y = rk(b); return x === y ? 0 : x < y ? -1 : 1; };
-  // Inside a tier, new items come before seen ones; each part keeps the order above.
-  const part = (f) => (a, b) => (isSeen(a) ? 1 : 0) - (isSeen(b) ? 1 : 0) || f(a, b);
+  // Inside a tier, an arrival after load comes first, then new items before seen ones; each part keeps the order above.
+  const part = (f) => (a, b) => (isArrival(a) ? 0 : 1) - (isArrival(b) ? 0 : 1) || (isSeen(a) ? 1 : 0) - (isSeen(b) ? 1 : 0) || f(a, b);
   by.holds.sort(part((a, b) => byRank(a, b) || byAge(a, b)));
   by.due.sort(part((a, b) => byRank(a, b) || dl(a) - dl(b) || byAge(a, b)));
   by.calm.sort(part((a, b) => byRank(a, b) || (a.kind === b.kind ? byAge(a, b) : a.kind === "decision" ? -1 : 1)));
@@ -1617,11 +1652,24 @@ function unfoldBtn(it, open, locked, ncmd, words) {
     h("span", { class: "uf-labels" }, h("span", { class: "uf-show" }, show), h("span", { class: "uf-hide" }, hide), h("span", { class: "uf-lock" }, "Stays open: your answer is ready")),
     h("span", { class: "sr" }, " for No. " + it.n));
 }
-// The fold of a seen card and of a sunk one: the control, then the body. One home for the lock, so a draft on either keeps the fold open.
+// The fold of a sunk card: the control, then the body. One home for the lock, so a draft keeps the fold open.
 function foldEls(it, parts, ncmd, words) {
   const locked = foldLocked(it);
   if (locked) state.unfold[it.id] = true;
-  return [unfoldBtn(it, !!state.unfold[it.id], locked, ncmd, words), h("div", { class: "foldbody", id: "fold-" + it.id, hidden: !state.unfold[it.id] }, ...parts)];
+  const open = foldOpen(it);
+  return [unfoldBtn(it, open, locked, ncmd, words), h("div", { class: "foldbody", id: "fold-" + it.id, hidden: !open }, ...parts)];
+}
+// The New reply mark of a card. Its words show once on a screen, on the first new card in page order; each later mark is the dot with the words hidden (ux-label-once).
+const REPLY_WORDS = ["New reply", " since your last Send"];
+function replyFirst(it) {
+  if (!newReply(it)) return false;
+  const by = sorted(), first = [...TIERS.map((T) => T.k), "answered"].map((k) => by[k].find(newReply)).find(Boolean);
+  return !!first && first.id === it.id;
+}
+function replyMark(it) {
+  const full = REPLY_WORDS.join("");
+  return replyFirst(it) ? h("span", { class: "newmark" }, REPLY_WORDS[0], h("span", { class: "sr" }, REPLY_WORDS[1]))
+    : h("span", { class: "newmark dot", title: full }, h("span", { class: "sr" }, full));
 }
 const parkBtn = (it, d) => h("button", { class: "btn dash parkbtn", type: "button", id: "b-park-" + it.id, "aria-pressed": String(d.act === "park"), onclick: () => pressPark(it, "park") }, ACT_NAME.park);
 function buildCard(it) {
@@ -1633,6 +1681,7 @@ function buildCard(it) {
     // The section head says "Answered", so its pill drops the word: the ring or tick carries it.
     byWait ? h("span", { class: "ans" }, (sunk ? "" : "Answered, "), h("span", { class: "t" }, "Sent" + (fmt(lastOf(it).at) ? " " + fmt(lastOf(it).at) : "")))
     : saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? (sunk ? "Filed in " : "Answered, filed in ") + it.home + " " : sunk ? "Filing pending, sent " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at))) : h("span", {}, waited(it.added)));
+  if (newReply(it)) top.children[0].after(replyMark(it));
   if (it.minutes && !saved) top.append(h("span", {}, minutesText(it.minutes)));
   if (it.group) { const m = mates(it).filter((x) => x.id !== it.id); if (m.length) top.append(h("span", { class: "inbundle" }, "goes with No. " + m.map((x) => x.n).join(", No. "))); }
   // A lane and a wait share one span, so "waits on" is said once. The link is the wait only.
@@ -1673,8 +1722,8 @@ function buildCard(it) {
   if (ctxText.length > 220) card.append(h("button", { class: "morebtn", type: "button", "aria-expanded": String(more), "aria-controls": "ctx-" + it.id, onclick: () => { state.more[it.id] = !more; repaint(it); } }, more ? "Less" : "More context"));
   if (it.ref) card.append(h("p", { class: "about" }, it.ref));
   if (state.notice[it.id]) card.append(h("p", { class: "status", role: "status" }, state.notice[it.id]));
-  // A seen card, or a sunk one changed on the page (a Change keeps it in the Answered section), folds every part the owner answers with, behind one control. Outside the fold: the top row, title, stakes, thread, context and the Lands-in line.
-  let ncmd = 0; const fold = isSeen(it) || sunk ? [] : null, put = (...n) => (fold ? fold.push(...n) : card.append(...n));
+  // A sunk card changed on the page (a Change keeps it in the Answered section) folds every part the owner answers with, behind one control. An item the owner still owes never folds. Outside the fold: the top row, title, stakes, thread, context and the Lands-in line.
+  let ncmd = 0; const fold = sunk ? [] : null, put = (...n) => (fold ? fold.push(...n) : card.append(...n));
   const multi = isMulti(it);
   const ready = h("p", { class: "ready" + (multi ? " multi" : "") + (draftReady(it) ? " on" : ""), "aria-live": "polite" }, readyText(it));
   const readyRow = multi ? h("div", { class: "readybox" }, ready, readyFits(it).map((t) => h("p", { class: "readyfit", "aria-hidden": "true" }, t))) : ready;
@@ -1763,10 +1812,38 @@ function releaseSent() {
   held.forEach((el) => { el.style.minHeight = ""; heldWatch.unobserve(el); });
   if (mark) window.scrollBy(0, mark.getBoundingClientRect().top - before);
 }
+// One home for holding the cards in view still across a render that moves cards (Send, Undo) or changes the rail above the list. It works with the browser's scroll anchoring on or off:
+// it measures one anchor before the render and scrolls by the anchor's viewport-top change after it, and the forced layout of that read has already taken any scroll the browser made.
+// The anchor is the list's top, which moves only with the rail (the Answered row appears or goes). If the first card to move starts above the viewport, its leaving would shift the
+// cards in view, so the anchor is the first card after it that is in view. A card wholly below the view is no anchor: a sent card taller than the view leaves the list top as
+// the anchor, so the next card takes the sent card's top. `ids` are the cards that move. The returned function carries `tops`: each moving card's viewport top now, kept by a Send.
+// `back` (Undo) is that map from the Send. A card that left from above the band comes back to its old top: the first such card in page order is the anchor.
+// It holds nothing under SENT_MOVE "stay" (no card moves), and not while the rail is in view above the list: the owner sees the rail change, so the list below it follows.
+function holdView(ids, back) {
+  const tops = new Map(), none = Object.assign(() => {}, { tops });
+  if (SENT_MOVE !== "sink") return none;
+  const band0 = document.querySelector(".hdr").getBoundingClientRect().bottom, el = (id) => document.getElementById("item-" + id);
+  const rail = $("rail").getBoundingClientRect();
+  const cardsNow = [...document.querySelectorAll("#list article.card")], movers = cardsNow.filter((c) => ids.includes(c.id.slice(5)));
+  movers.forEach((c) => tops.set(c.id.slice(5), c.getBoundingClientRect().top));
+  const returns = back ? ids.filter((id) => back.has(id) && back.get(id) < band0) : [];
+  let key = null, a0 = $("list").getBoundingClientRect().top;
+  const first = movers[0];
+  if (!returns.length && first && !first.closest("#tier-answered") && first.getBoundingClientRect().top < band0) {
+    const c = cardsNow.find((x) => { const r = x.getBoundingClientRect(); return !movers.includes(x) && first.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING && r.bottom > band0 && r.top < innerHeight; });
+    if (c) { key = c.id.slice(5); a0 = c.getBoundingClientRect().top; }
+  }
+  if (!returns.length && !key && rail.bottom <= a0 + 1 && rail.bottom > band0) return none;
+  return Object.assign(() => {
+    const ret = returns.map(el).filter(Boolean).sort((x, y) => x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)[0];
+    const a = ret || (key && el(key)) || $("list"), d = a.getBoundingClientRect().top - (ret ? back.get(ret.id.slice(5)) : a0);
+    if (Math.abs(d) > 0.5) window.scrollBy(0, d);
+  }, { tops });
+}
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
   const d = eff(it) || {};
-  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.act, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), isSunk(it), state.unfold[it.id], state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
+  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.act, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), isSunk(it), state.unfold[it.id], replyFirst(it), state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
 }
 const copyAttrs = (to, from) => { [...to.attributes].forEach((a) => to.removeAttribute(a.name)); [...from.attributes].forEach((a) => to.setAttribute(a.name, a.value)); };
 // Replace old's children with nu's but leave each kept node ([old node, nu stand-in, optional sync]) in place: moving an iframe reloads it.
@@ -1812,9 +1889,12 @@ function cardFor(it) {
   patch(rec.el, nu); rec.sig = sig; return rec.el;
 }
 function repaint() { render(); }
+// A child that stays is never detached: leavers go first, so the kept children are already in order and the loop inserts only the new ones.
+// A move would drop the focus inside a card and reload a live design preview.
 function reconcile(parent, want) {
+  const keep = new Set(want);
+  [...parent.children].forEach((c) => { if (!keep.has(c)) c.remove(); });
   want.forEach((n, i) => { if (parent.children[i] !== n) parent.insertBefore(n, parent.children[i] || null); });
-  while (parent.children.length > want.length) parent.lastElementChild.remove();
 }
 const tierEls = {}, bundleEls = {}, seenHeads = {};
 // Not "not answered": a seen card answered by a Send stays below the divider until reload.
@@ -1873,14 +1953,14 @@ function rulingsEl() {
     toggle: () => { state.rulingsOpen = !state.rulingsOpen; render(); },
     sub: "Each stands unless you overturn it." + (on || !ruledAt(list[0]) ? "" : " Newest " + fmt(list[0].ruled) + ".") });
 }
-// The items answered before this visit (isSunk), newest first. Open on load, each card folded.
+// The items answered before this visit, and under SENT_MOVE "sink" those sent on it (isSunk), newest first. Open on load, each card folded.
 function answeredEl(items, place) {
   const on = state.answeredOpen, stamps = items.map((i) => Date.parse(sentOf(i).at)).filter(Number.isFinite);
   const body = [], done = new Set();
   items.forEach((it) => { if (!done.has(it.id)) place(items, it, done, body); });
   return sectionEl("answered", { cls: "sunk", glyph: "done", name: "Answered", count: items.length, open: on, listId: "ab", btnId: "b-answered", body,
     toggle: () => { state.answeredOpen = !state.answeredOpen; render(); },
-    sub: "Sent before this visit, newest first." + (on ? " Each leaves the page once its session closes it." : stamps.length ? " Newest " + fmt(new Date(Math.max(...stamps)).toISOString()) + "." : "") });
+    sub: (SENT_MOVE === "sink" ? "Your sent answers, newest first." : "Sent before this visit, newest first.") + (on ? " Each leaves the page once its session closes it." : stamps.length ? " Newest " + fmt(new Date(Math.max(...stamps)).toISOString()) + "." : "") });
 }
 function renderList() {
   const list = $("list"), by = sorted(), want = [];
@@ -2098,14 +2178,17 @@ async function sendAll() {
       const d = eff(it), prior = state.answers[it.id] || null, body = answerBody(it, d, at);
       try { await state.db.collection("answers").doc(it.id).set(body); }
       catch (e) { state.barNote = "Not saved (" + (e && e.code || "error") + ")" + (wrote.length ? " from " + nList([it.n]) : "") + ". Copy the answers and paste them in chat."; state.copyOffer = true; break; }
-      wrote.push({ it, prior, draft: state.draft[it.id] || null, changing: !!state.changing[it.id], act: body.act });
+      wrote.push({ it, prior, draft: state.draft[it.id] || null, changing: !!state.changing[it.id], act: body.act, sank: sinkSent(it) });
       state.answers[it.id] = body; delete state.draft[it.id]; delete state.changing[it.id]; delete state.notice[it.id];
       entries.push(it.park ? { n: it.n, choice: body.act, owner: it.owner } : { n: it.n, act: body.act, choice: body.choice, done: body.done, note: body.note, owner: it.owner });
     }
     saveDraft();
     if (wrote.length) openSent(wrote, at);
     sentNow = wrote.filter((w) => !w.withdrawn).map((w) => w.it.id);
+    const hold = holdView(wrote.map((w) => w.it.id));
+    wrote.forEach((w) => { if (w.sank && hold.tops.has(w.it.id)) w.top = hold.tops.get(w.it.id); });
     render();
+    hold();
     if (entries.length) {
       const told = await notifyClaude(noticeText(entries, "Saved on the waiting page."), can);
       setSentStatus(told === true ? TOLD : ANSWER_NOT_TOLD(told));
@@ -2163,7 +2246,10 @@ async function undoSend() {
     if (!w.prior && state.receipts[w.it.id]) { try { await state.db.collection("receipts").doc(w.it.id).delete(); } catch (e) {} delete state.receipts[w.it.id]; }
   }
   if (late.length) { late.sort((x, y) => x - y); state.barNote = "Too late to undo " + nList(late) + "."; }
+  undone.forEach(unsinkSent);
+  const hold = holdView(undone.map((w) => w.it.id), new Map(undone.filter((w) => w.top != null).map((w) => [w.it.id, w.top])));
   saveDraft(); closeSent(); render();
+  hold();
   const told = undone.filter((w) => !w.withdrawn); // a withdraw told no session, so its undo tells none
   if (told.length) {
     const can = await canTell();
@@ -2250,12 +2336,11 @@ const askShort = (x) => (x.length > 60 ? x.slice(0, 59) + "…" : x);
 // The newest answered record of a thread: a reply follows its answer, and its time says whether the thread has a new answer. A tie goes to the later record.
 const askLatest = (t) => askMembers(t).filter((a) => askReply(a)).reduce((best, a) => (!best || (Date.parse(a.answered) || -Infinity) >= (Date.parse(best.answered) || -Infinity) ? a : best), null);
 // An answer is new while it is later than the seen mark of this viewer, read once at load. With no mark, the last 24 hours are new.
-let ASK_SEEN = null;
-try { const t = Date.parse(localStorage.getItem("waiting.askSeen")); if (!isNaN(t)) ASK_SEEN = t; } catch (e) {}
+const ASK_SEEN = readStamp("waiting.askSeen");
 const ASK_LOADED = Date.now();
 const askFresh = (a) => { const t = Date.parse(a.answered) || Date.parse(a.at); return ASK_SEEN !== null ? t > ASK_SEEN : ASK_LOADED - t < ASK_NEW_MS; };
 const askIsOpen = (t) => (t.id in askState.open ? askState.open[t.id] : askFresh(askLatest(t) || t));
-const markAsksSeen = () => { try { localStorage.setItem("waiting.askSeen", new Date().toISOString()); } catch (e) {} };
+const markAsksSeen = () => writeStamp("waiting.askSeen");
 document.addEventListener("visibilitychange", () => { if (document.hidden) markAsksSeen(); });
 window.addEventListener("pagehide", markAsksSeen);
 const saveAskDraft = () => { try { const v = $("askText").value; if (v) localStorage.setItem("waiting.askDraft", v); else localStorage.removeItem("waiting.askDraft"); } catch (e) {} };
@@ -3195,7 +3280,8 @@ function renderRail() {
   const cur = curPhase(), shown = shownPhase();
   $("svRail").innerHTML = PH.map((p) => {
     const ss = byPhase(p.k), d = ss.filter((s) => s.status === "done").length, a = ss.filter((s) => s.status === "active").length, b = ss.filter((s) => s.status === "blocked").length;
-    return `<button type="button" data-phase="${esc(p.k)}" aria-pressed="${p.k === shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${p === cur && !p.none ? ", current phase" : ""}"><span class="nm"><span>${esc(p.n)}${p === cur && !p.none ? '<span class="here" title="Current phase: the first with work left"></span>' : ""}</span><span class="num" aria-hidden="true">${d}/${ss.length}</span></span><span class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</span></button>`;
+    const u = ss.filter(stepNew).length;
+    return `<button type="button" data-phase="${esc(p.k)}" aria-pressed="${p.k === shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${p === cur && !p.none ? ", current phase" : ""}${u ? ", " + u + " updated since your last visit" : ""}"><span class="nm"><span>${esc(p.n)}${p === cur && !p.none ? '<span class="here" title="Current phase: the first with work left"></span>' : ""}</span><span class="nmr">${u ? countMark(u) : ""}<span class="num" aria-hidden="true">${d}/${ss.length}</span></span></span><span class="segbar" aria-hidden="true">${segs(d, a, b, ss.length)}</span></button>`;
   }).join("");
 }
 
@@ -3241,15 +3327,27 @@ function metaTiles(k) {
 }
 
 /* ---------- steps ---------- */
+// A step is new when its updatedAt is later than the owner's last visit (VISIT, read once at load). The words show on the first marked row of a drawing; each later one is the dot.
+const stepNew = (s) => VISIT !== null && Date.parse(s.updatedAt) > VISIT;
+let stepWords = true;
+function stepMark(s) {
+  const full = "Updated since your last visit", first = stepWords;
+  stepWords = false;
+  return first ? '<span class="newmark" aria-hidden="true">Updated</span>' : `<span class="newmark dot" aria-hidden="true" title="${full}"></span>`;
+}
+// A step updated since the last visit draws open, and the done fold of its phase opens with it (the done list sorts the newest first, so it is at the top).
+// A press after that wins; a marked step in another phase shows when the owner opens that phase, and the phase rail counts it.
+steps.filter(stepNew).forEach((s) => { ui.open.add(s.id); if (s.status === "done") ui.folds.add(phaseKey(s)); });
+const countMark = (n) => `<span class="newmark ct" aria-hidden="true" title="${n} updated since your last visit">${n}</span>`;
 const landed = (id) => { const w = B && B.landed && B.landed[id]; return Array.isArray(w) && w.length ? w : null; };
 function stepRow(s, nextIds) {
   const ni = nextIds.indexOf(s.id), lw = landed(s.id);
-  const stl = stalledIds.has(s.id), pzd = pausedIds.has(s.id);
-  const tags = [ni >= 0 ? `Next ${ni + 1}` : "", s.status === "blocked" ? "Blocked" : "", lw ? "Landed in " + lw.join(", ") : "", stl ? "Stalled" : "", pzd ? "Paused" : ""];
+  const stl = stalledIds.has(s.id), pzd = pausedIds.has(s.id), isNew = stepNew(s);
+  const tags = [ni >= 0 ? `Next ${ni + 1}` : "", s.status === "blocked" ? "Blocked" : "", lw ? "Landed in " + lw.join(", ") : "", stl ? "Stalled" : "", pzd ? "Paused" : "", isNew ? "Updated since your last visit" : ""];
   const d = when(s.updatedAt), open = ui.open.has(s.id), noteOpen = ui.notes.has(s.id), lbl = stl ? LBL.stalled : pzd ? LBL.paused : LBL[s.status] || LBL.todo;
   return `<li class="${s.status}${stl ? " stl-row" : ""}${open ? " open" : ""}" id="s-${esc(s.id)}">
     <button type="button" class="rrow" data-row="${esc(s.id)}" aria-expanded="${open}" aria-label="${esc(s.id)}, ${lbl}: ${esc(s.title || "Untitled step")}${tags.filter(Boolean).length ? ". " + esc(tags.filter(Boolean).join(". ")) : ""}">${rg(stl ? "stalled" : pzd ? "paused" : s.status)}<span class="id">${esc(s.id)}</span><span class="ttl">${esc(s.title || "Untitled step")}</span>
-      <span class="meta">${tags[0] ? `<span class="tag next">${tags[0]}</span>` : ""}${tags[1] ? '<span class="tag blk">Blocked</span>' : ""}${lw ? `<span class="tag landed" title="Merged; waiting for triage to close the step">${esc(tags[2])}</span>` : ""}${stl ? `<span class="tag stl ic" role="img" aria-label="Stalled" title="Stalled: no live lane and no open pull request">${GLY.stalled}</span>` : ""}${pzd ? `<span class="tag pzd ic" role="img" aria-label="Paused" title="Paused: ${esc((s.paused || {}).why || "")}">${GLY.paused}</span>` : ""}</span><span class="chev" aria-hidden="true">▶</span></button>
+      <span class="meta">${tags[0] ? `<span class="tag next">${tags[0]}</span>` : ""}${tags[1] ? '<span class="tag blk">Blocked</span>' : ""}${lw ? `<span class="tag landed" title="Merged; waiting for triage to close the step">${esc(tags[2])}</span>` : ""}${stl ? `<span class="tag stl ic" role="img" aria-label="Stalled" title="Stalled: no live lane and no open pull request">${GLY.stalled}</span>` : ""}${pzd ? `<span class="tag pzd ic" role="img" aria-label="Paused" title="Paused: ${esc((s.paused || {}).why || "")}">${GLY.paused}</span>` : ""}${isNew ? stepMark(s) : ""}</span><span class="chev" aria-hidden="true">▶</span></button>
     <div class="rbody"><dl>
       <dt>Status</dt><dd>${lbl}</dd>
       ${s.why ? `<dt>Why</dt><dd>${esc(s.why)}</dd>` : ""}
@@ -3268,13 +3366,14 @@ const clampPage = (p, pages) => Math.max(0, Math.min(p, pages - 1));
 const defaultPage = (list) => { const ix = list.findIndex((s) => s.status !== "done"); return ix < 0 ? 0 : Math.floor(ix / pageSize()); };
 
 function renderPhase() {
+  stepWords = true;
   const k = shownPhase(), p = PH.find((x) => x.k === k), ss = byPhase(k);
   const open = openList(k), done = doneList(k), d = done.length, a = ss.filter((s) => s.status === "active").length, b = ss.filter((s) => s.status === "blocked").length;
   const nextIds = nextUp().map((s) => s.id), size = pageSize();
   const pages = Math.max(1, Math.ceil(open.length / size));
   if (ui.page[k] == null) ui.page[k] = defaultPage(open);
   const pg = ui.page[k] = clampPage(ui.page[k], pages);
-  const dPages = Math.max(1, Math.ceil(d / size)), dpg = ui.donePage[k] = clampPage(ui.donePage[k] || 0, dPages);
+  const du = done.filter(stepNew).length, dPages = Math.max(1, Math.ceil(d / size)), dpg = ui.donePage[k] = clampPage(ui.donePage[k] || 0, dPages);
   let asof = "", foot = "", tiles = "";
   if (k === "cleanup") {
     const ci = cullInfo(); tiles = cullTiles(ci);
@@ -3294,7 +3393,7 @@ function renderPhase() {
     <div class="hint"><span>${open.length} open step${open.length === 1 ? "" : "s"}, in work order</span><span>Read only</span></div>
     <ul class="rsteps">${open.slice(pg * size, (pg + 1) * size).map((s) => stepRow(s, nextIds)).join("") || `<li class="noneyet">${ss.length ? "Every step in this phase is done." : "No steps in this phase yet."}</li>`}</ul>
     ${pager("open", pg, pages, open.length, "open steps")}
-    ${d ? `<div class="donefold${ui.folds.has(k) ? " open" : ""}"><button type="button" class="fold" data-fold="${esc(k)}" aria-expanded="${ui.folds.has(k)}"><span class="chev" aria-hidden="true">▶</span><span><span class="num">${d}</span> done</span></button>
+    ${d ? `<div class="donefold${ui.folds.has(k) ? " open" : ""}"><button type="button" class="fold" data-fold="${esc(k)}" aria-expanded="${ui.folds.has(k)}"><span class="chev" aria-hidden="true">▶</span><span><span class="num">${d}</span> done${du ? `<span class="sr">, ${du} updated since your last visit</span>` : ""}</span>${du ? countMark(du) : ""}</button>
       <div class="fb"><ul class="rsteps">${done.slice(dpg * size, (dpg + 1) * size).map((s) => stepRow(s, nextIds)).join("")}</ul>${pager("done", dpg, dPages, d, "done")}</div></div>` : ""}
   </section>`;
 }
