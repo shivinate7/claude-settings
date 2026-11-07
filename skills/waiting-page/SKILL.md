@@ -267,7 +267,8 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    republish, so the copy holds the page as it was.
 4. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
    `<out>` is main's page with the live `designData` and roadmap blocks kept, byte for byte
-   (`--write` calls `splice.carry`), minus the mockups of closed items when you pass `--items` (step 2).
+   (`--write` calls `splice.carry`). With `--items` (step 2), the mockups of closed items go, and the
+   kept mockups are written again with the same values.
    A live page with no roadmap block keeps the template's empty one.
    When you also add a design, do it in
    `<out>` first and republish once ("Add a design").

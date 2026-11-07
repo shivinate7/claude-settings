@@ -1509,3 +1509,4 @@
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
 - prune-empty-page-refused: a waiting page whose designData prunes to `{}`, with the template's title and an empty roadmap block, meets the guard's empty-page refusal (hooks/guard.py ~3716). Rare: a live page has a title and a roadmap block. (skills/waiting-page/splice.py `prune_designs`)
 - prune-bad-json-keeps-all: `prune_designs` keeps every mockup, and says nothing, when the designData block is not JSON. (skills/waiting-page/splice.py)
+- prune-parked-kept-forever: a closed item whose `lastAnswer.act` stays `park` keeps its mockup on every republish, even once it will never reopen. The cost is page size only. (skills/waiting-page/splice.py `parked`)
