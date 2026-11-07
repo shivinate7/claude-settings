@@ -54,6 +54,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 from unittest import mock
 
@@ -582,6 +583,246 @@ def case_task_why_cited_greens():
                   entry_of(task_item(STEPS, context="Why yours: this needs your login.")), None)
     check("task why cited: a Why yours line with no route cite never reads the rows file", not reads,
           "the rows file was read %d times" % len(reads))
+
+
+# ------------------------------------------------------------------ the stored line, read from the transcript
+#
+# Rule task-why-cited on a str_replace of a waiting-page item's context (decision why-cite-sees-stored-line). The guard
+# reads the stored item from this session's transcript, the payload's transcript_path: the newest get of the item at the
+# write's if_version, or this session's earlier successful write that returned that version, replayed on the stored
+# text. It applies old_str to new_str and judges each Why yours line. A stored text that cannot be found or does not
+# apply is an ask. Each case runs guard.judge on a payload in process, and a process start raises.
+#
+# Transcript shape assumed here (the feedback guard's shape, hooks/feedback_guard.py _reads_items and read_back): one
+# JSON object per line. A call is {"type": "assistant", "isSidechain": false, "message": {"content": [{"type":
+# "tool_use", "id", "name": "ArtifactData", "input"}]}}. Its result is {"type": "user", "message": {"content":
+# [{"type": "tool_result", "tool_use_id", "content": <text>, "is_error"}]}}, paired by tool_use_id. A get's text is
+# one document line, {"id", "version", "updatedAt", "data": {...}}. A successful write's text is one line, {"id",
+# "version"}, with no data. A sidechain record is a subagent's, not this session's.
+
+STORED = "Why yours: I can't delete it (route r-refused)."
+MEASURED = "Why yours: I can't delete it (measured 2026-11-06, the proxy said 403)."
+TRUE_LINE = "Why yours: I can't delete it (route r-refused). Notes follow."
+READ_ID, WRITE_ID = "toolu_read", "toolu_write"
+STORED_SESSION = "why-stored-1"
+DENY, ASK, ALLOW = ("deny", WHY_RULE), ("ask", WHY_RULE), ("allow", "")
+_transcript_names = []
+
+
+def item_line(context, version):
+    """The line an items get returns for the item: its document, with its data and version."""
+    doc = {"id": DOC, "version": version, "updatedAt": "2026-11-07T15:00:00Z",
+           "data": {"kind": "task", "title": "Delete the stale branch", "status": "open", "steps": STEPS,
+                    "context": context}}
+    return json.dumps(doc, ensure_ascii=False, separators=(",", ":"))
+
+
+def wrote_line(version):
+    """The line a successful write returns: the document's id and the version it now holds, no data."""
+    return json.dumps({"id": DOC, "version": version}, separators=(",", ":"))
+
+
+def record_call(use_id, tool_input, sidechain=False):
+    """An assistant record that holds one ArtifactData tool_use."""
+    return {"type": "assistant", "isSidechain": sidechain,
+            "message": {"role": "assistant", "content": [{"type": "tool_use", "id": use_id,
+                                                          "name": "ArtifactData", "input": tool_input}]}}
+
+
+def record_answer(use_id, text, is_error=False, sidechain=False):
+    """The user record that holds the tool_result of the tool_use `use_id`."""
+    return {"type": "user", "isSidechain": sidechain,
+            "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": use_id,
+                                                     "content": text, "is_error": is_error}]}}
+
+
+def get_of(version, context, sidechain=False, **extra):
+    """A get of the item and its result: a read at `version` that shows `context`."""
+    tool_input = {"action": "get", "url": PAGE_URL, "collection": "items", "doc_id": DOC}
+    tool_input.update(extra)
+    return [record_call(READ_ID, tool_input, sidechain),
+            record_answer(READ_ID, item_line(context, version), sidechain=sidechain)]
+
+
+def write_of(use_id, tool_input, result, is_error=False):
+    """A write and its result: the text a successful write returns, or an error."""
+    return [record_call(use_id, tool_input), record_answer(use_id, result, is_error=is_error)]
+
+
+def transcript_of(records):
+    """A transcript file of this run's folder, one JSON record per line. Its path."""
+    path = os.path.join(RUN_FOLDER, "stored-line-%d.jsonl" % len(_transcript_names))
+    _transcript_names.append(path)
+    with open(path, "w", encoding="utf-8") as handle:
+        for rec in records:
+            handle.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return path
+
+
+def edit(old, new, version=3, field="context", **extra):
+    """A str_replace of the item's field, pinned to `version` (None leaves if_version out)."""
+    tool_input = {"action": "str_replace", "url": PAGE_URL, "collection": "items", "doc_id": DOC,
+                  "field": field, "old_str": old, "new_str": new}
+    if version is not None:
+        tool_input["if_version"] = version
+    tool_input.update(extra)
+    return tool_input
+
+
+def guard_payload(tool_input, transcript, tool="ArtifactData"):
+    """The PreToolUse payload the guard receives: the call, its cwd, and the session's transcript path."""
+    payload = {"hook_event_name": "PreToolUse", "session_id": STORED_SESSION, "tool_name": tool,
+               "tool_input": tool_input, "cwd": PAGE_REPO}
+    if transcript is not None:
+        payload["transcript_path"] = transcript
+    return payload
+
+
+@contextlib.contextmanager
+def count_opens(path):
+    """The opens of `path` in this block, counted as attempts, so a missing file counts too."""
+    opened = []
+    real_open = open
+
+    def counting(file, *args, **kwargs):
+        try:
+            if os.fspath(file) == path:
+                opened.append(path)
+        except TypeError:  # a file descriptor, not a path
+            pass
+        return real_open(file, *args, **kwargs)
+
+    with mock.patch("builtins.open", counting):
+        yield opened
+
+
+@contextlib.contextmanager
+def no_process():
+    """A process start raises, so a rule that starts one fails its case by name."""
+    def refuse_start(*args, **kwargs):
+        raise AssertionError("a process was started on the stored-line path")
+    with mock.patch.object(subprocess, "run", refuse_start), mock.patch.object(subprocess, "Popen", refuse_start):
+        yield
+
+
+def judge_payload(payload):
+    """(decision, rule) for one guard payload, through guard.judge in process: the decision refuse prints, or allow
+    when nothing prints. A raise is named, so a crash is never read as a verdict."""
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out), no_process():
+            guard.judge(payload)
+    except SystemExit:
+        pass
+    except Exception as exc:
+        return "raised", "%s: %s" % (type(exc).__name__, exc)
+    text = out.getvalue().strip()
+    if not text:
+        return "allow", ""
+    try:
+        found = json.loads(text)["hookSpecificOutput"]
+        return found["permissionDecision"], found["permissionDecisionReason"].split(":", 1)[0]
+    except (ValueError, KeyError, TypeError):
+        return "unparsed", text[:80]
+
+
+def stored_case(name, tool_input, records, want, path=None, read_gate=True):
+    """One item write judged through the guard payload, its transcript written from `records` (or the file at `path`).
+    With `read_gate`, the rule must read the transcript before it judges, so a case that reads nothing fails by name
+    with no verdict. A green passes with zero reads on the code before the rule, so it names no read."""
+    transcript = path if path is not None else transcript_of(records)
+    rows = rows_at("why-rows.json", WHY_ROWS)
+    with local_rows(rows):
+        if not on_local_surface(name):
+            return
+        with count_opens(transcript) as opened:
+            got = judge_payload(guard_payload(tool_input, transcript))
+    if got[0] == "raised":
+        check(name, False, "the guard raised: %s" % got[1])
+    elif read_gate and not opened:
+        check(name, False, "the rule read the transcript 0 times, so it judged no stored line (got %s)" % (got,))
+    else:
+        check(name, got == want, "want %s, got %s" % (want, got))
+
+
+def case_stored_line_reds():
+    """Each case here is a stored line the rule must refuse: the cite judged is the one the stored text holds, after
+    old_str is applied. Each is allowed on the code before the rule, so each is red on it."""
+    stored_case("a stored refused cite swapped for a works row is denied", edit("r-refused", "r-works"),
+                get_of(3, STORED), DENY)
+    stored_case("a stored dated cite with its date swapped for words is denied", edit("2026-11-06", "last week"),
+                get_of(3, MEASURED), DENY)
+    stored_case("a stored cite dropped from its Why yours line is denied", edit(" (route r-refused)", ""),
+                get_of(3, STORED), DENY)
+    stored_case("a stored cite swapped for a bare premise label is denied", edit("(route r-refused)", "(measured)"),
+                get_of(3, STORED), DENY)
+
+
+def case_stored_line_asks():
+    """Each case here has no stored text the rule can judge, so the guard asks: never an allow, never a verdict."""
+    stored_case("a write with no read of the item is asked", edit("r-refused", "r-asks"), [], ASK)
+    stored_case("a read at version 2 is not the write's version 3, so it is asked", edit("r-refused", "r-asks"),
+                get_of(2, STORED), ASK)
+    stored_case("a write with no transcript file is asked", edit("r-refused", "r-asks"), None, ASK,
+                path=os.path.join(RUN_FOLDER, "absent-transcript.jsonl"))
+    stored_case("a get with out_dir is asked, since it returns files, not the item", edit("r-refused", "r-asks"),
+                get_of(3, STORED, out_dir="exports"), ASK)
+    stored_case("an old_str the stored text lacks is asked", edit("r-missing", "r-works"), get_of(3, STORED), ASK)
+    stored_case("a write with no if_version is asked", edit("r-refused", "r-asks", version=None),
+                get_of(3, STORED), ASK)
+    stored_case("a read made by a subagent is not this session's read, so it is asked", edit("r-refused", "r-asks"),
+                get_of(3, STORED, sidechain=True), ASK)
+
+
+def case_stored_line_replay():
+    """A second edit pinned to the version a first write returned is judged on the text that write leaves, and a failed
+    write leaves no text to replay."""
+    first = edit("r-refused", "r-asks")
+    stored_case("a second edit pinned to the version the first write returned is judged on the replayed text",
+                edit("r-asks", "r-works", version=4), get_of(3, STORED) + write_of(WRITE_ID, first, wrote_line(4)),
+                DENY)
+    failed = "Error: the page refused the write"
+    stored_case("a failed earlier write is not replayed, so a second edit at its version is asked",
+                edit("r-asks", "r-works", version=4),
+                get_of(3, STORED) + write_of(WRITE_ID, first, failed, is_error=True), ASK)
+
+
+def case_stored_line_greens():
+    """Each case here is a stored line the rule must allow. Each passes on the code before the rule, with no read."""
+    stored_case("a stored refused cite swapped for an asks row passes", edit("r-refused", "r-asks"), get_of(3, STORED),
+                ALLOW, read_gate=False)
+    stored_case("an unrelated edit on a true stored line passes", edit("Notes follow.", "Notes below."),
+                get_of(3, TRUE_LINE), ALLOW, read_gate=False)
+
+
+def case_stored_line_cost():
+    """The transcript is opened once for a context str_replace on the page, and never for any other write or a read."""
+    records = get_of(3, STORED)
+    path = transcript_of(records)
+    rows = rows_at("why-rows.json", WHY_ROWS)
+    cases = (
+        ("a context str_replace on the page opens the transcript once", edit("r-refused", "r-asks"), 1),
+        ("a set on the page opens no transcript",
+         {"action": "set", "url": PAGE_URL, "collection": "items", "doc_id": DOC,
+          "data": task_item(STEPS, context=STORED)}, 0),
+        ("an update of kind task and context opens no transcript",
+         {"action": "update", "url": PAGE_URL, "collection": "items", "doc_id": DOC,
+          "data": {"kind": "task", "context": STORED}}, 0),
+        ("a str_replace of another field opens no transcript",
+         edit("Delete the stale branch", "Remove the stale branch", field="title"), 0),
+        ("a str_replace on another page opens no transcript",
+         edit("r-refused", "r-asks", url="https://claude.ai/artifact/otherpage"), 0),
+        ("a get of the item opens no transcript",
+         {"action": "get", "url": PAGE_URL, "collection": "items", "doc_id": DOC}, 0),
+    )
+    for name, tool_input, want in cases:
+        with local_rows(rows):
+            if not on_local_surface(name):
+                continue
+            with count_opens(path) as opened:
+                decision, reason = judge_payload(guard_payload(tool_input, path))
+        check(name, len(opened) == want and decision != "raised",
+              "the transcript was opened %d times, want %d (%s %s)" % (len(opened), want, decision, reason))
 
 
 # ------------------------------------------------------------------ chat only
@@ -1637,7 +1878,9 @@ def main():
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
-                 case_task_why_cited_reds, case_task_why_cited_greens):
+                 case_task_why_cited_reds, case_task_why_cited_greens,
+                 case_stored_line_reds, case_stored_line_asks, case_stored_line_replay, case_stored_line_greens,
+                 case_stored_line_cost):
         try:
             case()
         except Exception as exc:
