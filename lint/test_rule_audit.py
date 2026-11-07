@@ -11,6 +11,7 @@ Run with:
 """
 import ast
 import glob
+import io
 import json
 import os
 import re
@@ -18,6 +19,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -833,6 +835,73 @@ class GuardsSectionTests(unittest.TestCase):
         guard = self.real_guard_text()
         problems = run(rule_map=guards_map(sorted(rule_audit.guard_rule_names(guard))), guard=guard)
         self.assertEqual(problems, [])
+
+
+# ------------------------------------------------------------ guard rule id reads
+# A guard writes a rule id from a module constant: its own, or one imported from a sibling module under
+# hooks/. The reader lists the value, or raises with path:line on a call whose id it cannot list. The
+# audit takes its ids from one list, emitted_rule_ids, and main() checks every id on that list.
+
+WATCH_ONLY = "watch-only-rule"  # an id that no hooks/guard*.py writes; only a non-guard module would
+
+
+class GuardRuleIdReadTests(unittest.TestCase):
+    """`guard_rule_names` lists a constant rule id, and raises with path:line when it cannot list one."""
+
+    def fixture(self, files):
+        return GuardTextTests.tree(self, files)
+
+    def test_same_module_constant_rule_id_is_listed(self):
+        self.assertEqual(rule_audit.guard_rule_names('NEW_RULE = "x"\nrefuse(t, "deny", NEW_RULE, R, m)\n'),
+                         {"x"})
+
+    def test_constant_imported_from_a_sibling_module_is_listed(self):
+        root = self.fixture({
+            os.path.join("hooks", "rule_ids.py"): 'SIBLING_RULE = "from-sibling"\n',
+            os.path.join("hooks", "guard.py"):
+                'from rule_ids import SIBLING_RULE\nrefuse(t, "deny", SIBLING_RULE, R, m)\n',
+        })
+        self.assertIn("from-sibling", rule_audit.emitted_rule_ids(root))
+
+    def test_import_from_a_module_that_is_not_there_raises_with_path_and_line(self):
+        root = self.fixture({
+            os.path.join("hooks", "guard.py"):
+                'from rule_ids_absent import ABSENT\nrefuse(t, "deny", ABSENT, R, m)\n',
+        })
+        with self.assertRaisesRegex(ValueError, r"hooks[\\/]guard\.py:2: refuse\(\) takes a rule id the reader cannot resolve"):
+            rule_audit.emitted_rule_ids(root)
+
+    def test_non_literal_constant_raises_with_path_and_line(self):
+        with self.assertRaisesRegex(ValueError, r"hooks/guard\.py:2: refuse\(\) takes a rule id the reader cannot resolve"):
+            rule_audit.guard_rule_names('NEW = make()\nrefuse(t, "deny", NEW, R, m)\n', "hooks/guard.py")
+
+    def test_subscript_rule_id_raises_with_path_and_line(self):
+        with self.assertRaisesRegex(ValueError, r"hooks/guard\.py:2: refuse\(\) takes a rule id the reader cannot resolve"):
+            rule_audit.guard_rule_names('RULES = {"a": "x"}\nrefuse(t, "deny", RULES["a"], R, m)\n',
+                                        "hooks/guard.py")
+
+    def test_f_string_rule_id_raises_with_path_and_line(self):
+        # Pin: the old reader already raised on an f-string. Kept here so every unlistable shape has a case.
+        with self.assertRaisesRegex(ValueError, r"hooks/guard\.py:2: refuse\(\) takes an f-string"):
+            rule_audit.guard_rule_names('n = 1\nrefuse(t, "deny", f"fs-{n}", R, m)\n', "hooks/guard.py")
+
+    def test_main_checks_an_id_only_config_watch_emits(self):
+        # The audit's real run, with one extra id on the list that emitted_rule_ids returns. It has no row,
+        # so main() must name it and exit 1. main() reads the real CLAUDE.md and map, as CI does.
+        listed = rule_audit.emitted_rule_ids
+        out = io.StringIO()
+        with mock.patch.object(rule_audit, "emitted_rule_ids",
+                               side_effect=lambda root: listed(root) | {WATCH_ONLY}) as emitted, \
+                redirect_stdout(out):
+            try:
+                rule_audit.main()
+                code = 0
+            except SystemExit as stop:
+                code = stop.code
+        self.assertTrue(emitted.called, "control: the patched emitted_rule_ids is not on main()'s path")
+        self.assertEqual(code, 1, "main() passes, so an id emitted_rule_ids lists with no guards row goes "
+                                  "unchecked. Output: " + out.getvalue())
+        self.assertIn(WATCH_ONLY, out.getvalue())
 
 
 # ------------------------------------------------------------ refusal cites
