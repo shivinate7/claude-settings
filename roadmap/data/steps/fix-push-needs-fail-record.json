@@ -1,0 +1,11 @@
+{
+  "title": "A fix push needs the review FAIL record it answers",
+  "phase": "now",
+  "status": "doing",
+  "order": 1.31,
+  "owner": "coordinator",
+  "why": "Coordinator, 14:32 CST Nov 7.",
+  "note": "Title read from the slug; the coordinator was asked for a one-line goal.",
+  "lane": "session_013NEJL3KhxJ9MV6PvgDun3P",
+  "updatedAt": "2026-11-07T14:32:00-06:00"
+}

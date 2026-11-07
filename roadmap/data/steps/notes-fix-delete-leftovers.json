@@ -1,0 +1,11 @@
+{
+  "title": "Fix the rows the delete pass kept",
+  "phase": "now",
+  "status": "doing",
+  "order": 1.3,
+  "owner": "coordinator",
+  "why": "Coordinator, 14:32 CST Nov 7.",
+  "note": "Title read from the slug; the coordinator was asked for a one-line goal.",
+  "lane": "session_013NEJL38tqHPZrQNHNdo9ba",
+  "updatedAt": "2026-11-07T14:32:00-06:00"
+}
