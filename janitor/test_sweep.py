@@ -4777,12 +4777,14 @@ class _AgentEndFixture(unittest.TestCase):
             return None
         return "claude agent agent-%s (pid %d start %d)" % (name, os.getpid(), ticks)
 
-    def write_stop_row(self, agent, path):
+    def write_stop_row(self, agent, path, at=None):
         """Add AGENT's SubagentStop row to the payload log, in the shape the hook writes: `raw` holds the
-        payload, which names the agent by agent_id."""
+        payload, which names the agent by agent_id, and `at` is the row's time as `log()` stamps it. AT, a
+        POSIX time, defaults to now."""
         raw = json.dumps({"hook_event_name": "SubagentStop", "agent_id": agent, "cwd": path,
                           "session_id": "agent-end-wt-cases", "transcript_path": self.session_transcript()})
-        row = {"raw": raw, "run": "fixture-%s" % agent, "state": "done", "target": path}
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(time.time() if at is None else at))
+        row = {"raw": raw, "run": "fixture-%s" % agent, "state": "done", "target": path, "at": stamp}
         log_file = os.path.join(self.cfg, "state", "agent-end-payloads.jsonl")
         os.makedirs(os.path.dirname(log_file), exist_ok=True)
         with open(log_file, "a", encoding="utf-8") as handle:
@@ -5002,7 +5004,7 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
             self.assert_own_left(subject)
 
     def test_a_sibling_agent_tree_locked_by_the_same_host_pid_is_kept(self):
-        # A host lock lifts only once the finish is proven (ruling of 2026-11-07 14:11 CST). This
+        # A host lock lifts only once the finish is proven (coordinator pick of 2026-11-07 14:43 CST). This
         # sibling has no subagent transcript and its payload has no background_tasks, so the finish is
         # unproven and the lock stays. The own tree is kept whatever the sibling holds.
         own, sibling = self.add("ownsib"), self.add("sibhost")
@@ -5120,19 +5122,20 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
                              "the unstaged deletion was written back into a kept tree")
 
 
-class AgentEndShellStopTests(_AgentEndFixture):
-    """A finished agent's shells and tree at a later agent end. The owner's ruling (2026-10-15 19:43
-    CDT) stops a finished agent's own shells, then removes its tree. The coordinator's pick (ruling of
-    2026-11-07 14:11 CST) says when: a tree is unlocked, its shells stopped and the tree removed only
-    when all of these hold. The agent is not listed as running in the SubagentStop payload's
-    background_tasks, and a missing or malformed field keeps. `<transcript minus .jsonl>/subagents/
-    agent-<id>.jsonl` exists and has been idle 30 min or more. The tree is clean and pushed. A pid is
-    ours only when its parent chain reaches the host pid named in the tree's lock, that pid is this
-    session's host, and every pid below the host has its cwd in the tree.
+class AgentEndFinishedTreeTests(_AgentEndFixture):
+    """A finished agent's tree at a later agent end. The finish is the coordinator's pick of 2026-11-07
+    14:43 CST: the agent's own SubagentStop row is in the payload log and is newer than its subagent
+    transcript, the agent is not listed as running in the payload's background_tasks (a missing or
+    malformed field keeps), `<transcript minus .jsonl>/subagents/agent-<id>.jsonl` has been idle 30 min
+    or more, and the tree is clean and pushed. The coordinator's pick B of 2026-11-07 15:05 CST sets
+    what follows: no process can be shown to be the agent's own, so the reaper stops nothing. A finished
+    tree with no process inside is unlocked and removed. A finished tree with any process inside keeps
+    both the tree and the process.
 
-    The red case holds every check. Each keep case changes one check, so a builder that drops that
-    check fails its case. Each keep case runs beside a clean control tree that the same run removes,
-    so a keep cannot pass on a hook that deletes nothing."""
+    The red case is a finished, host-locked tree with no process inside, which must be removed. Each keep
+    case changes one check and leaves no process in its tree, so a builder that drops that check removes
+    the tree and fails its case. Each keep case runs beside a clean control tree that the same run
+    removes, so a keep cannot pass on a hook that deletes nothing."""
 
     def finished_tree(self, name, lock=None):
         """NAME's tree: clean, pushed and idle 31 min, locked by LOCK (default: the host pid this test
@@ -5164,22 +5167,23 @@ class AgentEndShellStopTests(_AgentEndFixture):
         except subprocess.TimeoutExpired:
             return False
 
-    def keep_case(self, name, arm, background=None, minutes=31, transcript=True, dirty=False, row=True):
-        """One finished tree that must keep both its tree and its shell. BACKGROUND None gives the
-        payload only other agents' running tasks, and MISSING omits the field. MINUTES ages the subagent
-        transcript, TRANSCRIPT False writes none, and DIRTY leaves an uncommitted file in the tree. ARM
-        names the one check the case changes."""
+    def keep_case(self, name, arm, background=None, minutes=31, transcript=True, dirty=False, row=True,
+                  row_at=None):
+        """One finished tree with no process inside, which must be kept. BACKGROUND None gives the payload
+        only other agents' running tasks, and MISSING omits the field. MINUTES ages the subagent transcript,
+        TRANSCRIPT False writes none, DIRTY leaves an uncommitted file in the tree, and ROW False writes no
+        stop row. ROW_AT, a POSIX time, dates the stop row (default: now). ARM names the one check the case
+        changes."""
         ending = name + "end"
         own = self.add(ending)
         control = self.control_tree(name + "ctl")
         tree = self.finished_tree(name)
         if row:
-            self.write_stop_row(name, tree)
+            self.write_stop_row(name, tree, at=row_at)
         if transcript:
             then = self.age_subagent_transcript(name, minutes)
         if dirty:
             self.untracked(tree)
-        shell = self.sleeper(tree)
         self.age_control(control)
         with self.subTest(precondition="the case sets only the one check its arm names"):
             if transcript:
@@ -5190,20 +5194,43 @@ class AgentEndShellStopTests(_AgentEndFixture):
                                  "a subagent transcript exists")
             if dirty:
                 self.assertTrue(guard.porcelain(tree), "the tree has no uncommitted file")
-        with self.subTest(precondition="the shell is alive, inside the finished tree"):
+            if row_at is not None:
+                self.assertLess(row_at, os.path.getmtime(self.subagent_transcript(name)),
+                                "the stop row is not older than the subagent transcript")
+        with self.subTest(precondition="no process is inside the finished tree"):
             inside, _unreadable = sweep.processes_in(tree)
-            self.assertIn(shell.pid, inside or [], "the shell is not inside the finished tree")
-            self.assertIsNone(shell.poll(), "the shell exited before the hook ran")
+            self.assertEqual(inside, [], "a process is inside the finished tree")
         value = self.running_elsewhere() if background is None else background
         self.fire_under_host(ending, own, extra=self.payload_extra(value))
         with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
             self.assertRemoved(control)
         with self.subTest(arm="%s: the finished tree is kept" % arm):
             self.assertKept(tree)
-        with self.subTest(arm="%s: the shell is not stopped" % arm):
-            self.assertIsNone(shell.poll(), "the shell was stopped; %s" % self.reason_for(tree))
 
-    def test_a_finished_host_locked_tree_has_its_shell_stopped_and_is_removed(self):
+    def test_a_finished_host_locked_tree_with_no_process_inside_is_removed(self):
+        ending = "treeend"
+        own = self.add(ending)
+        control = self.control_tree("treectl")
+        lock = self.live_host_lock("treefin")
+        if lock is None:
+            self.skipTest("the live lock's start is read from /proc, which this box has")
+        tree = self.finished_tree("treefin", lock=lock)
+        self.write_stop_row("treefin", tree)
+        then = self.age_subagent_transcript("treefin", 31)
+        self.age_control(control)
+        with self.subTest(precondition="the tree is locked by the host, its transcript is 31 min idle, and it is empty"):
+            self.assertTrue(guard.worktree_locked(self.primary, tree), "the host lock did not take")
+            self.assertAlmostEqual(os.path.getmtime(self.subagent_transcript("treefin")), then, delta=2,
+                                   msg="the subagent transcript did not take its age")
+            inside, _unreadable = sweep.processes_in(tree)
+            self.assertEqual(inside, [], "a process is inside the finished tree")
+        self.fire_under_host(ending, own, extra=self.payload_extra(self.running_elsewhere()))
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
+        with self.subTest(arm="the finished host-locked tree with no process inside is removed"):
+            self.assertRemoved(tree, "; " + self.reason_for(tree))
+
+    def test_a_finished_host_locked_tree_with_a_process_inside_keeps_the_tree_and_process(self):
         ending = "shellend"
         own = self.add(ending)
         control = self.control_tree("shellctl")
@@ -5226,10 +5253,10 @@ class AgentEndShellStopTests(_AgentEndFixture):
         self.fire_under_host(ending, own, extra=self.payload_extra(self.running_elsewhere()))
         with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
             self.assertRemoved(control)
-        with self.subTest(arm="the finished tree's host-child shell is stopped"):
-            self.assertTrue(self.exited(shell), "the finished agent's shell is still running")
-        with self.subTest(arm="the finished tree is removed"):
-            self.assertRemoved(tree, "; " + self.reason_for(tree))
+        with self.subTest(arm="the finished tree with a host-child process inside is kept"):
+            self.assertKept(tree)
+        with self.subTest(arm="the host-child process inside the finished tree is still alive"):
+            self.assertIsNone(shell.poll(), "the host-child process was stopped; %s" % self.reason_for(tree))
 
     def test_a_shell_under_a_live_pid_that_is_not_the_host_keeps_the_tree_and_shell(self):
         name = "shellsp"
@@ -5250,7 +5277,7 @@ class AgentEndShellStopTests(_AgentEndFixture):
         self.addCleanup(self.stop, sponsor)
         shell_pid = int(_read_when_ready(pidfile))
         self.addCleanup(sweep.send_signal, shell_pid)
-        # The lock names a live pid that is not this session's host, so no pid under it is ours.
+        # The lock names a live pid that is not this session's host, so the tree is not host-locked.
         self.lock(tree, "claude agent agent-%s (pid %d)" % (name, sponsor.pid))
         self.write_stop_row(name, tree)
         self.age_subagent_transcript(name, 31)
@@ -5269,49 +5296,52 @@ class AgentEndShellStopTests(_AgentEndFixture):
         with self.subTest(arm="the shell under a live pid that is not the host is not stopped"):
             self.assertTrue(sweep.pid_alive(shell_pid), "the shell under the non-host pid was stopped")
 
-    def test_an_agent_listed_as_running_in_background_tasks_keeps_the_tree_and_shell(self):
-        name = "shellrun"
+    def test_an_agent_listed_as_running_in_background_tasks_keeps_the_tree(self):
+        name = "treerun"
         listed = {"id": name, "type": "subagent", "status": "running",
                   "description": "finished agent", "agent_type": "general-purpose"}
         self.keep_case(name, "the agent is listed as running in background_tasks",
                        background=[listed] + self.running_elsewhere())
 
-    def test_a_missing_background_tasks_field_keeps_the_tree_and_shell(self):
-        self.keep_case("shellmis", "background_tasks field missing", background=MISSING)
+    def test_a_missing_background_tasks_field_keeps_the_tree(self):
+        self.keep_case("treemis", "background_tasks field missing", background=MISSING)
 
-    def test_a_malformed_background_tasks_field_keeps_the_tree_and_shell(self):
-        self.keep_case("shellmal", "background_tasks is not a list", background="shellmal is running")
+    def test_a_malformed_background_tasks_field_keeps_the_tree(self):
+        self.keep_case("treemal", "background_tasks is not a list", background="treemal is running")
 
-    def test_a_transcript_idle_under_30_minutes_keeps_the_tree_and_shell(self):
-        self.keep_case("shelltr", "subagent transcript idle 29 min", minutes=29)
+    def test_a_transcript_idle_under_30_minutes_keeps_the_tree(self):
+        self.keep_case("treetr", "subagent transcript idle 29 min", minutes=29)
 
-    def test_a_missing_subagent_transcript_keeps_the_tree_and_shell(self):
-        self.keep_case("shellnot", "no subagent transcript", transcript=False)
+    def test_a_missing_subagent_transcript_keeps_the_tree(self):
+        self.keep_case("treenot", "no subagent transcript", transcript=False)
 
-    def test_a_finished_idle_tree_with_an_uncommitted_file_keeps_the_tree_and_shell(self):
-        self.keep_case("shelldirty", "uncommitted file in the tree", dirty=True)
+    def test_a_finished_idle_tree_with_an_uncommitted_file_keeps_the_tree(self):
+        self.keep_case("treedirty", "uncommitted file in the tree", dirty=True)
 
+    def test_an_agent_with_no_subagent_stop_row_keeps_the_tree(self):
+        self.keep_case("treenor", "no SubagentStop row for the agent", row=False)
 
-    def test_an_agent_with_no_subagent_stop_row_keeps_its_shells_and_tree(self):
-        self.keep_case("shellnor", "no SubagentStop row for the agent", row=False)
+    def test_a_stop_row_older_than_the_subagent_transcript_keeps_the_tree(self):
+        """The agent was resumed after its stop row, so the row is 40 min old and its transcript 31 min idle. The
+        row is older than the transcript, so the finish is unproven and the tree stays."""
+        self.keep_case("treestale", "stop row older than the subagent transcript",
+                       row_at=time.time() - 40 * 60)
 
-    def test_a_failed_lock_reread_keeps_the_tree_and_its_shell(self):
-        """A finished agent's shell is stopped only once the unlock has succeeded. The removal re-reads the
-        lock with `git worktree list` after the stop decision. Every read after the reap's first one is refused
-        here, so the removal cannot confirm the lock is gone, and the tree and its shell must stay."""
-        name = "shellrl"
+    def test_a_failed_lock_reread_keeps_the_finished_tree_locked(self):
+        """A finished tree is unlocked only once the lock re-read confirms the lock (`unlock_for_removal`).
+        Every read after the reap's first one is refused here, so the unlock cannot confirm the lock: the
+        tree must stay, and the host lock must stay on it."""
+        name = "treerl"
         ending = name + "end"
         own = self.add(ending)
         control = self.control_tree(name + "ctl")
         tree = self.finished_tree(name)
         self.write_stop_row(name, tree)
         self.age_subagent_transcript(name, 31)
-        shell = self.sleeper(tree)
         self.age_control(control)
-        with self.subTest(precondition="the shell is alive, inside the finished tree, and the host lock holds"):
+        with self.subTest(precondition="no process is inside the finished tree, and the host lock holds"):
             inside, _unreadable = sweep.processes_in(tree)
-            self.assertIn(shell.pid, inside or [], "the shell is not inside the finished tree")
-            self.assertIsNone(shell.poll(), "the shell exited before the hook ran")
+            self.assertEqual(inside, [], "a process is inside the finished tree")
             self.assertTrue(guard.worktree_locked(self.primary, tree), "the host lock did not take")
         real_list = sweep.parse_worktree_list
         reads = []
@@ -5329,20 +5359,20 @@ class AgentEndShellStopTests(_AgentEndFixture):
             self.assertGreater(len(reads), 1, "no lock re-read happened, so the refusal never landed; %s" % reason)
         with self.subTest(arm="the tree is kept when the lock re-read fails"):
             self.assertKept(tree)
-        with self.subTest(arm="no shell is stopped before the unlock"):
-            self.assertIsNone(shell.poll(), "the shell was stopped before the unlock; %s" % reason)
+        with self.subTest(arm="the host lock stays on the tree when the lock re-read fails"):
+            self.assertTrue(guard.worktree_locked(self.primary, tree), "the lock was lifted; %s" % reason)
 
     def test_an_orphan_shell_keeps_the_tree(self):
-        """A shell whose parent died is an orphan: its chain reaches init, not the host. It is not a host child,
-        so the finished agent's tree keeps it, and the tree stays."""
-        name = "shellorph"
+        """A process inside the finished tree keeps the tree, whatever its parent. An orphan's chain reaches init,
+        not the host. It keeps the tree too, and the orphan is not stopped."""
+        name = "treeorph"
         ending = name + "end"
         own = self.add(ending)
         control = self.control_tree(name + "ctl")
         tree = self.finished_tree(name)
         self.write_stop_row(name, tree)
         self.age_subagent_transcript(name, 31)
-        pidfile = os.path.join(self.root, "shellorph.pid")
+        pidfile = os.path.join(self.root, "treeorph.pid")
         orphan_code = ("import subprocess, sys\n"
                        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'],"
                        " cwd=sys.argv[2])\n"
@@ -5364,8 +5394,33 @@ class AgentEndShellStopTests(_AgentEndFixture):
             self.assertRemoved(control)
         with self.subTest(arm="the finished tree is kept for its orphan shell"):
             self.assertKept(tree)
-        with self.subTest(arm="the orphan shell is not stopped"):
-            self.assertTrue(sweep.pid_alive(orphan), "the orphan shell was stopped")
+        with self.subTest(arm="the orphan is not stopped"):
+            self.assertTrue(sweep.pid_alive(orphan), "the orphan was stopped")
+
+    def test_a_lock_whose_start_ticks_mismatch_its_pid_is_stale(self):
+        """The live lock's S is clock ticks since boot, field 22 of the holder's /proc stat. A mismatch is pid
+        reuse, so the lock may go. The ticks are read from /proc, so this runs on Linux only."""
+        ticks = self.host_start_ticks()
+        if ticks is None:
+            self.skipTest("the start ticks are read from /proc, which this box has")
+        held = "claude agent agent-ticks (pid %d start %d)" % (os.getpid(), ticks)
+        reused = "claude agent agent-ticks (pid %d start %d)" % (os.getpid(), ticks + 1)
+        with self.subTest(arm="the lock holds this process's own start ticks, so it is not stale"):
+            self.assertIs(sweep.stale_agent_lock_verdict(held), False, "the lock with the live start reads as stale")
+        with self.subTest(arm="a start tick that mismatches its pid is stale"):
+            self.assertIs(sweep.stale_agent_lock_verdict(reused), True, "the lock with a mismatched start is not stale")
+
+    def test_on_a_non_linux_platform_the_host_proof_is_none(self):
+        """Off Linux the start ticks are unmeasured, so the host is unproven: the stale and own-lock verdicts both
+        read None, and only a True verdict lets a lock go. The platform is patched, so no /proc is read."""
+        reason = "claude agent agent-ticks (pid %d start %d)" % (os.getpid(), 181)
+        with mock.patch.object(sys, "platform", "darwin"):
+            stale = sweep.stale_agent_lock_verdict(reason)
+            owner = sweep.own_agent_lock_verdict(reason)
+        with self.subTest(arm="the stale verdict is None off Linux"):
+            self.assertIsNone(stale, "the stale verdict is %r off Linux, so the lock may go" % (stale,))
+        with self.subTest(arm="the own-lock verdict is None off Linux"):
+            self.assertIsNone(owner, "the own-lock verdict is %r off Linux, so the lock may go" % (owner,))
 
 
 class AgentEndOtherWorktreeTests(_AgentEndFixture):
