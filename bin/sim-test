@@ -63,12 +63,17 @@
 # line says the fold was not checked, and the run goes on. It never uninstalls and never erases. Cost: one simctl ui read
 # per run, and one more call when it sets; a Duo run adds one hinge get, and one hinge close when the fold is not closed.
 # It adds `-collect-test-diagnostics never` unless the caller sets that flag: a failed test then starts no simctl diagnose.
+# Run limit (coordinator pick, 2026-11-07; 1800 s is unmeasured): an xcodebuild child still running after SIM_TEST_MAX_RUN
+# seconds (default 1800; text that is not whole seconds counts as the default) is stopped. The run exits 124 and cleans up as
+# a hold does: it shuts down only what it booted, gives the lease, frees the lock. A hold has its own limit, --for.
 # The exit code is otherwise xcodebuild's.
 # macOS only. It runs under /bin/bash 3.2.
 CAP=2 # guard.SIM_BOOT_CAP: bash cannot import it; hooks/test_guard.py checks the two are equal
 POLL=${SIM_TEST_POLL:-2}
 LOCK_WAIT=${SIM_TEST_LOCK_WAIT:-300}
 WINDOW=${SIM_TEST_WINDOW:-30}
+MAX_RUN=${SIM_TEST_MAX_RUN:-1800}
+case $MAX_RUN in ''|*[!0-9]*) MAX_RUN=1800 ;; esac
 CRASH_DIR=${SIM_TEST_CRASH_DIR:-$HOME/Library/Logs/DiagnosticReports}
 STATE_DIR=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state
 LOCK=$STATE_DIR/sim-test.lock
@@ -343,9 +348,16 @@ else
   child=$!
 fi
 timed_out=
+run_start=$SECONDS
 # The child ends the watch; a hold with no child ends it at its deadline.
 while [ -n "$hold$child" ]; do
   if [ -n "$child" ]; then kill -0 "$child" 2>/dev/null || break; fi
+  if [ -z "$hold" ] && [ $((SECONDS - run_start)) -ge "$MAX_RUN" ]; then
+    if [ -n "$booted_by_me" ]; then fate="shut down"; else fate="left running"; fi
+    echo "sim-test: run limit: xcodebuild still running after ${MAX_RUN}s on $udid; stopped it, $fate." >&2
+    stop_child
+    exit 124
+  fi
   if [ -n "$hold" ] && [ "$SECONDS" -ge "$hold_end" ]; then timed_out=1; break; fi
   for name in $(list_reports); do
     case $known in *"|$name|"*) continue ;; esac
