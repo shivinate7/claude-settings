@@ -377,6 +377,10 @@ class Ios(unittest.TestCase):
         body = "".join("\t%s\n" % line for line in recipe.split("\n"))
         return self.edit(self.gold(), "Makefile", "phone:\n", "ui-run:\n" + body + "\nphone:\n")
 
+    def flagged(self, definitions, recipe="xcodebuild test -scheme X $(FLAGS)"):
+        """The gold with `recipe` as the ui-run recipe, and `definitions` (Makefile lines) above the phone target."""
+        return self.edit(self.make_run(recipe), "Makefile", "phone:\n", definitions + "\nphone:\n")
+
     def diag_pass(self, repo):
         code, out = repo.run("ios")
         self.assertEqual(code, 0, out)
@@ -481,9 +485,69 @@ class Ios(unittest.TestCase):
 
     def test_a_flag_in_a_make_variable_is_no_gap(self):
         # The recipe passes the flag through `$(FLAGS)`, and the Makefile sets FLAGS to it: the run does carry the flag.
-        repo = self.edit(self.make_run("xcodebuild test -scheme X $(FLAGS)"), "Makefile", "phone:\n",
-                         "FLAGS = -collect-test-diagnostics never\n\nphone:\n")
-        self.diag_pass(repo)
+        self.diag_pass(self.flagged("FLAGS = -collect-test-diagnostics never\n"))
+
+    # Each case below reads the run's grade. The first line is the scope: with the variable unset, the run is read and
+    # carries no flag, so the grade is gap. Without it, a run that is not read would grade pass and the case would pass for nothing.
+    def test_a_later_equals_replaces_the_make_variable(self):
+        first = "FLAGS = -collect-test-diagnostics never\n"
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged(first), "test diagnostics"), "pass", "control: the first value holds the flag")
+        self.assertEqual(self.grade(self.flagged(first + "FLAGS = -quiet\n"), "test diagnostics"), "gap",
+                         "a later = replaces the value, so the run gets -quiet and no diagnostics flag")
+
+    def test_a_question_equals_applies_only_when_the_variable_is_unset(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS ?= -collect-test-diagnostics never\n"), "test diagnostics"), "pass",
+                         "control: FLAGS is unset, so ?= sets it")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -quiet\nFLAGS ?= -collect-test-diagnostics never\n"), "test diagnostics"),
+                         "gap", "?= does nothing once FLAGS is set to -quiet")
+
+    def test_a_plus_equals_appends_to_the_make_variable(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -quiet\nFLAGS += -collect-test-diagnostics never\n"), "test diagnostics"),
+                         "pass", "+= appends the flag after -quiet")
+
+    def test_a_backslash_continued_make_value_is_read_whole(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -quiet \\\n\t-collect-test-diagnostics never\n"), "test diagnostics"),
+                         "pass", "the continuation line is part of FLAGS, so the run carries the flag")
+
+    def test_a_three_level_make_chain_resolves(self):
+        recipe = "xcodebuild test -scheme X $(DIAG_A)"
+        self.assertEqual(self.grade(self.flagged("", recipe), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("DIAG_A = -collect-test-diagnostics never\n", recipe), "test diagnostics"),
+                         "pass", "control: one level")
+        self.assertEqual(self.grade(self.flagged("DIAG_A = $(DIAG_B)\nDIAG_B = $(DIAG_C)\nDIAG_C = -collect-test-diagnostics never\n",
+                                                 recipe), "test diagnostics"), "pass",
+                         "A = $(B), B = $(C), C = the flag: the run carries the flag through three levels")
+
+    def test_an_export_make_assignment_is_read(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("export FLAGS = -collect-test-diagnostics never\n"), "test diagnostics"), "pass",
+                         "export FLAGS = is an assignment, so the run carries the flag")
+
+    def test_an_override_make_assignment_is_read(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("override FLAGS = -collect-test-diagnostics never\n"), "test diagnostics"), "pass",
+                         "override FLAGS = is an assignment, so the run carries the flag")
+
+    def test_a_double_colon_make_assignment_is_read(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS ::= -collect-test-diagnostics never\n"), "test diagnostics"), "pass",
+                         "FLAGS ::= is an assignment, so the run carries the flag")
+
+    def test_a_lone_quote_in_a_make_comment_is_no_gap(self):
+        # The apostrophe is text in a comment: it opens no string, so the flag before the comment still counts.
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -collect-test-diagnostics never # the team's flag\n"), "test diagnostics"),
+                         "pass", "the flag before a comment that holds a lone quote still counts")
+
+    def test_a_quoted_hash_in_a_recipe_beside_a_make_variable_is_no_gap(self):
+        recipe = 'xcodebuild test -scheme "a #b" $(FLAGS)'
+        self.assertEqual(self.grade(self.flagged("", recipe), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -collect-test-diagnostics never\n", recipe), "test diagnostics"), "pass",
+                         "a # inside quotes in the recipe is text, so the variable's flag still counts")
 
     def test_a_quoted_never_is_no_gap(self):
         # The shell reads `"never"` and `'never'` as `never`, so the run does carry the flag.
