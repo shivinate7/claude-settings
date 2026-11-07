@@ -879,6 +879,7 @@ class NotRunLines(Job):
 OVERLAP_STEP = r'''"""Fixture lint step for LintParallel. usage: overlap.py ME WAIT OUTCOME [--best]
 
 Writes started-ME, waits for the file WAIT (`-` for none), prints OUTCOME's output, and writes done-ME on every exit.
+OUTCOME is clean, fail, skip, or missing; missing exits 127, the code ci-job reads as a missing tool.
 The wait polls every 50 ms, at most 200 times (10 s), or 100 times with --best. That bound only stops a hang: no assert
 reads it. Without --best a missed wait fails the step; with --best the wait only asks for overlap.
 """
@@ -908,7 +909,6 @@ try:
     elif outcome == "skip":
         print("Ran 1 test in 0.000s\n\nOK (skipped=1)")
     elif outcome == "missing":
-        print("tool missing: no-such-tool-c69")
         sys.exit(127)
     else:
         print("clean")
@@ -949,8 +949,10 @@ class LintParallel(Job):
         rc, lines, out = self.run_job(step("Slow first", "python3 lint/overlap.py first done-second clean"),
                                       step("Quick second", "python3 lint/overlap.py second - clean"),
                                       args=("--lint",))
-        self.assertEqual((rc, list(by_step(lines).items())), (0, [("Slow first", "PASS"), ("Quick second", "PASS")]),
+        self.assertEqual((rc, by_step(lines)), (0, {"Slow first": "PASS", "Quick second": "PASS"}),
                          "no two CI steps ran at once: the slow first step never saw the later one finish\n" + out)
+        self.assertEqual(list(by_step(lines)), ["Slow first", "Quick second"],
+                         "lines print in completion order, not workflow order\n" + out)
 
     def test_fail_marker_stays_in_its_step(self):
         rc, lines, out = self.run_job(step("Fail marker", "python3 lint/overlap.py fail started-clean fail --best"),
