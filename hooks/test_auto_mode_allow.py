@@ -26,6 +26,10 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
 - One "Relayed Grant:" entry quotes page_grant.py's COMMAND and COUNTED_LINE, read from the
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
   relayed-grant-read-from-page).
+- One "Relayed Merge Yes:" entry quotes the merge command derived from merge/cloud_allow.json's
+  one `--confirm` merge rule. Its Covers text names a session tagged cs-build:coordinator and the
+  pull request it names. Its Never covers names each act in RELAYED_MERGE_REFUSED (owner ruling,
+  2026-11-07).
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
@@ -48,6 +52,8 @@ LISTS = ("environment", "allow", "soft_deny", "hard_deny")
 ARCHIVE = "Archived Branch Delete:"
 OWNER_PR = "Owner PR Housekeeping:"
 RELAYED = "Relayed Grant:"
+RELAYED_MERGE = "Relayed Merge Yes:"
+MERGE_CLOUD_ALLOW = os.path.join(REPO_ROOT, "merge", "cloud_allow.json")
 OWNER_MESSAGE = "Owner Session Message:"
 PR_CLOSE = "gh api -X PATCH repos/shivinate7/joyous/pulls/54 -f state=closed"
 SEND_MESSAGE = "mcp__claude-code-remote__send_message"
@@ -83,6 +89,13 @@ RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page 
                    ("closed item", "a closed item"), ("arbiter overturn only", r"except an arbiter overturn"),
                    ("permissions", "permissions"), ("settings", "settings"), ("overrides", "overrides"),
                    ("no counted line", "no `counted` line in this session"))
+# Each act the Relayed Merge Yes entry's "Never covers" sentence must name (owner ruling, 2026-11-07).
+RELAYED_MERGE_REFUSED = (("another pull request", "another pull request"),
+                         ("not tagged cs-build:coordinator", "not tagged `cs-build:coordinator`"),
+                         ("failing", "failing"), ("running", "running"), ("approval", "approv"),
+                         ("review", "review"), ("admin", "admin"), ("force push", "force[- ]push"),
+                         ("permissions", "permission"), ("settings", "setting"),
+                         ("overrides", "override"), ("any other act", "any other act"))
 MERGE_GO_REFUSED = (("any other session", "any other session"),
                     ("not a coordinator", "not a coordinator"))
 # The Covers text names the session that started this one, and the no-act report it lets through.
@@ -106,6 +119,22 @@ def auto_mode():
 def remedy_commands():
     """Every backticked span of the remedy: the archive push, the delete, the fallback name."""
     return re.findall(r"`([^`]+)`", guard_branch_worktree.BRANCH_DELETE_DENY_REASON)
+
+
+def merge_rules():
+    """The --confirm merge rules in merge/cloud_allow.json, as written there."""
+    with open(MERGE_CLOUD_ALLOW, encoding="utf-8") as handle:
+        allow = json.load(handle).get("permissions", {}).get("allow", [])
+    return [rule for rule in allow
+            if rule.startswith("Bash(~/.claude/bin/merge ") and rule.endswith(" --confirm)")]
+
+
+def merge_command():
+    """The one merge rule's command with its `*` read as <pr>, or None when there is not exactly one rule."""
+    rules = merge_rules()
+    if len(rules) != 1:
+        return None
+    return rules[0][len("Bash("):-1].replace("*", "<pr>")
 
 
 def allow_entry(prefix):
@@ -177,6 +206,49 @@ class RelayedGrantIsAllowed(unittest.TestCase):
         clause = never_covers(allow_entry(RELAYED))
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Grant entry")
         missing = unnamed_terms(clause, RELAYED_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+
+class RelayedMergeYesIsAllowed(unittest.TestCase):
+    def relayed_merge_entry(self):
+        """The one Relayed Merge Yes entry, asserting first that there is exactly one."""
+        entry = allow_entry(RELAYED_MERGE)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % RELAYED_MERGE)
+        return entry
+
+    def test_one_entry_names_the_relayed_merge_yes(self):
+        self.assertIn("$defaults", auto_mode().get("allow", []), "autoMode.allow lost $defaults")
+        self.relayed_merge_entry()
+
+    def test_merge_rule_is_one_in_the_constant(self):
+        rules = merge_rules()
+        self.assertEqual(len(rules), 1,
+                         "merge/cloud_allow.json must hold exactly one --confirm merge rule: %r" % rules)
+        command = merge_command()
+        self.assertIn("<pr>", command, "derived merge command has no <pr> for the pull request number")
+        self.assertNotIn("*", command, "derived merge command still has a wildcard")
+
+    def test_entry_quotes_the_merge_command(self):
+        entry = self.relayed_merge_entry()
+        command = merge_command()
+        self.assertIsNotNone(command, "merge/cloud_allow.json must hold exactly one --confirm merge rule")
+        self.assertIn("`%s`" % command, bounds_text(entry),
+                      "Covers text must quote the merge command in backticks")
+
+    def test_covers_names_the_coordinator_tag(self):
+        entry = self.relayed_merge_entry()
+        self.assertIn("cs-build:coordinator", bounds_text(entry),
+                      "Covers text must require a session tagged cs-build:coordinator")
+
+    def test_covers_names_the_pull_request(self):
+        entry = self.relayed_merge_entry()
+        self.assertRegex(bounds_text(entry), r"(?i)\b(named|names)\b",
+                         "Covers text must say the relay names the pull request")
+
+    def test_never_covers_names_each_refused_act(self):
+        clause = never_covers(self.relayed_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Merge Yes entry")
+        missing = unnamed_terms(clause, RELAYED_MERGE_REFUSED)
         self.assertFalse(missing, "Never covers does not name %r" % missing)
 
 
