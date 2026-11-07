@@ -49,7 +49,7 @@ Cost, every git read of a run with no file argument, per notes file path (the la
   - unseen_notes (janitor/sweep.py --expire-notes only): one `git blame --line-porcelain` per notes file, one
     rev-parse when a boundary line shows, and one ls-tree of HEAD when blame fails (a file HEAD does not hold);
   - --next-debt: one show-toplevel and one listing of the debt folder; --debt-flow: one show-toplevel, one rev-parse
-    of START's parent (a hash-object when START has none) and one diff.
+    that START is a commit, one rev-parse of its parent (a hash-object when START has none) and one diff.
 No file is written, no process is left running, no timer. commit_fixes (read by lint/report_guard.py) is one git show
 of one commit, one process.
 
@@ -586,14 +586,16 @@ def next_debt(root):
 def debt_flow(root, start, end):
     """(opened slugs, closed slugs): the debt files added and deleted from the parent of `start` (the empty tree when
     `start` has no parent) to `end`, so `start` itself counts. The count is net: a debt that `start` adds and a later
-    commit deletes is in neither list. One git diff with renames off, plus one rev-parse for the parent, and a
-    hash-object only when there is none. The folder's README and notes file are no debts. Raises Unknown when git
-    cannot say."""
-    parent = _nowindow.run(["git", "rev-parse", "--verify", "--quiet", start + "^"], cwd=root, capture_output=True,
-                           encoding="utf-8", errors="replace")
+    commit deletes is in neither list. One git diff with renames off, one rev-parse that START is a commit, one for its
+    parent, and a hash-object only when it has none. The folder's README and notes file are no debts. Raises Unknown
+    when git cannot say, and when `start` names no commit (never read as a root commit)."""
+    def run(*args, **kw):
+        return _nowindow.run(["git", *args], cwd=root, capture_output=True, encoding="utf-8", errors="replace", **kw)
+    if run("rev-parse", "--verify", "--quiet", start + "^{commit}").returncode:
+        raise Unknown("%s names no commit" % start)
+    parent = run("rev-parse", "--verify", "--quiet", start + "^")
     if parent.returncode:
-        parent = _nowindow.run(["git", "hash-object", "-t", "tree", "--stdin"], cwd=root, capture_output=True,
-                               encoding="utf-8", errors="replace", input="")
+        parent = run("hash-object", "-t", "tree", "--stdin", input="")
         if parent.returncode:
             raise Unknown("git hash-object failed: %s" % parent.stderr.strip())
     added_files, moved = changes(root, parent.stdout.strip(), end, renames=False, direct=True)
