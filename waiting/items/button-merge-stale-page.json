@@ -4,7 +4,6 @@
   "home": "lane notes-keep-reverify",
   "id": "button-merge-stale-page",
   "kind": "decision",
-  "lane": "notes-keep-reverify",
   "lastAnswer": {
     "at": "2026-11-07T20:41:09.600Z",
     "choice": "none",
@@ -35,7 +34,7 @@
   "pick": "a",
   "rank": 2,
   "ref": "decision no-merge-during-batch-ci",
-  "reply": "14:41 CST: asked lane notes-keep-reverify to weigh b (a bot rebuilds the page on main after any merge) against a, with what each costs. Its answer comes back here.",
+  "reply": "Lane notes-keep-reverify, 14:48 CST, on \"is B the best option?\": b covers the most, since it also covers your own button presses, but it costs the most. A bot commits straight to main, against PR-only main, so it needs your exception and a branch-protection bypass, plus one extra commit and CI run per merge, and a race when two merges land close together. A safer b: the bot opens a rebuild PR, which the batch runner merges. a is one small guard rule that stops Claude causing the gap, but not your own presses. How often a button merge happens is unmeasured. The lane recommends a, unless you press the button yourself often; then the PR form of b. Pick a, b or c.",
   "short": "Button merge: refuse auto-merge, bot rebuild, or waive the check",
   "status": "open",
   "title": "How should a merge by GitHub's button stop leaving the records page stale?",

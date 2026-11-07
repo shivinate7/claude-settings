@@ -1,10 +1,9 @@
 {
   "added": "2026-11-07T20:00:00Z",
-  "context": "Goal: q_max's Neon project holds no leftover worktree branches.\nBased on (measured): q_max docs/commands.md line 131 counts 611 `wt-` branches.\nRecovery: none needed. These are throwaway worktree branches.\nSteps: open the Neon console, go to project q_max, then Branches. Filter by \"wt-\" and delete the matches. Then press Done here.",
+  "context": "Goal: q_max's Neon project holds no leftover worktree branches.\nProblem (cannot undo): a Neon branch delete cannot be undone, and no session holds a Neon key now.\nBased on (ruling): item 332 b (owner, 12:31 CST Nov 7): sessions never touch Neon. Asked again because at 14:41 CST you wrote \"I'm pretty sure you can do this\" on this task.\nBased on (measured): q_max docs/commands.md line 131 counts 611 `wt-` branches.\nDeparts from: ruling 332 b, where no session touches Neon. Option a allows this one delete.",
   "home": "q_max debt filed by lane qmax-browser-main-red",
   "id": "qmax-neon-wt-branches",
-  "kind": "task",
-  "lane": "coordinator",
+  "kind": "decision",
   "lastAnswer": {
     "at": "2026-11-07T20:41:09.600Z",
     "note": "I'm pretty sure you can do this"
@@ -16,12 +15,27 @@
     }
   ],
   "n": 361,
+  "options": [
+    {
+      "gain": "You do not click through 611 deletes.",
+      "key": "a",
+      "label": "Yes: you add a Neon API key to the q_max cloud env; a q_max session deletes only the 611 `wt-` branches, reports the count, and you remove the key",
+      "lose": "One exception to 332 b, and a key in the env for a while. The delete cannot be undone."
+    },
+    {
+      "gain": "Ruling 332 b holds, and no key is needed.",
+      "key": "b",
+      "label": "No: you delete them in the Neon console; the task stays yours (recommended)",
+      "lose": "You do the delete by hand."
+    }
+  ],
   "owner": "coordinator",
+  "pick": "b",
   "rank": 2,
   "ref": "item 332; step qmax-browser-main-red",
-  "reply": "14:41 CST: you handed this back. Read as your yes to the exact act: delete q_max's 611 `wt-` Neon branches, and only those. Sent to the coordinator for a q_max session with the Neon key. This closes when that session reports the count deleted.",
-  "short": "Delete 611 leftover wt- Neon branches",
+  "reply": "14:48 CST: your 14:41 CST note \"I'm pretty sure you can do this\" was not read as a yes, because ruling 332 b says sessions never touch Neon, and no session holds a Neon key. Pick a or b above.",
+  "short": "Neon wt- branches: a session deletes, or you do",
   "status": "open",
-  "title": "Delete q_max's leftover `wt-` Neon branches",
+  "title": "Should a session delete q_max's 611 `wt-` Neon branches, against your no-Neon ruling?",
   "why": "Your ruling on item 332 (b) bars every session from Neon, and the sweep that used to remove these branches is gone. So only you can delete them."
 }

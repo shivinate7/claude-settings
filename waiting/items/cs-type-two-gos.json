@@ -19,8 +19,9 @@
   "owner": "coordinator",
   "rank": 1,
   "ref": "item 352; item 350; items 257 and 278; steps lease-push-c-and-d and auto-mode-middle-ground",
-  "short": "Lease go withdrawn? Confirm in lease-push-c-and-d",
-  "status": "open",
+  "reply": "Closed 14:48 CST: both gos are typed in lane lease-push-c-and-d. The 13:28 CST lease go stands, and runner 8 merges #1429. The 14:45 CST go for the own CI cancel and own check-in delete entries is recorded at 6212a5ed5. #1316 merges after #1429.",
+  "short": "Type 1 go in lease-push-c-and-d",
+  "status": "closed",
   "title": "Type one go line in lane lease-push-c-and-d's chat",
-  "why": "Not granted. At 14:43 CST you typed \"disregard that command - accident\" in lane lease-push-c-and-d. The lane reads that as withdrawing your 13:28 CST go for the lease push entry. So nothing here counts as granted until you confirm in that lane's chat. Runner 8 holds PR #1429 (the lease push entry) and PR #1316 stays held. Two things are open in that chat: (1) confirm or withdraw the 13:28 CST lease go; (2) the line below, which you have not typed yet. A settings.json change needs words you type in the acting session's own chat, so pressing Done here cannot grant it."
+  "why": "Done. Your 14:43 CST \"disregard\" was about a different message, so your 13:28 CST lease go stands (lane lease-push-c-and-d, 14:45 CST). You typed #1316's go at 14:45 CST in that lane, recorded at 6212a5ed5."
 }
