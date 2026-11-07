@@ -270,14 +270,14 @@ class StaleCase(unittest.TestCase):
         self.assertIn("stale-cites: PASS", out)
         self.assertEqual(parse(out), [], out)
 
-    def run_tree(self, rng, rev=None, extra_env=None):
-        """`--tree [rev]` in the repo: (exit code, output). EXCLUDE from the caller's environment is dropped, so
-        only a case that sets EXCLUDE sees one."""
+    def run_tree(self, rng, rev=None, extra_env=None, args=()):
+        """`--tree [rev]` in the repo, with the option strings `args` after it: (exit code, output). EXCLUDE from the
+        caller's environment is dropped, so only a case that sets EXCLUDE sees one."""
         env = dict(os.environ, TMPDIR=rng.case)
         env.pop("EXCLUDE", None)
         env.update(extra_env or {})
-        args = [sys.executable, MODULE, "--tree"] + ([rev] if rev else [])
-        done = subprocess.run(args, cwd=rng.repo, env=env, capture_output=True, text=True,
+        argv = [sys.executable, MODULE, "--tree"] + ([rev] if rev else []) + list(args)
+        done = subprocess.run(argv, cwd=rng.repo, env=env, capture_output=True, text=True,
                               encoding="utf-8", errors="replace")
         return done.returncode, done.stdout + done.stderr
 
@@ -285,19 +285,19 @@ class StaleCase(unittest.TestCase):
         """A repo whose HEAD holds `notes` as the NOTES page, the CODE files and `extra`. Nothing is removed."""
         return self.make_range(base_files(notes, extra=extra), lambda repo: None)
 
-    def assert_tree_flags(self, rng, expected, rev=None, extra_env=None):
+    def assert_tree_flags(self, rng, expected, rev=None, extra_env=None, args=()):
         """The findings are exactly `expected`, as (path, line, code), the verdict is FAIL and the exit is 1.
         Returns the findings."""
-        rc, out = self.run_tree(rng, rev, extra_env)
+        rc, out = self.run_tree(rng, rev, extra_env, args)
         found = parse(out)
         self.assertEqual(sorted((p, n, c) for p, n, c, _ in found), sorted(expected), out)
         self.assertIn("stale-cites: FAIL, %d finding(s)" % len(expected), out)
         self.assertEqual(rc, 1, out)
         return found
 
-    def assert_tree_passes(self, rng, rev=None, extra_env=None):
+    def assert_tree_passes(self, rng, rev=None, extra_env=None, args=()):
         """The verdict is PASS, the exit is 0 and no finding prints."""
-        rc, out = self.run_tree(rng, rev, extra_env)
+        rc, out = self.run_tree(rng, rev, extra_env, args)
         self.assertIn("stale-cites: PASS", out)
         self.assertEqual(rc, 0, out)
         self.assertEqual(parse(out), [], out)
@@ -1601,6 +1601,136 @@ class TreeTests(StaleCase):
         rng = self.make_range(base_files("# Notes\n\n- see `hooks/tool.py`\n"), change)
         self.assert_tree_flags(rng, [(NOTES, 3, "STALE003")])  # HEAD: the file is gone
         self.assert_tree_passes(rng, rev="HEAD~1")  # HEAD~1: the file is tracked
+
+    def test_a_sibling_cite_is_never_read_as_a_path(self):
+        # `name:path` names another checkout's file, so only the bare cite and the spaced `Note:` line fire.
+        rows = [
+            ("- see `banchi:hooks/nope.py`", False),
+            ("- see `q_max:hooks/nope.py`", False),
+            ("- see `repo-2:hooks/nope.py`", False),
+            ("- see `hooks/nope.py`", True),
+            ("- Note: hooks/nope.py", True),
+        ]
+        text, lines = rows_text(rows)
+        self.assert_tree_flags(self.tree(text), [(NOTES, n, "STALE003") for n in lines])
+
+    def test_any_top_flags_a_cite_under_no_tracked_top_folder(self):
+        rng = self.tree("# Notes\n\n- see `harness/tests-for.mjs`\n")
+        self.assert_tree_passes(rng)  # without the flag, a folder that is no tracked top is skipped
+        self.assert_tree_flags(rng, [(NOTES, 3, "STALE003")], args=["--any-top"])
+
+    def test_any_top_flags_a_bare_cite_but_never_a_sibling_form(self):
+        rows = [
+            ("- see `banchi:hooks/nope.py`", False),
+            ("- see `q_max:harness/tests-for.mjs`", False),
+            ("- see `repo-2:harness/tests-for.mjs`", False),
+            ("- see `harness/tests-for.mjs`", True),  # the flag took effect: a bare non-top cite fires
+            ("- Note: harness/tests-for.mjs", True),
+        ]
+        text, lines = rows_text(rows)
+        self.assert_tree_flags(self.tree(text), [(NOTES, n, "STALE003") for n in lines], args=["--any-top"])
+
+    def test_any_top_leaves_placeholder_url_and_absolute_cites_silent(self):
+        rows = [
+            ("- see `harness/tests-for.mjs`", True),  # the flag took effect
+            ("- see `skills/<x>/y.md`", False),
+            ("- see `harness/<name>.py`", False),
+            ("- see `harness/*.py`", False),
+            ("- see `${HOME}/x/y.py`", False),
+            ("- see `/abs/x/y.py`", False),
+            ("- see `https://host/a/b.md`", False),
+        ]
+        text, lines = rows_text(rows)
+        self.assert_tree_flags(self.tree(text), [(NOTES, n, "STALE003") for n in lines], args=["--any-top"])
+
+    def test_any_top_leaves_a_home_relative_cite_silent(self):
+        rows = [
+            ("- see `harness/tests-for.mjs`", True),  # the flag took effect
+            ("- see `~/.claude/lint/x.py`", False),
+        ]
+        text, lines = rows_text(rows)
+        self.assert_tree_flags(self.tree(text), [(NOTES, n, "STALE003") for n in lines], args=["--any-top"])
+
+    def test_any_top_honours_the_disable_line_mark_for_its_own_code(self):
+        rows = [
+            ("- see `harness/tests-for.mjs`", True),
+            ("- see `harness/tests-for.mjs` <!-- ste-disable-line STALE003 -->", False),
+            ("- see `harness/tests-for.mjs` <!-- ste-disable-line STALE004 -->", True),
+        ]
+        text, lines = rows_text(rows)
+        self.assert_tree_flags(self.tree(text), [(NOTES, n, "STALE003") for n in lines], args=["--any-top"])
+
+    def test_any_top_reads_past_comment_openers_quotes_and_templates(self):
+        rows = [
+            ("# Dead `harness/x.mjs`", True),  # a heading opens with `#`
+            ("Open a comment with `<!--`. See `harness/x.mjs`.", True),
+            ("Don't read `harness/x.mjs` for the list.", True),  # a lone quote in text
+            ("```js", False),
+            ('x = "a // b"  # see harness/x.mjs', True),
+            ("const t = `", False),  # a multi-line template literal opens
+            ("  see harness/x.mjs", True),
+            ("`;", False),
+            ('  s = "cfg:harness/x.mjs"', False),  # the sibling form inside a string is no path
+            ("```", False),
+            ('Quote `"/*"` in a string. See `harness/x.mjs`.', True),
+        ]
+        text, lines = rows_text(rows)
+        self.assert_tree_flags(self.tree(text), [(NOTES, n, "STALE003") for n in lines], args=["--any-top"])
+
+    def test_any_top_resolves_a_cite_from_the_md_folder_as_the_bare_form_does(self):
+        extra = {"mods/session-board/notes.md": "- see `local/tool.py`\n- see `local/gone.py`\n",
+                 "mods/session-board/local/tool.py": "def tool():\n    return 1\n"}
+        rng = self.tree("# Notes\n", extra=extra)
+        self.assert_tree_passes(rng)  # without the flag, `local` is no tracked top, so both lines are skipped
+        self.assert_tree_flags(rng, [("mods/session-board/notes.md", 2, "STALE003")], args=["--any-top"])
+
+    def test_only_reads_just_the_named_markdown_file(self):
+        extra = {"docs/plan.md": "# Plan\n\n- see `hooks/gone.py`\n",
+                 "docs/skip.md": "- see `hooks/skip-gone.py`\n"}
+        rng = self.tree("# Notes\n", extra=extra)
+        # Without --only both files are read. With it, only the named one is, and `hooks` is still a top
+        # because the top folders come from the whole tree.
+        self.assert_tree_flags(rng, [("docs/plan.md", 3, "STALE003"), ("docs/skip.md", 1, "STALE003")])
+        self.assert_tree_flags(rng, [("docs/plan.md", 3, "STALE003")], args=["--only", "docs/plan.md"])
+
+    def test_only_is_repeatable_and_leaves_an_unnamed_file_silent(self):
+        extra = {"docs/plan.md": "- see `hooks/gone.py`\n",
+                 "docs/other.md": "- see `hooks/other-gone.py`\n",
+                 "docs/skip.md": "- see `hooks/skip-gone.py`\n"}
+        rng = self.tree("# Notes\n", extra=extra)
+        self.assert_tree_flags(rng, [("docs/plan.md", 1, "STALE003"), ("docs/other.md", 1, "STALE003"),
+                                     ("docs/skip.md", 1, "STALE003")])
+        self.assert_tree_flags(rng, [("docs/plan.md", 1, "STALE003"), ("docs/other.md", 1, "STALE003")],
+                               args=["--only", "docs/plan.md", "--only", "docs/other.md"])
+
+    def test_only_keeps_the_did_you_mean_hint_from_the_whole_tree(self):
+        rng = self.tree("# Notes\n", extra={"docs/plan.md": "- see `lint/guard.py`\n"})
+        found = self.assert_tree_flags(rng, [("docs/plan.md", 1, "STALE003")], args=["--only", "docs/plan.md"])
+        self.assertIn("did you mean hooks/guard.py", found[0][3])
+
+    def test_only_naming_an_empty_markdown_file_passes(self):
+        rng = self.tree("# Notes\n", extra={"docs/empty.md": "", "docs/skip.md": "- see `hooks/gone.py`\n"})
+        self.assert_tree_passes(rng, args=["--only", "docs/empty.md"])
+
+    def test_only_naming_a_path_that_is_not_tracked_markdown_at_rev_is_unknown(self):
+        rng = self.tree("# Notes\n")
+        write(rng.repo, "docs/wip.md", "- see `hooks/gone.py`\n")  # in the working tree only, so not tracked at HEAD
+        for path in ("docs/missing.md", "hooks/guard.py", "docs/wip.md"):
+            with self.subTest(path=path):
+                rc, out = self.run_tree(rng, args=["--only", path])
+                unknown = [line for line in out.splitlines() if line.startswith("stale-cites: UNKNOWN, ")]
+                self.assertEqual(rc, 2, out)
+                self.assertTrue(any(path in line for line in unknown), out)
+
+    def test_only_without_tree_is_a_usage_error(self):
+        rng = self.tree("# Notes\n")
+        done = subprocess.run([sys.executable, MODULE, "--range", "%s...%s" % (rng.base, rng.head), "--only", NOTES],
+                              cwd=rng.repo, env=dict(os.environ, TMPDIR=rng.case), capture_output=True, text=True,
+                              encoding="utf-8", errors="replace")
+        out = done.stdout + done.stderr
+        self.assertEqual(done.returncode, 2, out)
+        self.assertIn("--only", out)
+        self.assertNotIn("unrecognized arguments", out)
 
 
 ROUTE_ROWS = "hooks/route_rows.json"  # a route id is a row of this file at head
