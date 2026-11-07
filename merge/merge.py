@@ -1010,10 +1010,12 @@ class Host:
         return got
 
     def wait_checks(self, n, sha, deadline_minutes, prior=None):
-        """Wait until every check on `sha` has finished and none failed. -> (ok, why). `prior` is the head before this run's push.
+        """Wait until every required check on `sha` has finished and none failed. -> (ok, why). `prior` is the head before this run's push.
         Each pass reads the pull request first: a third head, DIRTY or CONFLICTING ends the wait. A head
-        that still reads as `prior` is GitHub lagging the push: keep waiting. Any red check, required or
-        not, ends the wait, and any pending check, required or not, is waited on. A pending check pauses with no gh call (30 s with an Actions run link, else a minute), then the loop reads again."""
+        that still reads as `prior` is GitHub lagging the push: keep waiting. Any red check or run, required or not,
+        ends the wait. Only a pending check named in the required list holds the wait, or a pending workflow run that
+        `required_only` cannot show to belong to a workflow without a required job; any other pending check or run is dropped from the wait,
+        and the success line names it. A pending check pauses with no gh call (30 s with an Actions run link, else a minute), then the loop reads again."""
         listed = self.required if isinstance(self.required, list) else None  # protection mode needs a gh read to know the names
         say("merge: checking " + (", ".join(listed) if listed else "the required checks") + " ...")  # before the first gh read, which can block
         names = self.required_names()
@@ -1046,7 +1048,9 @@ class Host:
                 return False, f"the pull request went DIRTY during the wait {BASE_CITE}. Merge the base into the branch and run again."
             got = self.checks(n, sha=info["head"])
             red, pending, ignored = self.classify(got, names, self.ignore, info["branch"])
-            red, pending = self.settle(red, pending, *self.run_state(sha))
+            r_red, r_pending = self.run_state(sha)
+            pending, held, unwaited = pending + r_pending, *self.required_only(pending + r_pending, names)  # only what the wait waits on may clear a "no check ran" red
+            red = self.settle(red, held, r_red, [])[0]
             if red:
                 return False, "a check is red: " + "; ".join(red) + " " + GREEN_CITE
             absent = sorted(k for k in names if not got.get(k))
@@ -1058,6 +1062,7 @@ class Host:
                 return False, ("no run reports the required check " + ", ".join(absent) + f" on this head, and every check that did report has ended. "
                                f"Waiting would end at the deadline of {deadline_minutes} minutes. Compare merge.requiredChecks and the branch protection of {base} with the workflow job names. {GREEN_CITE}")
             absent_seen = None
+            pending = held  # after the absent block, which compares the full list; before the settle pass, so its re-read still runs
             if not pending and not settled:
                 # ponytail: a workflow GitHub has not created yet still reads as green. The runs read and this settle read close most of the window. Ceiling: a workflow that appears after SETTLE_SECONDS.
                 if self.now() - said_at + SETTLE_SECONDS > 120:  # the settle pause would break the 120 s rhythm
@@ -1069,12 +1074,34 @@ class Host:
             if not pending:
                 if ignored:
                     say("merge: ignored by merge.ignoreChecks: " + "; ".join(ignored))
+                if unwaited:
+                    say("merge: not waited for (not required): " + "; ".join(unwaited))
                 return True, ""
             if self.now() >= end:
                 return False, f"the deadline of {deadline_minutes} minutes passed. Still pending: " + ", ".join(pending) + " " + GREEN_CITE
             settled = False
             progress(", ".join(pending))
             self.block(pending, got)
+
+    def required_only(self, pending, names):
+        """-> (held, dropped) from the pending list of `wait_checks`. Held: a pending check named in `names`, and every `workflow <name>` run
+        not shown to be a workflow without a required job. A run is dropped only when its name is the top-level `name:` of a local workflow
+        file that was read, whose line scan found jobs, and that defines none of `names`. An unknown run name, an empty or unreadable folder
+        and a file whose scan finds no job all hold: a failed read never loosens the wait. Dropped: every other pending check or run."""
+        runs = [x for x in pending if x.startswith("workflow ") and x not in names]
+        by_name = {}
+        if runs:
+            try:
+                flow = workflow_dir(self.cwd)
+                for p in sorted(flow.glob("*.y*ml")) if flow else ():
+                    run_name, jobs = workflow_name(p.name, p.read_text(encoding="utf-8"))
+                    by_name.setdefault(run_name, []).append(jobs)
+            except (OSError, ValueError):
+                by_name = {}
+        wanted = set(names)
+        dropped = {x for x in runs if (found := by_name.get(x[len("workflow "):])) and all(jobs and not jobs & wanted for jobs in found)}
+        held = [x for x in pending if x in names or (x in runs and x not in dropped)]
+        return held, [x for x in pending if x not in held]
 
     def runs(self, sha):
         """The workflow runs of `sha`, less the ignored ones."""
@@ -2204,6 +2231,21 @@ def workflow_dir(start):
             return None
     return None
 
+def workflow_name(filename, text):
+    """-> (run name, jobs) of a workflow file: its top-level `name:` (else its path), and the set of its job ids and job names. A line scan like job_caps:
+    a job is a two-space key under `jobs:`, its name a four-space `name:`. A scan that finds no job (a 4-space indent, a flow-style `jobs:`) gives an empty set."""
+    name, in_jobs, jobs = None, False, set()
+    for line in text.splitlines():
+        if re.match(r"[^\s#]", line):
+            in_jobs = line.startswith("jobs:")
+            if m := re.match(r"name:\s*(.+?)\s*(?:#.*)?$", line):
+                name = m.group(1).strip("'\"")
+        elif in_jobs and (m := re.match(r"^ {2}([\w-]+):\s*(?:#.*)?$", line)):
+            jobs.add(m.group(1))
+        elif in_jobs and (m := re.match(r"^ {4}name:\s*(.+?)\s*(?:#.*)?$", line)):
+            jobs.add(m.group(1).strip("'\""))
+    return name or f".github/workflows/{filename}", jobs
+
 def job_caps(texts):
     """-> {job id or job name: timeout-minutes} from workflow file texts. A line scan, since the repo has no YAML reader:
     only a job's own keys count, at four spaces under a two-space job id under `jobs:`. A step's cap, a comment, a block scalar
@@ -2410,7 +2452,9 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     raise Stop(f"ci-job exited {c} on {short}, so the lint is unknown, not a pass. {LANE_LINT_REMEDY}")
 
 PROSE_JUDGE_MAX_CALLS = 3  # model calls one merge makes; each may run MODEL_TIMEOUT s after the lock is released, so the count bounds how long the run waits before it ends. A file past it reads UNKNOWN
-PROSE_JUDGE_MAX_LINES = 20  # report lines one merge prints for the prose judge; the rest are one count line
+PROSE_JUDGE_MAX_LINES = 20  # finding lines (stale, unbacked) one merge prints for the prose judge; the rest are one count line. UNKNOWN lines never count against it
+PROSE_JUDGE_CAUSES = ("timed out", "model error", "no readable verdict", "past the call cap", "skipped by the reply")  # the buckets of the one UNKNOWN count line, in print order; the count line carries no raw error text
+TIMED_OUT, MODEL_ERROR, NO_VERDICT, PAST_CAP, SKIPPED = PROSE_JUDGE_CAUSES
 
 def prose_judge_lines(wt, sha, base_ref, changed):
     """{path: {line: (text, [cite])}}: the governed prose lines the model judges, from the tree at `wt` (the head). A line that cites
@@ -2497,15 +2541,17 @@ def prose_judge_row(n, path, number, word, why):
 def prose_judge_plan(wt, sha, base_ref, names, n):
     """Under the merge lock: read the tree and build every prompt, because the worktree goes when the lock does. -> a list in report order, each
     item a finished report line or a (path, lines, prompt) job for prose_judge_run, which calls the model once the lock is released.
-    A file past PROSE_JUDGE_MAX_CALLS, and a selection that failed, are UNKNOWN lines here."""
+    A selection that failed is an UNKNOWN line here. The lines of a file past PROSE_JUDGE_MAX_CALLS are a (PAST_CAP, count) item."""
     try:
         if names is None:
             return [f"merge: #{n} prose judge UNKNOWN: the changed files could not be read, so no line was judged."]
+        if base_ref is None:
+            return [f"merge: #{n} prose judge UNKNOWN: the base could not be read, so no line was judged."]
         picked = prose_judge_lines(wt, sha, base_ref, {x for x in names.split("\0") if x})
         plan = []
         for calls, (path, by_line) in enumerate(sorted(picked.items())):
             if calls >= PROSE_JUDGE_MAX_CALLS:
-                plan += [prose_judge_row(n, path, number, "UNKNOWN", "not sent, past the cap on model calls") for number in sorted(by_line)]
+                plan.append((PAST_CAP, len(by_line)))
             else:
                 plan.append((path, by_line, prose_judge_prompt(wt, path, by_line)))
         return plan
@@ -2522,40 +2568,58 @@ def readable_verdicts(verdict):
             return None
     return rows
 
+def prose_judge_cause(verdict, error):
+    """The PROSE_JUDGE_CAUSES bucket for a call that gave no readable verdict (a verdict that failed readable_verdicts has an error of None). Reply-parse errors from decision_watch start with one of its REPLY_ERROR_PREFIXES;
+    every other error (exit, failed start, token read) is a model error."""
+    import decision_watch
+    if error == decision_watch.MODEL_TIMEOUT_ERROR:
+        return TIMED_OUT
+    if error is None or error.startswith(decision_watch.REPLY_ERROR_PREFIXES):
+        return NO_VERDICT
+    return MODEL_ERROR
+
 def prose_judge_run(plan, n):
     """Report-only (outcomes-mechanize-rules), after the lock is released: one decision_watch.invoke_model call per job in `plan`, looked up
-    at call time. -> the report lines, one per line the model calls stale or unbacked, and one per line it could not judge (UNKNOWN: a model
-    error, a timeout, an unreadable reply, a line the reply skipped, a file past PROSE_JUDGE_MAX_CALLS), at most PROSE_JUDGE_MAX_LINES, then
-    one count line. Nothing here refuses a merge or writes a file."""
-    report = []
-    unknown = []  # UNKNOWN lines go after the stale and unbacked ones, so the cap on lines never hides a verdict behind them
+    at call time. -> the report lines: one per line the model calls stale or unbacked, at most PROSE_JUDGE_MAX_LINES, then one count line for
+    the rest; then one UNKNOWN count line for every line not judged, by cause (PROSE_JUDGE_CAUSES; it carries no raw error text). A plan-level failure line names its exception type and message. Nothing here refuses a merge or writes a file."""
+    findings = []
+    plan_failures = []  # a plan-level UNKNOWN line stands alone, whole
+    counts = dict.fromkeys(PROSE_JUDGE_CAUSES, 0)
     try:
         import decision_watch
         for item in plan or []:
             if isinstance(item, str):
-                unknown.append(item)
+                plan_failures.append(item)
+                continue
+            if len(item) == 2:
+                counts[item[0]] += item[1]
                 continue
             path, by_line, prompt = item
             try:
                 verdict, error = decision_watch.invoke_model(prompt, shape=decision_watch.LINE_VERDICTS)
-            except Exception as e:  # a model that cannot run is unknown, never a refusal
-                verdict, error = None, f"the model call raised {type(e).__name__}"
+            except Exception:  # a model that cannot run is unknown, never a refusal
+                counts[MODEL_ERROR] += len(by_line)
+                continue
             entries = readable_verdicts(verdict) if verdict is not None else None
             if entries is None:
-                unknown += [prose_judge_row(n, path, number, "UNKNOWN", error or "the model gave no verdict, or one this merge could not read") for number in sorted(by_line)]
+                counts[prose_judge_cause(verdict, error)] += len(by_line)
                 continue
             said = {e["line"]: e for e in entries if e["line"] in by_line}
             for number in sorted(by_line):
                 e = said.get(number)
                 if e is None:
-                    unknown.append(prose_judge_row(n, path, number, "UNKNOWN", "the model gave no verdict for this line"))
+                    counts[SKIPPED] += 1
                 elif e["verdict"] != "holds":
-                    report.append(prose_judge_row(n, path, number, e["verdict"], e.get("why") or ""))
+                    findings.append(prose_judge_row(n, path, number, e["verdict"], e.get("why") or ""))
     except Exception as e:
-        unknown.append(f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]}).")
-    report += unknown
+        plan_failures.append(f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]}).")
+    report = findings
     if len(report) > PROSE_JUDGE_MAX_LINES:
-        report[PROSE_JUDGE_MAX_LINES:] = [f"merge: #{n} prose judge: {len(report) - PROSE_JUDGE_MAX_LINES} more lines not shown"]
+        report[PROSE_JUDGE_MAX_LINES:] = [f"merge: #{n} prose judge: {len(findings) - PROSE_JUDGE_MAX_LINES} more lines not shown"]
+    report += plan_failures
+    total = sum(counts.values())
+    if total:
+        report.append(f"merge: #{n} prose judge UNKNOWN: {total} lines not judged ({', '.join(f'{counts[c]} {c}' for c in PROSE_JUDGE_CAUSES if counts[c])})")
     return report
 
 def ignore_checks(cfg):
@@ -2882,7 +2946,11 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             say(f"merge: #{n} the rule-file check could not run: git diff failed. Read the PR's files yourself.")
         for x in rule_files or []:
             say(f"merge: #{n} changes {x}, a rule file every session loads.")
-        judge = prose_judge_plan(wt, sha, base_ref, names if c == 0 else None, n)  # report-only: the merge has landed, whatever it says; the model calls wait for the lock's release
+        try:  # ff_main's fetch moves origin/<base> onto the merge, which would empty the plan's diff; any failure leaves the base unknown and never holds the merge
+            tip_c, tip = git(wt, "rev-parse", "--verify", "-q", base_ref + "^{commit}")
+        except (subprocess.TimeoutExpired, OSError):
+            tip_c, tip = 1, ""
+        plan_base = tip.strip() if tip_c == 0 and tip.strip() else None
         ok = True
         try:
             ff_main(root, base, commit)
@@ -2894,6 +2962,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             cut_branch(root, branch, sha)
             if lanes:
                 cut_lanes(root, lanes, commit, host, base, {cfg["defaultBranch"], base, branch}, m.get("keepBranches", []), dropped)
+        judge = prose_judge_plan(wt, sha, plan_base, names if c == 0 else None, n)  # report-only: the merge has landed, whatever it says; the model calls wait for the lock's release. Last, so an interrupt in the tree read leaves the ff, afterMerge and the cuts done. `wt` is detached, so no cut removes it
         code = 0 if ok else 1  # the merge landed either way; a failed ff or afterMerge exits non-zero
     finally:
         if wt:
