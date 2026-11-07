@@ -3002,11 +3002,15 @@ class GhLockTest(unittest.TestCase):
 #   - an argument holding a newline (`\n` or `\r`), a `-f` value included, is refused for the same reason: cmd.exe cuts the command at it. Send a multi-line value as JSON with `--input <file>`.
 #   - `--input <file>` reads a JSON object and merges its keys into the fields (gh's own body-from-file rule, so a PUT or POST sends it). `--input -` (stdin) is refused.
 #   - GraphQL (`gh pr ...`, `gh repo view`, `gh api graphql`, any other gh command) answers the HTTP 403 a Claude Code cloud session gives.
+#   - the cloud agent proxy refuses a numeric-ID path: when a case sets `proxy_refuses_paged`, a `--paginate` read of more than one page
+#     answers HTTP 403 on `repositories/<id>/...`, the path gh follows from the Link header. Off unless a case sets it.
+#   - `issues/comments` answers a case's `issue_comments` (oldest first) once the case sets them; with none set it stays a 404.
 GH_REST_LIB = r'''
 import json, re
 
 GRAPHQL_403 = "HTTP 403: GitHub GraphQL is not available from Claude Code sessions; use the REST API (https://api.github.com/graphql)"
 TEST_MERGE_SHA = "e" * 40  # REST sets merge_commit_sha on an OPEN pull request too: the sha of GitHub's test merge
+REPO_NUMERIC_ID = 424242424  # the repo's id on GitHub: the numeric path a Link header names, which the cloud agent proxy refuses
 
 class Refused(Exception):
     """An answer the fake gives as a failure: .text is what gh prints, .code its exit status."""
@@ -3082,12 +3086,15 @@ def jq_lines(expr, value):
         vals = [v.get(name) if isinstance(v, dict) else None for v in vals] if name else [x for v in vals for x in (v if isinstance(v, list) else [])]
     return [v if isinstance(v, str) else json.dumps(v, separators=(",", ":")) for v in vals]
 
-def listing(items, key, params, flags, jq, cap, top=None):
+def listing(items, key, params, flags, jq, cap, top=None, refuse=None):
     """The text gh prints for a list read. `items` is the whole list; `key` is None for a JSON array reply, else the object field that
-    holds the page (check_runs, statuses), with `top` the object's other fields. Without --paginate only the page asked for comes back."""
+    holds the page (check_runs, statuses), with `top` the object's other fields. Without --paginate only the page asked for comes back.
+    `refuse` names the second page's path when the proxy refuses it: a --paginate read of more than one page then answers HTTP 403."""
     size = max(1, min(int(params.get("per_page", 30)), cap))
     pages = [items[i:i + size] for i in range(0, len(items), size)] or [[]]
     if "paginate" in flags:
+        if refuse and len(pages) > 1:
+            raise Refused(api_error(403, "Resource not accessible by integration: " + refuse))
         chosen = pages
     else:
         n = int(params.get("page", 1))
@@ -3222,6 +3229,7 @@ try:
         raise Refused(api_error(404, "Not Found"))
     repo, rel = m.group(1), m.group(2) or ""
     cap = S.get("page_cap", 100)
+    refuse = "repositories/%d/%s?page=2" % (REPO_NUMERIC_ID, rel) if S.get("proxy_refuses_paged") else None  # the second page's numeric path, when the proxy refuses it
     num = S.get("pr_number", 7)
     rows = S.get("open_prs", [])
     numbered = {(r[3] if len(r) > 3 else 101 + i): r for i, r in enumerate(rows)}
@@ -3250,7 +3258,7 @@ try:
         if params.get("state", "open") != "open" or set(params) - {"state", "per_page", "page"}:
             raise Refused(api_error(422, "fake gh: the open pull requests are read with state=open and per_page only, then matched on head.ref"))
         items = [list_item(n, r[1], r[0], r[2]) for n, r in numbered.items()]
-        finish(listing(items, None, params, flags, jq, cap), 0, include)
+        finish(listing(items, None, params, flags, jq, cap, refuse=refuse), 0, include)
 
     elif method == "GET" and m_pr:
         n = int(m_pr.group(1))
@@ -3323,23 +3331,28 @@ try:
             other = S.get("other_rows", {}).get(sha, [("checks", "pass", "")])
             if m_run:
                 crs = [check_run(r, k) for k, r in enumerate(other)]
-                finish(listing(crs, "check_runs", params, flags, jq, cap, {"total_count": len(crs)}), 0, include)
-            finish(listing([], "statuses", params, flags, jq, cap, {"state": "pending", "sha": sha, "total_count": 0}), 0, include)
+                finish(listing(crs, "check_runs", params, flags, jq, cap, {"total_count": len(crs)}, refuse=refuse), 0, include)
+            finish(listing([], "statuses", params, flags, jq, cap, {"state": "pending", "sha": sha, "total_count": 0}, refuse=refuse), 0, include)
         if sha not in set(S.get("shown", [])) | {feat_head()}:
             raise Refused(api_error(422, "No commit found for SHA: " + sha))
-        cf = S.get("checks_fail")  # {"n", "msg"}: the next n reads fail with msg, then it answers
-        if cf and cf["n"] > 0:
-            cf["n"] -= 1; S["checks_failed"] = S.get("checks_failed", 0) + 1; save()
-            raise Refused(cf["msg"])
+        # A round is page 1 of a check-runs read and page 1 of a status read, in either order. A later page (the reader asks for page=2 to see the
+        # empty page that ends it) serves the rows of the round that page 1 advanced to, and counts nothing: no failure, no refusal, no call.
         key = "n_runs" if m_run else "n_status"
-        i = S.get(key, 0); S[key] = i + 1
-        # broken_from counts rounds per route (a round is one check-run read and one status read, in either order), so the second route of a round is not cut off early
-        if S.get("checks_broken") and i >= S.get("broken_from", 0):
-            S[key] = i; save()
-            raise Refused(api_error(404, "Not Found"))  # a 4xx is a refusal, not a network error: the wait's read reverts (a 5xx is a network stop, see GhHalf)
-        if m_run:
-            S["checks_calls"] = S.get("checks_calls", 0) + 1
-        save()
+        if int(params.get("page", 1)) == 1:
+            cf = S.get("checks_fail")  # {"n", "msg"}: the next n rounds fail with msg, then it answers
+            if cf and cf["n"] > 0:
+                cf["n"] -= 1; S["checks_failed"] = S.get("checks_failed", 0) + 1; save()
+                raise Refused(cf["msg"])
+            i = S.get(key, 0); S[key] = i + 1
+            # broken_from counts rounds per route (a round is one check-run read and one status read, in either order), so the second route of a round is not cut off early
+            if S.get("checks_broken") and i >= S.get("broken_from", 0):
+                S[key] = i; save()
+                raise Refused(api_error(404, "Not Found"))  # a 4xx is a refusal, not a network error: the wait's read reverts (a 5xx is a network stop, see GhHalf)
+            if m_run:
+                S["checks_calls"] = S.get("checks_calls", 0) + 1
+            save()
+        else:
+            i = max(0, S.get(key, 0) - 1)
         raw = S.get("raw_checks")  # a round written as REST objects: {"check_runs": [...], "statuses": [...]}
         if raw:
             cur = raw[min(i, len(raw) - 1)]
@@ -3348,8 +3361,11 @@ try:
             cur = {"check_runs": [check_run(r, k) for k, r in enumerate(rows_now) if len(r) < 4 or r[3] != "status"],
                    "statuses": [status_entry(r, k) for k, r in enumerate(rows_now) if len(r) >= 4 and r[3] == "status"]}
         if m_run:
-            finish(listing(cur["check_runs"], "check_runs", params, flags, jq, cap, {"total_count": len(cur["check_runs"])}), 0, include)
-        finish(listing(cur["statuses"], "statuses", params, flags, jq, cap, {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])}), 0, include)
+            finish(listing(cur["check_runs"], "check_runs", params, flags, jq, cap, {"total_count": len(cur["check_runs"])}, refuse=refuse), 0, include)
+        finish(listing(cur["statuses"], "statuses", params, flags, jq, cap, {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])}, refuse=refuse), 0, include)
+
+    elif method == "GET" and rel == "issues/comments" and "issue_comments" in S:  # the repo's issue comments, seeded by a case (the review record reads them)
+        finish(listing(S["issue_comments"], None, params, flags, jq, cap, refuse=refuse), 0, include)
 
     elif method == "GET" and rel.startswith("compare/"):  # the batch brake's containment read: diverged, so no other ready pull request holds this head
         finish(one({"status": "diverged"}, jq), 0, include)
@@ -3367,7 +3383,7 @@ try:
 
     elif method == "GET" and m_jobs:
         jobs = (S.get("base_jobs") or {}).get(m_jobs.group(1), [])
-        finish(listing(jobs, "jobs", params, flags, jq, cap, {"total_count": len(jobs)}), 0, include)
+        finish(listing(jobs, "jobs", params, flags, jq, cap, {"total_count": len(jobs)}, refuse=refuse), 0, include)
 
     elif method == "GET" and m_req:
         af = S.get("api_fail")  # {"msg", "after_checks"}: once the checks have been read that many times, each read fails with msg
@@ -3634,7 +3650,7 @@ class GhHalf(Env):
         got = self.gh_host().open_heads()
         self.assertEqual(got, {"lane2": ("a" * 40, "main"), "agent/lane1": ("b" * 40, "release/1.0")})
         calls = self.calls()
-        for part in (LIST_CALL, "state=open", "per_page=100", "--paginate"):  # one page holds 100 at most, and --paginate takes the rest
+        for part in (LIST_CALL, "state=open", "per_page=100"):  # one page holds 100 at most, so the read asks for each page by number
             self.assertIn(part, calls)
 
     def test_a_failed_open_pr_read_is_never_an_empty_set(self):
@@ -5258,6 +5274,73 @@ class RestRoutes(Env):
     def test_open_heads_reads_every_page_of_more_than_a_hundred_open_pull_requests(self):
         self.set(open_prs=[[f"b{i}", f"{i:040x}", "main"] for i in range(250)])
         self.assertEqual(len(self.gh_host().open_heads()), 250)
+
+    # ---- the proxy refuses the numeric page gh follows from a Link header, so a list read asks for each page by number
+
+    @staticmethod
+    def open_pr_rows(n):
+        return [[f"b{i}", f"{i:040x}", "main"] for i in range(n)]
+
+    def list_reads(self):
+        return len([c for c in self.calls() if c.startswith(LIST_CALL)])
+
+    def test_open_pull_requests_past_one_hundred_all_come_back_when_the_proxy_refuses_a_paginated_read(self):
+        # Scope first: the paginated read of two pages is the one the proxy refuses, so the pass below is the reader's own paging.
+        for n in (101, 194):
+            with self.subTest(open_prs=n):
+                self.set(proxy_refuses_paged=True, open_prs=self.open_pr_rows(n))
+                host = self.gh_host()
+                code, out = host.api("pulls", "--paginate", "--slurp", fields={"state": "open", "per_page": 100})
+                self.assertNotEqual(code, 0, "the proxy must refuse the paginated read of two pages: " + out)
+                self.assertIn("repositories/", out)
+                try:
+                    got = host.pages("pulls", fields={"state": "open"})
+                except merge.Stop as e:
+                    self.fail(f"paged read of {n} open pull requests stopped: {e}")
+                self.assertEqual(len(got), n, "a paged read of open pull requests dropped items")
+                self.assertEqual(sorted(d["number"] for d in got), list(range(101, 101 + n)))
+
+    def test_open_pull_requests_of_zero_and_one_hundred_come_back_whole_and_the_read_stops(self):
+        # The control: one page is one read the proxy answers, and a list of exactly 100 ends on an empty second page.
+        for n in (0, 100):
+            with self.subTest(open_prs=n):
+                self.set(proxy_refuses_paged=True, open_prs=self.open_pr_rows(n))
+                host = self.gh_host()
+                before = self.list_reads()
+                try:
+                    got = host.pages("pulls", fields={"state": "open"})
+                except merge.Stop as e:
+                    self.fail(f"paged read of {n} open pull requests stopped: {e}")
+                self.assertEqual(sorted(d["number"] for d in got), list(range(101, 101 + n)))
+                self.assertLessEqual(self.list_reads() - before, 2, "the read asked for more than the first page and an empty second one")
+
+    def test_check_runs_past_one_hundred_all_come_back_when_the_proxy_refuses_a_paginated_read(self):
+        names = [f"run{i:03d}" for i in range(194)]
+        self.set(proxy_refuses_paged=True, checks_seq=[[(name, "pass", "") for name in names]])
+        host = self.gh_host()
+        code, out = host.api(f"commits/{self.head()}/check-runs", "--paginate", "--slurp", fields={"per_page": 100})
+        self.assertNotEqual(code, 0, "the proxy must refuse the paginated read of two pages: " + out)
+        self.assertIn("repositories/", out)
+        try:
+            got = host.checks(7, warn=False)
+        except merge.Stop as e:
+            self.fail(f"paged read of 194 check runs stopped: {e}")
+        self.assertEqual(sorted(got), sorted(names))
+
+    def test_review_comments_past_one_hundred_are_all_read_when_the_proxy_refuses_a_paginated_read(self):
+        since = "2000-01-01T00:00:00Z"
+        comments = [{"id": i, "body": REVIEW_MARKER + "\n", "issue_url": f"https://api.github.com/repos/o/r/issues/{i}", "created_at": "2026-01-01T00:00:00Z"}
+                    for i in range(1, 151)]
+        self.set(proxy_refuses_paged=True, issue_comments=comments)
+        host = self.gh_host()
+        code, out = host.api("issues/comments", "--paginate", "--slurp", fields={"per_page": 100, "sort": "created", "direction": "asc", "since": since})
+        self.assertNotEqual(code, 0, "the proxy must refuse the paginated read of two pages: " + out)
+        self.assertIn("repositories/", out)
+        try:
+            found = host.review_comments(since)
+        except merge.Stop as e:
+            self.fail(f"review record read of 150 issue comments stopped: {e}")
+        self.assertEqual(sorted(found), list(range(1, 151)), "a review record on some pull request was not read")
 
     # ---- every conclusion and state lands in one bucket
 
@@ -10909,7 +10992,7 @@ class PullsHost(merge.Host):
         if self.count_gh and args[0] == "api":
             rel = args[1].split("/", 3)[-1]  # repos/{owner}/{repo}/<rel>
             self.gh_calls.append(rel)
-            return 0, self.answer(rel)
+            return 0, self.answer(rel, args[1:])
         route = args[1] if args[:1] == ["api"] else ""
         m = re.search(r"/pulls/(\d+)$", route)
         if m:
@@ -10926,19 +11009,21 @@ class PullsHost(merge.Host):
             return 0, json.dumps({"status": self.compares.get(m.groups(), "diverged")})
         raise AssertionError("unexpected gh call: " + " ".join(args))
 
-    def answer(self, rel):
-        """The reply of one REST route, in the shape `gh api --paginate --slurp` gives it (one page), or the --jq value of the protection."""
+    def answer(self, rel, argv):
+        """The reply of one REST route for the request's own flags, as the fake gh gives it (REST.listing): the page asked for, or with
+        --paginate every page in the --slurp shape. The protection answers its --jq value. A list read that asks for a page gets that page."""
+        _method, _path, params, flags, _jq = REST.parse(argv)
         m = re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel)
         if rel == "pulls":
-            return json.dumps([self.pulls])
+            return REST.listing(self.pulls, None, params, flags, None, 100)
         if rel == "issues/comments":
-            return json.dumps([self.comments])
+            return REST.listing(self.comments, None, params, flags, None, 100)
         if rel == f"branches/{self.base}/protection/required_status_checks":
             return json.dumps(self.protection)
         if m and m.group(2) == "check-runs":
-            return json.dumps([{"check_runs": self.check_rows.get(m.group(1), [])}])
+            return REST.listing(self.check_rows.get(m.group(1), []), "check_runs", params, flags, None, 100)
         if m:
-            return json.dumps([{"statuses": []}])
+            return REST.listing([], "statuses", params, flags, None, 100)
         raise AssertionError("unexpected route: " + rel)
 
     def pages(self, rel, key=None, fields=None):
@@ -12632,26 +12717,30 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(len(reads), 1)
         self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")
 
-    def test_one_ready_pr_with_a_record_costs_five_gh_calls(self):
-        # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection
+    def test_one_ready_pr_with_a_record_costs_eight_gh_calls(self):
+        # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection.
+        # A list read with items is two calls: its page, then the empty page that ends it (Host.pages). An empty first page ends it at once.
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "success")]},
                                           count_gh=True)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), r"CI green$")
-        self.assertEqual(host.gh_calls, ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status",
+        self.assertEqual(host.gh_calls, ["pulls", "pulls", "issues/comments", "issues/comments",
+                                         f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/check-runs",
+                                         f"commits/{REVIEW_HEAD}/status",
                                          "branches/main/protection/required_status_checks"])
 
     def test_a_draft_with_a_record_reads_no_head_checks(self):
         host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS))],
                                           count_gh=True)
         self.assertEqual(rc, 0, out + err)
-        self.assertEqual(host.gh_calls, ["pulls", "issues/comments"])
+        self.assertEqual(host.gh_calls, ["pulls", "pulls", "issues/comments", "issues/comments"])
 
     def test_a_ready_pr_with_no_record_reads_no_head_checks(self):
+        # an empty comments list is one empty page, so its read is one call
         host, rc, out, err = self.listing([batch_pull(8, REVIEW_HEAD)], [], count_gh=True)
         self.assertEqual(rc, 0, out + err)
-        self.assertEqual(host.gh_calls, ["pulls", "issues/comments"])
+        self.assertEqual(host.gh_calls, ["pulls", "pulls", "issues/comments"])
 
     def test_a_newest_record_with_the_attribution_footer_lists_as_done(self):
         # The older record is open, so the newer one must be the record the list reads. Its footer is trailing text: the line is done, not bad.
