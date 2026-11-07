@@ -17,7 +17,7 @@ writes, so a session cannot grant itself an override. It is valid only while now
   nothing (an intended "off" must never become a grant). A later line starting with the word grants
   nothing, except the last non-blank line when the prompt's start is no override word: a status block the app puts
   before the owner's words does not hide it. That line grants only as the bare word, `off` or a length, with no
-  reason and no Opus word. Machine blocks are stripped first (BLOCKS); pasted text is never the owner's word.
+  reason and no Opus word. Machine blocks are stripped first (BLOCKS); the owner never types pasted text.
 An Opus override is the file <config dir>/state/override/opus/<session_id>.json, {"kind": "opus",
 "until": ISO-8601 UTC, "role": null, one role, or a sorted list of 2 or more roles}. It lives beside the override, so the two never
 replace each other. It lifts only the Opus spawn refusal of guard rule agent-model-cap, never that
