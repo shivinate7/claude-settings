@@ -1064,16 +1064,26 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
     in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe.
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
-    leaves the shell where it was, and `;`, a newline or `||` run the next command there. After
-    `&&` the next command does not run, so that case stays None. Off by default, so a rule that
+    leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
+    worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
+    a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
     fails closed on an untrusted `cd` keeps doing so."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
+    skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     for at, segment in enumerate(segments[:number + 1]):
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
         stack.extend([(where, prev)] * marks.count("("))
+        end = ends[at] if at < len(ends) else ""
         if at == number:
-            return where
+            return None if skipping else where
+        if skipping:
+            skipping = end in ("&&", "|")
+            for _ in range(marks.count(")")):
+                if stack:
+                    where, prev = stack.pop()
+                    skipping = False
+            continue
         tokens = segment_tokens(segment)
         move = _segment_cd_move(tokens) if tokens else None
         if move is not None and not is_powershell(segment) and "|" in (
@@ -1093,8 +1103,9 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                 target = shell_abs(move or "~", where)
                 if target and os.path.isdir(target):
                     where = target
-                elif target and failed_cd_stays and (ends[at] if at < len(ends) else "") != "&&":
-                    pass   # the cd failed: the shell stays where it was
+                elif target and failed_cd_stays:
+                    skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
+                    old = prev   # a failed cd leaves the folder `cd -` goes back to alone
                 else:
                     where = None
             prev = old
