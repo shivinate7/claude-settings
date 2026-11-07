@@ -375,6 +375,7 @@ WRAPPER_VALUE_FLAGS = {
 WRAPPER_VALUE_FLAGS.update({
     "stdbuf": {"-i", "-o", "-e"}, "caffeinate": {"-t", "-w"},
     "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
+    "ionice": {"-c", "-n", "-p", "-P", "-u", "--class", "--classdata", "--pid", "--pgid", "--uid"},
     "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
     "podman": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
 })

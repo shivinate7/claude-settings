@@ -9,6 +9,7 @@ A repo lists paths that no session may write, in `.claude/layout-extras.json`. T
 - The list is that of the checkout that holds the target, never the session's cwd. A write from repo A into repo B's listed path is denied.
 - A path matches per segment: `fixtures/` covers `fixtures/x/y.csv`, never `fixturesX/` or `src/fixtures.py`. The literal and the resolved (symlink) spellings both count.
 - `touch` counts as a write (`MUTATING_COMMAND`), for this rule and every rule that reads that list, the frozen path's too.
+- This rule alone also reads its own write forms (`PROTECTED_ONLY_WRITE` and `_protected_write` in `hooks/guard_frozen.py`, their one home): the `rsync` destination, `sed` or `perl` with an in-place option word, `find -delete` or `-exec` of a mutating command (a path it only excludes is not written), `git restore` without `--staged` alone, `git checkout` naming a path, and a python removal. It reads through a subshell's parens and the runners `ionice`, `stdbuf` and `flock`. Every other rule judges these as main did.
 - The reason quotes the entry's `why`. It never prints a command that writes the path.
 - A malformed key allows the call and writes one `noted` guard.log line for `protected-path`. One bad entry drops the whole list, not that entry alone.
 - Override: the owner's typed `override` (decision `owner-override`) lifts one refusal.

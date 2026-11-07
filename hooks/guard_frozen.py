@@ -8,10 +8,11 @@ import re
 
 import guard_core
 from guard_core import (
-    REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
-    dir_before_segment, norm, resolve_command, segment_tokens, split_segments,
+    REDIRECT, _expanded, _git_subcommand_index, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally,
+    basename, dir_before_segment, norm, resolve_command, segment_tokens, split_segments,
 )
 from guard_env import _quoted_words
+from guard_shared_tree import checkout_names_a_path
 
 
 # ------------------------------------------------------------------ the frozen paths
@@ -226,7 +227,7 @@ def is_project_config(path: str, cwd: str) -> bool:
 # The list holds the PowerShell cmdlets (`Set-Content`, `Out-File`, `Add-Content`, `Remove-Item`) as
 # well as the POSIX commands. Matching folds case, as PowerShell does.
 MUTATING_COMMAND = (
-    r"\b(?i:rm|mv|cp|chmod|truncate|touch|rsync|tee|install|ln"
+    r"\b(?i:rm|mv|cp|chmod|truncate|touch|tee|install|ln"
     r"|set-content|add-content|clear-content|out-file|new-item|remove-item|move-item|copy-item"
     r"|rename-item|set-itemproperty|ri|rd|rmdir|del|erase|move|copy|ren)\b"
 )
@@ -236,7 +237,7 @@ MUTATING_COMMAND = (
 _RUNS_ITS_ARGUMENTS = {"find", "eval", "exec", "pwsh", "powershell", "cmd"}
 
 
-def _mutates_as_command(command: str, words, git_paths=False) -> bool:
+def _mutates_as_command(command: str, words) -> bool:
     """True when the segment's own command (`command`, its resolved name) changes the files it names:
     a word of MUTATING_COMMAND or a `mv` or `rm` of the version control tool. A command that runs its
     arguments counts too, as it always did, so a shell `-c "rm x"` and `find -exec rm` stay seen."""
@@ -244,21 +245,11 @@ def _mutates_as_command(command: str, words, git_paths=False) -> bool:
         return True
     if command == "git":
         rest = [word for word in words if not word.startswith("-")]
-        if git_paths and "restore" in rest[:2]:   # `git restore --staged` alone rewrites the index, never the working tree
-            staged = any(word in ("--staged", "-S") for word in words)
-            return not staged or any(word in ("--worktree", "-W") for word in words)
-        return any(word in ("mv", "rm") for word in rest[:2]) or (git_paths and "checkout" in rest[:2] and "--" in words)
+        return any(word in ("mv", "rm") for word in rest[:2])
     return bool(re.fullmatch(MUTATING_COMMAND, command))
 
 
-# `sed -i` and `perl -pi` rewrite the file they name. `%s` takes the escaped path.
-_IN_PLACE_EDIT = r"\b(?:sed|perl)\b[^\n;|&]*(?<![\w-])-[A-Za-z]*i\b[^\n;|&]*%s"
-# The version control tool's `restore <path>` and `checkout [<tree>] -- <path>` overwrite the working tree file.
-_GIT_PATH_WRITE = r"\bgit\b[^\n;|&]*(?:\brestore\b|\bcheckout\b[^\n;|&]*\s--(?=\s))"
-_FIND_WRITES = re.compile(r"\bfind\b[^\n;|&]*\s-(?:delete\b|(?:exec|execdir|ok|okdir)\s+" + MUTATING_COMMAND + ")")
-
-
-def writes_to(path: str, cmd: str, command=None, words=(), git_paths=False) -> bool:
+def writes_to(path: str, cmd: str, command=None, words=(), protected=None) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
     Two ways to write a named file from a shell: redirect onto it, or hand it to a command that
@@ -268,24 +259,170 @@ def writes_to(path: str, cmd: str, command=None, words=(), git_paths=False) -> b
     `echo x > .claude/settings.json` from `cat .claude/settings.json 2>/dev/null`. The second
     redirects to the null device. It is also what stops a redirect elsewhere on the line from
     counting as a write to a path named in a comment.
+
+    `protected` is set by the protected-path rule alone: the segment's words after its command, quotes
+    kept, for `_protected_write`. Every other rule passes None and reads only the forms below.
     """
     target = re.escape(path)
     if re.search(r"\d?>>?\s*['\"]?" + target, cmd):
         return True
+    if protected is not None:
+        verdict = _protected_write(path, command, protected)
+        if verdict is not None:
+            return verdict
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
-    if command is not None and not _mutates_as_command(command, words, git_paths):
-        return command in ("sed", "perl") and bool(re.search(_IN_PLACE_EDIT % target, cmd))
-    if command == "rsync":   # only the destination, the last operand, is written
-        operands = [word for word in words if not word.startswith("-")]
-        return bool(operands) and operands[-1] == path
-    if git_paths and re.search(_GIT_PATH_WRITE + r"[^\n;|&]*" + target, cmd):
-        return True
-    if _FIND_WRITES.search(cmd):   # a find that deletes or runs a mutating command writes what it walks
-        return True
+    if command is not None and not _mutates_as_command(command, words):
+        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    return bool(re.search(_IN_PLACE_EDIT % target, cmd))
+    if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
+        return True
+    return False
+
+
+# ------------------------------------------------------------------ the protected-path rule's own write forms
+#
+# The one home of what the protected-path rule counts as a write beyond the forms every rule reads (decision
+# protected-path). Only `protected_shell_hit` reads them, so the other rules judge a recovery by `git restore`, a
+# copy out by `rsync` or a `find -newer` as before. PROTECTED_ONLY_WRITE is their cheap hint (guard.py adds it to
+# SHELL_WRITE_HINT); `_protected_write` reads each form; `_PROTECTED_RUNNERS` are the runners it reads through.
+PROTECTED_ONLY_WRITE = (r"\brsync\b|\b(?:sed|perl)\b|\bfind\b[^\n;|&]*\s-(?:delete|exec|execdir|ok|okdir)\b"
+                        r"|\bgit\b[^\n;|&]*\b(?:restore|checkout)\b")
+_PROTECTED_RUNNERS = ("ionice", "stdbuf", "flock")
+# The options whose value is the next word (or the rest of a short cluster). `glued` letters take only the rest.
+_RSYNC_VALUES = ("efTB", {
+    "--exclude", "--include", "--filter", "--exclude-from", "--include-from", "--files-from", "--rsh", "--rsync-path",
+    "--temp-dir", "--partial-dir", "--backup-dir", "--suffix", "--compare-dest", "--copy-dest", "--link-dest",
+    "--log-file", "--chmod", "--chown", "--max-size", "--min-size", "--timeout", "--port", "--block-size", "--bwlimit",
+    "--out-format", "--password-file", "--info", "--debug"})
+_IN_PLACE_VALUES = {"sed": ("efl", {"--expression", "--file", "--line-length"}, "i"),
+                    "perl": ("eE", set(), "MmIl0xCdDFi")}
+_GIT_PATH_VALUES = {"restore": ("s", {"--source", "--pathspec-from-file"}),
+                    "checkout": ("bB", {"--orphan", "--conflict", "--pathspec-from-file"})}
+_FIND_PATTERN_TESTS = {"-path", "-ipath", "-wholename", "-iwholename"}
+_FIND_RUNS = {"-exec", "-execdir", "-ok", "-okdir"}
+
+
+def _ungroup(words):
+    """A segment's words with a subshell's glued parens dropped: `(rm` reads `rm`, `a.csv)` reads `a.csv`."""
+    out = []
+    for word in words:
+        word = word.lstrip("(") if word[:1] == "(" else word
+        word = word.rstrip(")") if word.endswith(")") and "(" not in word else word
+        if word:
+            out.append(word)
+    return out
+
+
+def _operands(tail, short="", long=(), glued=""):
+    """The operands of a getopt-style command, dequoted: option words and their values skipped, redirects too.
+    A `short` letter takes the rest of its cluster or the next word, a `glued` letter the rest only, a `long` option
+    its `=value` or the next word. A quoted word is never an option, so a quoted script stays one word."""
+    out, index, options = [], 0, True
+    while index < len(tail):
+        word = tail[index]
+        index += 1
+        if _is_redirect(word) or word == "<":
+            index += 1
+            continue
+        if re.match(r"\d*[<>]", word):
+            continue
+        if not options or not word.startswith("-") or word == "-":
+            out.append(_unquoted(word))
+        elif word == "--":
+            options = False
+        elif word.startswith("--"):
+            index += "=" not in word and word in long
+        else:
+            for at, letter in enumerate(word[1:], 1):
+                if letter in glued:
+                    break
+                if letter in short:
+                    index += at == len(word) - 1
+                    break
+    return out
+
+
+def _in_place(command, tail) -> bool:
+    """True when an option word of `sed` or `perl` asks for an in-place edit: `-i`, `-pi`, `-i.bak`, `--in-place`.
+    Only an option word counts: `perl -pe 's/-i//'` edits nothing. Perl's options end at its first operand."""
+    short, long, glued = _IN_PLACE_VALUES[command]
+    index = 0
+    while index < len(tail):
+        word = tail[index]
+        index += 1
+        if word == "--" or not word.startswith("-") or word == "-":
+            if command == "perl":
+                return False
+            continue
+        if word.startswith("--"):
+            if word.split("=", 1)[0] == "--in-place":
+                return True
+            index += "=" not in word and word in long
+            continue
+        for at, letter in enumerate(word[1:], 1):
+            if letter == "i":
+                return True
+            if letter in glued:
+                break
+            if letter in short:
+                index += at == len(word) - 1
+                break
+    return False
+
+
+def _find_writes_named(words, at: int) -> bool:
+    """True when the word at `at` of a writing `find` names a path it writes: a start point or a selecting pattern
+    test. A pattern test that excludes (`-not -path P`, `! -path P`, `-path P -prune`) and a `-newer` reference
+    name a path the find never writes."""
+    before = words[at - 1] if at else ""
+    if before == "-newer":
+        return False
+    if before in _FIND_PATTERN_TESTS:
+        return not ((at >= 2 and words[at - 2] in ("-not", "!")) or words[at + 1:at + 2] == ["-prune"])
+    return True
+
+
+def _protected_write(path: str, command: str, tail):
+    """The protected-path rule's own reading of one segment: True when it writes `path`, False when it does not,
+    None when its command is none of these forms (the shared reading in `writes_to` then decides). `tail` is the
+    segment's words after its command, quotes kept.
+    - `rsync` writes its destination, the last operand.
+    - `sed` and `perl` write their operands when an option word asks for an in-place edit.
+    - `find` with `-delete`, or `-exec` of a mutating command, writes what it walks (`_find_writes_named`). A path
+      only inside a quoted script is read as before.
+    - `git restore` writes its paths, unless it is `--staged` alone. `git checkout` writes its paths when it names
+      one (`checkout_names_a_path`); a branch switch names none."""
+    if command == "rsync":
+        operands = _operands(tail, *_RSYNC_VALUES)
+        return bool(operands) and operands[-1] == path
+    if command in _IN_PLACE_VALUES:
+        short, long, glued = _IN_PLACE_VALUES[command]
+        return _in_place(command, tail) and path in _operands(tail, short, long, glued)
+    if command == "find":
+        words = [_unquoted(word) for word in tail]
+        runs = any(word in _FIND_RUNS and at + 1 < len(words) and _mutates_as_command(_name(words[at + 1]), ())
+                   for at, word in enumerate(words))
+        if not ("-delete" in words or runs):
+            return False
+        named = [at for at, word in enumerate(words) if word == path]
+        return any(_find_writes_named(words, at) for at in named) if named else None
+    if command == "git":
+        full = ["git"] + list(tail)
+        at = _git_subcommand_index(full, 0)
+        sub = _unquoted(full[at]) if at < len(full) else ""
+        if sub not in _GIT_PATH_VALUES:
+            return None
+        args = full[at + 1:]
+        plain = [_unquoted(word) for word in args]
+        if sub == "restore" and any(word in ("--staged", "-S") for word in plain) \
+                and not any(word in ("--worktree", "-W") for word in plain):
+            return False   # the index alone, never the working tree
+        if sub == "checkout" and not checkout_names_a_path(plain):
+            return False
+        return path in _operands(args, *_GIT_PATH_VALUES[sub])
+    return None
 
 
 # VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
@@ -613,19 +750,22 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 
 
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
-                     command_position=False, predicate_command=False, git_paths=False) -> str:
+                     command_position=False, predicate_command=False, protected=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
     when that folder cannot be told. `predicate_command` also hands `predicate` the segment's command
-    name as a third argument (`''` when none). `git_paths` also reads `git restore <path>` and `git checkout -- <path>`
-    as writes of that path: the protected-path rule asks for it, and a rule that lets a recovery by them pass does not."""
+    name as a third argument (`''` when none). `protected` is the protected-path rule's reading
+    (`_protected_write`): a subshell's glued parens and the runners ionice, stdbuf and flock are read
+    through, and its own write forms count. No other rule sets it, so each judges as before."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
     segments = split_segments(cmd, ends)
     scans = [_scan(segment) for segment in segments]
     parsed = [_quoted_words(segment) for segment in segments]
+    if protected:
+        parsed = [_ungroup(words) for words in parsed]
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
@@ -660,21 +800,29 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
+        own = _segment_command(raw, protected)[1] if protected else None
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(words) if command_position else ()), git_paths=git_paths):
+            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(words, protected) if command_position else ()), protected=own):
                 return word
     return ""
 
 
-def _segment_command(words):
-    """(resolved command name, plain words after it) of a segment, for `writes_to`'s command position."""
+def _segment_command(words, protected=False):
+    """(resolved command name, plain words after it) of a segment, for `writes_to`'s command position.
+    `protected` also reads through the runners only the protected-path rule unwraps (`_PROTECTED_RUNNERS`)."""
     index = resolve_command(tuple(words))
     if index is None:
         index = next((i for i, word in enumerate(words) if not _ASSIGNMENT.match(word)), len(words))
+    while protected and index < len(words) and _name(words[index]) in _PROTECTED_RUNNERS:
+        runner = _name(words[index])
+        index, _flags = guard_core._wrapper_flags(runner, words, index + 1)
+        index += runner == "flock"   # the lock file
+        inner = resolve_command(tuple(words[index:]))
+        index = len(words) if inner is None else index + inner
     command = _name(words[index]) if index < len(words) else ""
     return command, [word for word in words[index + 1:] if word]
 
@@ -758,7 +906,7 @@ def protected_why(path: str) -> str:
 
 def protected_shell_hit(cmd: str, cwd: str) -> str:
     """Return the protected path a shell command writes to, else ''. A leading `cd` moves the folder the path is read from."""
-    return _shell_write_hit(cmd, cwd, is_protected, follow_cd=True, command_position=True, git_paths=True)
+    return _shell_write_hit(cmd, cwd, is_protected, follow_cd=True, command_position=True, protected=True)
 
 
 # ------------------------------------------------------------------ an interpreter's own writes
@@ -778,11 +926,14 @@ _INLINE_FLAG_WORDS = ("-c", "-e", "-p", "--eval", "--print")
 _PATH_CTORS = ("Path", "PurePath", "PosixPath", "WindowsPath", "PurePosixPath", "PureWindowsPath")
 _PATH_PASS = ("resolve", "expanduser", "absolute")
 _COPY_NAMES = ("copy", "copy2", "copyfile", "copytree", "move")
+# A removal counts for the protected-path rule alone (its `protected` reading), like its shell write forms.
 _REMOVE_NAMES = ("remove", "unlink", "rmdir", "removedirs")   # os.remove(path), os.unlink(path), ...
 _PATH_REMOVE_METHODS = ("unlink", "rmdir", "touch")           # Path(...).unlink(), a method of the path itself
 _PY_WRITE_CALL = re.compile(
-    r"""open\s*\([^)]*['"][rwabt]*[wax+][rwabt+]*['"]|write_text|write_bytes|shutil\s*\.\s*(?:copy|move|rmtree)"""
-    r"""|os\s*\.\s*(?:replace|rename|remove|unlink|rmdir|removedirs)|\.\s*(?:unlink|rmdir)\s*\(""")
+    r"""open\s*\([^)]*['"][rwabt]*[wax+][rwabt+]*['"]|write_text|write_bytes|shutil\s*\.\s*(?:copy|move)"""
+    r"""|os\s*\.\s*(?:replace|rename)""")
+_PY_REMOVE_CALL = re.compile(
+    r"""shutil\s*\.\s*rmtree|os\s*\.\s*(?:remove|unlink|rmdir|removedirs)|\.\s*(?:unlink|rmdir|touch)\s*\(""")
 _STRING_LITERAL = re.compile(r"""'([^'\n]+)'|"([^"\n]+)\"""")
 
 
@@ -861,9 +1012,9 @@ def _py_arg(call, index, keyword):
     return next((kw.value for kw in call.keywords if kw.arg == keyword), None)
 
 
-def _py_written(tree, env_at):
+def _py_written(tree, env_at, protected=False):
     """(call, path expression) of each write call of a script: `open` with a writing mode, `write_text`,
-    `write_bytes`, the destination of a copy, a move or a rename."""
+    `write_bytes`, the destination of a copy, a move or a rename. `protected` adds a removal or a touch."""
     import ast
     out = []
     for node in ast.walk(tree):
@@ -875,7 +1026,7 @@ def _py_written(tree, env_at):
                 out.append((node, _py_arg(node, 0, "file")))
             elif func.id in _COPY_NAMES and len(node.args) >= 2:
                 out.append((node, node.args[1]))
-            elif (func.id in _REMOVE_NAMES or func.id == "rmtree") and node.args:
+            elif protected and (func.id in _REMOVE_NAMES or func.id == "rmtree") and node.args:
                 out.append((node, node.args[0]))   # `from os import remove`
         elif isinstance(func, ast.Attribute):
             attr, owner = func.attr, func.value
@@ -888,10 +1039,10 @@ def _py_written(tree, env_at):
                 out.append((node, owner))
             elif attr in _COPY_NAMES and isinstance(owner, ast.Name) and owner.id == "shutil" and len(node.args) >= 2:
                 out.append((node, node.args[1]))
-            elif (attr in _REMOVE_NAMES and isinstance(owner, ast.Name) and owner.id == "os"
-                  or attr == "rmtree" and isinstance(owner, ast.Name) and owner.id == "shutil") and node.args:
+            elif protected and (attr in _REMOVE_NAMES and isinstance(owner, ast.Name) and owner.id == "os"
+                                or attr == "rmtree" and isinstance(owner, ast.Name) and owner.id == "shutil") and node.args:
                 out.append((node, node.args[0]))
-            elif attr in _PATH_REMOVE_METHODS and not module and not node.args:
+            elif protected and attr in _PATH_REMOVE_METHODS and not module and not node.args:
                 out.append((node, owner))
             elif attr in ("replace", "rename") and isinstance(owner, ast.Name) and owner.id == "os" \
                     and len(node.args) >= 2:
@@ -902,7 +1053,7 @@ def _py_written(tree, env_at):
     return [(call, expression) for call, expression in out if expression is not None]
 
 
-def _py_hit(body: str, cwd: str, predicate) -> str:
+def _py_hit(body: str, cwd: str, predicate, protected=False) -> str:
     import ast
     import textwrap
     try:
@@ -910,14 +1061,14 @@ def _py_hit(body: str, cwd: str, predicate) -> str:
     except (SyntaxError, ValueError):
         # Unparsable (a shell variable in an unquoted body, a Python 2 line): a literal path the
         # predicate accepts, beside a write call in the same body, counts.
-        if _PY_WRITE_CALL.search(body):
+        if _PY_WRITE_CALL.search(body) or (protected and _PY_REMOVE_CALL.search(body)):
             for match in _STRING_LITERAL.finditer(body):
                 text = match.group(1) or match.group(2)
                 if predicate(text, cwd):
                     return text
         return ""
     env_at = _py_env_at(tree)
-    for call, expression in _py_written(tree, env_at):
+    for call, expression in _py_written(tree, env_at, protected):
         for path in _py_paths(expression, env_at(call)):
             if predicate(path, cwd):
                 return path
@@ -982,18 +1133,19 @@ def _inline_scripts(command: str):
                 break
 
 
-def interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
+def interpreter_write_hit(raw: str, cwd: str, predicate, protected=False) -> str:
     """Return the path a python or node script in `raw` writes that `predicate(path, cwd)` accepts, else ''.
     Read: the body of each heredoc fed to python or node, quoted or not, and each `python -c` and
     `node -e` script. A script that only reads a path, or names it in a string, hits nothing.
+    `protected` (the protected-path rule alone) also counts a python removal as a write.
     A crash of the scan reads as no hit: it must never skip the rules after it."""
     try:
-        return _interpreter_write_hit(raw, cwd, predicate)
+        return _interpreter_write_hit(raw, cwd, predicate, protected)
     except Exception:
         return ""
 
 
-def _interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
+def _interpreter_write_hit(raw: str, cwd: str, predicate, protected=False) -> str:
     if "<<" in raw:
         seen = set()
         for reading in (False, True):   # bash's own walk, and the one where a contraction's `'` is text
@@ -1002,7 +1154,7 @@ def _interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
                     continue
                 seen.add((header, body))
                 if _PY_HEADER.search(header):
-                    hit = _py_hit(body, cwd, predicate)
+                    hit = _py_hit(body, cwd, predicate, protected)
                 elif _NODE_HEADER.search(header):
                     hit = _js_hit(body, cwd, predicate)
                 else:
@@ -1012,7 +1164,7 @@ def _interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
     if any(flag in raw for flag in _INLINE_FLAG_WORDS):
         for kind, script, number, segments, ends in _inline_scripts(raw):
             at = dir_before_segment(segments, number, cwd, ends) or cwd
-            hit = (_py_hit if kind == "py" else _js_hit)(script, at, predicate)
+            hit = _py_hit(script, at, predicate, protected) if kind == "py" else _js_hit(script, at, predicate)
             if hit:
                 return hit
     return ""
