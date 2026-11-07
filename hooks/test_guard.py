@@ -7321,6 +7321,33 @@ for _name, _command in (
     ("a folder, long flags", "rm --recursive --force build/"),
 ):
     sh("delete: " + _name + " is allowed", _command, "allow", cwd=NOGIT)
+# THE SPLIT FLAGS IN QUOTED TEXT. `rm -r -f .` and `del -Recurse -Force C:/` in an echo are text, as
+# `rm -rf .` already is. A shell that runs the same text still refuses it.
+sh("delete: an echo of rm with split flags at the working folder calls nothing",
+   'echo "rm -r -f ."', "allow", cwd=NOGIT)
+sh("delete: an echo of the PowerShell delete at a drive root calls nothing",
+   'echo "del -Recurse -Force C:/"', "allow", cwd=NOGIT)
+sh("delete: sh -c of rm with split flags at the working folder still denies",
+   'sh -c "rm -rf ."', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: bash -c of rm with split flags at the working folder still denies",
+   'bash -c "rm -r -f ."', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: eval of rm at the working folder still denies",
+   'eval "rm -rf ."', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: pwsh -Command of a PowerShell delete at a drive root still denies",
+   'pwsh -Command "Remove-Item -Recurse -Force C:/"', "deny", "destructive-delete", cwd=NOGIT)
+# THE INDEX-ONLY FORM. `git rm --cached` removes a path from the index and leaves the working folder
+# alone, so `git rm -rf --cached .` deletes nothing on disk. The same words without `--cached` delete
+# every file under the working folder, and a chained delete still denies.
+sh("delete: git rm -rf --cached . touches the index only, and is allowed",
+   VCS + " rm -rf --cached .", "allow", cwd=NOGIT)
+sh("delete: git rm -r -f --cached . touches the index only, and is allowed",
+   VCS + " rm -r -f --cached .", "allow", cwd=NOGIT)
+sh("delete: git rm -rf . with no --cached still denies", VCS + " rm -rf .", "deny",
+   "destructive-delete", cwd=NOGIT)
+sh("delete: git rm -r -f . with no --cached still denies", VCS + " rm -r -f .", "deny",
+   "destructive-delete", cwd=NOGIT)
+sh("delete: git rm -rf --cached . chained with rm -rf . still denies",
+   VCS + " rm -rf --cached . && rm -rf .", "deny", "destructive-delete", cwd=NOGIT)
 
 # Each is a program that runs the real command: find -exec, su -c, a container exec, and flock.
 for _name, _command in (
