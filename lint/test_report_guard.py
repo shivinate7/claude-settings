@@ -4781,6 +4781,50 @@ class PostedNeedsCommentUrlTests(ReplyGuardRuns, unittest.TestCase):
         self.assert_allowed("Posted the review record on #1500 and #1501, see "
                             "https://github.com/o/r/pull/1500#issuecomment-123.")
 
+    def test_posted_green_non_pr_destination_passes_beside_its_twin(self):
+        # Lane ruling 15:44 CST, session_013NEJL45afxTyvacTQtAEwZ (R2-1): a post whose destination is the page, the
+        # waiting page, an inbox, code, a file or a repo path is no PR-comment claim. The bare word PR counts as a
+        # PR ref only outside the noun phrases "PR comment" and "PR review". Catches: a post to a page is read as a
+        # PR comment, or the PR of a noun phrase is read as a PR ref.
+        pairs = [
+            ("Posted the PR comment draft to the page", "Posted the PR comment on PR #1500."),
+            ("Posted review notes to the page for PR #1500.", "Posted the review notes on PR #1500."),
+            ("Posted the PR review checklist to the page", "Posted the review checklist on PR #1500."),
+            ("Posted the review to the waiting page, PR #1500 merged.", "Posted the review to PR #1500."),
+            ("comment posted to the waiting page, PR #1500 open", "comment posted to PR #1500."),
+        ]
+        for green, twin in pairs:
+            with self.subTest(line=green):
+                self.assert_blocked(twin, self.NEEDLE, twin)
+                self.assert_allowed(green)
+
+    def test_posted_green_left_or_commented_off_a_pr_passes_beside_its_twin(self):
+        # Lane ruling 15:44 CST, session_013NEJL45afxTyvacTQtAEwZ (R2-1): the same destination rule holds for left
+        # and commented. Catches: left in code, left to a runner, or commented out is read as a PR-comment claim.
+        pairs = [
+            ("Left a comment in the code on PR #1500.", "Left a comment on PR #1500."),
+            ("Left the review to the runner on #1500.", "Left the review on #1500."),
+            ("Commented out the check in PR #1500.", "Commented on PR #1500."),
+        ]
+        for green, twin in pairs:
+            with self.subTest(line=green):
+                self.assert_blocked(twin, self.NEEDLE, twin)
+                self.assert_allowed(green)
+
+    def test_posted_red_left_with_its_noun_before_refuses_beside_its_page_twin(self):
+        # Lane ruling 15:44 CST, session_013NEJL45afxTyvacTQtAEwZ (N4): left takes the noun in front of it as its
+        # object, so "Review comment left on PR #1500." is a claim. Catches: left with its noun before it passes.
+        # The page version is the green control: its destination is no PR.
+        self.assert_blocked("Review comment left on PR #1500.", self.NEEDLE, "Review comment left on PR #1500.")
+        self.assert_allowed("Review comment left on the page.")
+
+    def test_posted_red_pr_destination_still_refuses(self):
+        # Lane ruling 15:44 CST, session_013NEJL45afxTyvacTQtAEwZ (R2-1), must-refuse stays: a PR is a destination
+        # the page, inbox, code, file or repo path is not. Catches: the destination rule lets a PR post through.
+        for line in ("posted the review on PR #1500.", "Posted the round-1 review record to PR #1500."):
+            with self.subTest(line=line):
+                self.assert_blocked(line, self.NEEDLE, line)
+
     # Cost: regex only. The probe is builtins.open, the pattern AnsweredNeedsSourceTests uses, plus subprocess.Popen
     # and subprocess.run recorded, so a process start inside the check is counted.
 
