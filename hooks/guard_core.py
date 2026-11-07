@@ -51,9 +51,14 @@ def is_cloud() -> bool:
 # It never raises. `reconfigure` landed in Python 3.7 and a stream can be something other than a
 # text wrapper, so a failure here leaves the old encoding rather than bricking the hook.
 def _force_utf8_streams() -> None:
-    for stream in (sys.stdin, sys.stdout, sys.stderr):
+    # Stdin keeps a byte that is no UTF-8 as a lone surrogate, so the call is still judged. Strict
+    # decoding would raise, and main() fails open on unreadable input.
+    for stream, errors in ((sys.stdin, "surrogateescape"), (sys.stdout, None), (sys.stderr, None)):
         try:
-            stream.reconfigure(encoding="utf-8")
+            if errors:
+                stream.reconfigure(encoding="utf-8", errors=errors)
+            else:
+                stream.reconfigure(encoding="utf-8")
         except Exception:
             pass
 
