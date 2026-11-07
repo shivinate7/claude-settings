@@ -13177,6 +13177,122 @@ sh("builder-test: shell open-write to a test under os.getcwd() is refused",
    "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'x.py'), 'w').write('x')\nEOF",
    "deny", rule=BT, carries=("test-author",), **BR)
 
+# ---- a script a builder runs (the script-file test-write debt). The shell check judges a script by its text when
+# the same command writes it (a heredoc body), and when the command runs a file it names: `python3 f`, `./f` with a
+# shebang, `node f`, `bash f`, `sh f`, `source f`, `. f`. These cases pin that a script already on disk is read
+# the same way, so a test path it writes is seen. SCRIPTREPO is a checkout of its own under the run folder.
+# No case here writes to GITMAIN or GITWT, whose status other families read.
+SCRIPTREPO = os.path.join(ROOT, "scriptrepo")
+SR = dict(B, cwd=SCRIPTREPO)
+TEST_WRITE_PY = "open('tests/x.py', 'w').write('x = 1\\n')\n"
+SRC_WRITE_PY = "open('src/app.py', 'w').write('x = 3\\n')\n"
+NODE_WRITE = "require('fs').writeFileSync('web/a.test.js', 'x')\n"
+
+
+def guard_constant(name):
+    """A module-level constant of the guard under test, read from its source. The value is an expression
+    such as 64 * 1024, evaluated with no names in reach, so a case never copies the number."""
+    with open(GUARD, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), GUARD)
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == name for t in node.targets):
+            return eval(compile(ast.Expression(node.value), GUARD, "eval"), {"__builtins__": {}})
+    sys.exit("fixture setup failed: %s is not a module-level constant in %r" % (name, GUARD))
+
+
+def _build_scriptrepo():
+    """SCRIPTREPO: a checkout holding the script files the cases below name. Each file holds the one shape its
+    case tests. The two sized files sit at the guard's cap and one byte over it."""
+    cap = guard_constant("MESSAGE_FILE_MAX")
+    make_repo(SCRIPTREPO, {
+        "src/app.py": "x = 1\n",
+        "tests/test_x.py": "open('tests/y.py', 'w').write('x = 1\\n')\n",  # a test that writes a test path
+        "gen.py": TEST_WRITE_PY,
+        "gen_ok.py": SRC_WRITE_PY,
+        "gen_string.py": "s = \"# don't\"  # ok\n" + TEST_WRITE_PY,        # a comment opener and a lone quote
+        "gen_shebang": "#!/usr/bin/env python3\n" + TEST_WRITE_PY,
+        "gen_node.js": NODE_WRITE,
+        "gen_tpl.js": "const s = `\nline one\nline two\n`;\n" + NODE_WRITE,  # a multi-line template literal
+        "shell_write.sh": "echo x > tests/x.py\n",
+        "shell_src.sh": "echo x > src/app.py\n",
+        "shell_lone.sh": "# don't touch this\necho x > tests/x.py\n",     # a lone quote in a comment
+        "comment_only.py": "# open('tests/x.py', 'w')\nprint('tests/x.py')\n",
+        "empty.py": "",
+        "x/keep": "keep\n",
+    })
+    os.chmod(os.path.join(SCRIPTREPO, "gen_shebang"), 0o755)
+    for name, total in (("at_cap.py", cap), ("over_cap.py", cap + 1)):
+        lead = "#" * (total - len(TEST_WRITE_PY) - 1) + "\n"   # a comment line that fills the file, then the write
+        with open(os.path.join(SCRIPTREPO, name), "wb") as handle:
+            handle.write((lead + TEST_WRITE_PY).encode("ascii"))
+    for name, size in (("at_cap.py", cap), ("over_cap.py", cap + 1), ("empty.py", 0),
+                       ("gen.py", len(TEST_WRITE_PY))):
+        got = os.path.getsize(os.path.join(SCRIPTREPO, name))
+        if got != size:
+            sys.exit("fixture setup failed in _build_scriptrepo: %r is %d bytes, want %d" % (name, got, size))
+
+
+lazy_fixture([SCRIPTREPO], _build_scriptrepo)
+
+# Refused. The same command writes a script and runs it: the heredoc body is judged, never the disk copy.
+for _name, _command in (
+    ("heredoc to gen_q.py, quoted EOF, then python3 runs it, writes tests/x.py",
+     "cat > gen_q.py <<'EOF'\n" + TEST_WRITE_PY + "EOF\npython3 gen_q.py"),
+    ("heredoc to gen_u.py, unquoted EOF, then python3 runs it, writes tests/x.py",
+     "cat > gen_u.py <<EOF\n" + TEST_WRITE_PY + "EOF\npython3 gen_u.py"),
+    ("tee to gen_t.py from a heredoc, then python3 runs it, writes tests/x.py",
+     "tee gen_t.py <<'EOF'\n" + TEST_WRITE_PY + "EOF\npython3 gen_t.py"),
+    ("heredoc to gen_n.js, then node runs it, writes web/a.test.js",
+     "cat > gen_n.js <<'EOF'\n" + NODE_WRITE + "EOF\nnode gen_n.js"),
+):
+    sh("builder-test: script-file, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **SR)
+# Control, refused on the base commit already: a heredoc shell script that sh runs writes a test path.
+sh("builder-test: script-file control, heredoc to run_s.sh, then sh runs it, writes tests/x.py, is refused",
+   "cat > run_s.sh <<'EOF'\necho x > tests/x.py\nEOF\nsh run_s.sh", "deny", rule=BT,
+   carries=("test-author",), **SR)
+
+# Refused. A script already on disk, run by the command: its own text is read.
+for _name, _command in (
+    ("python3 runs gen.py by its absolute path, writes tests/x.py",
+     "python3 " + os.path.join(SCRIPTREPO, "gen.py")),
+    ("python3 -W ignore gen.py, the flag value is skipped, writes tests/x.py", "python3 -W ignore gen.py"),
+    ("./gen_shebang runs as python by its shebang, writes tests/x.py", "./gen_shebang"),
+    ("cd x, then python3 ../gen.py, writes tests/x.py", "cd x && python3 ../gen.py"),
+    ("node runs gen_node.js, writes web/a.test.js", "node gen_node.js"),
+    ("node runs gen_tpl.js, a multi-line template literal, then writes web/a.test.js", "node gen_tpl.js"),
+    ("bash runs shell_write.sh, echo redirect onto tests/x.py", "bash shell_write.sh"),
+    ("source runs shell_write.sh, echo redirect onto tests/x.py", "source shell_write.sh"),
+    (". runs shell_write.sh, echo redirect onto tests/x.py", ". shell_write.sh"),
+    ("python3 runs gen_string.py, a string holds # don't before the test write", "python3 gen_string.py"),
+    ("bash runs shell_lone.sh, a comment holds a lone quote before the test redirect", "bash shell_lone.sh"),
+    ("python3 runs at_cap.py, exactly the cap, the test write in its last bytes", "python3 at_cap.py"),
+):
+    sh("builder-test: script-file, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **SR)
+
+# Allowed. A script that writes product code, a script missing or empty, one a byte over the cap (never read),
+# a test run (running tests is builder work), a string or comment that names a test path, and a heredoc body
+# that rewrites the disk copy's path with product code (the body wins).
+for _name, _command in (
+    ("python3 runs over_cap.py, one byte over the cap, is not read", "python3 over_cap.py"),
+    ("python3 runs gen_ok.py, writing src/app.py", "python3 gen_ok.py"),
+    ("python3 runs missing.py, which is not on disk", "python3 missing.py"),
+    ("python3 runs empty.py, an empty file", "python3 empty.py"),
+    ("python3 runs tests/test_x.py, running a test is builder work", "python3 tests/test_x.py"),
+    ("python3 -m pytest runs tests/test_x.py", "python3 -m pytest tests/test_x.py"),
+    ("bash runs shell_src.sh, writing src/app.py", "bash shell_src.sh"),
+    ("python3 runs comment_only.py, which names tests/x.py in a comment and a string",
+     "python3 comment_only.py"),
+    ("echo of a quoted python3 gen.py", "echo \"python3 gen.py\""),
+    ("true, then a comment naming python3 gen.py", "true # python3 gen.py"),
+    ("heredoc to gen.py writes src/app.py, then python3 runs it, the body wins over the disk copy",
+     "cat > gen.py <<'EOF'\n" + SRC_WRITE_PY + "EOF\npython3 gen.py"),
+):
+    sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
+sh("builder-test: script-file, test-author runs python3 gen.py, writing tests/x.py, is allowed",
+   "python3 gen.py", "allow", agent_id="auth1", agent_type="test-author", cwd=SCRIPTREPO)
+
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
 BASE_FILES = {
