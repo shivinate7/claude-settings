@@ -940,7 +940,9 @@ def _run_files(text: str, written) -> set:
         line_words = _plain_words(_WORDS(line))
         if _SUBSTITUTION.search(line) and any(_RUNNER(_basename_word(word)) for word in line_words):
             ran.update(written.intersection(line_words))
-        for pipeline in re.split(r";|&&|\|\||&", line):
+        # A substitution is a command of its own: `cat f` inside `eval "$(cat f)"` reads f, and the line above decides
+        # whether the runner runs what it prints.
+        for pipeline in re.split(r";|&&|\|\||&|\$\(|<\(|`|\)", line):
             stages = pipeline.split("|")
             words = [_plain_words(_WORDS(stage)) for stage in stages]
             reads = [_reads_only(stage_words) for stage_words in words]
