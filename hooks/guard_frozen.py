@@ -484,11 +484,20 @@ _OPEN_REDIRECT = re.compile(r"\d*>>?|&>>?")
 _CP_DEST_UNSAFE = re.compile(r"[$`*?\[{<>]")
 
 
-def _copy_reads(raw, predicate, cwd):
+def _cp_start(raw, keywords=False):
+    """The index of the `cp` word of a segment, past its `VAR=value` words (and past `do`, `then` and
+    the other loop keywords when `keywords`), else None when the command is not `cp`."""
+    start = 0
+    while start < len(raw) and (_ASSIGNMENT.match(raw[start]) or keywords and raw[start] in LOOP_KEYWORDS):
+        start += 1
+    return start if _name(raw[start] if start < len(raw) else "") == "cp" else None
+
+
+def _copy_reads(raw, predicate, cwd, keywords=False):
     """The indexes of the words of a `cp` segment that are only read, else an empty set."""
     words = [_unquoted(word) for word in raw]
-    start = next((i for i, word in enumerate(raw) if not _ASSIGNMENT.match(word)), len(raw))
-    if _name(raw[start] if start < len(raw) else "") != "cp":
+    start = _cp_start(raw, keywords)
+    if start is None:
         return set()
     operands, target, index = [], None, start + 1
     while index < len(words):
@@ -530,14 +539,14 @@ def _copy_reads(raw, predicate, cwd):
     return set(operands)
 
 
-def _cp_link_source(raw, holds, cwd) -> str:
+def _cp_link_source(raw, holds, cwd, keywords=False) -> str:
     """The word of a linking `cp` (`-l`, `-s`, `--link`, `--symbolic-link`, in any cluster) that
     `holds(word, cwd)` accepts, else ''. A link to a frozen file, or to a folder of them, gives the
     new name the frozen file itself, so a later write there writes it. Every operand but a plain
     DEST is judged; with `-t` every operand is, which fails closed."""
     words = [_unquoted(word) for word in raw]
-    start = next((i for i, word in enumerate(raw) if not _ASSIGNMENT.match(word)), len(raw))
-    if _name(raw[start] if start < len(raw) else "") != "cp":
+    start = _cp_start(raw, keywords)
+    if start is None:
         return ""
     link = target = False
     operands = []
@@ -598,6 +607,7 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 # root fed through a variable that a loop or an xargs itself assigns are not read.
 _MARK = "\0"
 _MARK_AT = re.compile("`\0`|\0")
+_WORD_MARK = "\x01"   # the mark as `_copy_outer` splits words: `_quoted_words` keeps it, not NUL
 _FIND_EXEC = ("-exec", "-execdir", "-ok", "-okdir")
 _FIND_END = (";", "\\;", "+")
 _FIND_TEST_STARTS = ("(", "\\(", "!", "\\!")
@@ -653,14 +663,44 @@ def _roots(words) -> list:
     return roots[1:] if grep and not has_pattern else roots
 
 
+def _piped_into(ends, parsed, at):
+    """The index of the segment whose output pipes into segment `at`, else None. A pipe at a line's
+    end leaves an empty segment cut at the newline before the next command; it is passed over."""
+    back = at - 1
+    while back >= 0 and not parsed[back] and ends[back] == "\n":
+        back -= 1
+    return back if back >= 0 and ends[back] == "|" else None
+
+
+def _prints_a_count(words) -> bool:
+    """True when the segment prints a count of what is piped in, not paths: `wc`, or a grep that
+    counts (`-c`, `--count`), with no root of its own. The roots of a pipeline that ends in one are
+    not fed on. Narrow on purpose: `grep -l` and `-rl` print paths, and `wc FILE` prints FILE."""
+    index = resolve_command(tuple(words))
+    if index is None or _roots(words):
+        return False
+    name = _name(words[index])
+    return name == "wc" or name in _GREP_COMMANDS and any(
+        word in ("-c", "--count") for word in words[index + 1:])
+
+
 def _text_roots(text: str) -> list:
-    """The roots of every segment of a command text, in order, each once."""
+    """The roots of every pipeline of a command text, in order, each once. A pipeline that ends in a
+    count (`_prints_a_count`) gives none."""
     ends = []
     segments = split_segments(text, ends)
-    segments, _ends, _changed = _fed_segments(segments, ends)
+    segments, ends, _changed = _fed_segments(segments, ends)
+    parsed = [_quoted_words(segment) for segment in segments]
+    fed_by = [_piped_into(ends, parsed, at) for at in range(len(parsed))]
     roots = []
-    for segment in segments:
-        roots.extend(word for word in _roots(_quoted_words(segment)) if word not in roots)
+    for at, words in enumerate(parsed):
+        if not words or at in fed_by or _prints_a_count(words):
+            continue   # empty, not the last of its pipeline, or a count
+        chain, stage = [], at
+        while stage is not None:
+            chain = _roots(parsed[stage]) + chain
+            stage = fed_by[stage]
+        roots.extend(word for word in chain if word not in roots)
     return roots
 
 
@@ -731,10 +771,12 @@ def _fed_segments(segments, ends):
         index, chain = _walk_wrappers(tuple(words))
         xargs = next((flags for word, flags in chain if word == "xargs"), None)
         if index is not None and xargs is not None:
-            roots, back = [], len(out) - 1
-            while back >= 0 and out_ends[back] == "|":
+            roots, back = [], _piped_into(out_ends, out_words, len(out))
+            if back is not None and _prints_a_count(out_words[back]):
+                back = None
+            while back is not None:
                 roots = _roots(out_words[back]) + roots
-                back -= 1
+                back = _piped_into(out_ends, out_words, back)
             replace = None
             for flag, value in xargs:
                 if flag == "-I":
@@ -760,7 +802,8 @@ def _fed_segments(segments, ends):
             changed = changed or made
             out.append(type(segment)(" ".join(part_words)) if made else segment)
             out_ends.append(ends[number] if part == len(rewritten) - 1 else ";")
-            out_words.append(part_words)
+            out_words.append(words)   # a later xargs reads roots here: the stage's own words, so a
+            # chain of xargs stages, each fed the stages before it, grows by a sum and not a product
     return out, out_ends, changed
 
 
@@ -787,8 +830,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     `read_fed` reads what main reads, and more: a path that `find`, `xargs`, a `for` list or a
     substitution feeds to a writer. It judges the command as it stands (`_copy_outer` aside), then
     each substitution's inner command as a command of its own, then the command once more as
-    `_fed_command` rewrites it. It only adds refusals, except for a `cp` whose sources are built by
-    a substitution (`cp $(find tests -name x) /tmp/`): those are reads, not flags. The builder test
+    `_fed_command` rewrites it. It only adds refusals, except for a `cp` source that is a whole
+    substitution (`cp $(find tests -name x) /tmp/`): that is a read (`_copy_outer`). The builder test
     check asks for it, from rule 7c and from `never_lifted` (both call `builder_shell_test_hit`), so
     no other caller's verdict moves."""
     def scan(text, fed=None, copy_outer=False):
@@ -808,9 +851,11 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
 
 
 def _copy_outer(segment):
-    """A `cp` segment whose substitutions are all among its sources, as the text around them with an
-    `x` in each one's place, else the segment. A substitution in the last word, as `-t`'s value, or
-    in a flag is left in: the destination of a copy is a write, and `_copy_reads` fails closed on it."""
+    """A `cp` segment whose substitutions are each a whole source word (`$(...)`, a backtick pair,
+    quoted or not), as the text around them with an `x` in each one's place, else the segment. Any
+    other substitution leaves the segment as main reads it: one in the last word, in a flag, glued to
+    a flag (`-t$(...)`, `--target-directory=$(...)`), after a flag that takes the target directory,
+    or glued to other text in any word (`tests/$(...)`, `/tmp/$(...)`)."""
     words = _quoted_words(segment)
     index = resolve_command(tuple(words))
     if index is None or _name(words[index]) != "cp" or is_powershell(segment):
@@ -818,12 +863,22 @@ def _copy_outer(segment):
     texts, too_deep = _substitutions(segment, mark=_MARK)
     if too_deep or len(texts) < 2:
         return segment
-    outer = _quoted_words(texts[-1][0])
+    # `_quoted_words` reads NUL as a space, so the mark goes in as a byte it keeps.
+    outer = [_unquoted(word) for word in _quoted_words(texts[-1][0].replace(_MARK, _WORD_MARK))]
     for at, word in enumerate(outer):
-        if _MARK in word and (at == len(outer) - 1 or word.startswith("-") or outer[at - 1].startswith("-t")
-                              or outer[at - 1] == "--target-directory"):
+        if _WORD_MARK not in word:
+            continue
+        if word not in (_WORD_MARK, "`%s`" % _WORD_MARK) or at == len(outer) - 1 or _takes_target(outer[at - 1]):
             return segment
     return type(segment)(_MARK_AT.sub("x", texts[-1][0]))
+
+
+def _takes_target(word) -> bool:
+    """True when a `cp` word takes the next word as its target directory: a short cluster that ends in
+    `t`, or `--target-directory` or a long flag it starts with."""
+    if word.startswith("--"):
+        return len(word) > 2 and "=" not in word and "target-directory".startswith(word[2:])
+    return word.startswith("-") and word.endswith("t")
 
 
 def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, predicate_command,
@@ -845,10 +900,10 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     for number, raw in enumerate(parsed):
-        linked = _cp_link_source(raw, holds, cwd)
+        linked = _cp_link_source(raw, holds, cwd, bool(fed))
         if linked:
             return linked
-        data = set() if closed else _copy_reads(raw, predicate, cwd)
+        data = set() if closed else _copy_reads(raw, predicate, cwd, bool(fed))
         if kinds[number] in ("printer", "message"):
             last = number
             while last + 1 < len(kinds) and ends[last] == "|":
