@@ -3694,6 +3694,15 @@ sh("two-worktrees: worktree add --force of a held branch is refused",
 # A QUOTED NAME is still the held branch once the shell strips the quotes.
 sh("two-worktrees: a quoted branch name is the held branch, and is refused",
    VCS + ' checkout -B "x"', "deny", TWO_RULE, cwd=TWACT)
+# THE IGNORE FLAG REFUSES ANY BRANCH, even one no worktree holds (the ruling, settled in its record).
+sh("two-worktrees: checkout --ignore-other-worktrees of a branch no worktree holds is refused",
+   VCS + " checkout --ignore-other-worktrees y", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: switch --ignore-other-worktrees of a branch no worktree holds is refused",
+   VCS + " switch --ignore-other-worktrees y", "deny", TWO_RULE, cwd=TWACT)
+# THE -C TREE. The tree a command runs in is the one `git -C` names, else the cwd. A -C naming another
+# tree that lacks x is refused while the holder holds x.
+sh("two-worktrees: git -C <other> checkout -B x, where the holder holds x, is refused",
+   VCS + " -C " + slash(TWACT) + " checkout -B x", "deny", TWO_RULE, cwd=TWACT)
 # A READ THAT FAILS REFUSES. The stand-in fails only the worktree list read, and `-B y` names no held
 # branch, so the refusal can only come from the failed read.
 stand_in_sh("two-worktrees: a failed worktree list read refuses, even for a branch no worktree holds",
@@ -3717,6 +3726,8 @@ sh("two-worktrees: worktree add of a new branch, with no force, is allowed",
    VCS + " worktree add -b w3-new ../w3", "allow", cwd=TWACT)
 sh("two-worktrees: worktree add of a held branch, with no force, is git's own refusal, not this rule's",
    VCS + " worktree add ../w4 x", "allow", cwd=TWACT)
+sh("two-worktrees: git -C <holder> checkout -B x, run in the holder's own tree, is allowed",
+   VCS + " -C " + slash(TWHOLD) + " checkout -B x", "allow", cwd=TWHOLD)
 
 
 def _two_worktrees_calls(command, cwd):
