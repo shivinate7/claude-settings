@@ -7,9 +7,7 @@ also read [`layout.md`](layout.md). An entry marked Guidance is not a house rule
 
 ## ux-press-moves-nothing
 
-A press, a load or a change of state moves no other content. A row that leaves an open list under
-ux-order-holds-still, and the rows that close its gap, are not a move under this rule (owner,
-2026-11-06 16:47 CST, item 313 a).
+A press, a load or a change of state moves no other content.
 Check: press each control and load each state. Pass when no other element moves or resizes. A
 loading area keeps its loaded size, and a control keeps the box of its widest label or icon.
 Source: banchi D118 (a press never moves other content) and D313 (nothing moves unless moved);
