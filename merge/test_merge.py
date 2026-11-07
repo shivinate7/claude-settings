@@ -12740,6 +12740,66 @@ def per_call(*answers):
     return answer
 
 
+RENDEZVOUS_WAIT = 30  # seconds a judge call waits for its peers before it gives up: a deadlock guard, never a timing assert. A run that overlaps its calls never reaches it
+CALL_LINES = 50  # cited lines in each file of three_call_files: the packer holds 61 lines to a call, so three such files make three calls, none past the cap
+CALL_VERDICTS = {7: ("stale", "the cited file says otherwise"), 14: ("unbacked", "no cited file backs it"),
+                 35: ("stale", "the cited file says otherwise"), 42: ("unbacked", "no cited file backs it"),
+                 49: ("stale", "the cited file says otherwise")}  # the verdicts three_call_files' lines get, by line number; every other line holds
+
+
+def three_call_files():
+    """Three governed files of CALL_LINES cited lines each, on lines 3 to 52. They pack into three calls, the last one short."""
+    return {p: tagged_doc(["%s-l%03d" % (x, n) for n in range(1, CALL_LINES + 1)]) for p, x in zip((LANE_A, LANE_B, LANE_C), "abc")}
+
+
+def call_verdict(path, number):
+    """The verdict of one line of three_call_files: its CALL_VERDICTS entry, else holds."""
+    return CALL_VERDICTS.get(number, ("holds", "the cited file agrees"))
+
+
+def finding_lines(out):
+    """The printed finding lines of the prose judge, in print order."""
+    return [line for line in out.splitlines() if line.startswith("merge: #7 prose judge, ")]
+
+
+def expected_findings(skip=()):
+    """The finding lines three_call_files prints, in file order, with the (path, line) rows in `skip` left out."""
+    return ["merge: #7 prose judge, %s:%d %s: %s" % (p, n, CALL_VERDICTS[n][0], CALL_VERDICTS[n][1])
+            for p in (LANE_A, LANE_B, LANE_C) for n in sorted(CALL_VERDICTS) if (p, n) not in skip]
+
+
+def rendezvous(barrier, answer):
+    """An answer that waits at `barrier` for its peer calls, then gives `answer`'s reply. A call that waits alone breaks the barrier."""
+    def waited(prompt):
+        barrier.wait()
+        return answer(prompt)
+    return waited
+
+
+def failing_job(failure):
+    """An answer that gives `failure` to the call holding the last line of LANE_C, and the three_call_files verdicts to the other calls."""
+    judged = answering(call_verdict)
+
+    def answer(prompt):
+        if (LANE_C, CALL_LINES + 2) in judged_rows(prompt):
+            return failure(prompt)
+        return judged(prompt)
+    return answer
+
+
+class TimeoutSpy(JudgeStub):
+    """A JudgeStub that also records the timeout each call runs under: the one the caller passed, else invoke_model's own default."""
+    def __init__(self, answer):
+        super().__init__(answer)
+        self.timeouts = []
+
+    def __call__(self, prompt, *args, **kwargs):
+        bound = inspect.signature(REAL_INVOKE_MODEL).bind(prompt, *args, **kwargs)
+        bound.apply_defaults()
+        self.timeouts.append(bound.arguments["timeout"])
+        return super().__call__(prompt, *args, **kwargs)
+
+
 REAL_INVOKE_MODEL = decision_watch.invoke_model  # captured at import, before the test base swaps in its stub
 REAL_RUN = decision_watch._nowindow.run  # captured at import, before the test base wraps it
 
@@ -13503,6 +13563,93 @@ class ProseJudge(Env):
         self.assertEqual(sorted(t for p in stub.prompts for t in tags_in(p)), sorted(["huge-l1"] + tags), "a line is not in exactly one call")
         self.assertEqual(prose_unknown_lines(out), [], "a line is not judged\n" + out)
         self.assertEqual(rc, 0, out)
+
+    def test_the_three_judge_calls_run_at_once(self):
+        # Three files pack into three calls, and each call waits at one barrier of three. The barrier passes only when all three calls are in flight at once.
+        self.setup_range(three_call_files(), {BACKING: BACKING_TEXT})
+        barrier = threading.Barrier(3, timeout=RENDEZVOUS_WAIT)
+        stub, rc, out = self.judge(rendezvous(barrier, answering(call_verdict)), cap=None)
+        self.assertEqual(len(stub.prompts), 3, "model calls: %d, want 3: three files of %d lines make three calls" % (len(stub.prompts), CALL_LINES))
+        self.assertFalse(barrier.broken, "the three judge calls did not overlap: one waited alone until the barrier broke\n" + out)
+        self.assertEqual(prose_unknown_lines(out), [], "a call read UNKNOWN: it did not reach the barrier with its peers\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_each_judge_call_runs_under_a_300_second_timeout(self):
+        # A 24 KB call takes about 195 s, past MODEL_TIMEOUT (120 s), so each judge call passes 300 s to invoke_model.
+        # test_a_caller_with_no_timeout_keeps_model_timeout pins the default that every other caller keeps.
+        self.setup_range(three_call_files(), {BACKING: BACKING_TEXT})
+        spy = TimeoutSpy(answering(call_verdict))
+        with unittest.mock.patch.object(decision_watch, "invoke_model", spy):
+            rc, out = self.run_capped(cap=None)
+        self.assertEqual(len(spy.prompts), 3, "model calls: %d, want 3" % len(spy.prompts))
+        self.assertEqual(spy.timeouts, [300, 300, 300], "invoke_model ran the judge's calls under %s s, want 300 s each: a call did not pass its own timeout" % spy.timeouts)
+        self.assertEqual(getattr(merge, "PROSE_JUDGE_TIMEOUT", None), 300, "merge.PROSE_JUDGE_TIMEOUT is not the named 300 s constant")
+        self.assertEqual(rc, 0, out)
+
+    def test_the_report_reads_in_file_order_whatever_order_the_calls_finish(self):
+        # The first file's call finishes last, the middle one next, the last file's call first. Each waits for the call that finishes before it.
+        # The findings still print in file order, the same lines the sequential run prints.
+        self.setup_range(three_call_files(), {BACKING: BACKING_TEXT})
+        done, last_done, middle_done = [], threading.Event(), threading.Event()
+
+        def finish_in_reverse(prompt):
+            rows = judged_rows(prompt)
+            if (LANE_A, 3) in rows:
+                name, waits_for, sets = "first", middle_done, None
+            elif (LANE_C, CALL_LINES + 2) in rows:
+                name, waits_for, sets = "last", None, last_done
+            else:
+                name, waits_for, sets = "middle", last_done, middle_done
+            if waits_for is not None and not waits_for.wait(RENDEZVOUS_WAIT):
+                raise RuntimeError("the call that should finish before this one did not finish")
+            done.append(name)
+            if sets is not None:
+                sets.set()
+            return answering(call_verdict)(prompt)
+
+        stub, rc, out = self.judge(finish_in_reverse, cap=None)
+        self.assertEqual(len(stub.prompts), 3, "model calls: %d, want 3" % len(stub.prompts))
+        self.assertEqual(done, ["last", "middle", "first"], "the calls finished as %s, want last, middle, first: the calls did not overlap, so the finish order was not forced" % done)
+        self.assertEqual(prose_unknown_lines(out), [], "a call read UNKNOWN\n" + out)
+        self.assertEqual(finding_lines(out), expected_findings(), "the findings do not read in file order as the sequential run does\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def assert_one_call_unknown(self, stub, out, cause):
+        # The call that holds the last line of LANE_C reads its lines UNKNOWN under `cause`, as one count line. The other calls' verdicts stand.
+        self.assertEqual(len(stub.prompts), 3, "model calls: %d, want 3" % len(stub.prompts))
+        failed = [p for p in stub.prompts if (LANE_C, CALL_LINES + 2) in judged_rows(p)]
+        self.assertEqual(len(failed), 1, "calls holding the failing line: %d, want 1" % len(failed))
+        rows = set(judged_rows(failed[0]))
+        self.assert_unknown_count(out, len(rows), [(len(rows), cause)])
+        self.assertEqual(finding_lines(out), expected_findings(skip=rows), "the other calls' verdicts did not stand: the findings differ from the fixture outside the failed call\n" + out)
+
+    def test_a_call_that_raises_turns_only_its_own_lines_unknown(self):
+        self.setup_range(three_call_files(), {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(failing_job(raises(RuntimeError("the model fell over"))), cap=None)
+        self.assert_one_call_unknown(stub, out, "model error")
+        self.assertEqual(rc, 0, out)
+
+    def test_a_call_that_times_out_turns_only_its_own_lines_unknown(self):
+        self.setup_range(three_call_files(), {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(failing_job(lambda prompt: (None, decision_watch.MODEL_TIMEOUT_ERROR)), cap=None)
+        self.assert_one_call_unknown(stub, out, "timed out")
+        self.assertEqual(rc, 0, out)
+
+    def test_a_caller_with_no_timeout_keeps_model_timeout(self):
+        # decision_watch.run calls `model_call(prompt)` with no timeout, so invoke_model's default applies: MODEL_TIMEOUT, 120 s.
+        # The judge's 300 s never reaches that caller.
+        seen, scratch = [], tempfile.mkdtemp(dir=self.t)
+
+        def run(args, **kwargs):
+            if args and args[0] == "claude":
+                seen.append(kwargs.get("timeout"))
+                return types.SimpleNamespace(returncode=0, stdout=json.dumps({"result": '{"verdict": "ALLOW"}'}), stderr="")
+            return REAL_RUN(args, **kwargs)
+        with unittest.mock.patch.object(decision_watch._nowindow, "run", run), \
+                unittest.mock.patch.object(decision_watch, "_judge_isolation", lambda: (scratch, {})):
+            REAL_INVOKE_MODEL("probe")
+        self.assertEqual(decision_watch.MODEL_TIMEOUT, 120, "decision_watch.MODEL_TIMEOUT is not 120 s")
+        self.assertEqual(seen, [120], "the caller with no timeout ran claude under %s s, want MODEL_TIMEOUT 120 s" % seen)
 
 
 NAMED = "hooks/x.py"  # a tracked code path that a prose line names in backticks
