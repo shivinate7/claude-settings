@@ -5,4 +5,4 @@
 - **Decision.** mutation-ci-report-and-replay (the known-defect replay reads a defect that needs a failed install as UNKNOWN).
 - **Fix.** none — rare and harmless. A failed install is an outage of the package source, and a red job is the right signal.
 - **Until.** A failed install in one of these profiles costs a merge, or an entry in `.github/known-defects.json` needs no install.
-- **Retire.** A way to tell an install-free defect from one that needs the install, built with a case that goes red on the old code. Today `hooks/test_mutate_ci.py` pins the exposure (a one-install profile reads every defect UNKNOWN); the fix re-points that case, and the debt closes when the file is green.
+- **Retire.** A way to tell an install-free defect from one that needs the install, built with a case that goes red on the old code. The case lives in `hooks/test_known_defects_exposed.py`, which does not exist yet; the debt closes when that file does and is green.
