@@ -11884,6 +11884,16 @@ sh("perl-ruby-near-forms: a # line inside a multi-line perl string does not end 
 sh("perl-ruby-near-forms: a write call inside a perl string is text, and the real write is refused",
    "perl <<'EOF'\nprint \"open(F, '>', '" + CFG_HOOK + "')\";\nopen(O, '>', '" + CFG_HOOK + "');\nEOF",
    "deny", "frozen-path", cwd=NOGIT)
+# Controls, green today. A # or a ruby #{...} on the write's own line is text, so the write beside it is still refused.
+sh("perl-ruby-near-forms: a # inside a perl heredoc string, on the write's own line, does not hide the write",
+   "perl <<'EOF'\nprint \"#\"; open(O, '>', '" + CFG_HOOK + "');\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("perl-ruby-near-forms: a ruby #{...} interpolation, on the write's own line, does not hide File.write",
+   "ruby <<'EOF'\nputs \"#{1}\"; File.write('" + CFG_HOOK + "', 'x')\nEOF", "deny", "frozen-path", cwd=NOGIT)
+# The real in-place edits beside the -i-in-text red: each edits the hook, so each is refused.
+sh("perl-ruby-near-forms: perl -i.bak edits a config hook in place and is refused",
+   "perl -i.bak -pe 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("perl-ruby-near-forms: perl with -i after the script edits a config hook in place and is refused",
+   "perl -pe 's/a/b/' -i " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
 sh("config-edit: rm of a project settings file is allowed", "rm " + PROJ_SETTINGS, "allow",
    cwd=NOGIT)
 sh("config-edit: mv of a project settings file is allowed",
