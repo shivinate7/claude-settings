@@ -537,6 +537,16 @@ CLAUDE_WAITS_ON_OWNER_PRESS = [
     "Claude merges once the owner has to approve it.",
     "Claude merges after the owner reviews and approves it.",
 ]
+# A session or Claude clause that joins a press by "and" with no subject ("and approve it", "and approve on GitHub"),
+# or that waits on the owner's approval, leaves that press to the owner: the option needs a link.
+SESSION_LEAVES_OWNER_PRESS = [
+    "The session merges PR #374 and approve on GitHub.",
+    "The session clicks Merge and approve it.",
+    "Claude merges PR #374 after the review and approve it.",
+    "The session clicks Merge after the owner's approval.",
+]
+# "the owner's merge commit" names a git object the session keeps, not a press the owner makes: it needs no link.
+SESSION_KEEPS_OWNER_MERGE = ["The session merges PR #374 keeping the owner's merge commit."]
 
 
 def case_session_press_needs_no_link():
@@ -596,6 +606,16 @@ def case_session_press_needs_no_link():
              entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
         chat("a Claude clause that waits for an owner press, %r, with no url, is refused as press-link" % how,
              chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in SESSION_LEAVES_OWNER_PRESS:
+        page("a session clause that leaves an owner press, %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
+        chat("a session clause that leaves an owner press, %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in SESSION_KEEPS_OWNER_MERGE:
+        page("a session clause that keeps the owner's merge commit, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), None)
+        chat("a session clause that keeps the owner's merge commit, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
     for how in SESSION_ONLY:
         page("a session clause with no press, %r, with no link, passes" % how, "set",
              entry_of(page_item(options=[dict(session, how=how), keep])), None)
