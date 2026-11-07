@@ -147,8 +147,8 @@ open item row with no `lane` key reads the items unknown, so a publisher that do
 passes for zero stalled items.
 
 build.py also prints `ready not started: <id> (<age>h)` for each step with status `todo` or `ready` and
-phase `now`. The step needs no live lane (the same test as above) and no valid `paused` field. No open
-item homed on it may lack a lane. The age is whole hours from `updatedAt` to the live read, or `(age unknown)` when `updatedAt`
+phase `now`. The step needs no live lane (the same test as above), no open pull that names it (the pair line
+names the two), and no valid `paused` field. No open item homed on it may lack a lane. The age is whole hours from `updatedAt` to the live read, or `(age unknown)` when `updatedAt`
 is missing or has no zone. The same list rides in the build info (`window.ROADMAP_BUILD.ready`). No page draws it yet.
 One function, `next_act`, gives each ready step and each stalled step `id`, `act`, `owner` and `age`. A ready
 step's act is `start lane`. The owner is the step's `owner` field, else `coordinator`.
@@ -158,8 +158,10 @@ with no age is never over. A `todo` or `ready` step that has landed on main (a `
 no lane to start, and the landed upkeep rows name it. A `todo` or `ready` step with a missing or wrongly cased phase
 prints `ready not started: unknown (<id> has no usable phase)` and is not listed. Every build prints
 `ready not started count: <N>`, zero included, or `ready not started count: unknown (<why>)` when a phase is unusable.
-With no usable live read, the list and the count each read `unknown (<why>)`, never zero, and there is no red line.
-A ready step inside the limit never changes the exit code.
+With no usable live read, or main unread (no step can be shown landed), the list and the count each read
+`unknown (<why>)`, never zero, and there is no red line. A ready step inside the limit never changes the exit code.
+Unmeasured limits: age counts from the step's `updatedAt`, so a weekend or a note edit moves it; a landed doing step
+goes red, but a landed todo step is excluded.
 
 Triage disposes each stalled step by writing, on the record branch, one of three things. It sets the step
 `todo` (the lane is gone and the work is not done) or `done` (it landed). Or it adds `paused`:
@@ -220,7 +222,8 @@ After each build the roadmap build script prints the upkeep list for the triage 
   needed. Each entry is the step id;
 - draft pull requests over 12 hours old with no live lane, in the row `draft PRs over 12 h with no live
   lane`. A pull's age is `createdAt` against the live file's `readAt`. A pull has a live lane when a
-  live session step equals its branch exactly (the in-progress row also counts a `lane/<id>` branch). Each entry is `#N (<branch or
+  live session step equals its branch exactly (the in-progress row also counts a `lane/<id>` branch). An ended
+  session holds no draft. Each entry is `#N (<branch or
   title>)`. A draft with no readable `createdAt` reads `unknown (#N has no createdAt)`. With no usable
   live file the row reads one `unknown (<why>)` entry;
 - page rulings not on their step: each closed waiting-page item whose `home` is a step that is not

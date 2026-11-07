@@ -99,11 +99,15 @@ one read of the waiting page's items (n, status, home) to that same publish. Thi
 process, file, timer or log for it. The dated-claim row adds no git process, file, timer or log: it reads
 the notes already loaded.
 The next act (`next_act`) serves the ready steps and the stalled steps. A ready step (status todo or ready, phase now,
-no live lane, no valid pause, no open lane-less page item) prints `ready not started: <id> (<age>h)`; one more than
-READY_AGE_LIMIT_HOURS old also prints `ready over limit: <id> (start lane; owner <owner>; age <N>h)` and the build
-exits 1, as on a stalled step. An unknown age is never over. A todo step with a missing or wrongly cased phase prints
-`ready not started: unknown (<id> has no usable phase)`. Every build prints `ready not started count: <N>`, or `unknown
-(<why>)` when the read or a phase is unknown. An ended lane (status_bucket completed or failed) holds no step. These add no process, file, timer or log: they use the steps and the live file this script already reads.
+no live lane, no open pull naming it, no valid pause, no open lane-less page item, not landed) prints `ready not
+started: <id> (<age>h)`; one more than READY_AGE_LIMIT_HOURS old also prints `ready over limit: <id> (start lane;
+owner <owner>; age <N>h)` and the build exits 1, as on a stalled step. An unknown age is never over. A todo step with
+a missing or wrongly cased phase prints `ready not started: unknown (<id> has no usable phase)`. Every build prints
+`ready not started count: <N>`, or `unknown (<why>)` when the live read, main or a phase is unknown. An ended lane
+(status_bucket completed or failed) holds no step and no draft. These add no process, file, timer or log: they use
+the steps and the live file this script already reads.
+Unmeasured limits: age counts from the step's updatedAt, so a weekend or a note edit moves it; a landed doing step
+goes red, but a landed todo step is excluded.
 The red line and the two stale-ready rows add no process, file, timer or log: they read the live file this
 script already reads. The publisher adds one field (createdAt) per pull row, from the GitHub list call it
 already makes.
@@ -154,7 +158,7 @@ SESSION_BUCKETS = ("SESSION_STATUS_BUCKET_WORKING", "SESSION_STATUS_BUCKET_BLOCK
                    "SESSION_STATUS_BUCKET_COMPLETED", "SESSION_STATUS_BUCKET_FAILED")
 # The buckets that mark a lane as done working: only these two can list a lane to archive.
 IDLE_BUCKETS = SESSION_BUCKETS[2:4]
-# The buckets of a lane that has ended: it holds no step for the ready rule or the doing rule (coordinator, 14:40 CST Nov 7).
+# The buckets of a lane that has ended: it holds no step for the ready, doing or draft rule (coordinator, 14:40 CST Nov 7).
 # Idle and review ready lanes stay live. A waiting-page item's lane (laneTags) is unchanged.
 ENDED_BUCKETS = SESSION_BUCKETS[3:5]
 # A waiting-page item in one of these statuses no longer holds its lane. The page writes open and closed only
@@ -578,11 +582,10 @@ def live_work(path, steps, slug=None):
     "sessions"?: [{"id", "session_status", "tags"?}]} (triage copies the list_sessions rows, every page;
     list_sessions omits the tags key on a tagless session, so a missing or null tags reads as no tags).
     A file with no threads or pulls list reads unknown, so a dropped key never shows as "none". An entry with the wrong shape is counted in `skipped`, never dropped silently. A step a thread
-    names that is not an open step is listed in `strays`. The session rows feed only the stale-step upkeep row:
-    `sessionSteps` holds the step ids of sessions that are not archived, carrying this repo's cs-repo tag. `liveSteps`
-    holds the same ids minus the sessions whose status_bucket is completed or failed (ENDED_BUCKETS): lane_live's step
-    test reads it. `staleWhy`
-    says why that row reads unknown, or None. `pullWhy` says why the todo-with-open-PR line reads
+    names that is not an open step is listed in `strays`. One list of lane rows (not archived, carrying this repo's
+    cs-repo tag) feeds liveness: `sessionSteps` holds their step ids and `laneTags` their topic and build tags, for an
+    item's lane; `liveSteps` holds the step ids of those rows not ended (ENDED_BUCKETS), for a step's lane and a
+    draft. `staleWhy` says why the live reading is unknown, or None. `pullWhy` says why the todo-with-open-PR line reads
     unknown, or None; it reads only readAt and the pulls list, never the sessions.
     A live file with no sessions list still renders Live work.
     "items" (optional, the waiting page's rows `{"n", "status", "home", "lane"?, "owner"?}`) feeds the page-ruling upkeep
@@ -666,14 +669,13 @@ def live_work(path, steps, slug=None):
         # list_sessions is account-wide and step ids repeat across repos, so a session counts only with this repo's tag.
         # GitHub names ignore case, so the slug compare does too.
         ours = lambda t: repo_tag_names(t, slug)
-        # One filtered list feeds both tag readings, so the archived and repo filters cannot drift apart.
-        tags = [t for r in sessions if r["session_status"] != ARCHIVED_SESSION and any(map(ours, r.get("tags") or []))
-                for t in r.get("tags") or [] if isinstance(t, str)]
+        # One filtered list of lane rows (not archived, this repo's tag) feeds every liveness reading: sessionSteps and
+        # laneTags for items, liveSteps for steps and drafts. Only liveSteps drops the ended rows (ENDED_BUCKETS).
+        rows = [r for r in sessions if r["session_status"] != ARCHIVED_SESSION and any(map(ours, r.get("tags") or []))]
+        tags = [t for r in rows for t in r.get("tags") or [] if isinstance(t, str)]
         session_steps = sorted(step_tag_ids(tags))
-        # An ended lane (completed or failed bucket) holds no step for the ready and doing rules; sessionSteps keeps it.
-        live_steps = sorted(step_tag_ids(
-            t for r in sessions if r["session_status"] != ARCHIVED_SESSION and any(map(ours, r.get("tags") or []))
-            and r.get("status_bucket") not in ENDED_BUCKETS for t in r.get("tags") or []))
+        live_steps = sorted(step_tag_ids(t for r in rows if r.get("status_bucket") not in ENDED_BUCKETS
+                                         for t in r.get("tags") or []))
         lane_tags = sorted({t for t in tags if t.startswith((TOPIC_TAG, BUILD_TAG))})
         lane_sessions = [{"id": r["id"], "session_status": r["session_status"], "tags": r.get("tags") or [],
                           "status_bucket": r.get("status_bucket") if isinstance(r.get("status_bucket"), str) else None}
@@ -841,7 +843,7 @@ def main(argv=None):
                            "read": info["live"]["read"]})
     info["panels"].insert(1, {"name": "Merges", "home": ref or args.main_branch,
                               "read": "unknown (%s)" % unread if unread else short(repo, ref) or "unknown (git could not name the commit)"})
-    info["ready"] = (ready_steps(data["steps"], info["live"], marks) if data else
+    info["ready"] = (ready_steps(data["steps"], info["live"], marks, unread) if data else
                      {"why": "unknown (steps unknown)", "steps": None, "unknown": []})
     out.write_text(render_block(data, info) if args.block else render(data, info), encoding="utf-8")
     if data is None:
@@ -1086,15 +1088,16 @@ def created_at(pull):
 
 
 def stale_drafts(work):
-    """Entries for each draft pull older than STALE_DRAFT_HOURS at the live read with no live lane, or one unknown entry."""
+    """Entries for each draft pull older than STALE_DRAFT_HOURS at the live read with no live lane (an ended lane holds
+    none), or one unknown entry."""
     why = live_why(work)
     if why:
         return [why]
     read = datetime.datetime.fromisoformat(work["read"].replace("Z", "+00:00"))
     out = []
     for p in work["pulls"]:
-        # A lane here is a live session step equal to the bare branch. unlaned also counts a lane/<id> branch.
-        if p.get("draft") is not True or (p.get("branch") and p["branch"] in work["sessionSteps"]):
+        # A lane here is a live, not ended, session step equal to the bare branch. unlaned also counts a lane/<id> branch.
+        if p.get("draft") is not True or (p.get("branch") and p["branch"] in work["liveSteps"]):
             continue
         at = created_at(p)
         if at is None:
@@ -1253,21 +1256,24 @@ def phase_unusable(step):
     return not isinstance(phase, str) or not phase or phase != phase.strip().lower()
 
 
-def ready_steps(steps, work, marks=None):
+def ready_steps(steps, work, marks=None, marks_why=None):
     """The page's ready block: {"why", "steps": [next_act entry] | None, "unknown": [step id]}. A step is listed when
-    its status is todo or ready, its phase is now, no live lane holds it (an ended lane does not), it has no valid
-    `paused` field, no open waiting-page item homed to it lacks a lane (an unanswered item), and it has not landed
-    on main (`marks`: a landed step has no lane to start; the upkeep rows "landed, waiting for ..." name it). A todo step with
-    an unusable phase is not listed; its id goes in `unknown`. `steps` is None only when `why` says the read is
-    unknown, never []."""
+    its status is todo or ready, its phase is now, no live lane holds it (an ended lane does not), no open pull names
+    it (pulled_steps), it has no valid `paused` field, no open waiting-page item homed to it lacks a lane (an
+    unanswered item), and it has not landed on main (`marks`; the landed upkeep rows name it). A todo step with an
+    unusable phase is not listed; its id goes in `unknown`. `steps` is None only when `why` says a read is unknown,
+    never []: the live read, or main (`marks_why`, landed_marks' why), since then no step can be shown landed."""
     _, why = stalled_items(work)  # live_why, then itemsWhy, then an open row with no lane key
+    if not why and marks_why:
+        why = "unknown (%s)" % marks_why
     if why:
         return {"why": why, "steps": None, "unknown": []}
     unanswered = {item_home(r) for r in work["pageItems"] if r["status"] != "closed" and not r["lane"]}
+    pulled = pulled_steps(steps, work)
     read = live_read(work)
     out, unknown = [], []
     for k, d in open_steps(steps):
-        if (d.get("status") not in TODO_STATUS or k in (marks or {}) or lane_live(work, k)
+        if (d.get("status") not in TODO_STATUS or k in (marks or {}) or k in pulled or lane_live(work, k)
                 or pause_why(d) is None or k in unanswered):
             continue
         if phase_unusable(d):
@@ -1275,6 +1281,12 @@ def ready_steps(steps, work, marks=None):
         elif d["phase"] == "now":
             out.append(next_act(k, d, None, read))
     return {"why": None, "steps": out, "unknown": unknown}
+
+
+def pulled_steps(steps, work):
+    """The todo steps an open pull names (todo_pairs): the pair line names them, so the ready list holds them back.
+    The caller has checked live_why(work), which covers the pulls read."""
+    return {k for k, _ in todo_pairs(steps, work) or []}
 
 
 def over_limit(block):
