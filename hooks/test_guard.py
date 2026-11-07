@@ -3623,11 +3623,10 @@ sh("pointer: a move back to main restores the invariant and passes",
    VCS + " checkout main", "allow", cwd=PTRMAIN, config=PTRCFG)
 sh("pointer: switch main passes for the same reason",
    VCS + " switch main", "allow", cwd=PTRMAIN, config=PTRCFG)
-# A checkout detached at local main's commit counts as on main (hooks/session_start.sh, "A checkout detached at
-# local main's commit counts as on main"), so a detach to `main` passes. Only that target: a detach to any other
-# ref stays refused, and so does a detach that names no ref.
-sh("pointer: checkout --detach main leaves HEAD on main's commit, which counts as on main, so it passes",
-   VCS + " checkout --detach main", "allow", cwd=PTRMAIN, config=PTRCFG)
+# A detach names no branch, so HEAD stops naming `main` even when it sits on main's commit. Rule 1b (decision
+# recovery-independent-of-state) passes only a move TO main, so a detach to `main` is refused.
+sh("pointer: checkout --detach main detaches, so it is refused",
+   VCS + " checkout --detach main", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
 sh("pointer: checkout --detach origin/main is not the main exemption, so it is refused",
    VCS + " checkout --detach origin/main", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
 sh("pointer: checkout --detach of another branch is refused",
@@ -3641,13 +3640,11 @@ sh("pointer: checkout -B main onto origin/main passes, from a checkout on main",
    VCS + " checkout -B main origin/main", "allow", cwd=PTRMAIN, config=PTRCFG)
 sh("pointer: switch -C main onto origin/main passes, from a checkout off main",
    VCS + " switch -C main origin/main", "allow", cwd=PTROFF, config=PTROFFCFG)
-# A detach to `main` passes for switch as for checkout: HEAD lands on main's commit, which counts as on main.
-# Near misses, refused: a detach to a remote-tracking ref, which is not local main, and a reset onto any other
-# branch is a new branch.
-sh("pointer: switch --detach main lands on main's commit, so it passes", VCS + " switch --detach main", "allow",
-   cwd=PTRMAIN, config=PTRCFG)
-sh("pointer: switch -d main lands on main's commit, so it passes", VCS + " switch -d main", "allow",
-   cwd=PTRMAIN, config=PTRCFG)
+# The same holds for switch: a detach names no branch, so `--detach main` and `-d main` are refused too.
+sh("pointer: switch --detach main detaches, so it is refused", VCS + " switch --detach main", "deny",
+   "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: switch -d main detaches, so it is refused", VCS + " switch -d main", "deny",
+   "pointer-head", cwd=PTRMAIN, config=PTRCFG)
 sh("pointer: switch --detach origin/main is not the main exemption, so it is refused",
    VCS + " switch --detach origin/main", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
 sh("pointer: switch -C of another branch onto origin/main is refused", VCS + " switch -C somebranch origin/main",
@@ -5546,6 +5543,16 @@ sh("waiter: a PowerShell range piped to % with Start-Sleep is refused",
    "1..10 | % { Start-Sleep 2 }", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
 sh("waiter: a PowerShell range piped to ForEach-Object with Start-Sleep is refused",
    "1..10 | ForEach-Object { Start-Sleep 2 }", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
+# A printing command prints what it is given, but a block that runs still counts its sleep. The control
+# `echo {sleep}`, above, stays allowed: it runs no block.
+sh("waiter: echo of a block that is then invoked, with a long Start-Sleep, is refused",
+   "echo {Start-Sleep 120}.Invoke()", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
+# Two more forms are refused by detached-launch, on main and on this branch, so the waiter never names them.
+# They pin the refusal with no rule named: a waiter name would fail on main, and this branch did not cause it.
+sh("waiter: Write-Host of a call that wraps a long Start-Sleep is refused",
+   "Write-Host ( & { Start-Sleep 120 } )", "deny", tool="PowerShell", cwd=NOGIT)
+sh("waiter: Write-Host of a block piped to a call operator, with a long Start-Sleep, is refused",
+   "Write-Host {Start-Sleep 120} | ForEach-Object { & $_ }", "deny", tool="PowerShell", cwd=NOGIT)
 sh("waiter: gh.exe run watch in the foreground is refused", "gh.exe run watch 1", "deny",
    "waiter", cwd=NOGIT)
 sh("waiter: gh pr checks --watch=true in the foreground is refused",
@@ -6009,6 +6016,11 @@ sh("wsl: a plain node test path that climbs",
    "wsl -e node ../x.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a plain node test path that is absolute",
    "wsl -e node /tmp/evil.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+# The same false green as a plain node glob: python3 and `pwsh -File` run only the first file a glob expands to.
+sh("wsl: a glob in a plain python3 test path is refused",
+   "wsl -e python3 hooks/test_*.py", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a glob in a pwsh -File test path is refused",
+   "wsl -e pwsh -NoProfile -File hooks/test_*.test.ps1", "deny", rule=WSL_RULE, cwd=NOGIT)
 
 # The same allowed call from each role: "allowed (any role)".
 sh("wsl: an allowed test call from a builder agent",
@@ -8839,6 +8851,16 @@ sh("git env set: PowerShell, a value set inside try, denies",
    "try{$env:GIT_DIR='x'}catch{}", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 sh("git env set: PowerShell, a call operator on a block that sets, denies",
    "& { $env:GIT_DIR=1 }", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+# A printing command prints the block it is given and runs none of it. A block that the same call then runs,
+# through `.Invoke()`, a `%` pipe into `& $_`, or Invoke-Expression, still sets the name. The control above,
+# `Write-Host {$env:GIT_DIR=1}`, stays allowed.
+sh("git env set: PowerShell, echo of a block that is then invoked, denies",
+   "echo {$env:GIT_DIR=1}.Invoke()", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, Write-Output of a block piped to a call operator, denies",
+   "Write-Output {$env:GIT_DIR=1} | % { & $_ }", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, Write-Output of a block piped to Invoke-Expression, denies",
+   "Write-Output {$env:GIT_DIR='x'} | Invoke-Expression", "deny", GIT_ENV_RULE, tool="PowerShell",
+   cwd=NOGIT)
 sh("git env set: PowerShell, a value set then git status, denies",
    "$env:GIT_DIR='x'; git status", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 # Scanner cases (building-scanner-respects-strings): a comment opener, a lone apostrophe, a
