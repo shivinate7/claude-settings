@@ -209,6 +209,35 @@ class LandingToolTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assert_quiet([("Bash", {"command": command})], command)
 
+    def test_lt_red_gh_api_merge_calls_block(self):
+        # Catches: a merge made through the REST API lands a commit, but the guard reads only gh pr verbs, so the
+        # turn passes with no report. A PUT to a pull's merge route merges it. A POST to the merges route writes a
+        # merge commit, and gh sends a POST whenever -f fields are given, as in the last command.
+        self.assert_scope(WITNESS_BASH)
+        commands = [
+            "gh api -X PUT repos/o/r/pulls/12/merge",
+            "gh api --method PUT repos/o/r/pulls/12/merge -f merge_method=squash",
+            "gh api -X POST repos/o/r/merges -f base=main -f head=topic",
+            "gh api repos/o/r/merges -f base=main -f head=topic",
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assert_blocks([("Bash", {"command": command})], command)
+
+    def test_lt_green_gh_api_reads_and_other_writes_pass(self):
+        self.assert_scope(WITNESS_BASH)
+        # Catches: a gh api read of a pull, or of its merge status, is taken for a merge, or a write to another
+        # route is taken for one. Only a PUT to a pull's merge route and a POST to the merges route land.
+        commands = [
+            "gh api repos/o/r/pulls/12",
+            "gh api -X GET repos/o/r/pulls/12/merge",
+            "gh api -X PUT repos/o/r/issues/12/labels -f labels[]=x",
+            "gh api -X POST repos/o/r/issues/12/comments -f body=x",
+        ]
+        for command in commands:
+            with self.subTest(command=command):
+                self.assert_quiet([("Bash", {"command": command})], command)
+
 
 if __name__ == "__main__":
     unittest.main()

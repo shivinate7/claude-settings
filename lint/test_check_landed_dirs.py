@@ -21,7 +21,19 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
+sys.path.insert(0, HERE)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 FILES = ("landed-dirs.txt", "install.sh", "install.ps1")
+RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
 def move_frozen_dirs_to_sibling(tree):
@@ -48,7 +60,7 @@ def move_frozen_dirs_to_sibling(tree):
 
 def run_in_copy(edit=None):
     """Copy the inputs to a temp tree, apply `edit(tree)`, run the script there."""
-    tree = tempfile.mkdtemp(prefix="landed_dirs_case_")
+    tree = tempfile.mkdtemp(prefix="landed_dirs_case_", dir=RUN_FOLDER)
     try:
         for rel in FILES:
             shutil.copy(os.path.join(ROOT, rel), os.path.join(tree, rel))
@@ -62,6 +74,16 @@ def run_in_copy(edit=None):
         )
     finally:
         shutil.rmtree(tree, ignore_errors=True)
+
+
+def add_file(rel, text):
+    """An edit that writes one file into the copy at `rel` (repo-relative, `/`-separated)."""
+    def edit(tree):
+        path = os.path.join(tree, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+    return edit
 
 
 def edit_file(rel, old, new):
@@ -99,6 +121,33 @@ class CheckLandedDirsTests(unittest.TestCase):
 
     def test_frozen_dirs_literal_moved_to_a_sibling_module_still_passes(self):
         result = run_in_copy(move_frozen_dirs_to_sibling)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_file_in_a_subfolder_of_a_landed_folder_fails(self):
+        # Why: install.sh's land_dir lands only the top-level files of a landed folder, so a file under
+        # hooks/testdata/ never reaches ~/.claude. The check must refuse it, not pass it.
+        result = run_in_copy(add_file("hooks/testdata/fixture.txt", "case\n"))
+        self.assertEqual(result.returncode, 1,
+                         "a file in hooks/testdata/, a subfolder of landed hooks/, passed the check: %s" % result.stdout)
+        self.assertIn("fixture.txt", result.stderr)
+
+    def test_file_at_the_top_of_a_landed_folder_still_passes(self):
+        # Why: land_dir lands the top-level files of a landed folder, so the nested rule must not refuse them.
+        result = run_in_copy(add_file("hooks/landed_probe.txt", "case\n"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_file_in_a_subfolder_of_an_unlanded_folder_still_passes(self):
+        # Why: testing/ is not a landed folder, so a subfolder there is no landing concern.
+        result = run_in_copy(add_file("testing/nested/probe.txt", "case\n"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_file_in_a_skill_subfolder_still_passes(self):
+        # Why: land_skills_dir links each skills/<name>/ whole, so a file under a skill's subfolder is landed with it.
+        def edit(tree):
+            skills = os.path.join(tree, "skills")
+            skill = next(n for n in sorted(os.listdir(skills)) if os.path.isfile(os.path.join(skills, n, "SKILL.md")))
+            add_file("skills/%s/refs/probe.md" % skill, "case\n")(tree)
+        result = run_in_copy(edit)
         self.assertEqual(result.returncode, 0, result.stderr)
 
 

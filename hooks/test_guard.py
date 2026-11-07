@@ -13164,6 +13164,39 @@ add("builder-test: an added run of a test path with --deselect is refused", "den
     file_path=WF, old_string=LINT,
     new_string=LINT + "      - name: X\n        run: python3 hooks/x_test.py --deselect a\n",
     carries=("test-author", "Report"), **B)
+# A wrapper runs the test it wraps, so a wrapped run is judged as the bare run it wraps. A builder's wrap of a bare
+# run keeps its test, a test-author's wrapped single-line run is a test step, and deleting a wrapped run drops its test.
+WRAPPED_RUNS = (
+    "timeout 600 python3 tests/test_a.py",
+    "xvfb-run -a python3 tests/test_a.py",
+    "coverage run tests/test_a.py",
+    "uv run tests/test_a.py",
+    "env FOO=1 python3 tests/test_a.py",
+    "nice python3 tests/test_a.py",
+    "python3 -m coverage run tests/test_a.py",
+)
+for _form in WRAPPED_RUNS:
+    add("builder-test: %s in place of a bare test run is allowed" % _form, "allow", tool="Edit", file_path=WF,
+        old_string=R3_UNIT, new_string="      - name: Unit\n        run: %s\n" % _form, **B)
+for _form in WRAPPED_RUNS:
+    add("test-author: a whole new test step, %s, is allowed" % _form, "allow", tool="Edit", file_path=WF,
+        old_string=LINT, new_string=LINT + "      - name: Unit\n        run: %s\n" % _form, **A)
+for _form in WRAPPED_RUNS:
+    add("builder-test: a wrapped test run, %s, deleted from checks.yml is refused" % _form, "deny", rule=BT,
+        tool="Edit", file_path=WF, old_string=LINT + "      - name: Unit\n        run: %s\n" % _form, new_string=LINT,
+        carries=("test-author", "Report"), **B)
+add("builder-test: a wrapped test run unwrapped to its bare path is allowed", "allow", tool="Edit", file_path=WF,
+    old_string="      - name: Unit\n        run: timeout 600 python3 tests/test_a.py\n", new_string=R3_UNIT, **B)
+# Not a test run: a wrapper around one does not make it a test, so each of these still drops the test it replaces.
+add("builder-test: a bare test run replaced by an echo of its path is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=R3_UNIT, new_string="      - name: Unit\n        run: echo python3 tests/test_a.py\n",
+    carries=("test-author", "Report"), **B)
+add("builder-test: a bare test run replaced by a timeout around a lint run is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=R3_UNIT, new_string="      - name: Unit\n        run: timeout 600 python3 lint/ste_lint.py\n",
+    carries=("test-author", "Report"), **B)
+add("test-author: a whole new test step, timeout around curl, is refused", "deny", rule=TA, tool="Edit",
+    file_path=WF, old_string=LINT, new_string=LINT + "      - name: Unit\n        run: timeout 600 curl -s x\n",
+    carries=("builder", "Report"), **A)
 add("test-author: a whole new test step with if: false is refused", "deny", rule=TA, tool="Edit",
     file_path=WF, old_string=LINT,
     new_string=LINT + "      - name: Guard tests\n        if: false\n        run: python3 hooks/test_guard.py\n",
