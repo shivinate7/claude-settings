@@ -424,10 +424,10 @@ class Flow(Env):
 
     @windows_slice
     def test_afterMerge_runs_in_git_bash_not_the_wsl_stub(self):
-        """after_merge() (merge/merge.py:470) hands subprocess.run a bare "bash". On Windows,
-        CreateProcess searches C:\\Windows\\System32 before PATH, and that folder holds the WSL
-        launcher stub, not Git Bash (decision bare-bash-on-windows-can-resolve-to-the-wsl-stub;
-        the fix, _find_git_bash(), lives only in hooks/test_config_watch.py). A command that
+        """after_merge() runs its commands in resolve_program("bash"). On Windows, CreateProcess
+        searches C:\\Windows\\System32 before PATH, and that folder holds the WSL launcher stub,
+        not Git Bash (decision bare-bash-on-windows-can-resolve-to-the-wsl-stub; the lookup's one
+        home is hooks/git_bash.py). A command that
         prints $OSTYPE tells the two apart: Git Bash (MSYS/MINGW) says "msys" or "msys-...", the
         WSL stub says "linux-gnu". The redirect target is a bare relative name so this case does
         not also depend on the separate native-path-quoting defect above."""
