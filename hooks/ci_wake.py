@@ -43,7 +43,6 @@ BACKOFF_CAP = 120         # seconds, the longest gap
 READ_TIMEOUT = 60         # seconds for each gh read
 RUN_FIELDS = "databaseId,name,status,conclusion,workflowName,headSha,event"
 GOOD = ("success", "skipped", "neutral")
-REPO_FLAGS = ("-R", "--repo")
 PR_URL = re.compile(r"^https?://([^/]+)/([^/]+/[^/]+)/pull/(\d+)")
 # A word-internal apostrophe (don't) opens no quote. Masked here, so split_segments does not read it as one.
 APOSTROPHE = re.compile(r"(?<=[A-Za-z])'(?=[A-Za-z])")
@@ -140,45 +139,19 @@ def watch_run(run_id, cwd, deadline, repo=""):
         time.sleep(gap)
 
 
-def ready_call(rest, env_repo=""):
-    """-> (selector, repo) for the args of a `gh pr ready` call, else None. The repo is the -R or
-    --repo value (`-R o/r`, `-Ro/r`, `-R=o/r`, `--repo o/r`, `--repo=o/r`), else env_repo (GH_REPO)."""
-    if rest[:2] != ["pr", "ready"] or any(a in ("--undo", "-h", "--help") for a in rest):
-        return None
-    pos, repo, i = [], env_repo, 2
-    while i < len(rest):
-        a = rest[i]
-        if a in REPO_FLAGS and i + 1 < len(rest):
-            repo, i = rest[i + 1], i + 1
-        elif a.startswith("--repo="):
-            repo = a[7:]
-        elif a.startswith("-R") and not a.startswith("--"):
-            repo = a[2:].lstrip("=")
-        elif not a.startswith("-"):
-            pos.append(a)
-        i += 1
-    return (pos[0] if pos else ""), repo
-
-
 def triggers(command, powershell):
     """-> [(selector, repo)], one per `gh pr ready` in the command. Reads the text only. A heredoc
     body, quoted text and text after `#` is no command (split_segments drops comments and keeps
     quotes whole); a lone apostrophe in a word opens no quote. A lone `&` ends a command too
     (guard_env's quote-aware split); the `&` of `2>&1` leaves the call whole."""
     import guard_core
-    from guard_core import resolve_command, segment_tokens
     from guard_env import _ampersand_split
-    from guard_merge import gh_call_of
+    from guard_merge import ready_call_of
     guard_core.POWERSHELL_CALL[0] = powershell
     text = APOSTROPHE.sub("\x01", guard_core.strip_heredoc_bodies(command))
     found = []
     for segment in (p for s in guard_core.split_segments(text) for p in _ampersand_split(s)):
-        rest = gh_call_of(segment)
-        call = None
-        if rest is not None:
-            tokens = segment_tokens(segment) or []
-            env = [t[8:] for t in tokens[:resolve_command(tokens) or 0] if t.startswith("GH_REPO=")]
-            call = ready_call(rest, env[-1] if env else "")
+        call = ready_call_of(segment)
         if call:
             found.append(call)
     return found

@@ -29,6 +29,9 @@ MACHINE_TAGS = ("<system-reminder>", TASK_NOTIFICATION_TAG) + _HAND_BACK_TAGS + 
 NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teammate-message")
                       for end in "> \t\n\r") + ("[SYSTEM NOTIFICATION",)
 
+# The label of an integration pull request: the merge ledger and the ready guard read it (`merge --lane-lint <pr> --integration` adds it).
+BATCH_LABEL = "batch"
+
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries this marker
 # (rule agent-role-model). Here, not in the guard, so the spawn judge names it without importing the guard.
 EXPLORE_AUDIT_MARKER = "Audit:"
@@ -70,6 +73,10 @@ STEP_TAG = "cs-step:"
 TOPIC_TAG = "cs-topic:"
 BUILD_TAG = "cs-build:"
 LANE_TAG = BUILD_TAG + "lane"
+
+# An older integration pull request carries no label, so the ready guard (rule draft-pr, decision draft-until-reviewed)
+# also reads a head ref that starts with this prefix as the batch's integration PR (rule git-integration-branch-merge).
+INTEGRATION_BRANCH_PREFIX = "batch-"
 
 
 def lane_head_refs(slug: str) -> tuple[str, str]:

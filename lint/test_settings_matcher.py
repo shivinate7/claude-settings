@@ -99,6 +99,14 @@ class Matcher(unittest.TestCase):
             with self.subTest(tool=tool):
                 self.assertTrue(any(re.fullmatch(m, tool) for m in matchers))
 
+    def test_guard_matcher_covers_update_pull_request(self):
+        # Rule draft-pr (decision draft-until-reviewed; debt pr-ready-unguarded): an MCP update_pull_request call with
+        # draft false asks the owner, and it is the cloud's ready route. The guard's own scan reads only the names the
+        # guard already emits, so this name needs its own check. Owner ruling 2026-11-07 13:20 CST (decision cull-rules).
+        tool = "mcp__github__update_pull_request"
+        self.assertTrue(any(re.fullmatch(m, tool) for m in guard_matchers()),
+                        "no guard matcher covers %s: %r" % (tool, guard_matchers()))
+
     def test_guard_matcher_covers_lane_effort_tool(self):
         # Rule lane-effort-pin reads the create_session call that starts a lane, so the guard must see it.
         matchers = guard_matchers()

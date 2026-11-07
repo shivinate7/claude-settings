@@ -278,7 +278,7 @@
     "git-integration-branch-merge": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Sequencing overlapping PRs into one integration branch and closing the originals is a manual coordination step. merge/merge.py refuses one part only: a batch that drops a lane by a revert (refuse_dropped_lane)."
+        "reason": "Sequencing overlapping PRs into one integration branch and closing the originals is a manual coordination step. merge/merge.py refuses one part only: a batch that drops a lane by a revert (refuse_dropped_lane). The guard rule draft-pr guards one other part: it asks before a lane session marks a PR ready that is not the integration PR."
       }
     },
     "verification-screens-verdict": {

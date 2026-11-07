@@ -13,7 +13,7 @@ Every other form stays a command: `; echo`, `| cat`, `; Write-Output`, `| tee`, 
 
 Owner, 2026-10-14 22:25 CDT: an inline interpreter script (a python, node, perl or ruby heredoc) is one command, and it asks once. A chain around it still counts. A shell body (bash, sh, a heredoc piped to a shell) counts each line, as does a body with no closing line. A refusal in the body still wins. Owner, 22:27: no safety hole that main lacks.
 
-The commands that ask: a worktree prune, a worktree discard, a forced push, and a shell write to the model-cap settings. The refusal names the kind of command, never its text.
+The commands that ask: a worktree prune, a worktree discard, a forced push, a ready mark of a pull request (`gh pr ready`), and a shell write to the model-cap settings. The refusal names the kind of command, never its text.
 
 Why: a chained `git worktree prune` made the whole shell call wait on the owner for a command the owner would have skipped. A lone ask shows one plain command.
 

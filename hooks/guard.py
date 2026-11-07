@@ -119,6 +119,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
+                       ask. A ready mark (`gh pr ready <pr>`, or the MCP update_pull_request with draft false), unless
+                       the pull request is the integration PR: its head ref starts with `batch-` or it carries the
+                       `batch` label (one REST read), or the session's own get_session record is read, current and holds
+                       no cs-build:lane tag. A failed read asks. A lone `&` separates marks, each judged. `--undo` and `-h` pass. (draft-until-reviewed, git-integration-branch-merge)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
@@ -210,7 +214,7 @@ Other tools, in `judge` order:
                        calls. The transcript is read only at full. A cloud session skips it. An override lifts it.
                        (machine-load-brake)
   merge-checks, draft-pr, impeccable-review-only
-                       deny. The MCP merge, pull request and Skill forms of the rules above.
+                       deny or ask. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-bypass
                        deny. A raw `simctl boot` (through `xcrun` or bare), or an open of
                        Simulator.app (`open -a Simulator`, `open -a Simulator.app`, an `open` of a
@@ -371,7 +375,7 @@ while True:
             BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, gh_call_of, git_call_of,
             merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
-            undrafted_pr_create, uses_merge_tool,
+            READY_PR_REASON, own_is_lane, pr_ready_hit, ready_calls, undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -3039,12 +3043,7 @@ def lane_session_hit(payload, tool: str) -> tuple:
             return "", ""
         full = load_full(read_load())
         transcript = payload.get("transcript_path")
-        if not full or not isinstance(transcript, str) or not transcript:
-            return "", ""
-        import own_session
-        tags, tagged_after, _parent = own_session.own_session_read(transcript, own_id)
-        names = [t.strip().casefold() for t in tags if isinstance(t, str)] if isinstance(tags, list) else []
-        if tagged_after or LANE_TAG not in names or any(n.startswith("cs-build:") and n != LANE_TAG for n in names):
+        if not full or not own_is_lane(transcript):
             return "", ""
     except Exception:
         return "", ""
@@ -3550,6 +3549,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     for text, _in_message in _substitutions(stripped)[0]:
         if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
             refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
+
+    # 6b2. A ready mark of a pull request that is not shown to be the batch's integration PR (rule draft-pr).
+    for text, _in_message in _substitutions(stripped)[0]:
+        for selector, repo in ready_calls(text):
+            matched = pr_ready_hit(selector, repo, cwd, transcript)
+            if matched:
+                ask_command("draft-pr", READY_PR_REASON, "gh pr ready " + matched, "ready mark")
 
     # 6c. A lane commit of the generated records page (decision records-index-at-merge).
     matched = records_page_hit(stripped, cwd)
@@ -4848,6 +4854,15 @@ def judge(payload) -> None:
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "merge tool " + verdict)
+
+    # The MCP update tool takes a pull request out of draft with `draft` false (rule draft-pr).
+    if tool == "mcp__github__update_pull_request" and tool_input.get("draft") is False:
+        owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "pullNumber"))
+        repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
+        trust_read = payload.get("transcript_path")
+        matched = pr_ready_hit(str(number), repo, cwd, trust_read if isinstance(trust_read, str) else "")
+        if matched:
+            refuse(tool, "ask", "draft-pr", READY_PR_REASON, "update_pull_request " + matched)
 
     # The MCP create tool carries its own `draft` field.
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
