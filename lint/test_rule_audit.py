@@ -883,6 +883,38 @@ class ModuleLevelRuleNameTests(unittest.TestCase):
                 self.assertIn("hooks/x.py:2", str(cm.exception),
                               "a LOGGED_RULES entry that cannot be resolved is not refused with its path:line")
 
+    def listed_or_refused(self, src):
+        """The ids `src` lists. A refusal is an assertion failure naming it, so a case reads red, not as a crash."""
+        try:
+            return self.ids(src, "hooks/x.py")
+        except ValueError as exc:
+            self.fail("refused instead of listed: %s" % exc)
+
+    def test_a_starred_logged_rules_entry_lists_each_string_of_the_tuple_it_unpacks(self):
+        src = 'X = ("a-rule", "b-rule")\nLOGGED_RULES = (*X,)\n'
+        self.assertEqual(self.listed_or_refused(src), {"a-rule", "b-rule"},
+                         "a starred LOGGED_RULES entry does not list the strings of the tuple it unpacks")
+
+    def test_a_dotted_string_logged_rules_entry_resolves_through_its_module(self):
+        sys.path.insert(0, os.path.join(rule_audit.ROOT, "hooks"))
+        import question_form  # the expected id is read from the module, never copied here
+        src = 'LOGGED_RULES = ("question_form.PAST_RULING_RULE",)\n'
+        self.assertEqual(self.listed_or_refused(src), {question_form.PAST_RULING_RULE},
+                         "a dotted-string LOGGED_RULES entry is not resolved through its module")
+
+    def test_a_dotted_string_naming_no_real_constant_is_refused_naming_the_entry(self):
+        src = 'X = 1\nLOGGED_RULES = ("question_form.NO_SUCH_RULE",)\n'
+        with self.assertRaises(ValueError) as cm:
+            self.ids(src, "hooks/x.py")
+        self.assertIn("hooks/x.py:2", str(cm.exception),
+                      "a dotted-string entry naming no real constant is not refused with its path:line")
+        self.assertIn("question_form.NO_SUCH_RULE", str(cm.exception),
+                      "the refusal of a dotted-string entry does not name the entry it cannot resolve")
+
+    def test_an_annotated_logged_rules_tuple_lists_its_constants(self):
+        src = 'A = "a-rule"\nLOGGED_RULES: tuple = (A,)\n'
+        self.assertEqual(self.ids(src), {"a-rule"}, "an annotated LOGGED_RULES tuple lists nothing")
+
     def all_rules_listing(self):
         """The ids the --all-rules table lists for the real repo: the one reader of that table here."""
         import guard_log_report
@@ -917,6 +949,19 @@ class ModuleLevelRuleNameTests(unittest.TestCase):
                 self.assertIsInstance(rule, str)
                 self.assertIn(rule, listed,
                               "the --all-rules listing has no row for %s, which is logged through a variable" % where)
+
+    def test_the_real_all_rules_listing_has_every_judged_rule_of_reply_judge(self):
+        sys.path.insert(0, os.path.join(rule_audit.ROOT, "hooks"))
+        import reply_judge  # the expected ids are read from the module, never copied here
+        self.assertIsInstance(reply_judge.JUDGED_RULES, tuple)
+        self.assertTrue(reply_judge.JUDGED_RULES, "reply_judge names no judged rule to check")
+        listed = self.all_rules_listing()
+        self.assertIn(reply_judge.JUDGE_RULE, listed,  # scope first: the listing has reply_judge's own id
+                      "the --all-rules listing has no row even for reply-judge, the id reply_judge logs")
+        for rule in reply_judge.JUDGED_RULES:
+            with self.subTest(rule):
+                self.assertIn(rule, listed,
+                              "the --all-rules listing has no row for %s, which reply_judge logs through a variable" % rule)
 
     def test_every_id_listed_before_this_change_is_still_listed(self):
         missing = sorted(set(LISTED_BEFORE) - rule_audit.emitted_rule_ids())
