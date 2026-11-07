@@ -1507,3 +1507,5 @@
 - conflict-markers-chain-clean-refuse: `git stash pop`, `git pull --rebase` or `git merge`, then commit and push in one call, is refused on a clean tree; the remedy is a separate push (hooks/guard_merge.py `_makes_conflict`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-show-uncapped: the push check runs one `git cat-file` per file with a marker finding, with no cap, and no cost case holds a finding (hooks/guard_merge.py `_kinds_of`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
+- split-sentence-eight-copies: the worktree-isolation split sentence is copied into 8 agent files; its one home could be COMMON in hooks/agent_brief.py, and claude-code-guide gets no copy (agents/*.md). Decision: none
+- split-sentence-command-term: the split sentence says "command" for a whole shell call, which GLOSSARY.md names a shell call (agents/*.md). Decision: none
