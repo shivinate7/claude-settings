@@ -545,9 +545,9 @@ def queue_repo(name):
     return root
 
 
-def case_n1_non_writer_set_of_an_unexported_collection_passes():
-    """A session that the transcript names as not the page writer, setting a collection the copy does not export."""
-    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="scratch/x")
+def case_n1_non_writer_set_of_receipts_passes():
+    """A session that the transcript names as not the page writer, setting receipts, which the copy exports: a non-writer passes."""
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x")
     expect_pass("N1", run_stop("n1", base_repo("n1"), records, writer="session_other"))
 
 
@@ -736,7 +736,7 @@ CASES.extend((
     case_s14_newest_write_after_the_copy_commit_blocks,
     case_s15_export_run_before_the_write_does_not_clear_it,
     case_s16_full_size_transcript_blocks,
-    case_n1_non_writer_set_of_an_unexported_collection_passes,
+    case_n1_non_writer_set_of_receipts_passes,
     case_n2_non_writer_update_of_an_item_passes,
     case_n3_writer_update_of_an_item_blocks,
     case_n4_export_history_alone_makes_the_writer_block,

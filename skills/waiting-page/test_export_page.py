@@ -89,26 +89,148 @@ with open(os.path.join(HERE, "page.html"), encoding="utf-8") as f:
     PAGE = f.read()
 assert len(DESIGN.findall(PAGE)) == 1, "page.html must hold one designData block: the fixture's shape"
 DESIGN_ELEMENT = DESIGN.search(PAGE).group(0)
-# The page's own collection calls. Only the script blocks are read, and in them a comment or a string is skipped, so a
-# call inside either is no call (building-scanner-respects-strings). A regex literal that holds a quote is not handled.
+# The page's own collection calls, read from its script blocks only (page text is no script). A script is tokenized the
+# way a JavaScript reader reads it: comments, strings, regex literals and template text are read as such, and the code in
+# a template's `${...}` is code, so a call there counts (building-scanner-respects-strings).
 SCRIPT_BODY = re.compile(r"<script\b[^>]*>(.*?)</script\s*>", re.I | re.S)
-JS_TOKEN = re.compile(
-    r"//[^\n]*"                                    # a line comment
-    r"|/\*.*?\*/"                                  # a block comment, across lines
-    r"|\"(?:\\.|[^\"\\\n])*\""                     # a double-quoted string
-    r"|'(?:\\.|[^'\\\n])*'"                        # a single-quoted string
-    r"|`(?:\\.|[^`\\])*`"                          # a template literal, across lines
-    r"|\bcollection\(\s*\"([A-Za-z_]+)\"\s*\)",    # a call with a literal name: group 1
-    re.S)
+JS_NAME = re.compile(r"[A-Za-z_$][\w$]*")
+JS_NUMBER = re.compile(r"(?:0[xXoObB][\da-fA-F_]+|\d[\d_]*(?:\.[\d_]*)?(?:[eE][+-]?\d+)?|\.\d[\d_]*(?:[eE][+-]?\d+)?)n?")
+# A slash after one of these words starts a regex literal (`return /x/`); after any other value it divides.
+JS_WORDS_BEFORE_EXPRESSION = frozenset("return typeof instanceof in of new delete void throw case do else yield await".split())
+
+
+def _closing_quote(code, i):
+    """Index of the quote that closes the string opened at code[i], or None. A ' or " string ends at its line."""
+    quote, j = code[i], i + 1
+    while j < len(code):
+        if code[j] == "\\":
+            j += 2
+        elif code[j] == quote:
+            return j
+        elif code[j] == "\n" and quote != "`":
+            return None
+        else:
+            j += 1
+    return None
+
+
+def _regex_end(code, i):
+    """Index just past the regex literal opened at code[i], or None. A slash inside a [class] does not close it."""
+    j, in_class = i + 1, False
+    while j < len(code) and code[j] != "\n":
+        c = code[j]
+        if c == "\\":
+            j += 2
+            continue
+        if in_class:
+            in_class = c != "]"
+        elif c == "[":
+            in_class = True
+        elif c == "/":
+            j += 1
+            while j < len(code) and (code[j].isalnum() or code[j] == "_"):
+                j += 1
+            return j
+        j += 1
+    return None
+
+
+def _first_argument(code, k):
+    """(name, source) for the first argument of a call whose argument list is open before code[k]. name is the text of one
+    literal of any quote (a template with no `${`) when `)` or `,` follows it. Otherwise name is None and source is the
+    argument's start."""
+    while k < len(code) and code[k].isspace():
+        k += 1
+    if k < len(code) and code[k] in "'\"`":
+        close = _closing_quote(code, k)
+        if close is not None and (code[k] != "`" or "${" not in code[k + 1:close]):
+            after = close + 1
+            while after < len(code) and code[after].isspace():
+                after += 1
+            if after < len(code) and code[after] in "),":
+                return code[k + 1:close], None
+    found = re.match(r"[^),\n]{0,60}", code[k:])
+    return None, found.group(0) if found else ""
+
+
+def js_collection_calls(code):
+    """(name, source) for each collection( call in one script, in order. name is the literal first argument, else None."""
+    calls, stack, prev, i, n = [], [], None, 0, len(code)  # stack: "template" in template text, [depth] in a ${...}
+    while i < n:
+        c = code[i]
+        if stack and stack[-1] == "template":
+            if c == "\\":
+                i += 2
+            elif c == "`":
+                stack.pop()
+                prev, i = "value", i + 1
+            elif code.startswith("${", i):
+                stack.append([0])
+                prev, i = None, i + 2
+            else:
+                i += 1
+            continue
+        name = JS_NAME.match(code, i)
+        if c.isspace():
+            i += 1
+        elif code.startswith("//", i):
+            end = code.find("\n", i)
+            i = n if end < 0 else end
+        elif code.startswith("/*", i):
+            end = code.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+        elif c in "'\"":
+            end = _closing_quote(code, i)
+            prev, i = "value", (i + 1 if end is None else end + 1)
+        elif c == "`":
+            stack.append("template")
+            i += 1
+        elif c == "/":
+            end = None if prev in ("value", ")", "]") else _regex_end(code, i)
+            if end is None:
+                prev, i = "/", i + 1
+            else:
+                prev, i = "value", end
+        elif c.isdigit() or (c == "." and code[i + 1:i + 2].isdigit()):
+            found = JS_NUMBER.match(code, i)
+            prev, i = "value", (found.end() if found else i + 1)
+        elif name:
+            word = name.group(0)
+            if word == "collection":
+                j = name.end()
+                while j < n and code[j].isspace():
+                    j += 1
+                if j < n and code[j] == "(":
+                    calls.append(_first_argument(code, j + 1))
+            prev, i = ("keyword" if word in JS_WORDS_BEFORE_EXPRESSION else "value"), name.end()
+        else:
+            if stack and isinstance(stack[-1], list):
+                if c == "{":
+                    stack[-1][0] += 1
+                elif c == "}":
+                    if stack[-1][0] == 0:
+                        stack.pop()
+                        i += 1
+                        continue
+                    stack[-1][0] -= 1
+            prev, i = c, i + 1
+    return calls
 
 
 def collection_calls(text):
-    """The names of the `collection("name")` calls in the script blocks of `text`, in order. A call inside a comment or a
-    string is no call. Page text outside a script block is not read, so a quote in it opens no string."""
-    return [m.group(1) for body in SCRIPT_BODY.findall(text) for m in JS_TOKEN.finditer(body) if m.group(1)]
+    """(names, others) for the script blocks of `text`. names is the literal name of each collection( call, in order.
+    others is the source of each call whose first argument is not one literal. Page text outside a script is not read."""
+    names, others = [], []
+    for body in SCRIPT_BODY.findall(text):
+        for name, source in js_collection_calls(body):
+            if name is None:
+                others.append(source)
+            else:
+                names.append(name)
+    return names, others
 
 
-PAGE_NAMES = frozenset(collection_calls(PAGE))
+PAGE_NAMES = frozenset(collection_calls(PAGE)[0])
 FETCHED = tuple(sorted(set(COLLECTIONS) | PAGE_NAMES))  # a fetch pulls every collection the page reads and the export holds
 # The fixture page as bytes with a CRLF line and non-ASCII text, so a copy that normalizes either goes red.
 PAGE_BYTES = PAGE.replace("<style>", "<!-- café — über -->\r\n<style>", 1).encode("utf-8")
@@ -542,33 +664,83 @@ class Base(unittest.TestCase):
 
 class PageCollections(unittest.TestCase):
     """The page's collections are export_page.COLLECTIONS: each collection the page reads or writes is exported, and each
-    exported one is read or written by the page. The scanner is also checked on snippets, so a call hidden by a comment
-    or a string fails there by name."""
+    exported one is read or written by the page. The scanner has a case for each shape a page could carry: a call it
+    must read, and a call it must refuse because the first argument is not one literal."""
+
+    def assertReads(self, text, want, why):
+        self.assertEqual(collection_calls(text), (want, []), why)
+
+    def assertRefuses(self, text, why):
+        names, others = collection_calls(text)
+        self.assertTrue(others, why + " (the scan read it as %r)" % (names,))
 
     def test_the_page_reads_and_writes_exactly_the_export_collections(self):
         self.assertTrue(SCRIPT_BODY.search(PAGE), "page.html has no script block, so there is nothing to scan")
-        page = set(collection_calls(PAGE))
-        self.assertTrue(page, "the scan found no collection(\"name\") call in page.html")
+        names, others = collection_calls(PAGE)
+        self.assertTrue(names, "the scan found no collection(\"name\") call in page.html")
+        self.assertEqual(others, [], "a collection( call in page.html has a first argument that is not one literal")
+        page = set(names)
         self.assertEqual(sorted(page - set(COLLECTIONS)), [],
                          "the page reads or writes a collection that export_page.COLLECTIONS does not export")
         self.assertEqual(sorted(set(COLLECTIONS) - page), [],
                          "export_page.COLLECTIONS exports a collection the page never reads or writes")
 
     def test_a_comment_opener_inside_a_string_hides_no_call(self):
-        text = '<script>const s = "/* open"; const u = "https://x"; db.collection("receipts").doc(id);</script>'
-        self.assertEqual(collection_calls(text), ["receipts"], "a comment opener inside a string hid the call after it")
+        self.assertReads('<script>const s = "/* open"; const u = "https://x"; db.collection("receipts").doc(id);</script>',
+                         ["receipts"], "a comment opener inside a string hid the call after it")
 
     def test_a_call_named_in_a_multi_line_template_literal_is_no_call(self):
-        text = "<script>const t = `first\ncollection(\"scratch\")\n// not a comment\n`; db.collection(\"items\");</script>"
-        self.assertEqual(collection_calls(text), ["items"], "a call named inside a multi-line template literal was counted")
+        self.assertReads("<script>const t = `first\ncollection(\"scratch\")\n// not a comment\n`; db.collection(\"items\");</script>",
+                         ["items"], "a call named inside a multi-line template literal was counted")
 
     def test_a_lone_quote_in_page_text_or_a_comment_opens_no_string(self):
-        text = "<p>Don't stop here.</p>\n<script>// Don't read this\ndb.collection(\"asks\");</script>"
-        self.assertEqual(collection_calls(text), ["asks"], "a lone quote in text or a comment hid the call after it")
+        self.assertReads("<p>Don't stop here.</p>\n<script>// Don't read this\ndb.collection(\"asks\");</script>",
+                         ["asks"], "a lone quote in text or a comment hid the call after it")
 
     def test_a_commented_out_call_is_no_call(self):
-        text = '<script>// db.collection("scratch")\n/* db.collection("scratch") */ db.collection("items");</script>'
-        self.assertEqual(collection_calls(text), ["items"], "a commented-out collection call was counted")
+        self.assertReads('<script>// db.collection("scratch")\n/* db.collection("scratch") */ db.collection("items");</script>',
+                         ["items"], "a commented-out collection call was counted")
+
+    def test_a_backtick_name_is_read(self):
+        self.assertReads("<script>db.collection(`receipts`).doc(id);</script>", ["receipts"], "a backtick name was not read")
+
+    def test_a_single_quoted_name_is_read(self):
+        self.assertReads("<script>db.collection('asks');</script>", ["asks"], "a single-quoted name was not read")
+
+    def test_a_name_with_digits_and_hyphens_is_read(self):
+        self.assertReads('<script>db.collection("v2-items_2");</script>', ["v2-items_2"], "a name with digits or hyphens was not read")
+
+    def test_a_variable_argument_is_refused(self):
+        self.assertRefuses("<script>db.collection(name).doc(id);</script>", "a variable argument was read as no call")
+
+    def test_a_concatenated_argument_is_refused(self):
+        self.assertRefuses('<script>db.collection("items" + suffix);</script>', "a concatenated argument was read as a literal")
+
+    def test_a_template_with_an_interpolation_is_refused(self):
+        self.assertRefuses("<script>db.collection(`items${n}`);</script>", "a template with an interpolation was read as a literal")
+
+    def test_an_empty_argument_list_is_refused(self):
+        self.assertRefuses("<script>db.collection();</script>", "an empty argument list was read as no call")
+
+    def test_a_slash_slash_in_a_regex_literal_hides_no_call(self):
+        self.assertReads('<script>const r = /[//]+/; db.collection("items");</script>', ["items"],
+                         "a // inside a regex literal hid the rest of its line")
+
+    def test_a_quote_in_a_regex_literal_hides_no_call(self):
+        self.assertReads('<script>const q = /"/g; db.collection("asks");</script>', ["asks"],
+                         "a quote inside a regex literal opened a string over the call")
+
+    def test_a_call_inside_a_template_interpolation_is_read(self):
+        self.assertReads('<script>const t = `n ${db.collection("receipts").doc(id)} end`;</script>', ["receipts"],
+                         "a call inside a template's interpolation was hidden")
+
+    def test_a_brace_inside_an_interpolation_does_not_end_it(self):
+        self.assertReads('<script>const t = `a ${ {k: "}"}.k } ${db.collection("meta")}`;</script>', ["meta"],
+                         "a brace inside an interpolation ended it early")
+
+    def test_a_division_is_not_a_regex(self):
+        self.assertReads('<script>const half = total / 2; const other = a / b; db.collection("groups");</script>', ["groups"],
+                         "a division was read as the start of a regex literal")
 
 
 class Scan(Base):

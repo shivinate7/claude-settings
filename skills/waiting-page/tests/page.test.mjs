@@ -5480,8 +5480,21 @@ const LEAK = {
   steps: { leak1: { title: LEAKED_STEP, status: "active", phase: "cleanup", order: 0, note: "n", updatedAt: "2026-10-26T00:00:00Z" } },
   meta: { phases: { cleanup: { metrics: [{ label: LEAKED_TILE, value: "9 of 9" }] } }, cull: { stopRule: "leak" }, advisor: { text: "leak" } },
 };
-// The waiting part reads items, answers, groups, receipts and meta/page. A read of anything else is the status part's.
+// The waiting collections are export_page.py's COLLECTIONS, the one home: read from the file, never copied here.
+const WAITING = (() => {
+  const tuple = /^COLLECTIONS\s*=\s*\(([^)]*)\)/m.exec(fs.readFileSync(path.join(HERE, "..", "export_page.py"), "utf8"));
+  assert.ok(tuple, "export_page.py has no COLLECTIONS tuple");
+  return [...tuple[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+})();
+// The status part reads steps, topics and meta other than page. A read of anything else is the waiting part's.
 const statusRead = (r) => r[0] === "steps" || r[0] === "topics" || (r[0] === "meta" && r[1] !== "page");
+test("the status part's reads match no waiting collection, whatever the list holds", () => {
+  assert.ok(WAITING.length > 0, "export_page.py's COLLECTIONS names no collection");
+  for (const name of WAITING) {
+    // meta's waiting doc is page; every other waiting collection is read by doc, and no doc of it is a status read.
+    assert.equal(statusRead([name, name === "meta" ? "page" : "doc"]), false, name + " is read as the status part's");
+  }
+});
 const statusTab = (page) => page.getByRole("tab", { name: "Status", exact: true });
 async function openStatus(page) {
   const tab = statusTab(page);
