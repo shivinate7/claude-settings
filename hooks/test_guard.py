@@ -10299,6 +10299,19 @@ for _name, _command in (
     ("a commit with no number", VCS + ' commit -m "fix guard parsing"'),
 ):
     sh("lane-by-slug: %s is allowed" % _name, _command, "allow", cwd=NOGIT, config=MERGECFG)
+# A PART CODE IS NO LANE NUMBER (lane-slug-part-code-refused). `part N12` names a part of a split, in a title or a
+# body, so it is allowed. A lane named in a sentence beside the word part is still a session number, and denies.
+for _name, _command in (
+    ("a part code in a body", VCS + ' commit -m "title\n\nthis is part N12 of the split"'),
+    ("a part code in a title", VCS + ' commit -m "Split part N12 out of the guard"'),
+):
+    sh("lane-by-slug: %s is allowed" % _name, _command, "allow", cwd=NOGIT, config=MERGECFG)
+sh("lane-by-slug: a lane named in a sentence with the word part still denies",
+   VCS + ' commit -m "title\n\nLane N12 is part of the split"', "deny", "lane-by-slug", cwd=NOGIT,
+   config=MERGECFG)
+sh("lane-by-slug: a part code followed by a lane number still denies",
+   VCS + ' commit -m "title\n\nthis is part N12, and N20 lands"', "deny", "lane-by-slug", cwd=NOGIT,
+   config=MERGECFG)
 # The same lane-by-slug rule, its title and merge half. A title names a lane on create and edit, and
 # a squash subject or body on merge, so each is read. The merge cases run on a green head, so merge-checks
 # passes and only the lane rule can decide. A create without --draft is refused by draft-pr, so the
@@ -12145,6 +12158,22 @@ add("cap: MultiEdit reaching an opus model asks", "ask", "agent-model-cap", tool
     carries=(OPUS,))
 add("cap: a managed settings file is a settings file", "ask", "agent-model-cap", tool="Write",
     cwd=NOGIT, file_path=MANAGED_SETTINGS, content=cap_settings(), carries=(OPUS,))
+# A FIXTURE NAMED settings.json IS NO SETTINGS FILE (cap-basename-false-alarm). Claude Code reads a settings file
+# from the config directory, a project's .claude folder, or the managed location. A test that writes a file of
+# that name into a scratch folder names none of them, so it is allowed: the basename alone asked, and refused
+# the fixture. The places Claude does read are still asked, as the cases after this block pin.
+CAP_FIXTURE = slash(os.path.join(ROOT, "fixture", "settings.json"))
+add("cap: Write of a fixture named settings.json in a scratch folder, setting an opus model, is allowed",
+    "allow", tool="Write", cwd=NOGIT, file_path=CAP_FIXTURE, content=cap_settings())
+sh("cap: a shell heredoc writing a fixture named settings.json in a scratch folder, setting an opus model, is allowed",
+   "cat > " + CAP_FIXTURE + " <<'EOF'\n" + cap_settings(compact=True) + "\nEOF", "allow", cwd=NOGIT)
+add("cap: Write of a settings file under a .claude folder in a scratch folder, setting an opus model, still asks",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT,
+    file_path=slash(os.path.join(ROOT, "fixture", ".claude", "settings.json")), content=cap_settings(),
+    carries=(OPUS, "settings.json"))
+sh("cap: a shell heredoc writing a project settings file, setting an opus model, still asks",
+   "cat > " + PROJ_SETTINGS + " <<'EOF'\n" + cap_settings(compact=True) + "\nEOF", "ask",
+   "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
 # The workflow agent model is a cap variable too: set to opus, it lifts the model of a workflow's agents.
 for _key in ("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL_FORCE"):
     add("cap: Write of a project settings file setting %s to opus asks" % _key, "ask",
@@ -12761,6 +12790,36 @@ chained_prune("ask-alone: an escaped quote in an echo tail does not hide a remov
               ASK_PRUNE + ' && echo "a \\" b" ; rm -rf y')
 chained_prune("ask-alone: a cd - to the previous folder before the prune is no named lead, so it denies",
               "cd - && " + ASK_PRUNE)
+
+# (k) QUOTED TEXT AND TRAILING SEPARATORS IN A HARMLESS TAIL. A `&`, or an apostrophe, inside the quotes of an
+# output tail is text the shell never runs, and a `;` or a newline after the tail adds no command, so each
+# form below asks once. A PowerShell tail with a quoted path that ends in a backslash is text too: in
+# PowerShell `\"` closes the quote. The nearest real commands beside them still deny: a command substitution
+# inside the quotes, a removal after the tail, and a second echo.
+asks_alone("ask-alone: a quoted & in an echo tail after an ask command asks once",
+           ASK_CAP + ' && echo "a & b"', "agent-model-cap", cwd=PROJ)
+asks_alone("ask-alone: a single-quoted & in an echo tail after an ask command asks once",
+           ASK_CAP + " && echo 'a & b'", "agent-model-cap", cwd=PROJ)
+asks_alone("ask-alone: an apostrophe beside a quoted & in an echo tail after an ask command asks once",
+           ASK_CAP + ' && echo "don\'t & stop"', "agent-model-cap", cwd=PROJ)
+asks_alone("ask-alone: a trailing semicolon after an echo tail, after an ask command, asks once",
+           ASK_CAP + " && echo x;", "agent-model-cap", cwd=PROJ)
+asks_alone("ask-alone: a trailing newline after an echo tail, after an ask command, asks once",
+           ASK_CAP + " && echo x\n", "agent-model-cap", cwd=PROJ)
+asks_alone("ask-alone: a PowerShell echo tail holding a quoted path that ends in a backslash asks once",
+           ASK_CAP + r' && echo "C:\x\"', "agent-model-cap", tool="PowerShell", cwd=PROJ)
+asks_alone("ask-alone: a PowerShell Write-Host tail holding a quoted path that ends in a backslash asks once",
+           ASK_CAP + r'; Write-Host "C:\x\"', "agent-model-cap", tool="PowerShell", cwd=PROJ)
+chained_ask("ask-alone: a quoted & in an echo tail, then a removal of y, still denies",
+            ASK_CAP + ' && echo "a & b"; rm -rf y', cwd=PROJ)
+chained_ask("ask-alone: a command substitution inside the quotes of an echo tail still denies",
+            ASK_CAP + ' && echo "$(rm -rf y)"', cwd=PROJ)
+chained_ask("ask-alone: a trailing semicolon after a removal of y, after an ask command, still denies",
+            ASK_CAP + " && rm -rf y;", cwd=PROJ)
+chained_ask("ask-alone: a second echo with a semicolon, after an ask command, still denies",
+            ASK_CAP + "; echo x;", cwd=PROJ)
+chained_ask("ask-alone: a PowerShell quoted path ending in a backslash, then a removal of y, still denies",
+            ASK_CAP + r'; Write-Host "C:\x\"; Remove-Item y', tool="PowerShell", cwd=PROJ)
 
 
 # =========================================================================== 6d. an interpreter heredoc is one command
@@ -14743,6 +14802,34 @@ def _j1_squash(w):
     _must(w, *IDENT, "commit", "-q", "-m", "squashed test-author case")
 
 
+def _cherry_resolved(w):
+    """Cut at main. The test-author's lane changes a line of a test file. Main changes the same line, and the
+    builder fast-forwards onto main. Its cherry-pick of the lane conflicts in the test file, and the builder
+    resolves the file by hand and commits. Git writes that commit's reflog subject as `commit (cherry-pick): ...`:
+    a replay the agent resolved, which the guard logs and never refuses."""
+    main = w + "-main"
+    _test_author_lane(w, TEST_A, "def test_a():\n    assert 1\n")
+    write(os.path.join(main, TEST_A), "def test_a():\n    assert 2\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main changes the case")
+    _must(w, *IDENT, "merge", "-q", "--ff-only", "main")
+    pick = run_vcs(main, "rev-parse", "lane").stdout.strip()
+    stopped = run_vcs(w, *IDENT, "cherry-pick", pick)
+    if stopped.returncode == 0:
+        sys.exit("fixture setup failed: the cherry-pick in %r did not conflict" % w)
+    write(os.path.join(w, TEST_A), "def test_a():\n    assert 3\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "resolved by hand")
+
+
+def _cherry_then_own(w):
+    """As _cherry_resolved, then the builder changes the same test file again and commits it: its own commit."""
+    _cherry_resolved(w)
+    write(os.path.join(w, TEST_A), "def test_a():\n    assert 4\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "own test change")
+
+
 def _i1_rebase_ours(w):
     """A test-author's lane changes a line of the test file, and main changes the same line. The builder rebases
     its product commit onto main. The rebase stops in the test file, and the builder keeps the upstream side
@@ -15026,6 +15113,30 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's cherry-pick of a test-auth
 diff_repo("bd-j1-squash", _j1_squash)
 LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's squash merge of a test-author's lane is denied at push and at "
                          "the first stop", refused_push_and_stop_case("bd-j1-squash")))
+
+
+def cherry_resolved_logged_case(label):
+    """A builder's hand-resolved cherry-pick commit that changes a test file: commit, push and stop print nothing,
+    and guard.log holds a noted builder-diff line that names the test file. The reflog subject is
+    `commit (cherry-pick): ...`, which ENTRY_RESOLVED must read as a replay the agent resolved."""
+    def case():
+        out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label), os.path.join(DIFFROOT, label),
+                                  "builder", "bld1")
+        if out:
+            return False, "expected silent allows at commit, push and stop, got %r" % out[:60]
+        noted = [r for r in rows if len(r) > 4 and r[2] == "noted" and r[3] == BDIFF and TEST_A in r[4]]
+        if not noted:
+            return False, "no noted builder-diff line names %s in %d line(s)" % (TEST_A, len(rows))
+        return True, "allowed at commit, push and stop; %d noted builder-diff line(s) name %s" % (len(noted), TEST_A)
+    return case
+
+
+diff_repo("bd-cherry-resolved", _cherry_resolved)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's hand-resolved cherry-pick of a test-author's commit is allowed "
+                         "and logs a noted builder-diff line", cherry_resolved_logged_case("bd-cherry-resolved")))
+_bd_cown = diff_repo("bd-cherry-own", _cherry_then_own)
+sh("builder-refuse: a builder's own test change after a hand-resolved cherry-pick is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_cown, agent_id="bld1", agent_type="builder")
 
 # A write after a rebase is the builder's own. Main's bytes written back over a test file the rebase replayed
 # drop the test-author's case, so the write is refused at commit, push and stop.
@@ -23931,6 +24042,63 @@ def ov_fail_closed_says_no_override():
 
 LOG_CHECKS_EXTRA.append(("override: a missing-module deny says that no override lifts it",
                          ov_fail_closed_says_no_override))
+
+
+# THE VETO SETTER, WHEN GUARD_CORE LACKS IT (override-veto-core-unwrapped). judge() registers the veto with
+# guard_core.set_override_veto, unwrapped, where set_override_context is wrapped. A guard_core that predates
+# the setter raised inside judge(), main() failed open, and the call was allowed. With the setter gone the
+# guard must still judge each call as it does with the setter present. A builder's commit is the other call
+# that registers a veto (guard.py diff_refusal), so it must still be refused.
+
+
+def _veto_setter_runs(label, command, cwd, extra):
+    """The guard's run for one Bash call, with guard_core's veto setter present (the control), then with the
+    setter deleted from the loaded guard_core, as session_log_stale_core_case deletes its two names."""
+    payload = json.dumps(dict({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}, **extra))
+    runs = []
+    for tag, drop in (("present", ()), ("gone", ("set_override_veto",))):
+        folder = os.path.join(ROOT, "vetoset-%s-%s" % (label, tag))
+        os.makedirs(folder, exist_ok=True)
+        code = ("import io, sys, importlib.util as u\n"
+                "spec = u.spec_from_file_location('g', %r)\n"
+                "g = u.module_from_spec(spec)\n"
+                "spec.loader.exec_module(g)\n" % GUARD
+                + "".join("del sys.modules['guard_core'].%s\n" % name for name in drop)
+                + "sys.stdin = io.StringIO(%r)\n"
+                  "g.main()\n" % payload)
+        env = dict(os.environ)
+        env["CLAUDE_CONFIG_DIR"] = folder
+        env.pop("CLAUDE_CODE_SESSION_ID", None)
+        env.pop("CLAUDE_CODE_REMOTE", None)
+        env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+        runs.append(subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                                   env=env, timeout=60))
+    return runs
+
+
+def ov_veto_setter_gone_case(label, command, cwd, rule, extra=None):
+    """One call that the guard must deny by `rule` with guard_core's veto setter gone, as it does with the setter."""
+    def case():
+        materialize(cwd)  # a diff repo is built by its own case, not by materialize_all
+        present, gone = _veto_setter_runs(label, command, cwd, extra or {})
+        decision, reason = _decision(present)
+        if decision != "deny" or rule not in reason:
+            return False, "the control with the setter present is %r, want deny by %s: %r" % (
+                decision, rule, reason[:90])
+        if "Traceback" in gone.stderr:
+            return False, "a traceback with the setter gone: %r" % gone.stderr.strip()[-160:]
+        decision, reason = _decision(gone)
+        if decision != "deny" or rule not in reason:
+            return False, "the call with the setter gone is %r, want deny by %s" % (decision, rule)
+        return True, "denied by %s with the setter gone, as with it present" % rule
+    return case
+
+
+LOG_CHECKS_EXTRA.append(("override: a kill still denies with guard_core's veto setter gone, as it does with the setter",
+                         ov_veto_setter_gone_case("kill", "pkill -f node", NOGIT, "machine-wide-kill")))
+LOG_CHECKS_EXTRA.append(("override: a builder's test change still denies at commit with guard_core's veto setter gone",
+                         ov_veto_setter_gone_case("builder", COMMIT, _bd_inc, BDIFF,
+                                                  extra={"agent_id": "bld1", "agent_type": "builder"})))
 
 
 # pkill and killall are refused by guard_kill through refuse(), which an override lifts. The settings.json
