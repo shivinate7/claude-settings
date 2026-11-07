@@ -53,7 +53,8 @@ Watcher: stall_watch.py --watch-pid PID --log LOG [--quiet SECS] [--beat BEAT] [
 Stop: stall_watch.py --stop
   Stop hook. Reads the Stop JSON on stdin, scans the session transcript for background shells
   (also a foreground call that its timeout moved to the background, which --hook never sees),
-  and prints one {"systemMessage": ...} line that lists each open job whose output file, and each
+  and prints one {"decision": "block", "reason": ..., "systemMessage": ...} line (both hold the same text: the reason
+  reaches the model and continues the turn, the message shows the owner) that lists each open job whose output file, and each
   log its command names, has not changed for the quiet age, and whose stall crossed after the previous
   Stop (the newest stop_hook_summary record, skipping the run after a blocked Stop). A job with no
   output file is listed once, at the first Stop after its call. With no summary, all are listed. A job closes on a <task-notification> with status completed, failed,
@@ -528,7 +529,8 @@ def stop():
             head = "Background shells still running and quiet: stop it or tell the owner."
             if "| until: " in "".join(rows):
                 head += " Say whether each until condition is met."
-            print(json.dumps({"systemMessage": "\n".join([head] + rows)}))
+            text = "\n".join([head] + rows)  # reason reaches the model and continues the turn; systemMessage shows the owner
+            print(json.dumps({"decision": "block", "reason": text, "systemMessage": text}))
     except Exception:  # guard-hooks-fail-closed: a failed check prints nothing and does not block
         pass
     return 0
