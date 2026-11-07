@@ -14,6 +14,7 @@ from guard_core import (
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 import session_tier  # the one home of the tier value, the tier dir and the tier file's formats
+from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -209,7 +210,7 @@ def merge_check(selector, repo: str, where: str):
 MERGE_CHECK_REASON = (
     "Rule (Git): this head is not settled: %s. A merge waits for every check and workflow run on "
     "the head, required or not, and a read that could not run counts as not settled. "
-    "Remedy: run the merge tool, `merge <pr> --confirm`, which waits on every check, then "
+    "Remedy: run the merge tool, `merge <pr> --confirm`, which waits on the required checks, then "
     "merges the head it waited on."
 )
 
@@ -693,7 +694,7 @@ def trust_card_hit(tool: str, transcript: str) -> str:
 
 # ---- archive_session: a lane closes only after its records pull request has left the open list
 ARCHIVE_TOOL = "mcp__claude-code-remote__archive_session"
-ARCHIVE_LANE_TAG = ROLE_TAG_PREFIX + "lane"
+ARCHIVE_LANE_TAG = LANE_TAG
 ARCHIVE_STEP_PREFIX, ARCHIVE_REPO_PREFIX = "cs-step:", "cs-repo:"
 ARCHIVE_NO_RECORD_REASON = (
     "this session's transcript holds no get_session record of the target, so the guard cannot tell whether "
@@ -735,7 +736,7 @@ def _head_landed(module, repo: str, row) -> bool:
 def archive_hit(tool: str, tool_input, transcript: str):
     """Return (matched, reason) when this archive call must be refused, else None. A target whose newest
     get_session record in this session's transcript has no cs-build:lane tag passes. A lane is refused
-    while any open pull request of its cs-repo has a head ref equal to its cs-step slug, except an open draft whose
+    while any open pull request of its cs-repo has a head ref in lane_head_refs of its cs-step slug, except an open draft whose
     head commit is already in its base (compare: behind or identical). Fails closed:
     any error in the reads is a refusal, because the guard-wide crash path fails open."""
     if tool != ARCHIVE_TOOL:
@@ -763,7 +764,7 @@ def archive_hit(tool: str, tool_input, transcript: str):
                 rows = module.Host(repo=repo).pages("pulls", fields={"state": "open"})
             for row in rows:
                 ref = str(row["head"]["ref"])
-                slug = next((s for s in slugs if s == ref), None)
+                slug = next((s for s in slugs if ref in lane_head_refs(s)), None)
                 if slug and row.get("draft") is True and _head_landed(module, repo, row):
                     continue
                 if slug:
@@ -776,7 +777,7 @@ def archive_hit(tool: str, tool_input, transcript: str):
 # ---- send_message: a lane brief goes to a lane of its own topic (rule lane-one-topic)
 BRIEF_TOOL = "mcp__claude-code-remote__send_message"
 LANE_BRIEF_MARKER = "Lane brief:"  # the first non-blank line of a brief starts `Lane brief: <step>. Topic: <topic>.`
-TOPIC_TAG_PREFIX = "cs-topic:"
+TOPIC_TAG_PREFIX = TOPIC_TAG
 _MARKDOWN_LEAD = r"[#*_>\s]*"  # a brief may open with markdown: a heading, bold, a quote
 _BRIEF_MARKER_LINE = re.compile(_MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER), re.IGNORECASE)
 _BRIEF_LINE = re.compile(
