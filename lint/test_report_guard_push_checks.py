@@ -30,10 +30,13 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_report_guard as trg  # noqa: E402  the Stop-hook harness and the gh stand-in seam (one home)
+import ci_wake  # noqa: E402  the read budget, ci_wake.Budget (hooks/ci_wake.py; on sys.path from the harness import)
+import report_guard  # noqa: E402  push_ci_states and push_ci_problem, read in process
 
 HEAD = "9f3c2a1b7d4e5f60718293a4b5c6d7e8f9012345"  # the head a case pushes
 HEAD7 = HEAD[:7]
@@ -300,9 +303,10 @@ class PushCheckTests(unittest.TestCase):
         steps = [push(push_out(MID7, old=OLD7), use_id="tu_1"), push(push_out(HEAD7, old=MID7), use_id="tu_2")]
         decision, _, _ = self.stop(turn(NO_REPORT, *steps), answers(prs=[pr_entry()], runs=[PENDING, PENDING_MID]))
         self.assertEqual(decision, "block", "a report-less two-push turn was not blocked (scope check)")
-        decision, reason, calls = self.stop(turn(REPORT, *steps),
+        decision, reason, calls = self.stop(turn(RUNNING, *steps),
                                             answers(prs=[pr_entry()], runs=[PENDING, PENDING_MID]))
-        self.assertIsNone(decision, "a two-push turn with a report that names no CI was blocked: " + reason)
+        self.assertIsNone(decision, "a two-push turn whose report names the newest head as running was blocked: "
+                          + reason)
         older = [c for c in calls if any(MID in a or MID7 in a for a in c)]
         self.assertEqual(older, [], "the guard read the older head of the turn: %s" % older)
 
@@ -313,6 +317,60 @@ class PushCheckTests(unittest.TestCase):
                                             answers(prs=[pr_entry()], runs=[PENDING]))
         self.assertGreaterEqual(len(calls), 1, "a push with a pending run read no CI: %s" % calls)
         self.assertLessEqual(len(calls), 2, "a push read more than two gh calls for its head: %s" % calls)
+
+
+class FakeClock:
+    """A clock the test moves by hand, read where Budget would read time.monotonic."""
+
+    def __init__(self, now):
+        self.now = now
+
+    def __call__(self):
+        return self.now
+
+
+class BudgetTests(unittest.TestCase):
+    """The read budget of one Stop (ci_wake.Budget): the per-read cap and the spent total, on a fake clock.
+    No real time passes. The gh reads run through the stand-in on PATH, with this case's fixture."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp(prefix="budget-", dir=trg.RUN_FOLDER)
+        self.log = os.path.join(self.folder, "gh.log")
+        fixture_path = os.path.join(self.folder, "fixture.json")
+        with open(fixture_path, "w", encoding="utf-8") as f:
+            json.dump(answers(prs=[pr_entry()], runs=[PENDING]), f)
+        patch = mock.patch.dict(os.environ, {"GH_STUB_FIXTURE": fixture_path, "GH_STUB_LOG": self.log})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_spent_total_reads_ci_unknown_with_no_gh_call(self):
+        clock = FakeClock(0.0)
+        budget = ci_wake.Budget(total=20, per_read=8, clock=clock)
+        clock.now = 25.0  # the 20 s total is spent before any read
+        records = turn(REPORT, push(push_out(HEAD7)))[1:]
+        states = report_guard.push_ci_states(records, {"cwd": self.folder}, budget=budget)
+        self.assertEqual([(sha7, state) for sha7, state, _ in states], [(HEAD7, "unknown")],
+                         "a spent budget did not read the pushed head as unknown: %s" % states)
+        reason = report_guard.push_ci_problem(REPORT, states)
+        self.assertIn("CI unknown on " + HEAD7, reason, "a spent budget is not named CI unknown")
+        self.assertEqual(trg.GH_STUB.read_log(self.log), [], "a spent budget still read gh")
+
+    def test_every_gh_read_is_capped_at_the_per_read_timeout(self):
+        clock = FakeClock(0.0)
+        budget = ci_wake.Budget(total=20, per_read=8, clock=clock)
+        real_gh = ci_wake.gh
+        timeouts = []
+
+        def spy(args, cwd, timeout=ci_wake.READ_TIMEOUT):
+            timeouts.append(timeout)
+            return real_gh(args, cwd, timeout)
+
+        with mock.patch.object(ci_wake, "gh", spy):
+            state, _ = ci_wake.head_state(HEAD7, BRANCH, self.folder, budget)
+        self.assertTrue(timeouts, "the head read made no gh call, so no timeout was checked")
+        self.assertLessEqual(max(timeouts), 8,
+                             "a gh read was given %s s, past the 8 s per-read cap" % max(timeouts))
+        self.assertEqual(state, "pending", "the fixture's pending run did not read as pending")
 
 
 if __name__ == "__main__":
