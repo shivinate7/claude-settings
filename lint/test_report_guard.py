@@ -1083,16 +1083,15 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIn("no model named for reviewer", out["reason"])
 
     def test_dm_red_next_builder_opus_ran_sonnet_still_blocks(self):
-        # Catches: a Next pair the spawn does not back must still refuse. Main refuses on the unnamed builder;
-        # the Next pair check words it as a mismatch. Either refusal passes this test.
+        # Catches: a Next pair the spawn does not back must still refuse. Next is not mismatch-checked, so the
+        # builder that Done leaves unnamed is the refusal.
         out = self.verdict(
             "> **Done:**\n> - OTHER: Added a test ..., commit 8f42c4ebe. (test-author haiku)\n>\n"
             "> **Next:**\n> - The builder is running (builder opus).\n> - Unstarted: none.",
             [self.TEST_AUTHOR, self.BUILDER])
         self.assertIsNotNone(out, "the report passed: a builder opus name in Next with a sonnet builder was not blocked")
         self.assertEqual(out["decision"], "block")
-        causes = ("no model named for builder", "'builder opus' matches no builder spawn")
-        self.assertTrue(any(cause in out["reason"] for cause in causes), out["reason"])
+        self.assertIn("no model named for builder", out["reason"])
 
     def test_dm_green_done_names_both_roles_passes(self):
         # Catches: a Done that names every spawned role, with the incident's spawns, must pass.
@@ -1102,6 +1101,42 @@ class DoneNamesModelsTests(unittest.TestCase):
             "> - Unstarted: none.",
             [self.TEST_AUTHOR, self.REVIEWER_R2])
         self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_false_alarm_planned_third_try_next_passes(self):
+        # Catches: Next's planned builder opus, which has not run, is read as a mismatch against the sonnet builder.
+        out = self.verdict(
+            "> **Done:**\n> - BUILT the guard, PR #5 (builder sonnet)\n>\n"
+            "> **Next:**\n> - Third try: builder opus, if round 2 fails.\n> - Unstarted: none.",
+            [self.BUILDER])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_false_alarm_planned_reviewer_haiku_next_passes(self):
+        # Catches: Next's planned fix check on haiku is read as a mismatch against the sonnet reviewer that ran.
+        out = self.verdict(
+            "> **Done:**\n> - BUILT the guard, PR #5 (builder sonnet, reviewer sonnet)\n>\n"
+            "> **Next:**\n> - Fix check next (reviewer haiku).\n> - Unstarted: none.",
+            [self.BUILDER, self.REVIEWER_R2])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_false_alarm_solo_build_reviewer_running_passes(self):
+        # Catches: a solo build's BUILT item, which names no pair because no builder ran, blocks a running reviewer
+        # that Next names with its model.
+        out = self.verdict(
+            "> **Done:**\n> - BUILT: x, PR #12\n>\n"
+            "> **Next:**\n> - Review running (reviewer sonnet).",
+            [self.REVIEWER_R2])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_red_two_review_rounds_next_names_one_model_blocks(self):
+        # Catches: a reviewer that ran haiku and sonnet is excused by a Next line that names only sonnet, so the
+        # haiku round goes unnamed.
+        out = self.verdict(
+            "> **Done:**\n> - OTHER: y, commit abc1234. (test-author haiku)\n>\n"
+            "> **Next:**\n> - Review round 2 running (reviewer sonnet).\n> - Unstarted: none.",
+            [self.TEST_AUTHOR, self.REVIEWER_R1, self.REVIEWER_R2])
+        self.assertIsNotNone(out, "the report passed: a Next line naming only sonnet excused a haiku reviewer")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for reviewer", out["reason"])
 
 
 class UnstartedItemsTests(unittest.TestCase):
