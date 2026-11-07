@@ -56,8 +56,10 @@ class OneFenceHomeTests(unittest.TestCase):
                       "ste_lint holds a FENCE of its own that nothing reads; delete it")
 
 
-# The three copies that take the list-aware fence test. Their own indent rule goes; the test decides each line.
-LIST_AWARE_COPIES = ("ste_lint.py", "check_ruling_kind.py", "hook_catalog.py")
+# The copies that take the list-aware fence test (ruling A). Each drops its own fence regex and asks is_fence.
+LIST_AWARE_COPIES = ("ste_lint.py", "check_ruling_kind.py", "hook_catalog.py", "find_copies.py", "stale_cites.py",
+                     "compliance_probes.py", os.path.join("..", "hooks", "feedback_guard.py"))
+FENCE_CALLS = ("compile", "match", "fullmatch", "search", "sub", "finditer")
 NOT_BUILT = "word_runs has no is_fence; the list-aware fence test is not built"
 
 
@@ -100,7 +102,7 @@ class ListAwareFenceTests(unittest.TestCase):
 
 
 class ListAwareCopiesTests(unittest.TestCase):
-    def test_the_three_copies_call_is_fence_and_hold_no_fence_regex(self):
+    def test_the_fence_copies_call_is_fence_and_hold_no_fence_regex(self):
         lint = os.path.dirname(os.path.abspath(__file__))
         for name in LIST_AWARE_COPIES:
             with self.subTest(module=name):
@@ -111,10 +113,11 @@ class ListAwareCopiesTests(unittest.TestCase):
                          and ((isinstance(node.func, ast.Attribute) and node.func.attr == "is_fence")
                               or (isinstance(node.func, ast.Name) and node.func.id == "is_fence"))]
                 self.assertTrue(calls, "%s does not call word_runs.is_fence" % name)
+                # A fence pattern carries a tilde, so a backtick-only pattern (feedback_guard's closer check) is no copy.
                 regexes = [node.lineno for node in ast.walk(tree) if isinstance(node, ast.Call)
-                           and isinstance(node.func, ast.Attribute) and node.func.attr == "compile"
+                           and isinstance(node.func, ast.Attribute) and node.func.attr in FENCE_CALLS
                            and node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
-                           and any(mark in node.args[0].value for mark in ("{3,}", "```", "~~~"))]
+                           and "~" in node.args[0].value and any(mark in node.args[0].value for mark in ("{3,}", "```", "~~~"))]
                 self.assertEqual(regexes, [], "%s holds a fence regex of its own, on the lines listed" % name)
 
 
