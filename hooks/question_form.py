@@ -454,9 +454,9 @@ _CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|and|but|s
 _CLAUSE_JOIN = "; "
 OWNER_YOU = re.compile(r"\byou\b", re.I)
 OWNER_NAME = re.compile(r"\b(?:the\s+owner|shivam|he)\b", re.I)
-# The act is the verb the name is subject of: a modal or an -ly word may come between, so "Shivam will
+# The act is the verb the name is subject of: a modal, "to" or an -ly word may come between, so "Claude asks Shivam to click Merge" and "Shivam will
 # approve it" acts and "the owner clicked Approve" (the button's name, after a past act) does not.
-OWNER_ACT = re.compile(r"(?:\s+(?:will|can|must|should|may|then|also|first|now|\w+ly))*\s+"
+OWNER_ACT = re.compile(r"(?:\s+(?:will|can|must|should|may|then|also|first|now|to|\w+ly))*\s+"
                        r"(?:press(?:es|ing)?|click(?:s|ing)?|tap(?:s|ping)?|approv(?:e|es|ing)"
                        r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)\b" + _PAGE_BUTTON, re.I)
 _PRESS_LEAD = frozenset(("you", "and", "then", "or", "please"))

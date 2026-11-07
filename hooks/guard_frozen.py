@@ -248,7 +248,7 @@ def _script_mutates(script: str) -> bool:
     if not script or _SCRIPT_RUNS_HIDDEN.search(script):
         return True
     for segment in split_segments(script):
-        command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment)])
+        command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment, True)])
         # `sed -i` is no mutating word: `writes_to` reads it by its own pattern, so it must get that far.
         if _mutates_as_command(command, rest) or (
                 command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)):
@@ -472,7 +472,7 @@ def _words_of(word: str):
     text split as the shell splits it (a `bash -c` script), and each quote's text as its own words
     (cut at a paren too, so `'$(echo 1 > P)'` shows `P`)."""
     inner = _unquoted(word)
-    out = [inner] + [_unquoted(w) for w in _quoted_words(inner)]   # a quoted script, read again
+    out = [inner] + [_unquoted(w) for w in _quoted_words(inner, True)]   # a quoted script, read again
     for piece in re.split(r"""['"()]""", word):
         out.extend(REDIRECT.sub(r" \1 ", piece).split())
     return out
@@ -617,7 +617,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     ends = []
     segments = split_segments(cmd, ends)
     scans = [_scan(segment) for segment in segments]
-    parsed = [_quoted_words(segment) for segment in segments]
+    parsed = [_quoted_words(segment, True) for segment in segments]
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
