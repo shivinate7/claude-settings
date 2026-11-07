@@ -505,8 +505,107 @@ def records_page_hit(stripped: str, cwd: str) -> str:
     return ""
 
 
+# ---- conflict-markers: a Bash `git commit` that would hold a leftover conflict marker
+#
+# The hook runs before the chain, so it judges what the commit will hold. A commit with pathspecs holds
+# those working-tree files. `commit -a` and an earlier whole-tree `git add` hold the whole working tree.
+# An earlier `git add <paths>` holds those paths from the working tree, and the rest from the index. Any
+# other commit holds the index. Each is read against HEAD with `git diff --check`. Only its "leftover
+# conflict marker" findings count, never its exit code, so trailing whitespace commits. A file is a hit
+# when its findings hold all three kinds: a `<<<<<<<` line, a lone `=======`, and a `>>>>>>>` line.
+# Context never hides a marker: a fence, a string, a comment and a template literal are not read.
+# Limits: a `sh -c` script and `eval` are not read (guard-guards-mistakes-only); an untracked file that
+# an earlier `git add` stages is not in `git diff HEAD`, so it is not read; a failed read, no HEAD, and an
+# unmerged index judged alone (git refuses that commit itself) are no hit.
+CONFLICT_MARKERS_REASON = (
+    "Rule (Git, conflict-markers): this commit would hold conflict markers in {file}. "
+    "Remedy: resolve the markers in that file, re-stage it, then retry."
+)
+_CONFLICT_FINDING = re.compile(r"^(.+):(\d+): leftover conflict marker\s*$")
+_MARKER_KINDS = {"<": "start", "=": "mid", ">": "end"}
+
+
+def _marker_findings(where, top, diff_args, cached):
+    """Return {file: set of marker kinds} for the leftover conflict markers `git diff --check` reports.
+    A line's kind is read from the new side of the file: the index blob, or the working-tree file."""
+    done = _git(where, "-c", "core.quotepath=off", "diff", "--no-ext-diff", "--no-color", "--check", *diff_args)
+    if done is None:
+        return {}
+    wanted = {}
+    for row in done.stdout.splitlines():
+        found = _CONFLICT_FINDING.match(row)
+        if found:
+            wanted.setdefault(found.group(1), []).append(int(found.group(2)))
+    kinds = {}
+    for name, numbers in wanted.items():
+        if cached:
+            read = _git(top, "cat-file", "-p", ":" + name)
+            text = read.stdout if read is not None and read.returncode == 0 else ""
+        else:
+            try:
+                with open(os.path.join(top, name), encoding="utf-8", errors="replace", newline="") as handle:
+                    text = handle.read()
+            except OSError:
+                text = ""
+        lines = text.split("\n")
+        for number in numbers:
+            if 0 < number <= len(lines) and lines[number - 1][:1] in _MARKER_KINDS:
+                kinds.setdefault(name, set()).add(_MARKER_KINDS[lines[number - 1][0]])
+    return kinds
+
+
+def _covered_by(where, specs):
+    """The staged files that the pathspecs `git add` would restage, as git reads them."""
+    done = _git(where, "-c", "core.quotepath=off", "diff", "--cached", "--name-only", "--", *specs)
+    return set(done.stdout.splitlines()) if done is not None and done.returncode == 0 else set()
+
+
+def conflict_markers_hit(stripped: str, cwd: str) -> str:
+    """Return the first file the commit would hold with all three conflict markers, else ''. Each
+    segment is judged from its own command word."""
+    whole_tops, add_specs = set(), []   # tops an earlier add stages whole / (where, top, specs) of earlier adds
+    for segment in split_segments(stripped):
+        call = git_call_of(segment) if segment.strip() else None
+        if call is None or call[0] not in ("add", "commit"):
+            continue
+        c_target = _segment_git_c_target(segment_tokens(segment) or [])
+        root = command_root(stripped, cwd)
+        where = _absolute(c_target, root) if c_target is not None else root
+        done = _git(where, "rev-parse", "--show-toplevel") if where and os.path.isdir(where) else None
+        if done is None or done.returncode != 0 or not done.stdout.strip():
+            continue
+        top = os.path.normpath(done.stdout.strip())
+        if call[0] == "add":
+            whole, specs = _add_shape(call[1])
+            if whole:
+                whole_tops.add(top)
+            elif specs:
+                add_specs.append((where, top, specs))
+            continue
+        all_flag, specs = _commit_shape(call[1])
+        head = _git(top, "rev-parse", "--verify", "-q", "HEAD")   # no HEAD: `git diff` would read an empty tree
+        if head is None or head.returncode != 0:
+            continue
+        if specs:
+            found = _marker_findings(where, top, ["HEAD", "--", *specs], False)
+        elif all_flag or top in whole_tops:
+            found = _marker_findings(top, top, ["HEAD"], False)
+        else:
+            found = _marker_findings(top, top, ["--cached"], True)
+            for add_where, add_top, add_paths in add_specs:
+                if add_top != top:
+                    continue
+                for name in _covered_by(add_where, add_paths):
+                    found.pop(name, None)
+                found.update(_marker_findings(add_where, top, ["HEAD", "--", *add_paths], False))
+        for name, seen in found.items():
+            if len(seen) == len(_MARKER_KINDS):
+                return name
+    return ""
+
+
 # ---- merge --role: the tier is read from this session's own get_session record
-ROLE_TIERS = ("batch-runner",)
+ROLE_TIERS =("batch-runner",)
 ROLE_TAG_PREFIX = "cs-build:"
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
