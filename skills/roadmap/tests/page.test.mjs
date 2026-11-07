@@ -143,3 +143,22 @@ test("a live doing step still counts as in progress in the where-you-are line", 
   const sub = (await page.locator("#now > div:first-child > .sub").first().textContent()).replace(/\s+/g, " ");
   assert.match(sub, /\b1 in progress/, "the where-you-are line does not count the live doing step as in progress: " + sub);
 });
+test("the Changes log row of a stalled step reads Stalled, not In progress", async (t) => {
+  const steps = { c1: stepOf("Step c1", "doing", 1) };
+  const page = await open(t, builtPage({ steps, stalled: STALLED_C1 })); if (!page) return;
+  await assertRowReads(page, "c1", "Stalled");
+  const row = page.locator("#days .ev", { has: page.locator('button[data-go="c1"]') });
+  assert.equal(await row.count(), 1, "step c1 has no row in the Changes log");
+  const kind = (await row.locator(".kind").textContent()).trim();
+  assert.doesNotMatch(kind, /In progress/, "the Changes log row of stalled step c1 reads In progress");
+  assert.match(kind, /Stalled/, `the Changes log row of stalled step c1 reads "${kind}", not Stalled`);
+});
+test("a live doing step still reads In progress in the Changes log", async (t) => {
+  const steps = { a: stepOf("Step a", "doing", 2) };
+  // Step a has an open pull request on its branch a, which makes it a live lane.
+  const live = { readAt: new Date().toISOString(), threads: [], pulls: [{ number: 7, title: "Step a", branch: "a" }], branches: [], sessions: [] };
+  const page = await open(t, builtPage({ steps, live })); if (!page) return;
+  const row = page.locator("#days .ev", { has: page.locator('button[data-go="a"]') });
+  assert.equal(await row.count(), 1, "step a has no row in the Changes log");
+  assert.equal((await row.locator(".kind").textContent()).trim(), "In progress", "the Changes log row of the live doing step does not read In progress");
+});
