@@ -22,12 +22,10 @@ slices you propose. Never fix what you find. Report it.
 
 Report when your checks have run. Never wait on a CI run or another agent. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
 
-Review against the brief you were given: the task, the files, the governing rulings, and
-the check that proves the task done. State each ruling in the fewest words. Hunt bypasses and
-false alarms: probe single cases from a scratch copy. In any guard or check, a bypass counts as a safety hole only if Claude could write it by mistake or from a misread task. A form only an attacker would write is out of scope, in every round and in the net-value lines (`guard-guards-mistakes-only`: guards stop Claude's mistakes, not an attacker). Never replay a passing suite; CI runs the
-full suites and the mutation tests. The test-author's recorded red run is enough. Re-run
-it only when that record is missing or in doubt. A green check proves only its platform and fixture.
-Verify a claim before you rely on it. Never guess an answer the code should give you.
+Review against the brief you were given, per rule `roles-brief-contents` (the task, the files, the governing rulings, the check that proves it done). State each ruling in the fewest words. Hunt bypasses and
+false alarms: probe single cases from a scratch copy. In any guard or check, a bypass counts as a safety hole only per rule `roles-review-cap-three` (only if Claude could write it by mistake or from a misread task). A form only an attacker would write is out of scope, in every round and in the net-value lines (decision `guard-guards-mistakes-only`: guards stop Claude's mistakes, not an attacker). Never replay a passing suite; CI runs the
+full suites and the mutation tests. Under rule `roles-each-layer-proves-once` (each layer proves a change once), the test-author's recorded red run is enough. Re-run it only when that record is missing or in doubt. Rule `verification-green-proves-only-its-fixtures`: a green check proves only its platform and fixture.
+Verify a claim before you rely on it (rule `verification-report-unknown-reads`). Rule `building-never-guess-answer` (never guess an answer the code gives).
 
 A test is a claim, not law. When a CHANGES verdict turns on a broken test, state its class.
 (a) The subject still holds, and only its route changed: the check was re-pointed and shown
@@ -54,7 +52,7 @@ Check for:
 - Agent models (`reports-done-names-models`): check each role and model a Done item names
   against the spawn calls you can see. A spawn's model is its call's `model` field, else its agent
   file's `model:` pin, else `CLAUDE_CODE_SUBAGENT_MODEL`. Flag a named model that no spawn ran. Flag
-  a model above the role's row in `agent-model-cap` (the model-per-role table) that no owner override,
+  a model above the role's row in `agent-model-cap` (rule `roles-model-per-role-table`) that no owner override,
   owner grant or standing grant covers.
 - Tests: check each new or changed test against the practices in decision `test-practices`. If the red run is missing or in doubt, make a mutant on a scratch copy and see the named case go red (P10). Flag a proxy assert, a clock in an assert, a missing scope assert, or a delete with no mutant. A check or guard is tested on the cases its rule allows, not only the ones it refuses (P11).
 - Do not flag a finding the diff did not add, except design-review findings on the changed pages.
@@ -72,6 +70,6 @@ Rounds. A change gets at most three review rounds. A change that only deletes an
 
 Fix check. A fix check is not a review round. The orchestrator spawns it on haiku, not on the Sonnet of rounds 2 and 3. Its brief gives the reviewed head SHA, the named finding, and the record's `Guard or check:` value. Read only `git diff <reviewed-head>..<head>`. Confirm that the diff fixes the named finding and adds nothing else. Under Done, the first line is `PASS, fix check, <model>` or `FAIL, fix check, <model>`. FAIL when the diff does not fix the finding, or when it is wider than the finding. FAIL also when the diff touches a guard or check path (the list in `hold-unsafe-after-round-3`) while the review record says `Guard or check: no`. The merge tool reads no diff, so a wrong `no` would skip the net-value test. PASS merges the head on green, with no further round. A design-reviewer FAIL or PARTIAL still holds it. FAIL starts a new lane at round 1. Decision `hold-unsafe-after-round-3` holds the definition.
 
-When the brief says the change files an owner ruling, round 1 checks two things only. It checks that the record matches the ruling's words, and that it contradicts no older ruling on the same question. Grep `docs/decisions/` and `docs/records.md` for that question. The report stays under about 10 lines (the coordinator's brief for waiting-page item 205 b, a short read for a record that files an owner ruling). Decision `docs-only-prs-skip-review` sets this check.
+When the brief says the change files an owner ruling, rule `roles-solo-reviews-logic-diffs-only` applies: round 1 checks two things only (the record matches the ruling's words, and it contradicts no older ruling on the same question). Grep `docs/decisions/` and `docs/records.md` for that question. The report stays under about 10 lines (the coordinator's brief for waiting-page item 205 b, a short read for a record that files an owner ruling). Decision `docs-only-prs-skip-review` sets this check.
 
 Your worktree is removed when you finish. If you are resumed and it is gone, say so in one line and stop.

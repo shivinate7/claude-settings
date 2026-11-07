@@ -4,7 +4,7 @@
 
 Owner, 2026-11-04 07:56 CST, waiting-page item 168 (what a lane is), pick a: a lane is a session everywhere. The same team of sessions (coordinator, triage, batch runner, lane sessions) runs all on the owner's Mac or all in the cloud, as one concept. The owner asked (2026-11-03 22:26 CST) why an all-local run and an all-cloud run of the same sessions could not share one concept. The owner saw no reason for the cloud and the Mac to mean different things.
 
-- **A lane is the unit of work.** It has its own branch, worktree and lane PR. A lane session runs it, local and cloud alike. The GLOSSARY lane row defines it.
+- **A lane is the unit of work.** It has its own branch, worktree and lane PR. A lane session runs it (rule `parallelism-own-lane-orchestrator`), local and cloud alike. The GLOSSARY lane row defines it.
 - **The coordinator starts each lane session.** Inside a standing build the owner started, it needs no further owner grant (record `session-tiers`, A coordinator starts lane sessions).
 - **An agent is not a lane.** A solo, one-lane or lane session fans its own work out to agents, each in its own worktree (`parallelism-each-own-checkout`, each agent in its own checkout). That work is part of the session's lane, or of its solo task. An agent ends with the session that started it.
 - **A keep-going follow-up.** A follow-up that `parallelism-keep-going` (keep going) lets a session start with no question is an agent when it is part of the session's own topic. A follow-up on a new topic is a new lane, so it goes to the coordinator. A solo session has no coordinator: it starts the follow-up as an agent and names it under Done.

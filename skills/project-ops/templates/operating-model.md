@@ -118,7 +118,7 @@ parent, or miss a message while busy.
   `pr-review-record`). That push makes the record stale, so the lane posts a new review record for the
   new head. When the repo holds a standing merge grant, the batch runner merges under it. The owner is
   not asked.
-- A session that waits on CI sets a timed check-in on each wait, and again after each red job.
+- A session that waits on CI sets timed check-ins (rule `git-ci-wait-checks-in`), and again after each red job.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.
   It ends each turn that leaves work in flight with a timed check-in, so a lost wake costs one gap.

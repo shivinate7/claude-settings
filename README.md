@@ -195,7 +195,7 @@ Exit 1 has two causes. Read the output to tell them apart. A line that starts
 * A linter change: edit `lint/`. A guard change: edit `hooks/`. Re-run the installer once
   locally so a new symlink exists.
 * A ruling worth keeping: one new file under `docs/decisions/`, named by slug. Claim its number only
-  at merge, per CLAUDE.md ("never allocate a numbered record on a branch").
+  at merge, per rule `git-slug-then-claim-number` (no numbered record on a branch).
 * An open question, not yet ruled on, or a deferred item: a file under `docs/debts/`.
 
 ## Troubleshooting
@@ -291,7 +291,7 @@ On its own boot it first takes the role's lease from `bin/sim-lease`, the Mac-wi
 ## Session tiers and a roadmap record for a repo
 
 The `project-ops` skill packages how the claude-settings project on claude.ai runs. It holds the
-session tiers (a coordinator that starts triage and the batch runner, then lane sessions), one roster,
+session tiers (rule `roles-pick-mode-from-request`: a coordinator, triage, the batch runner, lane sessions), one roster,
 rotation of the standing sessions, and autopilot deferral. It also holds a record branch for the roadmap data, briefs and role handoff notes. Its
 `scripts/scaffold.py` writes the record-branch skeleton. Its `templates/` hold the operating model,
 the roster, a brief and a role handoff note. A repo adopts it only on the owner's grant. See

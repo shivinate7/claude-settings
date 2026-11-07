@@ -19,7 +19,7 @@ batch ahead of it) holds that fix. This sweep cites it and does not redo it.
 - **Readers.** Six read-only Explore agents (Sonnet, `Audit:` marker), one per area below.
 - **Rule text.** First the decision the guard index names, then the CLAUDE.md or style anchor that
   `lint/rule_mechanisms.json` maps, then the comment above the code. No home was invented.
-- **Calibration.** Decision guard-guards-mistakes-only (guards stop Claude's mistakes, not an
+- **Calibration.** Rule `roles-review-cap-three`, decision guard-guards-mistakes-only (guards stop Claude's mistakes, not an
   attacker's): a bypass only an attacker would write counts as exact. A limit that its own decision
   accepts counts as exact.
 
@@ -118,17 +118,17 @@ Notes: lint/rule_mechanisms.json calls roles-sonnet-is-the-ceiling unmechanized,
 |---|---|---|---|---|---|---|
 | `port-question` | port-keeps-behaviour | "It says so in a 'Departs from: <file>:<symbol> — <what changes>' line." | looser | exact | a port task with "Departs from: none" or no file:symbol passes | tool fix: run the departs check on port task context; require file:symbol on the main side |
 | `uniform-pick` | uniform-over-variants | "It carries 'Goes against your ruling…' and is never the recommended option." | exact | exact | an unmarked widening option passes; the decision accepts that limit | - |
-| `press-link` | act-in-place | "An option or step that asks him to press in a web app carries a link to that exact page." | stricter | exact | option "Merge PR #374" with no link is refused, though the session does the merge after the pick | rule rewrite: a press the session runs needs no link, or tool fix: skip it when the option's how says the session does it |
+| `press-link` | act-in-place | "An option or step that asks him to press in a web app carries a link to that exact page." (rule `style-press-has-link`) | stricter | exact | option "Merge PR #374" with no link is refused, though the session does the merge after the pick | rule rewrite: a press the session runs needs no link, or tool fix: skip it when the option's how says the session does it |
 | `command-in-item` | act-in-place | "A step never sends him to a file for a command, and never holds one." | stricter | exact | step "Search for `foo\|bar` in the page" is refused: any semicolon or pipe in a code span counts as a shell line | tool fix: count a span only when it starts with a shell program or cmdlet |
-| `question-form` | question-form | "Goal, Problem, Based on lines in this order; each option's description says Gain: and Lose:." | looser | exact | the copied template "Goal: <the goal>" passes; only Departs from is checked for placeholders | tool fix: apply the placeholder check to Goal, Problem and Based on |
-| `owner-judge` | owner-judge-test | "The stake is one of goal, money, risk, rule, cannot undo." | exact | exact | a false stake passes; the decision accepts that limit | - |
+| `question-form` | question-form | "Goal, Problem, Based on lines in this order; each option's description says Gain: and Lose:." (rule `style-question-form`) | looser | exact | the copied template "Goal: <the goal>" passes; only Departs from is checked for placeholders | tool fix: apply the placeholder check to Goal, Problem and Based on |
+| `owner-judge` | owner-judge-test | "The stake is one of goal, money, risk, rule, cannot undo." (rule `style-question-form`) | exact | exact | a false stake passes; the decision accepts that limit | - |
 | `task-names-check` | task-names-its-check | "A waiting-page task carries a line in `context` that starts `Why yours:`." | exact | exact | false check text passes; the decision accepts that limit | - |
 | `option-letter-keys` | option-keys-are-letters | "The key of each option is that letter in lowercase." | exact | exact | only the decision says it; no CLAUDE.md or style line does | rule rewrite: add one key-letter line to the waiting-page skill |
 | `rework-off-page` | rework-leaves-page | "A session never writes an open item that says it is being reworked." | exact | exact | the stricter cases (history text) are limits the decision accepts | - |
 | `question-departs` | port-keeps-behaviour | "It also refuses a no-change word in the first clause of the change side." | exact | exact | "Departs from: main — adds a guard so nothing merges" is refused for "nothing", as the decision's word list says; the style rule names only three words | - |
 | `item-field-rendered` | item-field-rendered | "refuses an ArtifactData write to items that names a top-level field outside the list." | exact | exact | the list is read from page.html itemFields | - |
 | `page-stale` | page-stale-publish | "Every republish of a waiting page is main's page.html with the live designData and roadmap blocks kept." | looser | exact | a republish of main's raw page with empty designData and roadmap blocks passes, and the live data is lost | tool fix: deny a republish whose designData block equals main's empty template, unless it is a first publish |
-| `gh-login-switch` | act-in-place | "A gh command block opens, after its `cd`, with `gh auth switch -u shivinate7`" | stricter | exact | a str_replace of "gh pr view 3" to "gh pr view 4" is refused, though the stored command keeps its switch | tool fix: on str_replace, judge the whole command after the edit |
+| `gh-login-switch` | act-in-place | "A gh command block opens, after its `cd`, with `gh auth switch -u shivinate7`" (rule `output-never-hand-off-doable-step`) | stricter | exact | a str_replace of "gh pr view 3" to "gh pr view 4" is refused, though the stored command keeps its switch | tool fix: on str_replace, judge the whole command after the edit |
 
 Notes: owner-judge also fires on prose "Problem statement:" (wrong id only). gh-login-switch and command-in-item judge waiting-page tasks only; chat is the reply judge's.
 
