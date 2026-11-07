@@ -795,8 +795,10 @@ class Stale(unittest.TestCase):
         return (write_text(os.path.join(self.fetched, "current.html"), PAGE),
                 write_text(os.path.join(self.fetched, "behind.html"), set_body(ALTERED, STALE_BODY)))
 
-    def items_run(self, page, items, env):
-        return self.page_run(page, "--main", TEMPLATE, "--items", items, env=env)
+    def items_run(self, page, items, env, answers=None):
+        """One --items run. With `answers` (a list file or a folder) it also passes --answers; without it, no --answers."""
+        extra = [] if answers is None else ["--answers", answers]
+        return self.page_run(page, "--main", TEMPLATE, "--items", items, *extra, env=env)
 
     def page_line(self, r):
         """The page's verdict line: the first stdout line."""
@@ -997,9 +999,10 @@ class Stale(unittest.TestCase):
         self.assert_wait_line(r, 501 + cap - 1, 3001 + cap - 1, "waiting")
         self.assert_wait_line(r, 501 + cap, 3001 + cap, "unknown")
 
-    # An item on a lane (`lane` set) with a `lastAnswer` and no `waits` prints one lane line, open or closed, built from the
-    # item alone: the writer sees a wait that never ends. An item with `waits` keeps its one gh line. An item with no
-    # `lastAnswer`, or no `lane`, prints nothing.
+    # An item on a lane (`lane` set) with a `lastAnswer` and no `waits` prints one lane line, built from the item alone: the
+    # writer sees a wait that never ends. An open one always prints it. A closed one prints it only while its answer row is in
+    # --answers (`answers/<item id>`, a routed answer still in flight). Without --answers a closed one prints none. An item with
+    # `waits` keeps its one gh line. An item with no `lastAnswer`, or no `lane`, prints nothing.
 
     def lane_item(self, n, status="open", last_answer=True, waits=None, home=True):
         """An item on lane LANE: `lane` set, `home` set unless `home` is False, and `lastAnswer` set unless `last_answer` is False."""
@@ -1017,13 +1020,76 @@ class Stale(unittest.TestCase):
         item["lastAnswer"] = answer
         return item
 
-    def test_a_closed_lane_item_with_a_home_and_a_last_answer_prints_one_lane_line(self):
+    def answer_row(self, n):
+        """The answer row of item `n`: its id is the item id, and its data is the answer the page writes on Send."""
+        return {"id": "item-%d" % n, "data": {"item": "item-%d" % n, "n": n, "at": ANSWERED, "note": "", "choice": "a"}}
+
+    def answers_file(self, rows):
+        """The answers as a JSON list of {"id", "data"} entries: the first shape --answers takes."""
+        path = os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix="answers-"), "answers.json")
+        return write_text(path, json.dumps(rows))
+
+    def answers_folder(self, rows):
+        """The answers as the folder `ArtifactData list` saves: one <id>.json per answer, and the .complete marker it leaves."""
+        folder = tempfile.mkdtemp(dir=self.tmp.name, prefix="answers-")
+        for row in rows:
+            write_text(os.path.join(folder, row["id"] + ".json"), json.dumps(dict(row["data"], id=row["id"])))
+        write_text(os.path.join(folder, ".complete"), "")
+        return folder
+
+    def assert_answers_accepted(self, r):
+        """The run printed a verdict line, so the script took --answers. A refused flag prints none, and argparse names it on stderr."""
+        self.assertTrue(self.page_line(r), "--answers is not accepted: the run printed no verdict line, so the flag does not exist yet:\n" + r.stderr)
+
+    def test_a_closed_lane_item_with_a_home_and_a_last_answer_prints_no_lane_line_without_the_answers_flag(self):
+        current, _ = self.current_and_behind()
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                env, folder = self.gh_env({})
+                items = self.items_folder([self.lane_item(154, status="closed")]) if as_folder else self.items_file([self.lane_item(154, status="closed")])
+                r = self.items_run(current, items, env)
+                self.assert_page_word(r, "current", 0)
+                self.assertEqual(r.stdout.splitlines()[1:], [],
+                                 "a closed lane item printed a line with no --answers, so no answer row is known for it:\n" + r.stdout + r.stderr)
+                self.assertEqual(self.gh_calls(folder), [], "gh was called for a closed lane item with no --answers")
+
+    def test_a_closed_lane_item_with_no_answer_row_prints_no_lane_line(self):
+        current, _ = self.current_and_behind()
+        cases = (("an empty answers list", []), ("an answers list that holds only item 155's row", [self.answer_row(155)]))
+        for label, rows in cases:
+            for as_folder in (False, True):
+                with self.subTest(answers=label, folder=as_folder):
+                    env, folder = self.gh_env({})
+                    answers = self.answers_folder(rows) if as_folder else self.answers_file(rows)
+                    r = self.items_run(current, self.items_file([self.lane_item(154, status="closed")]), env, answers=answers)
+                    self.assert_answers_accepted(r)
+                    self.assert_page_word(r, "current", 0)
+                    self.assertEqual(r.stdout.splitlines()[1:], [],
+                                     "a closed lane item with no answer row printed a line:\n" + r.stdout + r.stderr)
+                    self.assertEqual(self.gh_calls(folder), [], "gh was called for a closed lane item with no answer row")
+
+    def test_a_closed_lane_item_with_its_answer_row_prints_one_lane_line_in_either_answers_shape(self):
+        current, _ = self.current_and_behind()
+        for as_folder in (False, True):
+            with self.subTest("answers folder" if as_folder else "answers list file"):
+                env, folder = self.gh_env({})
+                rows = [self.answer_row(154)]
+                answers = self.answers_folder(rows) if as_folder else self.answers_file(rows)
+                r = self.items_run(current, self.items_file([self.lane_item(154, status="closed")]), env, answers=answers)
+                self.assert_answers_accepted(r)
+                self.assert_page_word(r, "current", 0)
+                self.assertEqual(r.stdout.splitlines()[1:], [lane_line(154)],
+                                 "the lane line for item 154 is missing or differs:\n" + r.stdout + r.stderr)
+                self.assertEqual(self.gh_calls(folder), [], "gh was called for a closed lane item with its answer row")
+
+    def test_a_closed_lane_item_with_a_home_and_its_answer_row_prints_one_lane_line(self):
         current, _ = self.current_and_behind()
         for as_folder in (False, True):
             with self.subTest("folder of <id>.json files" if as_folder else "list file"):
                 env, _ = self.gh_env({})
                 items = self.items_folder([self.lane_item(154, status="closed")]) if as_folder else self.items_file([self.lane_item(154, status="closed")])
-                r = self.items_run(current, items, env)
+                r = self.items_run(current, items, env, answers=self.answers_file([self.answer_row(154)]))
+                self.assert_answers_accepted(r)
                 self.assert_page_word(r, "current", 0)
                 self.assertEqual(r.stdout.splitlines()[1:], [lane_line(154)],
                                  "the lane line for item 154 is missing or differs:\n" + r.stdout + r.stderr)
@@ -1031,7 +1097,8 @@ class Stale(unittest.TestCase):
     def test_the_lane_line_starts_no_gh_process(self):
         current, _ = self.current_and_behind()
         env, folder = self.gh_env({RUN_ARGV: RUN_DONE})
-        r = self.items_run(current, self.items_file([self.lane_item(154, status="closed")]), env)
+        r = self.items_run(current, self.items_file([self.lane_item(154, status="closed")]), env, answers=self.answers_file([self.answer_row(154)]))
+        self.assert_answers_accepted(r)
         self.assert_page_word(r, "current", 0)
         self.assertEqual(r.stdout.splitlines()[1:], [lane_line(154)],
                          "the lane line for item 154 is missing or differs:\n" + r.stdout + r.stderr)
@@ -1047,13 +1114,13 @@ class Stale(unittest.TestCase):
         self.assert_wait_line(r, 154, RUN, "ended")
         self.assertEqual(self.gh_calls(folder), [RUN_ARGV], "gh calls for an item with lane and waits")
 
-    def test_a_closed_lane_item_with_no_home_prints_one_lane_line_and_calls_no_gh(self):
+    def test_a_closed_lane_item_with_no_home_prints_no_lane_line_without_the_answers_flag_and_calls_no_gh(self):
         current, _ = self.current_and_behind()
         env, folder = self.gh_env({RUN_ARGV: RUN_DONE})
         r = self.items_run(current, self.items_file([self.lane_item(154, status="closed", home=False)]), env)
         self.assert_page_word(r, "current", 0)
-        self.assertEqual(r.stdout.splitlines()[1:], [lane_line(154)],
-                         "the lane line for item 154 with no home is missing or differs:\n" + r.stdout + r.stderr)
+        self.assertEqual(r.stdout.splitlines()[1:], [],
+                         "a closed lane item with no home printed a line with no --answers:\n" + r.stdout + r.stderr)
         self.assertEqual(self.gh_calls(folder), [], "gh was called for a closed lane item with no home")
 
     def test_an_open_lane_item_prints_one_lane_line_and_calls_no_gh(self):
@@ -1065,6 +1132,18 @@ class Stale(unittest.TestCase):
                          "the lane line for item 154 is missing or differs:\n" + r.stdout + r.stderr)
         self.assertEqual(self.gh_calls(folder), [], "gh was called for an open lane item")
 
+    def test_an_open_lane_item_prints_one_lane_line_with_the_answers_flag(self):
+        current, _ = self.current_and_behind()
+        for label, rows in (("an empty answers list", []), ("its own answer row", [self.answer_row(154)])):
+            with self.subTest(answers=label):
+                env, folder = self.gh_env({RUN_ARGV: RUN_DONE})
+                r = self.items_run(current, self.items_file([self.lane_item(154)]), env, answers=self.answers_file(rows))
+                self.assert_answers_accepted(r)
+                self.assert_page_word(r, "current", 0)
+                self.assertEqual(r.stdout.splitlines()[1:], [lane_line(154)],
+                                 "the lane line for open item 154 is missing or differs with --answers:\n" + r.stdout + r.stderr)
+                self.assertEqual(self.gh_calls(folder), [], "gh was called for an open lane item with --answers")
+
     def test_a_closed_lane_item_with_no_last_answer_prints_no_line_and_calls_no_gh(self):
         current, _ = self.current_and_behind()
         env, folder = self.gh_env({RUN_ARGV: RUN_DONE})
@@ -1073,18 +1152,21 @@ class Stale(unittest.TestCase):
         self.assertEqual(len(r.stdout.splitlines()), 1, "a closed lane item with no lastAnswer printed a line past the verdict:\n" + r.stdout)
         self.assertEqual(self.gh_calls(folder), [], "gh was called for a closed lane item with no lastAnswer")
 
-    def test_full_size_lane_items_print_one_line_each_for_every_item_with_a_last_answer_open_or_closed(self):
+    def test_full_size_lane_items_print_one_line_each_for_every_open_item_and_each_closed_item_with_an_answer_row(self):
         current, _ = self.current_and_behind()
-        items = [self.lane_item(801 + i, status="closed") for i in range(40)]  # closed, home, lastAnswer: one line each
-        items += [self.lane_item(901 + i) for i in range(40)]  # open, home, lastAnswer: one line each
-        items += [self.lane_item(951 + i, status="closed", home=False) for i in range(40)]  # closed, no home, lastAnswer: one line each
-        self.assertEqual(len(items), 120)
+        items = [self.lane_item(801 + i, status="closed") for i in range(40)]  # closed, home, lastAnswer, answer row: one line each
+        items += [self.lane_item(901 + i) for i in range(40)]  # open, home, lastAnswer, no answer row: one line each
+        items += [self.lane_item(951 + i, status="closed", home=False) for i in range(40)]  # closed, no home, lastAnswer, answer row: one line each
+        items += [self.lane_item(1001 + i, status="closed") for i in range(40)]  # closed, home, lastAnswer, no answer row: no line
+        self.assertEqual(len(items), 160)
+        rows = [self.answer_row(n) for n in list(range(801, 841)) + list(range(951, 991))]
         env, folder = self.gh_env({})
-        r = self.items_run(current, self.items_file(items), env)
+        r = self.items_run(current, self.items_file(items), env, answers=self.answers_file(rows))
+        self.assert_answers_accepted(r)
         self.assert_page_word(r, "current", 0)
         want = [lane_line(n) for n in list(range(801, 841)) + list(range(901, 941)) + list(range(951, 991))]
         self.assertEqual(r.stdout.splitlines()[1:], want,
-                         "the lane lines for 120 items differ from one per item with a lastAnswer and no waits:\n" + r.stdout)
+                         "the lane lines for 160 items differ from one per open item and one per closed item with an answer row:\n" + r.stdout)
         self.assertEqual(self.gh_calls(folder), [], "gh was called for lane items with no waits")
 
     def test_a_lane_line_whose_answer_has_no_usable_at_reads_answered_at_unknown_and_never_none_or_a_number(self):
@@ -1096,7 +1178,8 @@ class Stale(unittest.TestCase):
         for label, answer in cases:
             with self.subTest(case=label):
                 env, folder = self.gh_env({})
-                r = self.items_run(current, self.items_file([self.lane_item_with(154, answer)]), env)
+                r = self.items_run(current, self.items_file([self.lane_item_with(154, answer)]), env, answers=self.answers_file([self.answer_row(154)]))
+                self.assert_answers_accepted(r)
                 self.assert_page_word(r, "current", 0)
                 self.assertEqual(r.stdout.splitlines()[1:], [lane_line_unknown(154)],
                                  "the lane line for item 154 with %s is not the unknown line:\n%s" % (label, r.stdout + r.stderr))
@@ -1156,12 +1239,12 @@ HOME = "answered-leaves-page"  # the roadmap step that carries a routed answer's
 
 
 def lane_line(n):
-    """The line a closed item on a lane, with a home and a lastAnswer, prints: `wait: item <n> (lane <slug>): waiting (answered <at>)`."""
+    """The lane line of an item on a lane with a lastAnswer and no waits: `wait: item <n> (lane <slug>): waiting (answered <at>)`."""
     return "wait: item %d (lane %s): waiting (answered %s)" % (n, LANE, ANSWERED)
 
 
 def lane_line_unknown(n):
-    """The line a closed item on a lane prints when its lastAnswer has no usable `at`: the same line, `answered at unknown`."""
+    """The lane line when its lastAnswer has no usable `at`: the same line, `answered at unknown`."""
     return "wait: item %d (lane %s): waiting (answered at unknown)" % (n, LANE)
 
 
