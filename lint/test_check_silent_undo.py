@@ -388,6 +388,55 @@ class PrBodyEscape(unittest.TestCase):
                                      "Summary.\n\n%s\n\nNotes\n---\n%s\n" % (L, F),
                                      "Summary.\n\n%s\n\n%s\n" % (L, F)])  # no rule: not the posting footer
 
+    # Claude Code ends a PR body with the attribution paragraph, then a paragraph of only the session link.
+    # A trailer above that pair still counts. The link paragraph is skipped only when the attribution sits directly above it.
+    URL = "https://claude.ai/code/session_01ABC"
+
+    def test_a_trailer_above_the_attribution_and_session_link_excuses_its_path(self):
+        L, A, U = self.LINE, self.ATTR, self.URL
+        for body in ("Summary.\n\n%s\n\n%s\n\n%s\n" % (L, A, U),
+                     "Summary.\n\n%s\n\n%s\n\n  %s  \n" % (L, A, U)):  # the link line with spaces around it
+            with self.subTest(body=body):
+                ok, why = self.excused(body)
+                self.assertTrue(ok, why)
+
+    def test_a_trailer_above_the_attribution_and_session_link_excuses_its_path_with_crlf(self):
+        L, A, U = self.LINE, self.ATTR, self.URL
+        ok, why = self.excused("Summary.\r\n\r\n%s\r\n\r\n%s\r\n\r\n%s\r\n" % (L, A, U))
+        self.assertTrue(ok, why)
+
+    def test_a_trailer_above_the_attribution_session_link_and_posting_footer_excuses_its_path(self):
+        L, A, U, F = self.LINE, self.ATTR, self.URL, self.FOOT
+        for body in ("Summary.\n\n%s\n\n%s\n\n%s\n\n---\n%s\n" % (L, A, U, F),
+                     "Summary.\n\n%s\n\n%s\n\n%s\n\n---\n\n%s\n" % (L, A, U, F)):
+            with self.subTest(body=body):
+                ok, why = self.excused(body)
+                self.assertTrue(ok, why)
+
+    def test_a_trailer_sharing_a_paragraph_with_the_attribution_and_session_link_still_excuses(self):  # control, current behaviour
+        L, A, U = self.LINE, self.ATTR, self.URL
+        ok, why = self.excused("Summary.\n\n%s\n%s\n%s\n" % (L, A, U))
+        self.assertTrue(ok, why)
+
+    def test_a_session_link_sharing_a_paragraph_with_the_attribution_is_not_skipped(self):  # control
+        L, A, U = self.LINE, self.ATTR, self.URL
+        self.assert_nothing_excused(["Summary.\n\n%s\n\n%s\n%s\n" % (L, A, U)])
+
+    def test_a_session_link_with_other_text_is_not_skipped(self):  # control
+        L, A, U = self.LINE, self.ATTR, self.URL
+        self.assert_nothing_excused(["Summary.\n\n%s\n\n%s\n\nSee %s\n" % (L, A, U),
+                                     "Summary.\n\n%s\n\n%s\n\n%s extra\n" % (L, A, U)])
+
+    def test_a_session_link_to_another_host_or_path_is_not_skipped(self):  # control
+        L, A = self.LINE, self.ATTR
+        self.assert_nothing_excused(["Summary.\n\n%s\n\n%s\n\nhttps://claude.ai/code/other\n" % (L, A),
+                                     "Summary.\n\n%s\n\n%s\n\nhttps://example.com/code/session_01ABC\n" % (L, A)])
+
+    def test_a_lone_session_link_paragraph_is_not_skipped(self):  # control
+        L, A, U = self.LINE, self.ATTR, self.URL
+        self.assert_nothing_excused(["Summary.\n\n%s\n\n%s\n" % (L, U),  # no attribution above it
+                                     "Summary.\n\n%s\n\n%s\n\nClosing prose.\n\n%s\n" % (L, A, U)])  # not directly above it
+
 
 BLOCK = "alpha one\nbeta two\ngamma three\ndelta four\nepsilon five\nzeta six\n"
 
