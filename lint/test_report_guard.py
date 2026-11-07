@@ -4236,6 +4236,17 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         self.assertEqual(result, rg.RELAY_RULE_REASON % reason,
                          "the flag on try 2 did not return the relay rule text: %r" % (result,))
 
+    def test_a_timeout_then_a_flag_citing_an_unlisted_id_gives_the_cannot_run_text(self):
+        # A flag whose cited id is not in the list is a check that could not run, so it gets the Unvetted text after
+        # the retry, the same as two timeouts do. The cited id is one no candidate list shows.
+        rg = report_guard_constants()
+        flag = json.dumps({"ok": False, "reason": "decisions/no-such-record-4c1d: already decides this."})
+        result, calls = self.past_ruling([tcj.TIMEOUT_REPLY, flag])
+        self.assertEqual(len(calls), 2, "a timeout then an unlisted cite made %d model calls, not 2" % len(calls))
+        head, tail = rg.UNVETTED_REASON.split("%s")
+        self.assertTrue(result.startswith(head) and result.endswith(tail),
+                        "an unlisted cite did not return the cannot-run text: %r" % (result,))
+
     def test_a_model_error_that_is_not_a_timeout_is_not_retried(self):
         import decision_watch  # the one home of the timeout text
         rg = report_guard_constants()
@@ -4268,8 +4279,9 @@ def report_guard_constants():
 
 class PastRulingRetryBudgetTests(unittest.TestCase):
     def test_the_stop_timeout_covers_both_past_ruling_tries_and_the_start_up_allowance(self):
-        # The 10 s is an unmeasured start-up allowance: the python start and the two `claude -p` starts run outside the
-        # model caps, and nobody has timed them. It is a budget to keep honest, not a measured figure.
+        # The 10 s is an unmeasured start-up allowance. It covers report_guard's python start, the past_rulings git reads
+        # and decision_watch's _judge_isolation, which run outside the model caps. Nobody has timed them, so it is a budget
+        # to keep honest, not a measured figure.
         start_up_allowance = 10
         with open(os.path.join(HERE, "..", "settings.json"), encoding="utf-8") as f:
             settings = json.load(f)
