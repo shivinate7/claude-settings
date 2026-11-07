@@ -71,10 +71,10 @@ refusal per turn lists the lines and joins any other reason. A rewrite after a m
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 
 The posted-comment check (rule `posted-needs-comment-url`): on any turn, landed or not, it refuses each line of the last
-reply that names a PR (a `#<n>`, a github.com URL or the word PR) and claims a posted PR comment or review record,
+reply that names a PR (a `#<n>`, a github.com URL or the word PR outside "PR comment" and "PR review") and claims a posted PR comment or review record,
 unless the same line cites that comment's URL. A claim is the verb posted, left, filed or commented, with a review
-record, review or comment in the same clause (commented needs no noun; left needs the noun after it and is exempt when
-unchanged, as is or alone follows). The URL is a comment-anchored GitHub link (`/pull/<n>` or `/issues/<n>` with
+record, review or comment in the same clause (commented needs no noun and "commented out" is no claim; left is exempt
+when unchanged, as is or alone follows). A post to a page, inbox, code, file, repo path, person or agent is no claim. The URL is a comment-anchored GitHub link (`/pull/<n>` or `/issues/<n>` with
 `#issuecomment-`, `#discussion_r` or `#pullrequestreview-`); a bare PR link, a `#<n>`, a hash or a time is no source, and
 when the line's `#<n>` refs match no URL number it refuses. Fences, code spans and questions are exempt. So is a verb
 with a negator or modal in the auxiliary chain right before it, with a subordinator right before it or before a passive
@@ -556,8 +556,11 @@ def answered_problem(text):
 # posted-needs-comment-url: a reply line that claims a posted PR comment or review record cites the comment's URL.
 # The verb is posted, left, filed or commented; the noun is review record, review or comment, in the same clause
 # (a clause breaks as in answered, but not at a colon, so a label before a colon is the noun). The line also holds
-# a PR ref: a #<n>, a github.com URL or the word PR. commented needs no noun. left needs the noun after it and
-# claims nothing when its object stays unchanged, as is or alone. A verb is exempt only where it is not claimed:
+# a PR ref: a #<n>, a github.com URL or the word PR (not inside "PR comment" or "PR review"). commented needs no
+# noun and claims nothing as "commented out". left claims nothing when its object stays unchanged, as is or alone.
+# A post whose destination is a page, inbox, code, file, repo path, person or agent ("to the page", "in the code",
+# "to the runner") is no PR-comment claim; the destination sits within 4 words after the verb. A verb is exempt
+# only where it is not claimed:
 # a negator or modal in the auxiliary chain directly before it (up to 3 words), a subordinator that directly
 # precedes it or that opens a passive verb, no/nothing or a want-verb right before the noun phrase.
 # A URL is cut out of the line before clauses are read, so its dots break nothing. The only source is a
@@ -568,7 +571,12 @@ POSTED_NOUN_RE = re.compile(_POSTED_NOUN, re.I)
 POSTED_NOUN_EXEMPT_RE = re.compile(
     r"(?<![\w-])(?:no|nothing|needs?|wants?|awaits?|waits\s+for)\s+(?:[\w-]+\s+){0,2}?" + _POSTED_NOUN, re.I)
 POSTED_CLAUSE_BREAK_RE = re.compile(r"[.;!?,\u2014\u2013]|\s-{1,2}\s")
-POSTED_PR_RE = re.compile(r"#\d+|github\.com|\bPRs?\b|\bpull request")
+POSTED_PR_RE = re.compile(r"#\d+|github\.com|\bPRs?\b(?!\s+(?:comments?|reviews?)\b)|\bpull request")
+_POSTED_DEST = (r"(?:waiting\s+page|page|inbox|code|files?|runner|agents?|session|owner|coordinator|lanes?|reviewer"
+                r"|builder|(?:[\w.-]+/)+[\w.-]+|[\w-]+\.(?:py|md|json|jsonl|js|ts|sh|txt|ya?ml|toml|html|css|log))")
+POSTED_DEST_RE = re.compile(
+    r"^\s*(?:\w[\w-]*\s+){0,4}?(?:to|in|into|on|at)\s+(?:(?:the|a|an|my|our|this)\s+)?" + _POSTED_DEST + r"(?![\w-])", re.I)
+POSTED_OUT_RE = re.compile(r"^\s+out\b", re.I)
 POSTED_UNCHANGED_RE = re.compile(r"\b(?:unchanged|as\s+is|alone)\b", re.I)
 POSTED_CHAIN_STOP = {"not", "never", "yet", "will", "would", "should", "shall", "must", "can", "could", "may",
                      "might", "to", "cannot"}
@@ -621,11 +629,13 @@ def _claims_posted(plain):
         after = POSTED_CLAUSE_BREAK_RE.split(plain[m.end():])[0]
         if _posted_exempt(_posted_words(before)) or POSTED_NOUN_EXEMPT_RE.search(before + m.group(0) + after):
             continue
+        if POSTED_DEST_RE.search(after) or (verb == "commented" and POSTED_OUT_RE.match(after)):
+            continue
         if verb == "commented":
             return True
         if verb == "left" and POSTED_UNCHANGED_RE.search(after):
             continue
-        if POSTED_NOUN_RE.search(after) or (verb != "left" and POSTED_NOUN_RE.search(before)):
+        if POSTED_NOUN_RE.search(after) or POSTED_NOUN_RE.search(before):
             return True
     return False
 

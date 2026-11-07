@@ -4,7 +4,7 @@
 
 The posted-comment check, in the Stop hook `lint/report_guard.py` (rule `posted-needs-comment-url`), refuses a reply when one of its lines claims a posted PR comment or review record. The line must cite the comment URL. It runs on any turn, landed or not. One refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too, once. A rewrite with no refusal before it stays quiet. The rewrite follows the ruling in decision `answered-needs-source` (answered-source check).
 
-**What it reads.** Each line of the last reply, outside fences and inline code spans, that names a PR and holds a claim. A PR ref is a `#<n>`, a github.com URL or the word PR. A claim is a posting verb with a noun in the same clause. The verbs are posted, left, filed and commented. The nouns are review record, review and comment. "commented" needs no noun. "left" needs the noun after it. A word joined to another by a hyphen (`posted-needs-comment-url`) is not the word. A clause breaks at `. ; ! ?`, a comma or a dash, and not at a colon.
+**What it reads.** Each line of the last reply, outside fences and inline code spans, that names a PR and holds a claim. A PR ref is a `#<n>`, a github.com URL or the word PR. The word PR inside the noun phrase "PR comment" or "PR review" is no PR ref. A claim is a posting verb with a noun in the same clause. The verbs are posted, left, filed and commented. The nouns are review record, review and comment. "commented" needs no noun. "left" takes its noun before or after it. A word joined to another by a hyphen (`posted-needs-comment-url`) is not the word. A clause breaks at `. ; ! ?`, a comma or a dash, and not at a colon.
 
 **What counts as a source.** One comment-anchored GitHub URL on the same line: a link with `/pull/<n>` or `/issues/<n>`, then `#issuecomment-<digits>`, `#discussion_r<digits>` or `#pullrequestreview-<digits>`. A source inside an inline code span counts. A bare PR link, a `#<n>`, a commit hash, a repo path and a time are no source. When the line also holds a `#<n>` outside its URLs, one of them must equal a cited URL's number. A line with no `#<n>` passes on the URL alone.
 
@@ -14,6 +14,8 @@ The posted-comment check, in the Stop hook `lint/report_guard.py` (rule `posted-
 - A subordinator comes earlier in the clause and the verb is passive, with an auxiliary right before it.
 - "no" or "nothing" comes right before the noun phrase ("No review record was posted"), or a want-verb does (needs, wants, awaits, waits for).
 - "left" has "unchanged", "as is" or "alone" after it in the clause.
+- "commented" is followed by "out".
+- The post goes to a destination that is no PR: a page, the waiting page, an inbox, code, a file, a repo path, or a person or agent (the runner, the owner, a session). The destination follows the verb within 4 words, after "to", "in", "into", "on" or "at". "Posted the review to the waiting page, PR #1500 merged" claims nothing.
 
 **Lane choices, process-only (lane ruling 15:31 CST, session_013NEJL45afxTyvacTQtAEwZ).**
 - Verb set: posted, left, filed, commented.
@@ -24,6 +26,11 @@ The posted-comment check, in the Stop hook `lint/report_guard.py` (rule `posted-
 - The `#<n>` compare is lenient: one match between the line's `#<n>` refs and the cited URL numbers passes. The line refuses only when none matches.
 - A URL is cut out of the line before clauses are read, so its dots break nothing.
 - The noun read crosses a colon, so a label before a colon ("Review record: posted to PR #1500") is the noun.
+
+**Lane choices, process-only (lane ruling 15:44 CST, session_013NEJL45afxTyvacTQtAEwZ).**
+- A post to a non-PR destination is no claim, and "commented out" is no claim.
+- The bare word PR is a PR ref only outside "PR comment" and "PR review".
+- "left" takes the noun before it, so "Review comment left on PR #1500" is a claim.
 
 Risk kind: likely risk. The incident: lane notes-fix-page's reply at 14:54 CST said it "posted the round-1 review record on PR #1500". The comment went up at 15:01 CST.
 
@@ -36,6 +43,7 @@ Known limits:
 - A line that ends in `?` is skipped, as in the answered check, so "Posted the review on #1500?" claims nothing.
 - The verbs submitted, published and added are not read.
 - A rewrite after a posted-only refusal is not checked again, mirroring the answered check.
+- The destination read is a word list. A destination it does not name, such as "to the dashboard", is read as a PR post when the line names a PR.
 - "commented" on a line with no comment (a code comment, "the reviewer commented that") is read as a claim when the line names a PR.
 - Code reads tokens, not what they cite.
 
