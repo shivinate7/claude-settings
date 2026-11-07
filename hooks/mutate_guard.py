@@ -266,6 +266,18 @@ MUTATIONS = [
     ("heredoc: a runner reads no piped script, cat f | sh runs nothing",
      '            stdin = not picked or picked[0] == "-"',
      '            stdin = False', "guard", 'draft-pr: a run file piped into sh, is denied'),
+    # _reads_only: a pure reader is no reader, so its operands count as run beside a runner.
+    ("heredoc: a pure reader is not read as one, ls f piped into xargs runs f",
+     '        if name in _READERS:\n            return True',
+     '        if False:\n            return True', "guard", 'env: heredoc-r3: a file written with bash <<EOF and an env read, then ls piped into xargs wc, is allowed'),
+    # _data_positions: an interpreter's operands after its script are no data, so python3 check.py f runs f.
+    ("heredoc: an interpreter's operand after its script is run, python3 check.py runs f",
+     '            data.update(range(step + 1, len(words)))',
+     '            data.update(())', "guard", 'a file written with an env read in its body, then python3 check.py on it, is allowed'),
+    # The keep set: a body written to a shell script stays in view only when a command runs it.
+    ("heredoc: a body written to a shell script is kept only when run, run.sh stays out of view",
+     'if written & ran or any(map(_SHELL_SCRIPT, written))}',
+     'if written & ran}', "guard", 'draft-pr: a pull request in a body written to run.sh, run by no command in this call, is denied'),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)',
