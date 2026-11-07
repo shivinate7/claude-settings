@@ -168,7 +168,10 @@ def call(name, *args):
 
 
 def guard_hit(op, entry):
-    return guard.data_tool_hit(dict(entry, url=PAGE_URL, action=op), PAGE_REPO)
+    try:
+        return guard.data_tool_hit(dict(entry, url=PAGE_URL, action=op), PAGE_REPO)
+    except Exception as exc:  # a crash is a wrong verdict, shown by name, as call() shows it
+        return ("RAISED", "%s: %s" % (type(exc).__name__, exc))
 
 
 def verdict(name, got, want):
