@@ -41,13 +41,10 @@ judged by the checkout that holds the cwd, never by a name.
 Reason for read 3: an orphaned shell stub has a dead parent, so the reaper stops the server and the stub.
 On Windows, `cmd &` then another line in one foreground Bash call outlives the agent. Its parent is a live MSYS bash stub, and the tool shell above the stub is dead. `sweep.is_orphan` alone reads the live stub and keeps the server forever, so the reaper climbs to the root of the tree inside the target.
 A `run_in_background` task of a live agent hangs from a live host outside the worktree, so the reaper
-keeps it. The agent's own shells have the live host as parent, so read 3 keeps them. A later agent end stops them by a separate rule, once the agent is proven finished (`when-a-worktree-may-be-removed`, "A finished agent's shells").
+keeps it. The agent's own shells have the live host as parent, so read 3 keeps them, and a tree with any process inside is kept (`when-a-worktree-may-be-removed`, "A finished agent's tree").
 
 The reaper stops each orphaned tree inside the ended agent's worktree, not only listeners. That stop targets
-only that tree (owner ruling, 2026-09-27). One more stop reaches a finished agent's host-child shells at a
-later agent end, and only in a host-locked tree that the finish proof clears (owner ruling, 2026-10-15
-19:43 CDT; coordinator pick, 2026-11-07 14:43 CST). It targets that tree's own shells only: the chain from
-each pid to the host lies inside the tree.
+only that tree (owner ruling, 2026-09-27). It stops no shell of a finished agent in a later agent end: no process can be shown to be the agent's own (coordinator pick, 2026-11-07 15:05 CST).
 
 The guard's kill rule is separate from the reaper's reads. The guard's ownership change
 (`a-kill-by-pid-needs-an-owned-pid`) did not change them (owner ruling, 2026-10-10).
