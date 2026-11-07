@@ -34,7 +34,7 @@ CI: read live by merge --reviewed
 - The first line is the marker. A line `---` after the CI line ends the record, so the attribution footer may follow.
 - One `Round` line per reviewer. A round can hold more than one line.
 - The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. A PASS counts as its round passing in any round; after round 3 it keeps the net value round 3 gave; with no round recorded it reads open.
-- The `Reproduction` line is optional. It sits right after `Guard or check:`, and is allowed only with `Guard or check: yes`. `none:` is for a guard change that adds no refusal case, such as a refactor, never for an incident that did not reproduce. `merge <pr> --review-record ... --reproduction "<text>"` writes it.
+- The `Reproduction` line sits right after `Guard or check:`. It is required on a normal change with `Guard or check: yes`, optional on a `delete-only` one, and refused with `Guard or check: no`. The text holds no control character. A new record for a new head, a fix check record among them, copies the line. `none:` is for a guard change that adds no refusal case, such as a refactor, never for an incident that did not reproduce. `merge <pr> --review-record ... --reproduction "<text>"` writes it.
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
   PR as `CI draft, no run`, because a draft has no CI run.
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.

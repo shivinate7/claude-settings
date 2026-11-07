@@ -68,13 +68,13 @@ P11. A check enforces its rule's outcome, not a stricter or looser reading of it
 - joyous PR 63 — the merge tool refused it while a ready batch that contained it ran CI. The owner ruled the refusal stricter than its rule, which only keeps main still under a running batch (2026-11-01 20:57 CST, relayed by the coordinator).
 Applies to: guards and checks.
 
-P12. In a guard or check lane, reproduce the incident before you write its refusal cases, and record the command and the observed harm. If the incident does not reproduce, stop and report (coordinator brief, 2026-11-07).
+P12. In a guard or check lane, reproduce the incident before you write its refusal cases, and record the command and the observed harm. If the incident does not reproduce, stop and report (coordinator pick, 2026-11-07 15:03 CST, no owner ruling).
 - Counter: claude-settings lane lint-uses-pinned-tools, 2026-11-07 ~15:00 CST — a guard for `git checkout -B <current branch>` passed review on red tests that no one reproduced. The cause was misread as a stale index. The real cause was moving a branch another worktree held, so the guard would only have cried wolf. The red tests sit on archive/checkout-b-current-branch (commit 60810e23d).
 Applies to: guards and checks.
 
 P2 (red on a named old commit) is held by lint/check_red_run.py (decision red-run-trailer-on-test-commits).
 
-P12 (reproduce the incident first) is held by the review record's Reproduction line (merge/merge.py, parse_review and review_state).
+P12 (reproduce the incident first): the merge tool checks that the review record's Reproduction line is written (merge/merge.py, parse_review and review_state), and the reviewer checks the act.
 
 ### Checks that could hold these (not built)
 

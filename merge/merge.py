@@ -18,9 +18,9 @@
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--reproduction TEXT] [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V]
                           print the review record for the head SHA that was reviewed. Stops (exit 1) when the PR's live head is another
-                          sha. Posts nothing: the lane posts it as a PR comment. --reproduction adds the optional `Reproduction:` line
-                          right after `Guard or check:`, with --guard yes only: TEXT is `<command> -> <observed harm>` or `none: <reason>`,
-                          and a malformed TEXT exits 2. A normal guard or check change with no such line reads open in --reviewed.
+                          sha. Posts nothing: the lane posts it as a PR comment. --reproduction writes the `Reproduction:` line
+                          right after `Guard or check:`: refused with --guard no, TEXT is `<command> -> <observed harm>` or `none: <reason>`,
+                          and a malformed TEXT or one with a control character exits 2. A normal guard or check change with no such line reads open in --reviewed.
                           --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
@@ -3059,12 +3059,15 @@ REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
 REVIEW_SHA = r"[0-9a-f]{40}"
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
+REVIEW_CTRL = r"[\x00-\x1f\x7f]"  # a control character in a Reproduction text would end the line or hide text in a terminal
 REVIEW_REPRO = r"none: \S.*|\S.* -> \S.*"  # a Reproduction line's text: `none: <reason>` or `<command> -> <observed harm>` (rule P12 of decision test-practices)
 
 def review_body(n, head, kind, guard, rounds, net, fix=None, reproduction=None):
     """-> the record text, one field per line, in the order of the form. `rounds` is a list of (number, role, model, verdict). `fix` is None or the
     fix check (reviewed head, role, model, verdict), printed after the rounds and before Net value. `reproduction` is None or the text of the
-    optional Reproduction line, printed right after Guard or check."""
+    Reproduction line, printed right after Guard or check. The line is required on a normal guard or check change, optional on delete-only, and refused with guard no. A control character in `reproduction` raises ValueError."""
+    if reproduction is not None and re.search(REVIEW_CTRL, reproduction, re.ASCII):
+        raise ValueError("--reproduction text holds a control character")
     return "\n".join([REVIEW_MARKER, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
                       *([f"Reproduction: {reproduction}"] if reproduction is not None else []),
                       *(f"Round {i}: {role}, {model}, {verdict}" for i, role, model, verdict in rounds),
@@ -3075,7 +3078,7 @@ def parse_review(text):
     """-> {n, head, kind, guard, rounds, net, fix, repro}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
     malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. `fix` is None, or the one optional
     `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL` line (after the rounds, before Net value) as a (head, role, model, verdict)
-    tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. `repro` is None, or the text of the one optional
+    tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. `repro` is None, or the text of the one
     `Reproduction: <command> -> <observed harm>` or `Reproduction: none: <reason>` line, which must come right after Guard or check and needs Guard or
     check yes; a malformed line, a second one, or one in another place is None. Trailing blank lines are allowed. The
     record ends at the first line that is exactly `---`; it and everything after it (the GitHub attribution footer) are ignored."""
@@ -3210,6 +3213,8 @@ def round_arg(text):
 
 def reproduction_arg(text):
     """argparse type of --reproduction TEXT -> TEXT, which is `<command> -> <observed harm>` or `none: <reason>`."""
+    if re.search(REVIEW_CTRL, text, re.ASCII):
+        raise argparse.ArgumentTypeError(f"{text!r} holds a control character, which --reproduction refuses")
     if not re.fullmatch(REVIEW_REPRO, text, re.ASCII):
         raise argparse.ArgumentTypeError(f"{text!r} is not '<command> -> <observed harm>' or 'none: <reason>'")
     return text
