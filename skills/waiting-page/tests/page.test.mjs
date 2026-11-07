@@ -6100,6 +6100,26 @@ test("a doing step that is not stalled still counts as in progress in the where-
   assert.match(where, /1 in progress/, "the where-you-are line does not count the doing step as in progress: " + where);
 });
 
+test("the Changes log row of a stalled step reads Stalled, not In progress", async (t) => {
+  const page = await open(t, { pageHtml: withStalled(phasePage(stepsOf([["c1", "cleanup", 1, "doing"]])), STALLED_C1) }); if (!page) return;
+  await openStatus(page);
+  const row = page.locator("#svDays .ev", { has: page.locator('button[data-go="c1"]') });
+  assert.equal(await row.count(), 1, "step c1 has no row in the Changes log");
+  const mark = row.locator('[role="img"]');
+  assert.equal(await mark.count(), 1, "the Changes log row of step c1 has no state mark");
+  const label = await mark.getAttribute("aria-label");
+  assert.notEqual(label, "In progress", "the Changes log row of stalled step c1 reads In progress");
+  assert.equal(label, "Stalled", "the Changes log row of stalled step c1 does not read Stalled");
+});
+test("a doing step that is not stalled still reads In progress in the Changes log", async (t) => {
+  const steps = stepsOf([["d6", "cleanup", 1, "doing"], ["c1", "cleanup", 2, "todo"]]);
+  const page = await open(t, { pageHtml: withStalled(phasePage(steps), { why: "", steps: [], paused: [], badPause: [], items: [], ...NO_ITEMS }) }); if (!page) return;
+  await openStatus(page);
+  const row = page.locator("#svDays .ev", { has: page.locator('button[data-go="d6"]') });
+  assert.equal(await row.count(), 1, "step d6 has no row in the Changes log");
+  assert.equal(await row.locator('[role="img"]').getAttribute("aria-label"), "In progress", "the Changes log row of the doing step does not read In progress");
+});
+
 test("Doing now shows the stalled or paused mark in place of the in-progress mark", async (t) => {
   const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
   await openStatus(page);
