@@ -100,14 +100,17 @@ def git(where, *args, env=None):
 
 # --------------------------------------------------------------------------- repo fixtures
 
-def registry(page_export=None, page_id=PAGE_ID, page_url=PAGE_URL):
-    """The repo's extras file: a waiting page and a reference artifact. `page_export` names the copy folder."""
+def registry(page_export=None, page_id=PAGE_ID, page_url=PAGE_URL, extra=None):
+    """The repo's extras file: a waiting page and a reference artifact. `page_export` names the copy folder; `extra` merges
+    more keys into the file (a "rolled-out" mark, say)."""
     page = {"id": page_id, "url": page_url, "role": "waiting-page", "account": "shivam"}
     if page_export is not None:
         page["export"] = page_export
     reference = {"id": REF_ID, "url": REF_URL, "role": "reference", "account": "shivam",
                  "collections": ["notes"]}
-    return json.dumps({"kinds": {}, "artifacts": [page, reference]})
+    data = {"kinds": {}, "artifacts": [page, reference]}
+    data.update(extra or {})
+    return json.dumps(data)
 
 
 def make_repo(name, extras):
@@ -139,9 +142,10 @@ def roadmap_repo(name, commits, extras=None):
     return root
 
 
-def base_repo(name):
-    """The base fixture: the copy's last commit at 17:00, then a commit at 21:00 that touches no copy folder."""
-    return roadmap_repo(name, [(at(17), item(FOLDER, 1)), (at(21), {"roadmap/data/steps/x.json": "{}\n"})])
+def base_repo(name, extras=None):
+    """The base fixture: the copy's last commit at 17:00, then a commit at 21:00 that touches no copy folder. `extras` replaces
+    the extras file (registry() by default)."""
+    return roadmap_repo(name, [(at(17), item(FOLDER, 1)), (at(21), {"roadmap/data/steps/x.json": "{}\n"})], extras=extras)
 
 
 def item(folder, n):
@@ -731,6 +735,21 @@ def case_u2_git_failure_gives_a_note_and_no_reason():
           bool(note) and NOT_CHECKED in note, repr(note))
 
 
+def case_u3_a_bad_mark_does_not_fail_open_a_cleared_export():
+    """A "rolled-out" that is not JSON true or false, with the page's export already cleared by a `same` run after the write:
+    export_check() gives no reason and no note. A bad mark's note comes from the registry read at feedback_guard.py:1203,
+    which takes the page's id only. The valid mark is the control."""
+    fn = export_check_of(guard_module(), "U3")
+    if fn is None:
+        return
+    records = with_writer([owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 30), verdict="same"))
+    for label, mark in (("valid", True), ("bad", "yes")):
+        root = base_repo("u3-" + label, extras=registry(extra={"rolled-out": mark}))
+        reason, note = fn(root, transcript(run_dir("u3-" + label), records), SESSION)
+        check("U3 (%s mark): a cleared export gives no reason" % label, reason is None, repr(reason))
+        check("U3 (%s mark): a cleared export gives no note" % label, note is None, repr(note))
+
+
 CASES.extend((
     case_s1_block_when_copy_is_older_than_the_write,
     case_s2_later_copy_commit_passes,
@@ -778,6 +797,7 @@ CASES.extend((
     case_n17_writer_write_by_path_to_items_blocks,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
+    case_u3_a_bad_mark_does_not_fail_open_a_cleared_export,
 ))
 
 
