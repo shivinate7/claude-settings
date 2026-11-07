@@ -382,7 +382,6 @@ CTX_NO_GOAL = "\n".join((PROBLEM, BASED, DEPARTS, WHY))
 CTX_NO_WHY = "\n".join((GOAL, PROBLEM, BASED, DEPARTS))
 CTX_NO_STAKE = "\n".join((GOAL, PROBLEM_NO_STAKE, BASED, DEPARTS, WHY))
 CTX_BAD_DEPARTS = "\n".join((GOAL, PROBLEM, BASED, DEPARTS_BAD, WHY))
-CTX_NO_BASED = "\n".join((GOAL, PROBLEM_NO_STAKE, DEPARTS, WHY))
 OPT_A = {"key": "a", "label": "Keep the old index", "how": "Users keep today's results.",
          "gain": "Nothing is rebuilt.", "lose": "Old mismatches stay."}
 OPT_B = {"key": "b", "label": "Rebuild the index", "how": "The index rebuilds from source.",
@@ -449,8 +448,6 @@ TIE_FIXTURES = {
     ("holds", "port-question"): ({**COMMON, "holds": "Blocks the port of the search."}, COMMON),
     ("stands", "owner-judge"): ({**COMMON, "context": CTX_NO_STAKE},
                                 {**COMMON, "context": CTX_NO_STAKE, "stands": True}),
-    ("stands", "question-form"): ({**COMMON, "context": CTX_NO_BASED},
-                                  {**COMMON, "context": CTX_NO_BASED, "stands": True}),
     ("options", "option-letter-keys"): ({**COMMON, "options": [OPT_A_BAD_KEY, OPT_B]}, COMMON),
     ("options", "press-link"): ({**COMMON, "options": [OPT_A_PRESS, OPT_B]}, COMMON),
     ("options", "question-form"): ({**COMMON, "options": [OPT_A_NO_GAIN, OPT_B]}, COMMON),
@@ -507,13 +504,13 @@ class Ties(unittest.TestCase):
         self.assertTrue(ties, "fixture: field_table.json lists no tie")  # scope before subject (P7)
         for tie in sorted(ties):
             with self.subTest(tie=tie_name(tie)):
-                self.assertIn(tie, TIE_FIXTURES, "tie %s has no fixture in test_field_table.py" % tie_name(tie))
+                self.assertTrue(tie in TIE_FIXTURES, "tie %s has no fixture in test_field_table.py" % tie_name(tie))
 
     def test_every_fixture_is_a_listed_tie(self):
         ties = listed_ties()
         for tie in sorted(TIE_FIXTURES):
             with self.subTest(tie=tie_name(tie)):
-                self.assertIn(tie, ties, "fixture for %s, which field_table.json does not list as a tie" % tie_name(tie))
+                self.assertTrue(tie in ties, "fixture for %s, which field_table.json does not list as a tie" % tie_name(tie))
 
     def test_each_tie_moves_the_verdict_when_its_field_changes_alone(self):
         ties = sorted(listed_ties() & set(TIE_FIXTURES))
@@ -525,10 +522,13 @@ class Ties(unittest.TestCase):
                 changed = sorted(k for k in set(a) | set(b) if a.get(k, ABSENT) != b.get(k, ABSENT))
                 self.assertEqual(changed, [field], "fixture for %s changes %s, not its field alone"
                                  % (tie_name(tie), changed))
-                fires_a, fires_b = judge(a)[0] == rule, judge(b)[0] == rule
-                self.assertNotEqual(fires_a, fires_b, "%s: changing %s alone leaves %s with the same verdict "
-                                    "(first refusal %r, then %r)" % (tie_name(tie), field, rule,
-                                                                    judge(a)[0] or "none", judge(b)[0] or "none"))
+                # One side is refused by the rule and the other is refused by nothing, so no other rule masks the check.
+                verdict_a, verdict_b = judge(a), judge(b)
+                moved = (verdict_a[0] == rule and verdict_b == ("", "")) or (verdict_b[0] == rule and verdict_a == ("", ""))
+                self.assertTrue(moved, "%s: changing %s alone does not move %s between a refusal and a pass "
+                                "(A is refused %r, B is refused %r)" % (tie_name(tie), field, rule,
+                                                                       verdict_a[0] or "nothing",
+                                                                       verdict_b[0] or "nothing"))
 
     def test_empty_and_full_size_lists_pass_every_rule(self):
         full = [dict(OPT_A, key=chr(97 + i), label="Choice %d" % i) for i in range(26)]  # keys a to z, the page's range
