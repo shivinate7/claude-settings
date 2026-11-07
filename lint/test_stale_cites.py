@@ -2365,7 +2365,8 @@ BRIEF_GROWN = "**Brief.** Write the brief, for each lane, to the task and the fi
 BRIEF_LINE = "Write the brief to the task and the files only. Start with the point.\n"
 BATCH_BASE = "**Batch.** Main may merge only by a pull request.<!-- rule:batch-merge -->\n"
 BATCH_GROWN = "**Batch.** Main, when the checks pass, may merge only by a pull request.<!-- rule:batch-merge -->\n"
-# Growth that adds an exception changes what the rule allows, so it is a reword. Each word is its own case.
+# Growth that adds "unless" or "except" changes what the rule allows, so it is a reword. Each word is its own case.
+# "without" is no negator (owner ruling 15:00 CST), so its growth is the case after the listing test.
 BRIEF_UNLESS = "**Brief.** Write the brief, unless the owner asks, to the task and the files only.<!-- rule:brief-scope -->\n"
 BRIEF_EXCEPT = "**Brief.** Write the brief, except when the owner asks, to the task and the files only.<!-- rule:brief-scope -->\n"
 BRIEF_WITHOUT = ("**Brief.** Write the brief, without a note from the owner, to the task and the files only."
@@ -2407,11 +2408,15 @@ class RewordSkipTests(RewordCase):
 
     def test_a_rule_grown_by_an_exception_word_is_listed(self):
         # The exception is in the middle of the sentence, so the old runs across it are lost, as a reword's are.
-        for word, head in (("unless", BRIEF_UNLESS), ("except", BRIEF_EXCEPT), ("without", BRIEF_WITHOUT)):
+        for word, head in (("unless", BRIEF_UNLESS), ("except", BRIEF_EXCEPT)):
             with self.subTest(word=word):
                 rc, out = self.run_check(self.reword(BRIEF_BASE, head, BRIEF_LINE))
                 self.assertEqual(self.listed(out), [("agents/notes.md", 1)], out)
                 self.assertEqual(rc, 1, out)
+
+    def test_a_rule_grown_by_without_is_not_a_reword(self):
+        # Owner ruling 15:00 CST: "without" is no negator, so growth by it skips the reword check like other growth.
+        self.assert_passes(self.reword(BRIEF_BASE, BRIEF_WITHOUT, BRIEF_LINE))
 
 
 if __name__ == "__main__":
