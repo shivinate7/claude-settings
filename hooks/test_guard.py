@@ -13356,6 +13356,11 @@ sh("builder-test: bash -c install onto a test is refused",
 sh("builder-test: bash -c pytest read, then a cp onto a test after the semicolon, is refused",
    'bash -c "pytest -k install tests/test_x.py; cp /tmp/a tests/test_x.py"', "deny", rule=BT,
    carries=("test-author",), **BR)
+# A real newline inside the bash -c string starts a new command, so a write after it is judged the same way.
+sh("builder-test: bash -c with a newline before a cp onto a test is refused",
+   'bash -c "set -e\ncp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with a newline before a sed -i on a test is refused",
+   'bash -c "echo hi\nsed -i s/a/b/ tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: python heredoc that reads tests/x.py, rebinds the name, then writes src/app.py is allowed",
    "python3 - <<'EOF'\np='tests/x.py'\nprint(open(p).read())\np='src/app.py'\nopen(p,'w').write('x')\nEOF",
    "allow", **BR)
