@@ -69,9 +69,9 @@ WCAG level, is not taken on by choice (owner, 2026-11-01 12:23 CST, by triage).
   row then takes its slot, and the other rows keep their order (owner, 2026-11-06 16:47 CST, item
   313 a). The owner on item 311 (15:51 CST): the rule was "applied too strictly and is taking me away from the
   outcome I want".
-- `ux-order-holds-still` also lets other parts move with that row: the rows that close its gap,
-  the rows that make room where it lands, and a count badge or section header that those rows
-  shift (owner, 2026-11-06 17:19 CST, item 318 a).
+- `ux-order-holds-still` also lets the rows that close its gap and the rows that make room where
+  it lands shift, in their order (item 313 a). A count badge or section header that the sink
+  shifts may shift too (owner, 2026-11-06 17:19 CST, item 318 a).
 - Not rules: behaviour defaults (dropped); spend shows cost, work-screen head, real photos only and
   phone-first (per repo); letter case (Vercel).
 

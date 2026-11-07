@@ -24,8 +24,9 @@ other row leaves the list, and the other rows keep their order until the person 
 Check: act on a row. Pass when no other row leaves the open list and the other rows keep their
 order among themselves. If the acted-on row left, pass only when the next open row, if any, took
 its slot. Fail when the acted-on row moved to another place in the same open list. The rows that
-close its gap, the rows that make room where it lands, and a count badge or section header that
-those rows shift may shift with it (owner, 2026-11-06 17:19 CST, item 318 a).
+close its gap and the rows that make room where it lands may shift with it, in their order (owner,
+2026-11-06 16:47 CST, item 313 a). A count badge or section header that the sink shifts may shift
+too (owner, 2026-11-06 17:19 CST, item 318 a).
 Source: banchi D181 (order is taken once, a sale keeps it) and D263 (a sort press re-sorts,
 nothing else jumps); owner, 2026-11-06 16:47 CST, item 313 a (a sent card may sink).
 
