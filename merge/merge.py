@@ -6,6 +6,13 @@
                           A `Drops-lines:` line in the PR body excuses its path, as a commit trailer does.
   merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, sync the local base, clean up.
                           On a draft it is the records step and never merges: rebuild the page, push it, ask to mark the PR ready.
+                          A repo that lists merge.readyChecks in its config (step names of the checks job, such as "check invariants")
+                          gets them run first: `bin/ci-job checks --step NAME ... --base origin/<base>` in a temporary worktree on the tree
+                          the step would push, before any push and before the ready mark, on every path (default base, other base,
+                          Record-claim head). A FAIL or an unknown stops the step with the step lines and the log: nothing pushed, not
+                          marked ready, and no flag lifts it. A repo with no list runs no ready check, and one line says so.
+                          Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
+                          (the 1200 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
@@ -2195,7 +2202,7 @@ def after_merge(root, cmds):
 # ------------------------------------------------------------------ the flow
 
 MERGE_DEFAULTS = {"method": "merge", "deadlineMinutes": 45, "requiredChecks": "protection", "afterMerge": []}
-MERGE_FIELDS = set(MERGE_DEFAULTS) | {"deleteBranch", "ignoreChecks", "keepBranches", "standingGrant"}
+MERGE_FIELDS = set(MERGE_DEFAULTS) | {"deleteBranch", "ignoreChecks", "keepBranches", "readyChecks", "standingGrant"}
 
 def host_default_branch(root):
     # time.sleep is looked up at call time, so a test's patch of it holds. No retry inside `shared_deadline`, as in Host.gh.
@@ -2333,6 +2340,7 @@ def load_config(root, base, path):
                   (isinstance(m.get("deleteBranch", True), bool), "deleteBranch"),
                   (isinstance(m.get("standingGrant", True), bool), "standingGrant"),
                   (isinstance(am, list) and all(map(ne, am)), "afterMerge"),
+                  ("readyChecks" not in m or isinstance(m["readyChecks"], list) and m["readyChecks"] and all(map(ne, m["readyChecks"])), "readyChecks"),
                   (isinstance(m.get("keepBranches", []), list) and all(map(plain_name, m.get("keepBranches", []))), "keepBranches"),
                   (rc == "protection" or isinstance(rc, list) and rc and all(map(ne, rc)), "requiredChecks")):
         if not ok:
@@ -2412,6 +2420,27 @@ def lane_head_and_base(root, target, base):
         raise Stop(f"cannot find {target} as a commit or ref in this clone or on origin {LANE_LINT_CITE}")
     return head, base
 
+def ci_job_run(wt, *args):
+    """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
+    ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
+    -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
+    lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead. log: ci-job's log line, as a list of
+    0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
+    try:
+        c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
+    except subprocess.TimeoutExpired:
+        return "unknown", [f"ci-job did not finish in {LINT_SECONDS} s"], [], False
+    lines = out.splitlines()
+    log = [l for l in lines if l.startswith("log=")][-1:]
+    if c == 0:
+        return "pass", [], log, False
+    if c == 1:
+        return "fail", [l.rstrip() for l in lines if l.startswith("FAIL")] or [f"(no FAIL line read; ci-job exit {c})"], log, False
+    if c == 2:
+        return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
+    return "unknown", [f"ci-job exited {c}"], log, False
+
 def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
@@ -2426,30 +2455,23 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
         head, base = lane_head_and_base(root, target, base)
         tmp, wt = add_worktree(root, head)
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
-        try:
-            c, out = sh([sys.executable, CI_JOB, "checks", "--lint", "--base", f"origin/{base}"], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
-        except subprocess.TimeoutExpired:
-            raise Stop(f"the lint of {head[:9]} did not finish in {LINT_SECONDS} s, so it is unknown, not a pass. {LANE_LINT_REMEDY}")
+        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}")
     finally:
         drop_worktree(root, tmp, wt)
-    lines = out.splitlines()
-    log = [l for l in lines if l.startswith("log=")][-1:]  # ci-job's log line, the last one: the FAIL lines name it too
-    fails = [l.rstrip() for l in lines if l.startswith("FAIL")]
-    unknown = [l.rstrip() for l in lines if l.startswith("unknown")]
     short = head[:9]
-    if c == 0:
+    if state == "pass":
         say(f"PASS: lint of {short} against {base} passes. The batch runner may take this head, or join it to a batch.")
         return 0
-    if c == 1:
-        raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *(fails or [f"(no FAIL line read; ci-job exit {c})"]), *log, LANE_LINT_REMEDY]))
-    if c == 2:
-        if unknown_ok.strip():
-            say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *unknown, *log)
-            return 0
-        raise Liftable("\n".join([f"the lint of {short} against {base} is unknown, not a pass:", *(unknown or [f"(no unknown line read; ci-job exit {c})"]), *log,
+    if state == "fail":
+        raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))
+    if liftable and unknown_ok.strip():
+        say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log)
+        return 0
+    head_line = f"the lint of {short} against {base} is unknown, not a pass:"
+    if not liftable:  # a timeout or an odd exit says nothing about any step, so no flag lifts it
+        raise Stop("\n".join([head_line, *lines, LANE_LINT_REMEDY]))
+    raise Liftable("\n".join([head_line, *lines, *log,
                               'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
-    raise Stop(f"ci-job exited {c} on {short}, so the lint is unknown, not a pass. {LANE_LINT_REMEDY}")
 
 PROSE_JUDGE_MAX_CALLS = 3  # model calls one merge makes. They run at once, after the lock is released, so the merge command waits about one call, at most PROSE_JUDGE_TIMEOUT s, whatever the count. A file past the count reads UNKNOWN
 PROSE_JUDGE_TIMEOUT = 300  # seconds one judge call may run: a full PROSE_JUDGE_CALL_BYTES call takes about 195 s, past MODEL_TIMEOUT. Only this judge passes it; every other invoke_model caller keeps MODEL_TIMEOUT
@@ -2801,7 +2823,8 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         "  batch:  " + batch,
         f"  {base} run: {verdict}" + (f": {detail}. --confirm refuses it unless --base-red-ok \"<reason>\" is given." if verdict != "green" else ""),
         "  base:   " + (current or f"holds {base}'s tip"),
-        "  claim:  " + (f"already claimed ({resumed}); " + ("--confirm on the draft refuses this head, so mark it ready by hand (route pr-ready-mcp-cloud in cloud)" if info["draft"] else "a run resumes at the wait")
+        "  claim:  " + (f"already claimed ({resumed}); " + ((f"run `merge {n} --confirm` on the draft first: it runs the ready checks (" + ", ".join(m["readyChecks"]) + "), then refuses this head, so mark it ready by hand after they pass (route pr-ready-mcp-cloud in cloud)"
+                         if m.get("readyChecks") else "--confirm on the draft refuses this head, so mark it ready by hand (route pr-ready-mcp-cloud in cloud)") if info["draft"] else "a run resumes at the wait")
                         if resumed else trailer or "nothing to claim"),
         *([f"  records: {records}"] if records else []),
         *([] if base == cfg["defaultBranch"] else [f"  ids:    stay pending: {base} is not the default branch ({cfg['defaultBranch']}); they are claimed when it merges there."]),
@@ -2820,32 +2843,59 @@ def stale_page_remedy(n, claim=""):
     return (f"The head holds a Record-claim ({claim}) that this base claims nothing for. "
             f"Revert that claim commit on the branch, then run the records step: " + steps)
 
+READY_CHECKS_CITE = "(decision lanes-run-no-full-ci-job, the ready checks: a draft goes ready only when the repo's merge.readyChecks pass)"
+
+def run_ready_checks(wt, n, base, checks):
+    """The ready checks of the draft step: run the repo's `merge.readyChecks` through ci-job in the tree `wt`, which holds what the step
+    would push. One ci-job run. Returns on a pass; a FAIL or an unknown raises Stop, and no flag lifts it. `checks` is a non-empty list."""
+    args = ["checks", *[a for name in checks for a in ("--step", name)], "--base", f"origin/{base}"]
+    state, lines, log, _ = ci_job_run(wt, *args)
+    short = git(wt, "rev-parse", "--short=9", "HEAD")[1]
+    if state != "pass":
+        raise Stop("\n".join([f"the ready checks of {short} against {base} {'FAIL' if state == 'fail' else 'are unknown, not a pass'}:", *lines, *log,
+                              f"#{n} stays a draft and nothing was pushed. Fix it on the branch, push, and run --confirm again. {READY_CHECKS_CITE}"]))
+    say(f"merge: the ready checks ({', '.join(checks)}) pass on {short}.")
+
 def draft_step(root, cfg, n, host, info):
     """`merge <pr> --confirm` on a draft: rebuild the records page on the head, push it, mark the pull request ready, and
     stop. So the branch is final at ready, and the ready confirm pushes nothing (decision records-index-at-merge).
-    Takes no lock, claims no number and never merges: a claim stays at the ready confirm."""
+    Takes no lock, claims no number and never merges: a claim stays at the ready confirm.
+    A repo that declares merge.readyChecks also runs them first, on the tree the step would push, before any push and before the
+    ready mark, on every path (the ready checks, decision lanes-run-no-full-ci-job). One ci-job run, in one worktree."""
     base = info["base"]
-    if base != cfg["defaultBranch"]:
+    checks = cfg.get("merge", {}).get("readyChecks")
+    if not checks:
+        say("merge: this repo declares no ready checks (merge.readyChecks), so the draft step runs none.")
+    default = base == cfg["defaultBranch"]
+    if not default:
         say(f"merge: {base} is not the default branch ({cfg['defaultBranch']}). The records page is rebuilt only for it. Nothing was pushed.")
-    else:
+    if default or checks:  # one worktree, one open_worktree call, on either base
         tmp, wt = open_worktree(root, info, base)
         try:
-            claim = head_claim(wt)  # a page commit on top would hide the claim from own_claim at the ready confirm
-            if claim:
-                raise Stop(f"{info['head'][:9]} on {info['branch']} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it. "
-                           f"Mark #{n} ready by hand ({READY_ROUTES}), then run --confirm again. Nothing was pushed. {RECORDS_CITE}")
-            # before the rebuild: a small-move proof resets the tree. before_wait: under confirm's lock it extends the lock
-            stale, stands = holds_base(wt, f"origin/{base}", info["head"], getattr(host, "before_wait", None))
-            if stale:  # holds_base ends with the remedy
-                raise Stop(("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " Nothing was pushed.")
-            if stands:
-                say(f"merge: {stands}. The green run stands.")
-            if rebuild_records(wt):
-                sha = commit_claim(wt, None)
-                push_branch(wt, info["branch"])
-                say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
+            if not default:
+                run_ready_checks(wt, n, base, checks)
             else:
-                say(f"merge: the records page on {info['branch']} at {info['head'][:9]} is current. Nothing was pushed.")
+                claim = head_claim(wt)  # a page commit on top would hide the claim from own_claim at the ready confirm
+                if claim:
+                    if checks:
+                        run_ready_checks(wt, n, base, checks)  # before the remedy: it has the session mark ready by hand, past the checks
+                    raise Stop(f"{info['head'][:9]} on {info['branch']} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it. "
+                               f"Mark #{n} ready by hand ({READY_ROUTES}), then run --confirm again. Nothing was pushed. {RECORDS_CITE}")
+                # before the rebuild: a small-move proof resets the tree. before_wait: under confirm's lock it extends the lock
+                stale, stands = holds_base(wt, f"origin/{base}", info["head"], getattr(host, "before_wait", None))
+                if stale:  # holds_base ends with the remedy
+                    raise Stop(("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " Nothing was pushed.")
+                if stands:
+                    say(f"merge: {stands}. The green run stands.")
+                rebuilt = rebuild_records(wt)
+                sha = commit_claim(wt, None) if rebuilt else None
+                if checks:
+                    run_ready_checks(wt, n, base, checks)  # on the page commit when there is one, so what is checked is what is pushed
+                if rebuilt:
+                    push_branch(wt, info["branch"])
+                    say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
+                else:
+                    say(f"merge: the records page on {info['branch']} at {info['head'][:9]} is current. Nothing was pushed.")
         finally:
             drop_worktree(root, tmp, wt)
     ok, why = host.ready(n)

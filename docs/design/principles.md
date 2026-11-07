@@ -7,6 +7,8 @@ also read [`layout.md`](layout.md). An entry marked Guidance is not a house rule
 
 ## ux-press-moves-nothing
 
+Not adopted, not a house rule: a miss is no finding (record ux-house-rules; owner, 2026-11-06
+13:11 CST, item 183 option b).
 A press, a load or a change of state moves no other content.
 Check: press each control and load each state. Pass when no other element moves or resizes. A
 loading area keeps its loaded size, and a control keeps the box of its widest label or icon.
@@ -17,10 +19,18 @@ it); ios-adblock `ios/App/AdBlockApp.swift` (the state icon has a fixed frame).
 ## ux-order-holds-still
 
 Guidance, not a house rule: a miss is advice, not a finding (record ux-house-rules).
-A list keeps a plain, predictable order, and an act on a row does not re-rank the list.
-Check: act on a row. Pass when the other rows keep their order until the person sorts again.
+A list keeps a plain, predictable order, so the person reaches the next open row without a hunt
+and no other row changes its order. An act may move the row it acted on out of an open list,
+such as a sent card that sinks to Answered. Then the next open row, if any, takes its slot. No
+other row leaves the list, and the other rows keep their order until the person sorts again.
+Check: act on a row. Pass when no other row leaves the open list and the other rows keep their
+order among themselves. If the acted-on row left, pass only when the next open row, if any, took
+its slot. Fail when the acted-on row moved to another place in the same open list. The rows that
+close its gap and the rows that make room where it lands may shift with it, in their order (owner,
+2026-11-06 16:47 CST, item 313 a). A count badge or section header that the sink shifts may shift
+too (owner, 2026-11-06 17:19 CST, item 318 a).
 Source: banchi D181 (order is taken once, a sale keeps it) and D263 (a sort press re-sorts,
-nothing else jumps).
+nothing else jumps); owner, 2026-11-06 16:47 CST, item 313 a (a sent card may sink).
 
 ## ux-unknown-is-not-empty
 
