@@ -1,0 +1,10 @@
+{
+  "title": "Each owner ruling in a decision record carries his own words beside its rule text",
+  "phase": "next",
+  "status": "todo",
+  "order": 10.5,
+  "owner": "coordinator",
+  "why": "Incident, 13:00 CST Nov 7: decision test-practices P5 said \"ban every wall-clock wait\", stronger than the owner's words. Two lanes, the coordinator and triage built page item 345 on it, and the owner had to correct it.",
+  "note": "A check that each owner ruling in a decision record carries his verbatim words, or a cited quote, beside its rule text, so a paraphrase cannot drift past what he said. First check whether decision ruling-kind (lint/check_ruling_kind.py) or hooks/ruling_home.py already covers it, and extend that home if so. Done: the check goes red on a ruling line with no quote, and green on main.",
+  "updatedAt": "2026-11-07T13:03:00-06:00"
+}
