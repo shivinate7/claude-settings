@@ -42,6 +42,7 @@ Ruling: coordinator, 2026-11-07 13:56 CST. Drop the rail's "N ready to send" lin
 - `receipt()`, the `else` branch for one choice, now ends "You chose an option." when the key is no longer in `options`. New: "You chose an option that is no longer listed."
 - That branch adds the full stop itself (the `.line` builds `what + "."`), so the fallback words carry no stop, or the line ends "..".
 - `lastAnswerEl` already says "You chose an option that is no longer listed." This makes the two receipts say the same.
+- An answer with no choice keeps "You chose an option.": it names no key, so nothing is stale.
 
 ## 6. For the builder (outside the design folder)
 
