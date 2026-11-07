@@ -61,6 +61,7 @@ RETIRED = {
     "RUNNING_LANE_TOOLS": "RUNNING_AGENT_TOOLS",
     "LANE_TOOLS": "START_TOOLS",
     "Lane kind:": "Designer kind:",
+    "Write in Simplified Technical English": "Write plainly",  # owner item 337
 }
 
 # old name -> the tracked file that may keep it, on each line whose comment holds the opt-out marker. The one home of
