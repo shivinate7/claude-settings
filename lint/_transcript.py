@@ -281,7 +281,8 @@ def peer_body(rec):
     body = origin.get("body") if isinstance(origin, dict) else None
     if isinstance(body, str) and body:
         return body
-    content = (rec.get("message") or {}).get("content")
+    msg = rec.get("message")
+    content = msg.get("content") if isinstance(msg, dict) else None
     if isinstance(content, list):
         content = "\n".join(b.get("text", "") for b in content
                             if isinstance(b, dict) and isinstance(b.get("text"), str))
@@ -296,13 +297,17 @@ def last_incoming_index(records, acks=None, asks=None):
     send of the same turn to one of those targets, is the ack of that send: it starts no turn, and the
     sends before it stay in the turn. The ack uses up that sender's targets, so only its first reply is an
     ack; a later message from it starts a turn. `asks(rec)` is true for a message that asks something: such
-    a reply is an answer, not an ack, and starts a turn (it does not use up the targets)."""
+    a reply is not an ack and starts a turn, but only the sends to its sender's targets stop counting; the
+    sends to other targets stay open for their own acks."""
     found, sent = None, set()
     for i, rec in enumerate(records):
         if is_incoming(rec):
             reach = acks.get(peer_sender(rec), set()) if acks else set()
-            if reach & sent and not (asks and asks(rec)):
+            if reach & sent:
                 sent -= reach
+                if not (asks and asks(rec)):
+                    continue
+                found = i
                 continue
             found, sent = i, set()
         elif acks and not rec.get("isSidechain"):
