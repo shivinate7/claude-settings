@@ -139,6 +139,9 @@ export const blankPython = (src, { keepStrings = false } = {}) => {
   return out;
 };
 
+/** The file names read as shell: `blankShell` reads them. */
+export const SHELL_EXT = /\.(?:sh|bash|zsh)$/;
+
 /**
  * The comments of one source file, and nothing else: every other character is a space, a newline stays, and each offset still points
  * at the same character of the file. The reader follows the file name: Python by `blankPython`, shell by `blankShell`, any other name by
@@ -146,7 +149,7 @@ export const blankPython = (src, { keepStrings = false } = {}) => {
  */
 export const commentsOf = (src, file) => {
   const kept = /\.py$/.test(file ?? "") ? blankPython(src, { keepStrings: true })
-    : /\.(sh|bash)$/.test(file ?? "") ? blankShell(src, { keepStrings: true })
+    : SHELL_EXT.test(file ?? "") ? blankShell(src, { keepStrings: true })
     : blankComments(src, file);
   let out = "";
   for (let i = 0; i < src.length; i++) out += kept[i] !== src[i] || src[i] === "\n" ? src[i] : " ";

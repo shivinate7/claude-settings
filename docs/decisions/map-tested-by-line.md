@@ -36,7 +36,7 @@ No new process. MAP11's reads join the one `readFacts` call of a check run, so o
 
 ## Safety holes, named
 
-Opened: a `.sh` test that names the path only as data, such as `echo src/retry.py`, passes MAP11. The reader takes a word without its command.
+Opened: a `.sh` test that holds the path as a word without running it passes MAP11, such as `echo src/retry.py`, `[ -f src/retry.py ]`, `cat`, `grep` or `ls` on it. The reader takes a word without its command.
 
 Debts:
 - `map-import-alias-unread` (a test that imports by a path alias, such as `@/src/y`, fails MAP11).

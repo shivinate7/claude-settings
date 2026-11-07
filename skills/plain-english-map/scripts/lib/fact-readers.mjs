@@ -14,14 +14,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from './lazy-typescript.mjs';
 import { importTargets, resolveSpecifier } from './import-reader.mjs';
-import { blankCommentsAndStrings, blankShell } from './source-text.mjs';
+import { blankCommentsAndStrings, blankShell, SHELL_EXT } from './source-text.mjs';
 
 const PY_FACTS = fileURLToPath(new URL('./py-facts.py', import.meta.url));
 const TS_EXT = /\.(?:ts|tsx|mts|cts|mjs|cjs|js|jsx)$/;
 // A non-shell file whose `#` starts a comment. Only a full-line `#` comment is read as one: a trailing `# note` after code stays a
 // stated limit. A shell file goes to blankShell instead.
 const HASH_COMMENT_EXT = /\.(?:ps1|rb|toml|ya?ml|conf|mk)$/;
-const SHELL_EXT = /\.(?:sh|bash|zsh)$/;
 
 const fail = (req, reason, gone = false) => ({ file: req.file, symbol: req.symbol, ok: false, reason, ...(gone && { gone: true }) });
 const good = (req, value) => ({ file: req.file, symbol: req.symbol, ok: true, value });
@@ -202,7 +201,8 @@ const shellWords = (text) => {
   for (let i = 0; i < bare.length; i++) {
     const c = bare[i];
     if (quote) {
-      if (c === quote) quote = null; else word += code[i];
+      // A `$` in single quotes is text: `\$` marks it, so the `\` filter below skips the word.
+      if (c === quote) quote = null; else word += quote === "'" && code[i] === '$' ? '\\$' : code[i];
       continue;
     }
     if (c === '\\' && i + 1 < bare.length) { word = (word ?? '') + code[i] + code[i + 1]; i++; continue; }
