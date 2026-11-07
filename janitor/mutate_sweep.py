@@ -1468,7 +1468,9 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
     os.makedirs(janitor_dir, exist_ok=True)
     lint_dir = os.path.join(scaffold, "lint")
     os.makedirs(lint_dir, exist_ok=True)
-    shutil.copy(os.path.join(REPO_ROOT, "lint", "_test_git.py"), lint_dir)  # test_sweep.py imports it; never mutated
+    # test_sweep.py imports these, and sweep.py loads check_record_slugs.py (and layout.py, layout.json) for --expire-notes; never mutated
+    for name in ("_test_git.py", "_test_temp.py", "check_record_slugs.py", "layout.py", "layout.json"):
+        shutil.copy(os.path.join(REPO_ROOT, "lint", name), lint_dir)
     # Every hooks module, so a new hooks module cannot be left out. A lint/ module that hooks import
     # lazily is not covered. The loop
     # below replaces the guard family and git_reads.py with the target's text (mutated or real).
