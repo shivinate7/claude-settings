@@ -1289,9 +1289,8 @@ jobs:
   checks-windows-guard-2:
     runs-on: windows-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
-    # A shard of checks-windows-guard: its figures and cap are there. all-jobs-passed needs it, so on a ready pull_request
-    # its steps skip unless guard_windows_full is on.
+    # A shard of checks-windows-guard: its figures and cap are there. all-jobs-passed needs it, so it has no job-level if (a draft
+    # skips it through needs: scope), and on a ready pull_request its steps skip unless guard_windows_full is on.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
