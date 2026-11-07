@@ -642,6 +642,10 @@ def _typecheck_entry(item, where):
     for glob in globs:
         for one in _expand_braces(glob):
             _safe(one, where)  # each form a brace set stands for, so "{..,x}/a" is refused too
+        try:
+            _glob_regex(glob)  # a class such as [z-a] would otherwise fail later, inside the matching loop
+        except re.error:
+            raise LayoutError("%s: glob %r is not a readable pattern" % (where, glob))
     if not isinstance(command, list) or not command or not all(isinstance(c, str) and c for c in command):
         raise LayoutError("%s: \"command\" is not a non-empty list of strings" % where)
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
