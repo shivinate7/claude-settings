@@ -1488,7 +1488,8 @@ def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeou
     the profile itself) the install runs under `deps`, a folder the caller removes, and its folder is linked beside the
     lockfile. Parts with one lockfile and one install share one install and one link; any other install runs once more.
     A failed install does not stop the later parts. A defect needs a part's install when the part's `code` regex matches the
-    defect's `file` or its `tests` regex matches an element of the defect's `argv`; a part with neither regex is needed by
+    defect's `file` (unless its `code_not` regex matches it too) or its `tests` regex matches an element of the defect's
+    `argv`; the regexes are the profile's own (`REPLAY_PROFILES`, or `--profile-file`). A part with neither regex is needed by
     every defect, and a defect that no part claims needs every install. A defect that needs a failed install is not run: it
     reads UNKNOWN and its reason names the install, because a suite whose package is missing can read CAUGHT or MISS for the
     wrong cause. Any other defect runs as usual. A failed link leaves the checkout unusable, so every defect reads UNKNOWN."""
