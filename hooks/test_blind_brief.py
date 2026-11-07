@@ -608,6 +608,16 @@ class Hook(unittest.TestCase):
         # Control: stripping the bullet must not turn a zero count into a pass.
         self.assertRefused(self.spawn("- Designer kind: informed\n- Blind designers: 0\n\n" + DUO_BRIEF))
 
+    def test_bold_informed_spawn_with_blind_designers_passes(self):
+        # Control: a bold kind line is read as the kind, so the bold count line must be read as the count.
+        out = self.spawn("**Designer kind:** informed\n**Blind designers:** 2\n\n" + DUO_BRIEF)
+        self.assertEqual(out, "", "a bold count line must be read as the count, not refused")
+
+    def test_nbsp_led_informed_spawn_with_blind_designers_passes(self):
+        # A non-breaking space leads both lines. The kind line reads it through LEADING_MARKS, so the count line must too.
+        out = self.spawn(" - Designer kind: informed\n - Blind designers: 2\n\n" + DUO_BRIEF)
+        self.assertEqual(out, "", "a count line led by a non-breaking space must be read as the count, not refused")
+
     def test_informed_spawn_with_owner_none_passes(self):
         self.assertEqual(self.spawn('Designer kind: informed\nBlind designers: none, owner: "informed only"\n\nDraw it.'), "")
 
