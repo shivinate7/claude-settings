@@ -17,7 +17,7 @@ writes, so a session cannot grant itself an override. It is valid only while now
   nothing (an intended "off" must never become a grant). A later line starting with the word grants
   nothing, except the last non-blank line when the prompt's start is no override word: a status block the app puts
   before the owner's words does not hide it. That line grants only as the bare word, `off` or a length, with no
-  reason and no Opus word. Machine blocks are stripped first (BLOCKS); the owner never types pasted text.
+  reason and no Opus word. Pasted and machine blocks are dropped first (BLOCKS); the owner never types pasted text.
 An Opus override is the file <config dir>/state/override/opus/<session_id>.json, {"kind": "opus",
 "until": ISO-8601 UTC, "role": null, one role, or a sorted list of 2 or more roles}. It lives beside the override, so the two never
 replace each other. It lifts only the Opus spawn refusal of guard rule agent-model-cap, never that
@@ -105,7 +105,6 @@ MACHINE_BLOCKS = "|".join(
      for name in sorted({m for tag in NOTICE_TAGS for m in re.findall(r"<([\w-]+)", tag)})]
     + [re.escape(tag) + ".*" for tag in NOTICE_TAGS if not tag.startswith("<")])
 BLOCKS = re.compile(PASTED + "|" + MACHINE_BLOCKS, re.I | re.S)
-MACHINE_ONLY = re.compile(MACHINE_BLOCKS, re.I | re.S) if MACHINE_BLOCKS else None  # an empty pattern matches everywhere
 OPUS_ASK_SOURCES = (None, "user")  # the payload `source` values a plain ask may carry: absent, null or the owner
 ROLE_WORDS = re.compile(r"[A-Za-z][\w\u2019'-]*")
 NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t",
@@ -241,18 +240,14 @@ def _strip_blocks(prompt):
 def _override_rest(prompt):
     """The text after the word `override` for one owner prompt, or None when the prompt holds no override word.
     A machine block (a status block the app puts before the owner's words) is not the owner's, so the word may follow
-    one. Three reads, in order: the raw start; the start once machine blocks are gone (pasted text stays: it is never
-    the owner's typed word); the last non-blank line alone, which grants only as a bare word, `off` or a length, so
-    a reason or the Opus word there grants nothing. That last read drops pasted blocks too, so pasted text never
-    supplies the line."""
+    one. Two reads, in order: the raw start; the last non-blank line alone, which grants only as a bare word, `off` or
+    a length, so a reason or the Opus word there grants nothing. That read drops pasted and machine blocks first, so
+    their text never supplies the line. With no machine tags known, BLOCKS matches everywhere: no last-line read."""
     said = PROMPT.match(prompt)
     if said:
         return said.group(1)
-    if MACHINE_ONLY is None:
+    if not MACHINE_BLOCKS:
         return None
-    said = PROMPT.match(MACHINE_ONLY.sub("", prompt))
-    if said:
-        return said.group(1)
     lines = [line.strip() for line in _strip_blocks(prompt).splitlines() if line.strip()]
     said = PROMPT.match(lines[-1]) if lines else None
     if said and (not said.group(1).strip() or WORD.fullmatch(" ".join(said.group(1).split()))):
@@ -480,9 +475,8 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
 def grant(session_id, prompt, at):
     """Write, replace or remove the session's override for one owner prompt. Returns (kind, until) for a
     new override, ("off", None) when `override off` removed one, the _grant_opus result for the Opus word,
-    else None: the prompt is not a word. The word `override` counts at the start of the prompt, at the start once
-    machine blocks are stripped, or alone on the last non-blank line (_override_rest); only the first form may
-    carry a reason or the Opus word."""
+    else None: the prompt is not a word. The word `override` counts at the start of the prompt, or
+    alone on the last non-blank line (_override_rest); only the first form may carry a reason or the Opus word."""
     opus = OPUS_PROMPT.match(prompt) if isinstance(prompt, str) else None
     if opus:
         return _grant_opus(session_id, opus.group(1), at)
