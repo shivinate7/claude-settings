@@ -18,7 +18,7 @@ from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    push_destinations, push_target, push_text,
+    push_destinations, push_refspecs, push_target, push_text,
 )
 
 
@@ -505,29 +505,50 @@ def records_page_hit(stripped: str, cwd: str) -> str:
     return ""
 
 
-# ---- conflict-markers: a Bash `git commit` that would hold a leftover conflict marker
+# ---- conflict-markers: a Bash `git commit` or `git push` that would carry a leftover conflict marker
 #
-# The hook runs before the chain, so it judges what the commit will hold. A commit with pathspecs holds
-# those working-tree files. `commit -a` and an earlier whole-tree `git add` hold the whole working tree.
-# An earlier `git add <paths>` holds those paths from the working tree, and the rest from the index. Any
-# other commit holds the index. Each is read against HEAD with `git diff --check`. Only its "leftover
-# conflict marker" findings count, never its exit code, so trailing whitespace commits. A file is a hit
-# when its findings hold all three kinds: a `<<<<<<<` line, a lone `=======`, and a `>>>>>>>` line.
+# The hook runs before the chain, so it cannot see what an earlier segment does to the tree. A commit is
+# judged only when every earlier segment is a git add, a git read (status, diff, log, show), `true` or
+# `false`; any other earlier segment gives no hit at commit. A judged commit with pathspecs holds those
+# working-tree files. `commit -a` and an earlier whole-tree `git add` hold the whole working tree. An
+# earlier `git add <paths>` holds those paths from the working tree, and the rest from the index. Any
+# other commit holds the index. Each is read against HEAD with `git diff --check`.
+# A push is judged on the commits it would send, which are real when the hook runs. For each ref it
+# names, the range runs from the merge base with the remote-tracking tip of the destination, else the
+# source's upstream, else the default base, up to the local source ref (HEAD for a bare push). It is
+# read with `git diff --check` and the line kinds come from the source ref's blob. A commit that the
+# commit check could not judge, followed by a push in the same call, is refused: the push cannot see it.
+# Only the "leftover conflict marker" findings count, never the exit code, so trailing whitespace passes.
+# A file is a hit when its findings hold all three kinds: a start, a lone mid and an end marker line.
 # Context never hides a marker: a fence, a string, a comment and a template literal are not read.
 # Limits: a `sh -c` script and `eval` are not read (guard-guards-mistakes-only); an untracked file that
-# an earlier `git add` stages is not in `git diff HEAD`, so it is not read; a failed read, no HEAD, and an
-# unmerged index judged alone (git refuses that commit itself) are no hit.
+# an earlier `git add` stages is not in `git diff HEAD`, so it is not read; a failed read, no HEAD, no
+# resolvable range, `--all`, `--mirror` and a deletion push are no hit; an unmerged index judged alone
+# (git refuses that commit itself) is no hit.
+# Cost: per judged commit, one `git diff --check` (plus one read per file with a finding); per push, up
+# to four ref reads and one `git diff --check`. Nothing is read when the command holds neither.
 CONFLICT_MARKERS_REASON = (
     "Rule (Git, conflict-markers; decision commit-refuses-conflict-markers): this commit would hold conflict markers in {file}. "
     "Remedy: resolve the markers in that file, re-stage it, then retry."
 )
+CONFLICT_MARKERS_PUSH_REASON = (
+    "Rule (Git, conflict-markers; decision commit-refuses-conflict-markers): this push would send commits that hold "
+    "conflict markers in {file}. Remedy: resolve the markers in that file, commit the fix, then retry."
+)
+CONFLICT_MARKERS_CHAIN_REASON = (
+    "Rule (Git, conflict-markers; decision commit-refuses-conflict-markers): the commit in this call follows a step "
+    "the guard cannot read, so it cannot be checked for conflict markers before this push sends it. "
+    "Remedy: run the push in a call of its own, after the commit has landed."
+)
+_READ_VERBS = ("status", "diff", "log", "show")
 _CONFLICT_FINDING = re.compile(r"^(.+):(\d+): leftover conflict marker\s*$")
 _MARKER_KINDS = {"<": "start", "=": "mid", ">": "end"}
 
 
-def _marker_findings(where, top, diff_args, cached):
+def _marker_findings(where, top, diff_args, source):
     """Return {file: set of marker kinds} for the leftover conflict markers `git diff --check` reports.
-    A line's kind is read from the new side of the file: the index blob, or the working-tree file."""
+    A line's kind is read from the new side of the file: `source` None is the working-tree file, ''
+    the index blob, and a revision that revision's blob."""
     done = _git(where, "-c", "core.quotepath=off", "diff", "--no-ext-diff", "--no-color", "--check", *diff_args)
     if done is None:
         return {}
@@ -538,8 +559,8 @@ def _marker_findings(where, top, diff_args, cached):
             wanted.setdefault(found.group(1), []).append(int(found.group(2)))
     kinds = {}
     for name, numbers in wanted.items():
-        if cached:
-            read = _git(top, "cat-file", "-p", ":" + name)
+        if source is not None:
+            read = _git(top, "cat-file", "-p", source + ":" + name)
             text = read.stdout if read is not None and read.returncode == 0 else ""
         else:
             try:
@@ -560,19 +581,100 @@ def _covered_by(where, specs):
     return set(done.stdout.splitlines()) if done is not None and done.returncode == 0 else set()
 
 
-def conflict_markers_hit(stripped: str, cwd: str) -> str:
-    """Return the first file the commit would hold with all three conflict markers, else ''. Each
-    segment is judged from its own command word."""
+def _triplet_file(found):
+    """The first file whose findings hold all three marker kinds, else ''."""
+    return next((name for name, seen in found.items() if len(seen) == len(_MARKER_KINDS)), "")
+
+
+def _ref_sha(top, ref):
+    """The commit a revision names, or '' when it names none."""
+    done = _git(top, "rev-parse", "--verify", "-q", ref + "^{commit}")
+    return done.stdout.strip() if done is not None and done.returncode == 0 else ""
+
+
+def _push_hit(segment, stripped, cwd, args):
+    """Return the first file a `git push` would send with all three conflict markers, else ''. For each
+    ref the push names, the range is the merge base with the destination's remote-tracking tip, else the
+    source's upstream, else the default base, up to the local source ref."""
+    named = push_refspecs(args)
+    where, overrides = push_target(segment, stripped, cwd)
+    if named is None or not where or not os.path.isdir(where):
+        return ""
+    done = _git(where, "rev-parse", "--show-toplevel")
+    if done is None or done.returncode != 0 or not done.stdout.strip():
+        return ""
+    top = os.path.normpath(done.stdout.strip())
+    specs = named[1] or [""]
+    dests = push_destinations(args, where, overrides)
+    for spec, dest in zip(specs, dests):
+        source, colon, _target = spec.lstrip("+").partition(":")
+        if "*" in spec or (colon and not source):
+            continue
+        tip = _ref_sha(top, "HEAD" if source in ("", "@") else source)
+        if not tip:
+            continue
+        remote = named[0]
+        if not remote:
+            current = _git(top, "symbolic-ref", "-q", "--short", "HEAD")
+            configured = _git(top, "config", "--get", "branch." + (current.stdout.strip() if current else "") + ".remote")
+            remote = configured.stdout.strip() if configured is not None and configured.returncode == 0 else ""
+        base = ""
+        for ref in ((("refs/remotes/%s/%s" % (remote or "origin", dest)) if dest else ""),
+                    (source or "HEAD") + "@{upstream}", resolve_default_base(top) or ""):
+            base = _ref_sha(top, ref) if ref else ""
+            if base:
+                break
+        merged = _git(top, "merge-base", base, tip) if base else None
+        if merged is None or merged.returncode != 0 or not merged.stdout.strip():
+            continue
+        name = _triplet_file(_marker_findings(top, top, [merged.stdout.strip(), tip], tip))
+        if name:
+            return name
+    return ""
+
+
+def _chain_safe(segment):
+    """True when the segment cannot change the tree a later commit reads: a git add, a git read,
+    `true` or `false`."""
+    call = git_call_of(segment)
+    if call is not None:
+        return call[0] == "add" or call[0] in _READ_VERBS
+    tokens = segment_tokens(segment) or []
+    index = resolve_command(tokens) if tokens else None
+    return index is not None and basename(tokens[index]) in ("true", "false")
+
+
+def conflict_markers_hit(stripped: str, cwd: str):
+    """Return `(kind, file)` for the first commit or push that would carry all three conflict markers
+    in one file, else `('', '')`. The kind is `commit`, `push`, or `chain` (a push after a commit the
+    guard could not judge; the file is then `git push`). Each segment is judged from its own command word."""
     whole_tops, add_specs = set(), []   # tops an earlier add stages whole / (where, top, specs) of earlier adds
+    readable = True                     # every segment so far is one that cannot change the tree
+    blind = False                       # a commit followed a segment the guard cannot read
     for segment in split_segments(stripped):
-        call = git_call_of(segment) if segment.strip() else None
+        if not segment.strip():
+            continue
+        call = git_call_of(segment)
+        if call is not None and call[0] == "push":
+            if blind:
+                return "chain", "git push"
+            name = _push_hit(segment, stripped, cwd, call[1])
+            if name:
+                return "push", name
+            readable = False
+            continue
         if call is None or call[0] not in ("add", "commit"):
+            readable = readable and _chain_safe(segment)
+            continue
+        if call[0] == "commit" and not readable:
+            blind = True
             continue
         c_target = _segment_git_c_target(segment_tokens(segment) or [])
         root = command_root(stripped, cwd)
         where = _absolute(c_target, root) if c_target is not None else root
         done = _git(where, "rev-parse", "--show-toplevel") if where and os.path.isdir(where) else None
         if done is None or done.returncode != 0 or not done.stdout.strip():
+            readable = readable and call[0] == "add"
             continue
         top = os.path.normpath(done.stdout.strip())
         if call[0] == "add":
@@ -582,26 +684,27 @@ def conflict_markers_hit(stripped: str, cwd: str) -> str:
             elif specs:
                 add_specs.append((where, top, specs))
             continue
+        readable = False
         all_flag, specs = _commit_shape(call[1])
         head = _git(top, "rev-parse", "--verify", "-q", "HEAD")   # no HEAD: `git diff` would read an empty tree
         if head is None or head.returncode != 0:
             continue
         if specs:
-            found = _marker_findings(where, top, ["HEAD", "--", *specs], False)
+            found = _marker_findings(where, top, ["HEAD", "--", *specs], None)
         elif all_flag or top in whole_tops:
-            found = _marker_findings(top, top, ["HEAD"], False)
+            found = _marker_findings(top, top, ["HEAD"], None)
         else:
-            found = _marker_findings(top, top, ["--cached"], True)
+            found = _marker_findings(top, top, ["--cached"], "")
             for add_where, add_top, add_paths in add_specs:
                 if add_top != top:
                     continue
                 for name in _covered_by(add_where, add_paths):
                     found.pop(name, None)
-                found.update(_marker_findings(add_where, top, ["HEAD", "--", *add_paths], False))
-        for name, seen in found.items():
-            if len(seen) == len(_MARKER_KINDS):
-                return name
-    return ""
+                found.update(_marker_findings(add_where, top, ["HEAD", "--", *add_paths], None))
+        name = _triplet_file(found)
+        if name:
+            return "commit", name
+    return "", ""
 
 
 # ---- merge --role: the tier is read from this session's own get_session record
