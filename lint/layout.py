@@ -102,6 +102,26 @@ def legacy(name):
     return layout().get("legacy", {}).get(found, found)
 
 
+FILE_KINDS = ("debt-notes", "todo")  # record files that are not a listed folder
+
+
+def record_paths(data, root=None):
+    """Every layout, legacy and legacy-repos path of a kind marked record or listed, or in FILE_KINDS, as `/` paths without a trailing slash.
+    `data` is the layout as read. With `root`, the record or listed kinds of that repo's extras file join them."""
+    paths = set()
+    legacy_map = data.get("legacy", {})
+    for name, kind in data["kinds"].items():
+        if kind.get("record") or kind.get("listed") or name in FILE_KINDS:
+            paths.add(kind["path"].strip("/"))
+            if kind["path"] in legacy_map:
+                paths.add(legacy_map[kind["path"]].strip("/"))
+            paths.update(entry[name].strip("/") for entry in data.get("legacy-repos", {}).values() if name in entry)
+    if root is not None:
+        paths.update(kind["path"].strip("/") for kind in kinds(root).values()
+                     if kind.get("set") == "extra" and (kind.get("record") or kind.get("listed")))
+    return paths
+
+
 # github.com in https, ssh and scp form, and the /git/<owner>/<name> path of a cloud session's git proxy.
 GITHUB = re.compile(r"(?:^|[/@])github\.com[:/]+([^/\s]+/[^/\s]+?)(?:\.git)?/*$|/git/([^/\s]+/[^/\s]+?)(?:\.git)?/*$")
 

@@ -893,6 +893,21 @@ class Host:
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"cannot read whether {other[:9]} holds {head[:9]} {READ_CITE}: {e}")
 
+    def compare_files(self, base, head):
+        """-> {status, ahead_by, behind_by, files} of GitHub's compare of base...head: ONE read, never paged, so `files` holds at most COMPARE_FILE_CAP
+        entries (each a dict with filename, status and, for a rename, previous_filename). Any failed or malformed read raises Stop."""
+        c, out = self.api(f"compare/{base}...{head}")
+        try:
+            if c:
+                raise ValueError(out)
+            reply = json.loads(out)
+            found = {"status": reply["status"], "ahead_by": int(reply["ahead_by"]), "behind_by": int(reply["behind_by"]), "files": list(reply.get("files") or [])}
+            if not all(isinstance(f, dict) and isinstance(f.get("filename"), str) for f in found["files"]):
+                raise ValueError("a file entry has no filename")
+            return found
+        except (ValueError, KeyError, TypeError) as e:
+            raise Stop(f"cannot read the compare of {base[:9]} and {head[:9]} {READ_CITE}: {e}")
+
     def protection_names(self):
         """-> the required check names of the base's branch protection, or None when the base has none (an HTTP 404 that is not a
         network error). Through api, so the guard's -R repo and its cwd name the repo. Any other failed read raises Stop."""
@@ -3250,6 +3265,32 @@ def fix_check_arg(text):
         raise argparse.ArgumentTypeError(f"{text!r} is not REVIEWED_HEAD:{REVIEW_ROLES[0]}:MODEL:VERDICT, with a full 40-hex head and VERDICT {'|'.join(REVIEW_FIX_VERDICTS)}")
     return m.group(1, 2, 3, 4)
 
+COMPARE_FILE_CAP = 300  # GitHub's compare lists at most this many files, so a reply this long may be cut short
+
+def fix_base_problem(host, root, base, last_head):
+    """None when a fix check may start from `base` although the newest earlier record reviewed `last_head`, else the reason it may not.
+    The two heads must be one an ancestor of the other, and every file between them, a rename's old path too, a record or notes file
+    (the layout's record paths) or the generated records page: a commit of notes after a review then leaves the fix diff the reviewed one.
+    A failed compare read raises Stop. Reading no layout, or a compare that may be cut at the cap, refuses: the files cannot be told."""
+    try:
+        import layout
+        allowed = layout.record_paths(layout.layout(), root) | {RECORDS_PAGE}
+    except Exception as e:  # LayoutError, or a module that will not load: the record paths are unknown
+        return f"the record paths cannot be read from the layout ({type(e).__name__}), so the files between the heads cannot be told from code"
+    found = host.compare_files(last_head, base)
+    if found["ahead_by"] and found["behind_by"]:
+        return f"{base[:9]} and the newest earlier record's Head {last_head[:9]} have diverged: one must hold the other"
+    if len(found["files"]) >= COMPARE_FILE_CAP:
+        return f"the compare of {base[:9]} and {last_head[:9]} lists {COMPARE_FILE_CAP} or more files, so its list may be cut short"
+    def is_record_file(path):
+        path = path.strip("/")
+        return any(path == p or path.startswith(p + "/") for p in allowed)
+    named = [name for f in found["files"] for name in (f["filename"], f.get("previous_filename")) if name]
+    code = sorted({name for name in named if not is_record_file(name)})
+    if code:
+        return f"{base[:9]} is not the newest earlier record's Head, and the files between them are not all record or notes files: {', '.join(code[:3])}{' ...' if len(code) > 3 else ''}"
+    return None
+
 MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
 
 def role_path():
@@ -3344,7 +3385,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
-    p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from; VERDICT is PASS, FAIL (counts as the next round) or WIDE (counts none, new lane at round 1)")
+    p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from: the Head of the newest earlier record, or a head that differs from it only by record or notes files; VERDICT is PASS, FAIL (counts as the next round) or WIDE (counts none, new lane at round 1)")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after round 3")
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
@@ -3421,11 +3462,16 @@ def main(argv, host=None, lock=None):
                 raise Stop(f"the pull request is {info['state']} " + REVIEW_CITE)
             if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
-            if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
+            if a.fix_check:  # a fix never follows a fix, and the fix diff starts from the Head the newest earlier record reviewed, or from a record-file-only step from it
                 earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
                 last = earlier[-1] if earlier else None
-                if not last or last["head"] != a.fix_check[0] or last["fix"]:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
+                problem = None
+                if not last or last["fix"]:
+                    problem = "the newest earlier review record on this pull request must exist and have no Fix check line"
+                elif last["head"] != a.fix_check[0]:
+                    problem = fix_base_problem(h, root, a.fix_check[0], last["head"])
+                if problem:
+                    print(f"merge: --fix-check: {problem}. The reviewed head must be the Head of the newest earlier review record, or differ from it only by record or notes files. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
