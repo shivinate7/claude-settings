@@ -11600,6 +11600,61 @@ sh("frozen dup: cp from a dup before a frozen settings file stays frozen",
 sh("frozen dup: tee after a dup onto a frozen settings file stays frozen",
    "echo x | tee 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 
+# ------------------------------------------------------------- frozen write-word: a word in text is not a write
+# The frozen rule reads a mutating word (`copy`, `install`, `move`, ...) on the same line as a frozen path
+# as a write. A word held in a string, or in an env value, writes nothing, so the allow cases here are
+# allowed. Each allow case has a control beside it: the same shape with the word or the path taken out.
+# The paths are the fixture's config folder (CFG), not a literal `~`, because the runner's HOME is not CFG.
+# Run only this block: MUTATE_ONLY="frozen write-word:" python3 hooks/test_guard.py
+WW_HEREDOC = "python3 - <<'EOF'\n%s\nEOF"
+WW_HANDOFF = slash(os.path.join(CFG, "handoffs", "s1.md"))
+WW_BIN_LOG = slash(os.path.join(CFG, "bin", "out.log"))
+WW_TEST = slash(os.path.join(CFG, "hooks", "test_guard.py"))
+sh("frozen write-word: a python heredoc that names a frozen hook in a string and writes a handoff is allowed",
+   WW_HEREDOC % ("import os\nnote = \"install the mirror at %s\"\nopen(os.path.expanduser(\"%s\"), \"w\").write(note)"
+                 % (CFG_HOOK, WW_HANDOFF)), "allow", cwd=NOGIT)
+sh("frozen write-word: the same heredoc without the hook path is allowed",
+   WW_HEREDOC % ("import os\nnote = \"install the mirror at the hook path\"\nopen(os.path.expanduser(\"%s\"), \"w\").write(note)"
+                 % WW_HANDOFF), "allow", cwd=NOGIT)
+sh("frozen write-word: GUARD_FAMILY=copy before verdict on a frozen test file is allowed",
+   "GUARD_FAMILY=copy verdict python3 " + WW_TEST, "allow", cwd=NOGIT)
+sh("frozen write-word: GUARD_FAMILY=frozen before verdict on a frozen test file is allowed",
+   "GUARD_FAMILY=frozen verdict python3 " + WW_TEST, "allow", cwd=NOGIT)
+# A script that opens a frozen hook for writing is a write the shell never names, so it is refused. The
+# expanduser form and the plain form are both refused; the same heredoc writing a handoff is allowed.
+sh("frozen write-word: a python heredoc that opens a frozen hook for writing through expanduser is refused",
+   WW_HEREDOC % ("import os\nopen(os.path.expanduser(\"%s\"), \"w\").write(\"x\")" % CFG_HOOK),
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen write-word: a python heredoc that opens a frozen hook for writing is refused",
+   WW_HEREDOC % ("import os\nopen(\"%s\", \"w\").write(\"x\")" % CFG_HOOK), "deny", "frozen-path", cwd=NOGIT)
+sh("frozen write-word: the same heredoc writing a handoff is allowed",
+   WW_HEREDOC % ("import os\nopen(os.path.expanduser(\"%s\"), \"w\").write(\"x\")" % WW_HANDOFF),
+   "allow", cwd=NOGIT)
+# Scanner traps: a comment opener inside a string, a multi-line string, and a lone apostrophe in a comment,
+# each beside the mention. The mention writes nothing, so each one is allowed.
+sh("frozen write-word: a comment opener inside a string beside the mention is allowed",
+   WW_HEREDOC % ("import os\nnote = \"# install the mirror at %s\"\nopen(os.path.expanduser(\"%s\"), \"w\").write(note)"
+                 % (CFG_HOOK, WW_HANDOFF)), "allow", cwd=NOGIT)
+sh("frozen write-word: a multi-line string that holds the mention is allowed",
+   WW_HEREDOC % ("import os\nnote = \"\"\"line one\ninstall the mirror at %s\nline three\"\"\"\n"
+                 "open(os.path.expanduser(\"%s\"), \"w\").write(note)" % (CFG_HOOK, WW_HANDOFF)),
+   "allow", cwd=NOGIT)
+sh("frozen write-word: a lone apostrophe in a comment beside the mention is allowed",
+   WW_HEREDOC % ("import os\n# don't install the mirror at %s\nopen(os.path.expanduser(\"%s\"), \"w\").write(\"x\")"
+                 % (CFG_HOOK, WW_HANDOFF)), "allow", cwd=NOGIT)
+# Refusals that must stay: a redirect onto a frozen bin file, sed -i on a frozen hook, a bash heredoc that
+# copies onto a frozen hook, and a python heredoc that runs cp onto one. The last is a real write found in
+# the text, so a narrower text match must not let it through.
+sh("frozen write-word: a verdict run that redirects into a frozen bin file is refused",
+   "verdict python3 hooks/test_guard.py > " + WW_BIN_LOG, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen write-word: sed -i on a frozen hook is refused", "sed -i '' s/a/b/ " + CFG_HOOK, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen write-word: a bash heredoc that copies onto a frozen hook is refused",
+   "bash <<'EOF'\ncp /tmp/x " + CFG_HOOK + "\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen write-word: a python heredoc that runs cp onto a frozen hook is refused",
+   WW_HEREDOC % ("import subprocess\nsubprocess.run([\"cp\", \"/tmp/x\", \"%s\"])" % CFG_HOOK),
+   "deny", "frozen-path", cwd=NOGIT)
+
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
 add("config-edit: Edit of a project hook is allowed", "allow", tool="Edit", cwd=NOGIT,
