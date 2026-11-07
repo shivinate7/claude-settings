@@ -472,20 +472,26 @@ class LaneLint(CiJobStub, tm.CloudSession):
 
     # merge.laneTests: after the lint passes, the lane's head runs the suites its profile's select lists (contract: merge.lane_lint).
 
-    def use_lane_profile(self, select=None):
+    def use_lane_profile(self, select=None, install=None):
         """Register the fixture profile in mutate_guard.REPLAY_PROFILES for this case. Its select is tools/lane_select.py, in the
-        checkout (or `select`, when a case names another argv); its suites are test_*.py files run with this interpreter; it installs
-        nothing. The dict is patched in place, so a name that bound it at import sees the entry too."""
+        checkout (or `select`, when a case names another argv); its suites are test_*.py files run with this interpreter; its install
+        is `install` (an argv, with {deps} the install folder), or nothing. The dict is patched in place, so a name that bound it at
+        import sees the entry too."""
         profile = {"code": r"^src/.*\.py$", "tests": r"(^|/)test_[^/]*\.py$", "argv": [sys.executable, "{suite}"],
-                   "classify": "fail_line", "install": None, "sparse_skip": [],
+                   "classify": "fail_line", "install": install, "sparse_skip": [],
                    "select": select or [sys.executable, "tools/lane_select.py", "{path}"]}
         patch = unittest.mock.patch.dict(mutate_guard.REPLAY_PROFILES, {LANE_PROFILE: profile})
         patch.start()
         self.addCleanup(patch.stop)
 
-    def select_text(self, listed, fails, prefix="src/"):
-        """The fixture selector. It logs each path it is asked about, then prints `listed` for a path under `prefix`, or exits 3 when `fails`."""
+    def select_text(self, listed, fails, prefix="src/", helper=None):
+        """The fixture selector. It logs each path it is asked about, then prints `listed` for a path under `prefix`, or exits 3 when
+        `fails`. With `helper` ({folder, module}: a folder relative to the selector's own file), it imports the module from that folder
+        after the log line, as q_max's selector loads typescript beside itself: a missing module is a traceback and a non-zero exit."""
         head = "import sys\nwith open(%r, 'a', encoding='utf-8') as log:\n    log.write(sys.argv[1] + '\\n')\n" % self.select_log
+        if helper:
+            head = ("import os\n" + head + "sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), %r))\n"
+                    "import %s\n" % (helper["folder"], helper["module"]))
         if fails:
             return head + "sys.exit(3)\n"
         body = "".join("    print(%r)\n" % name for name in listed) or "    pass\n"
@@ -502,18 +508,19 @@ class LaneLint(CiJobStub, tm.CloudSession):
 
     def lane_fixture(self, listed=(), suites=None, feat_suites=None, select_fails=False, laneTests=LANE_PROFILE,
                      lane=None, select_prefix="src/", base_files=None, lane_deletes=(), lane_renames=None,
-                     lane_listed=None, select_argv=None, config_text=None):
+                     lane_listed=None, select_argv=None, config_text=None, helper=None, install=None):
         """The laneTests fixture, one call per case. origin/main gets the repo's own parts: the config, with merge.laneTests `laneTests`
         (None: the field is absent, or `config_text` is written as the file), tools/lane_select.py, the profile's select, which lists
-        `listed` for a path under `select_prefix` or exits 3 when `select_fails`; `suites` ({path: mode}), suites the lane does not touch;
-        and `base_files` ({path: text}), product files the base holds. origin/feat gets one commit on top: `lane` ({path: text}, default
-        src/p.py, the product file the lane changes), `feat_suites` ({path: mode}), suites the lane itself adds, and `lane_listed`, a
-        selector the lane writes in place of the base's. Then `lane_deletes` (paths) and `lane_renames` ({old: new}) go in a second
-        commit. `select_argv` replaces the profile's select. A mode is "pass", "fail" or "crash"."""
+        `listed` for a path under `select_prefix` or exits 3 when `select_fails`, and which imports `helper` ({folder, module}) when
+        given; `suites` ({path: mode}), suites the lane does not touch; and `base_files` ({path: text}), product files the base holds.
+        origin/feat gets one commit on top: `lane` ({path: text}, default src/p.py, the product file the lane changes), `feat_suites`
+        ({path: mode}), suites the lane itself adds, and `lane_listed`, a selector the lane writes in place of the base's. Then
+        `lane_deletes` (paths) and `lane_renames` ({old: new}) go in a second commit. `select_argv` replaces the profile's select, and
+        `install` is the profile's install argv. A mode is "pass", "fail" or "crash"."""
         self.select_log = os.path.join(self.t, "select-calls.log")
         self.suite_log = os.path.join(self.t, "suite-runs.log")
-        self.use_lane_profile(select_argv)
-        main = {"tools/lane_select.py": self.select_text(listed, select_fails, select_prefix)}
+        self.use_lane_profile(select_argv, install)
+        main = {"tools/lane_select.py": self.select_text(listed, select_fails, select_prefix, helper)}
         if config_text is not None:
             main[".github/stamp.json"] = config_text
         elif laneTests is not None:
@@ -719,6 +726,42 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.use_ci_job(PASSING, 0)
         rc, out = self.lint_run("--lane-lint", "7")
         self.assertIn(SUITE, self.suite_names(), "the base's selector did not decide the suites; the lane's own selector did: " + out)
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(any(SUITE in line and "FAIL" in line for line in out.splitlines()), "the refusal does not name the red suite: " + out)
+        self.assertEqual(pass_lines(out), [], out)
+
+    def test_a_selector_that_imports_a_helper_the_install_puts_in_the_checkout_still_names_the_red_suite(self):
+        """The profile's install writes helper.py into the install folder, which the checkout links as node_modules beside the lockfile.
+        The selector imports that helper from ../node_modules, relative to its own file, and exits non-zero without it. The lane changes
+        src/p.py, and the selector lists a red suite for it. The install runs before the selector, in the checkout, so the helper loads.
+        A select that ran first, from a temp copy of base's script, could not load it: every select would read unknown, and the lint
+        would refuse without a FAIL line naming the suite."""
+        install = [sys.executable, "-c", "open('{deps}/helper.py', 'w').write('LISTED = 1\\n')"]
+        self.lane_fixture(listed=[SUITE], suites={SUITE: "fail"}, base_files={"package-lock.json": "{}\n"},
+                          helper={"folder": "../node_modules", "module": "helper"}, install=install)
+        self.assert_suite_is_selector_only(SUITE)
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertIn(SUITE, self.suite_names(), "the selected suite did not run, because the selector could not import the helper "
+                      "the install puts in the checkout: " + out)
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(any(SUITE in line and "FAIL" in line for line in out.splitlines()), "the refusal does not name the red suite: " + out)
+        self.assertEqual(pass_lines(out), [], out)
+
+    def test_a_lane_that_changes_the_selector_still_runs_the_bases_and_its_relative_import_resolves(self):
+        """The lane writes tools/lane_select.py to list nothing. The base's selector imports lib/select_lib.py from ../lib, relative to
+        its own file, and lists the red suite for the lane's src/p.py. The base's script decides, and its import must resolve where the
+        script runs. A copy of only its tools/ folder has no ../lib: the select would exit non-zero, and the lint would refuse without
+        a FAIL line naming the suite."""
+        self.lane_fixture(listed=[SUITE], suites={SUITE: "fail"}, lane={"src/p.py": "VALUE = 1\n"}, lane_listed=[],
+                          base_files={"lib/select_lib.py": "LOADED = True\n"}, helper={"folder": "../lib", "module": "select_lib"})
+        status = self.lane_status()
+        self.assertEqual(status.get("tools/lane_select.py"), "M", "the fixture does not change the selector in the lane")
+        self.assert_suite_is_selector_only(SUITE)
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertIn(SUITE, self.suite_names(), "the base's selector did not list the red suite, because it could not import "
+                      "lib/select_lib.py from ../lib beside its own file: " + out)
         self.assertEqual(rc, 1, out)
         self.assertTrue(any(SUITE in line and "FAIL" in line for line in out.splitlines()), "the refusal does not name the red suite: " + out)
         self.assertEqual(pass_lines(out), [], out)
