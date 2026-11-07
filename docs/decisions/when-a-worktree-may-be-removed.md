@@ -53,7 +53,7 @@ Owner rulings, 2026-10-15 and 2026-10-16 (including the 30 min wait, 00:47 CDT).
 
 At each SubagentStop, the reaper (`janitor/agent_end_reap.py`) removes each finished agent's worktree that is idle 30 min or more. The ending agent's own worktree is not removed at its own end. It waits the same idle limit as the others, and so do its build folders (`build-dirs-reaped-at-agent-end`). A later agent end, or the session-end sweep, removes it. Reason: the hook cannot remove the tree its own shells stand in, so a tree is removed only from a later hook, whose cwd is in another tree. The wait also keeps follow-ups working: a message to a finished agent resumes it in its own worktree, and a removed worktree makes the agent stop (`an-agent-outside-its-home-tree-must-stop`).
 
-Owner ruling, 2026-10-15 19:43 CDT: remove the tree even when it holds git-ignored files, such as build output, packages or `.env.local`. The same ruling wants the agent's own shells stopped first. That half is not built: see "A finished agent's tree" below and the debt `finished-agent-shells-keep-tree`.
+Owner ruling, 2026-10-15 19:43 CDT: remove the tree even when it holds git-ignored files, such as build output, packages or `.env.local`. The same ruling wants the agent's own shells stopped first. That half is built, gated by a per-agent process marker: see "A finished agent's tree" below.
 
 A worktree is removed only when all of these hold. A read that cannot tell keeps it.
 
@@ -70,18 +70,26 @@ Coordinator picks, 2026-11-07 14:43 CST and 15:05 CST (pick B), under the owner'
 - The agent is not listed as running in the SubagentStop payload's `background_tasks` (each entry has `id`, `type`, `status`, `agent_type` and `description`; `id` is the agent id). A running entry keeps the tree. A missing or malformed field keeps it too. This is an extra safety, not the proof.
 - `<transcript_path minus .jsonl>/subagents/agent-<id>.jsonl` exists and has been idle 30 min or more.
 - The tree is clean and pushed. A dirty tree is always kept.
-- No process has a cwd inside the tree.
+- Each process with a cwd inside the tree is proven the agent's own (the marker rule below), or no process has one.
 
-Any process inside keeps the tree, and nothing is stopped. The reaper stops no shell yet. Why:
+A process inside keeps the tree unless the marker rule proves it the agent's own. A session's own process (the host, its tool shells, a sibling lane's shell) has a cwd and a parent chain like the agent's shell, so the parent chain alone proves nothing. `background_tasks` is not proof that an agent still runs either. 64 of 213 mid-run (payload, agent) pairs were unlisted in `background_tasks`, with quiet gaps of 6.4-16.2 min (measured 2026-11-07 from the session payload log). That is why the stop row is required.
 
-- No process can be shown to be the agent's own. A session's own process (the host, its tool shells, a sibling lane's shell) has a cwd and a parent chain like the agent's shell. A rule that stops the agent's shells would stop a process that is not the agent's.
-- `background_tasks` is not proof that an agent still runs. 64 of 213 mid-run (payload, agent) pairs were unlisted in `background_tasks`, with quiet gaps of 6.4-16.2 min (measured 2026-11-07 from the session payload log). That is why the stop row is required.
+**The marker rule.** The stall-watch hook (`hooks/stall_watch.py`) puts `export CLAUDE_AGENT_ID=<agent_id>` in front of each agent's Bash call, so each process the call execs holds that id in its exec-time environment (`hooks/proc_env.py`, `AGENT_TAG_NAME`, `entry_value`). The reaper (`sweep.host_child_stops`, `sweep.agent_mark`) stops the processes inside a finished tree only when all of these hold, and any failed read keeps the tree and stops nothing:
 
-Stopping the agent's own shells waits for a per-agent process marker (debt `finished-agent-shells-keep-tree`, fix `step:agent-process-marker`). Until then a tree with any process is kept.
+- The tree's basename is `agent-<id>` with `<id>` 17 hex characters. Any other name keeps.
+- Each pid inside climbs through parents to the host in the lock, and every pid on the climb has its cwd inside the tree.
+- Each pid holds `CLAUDE_AGENT_ID` equal to that id. The one exception is a pid that is the host's direct child (depth 0): the call's own bash does not hold the export at exec, so it may be unmarked, and only when a marked pid climbs through it. An unmarked pid anywhere else, or a different id, keeps the tree.
+- This process and its ancestors are never in the stop list.
+
+The unlock comes first; a failed one stops nothing. Pids are signalled deepest first, the process table is read again until empty within the stage budget, and then the tree is removed. A pid still alive puts the lock back and keeps the tree.
+
+Measured facts (Linux, 2026-11-07): each Bash call is its own session leader, so a process group or session id cannot span calls. An export reaches the children the call execs and not the call's own bash. The harness sets no agent tag. The macOS read of the marker is unmeasured (it reads as unmarked, so the tree is kept). Windows reads nothing, so every process is unmarked and the tree is kept.
+
+Cost: no new process, no timer, no file. One environment read per pid already listed inside a finished tree, at a later agent end.
 
 The live lock reads `claude agent agent-<id> (pid N start S)`, where S is clock ticks since boot, field 22 of `/proc/<N>/stat` (measured: host 159, start 181). On Linux the host proof matches S against that field: a match is the live host, a mismatch or a dead pid is a stale lock. A platform that cannot read it (macOS, Windows, where the unit is unmeasured) leaves the host unproven: the lock stays and the tree is kept. The lock is re-read and lifted just before the removal; a failed re-read or unlock keeps the tree. An unlocked tree keeps the rule above.
 
-Home: `janitor/agent_end_reap.py` (`stopped_agents`, `agent_finished`), `janitor/sweep.py` (`decide_worktree`, `finished_host_lock`).
+Home: `janitor/agent_end_reap.py` (`stopped_agents`, `agent_finished`, `stop_and_settle`), `janitor/sweep.py` (`decide_worktree`, `finished_host_lock`, `host_child_stops`, `agent_mark`).
 
 Session start warns when more than 50 agent worktrees exist. An agent leaves its worktree clean and pushed, and a later agent end removes it. The builder and test-author agent definitions say so.
 
