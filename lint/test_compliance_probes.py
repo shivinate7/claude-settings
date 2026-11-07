@@ -626,6 +626,15 @@ class Ios(unittest.TestCase):
                 self.assertEqual(self.grade(self.make_run(self.substituted(sub)), "test diagnostics"), "pass",
                                  "the flag after the substitution is in the run")
 
+    def test_an_unset_make_variable_in_a_recipe_keeps_the_flag(self):
+        # Make expands an unset `$(NAME)` to nothing, so the shell never sees a `$(`: the flag after it is in the run.
+        self.assertEqual(self.grade(self.flagged("", "xcodebuild test $(XCX_EXTRA)"), "test diagnostics"), "gap",
+                         "scope: with no flag the run is read, and it gaps")
+        self.assertEqual(self.grade(self.flagged("XCX_EXTRA = -collect-test-diagnostics never\n", "xcodebuild test $(XCX_EXTRA)"),
+                                    "test diagnostics"), "pass", "control: a variable that holds the flag passes")
+        self.assertEqual(self.grade(self.flagged("", "xcodebuild test $(XCX_EXTRA) -collect-test-diagnostics never"), "test diagnostics"),
+                         "pass", "the flag after an unset variable is in the run")
+
     def test_a_substitution_in_a_shell_script_keeps_the_flag(self):
         script = "tools/run-tests.sh"
         self.diag_pass(self.gold().write(script, "#!/bin/sh\n%s\n" % self.substituted("abc")))  # control: no substitution
@@ -653,6 +662,20 @@ class Ios(unittest.TestCase):
                 self.assertEqual(self.grade(self.step(self.gold(), "echo it's; " + self.substituted(sub, "")), "test diagnostics"), "gap",
                                  "scope: with no flag the run is read, and it gaps")
                 self.assertEqual(self.grade(self.step(self.gold(), "echo it's; " + self.substituted(sub)), "test diagnostics"), "pass",
+                                 "the flag after the substitution is in the run")
+
+    def test_a_comment_opener_and_a_continuation_keep_the_flag_in_a_workflow_step(self):
+        # A `#` inside the quotes is text. A `\` continuation joins the flag's line to the run, so the flag still counts.
+        pairs = (
+            ('xcodebuild test -destination "name=iPhone #1,id=$(cat id)" -scheme X',
+             'xcodebuild test -destination "name=iPhone #1,id=$(cat id)" -collect-test-diagnostics never'),
+            ('|\n          xcodebuild test -destination "id=$(cat id)" \\\n            -scheme X',
+             '|\n          xcodebuild test -destination "id=$(cat id)" \\\n            -collect-test-diagnostics never'))
+        for scope, subject in pairs:
+            with self.subTest(command=subject):
+                self.assertEqual(self.grade(self.step(self.gold(), scope), "test diagnostics"), "gap",
+                                 "scope: with no flag the run is read, and it gaps")
+                self.assertEqual(self.grade(self.step(self.gold(), subject), "test diagnostics"), "pass",
                                  "the flag after the substitution is in the run")
 
     # `${XCB:-xcodebuild}` is xcodebuild when XCB is unset, so `test` is its action and the run needs the flag.
