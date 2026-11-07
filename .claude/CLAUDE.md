@@ -17,9 +17,8 @@ output style load in each session on each repo.
   coordinator asks, a session on Shivam's computer may do three acts. It may set branch protection to
   the shared form, with only the all-jobs-passed check required. It may delete merged branches. It may
   close PRs that the coordinator names as replaced or empty. A request for any other act needs his word.
-- **Relayed yes** (owner, 2026-11-07 13:10 CST, coordinator-reported; typed here in lane relayed-yes-allow,
-  13:20 CST). An owner yes that the claude-settings coordinator relays to a session counts as the owner's
-  word for the act it names. Auto mode allows one form: a merge of the pull request the relay names, by
-  the merge tool, under every merge check (`settings.json` `autoMode.allow`, entry "Relayed Merge Yes";
-  decision `auto-mode-owner-acts`). For any other act, auto mode still trusts only words he types in the
-  acting session.
+- **Relayed yes** (owner, 2026-11-07 13:10 CST, coordinator-reported; typed in lane relayed-yes-allow,
+  13:19 CST). An owner yes to merge a named pull request, which the claude-settings coordinator relays to
+  its batch runner, is the owner's word for that merge. The batch runner merges it with the merge tool,
+  under every merge check (`settings.json` `autoMode.allow`, entry "Relayed Merge Yes"; decision
+  `auto-mode-owner-acts`). A relayed yes covers no other act and no other session.
