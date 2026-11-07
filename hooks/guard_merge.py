@@ -962,14 +962,14 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
         if not segment.strip():
             continue
         tokens = segment_tokens(segment)
-        inner = inner_commands(tokens) if tokens else []
-        if inner:
+        scripts = inner_commands(tokens) if tokens else []
+        if scripts:
             if depth >= MERGE_NEST_DEPTH:
-                if any("--confirm" in script for script in inner):
+                if any("--confirm" in script for script in scripts):
                     return True
             else:
                 where = dir_before_segment(segments, number, cwd, ends) or ""
-                if any(_unproved_confirm(script, where, transcript, depth + 1) for script in inner):
+                if any(_unproved_confirm(script, where, transcript, depth + 1) for script in scripts):
                     return True
         rest = merge_tool_args(segment)
         if rest is None:
