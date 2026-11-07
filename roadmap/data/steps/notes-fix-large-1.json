@@ -5,7 +5,7 @@
   "order": 1.07,
   "owner": "coordinator",
   "why": "Item 355 sort, coordinator 14:05 CST Nov 7: 9 Sonnet agents sorted 1,629 notes and debts on main 174b005c1. Fix 184 (166 small, 18 large), delete 86, keep 1,359 (146 of them unverified). Lists: branch claude/clever-planck-oynpfh 759486de5, docs/plans/notes-sort/.",
-  "note": "Its list is in docs/plans/notes-sort/ on branch claude/clever-planck-oynpfh. Each lane carries the tag cs-step:notes-fix-large-1. Coordinator pick, 14:11 CST Nov 7 (the owner may overturn it), for debt finished-agent-shells-keep-tree: the agent-end reap may free a host-locked worktree once the worktree is pushed, idle for 30 minutes, and its agent is absent from the stop event's background tasks. The reap stops that agent's shells, then removes the worktree. Based on the owner's ruling of 2026-10-15 19:43 CDT and his 13:41 CST note on page item 357.",
+  "note": "Its list is in docs/plans/notes-sort/ on branch claude/clever-planck-oynpfh. Each lane carries the tag cs-step:notes-fix-large-1. Coordinator pick, 14:11 CST Nov 7 (the owner may overturn it), for debt finished-agent-shells-keep-tree: the agent-end reap may free a host-locked worktree once the worktree is pushed, idle for 30 minutes, and its agent is absent from the stop event's background tasks. The reap stops that agent's shells, then removes the worktree. Based on the owner's ruling of 2026-10-15 19:43 CDT and his 13:41 CST note on page item 357. Page item 364 (14:16 CST) asks the owner whether the silent-undo check may pass reworded lines, for row inplace-edit-under-0-9-flagged.",
   "lane": "notes-fix-large-1",
-  "updatedAt": "2026-11-07T14:11:00-06:00"
+  "updatedAt": "2026-11-07T14:14:00-06:00"
 }
