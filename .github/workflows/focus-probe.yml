@@ -1,0 +1,37 @@
+name: focus-probe
+
+# Throwaway: runs the waiting page suite on many runners to catch the dismiss focus miss with its trace.
+# Lives only on branch worktree-focus-ci-probe; never merged.
+on:
+  push:
+    branches: [worktree-focus-ci-probe]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: ./actions/playwright-setup
+        with:
+          package-dir: .github/shoot
+      - name: machine
+        run: nproc; lscpu | grep -E "Model name|^CPU\(s\)"; free -m | head -2
+      - name: full suite
+        continue-on-error: true
+        run: NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs 2>&1 | grep -E "^not ok|focus is not|^# (pass|fail)"
+      - name: dismiss tests x10
+        continue-on-error: true
+        run: |
+          for i in $(seq 1 10); do
+            NODE_PATH="$PWD/.github/shoot/node_modules" node --test --test-name-pattern="^dismiss" skills/waiting-page/tests/page.test.mjs 2>&1 | grep -E "^not ok|focus is not|^# fail" || true
+          done
