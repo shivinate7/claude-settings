@@ -30,6 +30,7 @@ NOTICE = re.compile(r"agent[ -]worktree", re.IGNORECASE)
 TIER_PRINTF = re.compile(r"'(session tier: .*)'[ \t]*$", re.MULTILINE)
 UNKNOWN_LINE = "repo caution: unknown, the level could not be read"  # the hook's line when the caution level is unread
 KEEP = object()  # run_hook's tmpdir default: the runner's own TMPDIR is kept
+TMP_SEAM = "CLAUDE_SETTINGS_TMP_CANDIDATE"  # the hook's /tmp candidate, read only so these tests can name it
 
 
 def hook_tier_line():
@@ -102,7 +103,7 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             vcs(self.primary, "worktree", "add", "-q", "--detach", "--no-checkout", path, "HEAD")
 
     def run_hook(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
-                 remote_session_id=None, env_file=None, tmpdir=KEEP):
+                 remote_session_id=None, env_file=None, tmpdir=KEEP, tmp_candidate=None, path_dir=None):
         """The hook's stdout lines. Its stderr lands in self.last_stderr.
 
         remote: the CLAUDE_CODE_REMOTE value, or None to unset it as a non-cloud runner does.
@@ -112,6 +113,8 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         compact: send the payload with no spaces after its separators, the way the hook's sed must also read it.
         env_file: the CLAUDE_ENV_FILE value, or None to unset it. A runner's own env file never takes a case's exports.
         tmpdir: the TMPDIR value, "" for an empty one, None to unset it, or KEEP (the default) for the runner's own.
+        tmp_candidate: the TMP_SEAM value (the hook's /tmp candidate), or None to unset it.
+        path_dir: a folder put first on PATH (a fake python3 lives there), or None to leave PATH alone.
         """
         where = self.primary if session_cwd is None else session_cwd
         # Forward slashes: the hook reads "cwd" with sed, and a doubled backslash is not a path.
@@ -130,6 +133,11 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         env.pop("CLAUDE_ENV_FILE", None)
         if env_file is not None:
             env["CLAUDE_ENV_FILE"] = env_file
+        env.pop(TMP_SEAM, None)
+        if tmp_candidate is not None:
+            env[TMP_SEAM] = tmp_candidate
+        if path_dir is not None:
+            env["PATH"] = path_dir + os.pathsep + env.get("PATH", "")
         if tmpdir is None:
             env.pop("TMPDIR", None)
         elif tmpdir is not KEEP:
@@ -751,12 +759,13 @@ class SessionStartTmpdirTests(SessionStartAgentWorktreeNoticeTests):
     """SessionStart exports a writable TMPDIR into CLAUDE_ENV_FILE when the runner left TMPDIR unset or empty.
     With TMPDIR unset, a cloud session wrote a scratch file to / and the rm check then refused to remove it."""
 
-    def env_run(self, name, fixture, tmpdir):
-        """Run the hook with CLAUDE_ENV_FILE at a fresh file that starts as the fixture. Returns the file's path."""
+    def env_run(self, name, fixture, tmpdir, **hook):
+        """Run the hook with CLAUDE_ENV_FILE at a fresh file that starts as the fixture. Returns the file's path.
+        hook: more run_hook options, such as tmp_candidate or path_dir."""
         path = os.path.join(self.root, name)
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(FIXTURES[fixture])
-        lines = self.run_hook(env_file=path, tmpdir=tmpdir)
+        lines = self.run_hook(env_file=path, tmpdir=tmpdir, **hook)
         self.assertTrue(any(line.startswith("checkout ") for line in lines),
                         "the hook printed no checkout line: %r" % lines)
         return path
@@ -765,10 +774,12 @@ class SessionStartTmpdirTests(SessionStartAgentWorktreeNoticeTests):
         with open(path, encoding="utf-8") as handle:
             return handle.read()
 
-    def sourced_tmpdir(self, path):
-        """TMPDIR as a shell has it after sourcing the env file, with the runner's own TMPDIR removed."""
+    def sourced_tmpdir(self, path, preset=None):
+        """TMPDIR as a shell has it after sourcing the env file. The runner's own TMPDIR is removed, or set to `preset`."""
         env = dict(os.environ)
         env.pop("TMPDIR", None)
+        if preset is not None:
+            env["TMPDIR"] = preset
         answer = subprocess.run([sh_exe(), "-c", '. "$1" && printf %s "${TMPDIR-}"', "sh", path],
                                 capture_output=True, text=True, env=env, timeout=60)
         self.assertEqual(answer.returncode, 0, "the env file does not source cleanly: %r" % answer.stderr)
@@ -812,6 +823,91 @@ class SessionStartTmpdirTests(SessionStartAgentWorktreeNoticeTests):
                         "the hook printed no checkout line: %r" % lines)
         self.assertEqual(self.last_stderr, "", "the hook wrote to stderr with CLAUDE_ENV_FILE unset: %r" % self.last_stderr)
         self.assertEqual(tree_snapshot(self.root), before, "the hook wrote a file with CLAUDE_ENV_FILE unset")
+
+    def fake_python(self, answer):
+        """A python3 on PATH that prints `answer` for the hook's tempfile call and logs each call, so a case sets the
+        fallback's answer. Returns the folder to put first on PATH, and the call log's path."""
+        bin_dir = os.path.join(self.root, "fake-bin")
+        os.makedirs(bin_dir, exist_ok=True)
+        script = os.path.join(bin_dir, "python3")
+        with open(script, "w", encoding="utf-8") as handle:
+            handle.write('#!/bin/sh\necho called >> "$0.log"\ncat "$0.answer"\n')
+        os.chmod(script, 0o755)
+        with open(script + ".answer", "w", encoding="utf-8") as handle:
+            handle.write(answer + "\n")
+        log = script + ".log"
+        if os.path.exists(log):
+            os.remove(log)
+        return bin_dir, log
+
+    def test_sourcing_the_env_file_keeps_a_tmpdir_already_set(self):
+        preset = os.path.join(self.root, "preset-tmp")
+        os.makedirs(preset)
+        for fixture in FIXTURES:
+            with self.subTest(fixture=fixture):
+                path = self.env_run("preset-%s.sh" % fixture, fixture, None)
+                # Control: the env file holds the line, so a source that changes nothing is not a pass by default.
+                self.assertRegex(self.read(path), TMPDIR_LINE, "the env file has no export TMPDIR= line, so the case tests nothing")
+                value = self.sourced_tmpdir(path, preset=preset)
+                self.assertEqual(value, preset, "sourcing the env file overwrote a set TMPDIR: %r" % value)
+
+    def test_an_unwritable_env_file_prints_nothing_on_stderr(self):
+        missing = os.path.join(self.root, "no-such-dir", "env.sh")
+        lines = self.run_hook(env_file=missing, tmpdir=None)
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "the hook printed no checkout line: %r" % lines)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr for an unwritable CLAUDE_ENV_FILE: %r" % self.last_stderr)
+
+    def test_no_writable_candidate_writes_no_tmpdir_line_and_never_the_cwd(self):
+        candidate = os.path.join(self.root, "no-candidate-dir")
+        self.assertFalse(os.path.isdir(candidate), "the candidate names a dir, so the case tests nothing")
+        bin_dir, _ = self.fake_python(self.primary)  # the tempfile fallback answers the checkout itself
+        for fixture in FIXTURES:
+            with self.subTest(fixture=fixture):
+                path = self.env_run("nocand-%s.sh" % fixture, fixture, None, tmp_candidate=candidate, path_dir=bin_dir)
+                text = self.read(path)
+                self.assertNotIn(self.primary, text, "the env file names the cwd as TMPDIR: %r" % text)
+                self.assertNotRegex(text, TMPDIR_LINE, "no writable candidate, yet the env file got an export TMPDIR= line: %r" % text)
+
+    def test_a_relative_candidate_is_never_exported(self):
+        self.assertTrue(os.access(self.primary, os.W_OK), "the checkout is not writable, so the case tests nothing")
+        for fixture in FIXTURES:
+            with self.subTest(fixture=fixture):
+                path = self.env_run("rel-%s.sh" % fixture, fixture, None, tmp_candidate=".")
+                text = self.read(path)
+                self.assertNotRegex(text, TMPDIR_LINE, "a relative candidate got an export TMPDIR= line: %r" % text)
+
+    @unittest.skipUnless(os.access("/", os.W_OK), "the filesystem root is not writable here, so the write check refuses it first")
+    def test_a_root_candidate_is_never_exported(self):
+        for fixture in FIXTURES:
+            with self.subTest(fixture=fixture):
+                path = self.env_run("root-%s.sh" % fixture, fixture, None, tmp_candidate="/")
+                text = self.read(path)
+                self.assertNotRegex(text, TMPDIR_LINE, "the filesystem root got an export TMPDIR= line: %r" % text)
+
+    def test_a_python_answer_naming_no_dir_is_never_exported(self):
+        candidate = os.path.join(self.root, "no-candidate-dir")
+        gone = os.path.join(self.root, "answered-but-absent")
+        self.assertFalse(os.path.isdir(candidate), "the candidate names a dir, so the case tests nothing")
+        self.assertFalse(os.path.isdir(gone), "the python answer names a dir, so the case tests nothing")
+        for fixture in FIXTURES:
+            with self.subTest(fixture=fixture):
+                bin_dir, log = self.fake_python(gone)
+                path = self.env_run("gone-%s.sh" % fixture, fixture, None, tmp_candidate=candidate, path_dir=bin_dir)
+                self.assertTrue(os.path.exists(log), "the hook never reached the python fallback, so the case tests nothing")
+                text = self.read(path)
+                self.assertNotRegex(text, TMPDIR_LINE, "a python answer naming no dir got an export TMPDIR= line: %r" % text)
+
+    def test_a_single_quoted_candidate_is_never_exported(self):
+        quoted = os.path.join(self.root, "it's-tmp")
+        os.makedirs(quoted)
+        self.assertTrue(os.path.isdir(quoted) and os.access(quoted, os.W_OK),
+                        "the quoted candidate is not a writable dir, so the quote check is not what refuses it")
+        for fixture in FIXTURES:
+            with self.subTest(fixture=fixture):
+                path = self.env_run("quoted-%s.sh" % fixture, fixture, None, tmp_candidate=quoted)
+                text = self.read(path)
+                self.assertNotRegex(text, TMPDIR_LINE, "a single-quoted dir got an export TMPDIR= line: %r" % text)
 
 
 if __name__ == "__main__":
