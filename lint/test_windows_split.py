@@ -1842,7 +1842,8 @@ class GuardShardJobIf(unittest.TestCase):
 
 
 def merge_flags(merge="true", full="true", code="true"):
-    """The merge split's scope outputs for one run. The slice is checks_windows_merge on and full off, as the script computes it."""
+    """The merge split's scope outputs for one run. The slice is checks_windows_merge on and full off, as the script computes it.
+    The twin of scope_flags: the same rule over the merge flag names, which scope_flags does not take."""
     slice_ = "true" if merge == "true" and full == "false" else "false"
     return {"code": code, "checks_windows_merge": merge, MERGE_FULL_FLAG: full, MERGE_SLICE_FLAG: slice_}
 
