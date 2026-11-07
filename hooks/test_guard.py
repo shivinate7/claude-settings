@@ -10914,6 +10914,27 @@ records_deny("a chain that runs the generator with --root at this repo, then add
              GEN + " --root " + REC_LANES["product"] + " && " + ADD_A + " && " + COMMIT_X, "product")
 records_deny("a chain that runs the generator with --root . in this repo, then add -A and commit",
              GEN + " --root . && " + ADD_A + " && " + COMMIT_X, "product")
+
+# A relative --root resolves from the directory the run is in, and a leading `cd` moves that directory. So a
+# run from this repo's lint folder with `--root ..` writes this repo's page, and is refused, whether the commit
+# follows with a plain git or with `git -C`. A --root the guard cannot resolve (`~+`, `~-`) or that names no
+# repo it can find (`/x/...`) may name this repo, so it is refused too.
+RUN_FROM_LINT = "python3 hook_catalog.py --root .."
+LANE = REC_LANES["product"]
+records_deny("a chain that runs the generator from lint with --root .., then cd back, add -A and commit",
+             "cd " + os.path.join(LANE, "lint") + " && " + RUN_FROM_LINT + " && cd " + LANE + " && " + ADD_A
+             + " && " + COMMIT_X, "product")
+records_deny("a chain that runs the generator from lint with --root .., then cd back and git -C commit",
+             "cd " + os.path.join(LANE, "lint") + " && " + RUN_FROM_LINT + " && cd " + LANE + " && " + ADD_A
+             + " && " + VCS + " -C " + LANE + " commit -m x", "product")
+records_deny("a chain that runs the generator with --root ~+, then add -A and commit",
+             GEN + " --root ~+ && " + ADD_A + " && " + COMMIT_X, "product")
+records_deny("a chain that runs the generator with --root ~-, then add -A and commit",
+             GEN + " --root ~- && " + ADD_A + " && " + COMMIT_X, "product")
+records_deny("a chain that runs the generator with --root=/x/other, then add -A and commit",
+             GEN + " --root=/x/other && " + ADD_A + " && " + COMMIT_X, "product")
+records_deny("a chain that runs the generator with --root=/x/<this repo's name>, then add -A and commit",
+             GEN + " --root=/x/" + os.path.basename(LANE) + " && " + ADD_A + " && " + COMMIT_X, "product")
 records_deny("a chain that runs the generator as its own command word, then add -A and commit",
              "./lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, "product")
 records_deny("a chain that runs the generator through env, then add -A and commit",
