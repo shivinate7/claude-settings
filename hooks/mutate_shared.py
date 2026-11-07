@@ -1484,26 +1484,23 @@ def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeou
     text in `file` that the plant replaces with `new`, and `argv` is the catcher suite, read by the classifier `classify`.
     Returns [{id, name, verdict, reason}] with the verdict CAUGHT (the suite prints an assertion on the planted copy), MISS
     (the suite passed, crashed or timed out on it) or UNKNOWN (the anchor is stale or ambiguous, the entry is malformed, the
-    suite is not green on the clean copy, an install it needs failed, or a link failed). Only an assertion catches, as in a
+    suite is not green on the clean copy, its run could not resolve a module after an install failed, or a link failed). Only an assertion catches, as in a
     replay. The run is in a checkout of HEAD made like a replay's, so the working tree and the repository are left as found.
     The checkout is prepared as `--changed` prepares its own. For each part of `profile` (the values of a `parts` profile, else
     the profile itself) the install runs under `deps`, a folder the caller removes, and its folder is linked beside the
     lockfile. Parts with one lockfile and one install share one install and one link; any other install runs once more.
-    A failed install does not stop the later parts. A defect needs a part's install when the part's `code` regex matches the
-    defect's `file` (unless its `code_not` regex matches it too) or its `tests` regex matches an element of the defect's
-    `argv`; the regexes are the profile's own (`REPLAY_PROFILES`, or `--profile-file`). When any part has neither regex, or no
-    part claims the defect, the defect needs every install. A defect that needs a failed install is not run: it
-    reads UNKNOWN and its reason names the install, because a suite whose package is missing can read CAUGHT or MISS for the
-    wrong cause. Any other defect runs as usual. A failed link leaves the checkout unusable, so every defect reads UNKNOWN.
-    The load hook (`_LOAD_HOOKS`) runs only under a failed install. Each catcher run then carries it: it writes a start line
+    A failed install does not stop the later parts, and no defect is held back by it: every defect runs, and the load hook
+    decides. The load hook (`_LOAD_HOOKS`) runs only under a failed install. Each catcher run then carries it: it writes a start line
     when it loads, then the top-level name of each module that fails to resolve, even under a `try/except` (an ESM import, a
     CommonJS `require()` or a Python import), to a log the run owns. When the clean or the planted run's log names a module,
     the defect reads UNKNOWN and its reason names the module and each failed install, because a fallback may have caught the
-    plant for the missing package. When a run's log has no start line and its argv can start Python or Node (`_starts_hooked`:
+    plant for the missing package. A catcher that loads no missing module reads as usual, the failed install notwithstanding.
+    When a run's log has no start line and its argv can start Python or Node (`_starts_hooked`:
     a whitespace-split word of an argv element whose last path part is `python`, `python` with digits and dots, or `node`),
     the defect reads UNKNOWN too: the load hook did not run (an argv that resets PYTHONPATH or NODE_OPTIONS, `-S`, `env -i`,
     a failed log write). Any other argv, such as `sh -c "grep ..."` or `bash t.sh`, owes no start line. The argv is read as
     the defect lists it. With every install passing, there is no hook: no log, no PYTHONPATH or NODE_OPTIONS change.
+    A failed link leaves the checkout unusable, so every defect reads UNKNOWN.
     Cost: process starts added 0 (the hook loads inside the catcher's own interpreter); files written, the hook files once
     per replay and one log per catcher run, and none when every install passed, all under the replay's own folder and
     removed with it; each log read once, after its run. Nothing runs on a timer."""
@@ -1512,7 +1509,6 @@ def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeou
     sha = _git(repo, "rev-parse", "HEAD").strip()
     own = tempfile.mkdtemp(prefix="mutate_defects_")
     dest = os.path.join(own, "w")
-    results = []
     failed = {}  # part name -> the reason its install failed
 
     def all_unknown(reason: str) -> list:
@@ -1532,12 +1528,7 @@ def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeou
                 return all_unknown("the install could not be linked into the checkout: %s" % error)
         if failed:
             _write_load_hooks(own)
-        for defect in defects:
-            needed = [name for name in _needed_parts(defect, parts) if name in failed]
-            if needed:
-                results.append(_unrun_defect(defect, _install_failures(needed, failed)))
-            else:
-                results.append(_known_defect(dest, defect, suite_timeout, own, failed))
+        results = [_known_defect(dest, defect, suite_timeout, own, failed) for defect in defects]
     finally:
         _drop_checkout(repo, dest)
         shutil.rmtree(own, ignore_errors=True)
@@ -1680,22 +1671,6 @@ def _is_product(part: dict, path: str) -> bool:
     """True when the profile (or part) `part` reads `path` as product code: its `code` regex matches and its `code_not` does not."""
     return bool(part.get("code") and re.search(part["code"], path)
                 and not (part.get("code_not") and re.search(part["code_not"], path)))
-
-
-def _needed_parts(defect, parts: dict) -> list:
-    """The names of the parts whose install `defect` needs: the parts that claim it by their `code` regex on its `file` (less
-    `code_not`) or their `tests` regex on an element of its `argv`. No claim, a part with neither regex, or a defect too
-    malformed to read, needs every part: a part with neither regex may be what the defect needs, so no defect can be routed
-    around it."""
-    try:
-        file, argv = str(defect["file"]), [str(item) for item in defect["argv"]]
-    except (KeyError, TypeError):
-        return list(parts)
-    if any(not part.get("code") and not part.get("tests") for part in parts.values()):
-        return list(parts)
-    claimed = [name for name, part in parts.items()
-               if _is_product(part, file) or (part.get("tests") and any(re.search(part["tests"], item) for item in argv))]
-    return claimed or list(parts)
 
 
 def _unrun_defect(defect, reason: str) -> dict:
