@@ -998,6 +998,38 @@ def case_green_run_judged_past_the_deadline_is_not_green():
           and "lint" not in clock.line, detail)
 
 
+def refused_new_run():
+    """A run that first shows at the at-once re-list, completed, whose jobs read is refused (HTTP 403)."""
+    return dict(run(931, "codeql", "success", [job("scan", "success")], appears_at_list=2), refuse_jobs_read=True)
+
+
+def case_refused_re_list_view_keeps_a_judged_red():
+    """A red run is judged, then the at-once re-list finds a new run whose jobs read is refused (HTTP 403). The
+    refused read cannot undo the judged red run: a red run stays red, whatever the list hid (wait_for's docstring).
+    Before the deadline, and past it, where the re-list is the one list left. Scope first: the refused read is
+    reached at the re-list. Control: the same refusal after a green run is unknown (the next case)."""
+    for where, budget, ends_at in (("before the deadline", 3600, None), ("past the deadline", 100, {902: 100})):
+        label = "red run judged %s, the re-list's new run has a refused jobs read" % where
+        raised, clock, calls, deadline = wait_for_on_fakes([RED, refused_new_run()], budget, ends_at=ends_at, line=True)
+        detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+        refused = [t for t, a in calls if a[:3] == ["run", "view", "931"] and "jobs" in " ".join(a)]
+        check("%s: the new run's jobs read is reached (scope)" % label, bool(refused), detail)
+        check("%s: the line is CI red, naming unit and e2e" % label,
+              str(clock.line).startswith("CI red") and "unit" in clock.line and "e2e" in clock.line, detail)
+
+
+def case_refused_re_list_view_after_a_green_run_is_unknown():
+    """Control. A green run is judged, then the same refused read at the re-list. The unread list could hold a red
+    or a running run, so the line is CI unknown, never CI green. Before the deadline, and past it."""
+    for where, budget, ends_at in (("before the deadline", 3600, None), ("past the deadline", 100, {901: 100})):
+        label = "green run judged %s, the re-list's new run has a refused jobs read (control)" % where
+        raised, clock, calls, deadline = wait_for_on_fakes([GREEN, refused_new_run()], budget, ends_at=ends_at, line=True)
+        detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+        refused = [t for t, a in calls if a[:3] == ["run", "view", "931"] and "jobs" in " ".join(a)]
+        check("%s: the new run's jobs read is reached (scope)" % label, bool(refused), detail)
+        check("%s: the line is CI unknown, never CI green" % label, str(clock.line).startswith("CI unknown"), detail)
+
+
 def case_new_runs_on_every_list_are_paced_after_the_at_once_relist():
     """A stream: each list shows one more run that ended. wait_for re-lists once at once after the first
     judged run; from then on each list is 30 s or more after the one before it, so the stream costs one gh
@@ -1311,7 +1343,8 @@ def wait_for_on_fakes(runs, budget, ends_at=None, line=False):
     no gh, so a read that bypasses the module's `gh()` ends as Unknown and reaches no real gh.
     ends_at: {run id: seconds from the clock's start}. Until then such a run lists and reads in progress
     with no conclusion; from then on it reads as its fixture says. line: also set clock.result (what
-    wait_for returned) and clock.line (the line the hook prints for it)."""
+    wait_for returned) and clock.line (the line the hook prints for it). A run with refuse_jobs_read: its
+    `run view ... jobs` read exits 1 with HTTP 403. Its status read does not."""
     spec = importlib.util.spec_from_file_location("ci_wake_under_test", MODULE)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -1334,6 +1367,8 @@ def wait_for_on_fakes(runs, budget, ends_at=None, line=False):
         if args[:2] == ["run", "view"]:
             hits = [r for r in runs if str(r["databaseId"]) == args[2]]
             if hits:
+                if hits[0].get("refuse_jobs_read") and "jobs" in " ".join(args):
+                    return 1, "", "HTTP 403: Resource not accessible by integration"
                 out = as_of_clock(hits[0], GH.view(hits[0], False))
                 fields = args[args.index("--json") + 1].split(",") if "--json" in args else None
                 return 0, json.dumps({k: v for k, v in out.items() if not fields or k in fields}) + "\n", ""
@@ -2031,6 +2066,8 @@ def main():
     case_failed_re_list_keeps_the_judged_verdict()
     case_failed_re_list_after_a_green_run_is_unknown()
     case_green_run_judged_past_the_deadline_is_not_green()
+    case_refused_re_list_view_keeps_a_judged_red()
+    case_refused_re_list_view_after_a_green_run_is_unknown()
     case_new_runs_on_every_list_are_paced_after_the_at_once_relist()
     case_wait_for_lists_again_until_a_real_run_shows()
     case_wait_for_lists_until_the_deadline_and_no_further()
