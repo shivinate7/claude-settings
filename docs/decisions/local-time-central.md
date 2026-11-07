@@ -20,3 +20,15 @@ Reason: sessions saw only UTC and answered in UTC, which shows the wrong date fo
 
 Kind: process
 Home: hooks/local_time.py
+
+## A message's own time matches the clock
+
+- **Message time matches clock** (rule `message-time-matches-clock`, guard rule that denies a send_message whose header time is off the clock). Risk kind: incident. Incident: on 2026-11-07 the claude-settings coordinator stamped its send_message headers 10 to 25 minutes ahead of the clock, twice ("13:40 CST" sent at 13:22 CST, "13:50 CST" at 13:26 CST). A lane caught it. Harm: wrong times mislead triage's records, owner-ruling times and age-based checks.
+  - Form: the header is the first non-blank line of a `mcp__claude-code-remote__send_message` message, after optional markdown lead characters. It starts `<label>, HH:MM CST` or `<label>: HH:MM CST` (CDT in summer), with a label of one to three words and an optional `YYYY-MM-DD` before the time, such as `Coordinator, 13:28 CST: ...` or `Now: 13:28 CST`. The guard judges that one stamp by its position. It guesses nothing from prose.
+  - Verdict: deny when the header stamp is more than 3 minutes off the clock, ahead or behind. The stamp's zone sets its offset, so `13:22 CDT` in CST season is 60 minutes off. A stamp with no date is compared by minute of day, across midnight. The refusal prints the real time.
+  - Passes: every other stamp, such as a quoted owner-ruling time later on the header line, a stamp on a later line, or a message with no header. An override lifts it.
+  - Steer: re-stamp the header with the time the refusal prints.
+  - Known miss: a sender's time in any other form, such as `13:40 CST, coordinator here`, and git commit messages. Commit messages have no incident.
+  - Known false alarm: a message that opens with a quoted stamp in header form, such as `Owner, 16:36 CST: ...`. Open with your own label instead.
+  - Cost: one clock read per send_message, inside the guard process the PreToolUse matcher already starts. No transcript read, file, process or timer.
+  - Tests: family `message-time-matches-clock` in `hooks/test_guard.py`.
