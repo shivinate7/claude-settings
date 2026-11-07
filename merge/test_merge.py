@@ -13492,6 +13492,23 @@ class ProseJudge(Env):
         self.assertEqual(prose_unknown_lines(out), [], "a line is not judged\n" + out)
         self.assertEqual(rc, 0, out)
 
+    def test_no_built_prompt_goes_over_the_call_byte_budget_but_a_lone_line(self):
+        # Packed: one line of about 100 KB, then 30 lines of about 360 bytes. Each built prompt holds at most merge.PROSE_JUDGE_CALL_BYTES
+        # UTF-8 bytes, unless the call holds one line alone. The budget is read from merge, never copied.
+        huge = "huge-l1: cloud sessions cannot push to main. " + "the reason is written out in full, " * 3000 + "(read src/widget.py:4)."
+        tags = ["small-l%02d" % n for n in range(1, 31)]
+        rows = [huge] + ["%s: cloud sessions cannot push to main. %s(read src/widget.py:4)." % (tag, TAGGED_FILLER) for tag in tags]
+        self.setup_range({PROSE: "# Cloud notes\n\n" + "\n".join(rows) + "\n"}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(holds_every_line, cap=None)
+        self.assertTrue(stub.prompts, "no model call: the file was not selected")
+        budget = merge.PROSE_JUDGE_CALL_BYTES
+        for prompt in stub.prompts:
+            size, holding = len(prompt.encode("utf-8")), len(judged_rows(prompt))
+            self.assertTrue(size <= budget or holding == 1, "a call of %d bytes holds %d lines, want at most the budget of %d bytes, or one line alone" % (size, holding, budget))
+        self.assertEqual(sorted(t for p in stub.prompts for t in tags_in(p)), sorted(["huge-l1"] + tags), "a line is not in exactly one call")
+        self.assertEqual(prose_unknown_lines(out), [], "a line is not judged\n" + out)
+        self.assertEqual(rc, 0, out)
+
 
 NAMED = "hooks/x.py"  # a tracked code path that a prose line names in backticks
 NAMED_DOC = "# Named notes\n\nThe runner is `hooks/x.py` `run_all` and returns 3.\n"  # the named line is line 3
