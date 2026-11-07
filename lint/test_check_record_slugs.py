@@ -689,11 +689,12 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertTrue(self.printed_total(out, 3), out)
 
     def test_ratchet_equal_count_passes(self):
-        # One edit drops a Fix and another adds one. The count stays at one, so the branch passes.
+        # One edit drops a Fix and another adds one. The count stays at one, so the branch passes. The edited line keeps
+        # its Seen field: a base line with a Seen field keeps one (lane ruling 1, 2026-11-07 15:58 CST).
         self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE + KEPT_NOTE)
         self.commit_base()
         self.put(DEBT_NOTES, NOTES_HEAD + "- old-note: an old gap. Fix: already fixed on main 1a2b3c4\n"
-                 + "- kept-note: a gap, its Fix removed.\n")
+                 + "- kept-note: a gap, its Fix removed. Seen: %s x1.\n" % PINNED_TODAY)
         self.commit_change()
         self.assert_passes()
 
