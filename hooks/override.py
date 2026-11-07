@@ -14,9 +14,8 @@ writes, so a session cannot grant itself an override. It is valid only while now
          It reaches agents. The owner picks the length, so there is no cap.
   `override off` ends any override at once. `override`, `override <n>[m|h]` and `override off` mean
   that only as the whole prompt: a word after the length or after `off` is ambiguous, so it grants
-  nothing on this route (an intended "off" must never become a grant). The same holds for a reason that holds the
-  whole word `off` within NEGATION_SPAN words of its start, on the plain route too. A later line starting with the word
-  grants nothing.
+  nothing on this route (an intended "off" must never become a grant). A later line starting with the word grants
+  nothing.
   A plain ask (`yes override that`, `override that for 15 minutes please`) writes the same file when a model judges the
   prompt to be the owner's own present request to override a refusal (grant_override_ask, call_judge.override_ask). Cost:
   one model call, only for an owner prompt that holds the whole word `override` outside backtick code spans and
@@ -519,13 +518,6 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
     return _write_opus(session_id, path, at, length, _file_role(roles), said)
 
 
-def _off_near_start(reason):
-    """True when the whole word `off` stands within NEGATION_SPAN words of the start of a first-word `override`'s reason.
-    A stand-in `override` word heads the list, so _near_negation reads the reason's first NEGATION_SPAN words."""
-    names = ["override"] + [w.lower() for w in ROLE_WORDS.findall(reason)]
-    return _near_negation(names, 0, {"off"})
-
-
 def grant(session_id, prompt, at, defer=True):
     """Write, replace or remove the session's override for one owner prompt. Returns (kind, until) for a
     new override, ("off", None) when `override off` removed one, the _grant_opus result for the Opus word,
@@ -543,8 +535,6 @@ def grant(session_id, prompt, at, defer=True):
     word = WORD.fullmatch(reason)
     if not word and WORD.fullmatch(reason.split(" ")[0]):
         return None  # a word after `off` or a length: ambiguous, grants nothing
-    if not word and _off_near_start(reason):
-        return None  # an intended `off` never becomes a grant, on the keyword route or the plain route
     if not word and defer and ASK_LENGTH.search(reason):
         return None  # a plain ask with a length: grant_override_ask judges it
     off, number, unit = word.groups() if word else (None, None, None)
