@@ -990,6 +990,36 @@ class GuardClosure(unittest.TestCase):
         _, paths, loads, _ = _refs("janitor/zz_probe.py", ast.parse(src), tracked)
         self.assertNotIn("settings.json", paths | loads)
 
+    # A test module's join under REPO with several literals is a repo load: REPO is the real checkout (hooks/test_guard.py
+    # line 57). One case per target: the waiting-page page.html is read at three lines (15632, 17400, 18361).
+    def assert_test_module_reads(self, target):
+        tracked = set(_repo_files())
+        self.assertIn("hooks/test_guard.py", guard_closure()[0], "scope: hooks/test_guard.py is not in the closure")
+        self.assertIn(target, tracked, f"scope: {target} is not a repo file")
+        _, paths, loads, _ = _refs("hooks/test_guard.py", ast.parse(source_of("hooks/test_guard.py")), tracked)
+        self.assertIn(target, paths | loads, f"the test module's join under REPO for {target} is not followed")
+
+    def test_a_test_module_join_under_the_repo_reads_the_impeccable_skill(self):
+        # os.path.join(REPO, "skills", "impeccable", "SKILL.md") at hooks/test_guard.py line 15161.
+        self.assert_test_module_reads("skills/impeccable/SKILL.md")
+
+    def test_a_test_module_join_under_the_repo_reads_the_waiting_page_html(self):
+        # os.path.join(REPO, "skills", "waiting-page", "page.html") at hooks/test_guard.py lines 15632, 17400, 18361.
+        self.assert_test_module_reads("skills/waiting-page/page.html")
+
+    def test_a_test_module_join_under_the_repo_reads_the_waiting_page_splice(self):
+        # os.path.join(REPO, "skills", "waiting-page", "splice.py") at hooks/test_guard.py line 15843.
+        self.assert_test_module_reads("skills/waiting-page/splice.py")
+
+    def test_a_test_module_join_of_several_literals_under_a_fixture_root_is_not_a_repo_load(self):
+        # Control: a root passed in is not the repo, so the same several-literal join reads no repo file.
+        tracked = set(_repo_files())
+        self.assertIn("skills/waiting-page/page.html", tracked, "scope: skills/waiting-page/page.html is not a repo file")
+        src = 'import os\n\ndef probe(root):\n    return open(os.path.join(root, "skills", "waiting-page", "page.html"))\n'
+        _, paths, loads, unfollowed = _refs("hooks/test_zz_probe.py", ast.parse(src), tracked)
+        self.assertNotIn("skills/waiting-page/page.html", paths | loads)
+        self.assertEqual(unfollowed, [])
+
 
 @unittest.skipUnless(BASH, "bash not on PATH")
 class MutationReport(unittest.TestCase):
