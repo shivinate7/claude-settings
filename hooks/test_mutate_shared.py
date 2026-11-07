@@ -617,7 +617,7 @@ class ShardSplitTests(MainRunHarness, unittest.TestCase):
             with self.subTest(n=n):
                 problems = []
                 for k, legs in legs_of(n).items():
-                    label = label_of(mutate_guard.MUTATIONS[k])
+                    label = label_of(mutate_guard.MUTATIONS[k]) if k >= 0 else "a foreign entry"
                     if not legs:
                         problems.append("a mutant no leg runs: %s" % label)
                     elif len(legs) > 1:

@@ -3,8 +3,8 @@
 
 Branch protection requires that one check (actions/all-jobs-passed). It fails on a needed job that failed, was
 cancelled or was skipped, so every job all-jobs-passed needs must run on a non-draft pull_request. This file proves:
-all-jobs-passed needs exactly the jobs that run there, derived from the file and not from a copied list; only the shard
-jobs (test_windows_split.SHARD_VAR) stay off it; no needed job has a job-level if, since each scope condition sits in
+all-jobs-passed needs exactly the jobs that run there, derived from the file and not from a copied list; only the event-only
+shard jobs (test_windows_split.EVENT_ONLY_BASES) stay off it; no needed job has a job-level if, since each scope condition sits in
 its steps (test_windows_split.job_check_problems); the job's shape, its own if (non-draft pull_request only) and its
 checkout pin; scope skips only a draft PR; and ci-done needs all-jobs-passed.
 
