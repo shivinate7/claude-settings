@@ -519,6 +519,24 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertTrue(self.failed_about(out, "quote-prose", DEBT_NOTES), out)
         self.assertFalse(self.failed_about(out, "quote-ok"), out)
 
+    def test_bullet_fix_line_in_a_new_debt_file_passes(self):
+        # A debt file's Fix line counts at column one or after one leading "- ", as its Feel line does.
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.roadmap("alpha-beta")
+        self.put(NEW_DEBT, "# New debt\n\nWhat. A gap with a bullet fix.\n\n- Fix: step:alpha-beta\n")
+        self.commit_change()
+        self.assert_passes()
+
+    def test_none_and_already_fixed_lines_pass_without_origin_roadmap(self):
+        # Only a step line reads origin/roadmap. With no origin/roadmap ref, these two forms still pass.
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        fixed = "- fixed-note: a gap. Fix: already fixed on main %s\n" % self.base_sha()[:7]
+        self.put(DEBT_NOTES, NOTES_HEAD + NEW_VALID_NONE + fixed)
+        self.commit_change()
+        self.assert_passes()
+
 
 class ImportTests(unittest.TestCase):
     """lint/compliance_probes.py imports the module and calls its functions on a child's root, so the command line
