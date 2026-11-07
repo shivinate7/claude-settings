@@ -8450,6 +8450,27 @@ for _header in ("ssh host", "php", "lua", "at now", "su", "sudo", "doas"):
        cwd=PROJ)
 sh("env: heredoc-stdin: a print heredoc, then `cat <<'EOF'` whose body reads the env file, allowed",
    "python3 - <<'PY'\nprint(1)\nPY\ncat <<'EOF'\ncat " + ENV + "\nEOF", "allow", cwd=PROJ)
+# These headers read their heredoc body as commands: a make recipe, a parallel job list, an ex or vim
+# script, an sftp batch, a bun script on stdin. The body stays in view after a print heredoc.
+for _shell, _stdin_body in (
+        ("make -f -", "all:\n\tcat " + ENV),
+        ("parallel", "cat " + ENV),
+        ("vim -es", ":!cat " + ENV),
+        ("ex", ":!cat " + ENV),
+        ("sftp host", "!cat " + ENV),
+        ("bun -", "require('child_process').execSync('cat " + ENV + "')"),
+):
+    sh("env: heredoc-stdin: a print heredoc, then `%s <<'EOF'` whose body reads the env file, denies "
+       "[red on 15f6573]" % _shell,
+       "python3 - <<'PY'\nprint(1)\nPY\n" + _shell + " <<'EOF'\n" + _stdin_body + "\nEOF", "deny", "env-file",
+       cwd=PROJ)
+# Allow controls: `sudo tee` writes its body to a file and runs nothing, and an echo chained before a
+# cat-write runs no shell.
+sh("env: heredoc-stdin: an echo chained before a cat-write heredoc whose body names the env file, allowed "
+   "[red on 15f6573]",
+   "echo look at it; cat > n.md <<'EOF'\nthe guard refuses cat " + ENV + "\nEOF", "allow", cwd=PROJ)
+sh("env: heredoc-stdin: `sudo tee n.md <<'EOF'` whose body names the env file, allowed [red on 15f6573]",
+   "sudo tee n.md <<'EOF'\nthe guard refuses cat " + ENV + "\nEOF", "allow", cwd=PROJ)
 
 
 # The two incident commands, verbatim. The env word is written as @DOTENV@ and rebuilt from ENV, so
