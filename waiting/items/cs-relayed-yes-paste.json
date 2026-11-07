@@ -4,7 +4,12 @@
   "home": "item 350",
   "id": "cs-relayed-yes-paste",
   "kind": "task",
-  "link": "https://github.com/shivinate7/claude-settings/edit/main/.claude/CLAUDE.md",
+  "links": [
+    {
+      "label": "Open the page",
+      "url": "https://github.com/shivinate7/claude-settings/edit/main/.claude/CLAUDE.md"
+    }
+  ],
   "n": 349,
   "owner": "coordinator",
   "rank": 1,

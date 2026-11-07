@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-07T19:32:00Z",
+  "command": {
+    "mac": "cd ~/q_max\nbrew install postgresql@17 pgvector\nbrew services start postgresql@17\nexport PATH=\"/opt/homebrew/opt/postgresql@17/bin:$PATH\"\ncreateuser -s -h 127.0.0.1 postgres\nbash harness/local-postgres.sh"
+  },
+  "context": "Goal: q_max's browser checks run on local Postgres on your Mac, with no Neon (item 332 b).\nProblem (cannot undo): this installs Homebrew software and a background Postgres service on your Mac.\nBased on (read): harness/local-postgres.sh needs a server on 127.0.0.1:5432, pgvector, a passwordless postgres superuser and psql on PATH (lane qmax-browser-main-red, 13:23 CST).\nDeparts from: main, where your Mac has no local Postgres for q_max \u2014 adds Postgres 17 and pgvector.\nOn a, a Mac session runs the command below for you; lane qmax-browser-main-red (session_013NEJL42jmjfd1eLhrpSQx6) owns it.",
+  "home": "lane qmax-browser-main-red (session_013NEJL42jmjfd1eLhrpSQx6)",
+  "id": "qmax-local-postgres-mac",
+  "kind": "decision",
+  "n": 354,
+  "options": [
+    {
+      "gain": "Browser checks run locally, with no Neon.",
+      "key": "a",
+      "label": "Yes, a Mac session runs the install (recommended)",
+      "lose": "One install's disk use and a Postgres service running in the background."
+    },
+    {
+      "gain": "Nothing installed.",
+      "key": "b",
+      "label": "Not now",
+      "lose": "Browser checks run only in CI."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 2,
+  "ref": "item 332",
+  "short": "Local Postgres on the Mac?",
+  "status": "open",
+  "title": "Install Postgres 17 and pgvector on your Mac, so q_max's browser checks run locally?",
+  "why": "Your item 332 b: sessions never touch Neon. The browser checks then need a local database."
+}

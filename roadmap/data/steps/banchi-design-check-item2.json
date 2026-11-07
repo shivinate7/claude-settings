@@ -1,10 +1,10 @@
 {
   "title": "banchi: can design-check-passed run on a pull request and stay out of all-jobs-passed?",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 103.351,
   "why": "ci-hygiene Audit item 2 for banchi.",
-  "note": "Coordinator 12:09 CST: found by lane ci-hygiene-refresh (PR #1302).",
-  "updatedAt": "2026-11-07T13:30:00-06:00",
+  "note": "Closed 13:28 CST Nov 7 (coordinator): answered no, and banchi main already passes (banchi commit 69cfd96).\nCoordinator 12:09 CST: found by lane ci-hygiene-refresh (PR #1302).",
+  "updatedAt": "2026-11-07T13:34:00-06:00",
   "lane": "session_013NEJL3NJyXwypwxrjjHDxC"
 }

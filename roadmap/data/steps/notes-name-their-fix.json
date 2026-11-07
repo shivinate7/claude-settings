@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJKzPMtfKqsAuMKqn9cf",
   "why": "Owner, 13:25 CST Nov 7: \"I want the guard itself\".",
-  "note": "Each new notes.md or debt line names its fix: a step, a lane, or a listed reason for none. The report guard refuses a RECORDED gap with no started fix. Done: red tests for a notes line with no fix and a RECORDED gap with no started fix, then green.",
-  "updatedAt": "2026-11-07T13:30:00-06:00"
+  "note": "Coordinator pick, 13:30 CST Nov 7 (undoable): a new notes or debt line names its fix as `Fix: step:<slug>` only, or `Fix: none \u2014 <reason>` with a listed reason (owner decides, needs the Mac, rare and harmless, already fixed on main <sha>). A lane name does not count, because the PR ledger tracks steps.\nEach new notes.md or debt line names its fix: a step, a lane, or a listed reason for none. The report guard refuses a RECORDED gap with no started fix. Done: red tests for a notes line with no fix and a RECORDED gap with no started fix, then green.",
+  "updatedAt": "2026-11-07T13:34:00-06:00"
 }

@@ -9,7 +9,12 @@
     "choice": "a",
     "note": ""
   },
-  "link": "https://claude.ai/code",
+  "links": [
+    {
+      "label": "Open the page",
+      "url": "https://claude.ai/code"
+    }
+  ],
   "n": 331,
   "owner": "coordinator",
   "rank": 1,

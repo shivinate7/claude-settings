@@ -10,7 +10,12 @@
     "at": "2026-11-06T23:31:40Z",
     "note": "Owner: work on the way belongs in the roadmap tab, not the questions area."
   },
-  "link": "https://claude.ai/code/session_013NEJL2hB1pLZPDpzas7VgB",
+  "links": [
+    {
+      "label": "Open the page",
+      "url": "https://claude.ai/code/session_013NEJL2hB1pLZPDpzas7VgB"
+    }
+  ],
   "n": 316,
   "owner": "coordinator",
   "rank": 2,

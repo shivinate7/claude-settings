@@ -10,7 +10,12 @@
   "id": "session-mailbox-create",
   "kind": "task",
   "lane": "session-messaging-plan",
-  "link": "https://github.com/new",
+  "links": [
+    {
+      "label": "Open the page",
+      "url": "https://github.com/new"
+    }
+  ],
   "n": 312,
   "owner": "lane session-messaging-plan (session_013NEJL2btGMLKqHs4cDQSZ6)",
   "rank": 2,

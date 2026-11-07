@@ -1,0 +1,25 @@
+{
+  "added": "2026-11-07T19:32:00Z",
+  "context": "Goal: batch-runner merges under the coordinator's standing grant, and a lane's lease push to its own branch, run with no stop.\nWhy you: auto mode accepts a settings.json change only on words you type in the acting session. A page answer cannot grant it (decision relayed-grant-read-from-page, the settings exception), so item 352 is replaced by this task.\nDeparts from: main's autoMode.allow \u2014 adds \"runner-merge-allow\" (batch-runner merges under the coordinator's standing grant) and \"Own Branch Lease Push\" (a --force-with-lease --force-if-includes push to a branch the session pushed earlier; never --force, -f, +refspec, the default branch, archive/, roadmap, merge-lock, --mirror, --all, or a delete).\nSteps: open the first link and type the first line below. Open the second link and type the second line. Then press Done here.\n\nIn lane relayed-yes-allow:\ngo runner-merge-allow: allow batch-runner merges under the coordinator's standing grant\n\nIn lane lease-push-c-and-d:\ngo: add the \"Own Branch Lease Push\" entry to settings.json autoMode.allow, as drafted in lane lease-push-c-and-d",
+  "home": "lanes relayed-yes-allow and lease-push-c-and-d",
+  "id": "cs-type-two-gos",
+  "kind": "task",
+  "links": [
+    {
+      "label": "Lane relayed-yes-allow",
+      "url": "https://claude.ai/code/session_013NEJKzw6Mmu5eviHC3vobt"
+    },
+    {
+      "label": "Lane lease-push-c-and-d",
+      "url": "https://claude.ai/code/session_013NEJL27e8puG926YPKVUMf"
+    }
+  ],
+  "n": 353,
+  "owner": "coordinator",
+  "rank": 1,
+  "ref": "item 352; item 350; step lease-push-c-and-d",
+  "short": "Type 2 gos in 2 lanes",
+  "status": "open",
+  "title": "Type two go lines, one in each of two lane chats",
+  "why": "Each adds one auto-mode allow entry to settings.json. A settings change needs words you type in the acting session's own chat."
+}

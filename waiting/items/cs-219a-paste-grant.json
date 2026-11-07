@@ -5,7 +5,12 @@
   "home": "claude-settings #1421",
   "id": "cs-219a-paste-grant",
   "kind": "task",
-  "link": "https://github.com/shivinate7/claude-settings/edit/main/.claude/CLAUDE.md",
+  "links": [
+    {
+      "label": "Open the page",
+      "url": "https://github.com/shivinate7/claude-settings/edit/main/.claude/CLAUDE.md"
+    }
+  ],
   "n": 342,
   "owner": "coordinator",
   "rank": 2,

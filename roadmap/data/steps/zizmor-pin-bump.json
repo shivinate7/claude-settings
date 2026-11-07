@@ -4,7 +4,7 @@
   "status": "doing",
   "order": 103.35,
   "why": "Keeps the shared workflow scanner on the newest version that passes.",
-  "note": "Coordinator 12:09 CST: found by lane ci-hygiene-refresh (PR #1302). Edit actions/zizmor/run.sh. Read the changelog first (rule verification-newest-that-passes).",
-  "updatedAt": "2026-11-07T13:30:00-06:00",
+  "note": "13:30 CST Nov 7 (coordinator): duplicates #1348 (owner picked zizmor 1.31.1, item 302). The lane posts the missing review record. The 1.32.0 bump is step zizmor-1-32-bump.\nCoordinator 12:09 CST: found by lane ci-hygiene-refresh (PR #1302). Edit actions/zizmor/run.sh. Read the changelog first (rule verification-newest-that-passes).",
+  "updatedAt": "2026-11-07T13:34:00-06:00",
   "lane": "session_013NEJL1MjgTgHAgcXw66Gsk"
 }

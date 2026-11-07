@@ -1,11 +1,11 @@
 {
   "title": "A guard's remedy text never reaches the owner",
   "why": "The owner asked (page ask ask-mw6pwif5wv, 12:09 CST Nov 7) why guard instructions meant for a session reached his page. The Unvetted remedy text was passed to him as is.",
-  "note": "#1427 is with runner 8 (13:50 CST Nov 7). The lane asked for the done check in its 1a wording; triage asked the lane for the exact text.\nCoordinator pick 12:26 CST: the leak was the Stop-hook block reason from lint/report_guard.py (UNVETTED_REASON plus CORRECTION_TAIL), not a page write. Done check: a red test where a report_guard Stop reason carries session-instruction wording; green once each reason opens with one plain owner-safe line and cites a record for the session's steps; verdicts unchanged.",
+  "note": "Done check (coordinator pick 1a, 12:26 CST Nov 7): a red test where a lint/report_guard.py Stop block reason carries session-instruction wording; green once each reason opens with one plain owner-safe line and cites decision guard-remedy-not-to-owner, and a second test shows every verdict unchanged. Built in PR #1427 (lint/test_report_guard_remedy.py), with runner 8.\nCoordinator pick 12:26 CST: the leak was the Stop-hook block reason from lint/report_guard.py (UNVETTED_REASON plus CORRECTION_TAIL), not a page write. Done check: a red test where a report_guard Stop reason carries session-instruction wording; green once each reason opens with one plain owner-safe line and cites a record for the session's steps; verdicts unchanged.",
   "phase": "next",
   "status": "doing",
   "order": 262.5,
   "owner": "coordinator",
-  "updatedAt": "2026-11-07T13:32:00-06:00",
+  "updatedAt": "2026-11-07T13:34:00-06:00",
   "lane": "session_013NEJL1Ww5ei4o5dFv1mdT9"
 }

@@ -1,0 +1,10 @@
+{
+  "title": "Bump zizmor from 1.31.1 to 1.32.0",
+  "phase": "now",
+  "status": "todo",
+  "order": 0.85,
+  "owner": "coordinator",
+  "why": "Lane zizmor-pin-bump, 13:30 CST Nov 7: #1348 pins zizmor 1.31.1 (owner pick, item 302). 1.32.0 is newer.",
+  "note": "Rule verification-newest-that-passes: read 1.32.0's changelog first. Pin it if the action checks pass; else keep 1.31.1 and say why. Done: the pin on main with a green run.",
+  "updatedAt": "2026-11-07T13:34:00-06:00"
+}
