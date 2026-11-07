@@ -942,6 +942,7 @@ class LockRetake(Env):
         self.assertIn(merge.LOCK_CITE, str(cm.exception), "the Stop drops the lock cite")
 
     NET_DROP = "fatal: unable to access 'https://example.invalid/origin.git/': Failed to connect to example.invalid port 443 after 21 ms"
+    NON_NET_FETCH = "fatal: remote error: upload-pack: not our ref " + "a" * 40  # a fetch failure that no network produced
 
     def git_hook(self, hook):
         """Patch merge.git so every call goes to hook(args, run). The hook returns the (code, output) the caller sees; run() runs that call for real."""
@@ -1044,10 +1045,24 @@ class LockRetake(Env):
             else:
                 self.fail(f"a fetch the network dropped read the lock as never expiring: {got}")
 
+    def test_a_non_network_fetch_failure_stops_the_read(self):
+        held = merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
+        self.assertEqual(self.head("merge-lock/main"), held)  # scope: a live lock is listed, so the read reaches its fetch
+        self.assertFalse(merge.is_net(128, self.NON_NET_FETCH), "scope: the faked fetch output is a network error line")
+        ref = merge.lock_ref("main")
+        patch = self.git_hook(lambda args, run: (128, self.NON_NET_FETCH) if args[:1] == ("fetch",) and args[-1] == ref else run())
+        with patch:
+            try:
+                got = self.lock.read("main")
+            except merge.Stop as e:
+                self.assertNotIsInstance(e, merge.NetStop, f"a fetch that failed without the network stopped the lock read as a network stop: {e}")
+            else:
+                self.fail(f"a fetch that failed without the network read the lock as {got}, not as a stop")
+
     def test_a_listed_sha_gone_after_the_fetch_is_not_never_expires(self):
         listed = merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
         ref = merge.lock_ref("main")
-        self.assertNotEqual(merge.git(self.co, "cat-file", "-e", listed)[0], 0, "scope: the listed lock is already local, so the fetch brings nothing new for it")
+        self.assertNotEqual(merge.git(self.co, "cat-file", "-e", listed)[0], 0, "scope: the listed lock is not local, so the read cannot take its message from a local commit")
         rivals = []
         def hook(args, run):
             if args[:1] == ("fetch",) and args[-1] == ref and not rivals:
@@ -1079,6 +1094,25 @@ class LockRetake(Env):
         self.assertTrue(taken, "the rival never took the lock after unlock's read, so the case proves nothing")
         self.assertEqual(self.head("merge-lock/main"), taken[0], "unlock removed a lock a rival took after its read: the delete is not leased on the sha it read")
         self.assertTrue(reported, "unlock reports no failed delete when the lock it read was taken over")
+
+    def test_unlock_removes_the_lock_when_its_commit_cannot_be_read(self):
+        listed = merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
+        ref = merge.lock_ref("main")
+        self.assertEqual(self.head("merge-lock/main"), listed)  # scope: a live lock is listed on origin
+        self.assertFalse(merge.is_net(128, self.NON_NET_FETCH), "scope: the faked fetch output is a network error line")
+        deletes = []
+        def hook(args, run):
+            if args[:1] == ("fetch",) and args[-1] == ref:
+                return 128, self.NON_NET_FETCH  # the listed commit cannot be read: the fetch fails without the network
+            if args[:1] == ("push",) and args[-1] == f":{ref}":
+                deletes.append(args)
+            return run()
+        with self.git_hook(hook):
+            rc, out = self.run_merge("--unlock")
+        self.assertEqual(rc, 0, f"unlock stopped on the commit it cannot read, not on the ref: {out}")
+        self.assertFalse(self.lock_ref(), f"unlock left the listed lock on origin: {out}")
+        self.assertTrue(deletes, "unlock never pushed the delete, so the case proves nothing")
+        self.assertIn(f"--force-with-lease={ref}:{listed}", deletes[0], "the delete is not leased on the listed sha")
 
     def test_the_lock_message_is_read_by_the_listed_sha(self):
         listed = merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
@@ -1155,6 +1189,16 @@ class LockRetake(Env):
         self.assertTrue(taken, "the take push never ran, so the case proves nothing")
         self.assertEqual(len(rereads), merge.NET_RETRIES + 1, f"scope: the re-read did not fail past its retries: {out}")
         self.assertFalse(self.lock_ref(), f"the lock this run took is still on origin after its re-read failed, so no release ran: {out}")
+
+    def test_a_lost_take_race_through_confirm_forgets_the_take(self):
+        self.assertFalse(self.lock_ref())  # scope: no lock ref on origin before the take
+        lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)
+        moved = self.move_after_first_read(lock)  # a rival takes the ref between the first read and this run's push
+        rc, out = self.run_merge("7", "--confirm", lock=lock)
+        self.assertEqual(len(moved), 1, f"the rival never moved the ref, so the case proves nothing: {out}")
+        self.assertEqual(rc, 1, out)
+        self.assertIsNone(lock.sha, "the lost take is still recorded on the lock, so the release would act on another run's lock")
+        self.assertNotIn("not this run's any more", out, "the release reports the lock this run lost as removed by someone")
 
 class Guards(Env):
     def test_moved_head_is_refused_and_nothing_is_claimed(self):
