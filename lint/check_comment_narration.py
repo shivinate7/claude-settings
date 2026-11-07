@@ -54,8 +54,8 @@ PATTERNS = {
     "date": DatedText(),
     # Each form names the words around it, so a mid-sentence "previously" and "the user changed the value" stay
     # clean. The "previously" form needs the start of a sentence, since only there it opens a history clause.
-    # "changed from the previous snapshot" is change detection: the noun after the adjective decides, so
-    # "changed from the previous default" stays history.
+    # A "changed from" form whose noun is a snapshot or run is change detection, not history: the noun after
+    # the adjective decides, so the same form with any other noun still flags.
     # "the old behaviour expected by ..." is a participle naming who relies on it, not a past-tense verb.
     "history phrase": re.compile(
         r"(?:^[\s#/*\"']*|[.;:]\s+)previously\b,?\s+(?:this|it|they|we|was|were|returned|used|did|had)\b"
