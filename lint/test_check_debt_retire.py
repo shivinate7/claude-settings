@@ -46,6 +46,34 @@ WEAK_PY = script("self.assertTrue(True)")  # passes on any tree, so it never cat
 LATER_PY = script("with open('app/later.txt', encoding='utf-8') as f: self.assertEqual(f.read(), 'later\\n')")
 NEWMOD_PY = script("self.assertEqual(VALUE, 1)", imports="from newmod import VALUE\n")
 
+MARK_PY = ("import os\n"  # a plain script's mark, first in the file, so a run that dies on import still leaves one
+           "with open(os.environ['RETIRE_MARKS'], 'a', encoding='utf-8') as f:\n"
+           "    f.write(os.path.basename(__file__) + ' ' + os.getcwd() + '\\n')\n")
+
+
+def plain_script(body, imports=""):
+    """A plain script with no unittest: its mark, the imports, then `body` at module level."""
+    return MARK_PY + imports + "import sys\n" + body + "\n"
+
+
+PLAIN_EXIT_PY = plain_script("sys.exit(0 if open('app/value.txt', encoding='utf-8').read() == 'good\\n' else 1)")
+PLAIN_IMPORT_PY = plain_script("sys.exit(0 if VALUE == 1 else 1)", imports="from newmod import VALUE\n")
+FAILS_ON_DEFECT = ("if open('app/value.txt', encoding='utf-8').read() != 'good\\n':\n"  # exits 1 on the birth commit, before any test runs
+                   "    sys.exit(1)\n")
+EMPTY_PY = MARK_PY + ("import sys, unittest\n" + FAILS_ON_DEFECT +  # a unittest file with no test methods: "Ran 0 tests", exit 0 on the head
+                      "class Case(unittest.TestCase):\n"
+                      "    pass\n"
+                      "if __name__ == '__main__':\n"
+                      "    unittest.main(exit=False)\n")
+PYTEST_PY = MARK_PY + ("import sys\n" + FAILS_ON_DEFECT +  # pytest-style, no main block: exits 0 with no output on the head
+                       "def test_value():\n    assert open('app/value.txt', encoding='utf-8').read() == 'good\\n'\n")
+
+SH_HELPER_CHECK = ('echo "test_fixed.sh $(pwd)" >> "$RETIRE_MARKS"\n'  # its helper is added at head, so the birth tree lacks it
+                   'python3 tests/check_value.py\n')
+HELPER_PY = "import sys\nsys.exit(0 if open('app/value.txt', encoding='utf-8').read() == 'good\\n' else 1)\n"
+SH_CATCH = ('echo "test_value.sh $(pwd)" >> "$RETIRE_MARKS"\n'
+            'test "$(cat app/value.txt)" = good\n')
+
 NODE_IMPORTS = ("import fs from 'node:fs';\n"
                 "import assert from 'node:assert/strict';\n"
                 "import { test } from 'node:test';\n")
@@ -94,6 +122,12 @@ MISSING = "Delete the old helper. Check: `lint/test_gone.py`."
 NODE_PASS = "Delete the old helper. Check: `tests/test_value.mjs`."
 NODE_WEAK = "Delete the old helper. Check: `tests/test_weak.mjs`."
 NODE_IMPORT = "Delete the old helper. Check: `tests/test_nodemod.mjs`."
+PLAIN_EXIT = "Delete the old helper. Check: `tests/test_plain_exit.py`."
+PLAIN_IMPORT = "Delete the old helper. Check: `tests/test_plain_import.py`."
+EMPTY = "Delete the old helper. Check: `tests/test_empty.py`."
+PYTEST = "Delete the old helper. Check: `tests/test_pytest_style.py`."
+SHELL_HELPER = "Delete the old helper. Check: `tests/test_fixed.sh`."
+SHELL_CATCH = "Delete the old helper. Check: `tests/test_value.sh`."
 PROSE = "Delete the old helper once nothing reads it."
 RUN_URL = "https://github.com/fixture/repo/actions/runs/42"
 ATTRIBUTION = "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
@@ -500,6 +534,77 @@ class Birth(Case):
         self.assertEqual(pairs(found), [], "the birth commit ran its own weak copy of the test, not the head's copy that catches the defect")
 
 
+    def test_b12_a_reused_slug_takes_the_birth_of_its_last_life(self):
+        """Life 1 adds the debt on a good value; life 2 re-adds it on the new defect. The birth is life 2's add: the test catches it there."""
+        self.repo(debts={"d-re": PASS}, fixed=False, birth_files={"app/value.txt": "good\n"})  # life 1
+        self.change(rm=["docs/debts/d-re.md"])  # life 1 ends
+        self.change(write={"docs/debts/d-re.md": debt(PASS), "app/value.txt": "bad\n"})  # life 2: the new defect
+        self.base = self.head
+        self.change(write={"app/value.txt": "good\n"}, rm=["docs/debts/d-re.md"])  # the PR fixes the value and closes the debt
+        found = self.findings()
+        self.assertEqual(self.ran_at_birth(), ["test_pass.py"], "the Retire check did not run on the birth commit")
+        self.assertEqual(pairs(found), [], "a debt re-added for a new defect read its first life's add as its birth")
+
+
+class PythonRun(Case):
+    """A Python Retire test's birth run: any non-zero exit is red, unless the output shows an import error, or unittest errors with
+    no failures (unknown). A test file that runs no test on the head is red."""
+
+    def test_p1_a_plain_script_that_exits_1_on_the_birth_commit_passes_the_close(self):
+        self.repo(debts={"d-plain": PLAIN_EXIT})
+        self.change(write={"tests/test_plain_exit.py": PLAIN_EXIT_PY}, rm=["docs/debts/d-plain.md"])
+        found = self.findings()
+        self.assertEqual(self.ran_at_birth(), ["test_plain_exit.py"], "the plain script did not run on the birth commit")
+        self.assertEqual(pairs(found), [], "a plain script that exits 1 on the birth commit, with no import error, gave a finding")
+
+    def test_p2_a_plain_script_that_hits_a_module_not_found_on_the_birth_commit_is_unknown(self):
+        self.repo(debts={"d-plain-imp": PLAIN_IMPORT})
+        self.change(write={"tests/test_plain_import.py": PLAIN_IMPORT_PY}, rm=["docs/debts/d-plain-imp.md"])
+        found = self.findings()
+        self.assertEqual(self.ran_at_birth(), ["test_plain_import.py"], "the plain script did not run on the birth commit")
+        self.assertEqual(pairs(found), [("d-plain-imp", "unknown")], "a plain script that hits ModuleNotFoundError on the birth commit did not read as unknown")
+
+    def test_p3_a_test_file_that_runs_no_tests_on_the_head_is_red(self):
+        self.repo(debts={"d-empty": EMPTY})
+        self.change(write={"tests/test_empty.py": EMPTY_PY}, rm=["docs/debts/d-empty.md"])
+        found = self.findings()
+        self.assertEqual(self.ran(), [("test_empty.py", self.dir)], "the test file did not run in the head folder")
+        self.assertEqual(pairs(found), [("d-empty", "red")], "a unittest file that runs 0 tests on the head did not read as red")
+
+    def test_p4_a_pytest_style_file_without_a_main_block_is_red(self):
+        self.repo(debts={"d-pytest": PYTEST})
+        self.change(write={"tests/test_pytest_style.py": PYTEST_PY}, rm=["docs/debts/d-pytest.md"])
+        found = self.findings()
+        self.assertEqual(self.ran(), [("test_pytest_style.py", self.dir)], "the test file did not run in the head folder")
+        self.assertEqual(pairs(found), [("d-pytest", "red")], "a pytest-style file with no main block, exiting 0 with no output, did not read as red")
+
+
+@unittest.skipUnless(shutil.which("bash"), "bash is not on PATH, so the bash cases cannot run")
+class Shell(Case):
+    """A bash Retire test: a failure on the birth commit only because a helper is missing there is unknown, not a catch."""
+
+    def test_sh1_a_bash_test_whose_helper_is_missing_on_the_birth_commit_is_unknown(self):
+        self.repo(debts={"d-bash": SHELL_HELPER})
+        self.change(write={"tests/test_fixed.sh": SH_HELPER_CHECK, "tests/check_value.py": HELPER_PY}, rm=["docs/debts/d-bash.md"])
+        found = self.findings()
+        self.assertEqual(self.ran(), [("test_fixed.sh", self.dir)], "the bash test did not run in the head folder")
+        self.assertEqual(self.ran_at_birth(), ["test_fixed.sh"], "the bash test did not run on the birth commit")
+        self.assertEqual(pairs(found), [("d-bash", "unknown")], "a bash test that fails on the birth commit only for a missing helper read as a catch")
+
+    def test_sh2_a_written_reason_clears_the_unknown_of_a_bash_test_whose_helper_is_missing(self):
+        self.repo(debts={"d-bash": SHELL_HELPER})
+        self.change(write={"tests/test_fixed.sh": SH_HELPER_CHECK, "tests/check_value.py": HELPER_PY}, rm=["docs/debts/d-bash.md"])
+        found = self.findings(pr_body="Retire-run: d-bash -- check_value.py lands in the next PR, so the birth tree cannot run it\n")
+        self.assertEqual(pairs(found), [], "a written reason did not clear the unknown of a bash test whose helper is missing")
+
+    def test_sh3_a_bash_test_that_fails_on_the_defect_is_a_catch(self):
+        self.repo(debts={"d-catch": SHELL_CATCH})
+        self.change(write={"tests/test_value.sh": SH_CATCH}, rm=["docs/debts/d-catch.md"])
+        found = self.findings()
+        self.assertEqual(self.ran_at_birth(), ["test_value.sh"], "the bash test did not run on the birth commit")
+        self.assertEqual(pairs(found), [], "a bash test that fails on the birth commit because of the defect gave a finding")
+
+
 @unittest.skipUnless(shutil.which("node"), "node is not on PATH, so the node --test cases cannot run")
 class Node(Case):
     """A node --test span follows the same rule as a Python one: green on the head, red on the birth, unknown on an import error."""
@@ -615,6 +720,36 @@ class RetireRun(Case):
         found = self.findings(pr_body="Retire-run: d-weak-cite -- %s\n" % RUN_URL, run_state=runs)
         self.assertEqual(self.ran_at_birth(), ["test_weak.py"], "the Retire check did not run on the birth commit")
         self.assertEqual(pairs(found), [("d-weak-cite", "red")], "a green cite cleared a test that passes on the birth commit's defect")
+
+    def test_r11_a_run_url_with_a_note_after_it_is_a_run_cite_and_a_failed_run_is_red(self):
+        self.repo(debts={"d-imp": NEWMOD})
+        self.change(rm=["docs/debts/d-imp.md"])
+        runs = Runs(("failure", self.head))
+        found = self.findings(pr_body="Retire-run: d-imp -- %s (failed)\n" % RUN_URL, run_state=runs)
+        self.assertEqual(runs.urls, [RUN_URL], "the cited run with a note after its URL was not read as a run")
+        self.assertEqual(pairs(found), [("d-imp", "red")], "a failed run cited with a note after its URL did not refuse as red")
+
+    def test_r12_a_bare_url_of_a_failed_run_is_red(self):
+        self.repo(debts={"d-imp": NEWMOD})
+        self.change(rm=["docs/debts/d-imp.md"])
+        runs = Runs(("failure", self.head))
+        found = self.findings(pr_body="Retire-run: d-imp -- %s\n" % RUN_URL, run_state=runs)
+        self.assertEqual(runs.urls, [RUN_URL], "the bare cited run was not read")
+        self.assertEqual(pairs(found), [("d-imp", "red")], "a bare URL of a failed run did not refuse as red")
+
+    def test_r13_a_reason_with_a_url_inside_but_not_first_stays_a_reason(self):
+        self.repo(debts={"d-imp": NEWMOD})
+        self.change(rm=["docs/debts/d-imp.md"])
+        runs = Runs(("failure", self.head))
+        found = self.findings(pr_body="Retire-run: d-imp -- see %s for the log, the import lands in the next PR\n" % RUN_URL, run_state=runs)
+        self.assertEqual(runs.urls, [], "a reason with a URL inside, not first, was read as a run")
+        self.assertEqual(pairs(found), [], "a reason with a URL inside, not first, did not clear the unknown")
+
+    def test_r14_a_written_reason_does_not_close_a_prose_retire(self):
+        self.repo(debts={"d-prose": PROSE})
+        self.change(rm=["docs/debts/d-prose.md"])
+        found = self.findings(pr_body="Retire-run: d-prose -- the phone check is fine, trust me\n")
+        self.assertEqual(pairs(found), [("d-prose", "prose")], "a written reason closed a prose Retire")
 
 
 if __name__ == "__main__":
