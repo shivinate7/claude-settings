@@ -36,7 +36,7 @@ Cost: every git read, by command:
 - It adds one `rev-parse --is-shallow-repository` per notes file that has a boundary line, and one `ls-tree` of HEAD per notes file that blame cannot read.
 - With `--confirm` it also reads the default branch (one `symbolic-ref`, then up to five `rev-parse`), runs one `symbolic-ref` of HEAD, and runs one `status --porcelain` of the notes file.
 - `--next-debt` runs one `rev-parse --show-toplevel` and reads the debt folder once.
-- `--debt-flow` runs one `rev-parse --show-toplevel`, one `rev-parse` of the parent of START, and one `git diff`, once per batch merge. It adds one `hash-object` when START has no parent.
+- `--debt-flow` runs one `rev-parse --show-toplevel`, one `rev-parse` that START is a commit, one `rev-parse` of its parent, and one `git diff`, once per batch merge. It adds one `hash-object` when START has no parent.
 - None starts a long-lived process, writes a log, or runs on a timer.
 
 Why: since 2026-10-26, notes.md gained 1,304 lines and lost 358, and docs/debts/ added 107 debt files and deleted 37 (origin/main 174b005c1, 13:44 CST Nov 7). Rule `roles-findings-are-debts-or-notes` says a note becomes a debt after a real incident, but nothing counted incidents. So no note became a debt, and no note ever left.
