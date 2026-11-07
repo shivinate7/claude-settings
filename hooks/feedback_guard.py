@@ -578,9 +578,9 @@ class Pages:
     for the systemMessage line. An unreadable transcript stands down every block; a block with no
     owner record stands down alone."""
 
-    def __init__(self, path):
+    def __init__(self, path, session_id=None):
         self.path, self.records, self.owners, self.unread, self.skip = path, None, None, None, {}
-        self._by_id = None
+        self.session_id, self._by_id, self._pos = session_id, None, {}
 
     def _load(self):
         if self.records is None:
@@ -593,16 +593,16 @@ class Pages:
                 self.unread = "the transcript cannot be read: %s" % (" ".join(str(e).split())
                                                                       or type(e).__name__)
             for i, rec in enumerate(self.records):
+                for use in _transcript.tool_uses(rec):
+                    self._pos[id(use)] = i
                 text = _transcript.owner_text(rec, MACHINE_TAGS)
                 if text is not None:
                     self.owners.append((i, norm(text)))
         return not self.unread
 
     def _results(self):
-        """Each tool_result block of the transcript by its tool_use_id."""
         if self._by_id is None:
-            self._by_id = {b["tool_use_id"]: b for r in self.records if r.get("type") == "user"
-                           for b in _transcript.tool_results(r) if isinstance(b.get("tool_use_id"), str)}
+            self._by_id = _transcript.results_by_id(self.records)
         return self._by_id
 
     def stand_down(self, label, why):
@@ -654,12 +654,19 @@ class Pages:
         """The page urls of the read-backs of item n (_read_backs)."""
         return {use["input"].get("url") for use, _ in self._read_backs(text, k, n, stamp)}
 
-    def read_ids(self, text, k, n, stamp):
-        """The doc ids of the items those read-backs returned with n == n. A write that closes one of them proves
-        a send of item n though it carries no n (_proves)."""
-        return {doc_id for _, result in self._read_backs(text, k, n, stamp)
-                for doc_id, data in local_time._documents(result.get("content"))
-                if _is_n(data.get("n"), n) and isinstance(doc_id, str)}
+    def read_pairs(self, text, k, n, stamp):
+        """A function from a tool_use to the set of (page url, doc id) of the items whose read-backs (_read_backs)
+        returned n == n and came before that use. A write that closes one of them proves a send of item n though it
+        carries no n (_proves). The set is empty unless the page names this session as its writer: only the
+        writer's own close of an item reaches no one else (writer_is)."""
+        self._load()
+        reads = [] if writer_is(self.records, self.session_id) is not True else [
+            (self._pos.get(id(use)), use["input"].get("url"), doc_id)
+            for use, result in self._read_backs(text, k, n, stamp)
+            for doc_id, data in local_time._documents(result.get("content"))
+            if _is_n(data.get("n"), n) and isinstance(doc_id, str)]
+        return lambda use: {(u, d) for q, u, d in reads
+                            if q is not None and self._pos.get(id(use)) is not None and q < self._pos[id(use)]}
 
     def sent(self, text, k, proof, stamp, label="page"):
         """True when the proof is found, and true too when the check stands down (see proof_state)."""
@@ -671,16 +678,23 @@ def norm(text):
     return (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
 
 
-def _proves(use, n, closed_ids=()):
+def writer_is(records, session_id):
+    """True when the newest meta/page get names this session (or the id the remote env names) as the page writer,
+    False when it names another, None when it names none."""
+    writer = _transcript.page_writer_id(records)
+    return None if not writer else writer in (session_id, override.remote_session_id())
+
+
+def _proves(use, n, closed=()):
     """True when a tool_use sends page item n: a message naming n as a whole token, or an
-    ArtifactData write with key n == n under collection `items`, or a close of an item in closed_ids."""
+    ArtifactData write with key n == n under collection `items`, or a close of an item in `closed`, the (page url, doc id) pairs read back (Pages.read_pairs)."""
     name, tool_input = use.get("name") or "", use.get("input")
     if not isinstance(tool_input, dict):
         return False
     if name in SEND_TOOLS:
         msg = tool_input.get("message")
         return isinstance(msg, str) and re.search(r"(?<![A-Za-z0-9-])%s(?![A-Za-z0-9-])" % n, msg) is not None
-    return name.startswith(ARTIFACT_DATA) and _writes_n(tool_input, n, closed_ids)
+    return name.startswith(ARTIFACT_DATA) and _writes_n(tool_input, n, closed)
 
 
 def _reads_items(use):
@@ -706,8 +720,8 @@ def page_problem(item_id, rest, text, k, stamp, pages, homes=None):
     if m is None:
         return "%s [page] has a malformed page home: it needs `page:<digits>`" % item_id
     n = m.group(1)
-    ids = set() if pages is None else pages.read_ids(text, k, n, stamp)
-    state = None if pages is None else pages.proof_state(text, k, lambda use: _proves(use, n, ids), stamp)
+    closes = (lambda use: set()) if pages is None else pages.read_pairs(text, k, n, stamp)
+    state = None if pages is None else pages.proof_state(text, k, lambda use: _proves(use, n, closes(use)), stamp)
     if state is None:
         return None
     if state:
@@ -724,8 +738,9 @@ def page_problem(item_id, rest, text, k, stamp, pages, homes=None):
                 % (item_id, n, branch, n, folder, branch, n))
     return ("%s [page] page:%s: the transcript shows no send of the owner's ruling to the page writer after"
             " the owner's message; send the ruling to the page writer (send_message naming %s, or an"
-            " ArtifactData write with n %s); if the page writer cannot be sent to, close the item with `[closed]`"
-            % (item_id, m.group(1), m.group(1), m.group(1)))
+            " ArtifactData write with n %s). The ruling did not reach the writer; if the writer cannot be sent to, the"
+            " inbox line `- %s %s` still waits: it closes only when it gains `[closed]`, after its work is done or"
+            " its home holds it for good" % (item_id, m.group(1), m.group(1), m.group(1), item_id, rest))
 
 
 def _names_repo(use, owner, name):
@@ -780,8 +795,8 @@ def answer_problem(b, text, k, homes, pages):
             own.add(m.group(1))
     unsent = []
     for n in dict.fromkeys(numbers):
-        ids = pages.read_ids(text, k, n, b["stamp"]) if n not in own else set()
-        if n not in own and not pages.sent(text, k, lambda use: _proves(use, n, ids), b["stamp"]):
+        closes = pages.read_pairs(text, k, n, b["stamp"]) if n not in own else (lambda use: set())
+        if n not in own and not pages.sent(text, k, lambda use: _proves(use, n, closes(use)), b["stamp"]):
             unsent.append(n)
     if not unsent:
         return None
@@ -1175,9 +1190,9 @@ def _scan_transcript(records, collections):
                     writes.append((when, use.get("id"), inp["url"]))
             elif name in SHELL_TOOLS and EXPORT_RUN.search(str(inp.get("command", ""))):
                 exports.append((when, use.get("id")))
-        for block in _transcript.tool_results(rec):
-            lines = [ln.strip() for ln in _transcript.result_text(block).splitlines() if ln.strip()]
-            results[block.get("tool_use_id")] = (bool(block.get("is_error")), lines)
+    for uid, block in _transcript.results_by_id(records).items():
+        lines = [ln.strip() for ln in _transcript.result_text(block).splitlines() if ln.strip()]
+        results[uid] = (bool(block.get("is_error")), lines)
     return writes, exports, results
 
 
@@ -1213,10 +1228,8 @@ def export_check(cwd, transcript_path, session_id):
     writes = [w for w in writes if w[1] in results and not results[w[1]][0]]
     if not writes:
         return None, None  # nothing is read from the repo before a write is found
-    writer = _transcript.page_writer_id(records)
-    if writer:
-        is_writer = writer in (session_id, override.remote_session_id())
-    else:
+    is_writer = writer_is(records, session_id)
+    if is_writer is None:
         is_writer = any(e[0] < max(w[0] for w in writes) for e in exports)
     if not is_writer:
         return None, None  # receipts and answers are not this session's to export
@@ -1300,7 +1313,7 @@ def inbox_stop(hook):
                     handoff = f.read()
             except OSError:
                 handoff = ""
-            pages = Pages(hook.get("transcript_path"))
+            pages = Pages(hook.get("transcript_path"), hook.get("session_id"))
             found = problems(blocks, handoff, homes, burst, pages, inbox)
             reasons = found + flags
             notes = ([FAIL_OPEN % homes.skip] if homes.skip else []) + ([note] if note else []) + (

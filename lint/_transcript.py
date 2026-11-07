@@ -107,6 +107,12 @@ def tool_results(rec):
             yield b
 
 
+def results_by_id(records):
+    """Each tool_result block of the records by its string tool_use_id: the one home of the use-to-result
+    pairing."""
+    return {b["tool_use_id"]: b for r in records for b in tool_results(r) if isinstance(b.get("tool_use_id"), str)}
+
+
 def records_after_last_human(records):
     last_human_idx = None
     for i, rec in enumerate(records):
@@ -330,22 +336,25 @@ def _item_id(d):
     return v if d.get("collection") == "items" and isinstance(v, str) else None
 
 
-def _closes(d, ids):
-    """True when write dict d sets status `closed` on an item whose doc id is in ids."""
+def _closes(d, pairs, url):
+    """True when write dict d sets status `closed` on an item whose (page url, doc id) is in pairs. The url is
+    the dict's own, else the one of the call that holds it."""
     data = d.get("data")
-    return isinstance(data, dict) and data.get("status") == "closed" and _item_id(d) in ids
+    own = d.get("url") if isinstance(d.get("url"), str) else url
+    return isinstance(data, dict) and data.get("status") == "closed" and (own, _item_id(d)) in pairs
 
 
-def writes_n(node, n, closed_ids=()):
+def writes_n(node, n, closed=(), url=None):
     """True when a write dict that names the items collection holds key n == n at any depth below it. A write
-    that closes an item whose doc id is in closed_ids counts too, though it carries no n: the caller passes the
-    doc ids a read-back of this session returned with n (Pages.read_ids)."""
+    that closes an item whose (page url, doc id) is in `closed` counts too, though it carries no n: the caller
+    passes the pairs a read-back returned with n (Pages.read_pairs)."""
     if isinstance(node, dict):
         if not is_write(node):
             return False
-        return ((_in_items(node) and _has_n(node, n)) or _closes(node, closed_ids)
-                or any(writes_n(c, n, closed_ids) for c in node.values()))
-    return isinstance(node, list) and any(writes_n(c, n, closed_ids) for c in node)
+        here = node.get("url") if isinstance(node.get("url"), str) else url
+        return ((_in_items(node) and _has_n(node, n)) or _closes(node, closed, here)
+                or any(writes_n(c, n, closed, here) for c in node.values()))
+    return isinstance(node, list) and any(writes_n(c, n, closed, url) for c in node)
 
 
 def items_write(node):
