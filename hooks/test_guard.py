@@ -19297,6 +19297,14 @@ send_allow("a status line that names lane A's step, on lane B, is allowed",
 send_allow("a next-step line with the bare word step and a hyphenated word is allowed",
            role_path("start-lane-b"), START_LANE_B_ID,
            "Next step re-run the MAP check.")
+# Round 2. A prose step that an open lane carries is a reference to that lane, not a new step. Lane A carries the step on
+# the same topic, so only the reference exemption keeps lane B's brief from asking.
+send_allow("a Take this as step sentence naming a step an open lane carries is a reference: allowed",
+           role_path("start-lane-b"), START_LANE_B_ID,
+           "Take this as step qmax-map-format-skew")
+send_allow("a Step: line naming a step an open lane carries is a reference: allowed",
+           role_path("start-lane-b"), START_LANE_B_ID,
+           "Context for the lane.\nStep: qmax-map-format-skew")
 # Round 1. A step brief in three forms is asked. Each reason names the overlapping lane, and never the remedy phrase.
 send_ask("a step named in a Take this as step sentence, with a backticked slug, is asked",
          role_path("start-incident"), START_VERIFY_ID,
