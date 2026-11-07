@@ -815,7 +815,8 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
     """The new-tree path when `segments[number]` is a real worktree add whose tree lands
     outside `<primary>/.claude/worktrees/`, else "". The primary is the one of the repo the call
     runs in (`dir_before_segment`, then its own `-C`). A repo under the temp folder is a throwaway
-    and passes, so the repo is judged, never the target. Anything unreadable allows."""
+    and passes, so the repo is judged, never the target. A target with a variable is judged by the
+    folder before the variable. Any other unreadable part allows."""
     tokens = segment_tokens(segments[number])
     index = resolve_command(tokens) if tokens else None
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
@@ -831,7 +832,7 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
     named = _segment_git_c_target(tokens)
     if named is not None:
         where = None if _unexpanded(named) else shell_abs(named, where)
-    if not where or _unexpanded(target):
+    if not where:
         return ""
     primary = primary_checkout(where)
     if not primary:
@@ -839,6 +840,16 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
     import tempfile   # lazy: only a real worktree add reaches here
     if path_is_inside(primary, tempfile.gettempdir()):
         return ""
+    if _unexpanded(target):
+        # A loop variable in the path: the folder before the variable is all the guard can read. The
+        # tree passes only when that folder sits in the home folder; a variable first, or a folder
+        # elsewhere, is refused, since the one-line form of that path is refused too.
+        literal = re.split(r"[$%`]", target, maxsplit=1)[0]
+        folder = os.path.dirname(literal)
+        tree = shell_abs(folder, where) if folder else None
+        inside = tree is not None and path_is_inside(
+            tree, os.path.join(primary, ".claude", "worktrees")) is True
+        return "" if inside else target
     tree = shell_abs(target, where)
     if tree is None:
         return ""
