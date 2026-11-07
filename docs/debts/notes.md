@@ -1508,3 +1508,5 @@
 - conflict-markers-show-uncapped: the push check runs one `git cat-file` per file with a marker finding, with no cap, and no cost case holds a finding (hooks/guard_merge.py `_kinds_of`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
 - push-after-failed-commit-chain-unread: a single-call chain `git commit ...; git push` has no sibling record in the transcript, so a failed commit there does not stop the push (hooks/guard_push_delete.py). Decision: push-after-failed-commit.
+- push-after-failed-commit-bash-c: a commit inside `bash -c '...'` is read as one token, so a failed commit there does not stop a push beside it (hooks/guard_push_delete.py). Decision: push-after-failed-commit.
+- worktree-isolation-git-in-branch-name: the worktree isolation check reads a branch name holding "git" as a second git command, and refuses `git switch -c` and `gh pr create` that name it (seen 2026-11-07, in lane git-push-after-failed-commit).
