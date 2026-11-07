@@ -13904,24 +13904,108 @@ class ProseJudgePrompt(unittest.TestCase):
                     self.assertTrue(want in prompt, "line %d names fn_%02d, and row %d of its window is not in the call" % (line, line - 1, n))
 
     def test_packing_builds_each_line_once_not_once_per_candidate(self):
-        # Sixty lines, each naming its own def, packed in stable order. The packer tries each line in the call it is building. The
-        # prompt builder was handed every line packed so far for each new one, so its rows grew with the square of the line count.
-        # Counted on a spy, so no clock is read: the builder is handed about one row per line.
+        # Sixty lines, each naming its own def, packed in stable order. The packer tries each line in the call it is building, and
+        # keeps each line's block in one memo. Counted on spies, so no clock is read: a build is a block the memo did not hold, and
+        # a try is one call to prose_judge_pieces. A line that breaks a call is tried again in the next call, and no other line is.
         count = 60
         text, starts = self.defs_file(count)
-        real_prompt_of = merge.prose_judge_prompt_of
-        handed = []
+        real_block, real_pieces = merge.prose_judge_row_block, merge.prose_judge_pieces
+        builds, tries = [], []
 
-        def spy(rows, body, memo):
-            handed.append(len(rows))
-            return real_prompt_of(rows, body, memo)
-        with unittest.mock.patch.object(merge, "prose_judge_prompt_of", spy):
+        def block_spy(row, body, memo, tight=False):
+            before = len(memo)
+            got = real_block(row, body, memo, tight=tight)
+            if len(memo) > before:
+                builds.append(row[1])
+            return got
+
+        def pieces_spy(state, row, block):
+            tries.append(row[1])
+            return real_pieces(state, row, block)
+        with unittest.mock.patch.object(merge, "prose_judge_row_block", block_spy), \
+                unittest.mock.patch.object(merge, "prose_judge_pieces", pieces_spy):
             jobs, past = self.pack(self.defs_picked(count), {self.DEFS: text})
         packed = sum(len(rows) for _, rows, _ in jobs)
         self.assertEqual(packed + past, count, "scope: %d lines are packed or past the calls, want %d" % (packed + past, count))
-        self.assertLessEqual(sum(handed), 2 * count,
-                             "the prompt builder was handed %d rows for %d lines, want at most %d: each line is built about once, "
-                             "not once per candidate" % (sum(handed), count, 2 * count))
+        self.assertEqual(len(builds), count,
+                         "the packer built %d line blocks for %d lines, want each line built once" % (len(builds), count))
+        self.assertEqual(len(tries), count + len(jobs) - 1,
+                         "the packer tried %d lines for %d calls, want %d: each line once, plus one retry for each call that breaks"
+                         % (len(tries), len(jobs), count + len(jobs) - 1))
+
+    def test_a_lone_line_with_six_cites_is_cut_so_its_call_stays_within_the_budget(self):
+        # One line cites six windows of 40 rows, each row 300 characters wide. Its text and each cited row are cut first, and the
+        # line is still over the budget, so its call is cut to the byte room. The call holds the line once and stays within the budget.
+        served = {"src/many.py": numbered_source("mn", 400, width=300)}
+        cites = ["read src/many.py:%d-%d" % (first, first + 39) for first in range(1, 241, 40)]
+        text = "The windows are " + " ".join("(%s)" % cite for cite in cites) + "."
+        jobs, past = self.pack({self.DEFS_PROSE: {3: (text, cites)}}, served)
+        self.assertEqual(past, 0, "scope: %d lines are past the calls, want none" % past)
+        self.assertEqual([(p, n) for _, rows, _ in jobs for p, n in rows], [(self.DEFS_PROSE, 3)],
+                         "scope: the calls do not hold the one line once")
+        for _, rows, prompt in jobs:
+            size = len(prompt.encode("utf-8"))
+            self.assertLessEqual(size, merge.PROSE_JUDGE_CALL_BYTES,
+                                 "a call of %d bytes for one line with six cites, want at most the budget of %d"
+                                 % (size, merge.PROSE_JUDGE_CALL_BYTES))
+
+    def one_row_prompt(self, text):
+        """The prompt of one line of DEFS_PROSE that cites nothing, built on its own."""
+        return merge.prose_judge_prompt_of([(self.DEFS_PROSE, 1, text, ())], lambda path: None, {})
+
+    def padded_line(self, target):
+        """A line of 50 two-byte characters and ASCII padding, whose one-row prompt is `target` UTF-8 bytes. Each ASCII character adds one byte."""
+        base = chr(0xe9) * 50 + " "
+        text = base + "a" * (target - len(self.one_row_prompt(base).encode("utf-8")))
+        self.assertEqual(len(self.one_row_prompt(text).encode("utf-8")), target, "scope: the padded line does not build to %d bytes" % target)
+        return text
+
+    def test_a_non_ASCII_line_one_byte_over_the_call_budget_is_cut_not_packed_whole(self):
+        # The line's prompt is one byte over the budget. Its 50 two-byte characters, and the newline before each piece, are what a
+        # count that counts characters or drops the newline gets wrong: it sees the line under the budget, packs it whole, and the call
+        # is over the budget.
+        budget = merge.PROSE_JUDGE_CALL_BYTES
+        jobs, past = self.pack({self.DEFS_PROSE: {1: (self.padded_line(budget + 1), [])}}, {})
+        self.assertEqual(past, 0, "scope: %d lines are past the calls, want none" % past)
+        self.assertEqual([(p, n) for _, rows, _ in jobs for p, n in rows], [(self.DEFS_PROSE, 1)],
+                         "scope: the calls do not hold the one line once")
+        for _, rows, prompt in jobs:
+            size = len(prompt.encode("utf-8"))
+            self.assertLessEqual(size, budget, "a call of %d bytes, want at most the budget of %d: the line is one byte over, so it is cut"
+                                 % (size, budget))
+
+    def test_a_non_ASCII_line_exactly_at_the_call_budget_is_packed_whole(self):
+        # The control: the same kind of line, padded to exactly the budget, is not cut. Its call is its one-row prompt.
+        budget = merge.PROSE_JUDGE_CALL_BYTES
+        text = self.padded_line(budget)
+        jobs, past = self.pack({self.DEFS_PROSE: {1: (text, [])}}, {})
+        self.assertEqual(past, 0, "scope: %d lines are past the calls, want none" % past)
+        self.assertEqual(len(jobs), 1, "scope: the line is in %d calls, want one" % len(jobs))
+        self.assertNotIn("row cut at", jobs[0][2], "a line exactly at the budget is cut: its call has a cut marker")
+        self.assertEqual(jobs[0][2], self.one_row_prompt(text), "a line exactly at the budget does not build whole: its call is not its one-row prompt")
+
+    def test_two_lines_that_name_the_same_window_show_it_once_in_one_call(self):
+        # Two lines of one file name the same def, so they name one window. The call holds that window once.
+        line = "The runner is `%s` `fn_00` and returns 3." % self.DEFS
+        text = self.defs_file(1)[0]
+        jobs, past = self.pack({self.DEFS_PROSE: {1: (line, []), 2: (line, [])}}, {self.DEFS: text})
+        self.assertEqual(past, 0, "scope: %d lines are past the calls, want none" % past)
+        self.assertEqual(len(jobs), 1, "scope: the two lines are in %d calls, want one" % len(jobs))
+        shown =jobs[0][2].count("lines of %s around the names" % self.DEFS)
+        self.assertEqual(shown, 1, "the window of %s shows %d times in one call, want once" % (self.DEFS, shown))
+
+    def test_the_second_of_two_lines_naming_one_window_carries_a_note_naming_the_first(self):
+        # The same two lines. The second line's block says the window is shown under the first line, and names it.
+        line = "The runner is `%s` `fn_00` and returns 3." % self.DEFS
+        text = self.defs_file(1)[0]
+        jobs, past = self.pack({self.DEFS_PROSE: {1: (line, []), 2: (line, [])}}, {self.DEFS: text})
+        self.assertEqual(past, 0, "scope: %d lines are past the calls, want none" % past)
+        self.assertEqual(len(jobs), 1, "scope: the two lines are in %d calls, want one" % len(jobs))
+        prompt = jobs[0][2]
+        self.assertIn("%s:2:" % self.DEFS_PROSE, prompt, "scope: the second line is not in the call")
+        second = prompt.split("%s:2:" % self.DEFS_PROSE)[1]
+        note = "named path: %s: the same lines as shown under %s:1" % (self.DEFS, self.DEFS_PROSE)
+        self.assertIn(note, second, "the second line's block has no note that names the first line for %s" % self.DEFS)
 
     def test_a_cite_of_a_one_row_index_keeps_every_call_within_the_budget(self):
         # The line cites the one row of a minified index, about 1.1 MB. The cited row is cut with the cut marker, so the call that
