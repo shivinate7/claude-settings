@@ -1131,13 +1131,19 @@ def brief_hit(tool: str, tool_input, transcript: str):
 
 # ---- a lane start or a step brief that overlaps an open lane is asked (rule lane-start-overlap)
 START_CREATE_TOOL = "mcp__claude-code-remote__create_session"
-_STEP_PHRASE = re.compile(r"(?<![\w-])step\s+(?P<slug>[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)+)", re.IGNORECASE)
+_SLUG = r"`?(?P<slug>[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)+)`?"  # a hyphenated slug, backticks around it allowed
+# The step forms a send_message may name beyond the marker: `as step <slug>`, `new step <slug>`, a line `Step: <slug>`.
+# A bare `step <slug>` in prose is no form: it mentions a step as often as it names one.
+_STEP_PHRASES = (re.compile(r"(?<![\w-])(?:as|new)\s+step\s+" + _SLUG, re.IGNORECASE),
+                 re.compile(r"^[-+]?" + _MARKDOWN_LEAD + r"Step:[\s*_]*" + _SLUG, re.IGNORECASE | re.MULTILINE))
+_MARKER_STEP = re.compile(_MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER) + r"[\s*_`]*(?P<slug>[A-Za-z0-9_-]+)`?[\s*_]*\.",
+                          re.IGNORECASE)
 _WORD_SPLIT = re.compile(r"[-_]+")
 _TITLE_LANE_LEAD = re.compile(r"\s*lane\s*:\s*", re.IGNORECASE)
 START_OVERLAP_REASON = (
     "this %s overlaps the open lane on step %s (session %s): %s. Two lanes on one piece of work collide at "
-    "merge. An override lifts it; check that lane does not own the work, or send it the work with send_message "
-    "instead of starting a second lane. (decision session-tiers, a lane holds one topic)"
+    "merge. Check that lane does not own the work. An override lifts it, if the work is truly separate. "
+    "(decision session-tiers, a lane holds one topic)"
 )
 
 
@@ -1163,24 +1169,29 @@ def _repo_words(repos):
 
 
 def _new_steps_of(tool_input):
-    """The step slugs a send_message names for its target, in order, casefold not applied: the marker's step, then
-    each hyphenated slug after the word `step`. Empty for a message that names none."""
+    """[(slug, prose)] the step slugs a send_message names for its target, in order, casefold not applied: the
+    marker's step (prose False), then each slug of a prose form (prose True, see _STEP_PHRASES). A slug named twice
+    counts once, as the marker's if it is that. Empty for a message that names none."""
     message = tool_input.get("message")
     if not isinstance(message, str):
         return []
-    slugs = []
+    named = {}
     first = next((line.strip() for line in message.splitlines() if line.strip()), "")
-    found = _BRIEF_LINE.match(first)
+    found = _MARKER_STEP.match(first)
     if found:
-        slugs.append(found.group("step"))
-    slugs += [hit.group("slug") for hit in _STEP_PHRASE.finditer(message)]
-    return list(dict.fromkeys(slugs))
+        named[found.group("slug")] = False
+    for phrase in _STEP_PHRASES:
+        for hit in phrase.finditer(message):
+            named.setdefault(hit.group("slug"), True)
+    return list(named.items())
 
 
 def lane_overlap_hit(tool: str, tool_input, transcript: str, home_repo):
     """Return (matched, reason) when this call starts or briefs a lane step that overlaps an open lane, else None.
     Two paths: a create_session with a cs-build:lane tag, and a send_message that names a step slug (the
-    `Lane brief: <step>.` marker, or `step <slug>` with a hyphenated slug) that its target lane does not carry.
+    `Lane brief: <step>.` marker, or the prose forms `as step <slug>`, `new step <slug>`, a line `Step: <slug>`, with a
+    hyphenated slug) that its target lane does not carry. An open lane that already carries a step named in prose is a
+    reference to that lane, not an overlap.
     Open lanes are the lane records in this transcript (own_session.lane_records), the target of a send_message
     excluded. A new step overlaps an open lane when it shares a cs-repo tag other than the home repo and either
     the cs-topic is the same (casefold) or, only when the step differs from every cs-step of that lane, a word of
@@ -1198,7 +1209,8 @@ def lane_overlap_hit(tool: str, tool_input, transcript: str, home_repo):
             tags = [tags] if isinstance(tags, str) else tags
             if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):
                 return None
-            steps, topics = _tag_values(tags, ARCHIVE_STEP_PREFIX), _tag_values(tags, TOPIC_TAG_PREFIX)
+            steps = [(s, False) for s in _tag_values(tags, ARCHIVE_STEP_PREFIX)]
+            topics = _tag_values(tags, TOPIC_TAG_PREFIX)
             repos, target, kind = _tag_values(tags, ARCHIVE_REPO_PREFIX), None, "lane start"
         elif tool == BRIEF_TOOL:
             target = tool_input.get("session_id")
@@ -1210,7 +1222,7 @@ def lane_overlap_hit(tool: str, tool_input, transcript: str, home_repo):
             if mine is None or LANE_TAG not in mine["tags"]:
                 return None
             carried = {s.casefold() for s in _tag_values(mine["tags"], ARCHIVE_STEP_PREFIX)}
-            steps = [s for s in named if s.casefold() not in carried]
+            steps = [(s, prose) for s, prose in named if s.casefold() not in carried]
             if not steps:
                 return None
             topics, repos, kind = _tag_values(mine["tags"], TOPIC_TAG_PREFIX), _tag_values(mine["tags"], ARCHIVE_REPO_PREFIX), "step brief"
@@ -1227,7 +1239,11 @@ def lane_overlap_hit(tool: str, tool_input, transcript: str, home_repo):
             lane_topic = next(iter(_tag_values(record["tags"], TOPIC_TAG_PREFIX)), "").casefold()
             lane_repos = _tag_values(record["tags"], ARCHIVE_REPO_PREFIX)
             slug_cf = {s.casefold() for s in lane_steps}
-            if topic and lane_topic == topic and any(s.casefold() in slug_cf for s in steps):
+            # A step named in prose that this lane carries refers to the lane: it is not judged against it.
+            steps_here = [s for s, prose in steps if not (prose and s.casefold() in slug_cf)]
+            if not steps_here:
+                continue
+            if topic and lane_topic == topic and any(s.casefold() in slug_cf for s in steps_here):
                 return _overlap_hit(kind, lane_steps, session, "the same step and topic are already open")
             if home is None:
                 home = home_repo() if callable(home_repo) else None
@@ -1241,7 +1257,7 @@ def lane_overlap_hit(tool: str, tool_input, transcript: str, home_repo):
             drop = _repo_words(shared)
             lane_words = set().union(*[_slug_words(s, drop) for s in lane_steps], _slug_words(
                 _TITLE_LANE_LEAD.sub("", record["title"], count=1), drop))
-            for step in steps:
+            for step in steps_here:
                 if step.casefold() in slug_cf:
                     continue
                 common = _slug_words(step, drop) & lane_words

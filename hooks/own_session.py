@@ -145,6 +145,8 @@ def lane_records(transcript):
                         if not block.get("is_error") and archives[use] in records:
                             records[archives[use]]["closed"] = True
                     elif use in creates:
+                        if block.get("is_error"):  # a failed create_session started no session: no record
+                            continue
                         put(_created_session_id(body), creates[use][0], creates[use][1], None)
                     elif use in reads and isinstance(body, str):
                         try:

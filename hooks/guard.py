@@ -119,7 +119,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
   lane-start-overlap  ask. A create_session with a cs-build:lane tag, or a send_message that names a step slug for its
-                       target (the `Lane brief: <step>.` marker, or `step <slug>` with a hyphenated slug) that the target's
+                       target (the `Lane brief: <step>.` marker, or in prose `as step <slug>`, `new step <slug>` or a line `Step: <slug>`, a hyphenated slug) that the target's
                        cs-step tags do not carry, when an open lane overlaps it. Open lanes are the lane records in this
                        session's transcript (create_session calls with their results, get_session results, list_sessions
                        rows; the newest record of an id wins; archived or archive_session-closed ones are closed), the
@@ -130,7 +130,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        lane-one-topic. Fails open on any read error. It cannot see: the brief text at create time
                        (lane-effort-pin forces the prompt to `/effort medium`), lanes started by other sessions or before a
                        compaction unless a list_sessions or get_session result is in this transcript, home-repo-only lanes
-                       on the word clause, and step names given in prose without the word "step". A send_message to a
+                       on the word clause, a bare "step <slug>" in prose, and step names given in other words. A lane that carries a prose-named step is a reference, not an overlap. A send_message to a
                        target with no lane record passes. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
