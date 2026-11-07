@@ -7858,40 +7858,61 @@ const coarse = (page) => page.evaluate(() => matchMedia("(pointer: coarse)").mat
 const railRows = (page) => page.locator("#rail a.ov-head");
 const railChips = (page) => page.locator("#rail .nchip");
 const sizes = (loc, key) => loc.evaluateAll((els, k) => els.map((e) => [e.getAttribute(k) || e.id, e.getBoundingClientRect().height]), key);
-// The contrast of two rgb() colours, through the CONTRAST helper. Both are opaque, so the hex read drops no alpha.
-const edgeRatio = (page, fg, bg) => page.evaluate(`(() => {${CONTRAST}
-  const hex = (s) => "#" + s.match(/\\d+/g).slice(0, 3).map((x) => (+x).toString(16).padStart(2, "0")).join("");
-  return R(hex(${JSON.stringify(fg)}), hex(${JSON.stringify(bg)}));
-})()`);
+// A computed colour as hex. Read: rgb(r, g, b) and color(srgb r g b), both opaque. Any other form is null: the check reads no colour it cannot parse.
+const hexOf = (css) => {
+  const s = /^color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)\)$/.exec(css), r = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(css);
+  const v = s ? s.slice(1).map((x) => Math.round(+x * 255)) : r ? r.slice(1).map(Number) : null;
+  return v ? "#" + v.map((x) => x.toString(16).padStart(2, "0")).join("") : null;
+};
+// The WCAG ratio of two hex colours, through the CONTRAST helper.
+const ratioOf = (page, fg, bg) => page.evaluate(`(() => {${CONTRAST} return R(${JSON.stringify(fg)}, ${JSON.stringify(bg)}); })()`);
+// The dashed buttons of a card, each read unpressed: a pressed one draws its solid edge, which is not this check.
+const dashEdges = async (page, buttons) => {
+  const edges = [];
+  for (const [label, pre, it] of buttons) {
+    const btn = page.locator(`#${pre}-${it.id}`);
+    await need(btn, `No. ${it.n} has no ${label} button`);
+    assert.notEqual(await btn.getAttribute("aria-pressed"), "true", `${label} on No. ${it.n} is pressed, so it does not draw the unpressed edge`);
+    edges.push({
+      what: `${label} on No. ${it.n}`,
+      edge: await btn.evaluate((el) => getComputedStyle(el).borderTopColor),
+      card: await card(page, it).evaluate((el) => getComputedStyle(el).backgroundColor),
+      page: await page.evaluate(() => getComputedStyle(document.body).backgroundColor),
+    });
+  }
+  return edges;
+};
+// One failure line per edge and ground that reads under 3:1, or that the check cannot read.
+const edgeBad = async (page, edges, scheme) => {
+  const bad = [];
+  for (const e of edges) for (const [where, bg] of [["card", e.card], ["page", e.page]]) {
+    const fg = hexOf(e.edge), back = hexOf(bg);
+    if (!fg || !back) { bad.push(`${e.what} has a colour the check cannot read on the ${where} in the ${scheme} scheme: edge ${e.edge}, ground ${bg}`); continue; }
+    const r = await ratioOf(page, fg, back);
+    if (r < 3) bad.push(`${e.what} edge is ${r.toFixed(2)}:1 on the ${where} in the ${scheme} scheme, under 3:1`);
+  }
+  return bad;
+};
 
-// The dashed buttons draw an unpressed edge in --line, which reads under 3:1 (debt alts-dash-edge-contrast).
+// The dashed buttons draw an unpressed edge that must reach 3:1 (debt alts-dash-edge-contrast). Overturn on a ruling card is one of them.
 for (const scheme of ["light", "dark"]) {
-  test(`the unpressed None of these, Mark done and Park buttons draw an edge of 3:1 or more on their card and on the page, ${scheme} scheme`, async (t) => {
-    const page = await open(t, { items: [DECISION, TASK], scheme }); if (!page) return;
-    const buttons = [["None of these", "b-none", DECISION], ["Mark done", "b-done", TASK], ["Park", "b-park", DECISION], ["Park", "b-park", TASK]];
-    const edges = [];
-    for (const [label, pre, it] of buttons) {
-      const btn = page.locator(`#${pre}-${it.id}`);
-      await need(btn, `No. ${it.n} has no ${label} button`);
-      assert.notEqual(await btn.getAttribute("aria-pressed"), "true", `${label} on No. ${it.n} is pressed, so it does not draw the unpressed edge`);
-      edges.push({
-        what: `${label} on No. ${it.n}`,
-        edge: await btn.evaluate((el) => getComputedStyle(el).borderTopColor),
-        card: await card(page, it).evaluate((el) => getComputedStyle(el).backgroundColor),
-        page: await page.evaluate(() => getComputedStyle(document.body).backgroundColor),
-      });
-    }
-    const bad = [];
-    for (const e of edges) for (const [where, bg] of [["card", e.card], ["page", e.page]]) {
-      const r = await edgeRatio(page, e.edge, bg);
-      if (r < 3) bad.push(`${e.what} edge is ${r.toFixed(2)}:1 on the ${where} in the ${scheme} scheme, under 3:1`);
-    }
-    assert.deepEqual(bad, []);
+  test(`the unpressed None of these, Mark done, Park and Overturn buttons draw an edge of 3:1 or more on their card and on the page, ${scheme} scheme`, async (t) => {
+    const page = await open(t, { items: [DECISION, TASK, ARBITER], scheme }); if (!page) return;
+    const edges = await dashEdges(page, [["None of these", "b-none", DECISION], ["Mark done", "b-done", TASK], ["Park", "b-park", DECISION], ["Park", "b-park", TASK], ["Overturn", "b-over", ARBITER]]);
+    assert.deepEqual(await edgeBad(page, edges, scheme), []);
+  });
+  // A seen card is tinted (color-mix of --surface and --ground), so its ground is not the plain card: its edge is read against that tint too.
+  test(`the unpressed None of these and Park buttons on a seen card draw an edge of 3:1 or more on the tinted card and on the page, ${scheme} scheme`, async (t) => {
+    const seen = mk("seen-old", 1, { added: at(5) });
+    const page = await open(t, { items: [seen, sentItem()], scheme }); if (!page) return;
+    assert.equal(await seenOf(page, seen), "true", `No. ${seen.n} is not drawn as a seen card, so its tint is not tested`);
+    const edges = await dashEdges(page, [["None of these", "b-none", seen], ["Park", "b-park", seen]]);
+    assert.deepEqual(await edgeBad(page, edges, scheme), []);
   });
 }
 
-// The rail rows share .ov-head, which has no coarse-pointer rule (debt rail-row-touch-height). The fine page keeps a 24px floor: the mouse size in ux-house-rules.
-test("each rail row is 44px tall or more on a coarse pointer, and 24px or more on a fine one, at 390 wide", async (t) => {
+// The rail rows share .ov-head (debt rail-row-touch-height). Its 44px floor is for a coarse pointer only: the fine page stays exactly 32px, so a 44px floor for every pointer fails here.
+test("each rail row is 44px tall or more on a coarse pointer, and 32px on a fine one, at 390 wide", async (t) => {
   const items = [DECISION, TASK, ARBITER];
   const page = await open(t, { items, answers: SAVED_A, hasTouch: true, viewport: { width: 390, height: 844 } }); if (!page) return;
   assert.equal(await coarse(page), true, "the touch page does not match pointer: coarse, so the touch rule is not tested");
@@ -7900,7 +7921,7 @@ test("each rail row is 44px tall or more on a coarse pointer, and 24px or more o
   const fine = await open(t, { items, answers: SAVED_A, viewport: { width: 390, height: 844 } }); if (!fine) return;
   assert.equal(await coarse(fine), false, "the fine page matches pointer: coarse, so the fine control is not tested");
   assert.ok((await railRows(fine).count()) >= 3, "the fine rail draws fewer than 3 rows, so the control measures nothing");
-  const fineBad = (await sizes(railRows(fine), "href")).filter(([, h]) => h < 24).map(([href, h]) => `rail row ${href} is ${h.toFixed(1)}px tall on a fine pointer, under 24px`);
+  const fineBad = (await sizes(railRows(fine), "href")).filter(([, h]) => h !== 32).map(([href, h]) => `rail row ${href} is ${h.toFixed(1)}px tall on a fine pointer, not 32px`);
   assert.deepEqual([...bad, ...fineBad], []);
 });
 
