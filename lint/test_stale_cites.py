@@ -2184,7 +2184,7 @@ class CitedExcerptTests(unittest.TestCase):
 # Reword check (plan part b, owner item 340). A rule sentence removed or changed in a RULE_FILES file leaves a finding
 # on each tracked Markdown line at head that holds a 5-word run of it, unless that line's paragraph names the rule id.
 # The retired phrase is split in source, so this file never holds it whole (lint/test_retired_names.py).
-REWORD = "STALE006"  # the reword code; STALE001-005 are taken
+REWORD = "STALE003"  # the code the brief names; STALE003 is also the dead-path code of --tree (see the report)
 OLD_STE = "Write in Simplified " + "Technical English"
 OLD_RULE = ("**Output.** " + OLD_STE + " by default, to me and between agents,\n"
             "unless told otherwise.<!-- rule:output-write-in-ste -->\n")
