@@ -437,10 +437,12 @@ const PH = [
 const ORDER = ['todo','active','done','blocked'];
 // one cell per step: done, then in progress, then blocked, then the rest
 const segs = (c,n) => { const m=c.done+c.act+c.stl+c.pzd+c.blk; return ['done','act','stl','pzd','blk'].map(k=>`<i class="${k}"></i>`.repeat(c[k])).join('') + '<i></i>'.repeat(Math.max(0,n-m)) + (n?'':'<i></i>'); };
-// The bar's cell counts for a phase's steps, one per cell kind; shownState is the one home for a step's drawn state.
+// The bar's cell counts for a phase's steps, one per cell kind; every read of a step's drawn state goes through shownState.
 const tally = ss => ({ done:ss.filter(s=>s.status==='done').length, act:ss.filter(s=>shownState(s)==='active').length, stl:ss.filter(s=>shownState(s)==='stalled').length, pzd:ss.filter(s=>shownState(s)==='paused').length, blk:ss.filter(s=>s.status==='blocked').length });
 // The bar's words, such as "4 done, 1 in progress, 1 stalled, 1 paused, 5 to do"; a kind with no steps is left out.
 const barWords = (c,n) => [[c.done,'done'],[c.act,'in progress'],[c.stl,'stalled'],[c.pzd,'paused'],[c.blk,'blocked'],[n-c.done-c.act-c.stl-c.pzd-c.blk,'to do']].filter(x=>x[0]>0).map(x=>x[0]+' '+x[1]).join(', ');
+// A bar's role and name: an image with its words. A bar with no steps has no words, so it is no image.
+const barAttrs = (c,n) => { const w=barWords(c,n); return w ? ` role="img" aria-label="${w}" title="${w}"` : ''; };
 const LABEL = {todo:'To do',active:'In progress',done:'Done',blocked:'Blocked'};
 /* The four fields of each meta/cull reading, and how to read them. */
 const CULL_KEYS = [
@@ -567,8 +569,8 @@ function renderNow(){
   $('#now').innerHTML = `
   <div><h2>Phase <span class="num">${PH.indexOf(cur)+1}/${PH.length}</span></h2>
     <div class="big">${esc(cur.n)}</div>
-    <div class="sub"><span class="num">${done}</span> of <span class="num">${ss.length}</span> done${act?` · <span class="num">${act}</span> in progress`:''}${c.stl?` · <span class="num">${c.stl}</span> stalled`:''}${c.pzd?` · <span class="num">${c.pzd}</span> paused`:''}</div>
-    <div class="bar" style="margin-top:7px" role="img" aria-label="${barWords(c,ss.length)}" title="${barWords(c,ss.length)}">${segs(c,ss.length)}</div>
+    <div class="sub"><span class="num">${done}</span> of <span class="num">${ss.length}</span> done${act?` · <span class="num">${act}</span> in progress`:''}${c.stl?` · <span class="num">${c.stl}</span> stalled`:''}${c.pzd?` · <span class="num">${c.pzd}</span> paused`:''}${c.blk?` · <span class="num">${c.blk}</span> blocked`:''}</div>
+    <div class="bar" style="margin-top:7px"${barAttrs(c,ss.length)}>${segs(c,ss.length)}</div>
     <div class="sub" style="margin-top:6px;color:var(--muted)">Whole plan <span class="num">${tdone}/${tot}</span> done</div>
   </div>
   <div><h2>Doing now</h2><ul>${active.map(s=>`<li>${glyph('active')}<span class="id">${esc(s.id)}</span><button class="tx" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join('')||'<li class="sub">Nothing in progress. Pick the first step up next.</li>'}</ul>
@@ -638,8 +640,8 @@ function metaTiles(k){
 
 /* ---------- steps ---------- */
 function stepRow(s, nextIds){
-  const ni = nextIds.indexOf(s.id), sk = stallKind(s.id), shown = sk || s.status;
-  const tags = (s.status==='active'&&!sk?'<span class="tag t-now">Now</span>':'') + (ni>=0?`<span class="tag next">Next ${ni+1}</span>`:'') + (s.status==='blocked'?'<span class="tag blk">Blocked</span>':'');
+  const ni = nextIds.indexOf(s.id), shown = shownState(s);
+  const tags = (shown==='active'?'<span class="tag t-now">Now</span>':'') + (ni>=0?`<span class="tag next">Next ${ni+1}</span>`:'') + (s.status==='blocked'?'<span class="tag blk">Blocked</span>':'');
   const d = when(s.updatedAt), open = ui.open.has(s.id), noteOpen = ui.notes.has(s.id);
   const lbl = LABEL[shown]||LABEL.todo;
   return `<li class="st ${s.status}${open?' open':''}" id="s-${esc(s.id)}">
@@ -688,7 +690,7 @@ function renderPhase(){
   }
   $('#phases').innerHTML = `<section class="card phase" id="p-${k}">
     <div class="ph-head"><span class="lbl">Phase ${PH.indexOf(p)+1}</span><h2>${esc(p.n)}</h2>
-      <div class="prog"><span class="num">${d}/${ss.length}</span><div class="bar" role="img" aria-label="${barWords(c,ss.length)}" title="${barWords(c,ss.length)}">${segs(c,ss.length)}</div><span>done</span></div></div>
+      <div class="prog"><span class="num">${d}/${ss.length}</span><div class="bar"${barAttrs(c,ss.length)}>${segs(c,ss.length)}</div><span>done</span></div></div>
     ${asof?`<div class="asof">${asof}</div>`:''}
     ${k==='cleanup'&&ui.how&&cull&&cull.note?`<div class="howbody">${esc(cull.note)}</div>`:''}
     <div class="tiles">${tiles}</div>
@@ -983,7 +985,7 @@ function unavailable(){
   stallKind = id => stalledIds.has(id) ? 'stalled' : pausedIds.has(id) ? 'paused' : '';
   const marks = () => {
     document.querySelectorAll('#now li .tx[data-go]').forEach(b => {
-      const k = stalledIds.has(b.dataset.go) ? 'stalled' : pausedIds.has(b.dataset.go) ? 'paused' : '';
+      const st = steps.find(x => x.id === b.dataset.go), k = st && ['stalled', 'paused'].includes(shownState(st)) ? shownState(st) : '';
       const g = k && b.parentElement.querySelector('.g');
       if(g && !g.dataset.stall){ g.dataset.stall = k; g.setAttribute('role', 'img'); g.setAttribute('aria-label', label(k)); g.innerHTML = G[k]; }
     });

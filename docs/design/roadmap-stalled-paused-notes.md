@@ -59,7 +59,7 @@ Deep links: `#s=mixed|dense`, `&o=hatch|tint`, `&c=on|off`, `&w=all|390|1280`, `
 - CSS: `.kind.stalled{color:var(--bad)}`.
 - CSS: `.bar i.stl{background:repeating-linear-gradient(135deg,var(--bad) 0 2px,transparent 2px 4px)}`.
 - CSS: `.bar i.pzd{background:transparent;box-shadow:inset 0 0 0 1.5px var(--muted)}`.
-- JS: `segs(d,a,t,p,b,n)` emits `<i class="stl">` and `<i class="pzd">` in the order of item 5. Count
+- JS: `segs(counts, n)` over `tally` emits `<i class="stl">` and `<i class="pzd">` in the order of item 5. Count
   `t` and `p` with `shownState(s)==='stalled'|'paused'`. Change all three calls: `renderNow`,
   `renderRail` and `renderPhase` (the `.ph-head .prog` bar).
 - JS: the bar names and rail labels of item 6, and the Now card words of item 4.
@@ -70,7 +70,7 @@ Deep links: `#s=mixed|dense`, `&o=hatch|tint`, `&c=on|off`, `&w=all|390|1280`, `
   head bars draw a blocked step as to do. Only the rail draws it red. The mockup keeps that. Passing
   the blocked count in both would match the rail. Not blocking.
 
-## Critique (impeccable, single context: no sub-agent tool in a designer)
+## Critique (impeccable, single context: no agent tool in a designer)
 
 The detector found nothing. It reads the harness, not the screen in the frames.
 - Fixed: the harness labels on the Now card covered the phase name. They now sit at the card's

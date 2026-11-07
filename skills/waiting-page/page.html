@@ -3062,7 +3062,7 @@ const unknownRead = (r) => String(r).startsWith("unknown");
 // "unknown (why)" shows as its why, so the word "unknown" appears once on the screen, at the plan.
 const reason = (r) => { const m = /^unknown \(([\s\S]*)\)$/.exec(String(r == null ? "" : r)); return m ? m[1] : String(r == null ? "" : r); };
 const segs = (c, n) => ["done", "act", "stl", "pzd", "blk"].map((k) => `<i class="${k}"></i>`.repeat(c[k])).join("") + "<i></i>".repeat(Math.max(0, n - c.done - c.act - c.stl - c.pzd - c.blk)) + (n ? "" : "<i></i>");
-// The bar's cell counts for a phase's steps, one per cell kind; shownState is the one home for a step's drawn state.
+// The bar's cell counts for a phase's steps, one per cell kind; every read of a step's drawn state goes through shownState.
 const tally = (ss) => ({ done: ss.filter((s) => s.status === "done").length, act: ss.filter((s) => shownState(s) === "active").length, stl: ss.filter((s) => shownState(s) === "stalled").length, pzd: ss.filter((s) => shownState(s) === "paused").length, blk: ss.filter((s) => s.status === "blocked").length });
 // ", 3 stalled, 1 paused", with a kind left out when it has no steps.
 const stallWords = (c) => (c.stl ? ", " + c.stl + " stalled" : "") + (c.pzd ? ", " + c.pzd + " paused" : "");
@@ -3277,10 +3277,10 @@ function renderNow() {
   const active = workOrder(steps.filter((s) => s.status === "active")), nu = nextUp(), off = offTrack();
   $("svNow").innerHTML = `
   <div><h3>Phase${cur.none ? "" : ` <span class="num">${numbered().indexOf(cur) + 1}/${numbered().length}</span>`}</h3><div class="ph">${esc(cur.n)}</div>
-    <div class="lead"><span class="num">${done}</span> of <span class="num">${ss.length}</span> done${act ? `, <span class="num">${act}</span> in progress` : ""}${c.stl ? `, <span class="num">${c.stl}</span> stalled` : ""}${c.pzd ? `, <span class="num">${c.pzd}</span> paused` : ""}</div>
+    <div class="lead"><span class="num">${done}</span> of <span class="num">${ss.length}</span> done${act ? `, <span class="num">${act}</span> in progress` : ""}${c.stl ? `, <span class="num">${c.stl}</span> stalled` : ""}${c.pzd ? `, <span class="num">${c.pzd}</span> paused` : ""}${c.blk ? `, <span class="num">${c.blk}</span> blocked` : ""}</div>
     <div class="segbar" aria-hidden="true">${segs(c, ss.length)}</div>
     <div class="lead">Whole plan <span class="num">${tdone}/${tot}</span> done</div></div>
-  <div><h3>Doing now</h3><ul>${active.map((s) => `<li>${stalledIds.has(s.id) ? rgl("stalled") : pausedIds.has(s.id) ? rgl("paused") : rg("active")}<span class="id">${esc(s.id)}</span><button class="tx" type="button" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join("") || '<li class="none">Nothing in progress. Pick the first step up next.</li>'}</ul></div>
+  <div><h3>Doing now</h3><ul>${active.map((s) => `<li>${["stalled", "paused"].includes(shownState(s)) ? rgl(shownState(s)) : rg("active")}<span class="id">${esc(s.id)}</span><button class="tx" type="button" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join("") || '<li class="none">Nothing in progress. Pick the first step up next.</li>'}</ul></div>
   <div><h3>Up next <span style="font-weight:400">in work order</span></h3><ol>${nu.map((s, i) => `<li><span class="ix">${i + 1}</span><span class="id">${esc(s.id)}</span><button class="tx" type="button" data-go="${esc(s.id)}">${esc(s.title)}</button></li>`).join("") || '<li class="none">Nothing left to start in this phase.</li>'}</ol></div>
   <div class="offt"><h3>Off track <span class="num" style="color:${off.length ? "var(--holds)" : "var(--muted)"}">${off.length}</span></h3><ul>${off.map((o) => {
     const s = steps.find((x) => x.id === o.id);
@@ -3355,7 +3355,7 @@ const countMark = (n) => `<span class="newmark ct" aria-hidden="true" title="${n
 const landed = (id) => { const w = B && B.landed && B.landed[id]; return Array.isArray(w) && w.length ? w : null; };
 function stepRow(s, nextIds) {
   const ni = nextIds.indexOf(s.id), lw = landed(s.id);
-  const stl = stalledIds.has(s.id), pzd = pausedIds.has(s.id), isNew = stepNew(s);
+  const stl = shownState(s) === "stalled", pzd = shownState(s) === "paused", isNew = stepNew(s);
   const tags = [ni >= 0 ? `Next ${ni + 1}` : "", s.status === "blocked" ? "Blocked" : "", lw ? "Landed in " + lw.join(", ") : "", stl ? "Stalled" : "", pzd ? "Paused" : "", isNew ? "Updated since your last visit" : ""];
   const d = when(s.updatedAt), open = ui.open.has(s.id), noteOpen = ui.notes.has(s.id), lbl = stl ? LBL.stalled : pzd ? LBL.paused : LBL[s.status] || LBL.todo;
   return `<li class="${s.status}${stl ? " stl-row" : ""}${open ? " open" : ""}" id="s-${esc(s.id)}">

@@ -49,7 +49,7 @@ stalled mark is already red.
 
 - CSS: `.segbar i.stl { background: repeating-linear-gradient(135deg, var(--holds) 0 2px, transparent 2px 4px); }`.
 - CSS: `.segbar i.pzd { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }`.
-- JS: `segs(d, a, t, p, b, n)` emits `<i class="stl">` and `<i class="pzd">` in the order of item 4.
+- JS: `segs(counts, n)` over `tally` emits `<i class="stl">` and `<i class="pzd">` in the order of item 4.
   Count `t` and `p` with `shownState(s)`. Change all three calls: `renderNow`, `renderRail` and the
   phase head in the phase view.
 - JS: the Now card words of item 3, and the labels of item 5.
@@ -59,7 +59,7 @@ stalled mark is already red.
 - Departs from: `renderNow` passes 0 for blocked to `segs`, so the Now card bar draws a blocked step
   as to do. The rail and phase head draw it red. The mockup keeps that. Not blocking.
 
-## Critique (impeccable, single context: no sub-agent tool in a designer)
+## Critique (impeccable, single context: no agent tool in a designer)
 
 The detector found nothing. It reads the harness, not the screen in the frames.
 - Fixed: the harness labels on the Now card covered the phase name. They now sit at the card's foot.
