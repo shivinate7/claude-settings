@@ -122,7 +122,7 @@ class LeaseCase(unittest.TestCase):
     def env(self, **extra):
         env = {k: v for k, v in os.environ.items() if k not in (
             "CI", "GITHUB_ACTIONS", "CLAUDE_CONFIG_DIR", "SIM_LEASE_WAIT", "SIM_LEASE_POLL", "SIM_LEASE_TEST_UNAME",
-            "SIM_LEASE_NOW", "SIM_LEASE_SKIP")}
+            "SIM_LEASE_NOW", "SIM_LEASE_SKIP", "SIM_LEASE_MAX")}
         env.update(HOME=self.home, CLAUDE_CONFIG_DIR=self.cfg,
                    PATH=self.shims + os.pathsep + os.environ.get("PATH", ""), SIM_LEASE_POLL="1",
                    SIM_LEASE_TEST_LOAD=self.load_file, SIM_LEASE_TEST_LOADLOG=self.load_log,
@@ -393,6 +393,43 @@ class StaleWaiter(LeaseCase):
         self.wait_for(lambda: self.leased(head.pid),
                       "the stale head that polled again is not granted the next free slot")
         self.assertFalse(self.leased(second_later.pid), "a later waiter is granted ahead of the head that polled again")
+
+
+class LeaseExpiry(LeaseCase):
+    """A lease older than SIM_LEASE_MAX seconds since its grant is dropped on the next take, so the next waiter gets its
+    slot. SIM_LEASE_NOW is the clock: the grant is stamped with it, as `seen` is, and a later take reads it. The default
+    is 1800 s (unmeasured)."""
+
+    def clock(self, now, max_s=None):
+        extra = {"SIM_LEASE_NOW": str(now)}
+        if max_s is not None:
+            extra["SIM_LEASE_MAX"] = str(max_s)
+        return extra
+
+    def test_a_lease_older_than_sim_lease_max_is_dropped_for_the_next_waiter(self):
+        holder, second, waiter = self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid, env=self.clock(1000, 60))), (0, "1"))
+        self.assertEqual(grant(self.take("duo", second.pid, env=self.clock(1050, 60))), (0, "2"))
+        r = self.take("duo", waiter.pid, wait=2, env=self.clock(1061, 60))
+        self.assertEqual(grant(r), (0, "1"),
+                         "a lease granted at 1000 is older than SIM_LEASE_MAX=60 at 1061, so the next waiter takes slot 1")
+
+    def test_a_lease_younger_than_sim_lease_max_still_blocks_the_next_waiter(self):
+        holder, second, waiter = self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid, env=self.clock(1000, 60))), (0, "1"))
+        self.assertEqual(grant(self.take("duo", second.pid, env=self.clock(1000, 60))), (0, "2"))
+        r = self.take("duo", waiter.pid, wait=1, env=self.clock(1059, 60))
+        self.assertEqual(r.returncode, 1, "a lease 59 s old is under SIM_LEASE_MAX=60, so the waiter is not granted")
+        lines = self.run_tool("status", env=self.clock(1059, 60)).stdout.splitlines()
+        self.assertTrue(any(line.startswith("lease slot 1 ") and mentions(line, holder.pid) for line in lines),
+                        "the holder keeps slot 1")
+
+    def test_without_sim_lease_max_a_lease_older_than_1800_s_is_dropped(self):
+        holder, second, waiter = self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid, env=self.clock(1000))), (0, "1"))
+        self.assertEqual(grant(self.take("duo", second.pid, env=self.clock(1000))), (0, "2"))
+        r = self.take("duo", waiter.pid, wait=2, env=self.clock(2801))
+        self.assertEqual(grant(r), (0, "1"), "a lease granted at 1000 is 1801 s old at 2801, over the default 1800 s")
 
 
 class Give(LeaseCase):
