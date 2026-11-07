@@ -32,11 +32,11 @@
                           and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
                           measured once on one PR head), one worktree.
                           A repo whose config names merge.laneTests (a profile in REPLAY_PROFILES, hooks/mutate_guard.py) also runs,
-                          in that tree once the lint has passed, the suites the profile's selector lists for the lane's changed
+                          in that tree once the lint has passed (or its unknown is lifted), the suites the profile's selector lists for the lane's changed
                           files, plus the changed suites. A red suite, or one that dies with no verdict, refuses; a select or install
                           failure, or a suite timeout, is an unknown that --lint-unknown-ok lifts (the changed suites still run).
-                          The PASS line counts the suites run. Added cost: one selector run per changed file, one install
-                          (once, for a non-empty set), and the selected suites, each killed at 120 s. A repo without the field pays none.
+                          The PASS line counts the suites run. Added cost: one selector run per changed file, deleted ones too, each killed at 120 s, one install
+                          (once, for a non-empty set, killed at INSTALL_TIMEOUT, 900 s), and the selected suites, each killed at 120 s. A repo without the field pays none.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -2297,20 +2297,16 @@ def base_job_caps(root, ref):
         texts.append(text)
     return job_caps(texts)
 
-def load_config(root, base, path):
-    """The repo's config, read from the base branch on origin: never the local checkout, never the PR tree.
-    No file: all defaults. A file with fields left out: defaults for those fields. A broken file stops."""
+def read_base_config(root, base, path):
+    """The config file as origin/<base> holds it, with no fetch (the caller fetched): the parsed dict, or None when the base has no such
+    file. An unreadable base, or a file that is no JSON object, stops: it is never read as an absent file. The one home of that read:
+    load_config and the lane lint's laneTests read call it."""
     ref = f"origin/{base}"
-    c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
-    if c:
-        raise Stop(f"git fetch origin {base} failed: {out}")
     c, listed = git(root, "ls-tree", "--name-only", ref, "--", path)
     if c:  # an unreadable base is not an absent file
         raise Stop(f"cannot read {ref} to look for {path}: {listed}")
     if not listed:
-        branch = host_default_branch(root)
-        say(f"merge: {path} not found on {ref}. Using the defaults: merge method merge, 45 minute deadline, required checks from branch protection, default branch {branch}.")
-        return {"defaultBranch": branch, "merge": dict(MERGE_DEFAULTS)}
+        return None
     try:
         c, text = git(root, "show", f"{ref}:{path}")
         if c:
@@ -2320,6 +2316,20 @@ def load_config(root, base, path):
             raise ValueError("not an object")
     except ValueError as e:
         raise Stop(f"cannot read the config {path} on {ref}: {e}")
+    return cfg
+
+def load_config(root, base, path):
+    """The repo's config, read from the base branch on origin: never the local checkout, never the PR tree.
+    No file: all defaults. A file with fields left out: defaults for those fields. A broken file stops."""
+    ref = f"origin/{base}"
+    c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+    if c:
+        raise Stop(f"git fetch origin {base} failed: {out}")
+    cfg = read_base_config(root, base, path)
+    if cfg is None:
+        branch = host_default_branch(root)
+        say(f"merge: {path} not found on {ref}. Using the defaults: merge method merge, 45 minute deadline, required checks from branch protection, default branch {branch}.")
+        return {"defaultBranch": branch, "merge": dict(MERGE_DEFAULTS)}
     m = cfg.setdefault("merge", {})
     unknown = sorted(set(m) - MERGE_FIELDS)
     if unknown:
@@ -2449,18 +2459,16 @@ def ci_job_run(wt, *args):
     return "unknown", [f"ci-job exited {c}"], log, False
 
 def lane_tests_profile(root, base, config):
-    """-> (name, profile) of the repo's merge.laneTests, read from origin/<base>, or None when the config or the field is absent.
-    A repo that names none reads no further, so its lane lint is as before. The profile is the one in REPLAY_PROFILES
-    (hooks/mutate_guard.py), the one home of a repo's test selector. A name that is no profile stops, naming the field and the name."""
-    c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
-    if c:
-        raise Stop(f"git fetch origin {base} failed: {out} {LANE_LINT_CITE}")
-    c, text = git(root, "show", f"origin/{base}:{config}")
+    """-> (name, profile) of the repo's merge.laneTests, read from origin/<base>, or None when the config file or the field is absent.
+    The caller has fetched origin/<base> (lane_head_and_base or open_worktree). A config that cannot be read or parsed stops, as
+    `read_base_config` says. A repo that names none reads no further, so its lane lint is as before. The profile is the one in
+    REPLAY_PROFILES (hooks/mutate_guard.py), the one home of a repo's test selector. A name that is no profile stops, naming the field and the name."""
     try:
-        block = json.loads(text).get("merge") if not c else None
-    except (ValueError, AttributeError):
-        block = None  # a config that does not parse says no laneTests here; load_config refuses it where the merge reads it
-    if not isinstance(block, dict) or "laneTests" not in block:
+        cfg = read_base_config(root, base, config)
+    except Stop as stop:
+        raise Stop(f"{stop} {LANE_LINT_CITE}")
+    block = (cfg or {}).get("merge", {})
+    if "laneTests" not in block:
         return None
     name = block["laneTests"]
     if not isinstance(name, str) or not name.strip():
@@ -2485,14 +2493,13 @@ def lane_lint(root, target, host, base="", unknown_ok="", config=".github/stamp.
     if target.isdigit():
         info = (host or Host()).pr(int(target))
         head, base = info["head"], info["base"]
-        lane_tests = lane_tests_profile(root, base, config)  # before any worktree: an unknown profile name costs no lint run
-        tmp, wt = open_worktree(root, info, base)
+        tmp, wt = open_worktree(root, info, base)  # fetches origin/<base>, which the config read below needs
     else:
-        head, base = lane_head_and_base(root, target, base)
-        lane_tests = lane_tests_profile(root, base, config)
+        head, base = lane_head_and_base(root, target, base)  # fetches origin/<base> too
         tmp, wt = add_worktree(root, head)
     suites = None
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
+        lane_tests = lane_tests_profile(root, base, config)  # before the lint run: an unreadable config or an unknown profile name costs no lint run
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}")
         if lane_tests and (state == "pass" or (state == "unknown" and liftable and unknown_ok.strip())):
             import mutate_shared  # hooks/mutate_shared.py: the install, the selector and the suite run live there
@@ -3326,7 +3333,7 @@ def main(argv, host=None, lock=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
     p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")
     p.add_argument("--confirm", action="store_true")
-    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing. With merge.laneTests in the config it also runs the selector's suites (cost: one selector run per changed file, one install, the selected suites)")
+    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing. With merge.laneTests in the config it also runs the selector's suites (cost: one selector call per changed file, one install, the selected suites)")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")

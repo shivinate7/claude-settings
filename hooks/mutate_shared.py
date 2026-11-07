@@ -1014,14 +1014,14 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
         shutil.rmtree(own, ignore_errors=True)
 
 
-def _head_copy(repo: str, rel: str, own: str):
-    """The absolute path of repo-relative file `rel` as the clone's HEAD holds it, extracted into `own` with its whole
-    folder so a sibling it loads from beside itself is there too; None when HEAD has no such file. `git archive`
+def _head_copy(repo: str, rel: str, own: str, ref: str = "HEAD"):
+    """The absolute path of repo-relative file `rel` as the clone's `ref` (HEAD by default) holds it, extracted into `own` with its
+    whole folder so a sibling it loads from beside itself is there too; None when `ref` has no such file. `git archive`
     leaves out an export-ignore sibling, and a symlinked sibling is not copied."""
     import io
     import tarfile
     try:
-        archive = _git(repo, "archive", "HEAD", "--", os.path.dirname(rel) or rel, binary=True)
+        archive = _git(repo, "archive", ref, "--", os.path.dirname(rel) or rel, binary=True)
     except ValueError:
         return None
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
@@ -1035,19 +1035,20 @@ def _head_copy(repo: str, rel: str, own: str):
     return found if os.path.isfile(found) else None
 
 
-def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float, head=None):
+def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float, head=None, prefer_head=False):
     """The changed `suites` that the profile's `select` lists for product file `path`, run in checkout `dest`:
     (suites or None, note). None means no list: select is missing from the profile, or failed, and the note says why
     for a failure. A suite name is a line of the output; any other line is ignored. With `suites` None, every
     listed line that the profile's `tests` regex matches and `dest` holds is a suite, changed or not.
     `head(part)` serves a select argv part that has a "/" and no `{` and that `dest` lacks (a script the commit
-    lacks): the absolute path of the copy at the clone's HEAD, or None. A bare command name is left to PATH.
+    lacks): the absolute path of the copy at the clone's HEAD, or None. With `prefer_head`, `head` serves each such part even
+    when `dest` holds it: the lane path runs the base's selector, never the lane's own. A bare command name is left to PATH.
     The run stays in `dest`."""
     select = profile.get("select")
     if not select:
         return None, ""
     argv = [head(part) or part if head and "/" in part and "{" not in part
-            and not os.path.exists(os.path.join(dest, part)) else part for part in select]
+            and (prefer_head or not os.path.exists(os.path.join(dest, part))) else part for part in select]
     argv = [part.replace("{path}", path) for part in argv]
     try:
         code, output, timed_out = run_in_group(argv, dest, timeout)
@@ -1062,12 +1063,20 @@ def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float, 
     return [suite for suite in suites if suite in listed], ""
 
 
+def run_profile_suite(dest: str, profile: dict, suite: str, folder, timeout: float):
+    """Run `suite` in checkout `dest` as `profile` says: its argv, its classifier, from its cwd, up to `timeout` seconds.
+    -> (kind, seconds), as `run_suite_file`. The one home of that run: the replay and the lane path call it."""
+    return run_suite_file(dest, suite, timeout, argv=suite_argv(profile, suite, folder), classify=CLASSIFIERS[profile["classify"]],
+                          cwd=os.path.join(dest, profile.get("cwd", "")))
+
+
 def lane_suites(wt: str, head: str, base: str, profile: dict, deps_root: str, timeout: float = SUITE_TIMEOUT) -> dict:
     """The suites a lane's head owes its repo's selector, run in `wt` (a checkout of `head`). The lane's changes are the files
-    of merge-base(`base`, `head`)...`head`, no deletes. Per profile part (a profile without "parts" is one part), for each
-    changed file (the part's `code` regex does not filter), `_select_suites` lists the suites that test it;
-    the changed files that its `tests` regex matches join the set. The install runs once when the set is non-empty. Each suite
-    runs with the part's argv and classifier, up to `timeout` seconds.
+    of merge-base(`base`, `head`)...`head`: a delete is a change, and a rename is a delete and an add. Per profile part (a profile
+    without "parts" is one part), `_select_suites` lists the suites that test each changed file (the part's `code` regex does not
+    filter); the changed files that still exist and that its `tests` regex matches join the set. The selector runs from `base`'s
+    copy of its script, never the lane's own. The install runs once when the set is non-empty. Each suite runs as
+    `run_profile_suite` says, up to `timeout` seconds.
     -> {"ran": suites run, "red": [(suite, kind)] for each "assert" or "crash", "unknown": [text]}. A select that fails or
     times out, an install that fails, a read of the diff that fails and a suite that times out are unknown, never red and never
     a pass. A failed select leaves the changed suites of its part to run, as `_select_suites` says."""
@@ -1077,38 +1086,48 @@ def lane_suites(wt: str, head: str, base: str, profile: dict, deps_root: str, ti
     except ValueError as error:
         result["unknown"].append("cannot read the lane's diff: %s" % error)
         return result
-    live = sorted(path for path, status in files.items() if status != "D")
-    for part in (profile["parts"].values() if "parts" in profile else [profile]):
-        tests_re = re.compile(part["tests"])
-        suites = {path for path in live if tests_re.search(path) and _is_suite(wt, head, part, path)}
-        if not part.get("select"):
-            result["unknown"].append("the profile has no select, so the suites that test the lane's files are unknown")
-        for path in live if part.get("select") else []:  # every changed file, not only product code: a selector may map a doc or a config to suites
-            listed, note = _select_suites(part, wt, path, None, timeout)
-            if listed is None:
-                result["unknown"].append(note or "%s: select gave no list" % path)
-            else:
-                suites.update(name for name in listed if _is_suite(wt, head, part, name))
-        if not suites:
-            continue
-        folder, why = _ensure_deps(wt, head, part, deps_root)
-        if why:
-            result["unknown"].append("install failed, so %d suite(s) did not run: %s" % (len(suites), why))
-            continue
-        try:
-            _link_deps(wt, folder, part)
-        except OSError as error:
-            result["unknown"].append("install link failed, so %d suite(s) did not run: %s" % (len(suites), error))
-            continue
-        classify = CLASSIFIERS[part["classify"]]
-        for suite in sorted(suites):
-            kind, _seconds = run_suite_file(wt, suite, timeout, argv=suite_argv(part, suite, folder), classify=classify,
-                                            cwd=os.path.join(wt, part.get("cwd", "")))
-            result["ran"] += 1
-            if kind in ("assert", "crash"):
-                result["red"].append((suite, kind))
-            elif kind != "pass":
-                result["unknown"].append("%s: no verdict (%s after %d s)" % (suite, kind, timeout))
+    changed = sorted(files)
+    live = [path for path in changed if files[path] != "D"]
+    own = tempfile.mkdtemp(prefix="lane_select_")
+    base_copies = {}  # select argv part -> its copy at `base` (None when `base` has none), read once per call
+
+    def from_base(part):
+        if part not in base_copies:
+            base_copies[part] = _head_copy(wt, part, own, base)
+        return base_copies[part]
+
+    try:
+        for part in (profile["parts"].values() if "parts" in profile else [profile]):
+            tests_re = re.compile(part["tests"])
+            suites = {path for path in live if tests_re.search(path) and _is_suite(wt, head, part, path)}
+            if not part.get("select"):
+                result["unknown"].append("the profile has no select, so the suites that test the lane's files are unknown")
+            for path in changed if part.get("select") else []:  # every changed file, deleted ones too: a selector may map a doc or a config to suites
+                listed, note = _select_suites(part, wt, path, None, timeout, from_base, prefer_head=True)
+                if listed is None:
+                    result["unknown"].append(note or "%s: select gave no list" % path)
+                else:
+                    suites.update(name for name in listed if _is_suite(wt, head, part, name))
+            if not suites:
+                continue
+            folder, why = _ensure_deps(wt, head, part, deps_root)
+            if why:
+                result["unknown"].append("install failed, so %d suite(s) did not run: %s" % (len(suites), why))
+                continue
+            try:
+                _link_deps(wt, folder, part)
+            except OSError as error:
+                result["unknown"].append("install link failed, so %d suite(s) did not run: %s" % (len(suites), error))
+                continue
+            for suite in sorted(suites):
+                kind, _seconds = run_profile_suite(wt, part, suite, folder, timeout)
+                result["ran"] += 1
+                if kind in ("assert", "crash"):
+                    result["red"].append((suite, kind))
+                elif kind != "pass":
+                    result["unknown"].append("%s: no verdict (%s after %d s)" % (suite, kind, timeout))
+    finally:
+        shutil.rmtree(own, ignore_errors=True)
     return result
 
 
@@ -1150,12 +1169,6 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
     if why:
         row["reason"] = why
         return row
-    cwd_rel = profile.get("cwd", "")
-    classify = CLASSIFIERS[profile["classify"]]
-
-    def command(suite):
-        return suite_argv(profile, suite, folder)
-
     count = max(1, min(jobs, max(len(suites), len(mutants))))
     spare = queue.Queue()
     made_dirs = []
@@ -1178,8 +1191,7 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
                 spare.put(dest)
 
         def run_one(dest, suite, bound):
-            return run_suite_file(dest, suite, bound, argv=command(suite), classify=classify,
-                                  cwd=os.path.join(dest, cwd_rel))
+            return run_profile_suite(dest, profile, suite, folder, bound)
 
         # The suites that `select` lists for each file. None for a file means no list (no select, or it failed): the
         # changed suites run. With `select_all` the listed suites are the ones to run, so they take the control run.
