@@ -102,6 +102,11 @@ def codes(faults):
     return {f[0] for f in faults}
 
 
+def pairs(faults):
+    """The (code, section) pairs of the faults, so a case names the section a fault is in."""
+    return {(f[0], f[1]) for f in faults}
+
+
 class BriefFaults(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -267,6 +272,13 @@ class BriefFaults(unittest.TestCase):
     def test_font_name_after_a_line_break_is_still_refused(self):
         self.assertIn("token-font", codes(self.m.brief_faults(brief(job=JOB + "\nBody text is set in\nRoboto."))))
 
+    def test_font_word_and_name_split_by_a_line_break_are_refused(self):
+        # "font is" and "Fonts:" end a line and the font name starts the next. Main reads the name across the break.
+        for line in ("Body font is\nCooper Black for text.", "Fonts:\nCooper Black for headings."):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
+                self.assertIn(("token-font", "Job"), found)
+
     def test_colour_word_before_a_part_number_hash_is_no_colour(self):
         # "ink cartridge #1234" names a part. A 4-digit hash after a colour word is an id here, not a hex colour.
         self.assertEqual(self.m.brief_faults(brief(job=JOB + "\nReplace ink cartridge #1234.")), [])
@@ -282,13 +294,45 @@ class BriefFaults(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertIn("token-colour", codes(self.m.brief_faults(brief(job=JOB + "\n" + line))))
 
+    def test_four_digit_hash_right_after_a_colour_word_is_refused(self):
+        found = pairs(self.m.brief_faults(brief(job=JOB + "\nBackground #1234 for the cards.")))
+        self.assertIn(("token-colour", "Job"), found)
+
+    def test_label_with_a_colon_before_a_hex_colour_is_refused(self):
+        # "Item:" and "ID:" name a label, not an id number, so a hash with a hex letter after them is a colour.
+        for line in ("Item: #3d5af1", "ID: #ff8800"):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
+                self.assertIn(("token-colour", "Job"), found)
+
+    def test_plural_or_colon_id_words_before_a_six_digit_hash_pass(self):
+        # "Orders:", "Lots:" and "Boxes" name an id, as "Order" and "Lot" do. The six digits are a number, not a colour.
+        for line in ("Orders: #123456", "Lots: #123456", "Boxes #123456"):
+            with self.subTest(line=line):
+                self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n" + line)), [])
+
     def test_pixel_value_written_in_words_is_refused(self):
         # "12 pixels" is a px value in words. The spacing pattern reads px, rem and dp, so it misses this.
         self.assertIn("token-spacing", codes(self.m.brief_faults(brief(job=JOB + "\nCards have 12 pixels of padding."))))
 
+    def test_screen_width_in_pixels_passes_as_on_main(self):
+        # A width in pixels is no spacing value. Main passes it, so the branch must too.
+        self.assertEqual(self.m.brief_faults(brief(job=JOB + "\nA screen is 1920 pixels wide.")), [])
+
     def test_ios_app_named_in_a_device_section_passes(self):
         # The lane draws an iOS app. "the iOS app" names the product being drawn, not today's product.
         self.assertEqual(self.m.brief_faults(brief(device=DEVICE + "\nThe lane draws the iOS app for this phone.")), [])
+
+    def test_ios_app_as_todays_product_in_a_device_section_is_refused(self):
+        # A Device section exempts only the sentence that draws the iOS app. "Match" it, or say what it "now"
+        # shows, names today's product, and main refuses both as `current` in Device.
+        for line in ("Match the iOS app home screen.", "The iOS app now shows three tabs."):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(device=DEVICE + "\n" + line)))
+                self.assertIn(("current", "Device"), found)
+
+    def test_this_lane_draws_the_ios_app_in_a_device_section_passes(self):
+        self.assertEqual(self.m.brief_faults(brief(device=DEVICE + "\nThis lane draws the iOS app.")), [])
 
     def test_today_product_named_as_the_web_app_or_as_it_is_now_is_still_refused(self):
         for where, line in (("job", "The web app has three tabs."), ("device", "The web app has three tabs."),
