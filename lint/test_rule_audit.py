@@ -361,6 +361,7 @@ SIBLING_MAP = {
     }
 }
 
+
 class KindDocTests(unittest.TestCase):
     """The module docstring keeps the two kinds apart: only `judgment` says no check can judge the rule.
     A reader of `unmechanized` must not read it as the same case (claude-md-shrink)."""
