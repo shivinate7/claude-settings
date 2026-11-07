@@ -706,7 +706,8 @@ def _open_script_blocks(tokens, piped=False):
     its opener and its body, after any token: `if (...) {...}`, `ForEach-Object {...}`,
     `try {...}`. A token that starts inside quotes (`'{$env:X=1}'`, `tokens.quoted`) is text and
     stays whole, and so does a glued block handed to a printing cmdlet (`Write-Host {...}`) that
-    prints it and never runs it (`block_is_printed`: not piped onward, no call on the block).
+    prints it and never runs it (`block_is_printed`: not piped onward, not stored, no call on
+    the block).
     Known ceiling: an unquoted block passed as an argument to
     any other command, or spaced from its braces (`Write-Host { ... }`), is read as code too, a
     false deny, the safe side."""
@@ -714,7 +715,7 @@ def _open_script_blocks(tokens, piped=False):
     out = []
     for i, tok in enumerate(tokens):
         if i in quoted or (len(tok) > 1 and tok[0] == "{" and tok[-1] == "}" and i and i - 1 not in quoted
-                           and block_is_printed(tokens[i - 1:], piped)):
+                           and block_is_printed(tokens, i - 1, piped)):
             out.append(tok)
             continue
         while (opens := _PS_BLOCK_OPEN.match(tok)) and len(tok) > opens.end():

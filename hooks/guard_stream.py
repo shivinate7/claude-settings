@@ -208,7 +208,7 @@ def watch_flag(args) -> bool:
     return False
 
 
-def waiter_verdict(segments, background: bool) -> str:
+def waiter_verdict(segments, background: bool, ends=()) -> str:
     """Return the matched text when a command waits by looping, else ''.
 
     Refused: a loop around a sleep, two or more sleeps, one sleep of SLEEP_LIMIT seconds or
@@ -216,7 +216,7 @@ def waiter_verdict(segments, background: bool) -> str:
     `gh pr checks --watch`. Allowed: one short sleep, and `gh pr checks --watch` with
     run_in_background."""
     sleeps, loop, watcher, run_watch = [], False, "", ""
-    for segment in segments:
+    for at_segment, segment in enumerate(segments):
         # Braces get their own token, so a compact `while(1){Start-Sleep 1}` reads like a spaced one.
         tokens = segment_tokens(re.sub(r"([{}])", r" \1 ", segment))
         if not tokens:
@@ -228,7 +228,10 @@ def waiter_verdict(segments, background: bool) -> str:
         word = basename(tokens[index]).lower()
         # A PowerShell loop keeps its sleep in a `{ ... }` block inside the same segment. A printing
         # command (`echo {sleep}`) shows its block and never runs it, unless a call follows it.
-        blocks = () if block_is_printed(tokens[index:]) else (i + 1 for i, t in enumerate(tokens[:-1]) if t == "{")
+        # `ends` (split_segments) says which segment pipes its output on to a runner.
+        printed = block_is_printed(tokens, index, at_segment < len(ends) and ends[at_segment] == "|",
+                                   " ".join(segments[at_segment + 1:]))
+        blocks = () if printed else (i + 1 for i, t in enumerate(tokens[:-1]) if t == "{")
         for at in sorted({index, *blocks}):
             if basename(tokens[at]).lower() in WAITER_COMMANDS:
                 sleeps.append((tokens[at], sleep_seconds(tokens, at)))
