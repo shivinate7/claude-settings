@@ -238,6 +238,7 @@
 - records-page-reader-gaps: the records-page guard misses commit -i, rebase, cherry-pick, am, revert, sh -c scripts and python -m generator runs (hooks/guard_merge.py)
 - reload-missing-file-unpinned: no kept case covers a missing guard_pointer.py during the reload wait (hooks/test_guard.py, hooks/guard.py)
 - repo-home-backtick-then-comma: a repo home of a backtick, then a comma, still blocks as malformed, because unwrap runs before the comma strip. Ruling homes behave the same. Decision: owner-feedback-inbox.
+- reviewer-rm-outside-scratch: a reviewer agent ran `rm -f /tmp/x` on a shared /tmp path it had not written (its write was refused), and its report claimed it "filed a debt" it could not write (reviewer agent on PR #1604, 2026-11-07). Fix: none — rare and harmless. Until: 2026-11-21
 - rm-shim-bypass-forms: /bin/rm, command rm and find -delete skip the rm shim (bin/rm)
 - rm-shim-call-cost: a recursive rm costs about 40 ms, and the marker search reads byte by byte (bin/rm)
 - rm-shim-cloud-path: the PATH step skips cloud mode, so the rm shim is off in cloud sessions (install.sh)
