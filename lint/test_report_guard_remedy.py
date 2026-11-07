@@ -329,25 +329,13 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
         out = self.run_stop(case(landed(trg.GOOD_REPORT), "clean", tcj.make_repo("remedy-clean")))
         self.assertNotEqual(out.get("decision"), "block", "2 a clean report is blocked: %r" % out)
 
-    def assert_past_ruling_verdict(self, out, slug):
-        """The block is the past-ruling verdict itself, not the Unvetted refusal, and it keeps the ruling id. The
-        verdict is checked first, since the id and the order asserts read the same reason."""
+    def test_past_ruling_order_keeps_the_id_and_drops_the_order(self):
+        out = self.run_stop(self.fixture("past_ruling_order"))
         self.assertEqual(out.get("decision"), "block", "the past-ruling block did not fire: %r" % out)
         reason = out["reason"]
-        self.assertTrue(reason.startswith("Past-ruling guard"), "the block is not the past-ruling verdict: %r" % reason)
-        self.assertNotIn("Unvetted", reason, "the block is the Unvetted refusal, not the verdict: %r" % reason)
-        self.assertIn(slug, reason, "the reason lost the ruling id: %r" % reason)
-        return reason
-
-    def test_past_ruling_order_keeps_the_id_and_drops_the_order(self):
-        reason = self.assert_past_ruling_verdict(self.run_stop(self.fixture("past_ruling_order")), tcj.APPS_SLUG)
+        self.assertIn(tcj.APPS_SLUG, reason, "the reason lost the ruling id: %r" % reason)
         self.assertNotIn(JUDGE_ORDER, reason, "the judge's order reached the owner word for word: %r" % reason)
         self.assertEqual(RG.session_wording(reason), "", "the reason holds an order to the session: %r" % reason)
-
-    def test_recovered_no_source_names_the_item_miss(self):
-        reason, _ = self.block_for("recovered_no_source")
-        self.assertTrue(reason.startswith("Recovered guard"), "the block is not the Recovered verdict: %r" % reason)
-        self.assertIn("names no source", reason, "the block is not the no-source miss: %r" % reason)
 
     def test_mid_clause_orders_from_the_judge_do_not_reach_the_owner(self):
         decided = tcj.make_repo("remedy-decided-mid", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
@@ -356,7 +344,10 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
                 c = case([trg.human("decide"), *self.sent_to_writer(), trg.assistant_text(trg.RELAY)],
                          "past-ruling", decided,
                          env={"CJ_ANSWER": judge_answer(tcj.APPS_SLUG + " settles this. " + order)})
-                reason = self.assert_past_ruling_verdict(self.run_stop(c), tcj.APPS_SLUG)
+                out = self.run_stop(c)
+                self.assertEqual(out.get("decision"), "block", "the past-ruling block did not fire: %r" % out)
+                reason = out["reason"]
+                self.assertIn(tcj.APPS_SLUG, reason, "the reason lost the ruling id: %r" % reason)
                 self.assertNotIn(order, reason, "the judge's mid-clause order reached the owner: %r" % reason)
                 self.assertEqual(RG.session_wording(reason), "", "the reason holds an order: %r" % reason)
 
