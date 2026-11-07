@@ -408,19 +408,24 @@ test("a read but unfiled answer shows Read by the owner beside Change", async (t
 // The day of a read is its US Central day. CST is UTC-6 after Nov 1, 2026. Each pair is a read and the clock it is seen at.
 // READ_EARLIER: read Nov 6 23:30 CST, seen Nov 7 00:30 CST. Both are the same UTC day, so a day taken from UTC drops it.
 // READ_TODAY: read Nov 6 17:30 CST, seen Nov 6 18:30 CST. The UTC days differ, so a day taken from UTC shows one here.
+// The spaces in a read time are U+00A0, so its date and its clock wrap only as a whole.
 const READ_EARLIER = { read: "2026-11-07T05:30:00Z", clock: "2026-11-07T06:30:00Z" };
 const READ_TODAY = { read: "2026-11-06T23:30:00Z", clock: "2026-11-07T00:30:00Z" };
 
 test("a receipt read on an earlier Central day shows its day", async (t) => {
   const page = await open(t, { answers: SAVED_A, receipts: { [DECISION.id]: { read: READ_EARLIER.read } }, clock: READ_EARLIER.clock }); if (!page) return;
   await mustHave(page, `#item-${DECISION.id} .receipt .read`, "the receipt's read line");
-  assert.equal((await card(page, DECISION).locator(".receipt .read").textContent()).trim(), "Read by test thread Nov 6, 23:30 CST", "the receipt's read line drops the day of a read on an earlier Central day");
+  const read = (await card(page, DECISION).locator(".receipt .read").textContent()).trim();
+  assert.equal(read.replace(/\u00a0/g, " "), "Read by test thread Nov 6, 23:30 CST", "the receipt's read line drops the day of a read on an earlier Central day");
+  assert.equal(read, "Read by test thread Nov\u00a06,\u00a023:30\u00a0CST", "the receipt's read time has an ordinary space, not a non-breaking one, so it can wrap between its date and its time");
 });
 
 test("a receipt read on the same Central day shows the time only", async (t) => {
   const page = await open(t, { answers: SAVED_A, receipts: { [DECISION.id]: { read: READ_TODAY.read } }, clock: READ_TODAY.clock }); if (!page) return;
   await mustHave(page, `#item-${DECISION.id} .receipt .read`, "the receipt's read line");
-  assert.equal((await card(page, DECISION).locator(".receipt .read").textContent()).trim(), "Read by test thread 17:30 CST", "the receipt's read line shows a day for a read on the same Central day");
+  const read = (await card(page, DECISION).locator(".receipt .read").textContent()).trim();
+  assert.equal(read.replace(/\u00a0/g, " "), "Read by test thread 17:30 CST", "the receipt's read line shows a day for a read on the same Central day");
+  assert.equal(read, "Read by test thread 17:30\u00a0CST", "the receipt's same-day read time has an ordinary space, not a non-breaking one, so it can wrap between its time and CST");
 });
 
 test("a receipt older than the answer is ignored: a changed answer reads filing pending", async (t) => {
@@ -3513,14 +3518,18 @@ test("an ask read on an earlier Central day shows its day", async (t) => {
   const ask = { id: "ask-rd1", text: "Asked before an earlier Central day", at: "2026-11-06T15:00:00Z", owner: "triage", read: READ_EARLIER.read };
   const page = await open(t, { dbExtra: { asks: { [ask.id]: ask } }, clock: READ_EARLIER.clock }); if (!page) return;
   await shownBox(page, ask.text);
-  assert.equal(await reachOf(page, ask.text), "Read by triage Nov 6, 23:30 CST. Waiting for its answer.", "the ask's read line drops the day of a read on an earlier Central day");
+  const read = await reachOf(page, ask.text);
+  assert.equal(read.replace(/\u00a0/g, " "), "Read by triage Nov 6, 23:30 CST. Waiting for its answer.", "the ask's read line drops the day of a read on an earlier Central day");
+  assert.equal(read, "Read by triage Nov\u00a06,\u00a023:30\u00a0CST. Waiting for its answer.", "the ask's read time has an ordinary space, not a non-breaking one, so it can wrap between its date and its time");
 });
 
 test("an ask read on the same Central day shows the time only", async (t) => {
   const ask = { id: "ask-rd2", text: "Asked before the same Central day", at: "2026-11-06T15:00:00Z", owner: "triage", read: READ_TODAY.read };
   const page = await open(t, { dbExtra: { asks: { [ask.id]: ask } }, clock: READ_TODAY.clock }); if (!page) return;
   await shownBox(page, ask.text);
-  assert.equal(await reachOf(page, ask.text), "Read by triage 17:30 CST. Waiting for its answer.", "the ask's read line shows a day for a read on the same Central day");
+  const read = await reachOf(page, ask.text);
+  assert.equal(read.replace(/\u00a0/g, " "), "Read by triage 17:30 CST. Waiting for its answer.", "the ask's read line shows a day for a read on the same Central day");
+  assert.equal(read, "Read by triage 17:30\u00a0CST. Waiting for its answer.", "the ask's same-day read time has an ordinary space, not a non-breaking one, so it can wrap between its time and CST");
 });
 
 test("Add to list stacks asks in typed order, past three, and nothing reaches the store until Send", async (t) => {
