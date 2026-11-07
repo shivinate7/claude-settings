@@ -6,14 +6,9 @@
 // src/retry_check.py and src/run_retry_check.py for src/retry.py. Each failing case edits its own scratch copy of the fixture, and each
 // run goes through `scripts/map-check.mjs`. The spec file for T9 (the 4 to 5 upgrade) is format-version.test.mjs, case 2d: one home for the step.
 //
-// Red on the old code. The fixture holds formatVersion 5, and the old validator refuses a newer map before any check runs. So each case
-// goes red on that refusal, and its output names it. Once the skill reads version 5, each case goes red on its own MAP11 verdict, which
-// the old code never prints. Every MAP11 failure assertion names the page, the test and the file it is about.
-//
-// Assumed. The spec names the cases but not the messages, so these read the spec's own claims:
-//   - an unindented tested-by line, a line with no backticks, and a `;` separator each fail, and the failure names the page (T7d to T7f).
-//   - `import pkgpy` loads `pkgpy/__init__.py` by its package name (T8d, T8e).
-//   - a map line whose tested-by line is missing passes: the line is optional (T1b).
+// What each block pins: T1 the verdict on the clean fixture, T2 to T5 the link rules and the scanner traps, T6 how a shell test
+// loads a file, T7 the placement and form of a tested-by line, T8 the one hop through a package. Every MAP11 failure assertion
+// names the page, the test and the file it is about.
 //
 // Cases:
 //   T1   the clean fixture passes. T1b: no tested-by line at all passes. T1c, T1d: full size, 40 tests on one line, all pass; one that does not load the file fails.
@@ -39,9 +34,14 @@
 //        The edges of the bound-anchor rule: a bind to a mktemp folder after a known place counts for nothing (T6ao), a default
 //        value in a bind counts (T6ap), two places for one name count for nothing (T6aq), a use before the bind does not count (T6ar),
 //        a bind inside a string, on its own line (T6as) or after `;` in a string (T6at), and a bare `$BASH_SOURCE` base counts (T6au).
-//        A literal default `${NAME:-src/retry.py}` counts as that literal path (T6av). A rebind by `local`, `for`, `read`, or by
-//        `NAME=$OTHER` after `&&` or `||`, counts for nothing, even when it names the same place (T6aw to T6ba). `cd --`, `dirname`
-//        of a bound name (its parent place), `readlink -f` and `realpath` of a bound place count as that place (T6bb to T6bf).
+//        A literal default `${NAME:-src/retry.py}` counts as that literal path (T6av). A `local`, `declare` or `typeset` with a value is a
+//        bind: at the same place it keeps the name (T6aw, T6bs), at another place it voids it (T6bu, T6bv). With no value, `declare -r ROOT`
+//        changes nothing (T6bt). A rebind by `for`, `read`, or by `NAME=$OTHER` after `&&` or `||` counts for nothing, even at the same
+//        place (T6ax to T6ba). A rebind after `then`, `else`, `do`, `{`, `(`, `case x)`, `+=` or `unset` voids the name (T6bk to T6br).
+//        A `read` voids it for the whole file, even a use above it (T6by). The same text inside a string or a comment is no rebind (T6bz, T6ca).
+//        `cd --`, `dirname` of a bound name (its parent place), `readlink -f` and `realpath` of a bound place count as that place (T6bb to T6bf).
+//        `realpath -s` and `readlink -e` count for nothing (T6bw, T6bx). `dirname "$X/.."` is X itself, as the shell's text dirname gives:
+//        in src/deep/, `ROOT="$(dirname "$HERE/..")"` loads src/deep/retry.py and not the root file (T6bg to T6bj).
 //   T7   placement and form. A tested-by line under a table line (T7a), a screen line (T7b) or a home (T7c) fails. Unindented (T7d), with no
 //        backticks (T7e), or with a `;` separator (T7f), it fails. Under a map line after a decisions line (T7g), it passes.
 //        Under a backtick line in a Notes section it is an orphan and fails (T7h): a tested-by line is valid only under a Code files map line.
@@ -120,11 +120,28 @@ const mustNotLoad = (r, rel, cause = 'MAP11 must FAIL on this map') => {
   assert.doesNotMatch(line, /unknown read|could not read/, `MAP11 must judge ${rel} as a read that loads nothing, not as an unknown read\n${line}`);
   assert.match(line, /does not load/, `MAP11 must say ${rel} does not load the file\n${line}`);
 };
-/** Writes the test file `rel` of a scratch repository, marks it `git add -N`, and names it alone on the tested-by line of src/retry.py. */
-const soleTest = (dir, rel, body) => {
+/** Writes the test file `rel` of a scratch repository, marks it `git add -N`, and names it alone on the tested-by line of `file` (src/retry.py by default). */
+const soleTest = (dir, rel, body, file = 'src/retry.py') => {
   writeAt(dir, rel, body);
   gitIn(dir, 'add', '-N', rel);
-  setTestedBy(dir, 'src/retry.py', tested(rel));
+  setTestedBy(dir, file, tested(rel));
+};
+
+/** Adds `lines` at the end of the Code files section of the scratch docs/map/core.md. */
+const addCodeLines = (dir, lines) => {
+  const ls = linesAt(dir, CORE);
+  ls.splice(onlyLine(ls, '## Tables', CORE) - 1, 0, ...lines);
+  putLines(dir, CORE, ls);
+};
+
+/** A scratch repository with src/deep/retry.py and the root retry.py, each tracked and on a map line of its own. */
+const deepRepo = () => {
+  const dir = scratchRepo();
+  writeAt(dir, 'src/deep/retry.py', 'RETRY_WAIT_S = 30\n');
+  writeAt(dir, 'retry.py', 'RETRY_WAIT_S = 30\n');
+  gitIn(dir, 'add', '-N', 'src/deep/retry.py', 'retry.py');
+  addCodeLines(dir, ['- `src/deep/retry.py` — Holds the retry wait of the deep folder.', '- `retry.py` — Holds the retry wait of the root.']);
+  return dir;
 };
 
 // ---- Cases.
@@ -788,14 +805,14 @@ test('T6av. a literal default counts as its literal path: a shell test with `SET
   mustPass(check(dir), 'a literal default ${X:-src/retry.py} must count as the path src/retry.py, so SETUP_SH loads the file');
 });
 
-test('T6aw. a rebind by `local` counts for nothing, even at the same place: a shell test that binds HERE to the test folder, then rebinds it with `local` in a function, then `python3 "$HERE/retry.py"`, does not load the file', () => {
+test('T6aw. a `local` with a value is a bind: at the same place it keeps HERE, so the call in the function loads src/retry.py', () => {
   needFile(REL);
   const dir = scratchRepo();
   soleTest(dir, 'src/retry_check.sh', '#!/bin/bash\nHERE="$(dirname "$0")"\nf() {\n  local HERE="$(dirname "$0")"\n  python3 "$HERE/retry.py"\n}\nf\n');
-  // The scope first: the local rebind names the same place as the first bind, and src/retry.py exists, so the first bind alone would load it.
-  assert.match(readAt(dir, 'src/retry_check.sh'), /^  local HERE="\$\(dirname "\$0"\)"$/m, 'the function must rebind HERE with local');
+  // The scope first: the local bind names the same place as the first bind, and src/retry.py exists, so the first bind alone would load it.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^  local HERE="\$\(dirname "\$0"\)"$/m, 'the function must bind HERE with local');
   assert.ok(existsSync(join(dir, 'src/retry.py')), 'src/retry.py must exist');
-  mustNotLoad(check(dir), 'src/retry_check.sh', 'a local rebind of HERE counts for nothing, so MAP11 must FAIL: the reader kept the first bind');
+  mustPass(check(dir), 'a local with a value at the same place keeps HERE, so MAP11 must PASS: the reader voided HERE');
 });
 
 test('T6ax. a rebind by `for` counts for nothing, even at the same place: a shell test that binds HERE, then loops `for HERE in "$(dirname "$0")"`, then `python3 "$HERE/retry.py"`, does not load the file', () => {
@@ -886,6 +903,166 @@ test('T6bf. `realpath` of a bound place counts as that place: a shell test that 
   assert.match(readAt(dir, 'src/retry_check.sh'), /^ROOT="\$\(realpath "\$HERE\/\.\."\)"$/m, 'ROOT must be bound with realpath of HERE/..');
   assert.equal(existsSync(join(dir, 'src', 'src', 'retry.py')), false, 'src/src/retry.py must not exist');
   mustPass(check(dir), 'realpath of the bound place HERE/.. is the root, so ROOT is the root and the tail $ROOT/src/retry.py loads the file');
+});
+
+test('T6bg. control, green on the old code: a shell test in src/deep/ with `HERE="$(dirname "$0")"`, then `python3 "$HERE/retry.py"`, loads src/deep/retry.py', () => {
+  needFile(REL);
+  const dir = deepRepo();
+  soleTest(dir, 'src/deep/retry_check.sh', '#!/bin/sh\nHERE="$(dirname "$0")"\npython3 "$HERE/retry.py"\n', 'src/deep/retry.py');
+  // The scope first: the call names retry.py from HERE, which is the test's own folder src/deep.
+  assert.match(readAt(dir, 'src/deep/retry_check.sh'), /^python3 "\$HERE\/retry\.py"$/m, 'the call must name retry.py from HERE');
+  mustPass(check(dir), 'HERE is src/deep, so the call loads src/deep/retry.py');
+});
+
+test('T6bh. control, green on the old code: a shell test in src/deep/ with `python3 "$HERE/../../retry.py"` loads the root retry.py', () => {
+  needFile(REL);
+  const dir = deepRepo();
+  soleTest(dir, 'src/deep/retry_check.sh', '#!/bin/sh\nHERE="$(dirname "$0")"\npython3 "$HERE/../../retry.py"\n', 'retry.py');
+  // The scope first: the call climbs two folders from HERE, so it names the root file.
+  assert.match(readAt(dir, 'src/deep/retry_check.sh'), /^python3 "\$HERE\/\.\.\/\.\.\/retry\.py"$/m, 'the call must climb two folders from HERE');
+  mustPass(check(dir), 'HERE/../.. is the root, so the call loads the root retry.py');
+});
+
+// The shell reads dirname of HERE/.. as HERE itself, so ROOT is src/deep and the call names src/deep/retry.py.
+const DEEP_ROOT_BODY = '#!/bin/sh\nHERE="$(dirname "$0")"\nROOT="$(dirname "$HERE/..")"\npython3 "$ROOT/retry.py"\n';
+
+test('T6bi. `ROOT="$(dirname "$HERE/..")"` in src/deep/ loads src/deep/retry.py: the shell reads dirname of src/deep/.. as src/deep', () => {
+  needFile(REL);
+  const dir = deepRepo();
+  soleTest(dir, 'src/deep/retry_check.sh', DEEP_ROOT_BODY, 'src/deep/retry.py');
+  // The scope first: ROOT is bound by dirname of HERE/.., and the call names the file from ROOT.
+  assert.match(readAt(dir, 'src/deep/retry_check.sh'), /^ROOT="\$\(dirname "\$HERE\/\.\."\)"$/m, 'ROOT must be bound by dirname of HERE/..');
+  mustPass(check(dir), 'the shell reads dirname of src/deep/.. as src/deep, so ROOT is src/deep and the call loads src/deep/retry.py');
+});
+
+test('T6bj. the same test does not load the root retry.py: MAP11 fails on the root line, and names the test', () => {
+  needFile(REL);
+  const dir = deepRepo();
+  soleTest(dir, 'src/deep/retry_check.sh', DEEP_ROOT_BODY, 'retry.py');
+  // The scope first: the same ROOT binding, and the root line is the one that holds the tested-by line.
+  assert.match(readAt(dir, 'src/deep/retry_check.sh'), /^ROOT="\$\(dirname "\$HERE\/\.\."\)"$/m, 'ROOT must be bound by dirname of HERE/..');
+  mustNotLoad(check(dir), 'src/deep/retry_check.sh', 'the shell reads dirname of src/deep/.. as src/deep, so the call loads the deep file and not the root retry.py: MAP11 must FAIL on the root line');
+});
+
+// The rebind forms of T6bk to T6br. Each line sits after `ROOT=$(dirname "$0")/..` and before the call, and rebinds ROOT to /tmp.
+const REBIND_FORMS = [
+  ['T6bk', 'then', 'if true; then ROOT=/tmp; fi'],
+  ['T6bl', 'else', 'if false; then :; else ROOT=/tmp; fi'],
+  ['T6bm', 'do', 'for i in 1; do ROOT=/tmp; done'],
+  ['T6bn', '{', '{ ROOT=/tmp; }'],
+  ['T6bo', '(', '(ROOT=/tmp)'],
+  ['T6bp', 'case x)', 'case "$1" in x) ROOT=/tmp ;; esac'],
+  ['T6bq', 'ROOT+=', 'ROOT+=/tmp'],
+  ['T6br', 'unset', 'unset ROOT'],
+];
+
+for (const [id, form, line] of REBIND_FORMS) {
+  test(`${id}. a rebind of ROOT after "${form}" on the same line voids it: the call does not load src/retry.py`, () => {
+    needFile(REL);
+    const body = (l) => `#!/bin/bash\nROOT=$(dirname "$0")/..\n${l}\npython3 "$ROOT/src/retry.py"\n`;
+    // The control first: OTHER in place of ROOT leaves ROOT bound, so the call loads the file. A red here would blame the form, not the ROOT rebind.
+    const ctl = scratchRepo();
+    soleTest(ctl, 'src/retry_check.sh', body(line.replaceAll('ROOT', 'OTHER')));
+    mustPass(check(ctl), `control: after "${form}" a rebind of OTHER leaves ROOT bound, so the call loads src/retry.py`);
+    const dir = scratchRepo();
+    soleTest(dir, 'src/retry_check.sh', body(line));
+    // The scope first: the form line is in the test, and src/retry.py exists, so the first bind alone would load it.
+    assert.ok(readAt(dir, 'src/retry_check.sh').split('\n').includes(line), `the test must hold the line ${line}`);
+    assert.ok(existsSync(join(dir, 'src/retry.py')), 'src/retry.py must exist');
+    mustNotLoad(check(dir), 'src/retry_check.sh', `a rebind of ROOT after "${form}" voids it, so MAP11 must FAIL: the reader kept the first bind`);
+  });
+}
+
+test('T6bs. `declare -r ROOT="$(dirname "$0")/.."` with a value is a bind: at the same place it keeps ROOT, so the call loads src/retry.py', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/bash\nROOT=$(dirname "$0")/..\ndeclare -r ROOT="$(dirname "$0")/.."\npython3 "$ROOT/src/retry.py"\n');
+  // The scope first: the declare carries a value at the same place as the first bind, and src/retry.py exists, so the first bind alone would load it.
+  assert.ok(readAt(dir, 'src/retry_check.sh').split('\n').includes('declare -r ROOT="$(dirname "$0")/.."'), 'the test must hold the declare with a value');
+  assert.ok(existsSync(join(dir, 'src/retry.py')), 'src/retry.py must exist');
+  mustPass(check(dir), 'a declare with a value at the same place keeps ROOT, so MAP11 must PASS: the reader voided ROOT');
+});
+
+test('T6bt. `declare -r ROOT` with no value changes nothing: ROOT keeps its place, so the call loads src/retry.py', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/bash\nROOT=$(dirname "$0")/..\ndeclare -r ROOT\npython3 "$ROOT/src/retry.py"\n');
+  // The scope first: the declare carries no value, and src/retry.py exists, so the first bind alone would load it.
+  assert.ok(readAt(dir, 'src/retry_check.sh').split('\n').includes('declare -r ROOT'), 'the test must hold a declare with no value');
+  assert.ok(existsSync(join(dir, 'src/retry.py')), 'src/retry.py must exist');
+  mustPass(check(dir), 'a declare with no value changes nothing, so MAP11 must PASS: the reader voided ROOT');
+});
+
+test('T6bu. `declare -r ROOT="$(dirname "$0")"` at another place voids ROOT: the call does not load src/retry.py, though the first bind would', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/bash\nROOT=$(dirname "$0")/..\ndeclare -r ROOT="$(dirname "$0")"\npython3 "$ROOT/src/retry.py"\n');
+  // The scope first: the declare names src/, so the call reads src/src/retry.py, and src/retry.py exists for the stale bind to load.
+  assert.ok(readAt(dir, 'src/retry_check.sh').split('\n').includes('declare -r ROOT="$(dirname "$0")"'), 'the test must hold the declare at another place');
+  assert.ok(existsSync(join(dir, 'src/retry.py')), 'src/retry.py must exist');
+  assert.equal(existsSync(join(dir, 'src', 'src', 'retry.py')), false, 'src/src/retry.py must not exist');
+  mustNotLoad(check(dir), 'src/retry_check.sh', 'a declare with a value at another place voids ROOT, so MAP11 must FAIL: the reader kept the first bind');
+});
+
+test('T6bv. `local HERE=/tmp` in a function voids HERE: the call does not load src/retry.py, though the first bind would', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/bash\nHERE="$(dirname "$0")"\nf() {\n  local HERE=/tmp\n  python3 "$HERE/retry.py"\n}\nf\n');
+  // The scope first: the local names /tmp, and src/retry.py exists for the stale bind of HERE to load.
+  assert.ok(readAt(dir, 'src/retry_check.sh').split('\n').includes('  local HERE=/tmp'), 'the function must bind HERE with local to /tmp');
+  assert.ok(existsSync(join(dir, 'src/retry.py')), 'src/retry.py must exist');
+  mustNotLoad(check(dir), 'src/retry_check.sh', 'a local with a value at another place voids HERE, so MAP11 must FAIL: the reader kept the first bind');
+});
+
+test('T6bw. `realpath -s "$HERE/.."` counts for nothing: the call does not load src/retry.py', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nHERE="$(dirname "$0")"\nROOT="$(realpath -s "$HERE/..")"\npython3 "$ROOT/src/retry.py"\n');
+  // The scope first: the option is -s, and src/src/retry.py must not exist, so only the root place could load src/retry.py.
+  assert.ok(readAt(dir, 'src/retry_check.sh').split('\n').includes('ROOT="$(realpath -s "$HERE/..")"'), 'ROOT must be bound with realpath -s');
+  assert.equal(existsSync(join(dir, 'src', 'src', 'retry.py')), false, 'src/src/retry.py must not exist');
+  mustNotLoad(check(dir), 'src/retry_check.sh', 'realpath -s counts for nothing, so MAP11 must FAIL: ROOT is unknown and the call loads nothing');
+});
+
+test('T6bx. `readlink -e "$HERE/.."` counts for nothing: the call does not load src/retry.py', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nHERE="$(dirname "$0")"\nROOT="$(readlink -e "$HERE/..")"\npython3 "$ROOT/src/retry.py"\n');
+  // The scope first: the option is -e, and src/src/retry.py must not exist, so only the root place could load src/retry.py.
+  assert.ok(readAt(dir, 'src/retry_check.sh').split('\n').includes('ROOT="$(readlink -e "$HERE/..")"'), 'ROOT must be bound with readlink -e');
+  assert.equal(existsSync(join(dir, 'src', 'src', 'retry.py')), false, 'src/src/retry.py must not exist');
+  mustNotLoad(check(dir), 'src/retry_check.sh', 'readlink -e counts for nothing, so MAP11 must FAIL: ROOT is unknown and the call loads nothing');
+});
+
+test('T6by. a `read` rebind of ROOT voids it for the whole file: the call above it does not load src/retry.py', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nROOT="$(dirname "$0")/.."\npython3 "$ROOT/src/retry.py"\nread -r ROOT\n');
+  // The scope first: the call comes before the read, and src/retry.py exists, so the first bind alone would load it.
+  const lines = readAt(dir, 'src/retry_check.sh').split('\n');
+  assert.ok(lines.indexOf('read -r ROOT') > lines.findIndex((l) => l.startsWith('python3 ')), 'the read must come after the call');
+  assert.ok(existsSync(join(dir, 'src/retry.py')), 'src/retry.py must exist');
+  mustNotLoad(check(dir), 'src/retry_check.sh', 'a read rebind voids ROOT for the whole file, even the use above it, so MAP11 must FAIL');
+});
+
+test('T6bz. the text `if true; then ROOT=/tmp; fi` inside a single-quoted string is no rebind: the call loads src/retry.py', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', `#!/bin/bash\nROOT="$(dirname "$0")/.."\necho 'if true; then ROOT=/tmp; fi'\npython3 "$ROOT/src/retry.py"\n`);
+  // The scope first: the rebind-looking text sits inside single quotes, and src/retry.py exists.
+  assert.ok(readAt(dir, 'src/retry_check.sh').split('\n').includes("echo 'if true; then ROOT=/tmp; fi'"), 'the test must hold the form inside single quotes');
+  assert.ok(existsSync(join(dir, 'src/retry.py')), 'src/retry.py must exist');
+  mustPass(check(dir), 'a rebind-looking text inside a single-quoted string is text, so ROOT keeps its place and the call loads src/retry.py');
+});
+
+test('T6ca. the text `if true; then ROOT=/tmp; fi` in a comment is no rebind: the call loads src/retry.py', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', `#!/bin/bash\nROOT="$(dirname "$0")/.."\n# if true; then ROOT=/tmp; fi\npython3 "$ROOT/src/retry.py"\n`);
+  // The scope first: the rebind-looking text sits in a comment line, and src/retry.py exists.
+  assert.ok(readAt(dir, 'src/retry_check.sh').split('\n').includes('# if true; then ROOT=/tmp; fi'), 'the test must hold the form in a comment');
+  assert.ok(existsSync(join(dir, 'src/retry.py')), 'src/retry.py must exist');
+  mustPass(check(dir), 'a rebind-looking text in a comment is text, so ROOT keeps its place and the call loads src/retry.py');
 });
 
 test('T7a. a tested-by line under a table line fails, and the output names the page', () => {
