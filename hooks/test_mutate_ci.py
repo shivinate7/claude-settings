@@ -233,6 +233,7 @@ ORACLE_SUITE = ("import os\n"
                 "print('ok')\n")
 ROOT_LOCK, APP_LOCK = "requirements.lock", "app/deps.lock"  # committed, so their hashes are the cache keys
 LOCK_TEXT = "kb-oracle==1.0\n"
+FAILING_INSTALL = [PY, "-c", "import sys\nsys.exit(3)"]  # exits 3 with no output: a failed install
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -874,18 +875,18 @@ class KnownDefectsTests(unittest.TestCase):
                          "reads CAUGHT\n" + out + err)
         self.assertEqual(code, 0, "all defects caught must exit 0: exit %d\n%s%s" % (code, out, err))
 
-    def test_a_failed_install_reads_every_defect_unknown_naming_the_install_and_exits_1(self):
+    def test_a_failed_install_keeps_an_install_free_catch_caught_and_names_the_install_on_the_unknown(self):
         repo = defect_repo(extra_files={ROOT_LOCK: LOCK_TEXT, "test_oracle.py": ORACLE_SUITE})
-        profile = {"install": [PY, "-c", "import sys\nsys.exit(3)"], "lockfile": ROOT_LOCK}
+        profile = {"install": FAILING_INSTALL, "lockfile": ROOT_LOCK}
         defects = [defect("kb-dep", "return a + b", "return a - b", "test_oracle.py"),
                    defect("kb-plain", "return a * b", "return a + b", "test_calc.py")]
         code, out, err = known_run(defects, repo, profile=profile)
-        self.assertEqual(verdicts_of(out), {"kb-dep": "UNKNOWN", "kb-plain": "UNKNOWN"},
-                         "a failed install makes every defect UNKNOWN, the install-free catcher too\n" + out + err)
-        lines = [line for line in out.splitlines() if line.startswith("UNKNOWN kb-")]
-        self.assertEqual(len(lines), 2, "one UNKNOWN line per defect:\n" + out)
-        for line in lines:
-            self.assertIn("install", line, "the UNKNOWN reason must name the install: " + line)
+        self.assertEqual(verdicts_of(out), {"kb-dep": "UNKNOWN", "kb-plain": "CAUGHT"},
+                         "a failed install does not stop the run: the catcher that needs no package reads CAUGHT, "
+                         "and the one that needs the install reads UNKNOWN\n" + out + err)
+        dep = [line for line in out.splitlines() if line.startswith("UNKNOWN kb-dep")]
+        self.assertEqual(len(dep), 1, "one UNKNOWN line for kb-dep:\n" + out)
+        self.assertIn("install", dep[0], "the UNKNOWN reason must name the failed install: " + dep[0])
         self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
 
     def test_known_defects_without_a_profile_is_a_bad_argument_exit_2(self):
@@ -895,21 +896,64 @@ class KnownDefectsTests(unittest.TestCase):
         self.assertEqual(code, 2, "--known-defects takes --profile or --profile-file, and exits 2 without one: "
                          "exit %d\n%s%s" % (code, out, err))
 
-    def test_a_failed_install_of_one_part_reads_every_defect_unknown_when_another_part_shares_its_lockfile(self):
+    def test_a_failed_install_of_one_part_keeps_an_install_free_catch_caught_beside_a_shared_lockfile(self):
         repo = defect_repo(extra_files={ROOT_LOCK: LOCK_TEXT, "test_oracle.py": ORACLE_SUITE})
         profile = {"parts": {"a": {"install": ORACLE_INSTALL, "lockfile": ROOT_LOCK},
-                             "b": {"install": [PY, "-c", "import sys\nsys.exit(3)"], "lockfile": ROOT_LOCK}}}
+                             "b": {"install": FAILING_INSTALL, "lockfile": ROOT_LOCK}}}
         defects = [defect("kb-f1-dep", "return a + b", "return a - b", "test_oracle.py"),
                    defect("kb-f1-plain", "return a * b", "return a + b", "test_calc.py")]
         code, out, err = known_run(defects, repo, profile=profile)
-        self.assertEqual(verdicts_of(out), {"kb-f1-dep": "UNKNOWN", "kb-f1-plain": "UNKNOWN"},
-                         "part b's install failed, so every defect reads UNKNOWN; a shared lockfile must not hide it\n"
+        verdicts = verdicts_of(out)
+        self.assertIn("kb-f1-dep", verdicts, "no verdict line for kb-f1-dep (exit %d):\n%s%s" % (code, out, err))
+        self.assertEqual(verdicts["kb-f1-plain"], "CAUGHT",
+                         "part b's install failed, but a catcher that needs no package still reads CAUGHT\n"
                          + out + err)
-        lines = [line for line in out.splitlines() if line.startswith("UNKNOWN kb-f1-")]
-        self.assertEqual(len(lines), 2, "one UNKNOWN line per defect:\n" + out)
-        for line in lines:
-            self.assertIn("install", line, "the UNKNOWN reason must name the install: " + line)
+        self.assertNotEqual(verdicts["kb-f1-dep"], "MISS", "a defect after a failed install never reads MISS\n" + out)
+        for line in out.splitlines():
+            if line.startswith("UNKNOWN kb-f1-"):
+                self.assertIn("install", line, "the UNKNOWN reason must name the failed install: " + line)
+        expected = 0 if all(verdict == "CAUGHT" for verdict in verdicts.values()) else 1
+        self.assertEqual(code, expected, "exit 0 exactly when every verdict is CAUGHT: exit %d\n%s%s"
+                         % (code, out, err))
+
+    def test_a_catcher_that_passes_on_the_plant_after_a_failed_install_reads_unknown_not_miss(self):
+        # The suite records each mul(2, 3) it computes. The clean copy gives 6, so a 0 in the record is the planted copy.
+        mark = os.path.join(fresh(), "ran.txt")
+        suite = ("from calc import mul\n"
+                 "with open(%r, 'a', encoding='utf-8') as handle:\n"
+                 "    handle.write(str(mul(2, 3)) + '\\n')\n"
+                 "print('ok')\n") % mark
+        repo = defect_repo(extra_files={ROOT_LOCK: LOCK_TEXT, "test_marker.py": suite})
+        profile = {"install": FAILING_INSTALL, "lockfile": ROOT_LOCK}
+        defects = [defect("kb-passes", "return a * b", "return 0", "test_marker.py")]
+        code, out, err = known_run(defects, repo, profile=profile)
+        ran = []
+        if os.path.isfile(mark):
+            with open(mark, encoding="utf-8") as handle:
+                ran = handle.read().splitlines()
+        self.assertIn("0", ran, "the catcher never ran on the planted copy after the failed install, so its verdict "
+                      "is not from a run:\n" + out + err)
+        self.assertEqual(verdicts_of(out), {"kb-passes": "UNKNOWN"},
+                         "a catcher that passes on the plant reads UNKNOWN after a failed install, never MISS\n"
+                         + out + err)
+        line = [text for text in out.splitlines() if text.startswith("UNKNOWN kb-passes")]
+        self.assertEqual(len(line), 1, "one UNKNOWN line for kb-passes:\n" + out)
+        self.assertIn("install", line[0], "the UNKNOWN reason must name the failed install: " + line[0])
         self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
+
+    def test_a_failed_install_with_every_defect_caught_exits_0_and_prints_one_info_line_naming_the_install(self):
+        repo = defect_repo(extra_files={ROOT_LOCK: LOCK_TEXT, "test_oracle.py": ORACLE_SUITE})
+        profile = {"install": FAILING_INSTALL, "lockfile": ROOT_LOCK}
+        defects = [defect("kb-caught", "return a + b", "return a - b", "test_calc.py"),
+                   defect("kb-mul", "return a * b", "return a + b", "test_calc.py")]
+        code, out, err = known_run(defects, repo, profile=profile)
+        self.assertEqual(verdicts_of(out), {"kb-caught": "CAUGHT", "kb-mul": "CAUGHT"},
+                         "a failed install leaves every CAUGHT as it is\n" + out + err)
+        self.assertEqual(code, 0, "every defect caught exits 0 even when an install failed: exit %d\n%s%s"
+                         % (code, out, err))
+        info = [line for line in out.splitlines() if not VERDICT.match(line) and not line.startswith("known defects:")]
+        self.assertEqual(len(info), 1, "one info line, beside the verdict lines and the totals line:\n" + out + err)
+        self.assertIn("install", info[0], "the info line must name the failed install: " + info[0])
 
     def test_a_tracked_file_at_the_link_path_reads_unknown_naming_the_path_and_never_runs_on_it(self):
         # The tracked node_modules/kb_oracle.py is the module itself. A run that silently used it would read CAUGHT.
