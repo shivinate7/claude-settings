@@ -1507,6 +1507,7 @@
 - conflict-markers-chain-clean-refuse: `git stash pop`, `git pull --rebase` or `git merge`, then commit and push in one call, is refused on a clean tree; the remedy is a separate push (hooks/guard_merge.py `_makes_conflict`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-show-uncapped: the push check runs one `git cat-file` per file with a marker finding, with no cap, and no cost case holds a finding (hooks/guard_merge.py `_kinds_of`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
-- gloss-window-crosses-lines: has_gloss reads 80 characters past a cite across line ends, so a cite at a line end passes when the next line holds words (lint/report_guard.py has_gloss)
-- bare-ids-not-cites: the tree check reads backticked ids and a debt's Decision slug only, so a bare id in prose passes unglossed (lint/check_record_slugs.py tree_findings)
 - tree-check-scope-literal: the tree check names output-styles/ as a literal path, and does not scan plans, skills or agents (lint/check_record_slugs.py)
+- quoted-gloss-not-read: has_gloss does not read a quoted gloss, so `decision x, "The shapes"` is flagged (lint/report_guard.py has_gloss)
+- underscore-italic-cite-missed: the tree check does not read `_slug_` as a cite, since `_` is a word character (lint/check_record_slugs.py id_pattern)
+- table-and-ref-link-cites: the tree check flags a table row whose gloss sits in the next cell, and a reference-link target line (lint/check_record_slugs.py first_cites)
