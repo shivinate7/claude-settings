@@ -230,7 +230,7 @@ def two_worktrees_hit(segment: str, root: str) -> str:
             return matched
         trees = clone_worktrees(root)
         if trees is None:
-            return matched
+            return matched   # a failed read refuses; [] is no clone at all, where git refuses the call itself
         own = max((tree for tree, _ref in trees if path_is_inside(root, tree)), key=len, default=None)
         held = {ref for tree, ref in trees if ref and tree != own}
         if any("refs/heads/" + name in held for name in names):

@@ -129,11 +129,11 @@ def _has_git_above(where: str) -> bool:
 def clone_worktrees(where: str):
     """Return [(root, branch ref)] for every checkout of the clone that `where` sits in, the primary
     and each linked worktree, roots realpath'd. The ref is `refs/heads/<name>`, or None for a
-    detached HEAD. None when git gives no answer (no git, no tree, a git too old for `-z`). One
-    `git worktree list` call, and none when no `.git` sits at or above `where`. A bare entry has no
-    tree and is left out."""
+    detached HEAD. [] when no `.git` sits at or above `where`, with no git call: there is no clone
+    to list. None when git gives no answer (no git, a git too old for `-z`) or lists nothing. One
+    `git worktree list` call. A bare entry has no tree and is left out."""
     if not where or not os.path.isdir(where) or not _has_git_above(where):
-        return None
+        return []
     answer = _git(where, "worktree", "list", "--porcelain", "-z")
     if answer is None or answer.returncode != 0:
         return None
