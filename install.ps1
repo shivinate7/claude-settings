@@ -492,6 +492,7 @@ function Set-InstallId([string]$Path) {
 # Returns 'linked', 'copied', or 'failed'. The temp name ends in .cs-new, so it does not match a
 # name a person gives a file.
 $FailedFiles = [ordered]@{}   # dest -> src, for each file Install-File could not replace
+$FailedSkills = [ordered]@{}  # dest -> @{ Src; Old; Keep; Rel }, for each skill folder Install-Dir could not replace
 function Install-File([string]$Src, [string]$Dest) {
     $new = "$Dest.cs-new"
     try {
@@ -818,7 +819,7 @@ foreach ($sub in (Get-LandedDirs $RepoDir)) {
             if ($keep) { New-Item -ItemType Directory -Force -Path $skillBakDir | Out-Null }
             $old  = if ($keep) { $bak } else { "$dest.cs-old" }
             $how  = Install-Dir $src.FullName $dest $old $keep
-            if ($how -eq 'failed') { $AgentFailed = $true; $FailedSubs[$sub] = $true; continue }
+            if ($how -eq 'failed') { $FailedSkills[$dest] = @{ Src = $src.FullName; Old = $old; Keep = $keep; Rel = "$sub/$($src.Name)" }; continue }
             $LandedList.Add(@{ Rel = "$sub/$($src.Name)"; Dest = $dest })
             if ($keep) { Log "existing $dest moved to $bak" }
             if ($how -eq 'linked') {
@@ -909,9 +910,10 @@ if (-not (Get-Command python3 -ErrorAction SilentlyContinue) -and -not (Get-Comm
     Log "python3 not found on PATH; the guard and the other guards refuse Bash, Write and Edit calls until Python 3 is installed"
 }
 
-# Retries each file Install-File could not replace, with a longer back-off (2, 4, 8 s), then re-reads
-# the stamp of every copied guard.py and guard_*.py: a copy that does not carry this run's id is a half install,
-# so it is retried the same way. A file that still fails is named here and the run exits non-zero
+# Retries each file Install-File could not replace and each skill folder Install-Dir could not replace,
+# with a longer back-off (2, 4, 8 s), then re-reads the stamp of every copied guard.py and guard_*.py:
+# a copy that does not carry this run's id is a half install, so it is retried the same way. A file
+# or skill folder that still fails is named here and the run exits non-zero
 # at its end; the guard then fails closed and its text names this installer as the remedy.
 # Links are skipped: a link reads the repo file, and the repo copy holds the placeholder.
 $StillFailed = [ordered]@{}
@@ -938,9 +940,9 @@ function Resolve-Failures {
             }
             if (-not $ok -and -not $FailedFiles.Contains($d)) { $FailedFiles[$d] = $f.FullName }
         }
-        if ($FailedFiles.Count -eq 0) { return }
+        if ($FailedFiles.Count -eq 0 -and $FailedSkills.Count -eq 0) { return }
         if ($delay -eq 0) { break }
-        Log "$($FailedFiles.Count) file(s) not replaced; retrying in $delay s"
+        Log "$($FailedFiles.Count + $FailedSkills.Count) file(s) or skill folder(s) not replaced; retrying in $delay s"
         Start-Sleep -Seconds $delay
         foreach ($d in @($FailedFiles.Keys)) {
             $src = $FailedFiles[$d]
@@ -948,9 +950,19 @@ function Resolve-Failures {
             $r = Install-File $src $d
             if ($r -eq 'copied') { $script:AgentCopied = $true }
         }
+        foreach ($d in @($FailedSkills.Keys)) {
+            $s = $FailedSkills[$d]
+            $FailedSkills.Remove($d)
+            $r = Install-Dir $s.Src $d $s.Old $s.Keep
+            if ($r -eq 'failed') { $FailedSkills[$d] = $s; continue }
+            $LandedList.Add(@{ Rel = $s.Rel; Dest = $d })
+            if ($r -eq 'copied') { $script:AgentCopied = $true; Log "copied $d (symlink not permitted)" } else { Log "linked $d -> $($s.Src)" }
+        }
     }
     foreach ($d in @($FailedFiles.Keys)) { $StillFailed[$d] = $FailedFiles[$d]; Log "could not replace $d after retries; it is not this install's version" }
     $FailedFiles.Clear()
+    foreach ($d in @($FailedSkills.Keys)) { $StillFailed[$d] = $FailedSkills[$d].Src; $FailedSubs['skills'] = $true; Log "could not replace $d after retries; it is not this install's version" }
+    $FailedSkills.Clear()
 }
 Resolve-Failures
 if ($GuardSetMode) { Remove-StaleSets }
