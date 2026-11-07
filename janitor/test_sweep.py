@@ -4671,6 +4671,18 @@ class AgentEndReapTests(unittest.TestCase):
 MISSING = object()  # payload_extra's value for a payload with no background_tasks field
 
 
+# A shell stand-in for the nested cases: it starts COUNT sleepers (argv 3) with cwd TREE (argv 1), writes their pids
+# to PIDFILE (argv 2) in one rename so a reader never sees a half-written list, then sleeps until it is stopped.
+_SPONSOR = ("import os, subprocess, sys, time\n"
+            "tree, pidfile, count = sys.argv[1], sys.argv[2], int(sys.argv[3])\n"
+            "sleepers = [subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'], cwd=tree)\n"
+            "            for _ in range(count)]\n"
+            "with open(pidfile + '.tmp', 'w', encoding='utf-8') as handle:\n"
+            "    handle.write(' '.join(str(sleeper.pid) for sleeper in sleepers))\n"
+            "os.replace(pidfile + '.tmp', pidfile)\n"
+            "time.sleep(120)\n")
+
+
 class _AgentEndFixture(unittest.TestCase):
     """Shared fixture for the agent-end worktree cases below. Real repo with a bare remote, real
     worktrees under `.claude/worktrees/`, and the SubagentStop hook run as the harness runs it."""
@@ -4892,6 +4904,41 @@ class _AgentEndFixture(unittest.TestCase):
     def stop(proc):
         proc.kill()
         proc.wait(timeout=10)
+
+    def finished_tree(self, name, lock=None):
+        """NAME's tree: clean, pushed and idle 31 min, locked by LOCK (default: the host pid this test
+        process names). The caller ages the subagent transcript when the case has one."""
+        tree = self.add(name)
+        self.lock(tree, lock or self.host_lock(name))
+        _age_admin_files(tree, 31 * 60)
+        return tree
+
+    def reason_for(self, path):
+        """The last hook run's decision reason for PATH, for a failure message."""
+        row = self.row_for_tree(path)
+        return "row reason: %s" % (row.get("reason") if row else "the run wrote no row")
+
+    @staticmethod
+    def exited(proc, timeout=5):
+        """True once PROC has exited. The timeout only bounds how long a signalled shell may take to die."""
+        try:
+            proc.wait(timeout=timeout)
+            return True
+        except subprocess.TimeoutExpired:
+            return False
+
+    def sponsor(self, tree, count):
+        """A shell with its cwd in TREE, started by this test process (the host), that starts COUNT sleepers
+        with cwd TREE (`_SPONSOR`). Returns (the shell, [the sleepers' pids]). Teardown stops both."""
+        pidfile = os.path.join(self.root, os.path.basename(tree) + ".pids")
+        shell = subprocess.Popen([sys.executable, "-c", _SPONSOR, tree, pidfile, str(count)], cwd=tree,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, shell)
+        children = [int(pid) for pid in _read_when_ready(pidfile).split()]
+        for pid in children:
+            self.addCleanup(sweep.send_signal, pid)
+        return shell, children
 
 
 class AgentEndOwnWorktreeTests(_AgentEndFixture):
@@ -5136,19 +5183,6 @@ class AgentEndFinishedTreeTests(_AgentEndFixture):
     the tree and fails its case. Each keep case runs beside a clean control tree that the same run
     removes, so a keep cannot pass on a hook that deletes nothing."""
 
-    def finished_tree(self, name, lock=None):
-        """NAME's tree: clean, pushed and idle 31 min, locked by LOCK (default: the host pid this test
-        process names). The caller ages the agent transcript when the case has one."""
-        tree = self.add(name)
-        self.lock(tree, lock or self.host_lock(name))
-        _age_admin_files(tree, 31 * 60)
-        return tree
-
-    def reason_for(self, path):
-        """The last hook run's decision reason for PATH, for a failure message."""
-        row = self.row_for_tree(path)
-        return "row reason: %s" % (row.get("reason") if row else "the run wrote no row")
-
     @staticmethod
     def reason_in(record, path):
         """The decision reason for PATH in an in-process run's returned record, for a failure message."""
@@ -5156,15 +5190,6 @@ class AgentEndFinishedTreeTests(_AgentEndFixture):
             if _norm_path(str(row.get("path", ""))) == _norm_path(path):
                 return "row reason: %s" % row.get("reason")
         return "the run returned no row for it"
-
-    @staticmethod
-    def exited(proc, timeout=5):
-        """True once PROC has exited. The timeout only bounds how long a signalled shell may take to die."""
-        try:
-            proc.wait(timeout=timeout)
-            return True
-        except subprocess.TimeoutExpired:
-            return False
 
     def keep_case(self, name, arm, background=None, minutes=31, transcript=True, dirty=False, row=True,
                   row_at=None):
@@ -5422,6 +5447,114 @@ class AgentEndFinishedTreeTests(_AgentEndFixture):
             self.assertIsNone(stale, "the stale verdict is %r off Linux, so the lock may go" % (stale,))
         with self.subTest(arm="the own-lock verdict is None off Linux"):
             self.assertIsNone(owner, "the own-lock verdict is %r off Linux, so the lock may go" % (owner,))
+
+
+class AgentEndProcessMarkerTests(_AgentEndFixture):
+    """The stop half of the agent-end reap (debt finished-agent-shells-keep-tree). A finished agent's tree is
+    removed only after the processes inside it are stopped, and only when each one is the agent's own. A
+    process is the agent's own when its exec-time CLAUDE_AGENT_ID is the id in the tree's basename `agent-<id>`
+    and that id is 17 hex characters. Every process inside must be marked, except a host child (depth 0),
+    which may be unmarked when a marked process climbs through it. Each case changes one part of that proof, so
+    each keep names the part it breaks. The decisions run on real processes, with `sweep.agent_mark` patched to
+    a map of pid to id; the end-to-end case reads the real marker."""
+
+    AGENT = "5c0a1e7d93b2f4860"  # 17 hex characters, the id a tree basename carries
+    OTHER = "b71f3d0c2a9e56847"  # another 17-hex agent id
+    ENDING = "e3a9c7f15d0b28461"  # the agent whose SubagentStop runs the reap
+    SHORT = "shortid"  # a basename id that is not 17 hex characters
+
+    def agent_tree(self, agent):
+        """AGENT's finished tree, locked by the live host lock the Agent tool writes."""
+        lock = self.live_host_lock(agent)
+        if lock is None:
+            self.skipTest("the live lock's start is read from /proc, which this box has")
+        return self.finished_tree(agent, lock=lock)
+
+    def decision_for(self, tree, marks):
+        """The agent-end decision for TREE, a finished agent's tree, with `sweep.agent_mark` reading MARKS (a map of
+        pid to agent id; any other pid reads as unmarked)."""
+        entries = sweep.parse_worktree_list(self.primary) or []
+        listed = [entry for entry in entries if _norm_path(entry["path"]) == _norm_path(tree)]
+        require(len(listed) == 1, "the worktree list has no entry for %s" % tree)
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg}):
+            with mock.patch.object(sweep, "agent_mark", new=marks.get, create=True):
+                return sweep.decide_agent_end_worktree(self.primary, dict(listed[0], finished=True), None)
+
+    def assert_kept_for_process(self, decision, cause):
+        """DECISION must keep the tree because a process is inside. CAUSE names the rule the case breaks."""
+        self.assertEqual(decision["action"], "keep", "%s: the tree was reaped" % cause)
+        self.assertIn("process-inside", decision["reason"],
+                      "%s: the tree was kept for another reason: %s" % (cause, decision["reason"]))
+
+    def test_a_host_child_with_no_marker_keeps_the_tree(self):
+        """A session's own server: an unmarked host child with its cwd in the tree."""
+        tree = self.agent_tree(self.AGENT)
+        self.sleeper(tree)
+        self.assert_kept_for_process(self.decision_for(tree, {}), "an unmarked host child")
+
+    def test_a_marked_server_under_an_unmarked_shell_is_stopped_deepest_first(self):
+        tree = self.agent_tree(self.AGENT)
+        shell, (server,) = self.sponsor(tree, 1)
+        decision = self.decision_for(tree, {server: self.AGENT})
+        with self.subTest(arm="the tree is reaped"):
+            self.assertEqual(decision["action"], "reap",
+                             "the marked server under the unmarked shell kept the tree: %s" % decision["reason"])
+        with self.subTest(arm="the stop list holds the server before its shell"):
+            self.assertEqual(decision.get("stop_pids"), [server, shell.pid],
+                             "stop_pids is %r, not the server then its shell" % (decision.get("stop_pids"),))
+
+    def test_a_marker_of_another_agent_keeps_the_tree(self):
+        tree = self.agent_tree(self.AGENT)
+        child = self.sleeper(tree)
+        self.assert_kept_for_process(self.decision_for(tree, {child.pid: self.OTHER}),
+                                     "a marker of another agent")
+
+    def test_an_unmarked_pid_below_the_host_child_keeps_the_tree(self):
+        tree = self.agent_tree(self.AGENT)
+        _shell, (marked, unmarked) = self.sponsor(tree, 2)
+        self.assert_kept_for_process(self.decision_for(tree, {marked: self.AGENT}),
+                                     "an unmarked pid below depth 0")
+
+    def test_an_unmarked_host_child_with_no_marked_descendant_keeps_the_tree(self):
+        tree = self.agent_tree(self.AGENT)
+        marked = self.sleeper(tree)
+        self.sleeper(tree)
+        self.assert_kept_for_process(self.decision_for(tree, {marked.pid: self.AGENT}),
+                                     "an unmarked host child with no marked descendant")
+
+    def test_a_tree_name_without_a_17_hex_agent_id_keeps_the_tree(self):
+        tree = self.agent_tree(self.SHORT)
+        child = self.sleeper(tree)
+        self.assert_kept_for_process(self.decision_for(tree, {child.pid: self.SHORT}),
+                                     "a tree basename that is not 17 hex characters")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "the marker is read from /proc/<pid>/environ")
+    def test_a_finished_marked_host_child_is_stopped_and_its_tree_removed(self):
+        """End to end through the SubagentStop hook. The marked child is `env CLAUDE_AGENT_ID=<id> sleep`, a
+        direct child of this test process, so its exec-time environment carries the marker."""
+        ending = self.ENDING
+        own = self.add(ending)
+        control = self.control_tree("markctl")
+        tree = self.agent_tree(self.AGENT)
+        self.write_stop_row(self.AGENT, tree)
+        self.age_subagent_transcript(self.AGENT, 31)
+        shell = subprocess.Popen(["env", "CLAUDE_AGENT_ID=" + self.AGENT, "sleep", "120"], cwd=tree,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, shell)
+        self.age_control(control)
+        with self.subTest(precondition="the marked child is alive inside the finished tree, and the host lock holds"):
+            inside, _unreadable = sweep.processes_in(tree)
+            self.assertIn(shell.pid, inside or [], "the marked child is not inside the finished tree")
+            self.assertIsNone(shell.poll(), "the marked child exited before the hook ran")
+            self.assertTrue(guard.worktree_locked(self.primary, tree), "the host lock did not take")
+        self.fire_under_host(ending, own, extra=self.payload_extra(self.running_elsewhere()))
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
+        with self.subTest(arm="the marked host child is stopped"):
+            self.assertTrue(self.exited(shell), "the marked child is still running; %s" % self.reason_for(tree))
+        with self.subTest(arm="the finished tree is removed"):
+            self.assertRemoved(tree, "; " + self.reason_for(tree))
 
 
 class AgentEndOtherWorktreeTests(_AgentEndFixture):
