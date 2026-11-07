@@ -27,7 +27,8 @@ On the same landed turns it also blocks (one block, all reasons joined) when a D
 BUILT, RECORDED, or OTHER or a PR or commit ref (`reports-done-format`), or when the reply holds
 a record id with no short gloss (`speak-cite-id-plus-gloss`), or when a builder, reviewer,
 test-author or record-writer spawned since the last human message goes unnamed in Done, or a
-named "role model" pair matches no spawn of that role (`reports-done-names-models`), or when
+named "role model" pair matches no spawn of that role anywhere in the transcript
+(`reports-done-names-models`), or when
 a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-unstarted-items`).
 When the report is there, each of these blocks asks for only the corrected lines, never the report again.
 
@@ -591,10 +592,18 @@ def spawn_models(records):
     return found
 
 
-def done_models_problem(text, spawned):
-    """Name what Done gets wrong about the spawned roles' models, else ''."""
+def done_models_problem(text, spawned, all_spawned=None):
+    """Name what Done gets wrong about the spawned roles' models, else ''.
+
+    `spawned` holds the spawns since the last report; a role in it must be named in Done. A named
+    pair passes when any spawn of that role in `all_spawned`, the whole transcript, ran that model
+    (a reviewer in an earlier window may be named beside this window's). `all_spawned` defaults to
+    `spawned`. Cost: no read; both maps come from the one transcript read the caller already holds.
+    """
     if not spawned:
         return ""
+    if all_spawned is None:
+        all_spawned = spawned
     done = " ".join(done_items(block_text(text, keep_indent=True)))
     named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
              for r in ROLE_RE.findall(roles)}
@@ -602,7 +611,7 @@ def done_models_problem(text, spawned):
     if missing:
         return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
-        ran = spawned.get(role)
+        ran = all_spawned.get(role)
         if ran is not None and "" not in ran and model not in ran:
             return f"'{role} {model}' matches no {role} spawn, which ran " + ", ".join(sorted(ran))
     return ""
@@ -1542,7 +1551,7 @@ def rewrite_problems(hook):
         text = last_reply(hook)
         spawned = spawn_models(records[idx + 1:])
         reasons = []
-        models = done_models_problem(text, spawned)
+        models = done_models_problem(text, spawned, spawn_models(records))
         if models:
             reasons.append(MODELS_REASON + models + ".")
         if unstarted_problem(text, spawned):
@@ -2004,7 +2013,7 @@ def main():
             "Report-shape guard: each Done line must say BUILT, RECORDED, or OTHER. BUILT and "
             "RECORDED must also name a PR or commit. This one does not: " + repr(item) + ".")
     spawned = spawn_models(after)
-    models = done_models_problem(text, spawned) if shape_ok else ""
+    models = done_models_problem(text, spawned, spawn_models(records)) if shape_ok else ""
     if models:
         reasons.append(MODELS_REASON + models + ".")
     if shape_ok and unstarted_problem(text, spawned):
