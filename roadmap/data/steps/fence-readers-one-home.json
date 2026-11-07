@@ -1,0 +1,10 @@
+{
+  "title": "Five more fence readers use word_runs.code_mask",
+  "phase": "next",
+  "status": "todo",
+  "order": 267.9,
+  "owner": "coordinator",
+  "why": "Lane fence-regex-one-home found five more readers that walk code fences by hand, not through word_runs.code_mask (coordinator, 16:38 CST Nov 7): check_silent_undo.py:105, report_guard.py:444, 1025 and 1606, and ruling_home.py:319.",
+  "note": "Waits on the fence-regex-one-home PR merging; the coordinator starts its lane after that. Done check: each calls code_mask, with a red test per caller on a fence inside a top-level indented block.",
+  "updatedAt": "2026-11-07T16:39:00-06:00"
+}
