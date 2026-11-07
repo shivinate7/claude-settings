@@ -628,6 +628,15 @@ class RecordSlugsTests(unittest.TestCase):
         self.put(path, text)
         self.assert_tree(["%s:%d DEBT002 ghost-decision" % (path, line_of(text, "**Decision.**"))])
 
+    def test_a_backticked_none_is_none_but_a_sentence_is_not(self):
+        # A backticked none is none. A line that starts with none and goes on names no decision, so it is DEBT002.
+        self.put(self.rel("debts", "d-bt1.md"), "# Debt\n\n**Decision.** `none`\n")
+        self.put(self.rel("debts", "d-bt2.md"), "# Debt\n\n**Decision.** `none`.\n")
+        path = self.rel("debts", "d-bt3.md")
+        text = "# Debt\n\n**Decision.** none on main, see x\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d DEBT002 none" % (path, line_of(text, "**Decision.**"))])
+
     def test_a_named_decision_must_name_the_debt(self):
         # tap-lag names d-eight but not d-seven, so d-seven's decision line fails DEBT003.
         self.decision("tap-lag", "# Tap lag\n\nThe debt `d-eight` (its finding) waits.\n")
