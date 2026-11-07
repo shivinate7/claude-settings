@@ -994,6 +994,27 @@ def case_guard_home_check_under_a_bad_mark_refuses_unhomed_items():
                      named=("fb-12", "fb-13", "is not a tracked"))
 
 
+def case_guard_home_check_under_a_bad_mark_passes_a_ruling_in_either_home():
+    """A "rolled-out" that is not JSON true or false: the home check reads the decision folder under either mark, so
+    a ruling filed in docs/decisions/ passes, and one in the legacy decisions/ passes too. The valid mark is the
+    control: a rolled-out repo keeps decisions at docs/decisions/ only, so the same legacy ruling blocks there."""
+    tracked = ("CLAUDE.md", "docs/decisions/r.md", "decisions/r.md")
+    cases = (("bad mark, docs/decisions", "yes", "docs/decisions", True),
+             ("bad mark, legacy decisions", "yes", "decisions", True),
+             ("valid mark, docs/decisions", True, "docs/decisions", True),
+             ("valid mark, legacy decisions", True, "decisions", False))
+    for n, (label, mark, folder, passes) in enumerate(cases):
+        sid = "pass-home-%d" % n
+        repo = make_repo(sid, tracked=tracked, extras=json.dumps({"kinds": {}, "rolled-out": mark}))
+        p = homed(new_cfg(), sid, ("- fb-14 [ruling] -> %s/r.md" % folder,), cwd=repo)
+        if passes:
+            check("homes (%s) scope: the home check ran" % label, fail_open_line(p) == [], p.desc())
+            check("homes (%s): a ruling in %s/ passes" % (label, folder), block_reason(p) is None, p.desc())
+        else:
+            expect_block("homes (%s): a ruling in %s/ blocks, no home under this mark" % (label, folder), p,
+                         named=("fb-14", "is not a tracked"))
+
+
 APPLE_STAMP = "2026-10-31 20:21 CDT (UTC-05:00)"
 APPLE_LATER = "2026-10-31 21:05 CDT (UTC-05:00)"
 APPLE_FIRST = "2026-10-31 20:10 CDT (UTC-05:00)"  # a jotted message that comes before the burst
@@ -4360,6 +4381,7 @@ CASES = (
     case_guard_standing_homed_to_handoff_passes,
     case_guard_task_home_from_the_todo_kind,
     case_guard_home_check_under_a_bad_mark_refuses_unhomed_items,
+    case_guard_home_check_under_a_bad_mark_passes_a_ruling_in_either_home,
     case_guard_unreadable_layout_fails_open_with_one_line,
     case_guard_apple_tv_burst_names_where_items_go,
     case_guard_burst_heading_after_a_jotted_message_names_its_line,
