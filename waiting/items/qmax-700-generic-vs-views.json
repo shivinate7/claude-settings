@@ -4,6 +4,12 @@
   "home": "lane qmax-revive-idle (coordinator); q_max #700",
   "id": "qmax-700-generic-vs-views",
   "kind": "decision",
+  "lane": "qmax-revive-idle",
+  "lastAnswer": {
+    "at": "2026-11-07T19:12:42.618Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 344,
   "options": [
     {
@@ -31,7 +37,7 @@
   "ref": "item 343; q_max #700",
   "reply": "a, saved 13:12 CST. Sent to the coordinator: a lane ports #700's By Year and By City views (median per year and city, refusals with reasons) beside main's Group By, with a designer and a design check.",
   "short": "#700: generic Group By is on main; port the views?",
-  "status": "closed",
+  "status": "open",
   "title": "Main already groups Past Rates by year and city, with no medians or refusal reasons. Port #700's dedicated views anyway?",
   "why": "Your 343 a said: first confirm it is not on main in any form. The lane found part of it."
 }

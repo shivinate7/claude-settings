@@ -1,0 +1,41 @@
+{
+  "added": "2026-11-07T19:53:00Z",
+  "context": "Goal: review rounds catch real defects at the lowest cost.\nProblem (rule): the role rules agent-model-cap and roles-review-cap-three set each round's model and the number of rounds, and only you change them.\nBased on (measured): about 80% parse accuracy over 859 PRs, 2026-10-24 to 11-07. Haiku FAILs 79% of PRs at round 1 (73 of 92), and Sonnet or Opus 38% (18 of 48). After a Haiku round-1 FAIL, round 2 fails again 31% of the time, against 19% after another model. 15% of all FAILs are about wording only. Round 3 failed 3 times in 114 reviews, and never after a round-2 PASS (0 of at least 14). The net-value test held nothing in 14 days.\nBased on (ruling): agent-model-cap: reviewers run Sonnet from round 2, and round 1 uses the role's model. Asked again because of your 13:41 CST question.\nDeparts from: main, where round 1 runs on Haiku and round 3 runs at xhigh on every change. Each choice changes one part.\nSide by side: item 351 (the fix check of a guard runs on Sonnet) is close to a. a covers round 1 and 351 covers the fix check, so they fit together.",
+  "home": "coordinator; step review-rounds-rework",
+  "id": "review-rounds-rework-picks",
+  "kind": "decision",
+  "multi": true,
+  "n": 359,
+  "options": [
+    {
+      "gain": "Fewer false FAILs and fewer repeat FAILs on the risky PRs.",
+      "key": "a",
+      "label": "Round 1 runs on Sonnet for guard and check diffs; Haiku stays for docs and records (recommended)",
+      "lose": "More Sonnet tokens on guard PRs (cost unmeasured). Checked again after a week."
+    },
+    {
+      "gain": "About 14 or more round-3 reviews saved every 2 weeks, and less effort elsewhere.",
+      "key": "b",
+      "label": "Skip round 3 unless the change touches a guard or check, or round 2 failed; a guard's round 3 is a net-value read at high effort, not xhigh (recommended)",
+      "lose": "The rare real round-3 catch (1 in 114)."
+    },
+    {
+      "gain": "About 15% fewer false FAILs. Should-fix and wording findings are fixed before merge, with no new round, so no gap is filed instead of fixed. The merge tool refuses a review record whose model is \"unknown\", so every record names its model.",
+      "key": "c",
+      "label": "Label each finding blocker, should-fix or wording; only a blocker FAILs the round (recommended)",
+      "lose": "A small defect may slip. Watch the round-2 FAIL rate."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": [
+    "a",
+    "b",
+    "c"
+  ],
+  "rank": 1,
+  "ref": "item 356; item 351; rules agent-model-cap and roles-review-cap-three",
+  "short": "Review rounds: Sonnet round 1 on guards, skip round 3, blocker-only FAIL",
+  "status": "open",
+  "title": "Which changes to the review rounds' models and prompts do you want?",
+  "why": "Your 356 note, 13:41 CST: \"should we also consider reworking our 3 round program in terms of what models they use what prompts etc?\" A read-only audit agent (Explore, Sonnet) measured 859 PRs."
+}

@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-07T20:08:00Z",
+  "context": "Goal: a round-3 FAIL holds the change until its finding is fixed (your 356 a).\nProblem (rule): on the branch, a held change stays held even after a fix check passes, and its finding goes to a new lane. The lane builds b meanwhile, and a change is a small toggle.\nBased on (ruling): item 356 a, 2026-11-07 13:41 CST. Its label says \"holds the change until the finding is fixed\". Its gain line, which I wrote, said \"the finding becomes a new lane at round 1\". Option a follows the gain line and b follows the label, so you are asked which you meant.\nDeparts from: main, where a fix check PASS after round 3 reads done. b keeps that for a held change, and a sends the finding to a new lane.",
+  "home": "lane review-fix-check-round (PR #1440)",
+  "id": "round3-fixcheck-clears",
+  "kind": "decision",
+  "n": 363,
+  "options": [
+    {
+      "gain": "Every round-3 fix gets a full review.",
+      "key": "a",
+      "label": "Stay held; the finding becomes a new lane at round 1",
+      "lose": "A one-line fix waits for a whole lane."
+    },
+    {
+      "gain": "Matches \"until the finding is fixed\", and small fixes ship.",
+      "key": "b",
+      "label": "A fix check that passes clears the hold (recommended)",
+      "lose": "A fix check is lighter than a full round."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "b",
+  "rank": 1,
+  "ref": "item 356; PR #1440",
+  "short": "Round-3 hold: a fix check clears it, or a new lane",
+  "status": "open",
+  "title": "After a round-3 FAIL, does a passing fix check clear the hold?",
+  "why": "Lane review-fix-check-round (PR #1440), sent by the coordinator at 14:07 CST. It refines your pick of 356 a."
+}

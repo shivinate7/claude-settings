@@ -1,9 +1,14 @@
 {
   "added": "2026-11-07T19:32:00Z",
-  "context": "Goal: cloud sessions stop to ask far less, for acts you already granted: a lane's lease push to its own branch, cancelling its own CI run, and deleting its own check-in.\nWhy you: auto mode accepts a settings.json change only on words you type in the acting session. A page answer cannot grant it (decision relayed-grant-read-from-page, the settings exception). This replaces item 352.\nBased on (ruling): you granted these acts on items 257 a (the sha form of a lease push) and 278 c and d (cancel own CI run, delete own check-in), and at 13:16 CST said sessions can and should add auto-mode allow lines for themselves (decision auto-mode-owner-acts). So no new question: only the typed go.\nBased on (measured): docs/debts/notes.md: a lease push to a lane's own branch was refused 11 times on Nov 2-4.\nDeparts from: main's autoMode.allow \u2014 adds \"Own Branch Lease Push\" (a --force-with-lease push, sha form or --force-if-includes, to a branch the session pushed earlier; never --force, -f, +refspec, the default branch, archive/, roadmap, merge-lock, --mirror, --all, or a delete); a cancel of the session's own branch's CI run; and delete_trigger on its own check-in.\nStill refused, not asked: a bare --force-with-lease, rule edits, agents interrupting or creating sessions, a merge onto red main, and a remote branch delete with no archive.\nSteps: open the link and type the line below. Then press Done here.\n\ngo: add the \"Own Branch Lease Push\", own CI run cancel and own check-in delete entries to settings.json autoMode.allow, as drafted in lane lease-push-c-and-d (items 257 a, 278 c and d)",
+  "context": "Goal: cloud sessions stop to ask far less, for acts you already granted: cancelling their own CI run, and deleting their own check-in.\nWhy you: auto mode accepts a settings.json change only on words you type in the acting session. A page answer cannot grant it (decision relayed-grant-read-from-page, the settings exception).\nBased on (ruling): you granted these acts on items 278 c and d (cancel own CI run, delete own check-in), and at 13:16 CST said sessions can and should add auto-mode allow lines for themselves (decision auto-mode-owner-acts). So no new question: only the typed go.\nDeparts from: main's autoMode.allow, which adds a cancel of the session's own branch's CI run and delete_trigger on its own check-in.\nSteps: open the lane link, type the line below in that chat, then press Done here.\n\ngo: add the own CI run cancel and own check-in delete entries to settings.json autoMode.allow, as drafted in PR #1316 (items 278 c and d)",
   "home": "lane lease-push-c-and-d",
   "id": "cs-type-two-gos",
   "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-07T19:41:50.035Z",
+    "done": true,
+    "note": ""
+  },
   "links": [
     {
       "label": "Lane lease-push-c-and-d",
@@ -17,5 +22,5 @@
   "short": "Type 1 go in lease-push-c-and-d",
   "status": "open",
   "title": "Type one go line in lane lease-push-c-and-d's chat",
-  "why": "It adds auto-mode allow entries to settings.json for acts you already granted. A settings change needs words you type in the acting session's own chat. Your runner-merge-allow go (13:27 CST, lane relayed-yes-allow) is already done."
+  "why": "You pressed Done at 13:41 CST, but no go line was typed in lane lease-push-c-and-d's chat after 13:28 CST (coordinator, 13:46 CST). A settings.json change needs words you type in the acting session's own chat, so pressing Done here cannot grant it. The lease push entry is already done: you typed its go at 13:28 CST, and PR #1429 builds it."
 }

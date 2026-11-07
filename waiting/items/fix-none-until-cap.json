@@ -1,0 +1,36 @@
+{
+  "added": "2026-11-07T19:59:00Z",
+  "context": "Goal: every recorded gap gets fixed, not piled up.\nProblem (rule): each `Fix: none` note gets an `Until:` review date, and that date needs a cap. The agent found no standard number, so the cap is your call.\nBased on (measured): on origin/main, notes grow about 104 lines a day and 33 of them carry `Fix:`. Debt files open about 13 a day and close about 4. 410 live note lines are older than 10-26, and the oldest is from 10-17. About 1,250 kept notes will get an `Until:` date, spread across the cap, so the cap sets the monthly re-review load (coordinator, 14:08 CST).\nDeparts from: main, where a note has no review date. The change adds an `Until:` date with a cap to each `Fix: none` note.",
+  "home": "coordinator; step notes-name-their-fix",
+  "id": "fix-none-until-cap",
+  "kind": "decision",
+  "n": 360,
+  "options": [
+    {
+      "gain": "Each kept note is looked at again every month.",
+      "key": "a",
+      "label": "30 days (recommended)",
+      "lose": "About one sweep lane a month."
+    },
+    {
+      "gain": "Faster turnover.",
+      "key": "b",
+      "label": "14 days",
+      "lose": "Twice the re-review load."
+    },
+    {
+      "gain": "The least load.",
+      "key": "c",
+      "label": "60 days",
+      "lose": "A gap can wait two months."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 1,
+  "ref": "item 355; item 358; step notes-name-their-fix",
+  "short": "Cap on a `Fix: none` note's review date",
+  "status": "open",
+  "title": "How long may a `Fix: none` note wait before it is looked at again?",
+  "why": "From your 355 note: the best-practices agent's finding, sent by the coordinator at 13:58 CST."
+}

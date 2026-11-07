@@ -4,6 +4,12 @@
   "home": "runner 8 merge of claude-settings #1421",
   "id": "cs-1421-press-merge",
   "kind": "decision",
+  "lane": "batch-runner",
+  "lastAnswer": {
+    "at": "2026-11-07T19:12:42.618Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 346,
   "options": [
     {
@@ -31,7 +37,7 @@
   "ref": "item 342; item 219; claude-settings #1421",
   "reply": "a, saved 13:12 CST. Sent to the coordinator for runner 8, which reads this answer and merges #1421 once its checks are green.",
   "short": "Merge #1421?",
-  "status": "closed",
+  "status": "open",
   "title": "Merge #1421, your 219 a grant bullet, once its checks are green?",
   "why": "You said yes in chat at 12:44 CST. Auto mode refused runner 8's merge on a yes relayed by the coordinator. An answer here reaches runner 8 directly."
 }

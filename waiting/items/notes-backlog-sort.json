@@ -4,6 +4,11 @@
   "home": "coordinator; step notes-name-their-fix",
   "id": "notes-backlog-sort",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-07T19:41:50.035Z",
+    "choice": "none",
+    "note": "send a sonnet workflow to review through them. separately have an agent consider best practices around developing around them"
+  },
   "n": 355,
   "options": [
     {
@@ -29,8 +34,9 @@
   "pick": "a",
   "rank": 1,
   "ref": "rule roles-findings-are-debts-or-notes",
+  "reply": "None of these, 13:41 CST. A Sonnet workflow reviews the 1,501 notes lines and 121 debts. A separate agent writes best practices for how to work around them. Home: step notes-backlog-review.",
   "short": "Notes backlog: sort it, a lane each, or leave it",
-  "status": "open",
+  "status": "closed",
   "title": "Sort the 1,501 notes lines and 121 debts into fix, delete, or keep-with-reason?",
   "why": "You asked at 13:20 CST \"why not fix it then\" and at 13:28 CST \"should we send a lane on all of them?\"."
 }

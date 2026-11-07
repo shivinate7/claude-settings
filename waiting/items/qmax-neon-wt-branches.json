@@ -1,0 +1,21 @@
+{
+  "added": "2026-11-07T20:00:00Z",
+  "context": "Goal: q_max's Neon project holds no leftover worktree branches.\nBased on (measured): q_max docs/commands.md line 131 counts 611 `wt-` branches.\nRecovery: none needed. These are throwaway worktree branches.\nSteps: open the Neon console, go to project q_max, then Branches. Filter by \"wt-\" and delete the matches. Then press Done here.",
+  "home": "q_max debt filed by lane qmax-browser-main-red",
+  "id": "qmax-neon-wt-branches",
+  "kind": "task",
+  "links": [
+    {
+      "label": "Neon console",
+      "url": "https://console.neon.tech"
+    }
+  ],
+  "n": 361,
+  "owner": "coordinator",
+  "rank": 2,
+  "ref": "item 332; step qmax-browser-main-red",
+  "short": "Delete 611 leftover wt- Neon branches",
+  "status": "open",
+  "title": "Delete q_max's leftover `wt-` Neon branches",
+  "why": "Your ruling on item 332 (b) bars every session from Neon, and the sweep that used to remove these branches is gone. So only you can delete them."
+}

@@ -1,0 +1,40 @@
+{
+  "added": "2026-11-07T19:47:00Z",
+  "context": "Goal: the gap backlog shrinks instead of growing.\nProblem (rule): rule roles-findings-are-debts-or-notes files every finding, and gives it no owner, no expiry and no reader.\nBased on (measured): since 2026-10-26, notes.md gained 1,304 lines and lost 358, so about 3.6 lines are added for each line removed. In the same time docs/debts/ added 107 debt files and deleted 37 (git on origin/main 174b005c1, 13:44 CST).\nBased on (ruling): rule roles-findings-are-debts-or-notes: \"A note becomes a debt after a real incident.\" Asked again because nothing counts incidents, so no note ever becomes a debt, and your 355 note asked how to work around the backlog.\nDeparts from: main, where a note waits with no end. The change adds a sighting count and an expiry to each note.",
+  "home": "coordinator; step notes-backlog-review",
+  "id": "notes-sightings-expiry",
+  "kind": "decision",
+  "multi": true,
+  "n": 358,
+  "options": [
+    {
+      "gain": "Growth stops without relying on agents to remember. Each note carries `Seen: <date> x<n>`. A repeat sighting raises the count instead of adding a line, and a second sighting makes the note a debt. A note not seen for 30 days is deleted, and git keeps it. The janitor sweep runs this when asked, with no new process.",
+      "key": "a",
+      "label": "Sightings and expiry (recommended)",
+      "lose": "A rare real gap seen only once is deleted after 30 days."
+    },
+    {
+      "gain": "Steady paydown. Each batch merge starts one lane that fixes the most-seen debt, and \"debts opened vs closed\" becomes a fifth pace number.",
+      "key": "b",
+      "label": "One debt-fix lane per batch",
+      "lose": "One more lane per batch, and on its own it does not stop the growth."
+    },
+    {
+      "gain": "The pile cannot outrun the fixes. When open notes pass a budget, the next batch fixes debts only. The first ratchet run sets the budget number.",
+      "key": "c",
+      "label": "Over budget, the next batch is debt-only (recommended, with a)",
+      "lose": "Feature lanes wait one batch whenever the pile grows past the budget."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": [
+    "a",
+    "c"
+  ],
+  "rank": 1,
+  "ref": "item 355; rule roles-findings-are-debts-or-notes",
+  "short": "Notes backlog: pick sightings and expiry, a paydown lane per batch, or both",
+  "status": "open",
+  "title": "How should the notes and debts backlog stop growing?",
+  "why": "From your 355 note: the best-practices agent's finding, sent by the coordinator at 13:47 CST."
+}

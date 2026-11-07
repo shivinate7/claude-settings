@@ -4,6 +4,12 @@
   "home": "step pr-backlog-clear; revive lanes",
   "id": "held-prs-release",
   "kind": "decision",
+  "lane": "pr-backlog-clear",
+  "lastAnswer": {
+    "at": "2026-11-07T19:12:42.618Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 348,
   "options": [
     {
@@ -31,7 +37,7 @@
   "ref": "step pr-backlog-clear",
   "reply": "a, saved 13:12 CST. Sent to the coordinator: all ten held PRs go back to the revive lanes, each catches up with main and gets a fresh round-1 review, then batches alone or closes if out of date.",
   "short": "10 held PRs: release, one by one, or close",
-  "status": "closed",
+  "status": "open",
   "title": "Release the ten held claude-settings PRs to the revive lanes?",
   "why": "Only you can release a PR held after review round 3, and none of the ten has a recorded hold reason."
 }

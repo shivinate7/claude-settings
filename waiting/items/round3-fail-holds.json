@@ -4,6 +4,12 @@
   "home": "lane review-fix-check-round (session_013NEJL1PyP6demZ4Pyj8fYX)",
   "id": "round3-fail-holds",
   "kind": "decision",
+  "lane": "review-fix-check-round",
+  "lastAnswer": {
+    "at": "2026-11-07T19:41:50.035Z",
+    "choice": "a",
+    "note": "should we also consider reworking our 3 round program in terms of what models they use what prompts etc?"
+  },
   "n": 356,
   "options": [
     {
@@ -23,6 +29,7 @@
   "pick": "a",
   "rank": 1,
   "ref": "item 347; decision hold-unsafe-after-round-3",
+  "reply": "a, 13:41 CST: a round-3 FAIL holds the change, and the finding becomes a new lane at round 1. Lane review-fix-check-round builds it. Your question about reworking the 3-round program (models and prompts per round): yes, it is worth a look. Step review-rounds-rework first measures what each round catches, then proposes changes.",
   "short": "Round-3 FAIL: hold, or merge with a debt",
   "status": "open",
   "title": "Should a failed review at round 3 hold the change until the finding is fixed?",

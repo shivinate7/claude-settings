@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-07T20:08:00Z",
+  "context": "Goal: a round-3 FAIL holds the change until its finding is fixed (your 356 a).\nProblem (rule): a round-3 PARTIAL, where some findings stay open but the verdict is not FAIL, is not covered. The lane builds b meanwhile, and a change is a small toggle.\nBased on (ruling): item 356 a, 2026-11-07 13:41 CST: \"holds the change until the finding is fixed\". Asked again because 356 named only a FAIL.\nDeparts from: main, where round 3 counts any verdict as done. The branch holds a FAIL only, and b adds a PARTIAL.",
+  "home": "lane review-fix-check-round (PR #1440)",
+  "id": "round3-partial-holds",
+  "kind": "decision",
+  "n": 362,
+  "options": [
+    {
+      "gain": "Fewer held changes.",
+      "key": "a",
+      "label": "A PARTIAL keeps the old round-3 rules",
+      "lose": "A change with an open finding can merge."
+    },
+    {
+      "gain": "Matches \"until the finding is fixed\".",
+      "key": "b",
+      "label": "A PARTIAL holds too (recommended)",
+      "lose": "More held changes."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "b",
+  "rank": 1,
+  "ref": "item 356; PR #1440",
+  "short": "Round-3 PARTIAL: hold, or old rules",
+  "status": "open",
+  "title": "Does a round-3 PARTIAL hold the change too, like a FAIL?",
+  "why": "Lane review-fix-check-round (PR #1440), sent by the coordinator at 14:07 CST. It refines your pick of 356 a."
+}

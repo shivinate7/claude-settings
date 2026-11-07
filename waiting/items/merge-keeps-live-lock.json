@@ -1,30 +1,42 @@
 {
-  "added": "2026-11-07T19:40:00Z",
-  "context": "Goal: no live agent loses its worktree mid-task.\nProblem (risk): at merge, merge/merge.py:1984-1992 (cut_local, then remove_held_tree) frees a worktree's own agent lock once the worktree is merged and idle for 30 minutes (janitor/sweep.py:474-498 and 793-795). A quiet reviewer writes no git, so it reads as idle.\nBased on (code): janitor/sweep.py own_agent_lock_verdict.\nBased on (ruling): decision when-a-worktree-may-be-removed, line 7: no lock holds a worktree that a merge removes. Asked again because the lost-worktree incident of 2026-11-06 is the harm that line allows.\nDeparts from: main, where a merge frees an agent's own lock after 30 idle minutes. Option a keeps the lock while its agent is alive.",
+  "added": "2026-11-07T20:14:00Z",
+  "context": "Goal: a merge frees disk without losing a running agent's work.\nProblem (risk): freeing a running agent's worktree loses its uncommitted files.\nBased on (read): guard rule worktree-home (decision an-agent-outside-its-home-tree-must-stop) already stops an agent whose worktree is gone, so it cannot write into main.\nBased on (ruling): decision when-a-worktree-may-be-removed (owner, 2026-10-25): the merge removes the merged branch's worktree once it has been idle long enough. Asked again because you reopened item 357 at 14:12 CST.\nDeparts from: main, where the merge frees any lock it finds. Each option adds a test before the free.",
   "home": "lane worktree-unique-branch (session_013NEJL3WkjDpDX48MYiGdbs)",
   "id": "merge-keeps-live-lock",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-07T19:41:50.035Z",
+    "choice": "none",
+    "note": "answers directly "
+  },
   "n": 357,
   "options": [
     {
-      "gain": "A live reviewer's worktree is safe.",
+      "gain": "Nothing is lost.",
       "key": "a",
-      "label": "A merge never frees a lock whose agent is alive; the record changes to say so (recommended)",
-      "lose": "Merged worktrees with a live agent stay until that session ends."
+      "label": "Never free a running agent's lock; the worktree goes when the agent ends",
+      "lose": "The disk stays used until the agent ends. A finished agent's leftover files are not saved."
     },
     {
-      "gain": "No code change.",
+      "gain": "Frees the disk at once.",
       "key": "b",
-      "label": "Keep the code, and rewrite the record to match it",
-      "lose": "A quiet live reviewer can still lose its worktree."
+      "label": "Save, then free: copy uncommitted changes to an archive ref, then remove the worktree",
+      "lose": "The running agent is stopped mid-run and must be resumed."
+    },
+    {
+      "gain": "Nothing is lost from a running agent. A finished agent's leftover files, such as red-run files, are saved before its worktree goes. It also covers the coordinator's 14:11 CST cleanup pick on step notes-fix-large-1.",
+      "key": "c",
+      "label": "Both: a for running agents, b for finished ones (recommended)",
+      "lose": "One extra git write for each freed worktree."
     }
   ],
   "owner": "coordinator",
-  "pick": "a",
+  "pick": "c",
   "rank": 1,
   "ref": "decision when-a-worktree-may-be-removed",
-  "short": "Merge frees a live agent's worktree lock?",
-  "status": "open",
-  "title": "Should a merge ever free a worktree lock whose agent is still alive?",
-  "why": "A quiet reviewer writes no git for 30 minutes, so the merge reads its worktree as idle and can remove it mid-task."
+  "reply": "Not a question after all (coordinator, 14:16 CST). Decision when-a-worktree-may-be-removed already says a: the merge removes a worktree only when it is clean, with no lock, session or process in it, and a worktree with unsaved changes is never removed. The gap was the code: merge.py freed an agent's own lock after 30 idle minutes. Lane worktree-unique-branch makes the code follow the record.",
+  "short": "Merge and a running agent's worktree: keep, save-then-free, or both",
+  "status": "closed",
+  "title": "How should a merge free disk without losing a running agent's work?",
+  "why": "You reopened this in chat at 14:12 CST. You lean to a, and want the other options confirmed first. Lane worktree-unique-branch builds a meanwhile."
 }

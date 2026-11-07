@@ -4,6 +4,12 @@
   "home": "lane qmax-revive-idle (coordinator)",
   "id": "qmax-700-past-rates-views",
   "kind": "decision",
+  "lane": "qmax-revive-idle",
+  "lastAnswer": {
+    "at": "2026-11-07T18:44:43.273Z",
+    "choice": "a",
+    "note": "i would want you to first confirm it's trly not on main in any shape or form before doing this "
+  },
   "n": 343,
   "options": [
     {
@@ -28,8 +34,9 @@
   "owner": "coordinator",
   "rank": 3,
   "ref": "q_max #700",
+  "reply": "a, with your condition, sent to the coordinator for lane qmax-revive-idle at 12:47 CST. First the lane checks main for the By Year and By City views in any shape: the routes, the components, and any grouping of past rates by year or city. It ports the views only if none exists. If a partial form exists, it brings that back to you before it builds.",
   "short": "#700 Past Rates views: port or close",
-  "status": "closed",
+  "status": "open",
   "title": "q_max PR #700 (Past Rates by year and by city) cannot merge: rebuild the two views, or close it?",
   "why": "The PR has sat since Oct 12 and its history no longer fits main."
 }
