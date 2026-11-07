@@ -35,7 +35,8 @@ CI: read live by merge --reviewed
 - The `Fix check` line is optional, comes once after the Round lines, and a PASS is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A PASS counts as its round passing in any round; after round 3 it keeps the net value round 3 gave; with no round recorded it reads open.
 - A FAIL is open until the next record. It counts as the next round, N+1: that record carries `Round N+1: reviewer, <model>, FAIL` and no Fix check line, so `--fix-check` may follow again. A FAIL that counts as round 3 makes that record a round-3 record. After round 3 a FAIL holds the change (owner item 356 a).
 - A WIDE is open. Its fix starts a new lane at round 1.
-- No reset: when the record before the newest has a FAIL `Fix check` at last round N, the newest must reach round N+1, or the PR reads open. Why: `a failed fix check on head <9-hex> counts as round N+1, but this record's last round is M`. A WIDE or a PASS sets no floor.
+- No reset: a round count never goes down on a PR. The floor is the highest last round over every earlier record that parses, plus 1 when that record has a Fix check FAIL. A newest record below the floor reads open. Why: `round <F> is the floor, set by head <9-hex>, but this record's last round is M`. A WIDE sets the floor at its own last round. A new lane is a new branch and PR, so it starts over.
+- Counted slot: when an earlier record has a Fix check FAIL after round N, the round N+1 lines of every later record on the PR must include a FAIL line. Otherwise the PR reads open. Why: `the failed fix check fills round N+1`.
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
   PR as `CI draft, no run`, because a draft has no CI run.
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
@@ -79,6 +80,11 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
 - One fix check per record. A second fix needs the next round's record first: a FAIL counts as that round, and the record that carries it has no Fix check line. A WIDE starts a new lane at round 1. `--fix-check` refuses unless its reviewed head equals the Head of the newest earlier record on the PR and that record has no Fix check line.
+- Open, four switches. Each is one module constant in `merge/merge.py`, set to its default. Their code lands in a builder lane, so the tool does not enforce them yet.
+  - `ROUND3_PARTIAL_HOLDS = False`. Open question Q3: does a round-3 PARTIAL hold like a FAIL? True makes a Round 3 PARTIAL line hold, so round 3 is not done.
+  - `FIX_PASS_CLEARS_ROUND3_HOLD = False`. Open question Q4: does a fix check PASS after a round-3 FAIL clear the hold? False: the hold stands. True: the record follows the round-3 done rules, so guard `no` is done and guard `yes` needs net value zero or positive.
+  - `ROUND3_DESIGN_FAIL_HOLDS = True`. Question Q5, does a design-reviewer FAIL in round 3 hold? Answered: the coordinator picked a at 14:15 CST, so it holds. This is the coordinator's pick, not the owner's words. False: only a reviewer FAIL line in round 3 holds.
+  - `FIX_FAIL_AFTER_ROUND3_HOLDS = True`. The coordinator agreed at 14:15 CST that a fix check FAIL after round 3 holds. This is the coordinator's agreement, not the owner's words. False: a fix FAIL after round 3 reads open with the fix-failed why.
 
 ## Lane picks
 
