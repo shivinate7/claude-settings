@@ -28,7 +28,8 @@ sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 REPO = os.path.abspath(os.path.join(HERE, ".."))
-JOB_FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
+REPO_REAL = os.path.realpath(REPO)  # the root the derivation reads paths against: __file__ resolves to this too
+JOB_FLAGS =["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
 STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
 # Flags derived from others, kept out of JOB_FLAGS so the exact-set cases below stay about the base flags:
 # checks_windows_sweep is set with checks_windows_rest. checks_guard is set when both `code` and `guard` are set, or
@@ -62,12 +63,17 @@ def family_files():
 # The files the guard suite loads, derived from the code of GUARD_SEEDS, not listed by hand. A file is in the closure when
 # a file in it imports it, or loads it by a path (_refs reads each file's syntax tree):
 #   import x, from x import y, importlib.import_module("x"): x is the basename of a repo .py file;
+#   a run-time root that is a folder of the repo (_path_of reads __file__ and the os.path or pathlib calls on it, and a
+#   module-level name bound once to one of these), then one literal, as os.path.join(root, "lit") or root / "lit": the
+#   file at that folder plus the literal (_repo_load);
 #   os.path.join whose literal segments have a `..`, or whose run-time root is the file's own folder (__file__, _HERE):
 #     the file of that name in that folder;
 #   os.path.join of literal segments with no run-time root: a repo path, from the repo root;
-#   a spec_from_file_location or SourceFileLoader path: its Name read through to the os.path.join assigned to it.
-# Not followed: a join with a run-time root and literal segments. In a product module it is named in LOAD_EXCEPTIONS; in a
-# test module it is a fixture path inside a temp folder, and is not named. A loader path with no literal repo file is named.
+#   a spec_from_file_location or SourceFileLoader path: its Name read through to the path assigned to it.
+# Not followed: a join with a run-time root and several literals. A product module's such join, when its path is a repo file,
+# is named in LOAD_EXCEPTIONS. A test module's is not named: most are fixture paths in a temp folder, and the five under REPO
+# in hooks/test_guard.py read files the closure already holds. A run-time root that is not a folder of the repo is not read.
+# A loader path with no literal repo file is named. A string or a comment holds no load: the syntax tree is read.
 GUARD_SEEDS = ("hooks/guard.py", "hooks/test_guard.py")
 # Each load guard_closure finds but does not follow, as "file:scope:source": why. The scope is the enclosing function (or
 # <module>) and the source is the load's text as ast.unparse writes it, so a line added above a load keeps its entry.
@@ -86,9 +92,7 @@ LOAD_EXCEPTIONS = {
     "lint/rule_audit.py:<module>:os.path.join(ROOT, 'lint', 'rule_mechanisms.json')": "ROOT, the repo root by definition, a fixture root in the suite: lint/rule_mechanisms.json is not in the closure",
     "lint/rule_audit.py:<module>:os.path.join(ROOT, '.github', 'workflows', 'checks.yml')": "ROOT: .github/workflows/checks.yml, already a fail-safe path in ci-scope.sh",
     "lint/rule_audit.py:emitted_rule_ids:os.path.join(root, 'hooks', 'config_watch.py')": "ROOT: hooks/config_watch.py is not in the closure",
-    "lint/stale_cites.py:py_facts:PY_FACTS": "PY_FACTS: skills/plain-english-map/scripts/lib/py-facts.py is in the closure by a `..` load",
     "merge/merge.py:hit_suites:os.path.join(root, '.github', 'workflows', 'checks.yml')": "the checkout's own workflow, .github/workflows/checks.yml, already a fail-safe path in ci-scope.sh",
-    "merge/merge.py:idle_lanes:IDLE_BUILD": "IDLE_BUILD: skills/roadmap/build.py is in the closure by a `..` load",
     "skills/waiting-page/stale_pages.py:pointer_checkout:os.path.join(os.path.expanduser('~'), '.claude', 'CLAUDE.md')": "the user's ~/.claude/CLAUDE.md, not this repo's .claude/CLAUDE.md",
 }
 _CLOSURE = {}
@@ -128,10 +132,20 @@ def _join_segments(call):
     return [p for s in segs for p in s.split("/") if p], lead
 
 
-def _loader_joins(arg, call, tree, parents):
-    """The os.path.join calls a loader's path argument can hold: the argument itself, or the joins assigned to its Name
-    in the enclosing function (the module when there is none)."""
-    if isinstance(arg, ast.Call) and _callee(arg) == "os.path.join":
+def _is_str(node):
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+def _is_path_expr(node):
+    """An os.path.join call, or a `/` with a string literal on its right (pathlib): a path built from parts."""
+    return (isinstance(node, ast.Call) and _callee(node) == "os.path.join") or (
+        isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div) and _is_str(node.right))
+
+
+def _loader_joins(arg, call, tree, parents, bound):
+    """The path expressions a loader's path argument can hold: the argument itself, or the ones assigned to its Name in
+    the enclosing function (the module when there is none), or the module-level value of the Name."""
+    if _is_path_expr(arg):
         return [arg]
     if not isinstance(arg, ast.Name):
         return []
@@ -141,19 +155,108 @@ def _loader_joins(arg, call, tree, parents):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             scope = node
             break
-    return [n.value for n in ast.walk(scope) if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call)
-            and _callee(n.value) == "os.path.join" and any(isinstance(t, ast.Name) and t.id == arg.id for t in n.targets)]
+    found = [n.value for n in ast.walk(scope) if isinstance(n, ast.Assign) and _is_path_expr(n.value)
+             and any(isinstance(t, ast.Name) and t.id == arg.id for t in n.targets)]
+    if not found and _is_path_expr(bound.get(arg.id)):
+        found = [bound[arg.id]]
+    return found
 
 
 def _uses_file(node):
     return any(isinstance(n, ast.Name) and n.id == "__file__" for n in ast.walk(node))
 
 
-def _join_file(f, call, tracked, own_names):
-    """-> (path, kind) for an os.path.join: kind 'dir' when the path is read from the loading file's folder (a `..`
-    segment, or a run-time root that is that folder: an expression built from __file__, or a module-level Name in
-    own_names bound to one, such as guard.py's _HERE), 'root' when it is a repo path from the repo root with no run-time
-    root, 'run-time' when a run-time root comes before a repo path (a checkout or a fixture), or (None, None)."""
+def _bound_names(tree):
+    """The module-level names bound once in the file, with their values. A name bound anywhere else in the file (a
+    parameter, a local, an import, a second assignment) is not read through: its value is not the module's."""
+    stores = Counter()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
+            stores[n.id] += 1
+        elif isinstance(n, ast.arg):
+            stores[n.arg] += 1
+        elif isinstance(n, ast.alias):
+            stores[(n.asname or n.name).split(".")[0]] += 1
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            stores[n.name] += 1
+    return {st.targets[0].id: st.value for st in tree.body
+            if isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Name)
+            and stores[st.targets[0].id] == 1}
+
+
+def _path_of(node, f, bound, depth=0):
+    """The absolute path a path expression reads to, or None. Only these are read: __file__ (the loading file), the os.path
+    functions dirname, abspath, realpath, normpath and join, pathlib.Path(...), .resolve(), .parents[N], a `/` with a
+    literal, and a module-level name bound once to one of these. Nothing is called beyond them: no environment, no read."""
+    if depth > 20:
+        return None
+    if isinstance(node, ast.Name):
+        if node.id == "__file__":
+            return os.path.realpath(os.path.join(REPO_REAL, f))
+        return _path_of(bound[node.id], f, bound, depth + 1) if node.id in bound else None
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute) and node.value.attr == "parents" \
+            and isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, int):
+        p = _path_of(node.value.value, f, bound, depth + 1)
+        if p is None:
+            return None
+        for _ in range(node.slice.value + 1):  # parents[N] is N + 1 dirnames up
+            p = os.path.dirname(p)
+        return p
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div) and _is_str(node.right):
+        base = _path_of(node.left, f, bound, depth + 1)
+        return None if base is None else os.path.join(base, node.right.value)
+    if not isinstance(node, ast.Call):
+        return None
+    name = _callee(node)
+    if isinstance(node.func, ast.Attribute) and node.func.attr == "resolve" and not node.args:
+        p = _path_of(node.func.value, f, bound, depth + 1)
+        return None if p is None else os.path.realpath(p)
+    if name in ("os.path.dirname", "os.path.abspath", "os.path.realpath", "os.path.normpath", "pathlib.Path", "Path") \
+            and len(node.args) == 1:
+        p = _path_of(node.args[0], f, bound, depth + 1)
+        fn = {"os.path.dirname": os.path.dirname, "os.path.abspath": os.path.abspath, "os.path.realpath": os.path.realpath,
+              "os.path.normpath": os.path.normpath}.get(name, os.path.normpath)
+        return None if p is None else fn(p)
+    if name == "os.path.join" and node.args and all(_is_str(a) for a in node.args[1:]):
+        base = _path_of(node.args[0], f, bound, depth + 1)
+        return None if base is None else os.path.join(base, *(a.value for a in node.args[1:]))
+    return None
+
+
+def _repo_load(f, expr, tracked, bound):
+    """The repo file a load reads when a run-time root that is a folder of the repo comes before one literal, as
+    os.path.join(root, "lit") or root / "lit": the file at root plus the literal, when it is a repo file. None otherwise:
+    a literal root, or a chain of several literals, is not read here."""
+    if isinstance(expr, ast.Call) and _callee(expr) == "os.path.join" and len(expr.args) == 2 and _is_str(expr.args[1]):
+        root, lit = expr.args[0], expr.args[1].value
+    elif isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Div) and _is_str(expr.right):
+        root, lit = expr.left, expr.right.value
+    else:
+        return None
+    if _is_str(root) or (isinstance(root, ast.BinOp) and _is_str(root.right)):
+        return None
+    base = _path_of(root, f, bound)
+    if base is None:
+        return None
+    try:
+        rel = os.path.relpath(base, REPO_REAL).replace(os.sep, "/")
+    except ValueError:  # another drive on Windows: not in the repo
+        return None
+    c = posixpath.normpath(posixpath.join(rel, lit))
+    return c if c in tracked else None
+
+
+def _join_file(f, call, tracked, own_names, bound):
+    """-> (path, kind) for a path expression: kind 'repo' when _repo_load reads it, else for an os.path.join: kind 'dir'
+    when the path is read from the loading file's folder (a `..` segment, or a run-time root that is that folder: an
+    expression built from __file__, or a module-level Name in own_names bound to one, such as guard.py's _HERE), 'root'
+    when it is a repo path from the repo root with no run-time root, 'run-time' when a run-time root comes before a repo
+    path (a checkout or a fixture), or (None, None)."""
+    c = _repo_load(f, call, tracked, bound)
+    if c:
+        return c, "repo"
+    if not (isinstance(call, ast.Call) and _callee(call) == "os.path.join"):
+        return None, None
     segs, lead = _join_segments(call)
     if not segs:
         return None, None
@@ -188,6 +291,7 @@ def _refs(f, tree, tracked):
     parents = {c: n for n in ast.walk(tree) for c in ast.iter_child_nodes(n)}
     own_names = {t.id for st in tree.body if isinstance(st, ast.Assign) and _uses_file(st.value)
                  for t in st.targets if isinstance(t, ast.Name)}
+    bound = _bound_names(tree)
     test = posixpath.basename(f).startswith("test_")
     modules, paths, loads, unfollowed = set(), set(), set(), []
     for node in ast.walk(tree):
@@ -203,7 +307,7 @@ def _refs(f, tree, tracked):
                 else:
                     unfollowed.append((_key(node, parents), "importlib.import_module of a name built at run time"))
             elif name == "os.path.join":
-                c, kind = _join_file(f, node, tracked, own_names)
+                c, kind = _join_file(f, node, tracked, own_names, bound)
                 if kind == "run-time":
                     if not test:  # a test's join under a run-time root is a fixture path, not a repo load
                         unfollowed.append((_key(node, parents), f"os.path.join with a run-time root, then {c}"))
@@ -212,8 +316,8 @@ def _refs(f, tree, tracked):
             elif name.endswith("spec_from_file_location") or name.endswith("SourceFileLoader"):
                 arg = node.args[1] if len(node.args) > 1 else None
                 hits, named = [], False
-                for j in _loader_joins(arg, node, tree, parents):
-                    c, kind = _join_file(f, j, tracked, own_names)
+                for j in _loader_joins(arg, node, tree, parents, bound):
+                    c, kind = _join_file(f, j, tracked, own_names, bound)
                     if kind == "run-time":
                         named = True
                         unfollowed.append((_key(j, parents), f"a loader path with a run-time root, then {c}"))
@@ -222,6 +326,10 @@ def _refs(f, tree, tracked):
                 loads.update(hits)
                 if not hits and not named:
                     unfollowed.append((_key(arg if arg is not None else node, parents), "a loader path with no literal repo file"))
+        elif isinstance(node, ast.BinOp):  # a pathlib `/` load, read wherever it is written
+            c = _repo_load(f, node, tracked, bound)
+            if c:
+                paths.add(c)
     return modules, paths, loads, unfollowed
 
 
