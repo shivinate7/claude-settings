@@ -8717,6 +8717,69 @@ class RecordsHeal(RecordsEnv):
         drops = [l[len("Drops-lines:"):].split(" -- ")[0].split() for l in body.splitlines() if l.startswith("Drops-lines:")]
         self.assertEqual(drops, [["docs/records.md"]], body)
 
+class WaitRefusalCites(unittest.TestCase):
+    """Two wait refusals that name no failing check do not cite the failing-CI rule (git-never-merge-failing-ci): a deadline with GitHub
+    still on the pre-push head, and a head that moved during the wait. Each keeps its own words and a house-form cite of its own."""
+    wait = WaitProgress.wait
+
+    def test_the_deadline_with_the_pre_push_head_does_not_cite_the_failing_ci_rule(self):
+        host = ClockedHost(lambda t: {"checks": [("pass", "")]}, head_at=lambda t: "old")
+        ok, why, *_ = self.wait(host, 5, prior="old")
+        self.assertFalse(ok)
+        self.assertIn("deadline of 5 minutes passed", why)
+        self.assertNotIn("git-never-merge-failing-ci", why, f"a pre-push deadline cites the failing-CI rule: {why}")
+        self.assertRegex(why, r"\((decision|rule) [a-z0-9-]+, ", f"the refusal names no cite: {why}")
+
+    def test_a_head_that_moves_during_the_wait_does_not_cite_the_failing_ci_rule(self):
+        host = ClockedHost(lambda t: {"checks": [("pass", "")]}, head_at=lambda t: "other")
+        ok, why, *_ = self.wait(host, 15)
+        self.assertFalse(ok)
+        self.assertIn("branch head moved", why)
+        self.assertNotIn("git-never-merge-failing-ci", why, f"a moved head cites the failing-CI rule: {why}")
+        self.assertRegex(why, r"\((decision|rule) [a-z0-9-]+, ", f"the refusal names no cite: {why}")
+
+    def test_control_a_red_check_still_cites_the_failing_ci_rule(self):  # the control: the cite stays where a check is red
+        host = ClockedHost(lambda t: {"checks": [("fail", "")]})
+        ok, why, *_ = self.wait(host, 15)
+        self.assertFalse(ok)
+        self.assertIn("a check is red", why)
+        self.assertIn("git-never-merge-failing-ci", why, why)
+
+class ConfirmWaitCites(RecordsEnv):
+    """The same cite through confirm: its first wait wraps any refusal as a red head, so a head that moves during that wait is
+    refused with the failing-CI cite too (git-never-merge-failing-ci). The wait is the real one, as in BaseAware; its reads come from the fake."""
+
+    def test_a_head_that_moves_during_the_first_wait_does_not_cite_the_failing_ci_rule(self):
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed, with a stale page: the wait on the head runs before any push
+        fake, case = self.host, self
+        class MovesInWait(merge.Host):
+            def __init__(h):
+                super().__init__(["checks"], minute=60, now=lambda: 0, pause=lambda s: None)
+                h.in_wait, h.moved = False, False
+            def pr(h, n, *a, **k):
+                if h.in_wait and not h.moved:  # a push to the head lands during the first pass of the wait
+                    h.moved = True
+                    case.on("feat", {"notes.txt": "moved\n"}, "a push during the wait")
+                return fake.pr(n)
+            def wait_checks(h, *a, **k):
+                h.in_wait = True
+                try:
+                    return super().wait_checks(*a, **k)
+                finally:
+                    h.in_wait = False
+            def required_names(h): return ["checks"]
+            def batch_running(h, n, base, head=None): return []
+            def checks(h, n, *a, **k): return {"checks": [("pass", "")]}
+            def runs(h, sha): return []
+            def base_state(h, base, flows): return "green", ""
+            def head_state(h, n, *a, **k): return "green"
+            def merge(h, *a): return fake.merge(*a)
+        rc, out = self.run_merge("7", "--confirm", host=MovesInWait())
+        self.assertEqual(rc, 1, out)
+        self.assertIn("branch head moved", out)
+        self.assertNotIn("git-never-merge-failing-ci", out, f"a head that moved in the wait cites the failing-CI rule: {out}")
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
 class MergeImport(unittest.TestCase):
     """merge.py imports the records generator when it loads. With that import blocked, the tool prints one clear line and
     exits non-zero, with no traceback."""
