@@ -11664,8 +11664,10 @@ rr_allow("a deletion push, git push origin :feat, sends no commit, so the gap at
          VCS + " push origin :feat", RR_PLAIN)
 rr_refuse("two refspecs, git push origin clean:clean topic:topic, where only the second names the gap",
           VCS + " push origin clean:clean topic:topic", RR_CLEANREF)
-rr_allow("known limit: git push --all origin is allowed, though a branch it sends holds the gap",
-         VCS + " push --all origin", RR_PLAIN)
+# Known limit: `--all` names no refspec, and it sends main, so push-main asks before the red-run check. The check
+# reads no branch that `--all` sends, the gapped one included, and the ask is what stands.
+sh("red-run: known limit: git push --all origin asks on push-main first, so red-run reads none of the branches it sends",
+   VCS + " push --all origin", "ask", "push-main", cwd=RR_PLAIN)
 rr_allow("known limit: git push --tags origin is allowed, though the tag it sends names the gap",
          VCS + " push --tags origin", RR_TAG)
 
