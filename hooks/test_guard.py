@@ -9335,6 +9335,14 @@ START_WAITING = [("session_STARTWAIT0%d" % n, ["cs-build:lane", START_HOME, "cs-
                   "cs-topic:waiting-page"], "lane: waiting-page-" + step) for n, step in enumerate("abcde", 1)]
 START_GUARD = [("session_STARTGUARD0%d" % n, ["cs-build:lane", START_HOME, "cs-step:guard-" + step,
                 "cs-topic:guard-rules"], "lane: guard-" + step) for n, step in enumerate("acde", 1)]
+# lane-start-overlap, round 1. Lane A holds the step qmax-map-format-skew; lane B is on the same topic, on q_max.
+START_LANE_A_ID = "session_STARTLANEA01"
+START_LANE_A_TAGS = ["cs-build:lane", START_HOME, START_QMAX, "cs-step:qmax-map-format-skew", "cs-topic:qmax-maps"]
+START_LANE_B_ID = "session_STARTLANEB01"
+START_LANE_B_TAGS = ["cs-build:lane", START_HOME, START_QMAX, "cs-step:qmax-maps-review", "cs-topic:qmax-maps"]
+# An open lane, session_aaa111, and a create_session the guard refuses. The refusal's text names aaa111; its tags differ.
+START_AAA_ID = "session_aaa111"
+START_OTHER_TAGS = ["cs-build:lane", START_HOME, "cs-step:page-names-other", "cs-topic:other-names"]
 
 
 def start_lanes(*lanes):
@@ -9359,6 +9367,12 @@ def start_list(*rows):
     """A list_sessions result: its rows in ccr.data, returned as another session's text, nonce-wrapped."""
     body = role_wrapped(json.dumps({"ccr": {"data": list(rows)}}))
     return [role_use("l1", LIST_SESSIONS), role_result("l1", body)]
+
+
+def start_refused(tool_id, tags, title, text):
+    """A create_session the guard refused: its result is an error whose text is `text`."""
+    return [role_use(tool_id, CREATE_SESSION, {"title": title, "tags": list(tags)}),
+            role_result_block(tool_id, content=[{"type": "text", "text": text}], is_error=True)]
 
 
 # lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
@@ -9493,6 +9507,12 @@ ROLE_LINES = {
                                 + start_list(start_row(START_HOME_ID, "SESSION_STATUS_ARCHIVED", START_HOME_TAGS)),
     "start-waiting-five": start_lanes(*START_WAITING),
     "start-guard": start_lanes(*START_GUARD),
+    # lane-start-overlap, round 1. Lane B is the target of the status and step prose; lane A holds its step.
+    "start-lane-b": start_lanes((START_LANE_A_ID, START_LANE_A_TAGS, "lane: qmax-map-format-skew"),
+                                (START_LANE_B_ID, START_LANE_B_TAGS, "lane: qmax-maps-review")),
+    "start-refused": start_lanes((START_AAA_ID, START_HOME_TAGS, "lane: page-names-check"))
+                     + start_refused("r1", START_OTHER_TAGS, "lane: page-names-other",
+                                     "Refused: a lane for this step is already open (session session_aaa111)."),
 }
 
 
@@ -19159,10 +19179,10 @@ _OUTER_FAMILY = FAMILY
 FAMILY = "lane-one-topic"
 
 
-def start_ask(name, transcript, tags, title, carries):
+def start_ask(name, transcript, tags, title, carries, lacks=()):
     """A create_session the guard asks about: an open lane overlaps the start. Its reason names the lane."""
     add("lane-start-overlap: " + name, "ask", rule=LANE_START_RULE, tool=LANE_TOOL, cwd=LANE_REPO,
-        transcript=transcript, prompt="/effort medium", tags=list(tags), title=title, carries=carries)
+        transcript=transcript, prompt="/effort medium", tags=list(tags), title=title, carries=carries, lacks=lacks)
 
 
 def start_allow(name, transcript, tags, title):
@@ -19171,10 +19191,10 @@ def start_allow(name, transcript, tags, title):
         prompt="/effort medium", tags=list(tags), title=title)
 
 
-def send_ask(name, transcript, target, message, carries):
+def send_ask(name, transcript, target, message, carries, lacks=()):
     """A send_message the guard asks about: its step overlaps an open lane. Its reason names the lane."""
     add("lane-start-overlap: " + name, "ask", rule=LANE_START_RULE, tool=SEND_MESSAGE, cwd=LANE_REPO,
-        transcript=transcript, env=ROLE_ENV, session_id=target, message=message, carries=carries)
+        transcript=transcript, env=ROLE_ENV, session_id=target, message=message, carries=carries, lacks=lacks)
 
 
 def send_allow(name, transcript, target, message):
@@ -19268,6 +19288,33 @@ send_allow("a send_message with no step slug is allowed, though a word of it ove
 send_allow("a send_message with no step slug is allowed with an unreadable transcript",
            role_path("unreadable"), START_VERIFY_ID,
            "Status: the MAP run is green. No action needed.")
+
+# Round 1. A status line that names lane A's step, and a line that uses the word step with a hyphenated word, are not
+# step briefs: they are allowed on lane B, whose topic and step lane A shares.
+send_allow("a status line that names lane A's step, on lane B, is allowed",
+           role_path("start-lane-b"), START_LANE_B_ID,
+           "Status: step qmax-map-format-skew is green; no action.")
+send_allow("a next-step line with the bare word step and a hyphenated word is allowed",
+           role_path("start-lane-b"), START_LANE_B_ID,
+           "Next step re-run the MAP check.")
+# Round 1. A step brief in three forms is asked. Each reason names the overlapping lane, and never the remedy phrase.
+send_ask("a step named in a Take this as step sentence, with a backticked slug, is asked",
+         role_path("start-incident"), START_VERIFY_ID,
+         "Take this as step `qmax-main-map-ts`.",
+         carries=("qmax-map-format-skew", START_MAP_ID), lacks=("send it the work with send_message",))
+send_ask("a step named on a Step: line of a message is asked",
+         role_path("start-incident"), START_VERIFY_ID,
+         "Context for the lane.\nStep: qmax-main-map-ts",
+         carries=("qmax-map-format-skew", START_MAP_ID), lacks=("send it the work with send_message",))
+send_ask("a step named as new step qmax-main-map-ts is asked",
+         role_path("start-incident"), START_VERIFY_ID,
+         "new step qmax-main-map-ts",
+         carries=("qmax-map-format-skew", START_MAP_ID), lacks=("send it the work with send_message",))
+# Round 1. A refused create_session names aaa111 in its text and carries other tags. It must not overwrite aaa111's record,
+# so an exact re-start of aaa111's step and topic, on the home repo, is still asked.
+start_ask("a refused create_session does not overwrite the open lane it names: an exact re-start of that lane is asked",
+          role_path("start-refused"), START_HOME_TAGS, "lane: page-names-check",
+          carries=("page-names-check", START_AAA_ID))
 
 FAMILY = _OUTER_FAMILY
 
