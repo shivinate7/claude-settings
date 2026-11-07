@@ -1208,6 +1208,49 @@ class UnreadableReadTests(StaleCase):
         rc, out = self.run_check(rng)
         self.assert_read_failed(rc, out, ".ste-lint-exclude")
 
+    def link_exclude(self, rng, target):
+        """Make .ste-lint-exclude in the repo a symlink to `target`. A platform that makes no symlink skips the case."""
+        link = os.path.join(rng.repo, ".ste-lint-exclude")
+        try:
+            os.symlink(target, link)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest("this platform cannot make a symlink: %s" % exc)
+        self.assertTrue(os.path.islink(link), "scope: the exclude is a link")
+
+    def test_a_dangling_exclude_symlink_exits_two_and_names_it(self):
+        rng = self.moved_lib(cited=False)
+        self.assertIn(MOVED, touched(rng), "scope: the range renames a path, so the check reads the excludes")
+        target = os.path.join(rng.case, "no-such-excludes")
+        self.assertFalse(os.path.exists(target), "scope: the link's target is missing")
+        self.link_exclude(rng, target)
+        rc, out = self.run_check(rng)
+        self.assert_read_failed(rc, out, ".ste-lint-exclude")
+
+    def test_an_exclude_symlink_to_a_readable_file_still_passes(self):
+        rng = self.moved_lib(cited=False)
+        target = os.path.join(rng.case, "readable-excludes")
+        with open(target, "w", encoding="utf-8", newline="\n") as f:
+            f.write("# no excludes\n")
+        self.link_exclude(rng, target)
+        self.assert_passes(rng)
+
+    def test_a_non_utf8_exclude_file_exits_two_without_a_traceback(self):
+        rng = self.moved_lib(cited=False)
+        self.assertIn(MOVED, touched(rng), "scope: the range renames a path, so the check reads the excludes")
+        raw = b"\xff\xfe bad\n"
+        with self.assertRaises(UnicodeDecodeError):
+            raw.decode("utf-8")  # scope: the bytes are not UTF-8
+        with open(os.path.join(rng.repo, ".ste-lint-exclude"), "wb") as f:
+            f.write(raw)
+        rc, out = self.run_check(rng)
+        self.assert_read_failed(rc, out, ".ste-lint-exclude")
+        self.assertNotIn("Traceback", out, "a non-UTF-8 exclude file printed a traceback, not an unknown line\n" + out)
+
+    def test_a_utf8_exclude_file_with_non_ascii_text_still_passes(self):
+        rng = self.moved_lib(cited=False)
+        write(rng.repo, ".ste-lint-exclude", "# café excludes\n")
+        self.assert_passes(rng)
+
     def assert_only_adds_a_page(self, rng):
         """The range adds one Markdown page and removes, renames and changes nothing else. A case asserts this before
         it reads the result, so an add-only case has the add-only range it names."""
