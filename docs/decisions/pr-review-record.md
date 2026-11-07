@@ -33,13 +33,12 @@ CI: read live by merge --reviewed
 - The first line is the marker. A line `---` after the CI line ends the record, so the attribution footer may follow.
 - One `Round` line per reviewer. A round can hold more than one line.
 - The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. A PASS counts as its round passing in any round; after round 3 it keeps the net value round 3 gave; with no round recorded it reads open.
-- The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
-  PR as `CI draft, no run`, because a draft has no CI run.
+- The comment never stores CI state. `merge --reviewed` reads no CI per PR. It reads the base's latest run once, when a batch line exists. The form's CI line keeps its old wording, because posted records carry it (`REVIEW_CI_LINE` in `merge/merge.py`).
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
 - The newest record for a head counts. A record for an old head is stale.
 - `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints no body, so a push after the review never relabels old rounds as current.
 - A lane posts the body with the GitHub MCP comment tool after each round. `gh pr comment` uses GraphQL, which the cloud refuses (route graphql-gh-api-cloud).
-- The one home of the form is the merge tool (`merge/merge.py`). `review_body` writes the body, `parse_review` reads it, and `review_state` gives each record's state. `reviewed_lines` prints the `--reviewed` list, `round_arg` reads `--round`, and `Host.review_comments` makes the one list read.
+- The one home of the form is the merge tool (`merge/merge.py`). `review_body` writes the body, `parse_review` reads it, and `review_state` gives each record's state. `reviewed_lines` builds the `--reviewed` ledger: one next act per open PR, with its age limit in `merge/merge.py` `PR_STATE_AGE_HOURS` (design: the PR ledger, record `pr-ledger`, draft PR #1419). `round_arg` reads `--round`. `Host.issue_comments` makes the one comment list read, which `reviewed_lines` and `Host.review_comments` (`--fix-check`) both use.
 
 ## The done rules
 
@@ -60,13 +59,12 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 
 Counted as real `gh` calls, one call per list read however many pages it pages.
 
-- `merge --reviewed` makes two list calls per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
+- `merge --reviewed` reads the open PRs (one list) and the repo's issue comments since the oldest open PR (one list, all pages, not only review records). It reads one `issues/<n>/events` list per PR that reaches the hold rule. When a batch line exists, it reads the base's latest `actions/runs` run once (its jobs too, only when that run did not succeed). It reads no head and no check run. The comment list grows with the repo's comment traffic and with the age of the oldest open PR.
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
-- Each ready PR that has a record adds three calls: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
-- One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
+- One ready PR with a record (a batch line): three calls, the open PRs, the comments and the base's run. A held PR adds one events read.
 - `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
-- The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR.
+- The test `ReviewedList.test_one_ready_pr_with_a_record_costs_three_gh_calls` in `merge/test_merge.py` pins the three calls. `ReviewedLedger.test_reads_one_comment_list_no_head_and_at_most_one_event_list_per_held_pr` pins the list reads.
 
 ## The limits
 

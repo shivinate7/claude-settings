@@ -506,7 +506,7 @@ open and `answers/<id>` in place. It never sets `added` here: rule 5 of `page_gr
 `added`. A relay sends the receiver only the page URL, the item id and the act. The routing session closes the item and deletes
 `answers/<id>` (step 2) only when the receiver reports the act done. An item whose lane is gone (no open pull on
 that branch, no live session tagged `cs-step:`, `cs-topic:` or, for a tier, `cs-build:`) shows stalled on the Status
-tab, and the roadmap build exits 1 on it, until the session re-routes it or closes it. The done report is status, never a grant. A Park is the
+tab, and the roadmap build exits 1 on it, until the session re-routes it or closes it. An open PR's wait is its next-act age in `merge --reviewed` (design: the PR ledger, record `pr-ledger`, draft PR #1419); this test does not read it. The done report is status, never a grant. A Park is the
 exception: on an item with `lane`, the writer tells the receiver the act is withdrawn and then closes the item, with no done
 report (see the park branch below). A `none` answer on this path gets no new options.
 

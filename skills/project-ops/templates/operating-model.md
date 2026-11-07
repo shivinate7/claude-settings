@@ -25,7 +25,7 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   `lane` when the page item has one, so it can list an item whose lane is gone.
   At each publish, triage also disposes each `stalled step:` line the build prints (the build exits 1 on one): a
   step with no live lane and no open PR becomes `todo` or `done`, or gets a `paused` field with who decides; an item
-  is re-routed or closed. Triage does not end its wake while such a line prints: the Stop hook (`lint/report_guard.py`)
+  is re-routed or closed. A PR's wait is its next-act age in `merge --reviewed` (design: the PR ledger, record `pr-ledger`, draft PR #1419); the build's test does not read it. Triage does not end its wake while such a line prints: the Stop hook (`lint/report_guard.py`)
   refuses to end a turn while the newest build output in the transcript has one. A second Stop is released only when
   the report's Input Needed section names every stalled step id and item number, which escalates it to the coordinator.
   Triage, as the page writer, splices it into the repo's one page and
@@ -45,9 +45,12 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   N's. If N goes red, the batch runner rebuilds N+1 from the base without N, and N's lane is
   fixed in its own lane.
   When the repo holds a standing merge grant (claude-settings record `standing-merge-grant`), it
-  batches each PR whose review record is done, as `merge --reviewed` finds it at its wake, and merges the
+  batches each PR whose review record is done, as `merge --reviewed` lists it at its wake. It merges the
   integration PR on green. It asks the owner for no merge. It prints the merge output on the
-  terminal, never to a log only. It dispatches no deferred step.
+  terminal, never to a log only. It dispatches no deferred step. At each wake it runs `merge --reviewed`
+  and reports its two numbers: the longest wait since a done record, and the count of PRs with no next act.
+  Each RED line (past its age limit in `merge/merge.py` `PR_STATE_AGE_HOURS`, or with no next act) gets a next act or a hold in the same wake. A hold is a label (`held`, `parked` or `replaced`)
+  and a `Waits on: debt:<slug>` or `Waits on: page:<item-id>` comment on the PR.
 - **Lane session.** Runs one lane as an orchestrator, with its own builder and reviewer agents.
   It reports up to the coordinator. Work that needs a local machine is a lane session whose brief
   names the machine. It may drive a Remote Control session on the owner's machine.
@@ -70,6 +73,7 @@ The coordinator does not rotate. It writes its own handoffs and compacts in plac
 never hands its own sessions to a successor: a session may refuse a new coordinator as not its
 parent, or miss a message while busy.
 
+- At each wake, the coordinator runs `merge --reviewed`, reports its two numbers, and gives each RED line a next act or a hold, as the batch runner does.
 - At each wake, the coordinator reads each standing session's use from `get_session`:
   `external_metadata.context_usage` (`used_tokens` of `max_tokens`). A reading of 0, or none,
   is no reading, and the use is unknown. No session reports its own tally (owner, 2026-11-02 15:40 CST).
@@ -108,7 +112,7 @@ parent, or miss a message while busy.
   `Deferred (owner, <date>): <why>`, and waits. All other work runs, in roadmap order.
 - A lane that hits a question for the owner parks that part, and goes on.
 - A lane posts its review record on its PR after each round (claude-settings record
-  `pr-review-record`). The batch runner finds it. The lane first runs `merge --lane-lint <pr>`. The batch
+  `pr-review-record`), never by message only. It renders the body with `merge <pr> --review-record` and posts it as a PR comment with the GitHub MCP comment tool. The batch runner finds it. The lane first runs `merge --lane-lint <pr>`. The batch
   runner runs it again on each lane head before the join, and refuses a red lane (claude-settings record
   `lanes-run-no-full-ci-job`). A lane never rebases onto main and never merges.
 - A record that files an owner ruling gets a round 1 review before it merges. Round 1 checks two things only (claude-settings decision `docs-only-prs-skip-review`).

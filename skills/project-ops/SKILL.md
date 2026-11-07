@@ -20,8 +20,8 @@ Without a project, each tier is one Claude Code session, and the owner acts as t
   work runs. `templates/operating-model.md`.
 - **Batching.** Rule `git-integration-branch-merge` (lanes join one integration branch) governs it.
   The model adds only a review record on each PR (`templates/operating-model.md`, record
-  `pr-review-record`). Under a standing merge grant, the batch runner batches each PR whose review record
-  is done, as `merge --reviewed` finds it, and merges the integration PR on green. The owner is not
+  `pr-review-record`). Under a standing merge grant, the batch runner batches each PR whose `merge --reviewed`
+  line reads `batch`, and merges the integration PR on green. The owner is not
   asked.
 - **The record branch.** An orphan branch, `roadmap` by default, that holds the roadmap data,
   briefs and role handoff notes. It is never merged into main. A fork names its own record branch,
