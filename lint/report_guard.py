@@ -537,10 +537,11 @@ NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
 SPAWN_TOOLS = {"Agent", "Task"}
 MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
 # A model names the roles just before it: "builder sonnet", "builder: sonnet", "builder (sonnet)",
-# and "builder and reviewer sonnet" all count.
-_ROLE = r"(?:builder|reviewer|test-author|record-writer)"
+# and "builder and reviewer sonnet" all count. A role matches as a whole token: "design reviewer" and
+# "design-reviewer" are matched whole, so they never read as "reviewer", and then dropped as untracked.
+_ROLE = r"(?<![\w-])(?:design[\s-]+reviewer|builder|reviewer|test-author|record-writer)(?![\w-])"
 ROLE_MODEL_RE = re.compile(
-    r"\b(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(haiku|sonnet|opus|fable)\b",
+    r"(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(haiku|sonnet|opus|fable)\b",
     re.I)
 ROLE_RE = re.compile(_ROLE, re.I)
 AGENTS_DIR = os.path.join(HERE, "..", "agents")
@@ -613,14 +614,15 @@ def done_models_problem(text, spawned, records=None):
     all_spawned = spawn_models(records) if records is not None else spawned
     done = " ".join(done_items(block_text(text, keep_indent=True)))
     named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
-             for r in ROLE_RE.findall(roles)}
+             for r in ROLE_RE.findall(roles) if r.lower() in NAMED_ROLES}
     missing = sorted(r for r in spawned if not any(nr == r for nr, _ in named))
     if missing:
         return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
         ran = all_spawned.get(role)
         if ran is not None and model not in ran and "" not in spawned.get(role, ()):
-            return f"'{role} {model}' matches no {role} spawn, which ran " + ", ".join(sorted(ran))
+            known = ", ".join(sorted(m for m in ran if m)) or "an unknown model"
+            return f"'{role} {model}' matches no {role} spawn, which ran {known}"
     return ""
 
 
