@@ -8,6 +8,7 @@ case reads what the tool ran, in which tree, at which head. The repo builder, th
 fixture come from merge/test_merge.py: a case extends that fixture, it does not copy it. The draft step's ready check
 (class ReadyChecks) runs the same stub, through CiJobStub.
 The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
+The merge.laneTests cases register their own profile in mutate_guard.REPLAY_PROFILES, for that case only, and their select is a script in the fixture.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import atexit, json, os, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -18,6 +19,8 @@ sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint 
 import _test_temp  # noqa: E402  test-temp-standard: this run's folder (lint/_test_temp.py)
 import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importing it runs none of its cases
 import merge  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))  # merge.py puts hooks on sys.path too; named here for the profile registry
+import mutate_guard  # noqa: E402  REPLAY_PROFILES: the one home of a repo's test selector, which merge.laneTests names
 
 RUN_FOLDER = _test_temp.run_folder()
 atexit.register(shutil.rmtree, RUN_FOLDER, True)
@@ -25,6 +28,11 @@ atexit.register(shutil.rmtree, RUN_FOLDER, True)
 PASSING = [("PASS", "record slugs"), ("PASS", "ste lint")]
 FAILING = [("PASS", "record slugs"), ("FAIL", "comment narration")]
 UNKNOWN = [("PASS", "record slugs"), ("unknown", "shellcheck")]
+
+LANE_PROFILE = "lane_fixture"  # the profile name the fixture's merge.laneTests names; LaneLint.use_lane_profile registers it per case
+SUITE = "tests/test_p_contract.py"  # a suite the fixture's selector lists for its product file
+OTHER_SUITE = "tests/test_q_contract.py"
+THIRD_SUITE = "tests/test_r_contract.py"
 
 STUB = '''import json, os, subprocess, sys, time
 LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid()
@@ -461,6 +469,192 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertNotIn("coordinator", err.lower())
         self.assertNotIn("batch-runner", err.lower())
         self.assertFalse(os.path.exists(self.role_file), "a refused role wrote the role file")
+
+    # merge.laneTests: after the lint passes, the lane's head runs the suites its profile's select lists (contract: merge.lane_lint).
+
+    def use_lane_profile(self):
+        """Register the fixture profile in mutate_guard.REPLAY_PROFILES for this case. Its select is tools/lane_select.py, in the
+        checkout; its suites are test_*.py files run with this interpreter; it installs nothing. The dict is patched in place, so a
+        name that bound it at import sees the entry too."""
+        profile = {"code": r"^src/.*\.py$", "tests": r"(^|/)test_[^/]*\.py$", "argv": [sys.executable, "{suite}"],
+                   "classify": "fail_line", "install": None, "sparse_skip": [],
+                   "select": [sys.executable, "tools/lane_select.py", "{path}"]}
+        patch = unittest.mock.patch.dict(mutate_guard.REPLAY_PROFILES, {LANE_PROFILE: profile})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def select_text(self, listed, fails):
+        """The fixture selector. It logs each path it is asked about, then prints `listed` for a src/ path, or exits 3 when `fails`."""
+        head = "import sys\nwith open(%r, 'a', encoding='utf-8') as log:\n    log.write(sys.argv[1] + '\\n')\n" % self.select_log
+        if fails:
+            return head + "sys.exit(3)\n"
+        body = "".join("    print(%r)\n" % name for name in listed) or "    pass\n"
+        return head + "if sys.argv[1].startswith('src/'):\n" + body
+
+    def suite_text(self, name, mode):
+        """A fixture suite. It logs its path and its folder first, then passes ("pass"), prints a FAIL line and exits 1 ("fail"),
+        or dies with no FAIL line ("crash")."""
+        head = "import os\nwith open(%r, 'a', encoding='utf-8') as log:\n    log.write(%r + ' ' + os.getcwd() + '\\n')\n" % (self.suite_log, name)
+        end = {"pass": "print('ok')\n",
+               "fail": "print('FAIL: %s: src/p.py holds the wrong value')\nraise SystemExit(1)\n" % name,
+               "crash": "raise RuntimeError('the suite died')\n"}[mode]
+        return head + end
+
+    def lane_fixture(self, listed=(), suites=None, feat_suites=None, select_fails=False, laneTests=LANE_PROFILE):
+        """The laneTests fixture, one call per case. origin/main gets the config, with merge.laneTests `laneTests` (None: the field
+        is absent), and `suites` ({path: mode}), suites the lane does not touch. origin/feat gets one commit on top: src/p.py, the
+        product file the lane changes; tools/lane_select.py, the profile's select, which lists `listed` for a src/ path or exits 3
+        when `select_fails`; and `feat_suites` ({path: mode}), suites the lane itself adds. A mode is "pass", "fail" or "crash"."""
+        self.select_log = os.path.join(self.t, "select-calls.log")
+        self.suite_log = os.path.join(self.t, "suite-runs.log")
+        self.use_lane_profile()
+        main = {}
+        if laneTests is not None:
+            main[".github/stamp.json"] = json.dumps(dict(tm.CONFIG, merge=dict(tm.CONFIG["merge"], laneTests=laneTests)))
+        main.update({path: self.suite_text(path, mode) for path, mode in (suites or {}).items()})
+        if main:
+            tm.RecordsEnv.on(self, "main", main, "main: the config and the suites the selector lists")
+            tm.head_takes_base(self)  # the lane's head holds main's suites, as a lane that merged main does
+        feat = {"src/p.py": "VALUE = 1\n", "tools/lane_select.py": self.select_text(listed, select_fails)}
+        feat.update({path: self.suite_text(path, mode) for path, mode in (feat_suites or {}).items()})
+        tm.RecordsEnv.on(self, "feat", feat, "feat: the product file, the selector and the lane's own suites")
+
+    def assert_suite_is_selector_only(self, suite):
+        """Scope before subject (P7): the suite is on origin/main and not in the lane's own diff, so only the selector reaches it,
+        and it is in the head's tree. A fixture that put the suite in the lane's diff would test a different path."""
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+        changed = tm.sh(self.co, "git", "diff", "--name-only", "origin/main...origin/feat").splitlines()
+        self.assertNotIn(suite, changed, "the fixture put the suite in the lane's own diff")
+        self.assertEqual(tm.sh(self.co, "git", "ls-tree", "--name-only", "origin/main", "--", suite), suite, "the suite is not on main")
+        self.assertEqual(tm.sh(self.co, "git", "ls-tree", "--name-only", "origin/feat", "--", suite), suite, "the suite is not at the head")
+
+    def suites_run(self):
+        """-> (path, folder) of each suite the fixture logged, in run order. A suite that never ran logs nothing."""
+        if not os.path.exists(self.suite_log):
+            return []
+        with open(self.suite_log, encoding="utf-8") as f:
+            return [tuple(line.rstrip("\n").split(" ", 1)) for line in f if line.strip()]
+
+    def suite_names(self):
+        return [name for name, _ in self.suites_run()]
+
+    def select_paths(self):
+        """-> the paths the fixture selector was asked about, in call order."""
+        if not os.path.exists(self.select_log):
+            return []
+        with open(self.select_log, encoding="utf-8") as f:
+            return [line.rstrip("\n") for line in f if line.strip()]
+
+    def test_a_selected_suite_the_lane_did_not_touch_that_fails_at_the_head_refuses_the_lane(self):
+        """The incident shape (batch PR 1081): the lane changes the product file, the selector lists a suite the lane did not touch,
+        and that suite fails at the head. The lane lint refuses, names the suite, and runs it in the head's tree, not the lane checkout."""
+        self.lane_fixture(listed=[SUITE], suites={SUITE: "fail"})
+        self.assert_suite_is_selector_only(SUITE)
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertIn(SUITE, self.suite_names(), "the selected suite did not run at the head: " + out)
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(any(SUITE in line and "FAIL" in line for line in out.splitlines()), "the refusal does not name the red suite: " + out)
+        self.assertEqual(pass_lines(out), [], out)
+        self.assertRegex(out, r"(?i)push")
+        self.assertRegex(out, r"(?i)again")
+        for _, folder in self.suites_run():
+            self.assertNotEqual(os.path.realpath(folder), os.path.realpath(self.co), "the suite ran in the lane checkout")
+            self.assertFalse(os.path.exists(folder), "the suite's tree is still on disk after the lint")
+
+    def test_a_selected_suite_that_passes_at_the_head_passes_and_the_pass_line_counts_one_suite(self):
+        self.lane_fixture(listed=[SUITE], suites={SUITE: "pass"})
+        self.assert_suite_is_selector_only(SUITE)
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertIn(SUITE, self.suite_names(), "the selected suite did not run at the head: " + out)
+        self.assertEqual(rc, 0, out)
+        lines = pass_lines(out)
+        self.assertEqual(len(lines), 1, out)
+        self.assertRegex(lines[0], r"\b1 (?:selected )?suite", "the PASS line does not count the one suite that ran: " + lines[0])
+
+    def test_a_repo_with_no_laneTests_runs_no_suite_and_no_selector_and_passes_as_today(self):  # the control
+        self.lane_fixture(listed=[SUITE], suites={SUITE: "fail"}, laneTests=None)
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(self.suite_names(), [], "a repo with no laneTests ran a suite: " + out)
+        self.assertEqual(self.select_paths(), [], "a repo with no laneTests ran the selector")
+        self.assertEqual(rc, 0, out)
+        lines = pass_lines(out)
+        self.assertEqual(len(lines), 1, out)
+        self.assertNotIn("suite", lines[0], "a repo with no laneTests counts suites on its PASS line: " + lines[0])
+
+    def test_an_unknown_laneTests_profile_refuses_and_names_the_field_and_the_profile(self):
+        self.lane_fixture(listed=[SUITE], suites={SUITE: "fail"}, laneTests="no_such_profile")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertNotEqual(rc, 0, "an unknown laneTests profile read as a pass: " + out)
+        self.assertEqual(pass_lines(out), [], out)
+        self.assertIn("laneTests", out, "the refusal does not name the field: " + out)
+        self.assertIn("no_such_profile", out, "the refusal does not name the unknown profile: " + out)
+        self.assertEqual(self.suite_names(), [], "a suite ran for an unknown profile")
+
+    def test_a_selector_that_exits_non_zero_is_unknown_and_refuses_until_the_unknown_flag_lets_it_go_on(self):
+        self.lane_fixture(listed=[SUITE], suites={SUITE: "pass"}, select_fails=True)
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertIn("src/p.py", self.select_paths(), "the selector did not run on the lane's product file: " + out)
+        self.assertNotEqual(rc, 0, "a selector that exits non-zero read as a pass: " + out)
+        self.assertEqual(pass_lines(out), [], out)
+        self.assertRegex(out, r"(?i)unknown", "the refusal does not say the selection is unknown: " + out)
+        reason = "the selector is not on this box"
+        rc, out = self.lint_run("--lane-lint", "7", "--lint-unknown-ok", reason)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len([line for line in out.splitlines() if reason in line]), 1, "the unknown reason is not logged once: " + out)
+        self.assertEqual(pass_lines(out), [], "an unknown selection was printed as a pass")
+
+    def test_a_suite_the_lane_itself_changes_runs_even_when_the_selector_lists_nothing(self):
+        self.lane_fixture(listed=[], feat_suites={SUITE: "fail"})
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertIn(SUITE, self.suite_names(), "the lane's own changed suite did not run: " + out)
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(any(SUITE in line and "FAIL" in line for line in out.splitlines()), "the refusal does not name the changed suite: " + out)
+
+    def test_a_selected_suite_that_dies_with_no_FAIL_line_refuses_the_lane_and_gets_no_pass(self):
+        """The contract says FAIL or unknown, and does not say whether a suite that dies with no FAIL line is red. This case
+        asserts only what holds either way: the lane is refused and prints no PASS line."""
+        self.lane_fixture(listed=[SUITE], suites={SUITE: "crash"})
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertIn(SUITE, self.suite_names(), "the selected suite did not run at the head: " + out)
+        self.assertNotEqual(rc, 0, "a selected suite that died read as a pass: " + out)
+        self.assertEqual(pass_lines(out), [], out)
+
+    def test_every_red_selected_suite_is_named_and_a_green_one_is_not(self):
+        listed = [SUITE, OTHER_SUITE, THIRD_SUITE]
+        self.lane_fixture(listed=listed, suites={SUITE: "fail", OTHER_SUITE: "fail", THIRD_SUITE: "pass"})
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(sorted(self.suite_names()), sorted(listed), "not every selected suite ran at the head: " + out)
+        self.assertEqual(rc, 1, out)
+        fail_lines = [line for line in out.splitlines() if "FAIL" in line]
+        for name in (SUITE, OTHER_SUITE):
+            self.assertTrue(any(name in line for line in fail_lines), "the refusal does not name the red suite %s: %s" % (name, out))
+        self.assertFalse(any(THIRD_SUITE in line for line in fail_lines), "the refusal names the green suite: " + out)
+
+    def test_an_empty_selection_passes_and_the_pass_line_counts_zero_suites(self):
+        self.lane_fixture(listed=[])
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(self.suite_names(), [], out)
+        self.assertEqual(rc, 0, out)
+        lines = pass_lines(out)
+        self.assertEqual(len(lines), 1, out)
+        self.assertRegex(lines[0], r"\b0 (?:selected )?suites?\b", "the PASS line does not count the zero suites that ran: " + lines[0])
+
+    def test_laneTests_is_a_merge_field_that_the_config_validation_accepts(self):
+        tm.put_base_config(self, json.dumps(dict(tm.CONFIG, merge=dict(tm.CONFIG["merge"], laneTests=LANE_PROFILE))))
+        try:
+            cfg = merge.load_config(self.co, "main", ".github/stamp.json")
+        except merge.Stop as error:
+            self.fail("the config validation refused merge.laneTests: %s" % error)
+        self.assertEqual(cfg["merge"]["laneTests"], LANE_PROFILE)
 
 
 class ReadyChecks(CiJobStub, tm.RecordsEnv):
