@@ -1609,7 +1609,8 @@ class TreeTests(StaleCase):
         self.assert_tree_passes(rng, rev="HEAD~1")  # HEAD~1: the file is tracked
 
     def test_a_sibling_cite_is_never_read_as_a_path(self):
-        # `name:path` names another checkout's file, so only the bare cite and the spaced `Note:` line fire.
+        # A `name:path` whose name the registry at REV lists is another checkout's file, so only the bare cite
+        # and the spaced `Note:` line fire.
         rows = [
             ("- see `banchi:hooks/nope.py`", False),
             ("- see `q_max:hooks/nope.py`", False),
@@ -1618,7 +1619,8 @@ class TreeTests(StaleCase):
             ("- Note: hooks/nope.py", True),
         ]
         text, lines = rows_text(rows)
-        self.assert_tree_flags(self.tree(text), [(NOTES, n, "STALE003") for n in lines])
+        self.assert_tree_flags(self.tree(text, extra=with_registry("banchi", "q_max", "repo-2")),
+                               [(NOTES, n, "STALE003") for n in lines])
 
     def test_any_top_flags_a_cite_under_no_tracked_top_folder(self):
         rng = self.tree("# Notes\n\n- see `harness/tests-for.mjs`\n")
@@ -1634,7 +1636,8 @@ class TreeTests(StaleCase):
             ("- Note: harness/tests-for.mjs", True),
         ]
         text, lines = rows_text(rows)
-        self.assert_tree_flags(self.tree(text), [(NOTES, n, "STALE003") for n in lines], args=["--any-top"])
+        self.assert_tree_flags(self.tree(text, extra=with_registry("banchi", "q_max", "repo-2")),
+                               [(NOTES, n, "STALE003") for n in lines], args=["--any-top"])
 
     def test_any_top_leaves_placeholder_url_and_absolute_cites_silent(self):
         rows = [
@@ -1676,7 +1679,7 @@ class TreeTests(StaleCase):
             ("const t = `", False),  # a multi-line template literal opens
             ("  see harness/x.mjs", True),
             ("`;", False),
-            ('  s = "cfg:harness/x.mjs"', False),  # the sibling form inside a string is no path
+            ('  s = "cfg:harness/x.mjs"', True),  # `cfg` is no registry repo, so its path inside the string is read
             ("```", False),
             ('Quote `"/*"` in a string. See `harness/x.mjs`.', True),
         ]
