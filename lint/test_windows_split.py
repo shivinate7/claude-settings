@@ -2054,6 +2054,93 @@ class MergeMatrixJobIf(unittest.TestCase):
             self.assertTrue(self.job_level(merge_matrix_doc(job_if=flag_if)), "a flag in the job-level if is accepted")
 
 
+MERGE_GATE = "needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request'"
+
+
+def merge_matrix_fixture():
+    """The merge matrix job as checks.yml must hold it, each step in its pinned form: a checkout and a setup-python under the scope
+    condition alone, both launchers in the legs LAUNCH_LEG names, and the full and slice steps with their IF_PIN conditions. The
+    green control of MergeMatrixFixture: each checker that reads the merge shape must accept it."""
+    gate = f"({MERGE_GATE})"
+    launch = f"${{{{ {gate} && !cancelled() && needs.scope.outputs.code == 'true' && ({LAUNCH_LEG}) }}}}"
+    full = f"${{{{ {gate} && {unwrap(IF_PIN[MERGE_CMD])} }}}}"
+    slice_ = f"${{{{ {gate} && {unwrap(IF_PIN[SLICE])} }}}}"
+    scoped = f"${{{{ {MERGE_GATE} }}}}"
+    return ("jobs:\n" + matrix_job_block(MERGE_JOB)
+            + "      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0\n"
+            + f"        if: {scoped}\n"
+            + "      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0\n"
+            + f"        if: {scoped}\n"
+            + "      - name: Merge launcher fixture suite\n"
+            + f"        if: {launch}\n        run: python merge/test_launch.py\n"
+            + "      - name: Merge tool git-half fixture suite (full)\n"
+            + f"        if: {full}\n        env:\n          MERGE_SHARD: ${{{{ matrix.shard }}}}\n        run: python merge/test_merge.py\n"
+            + "      - name: Merge tool git-half fixture suite (Windows slice)\n"
+            + f"        if: {slice_}\n        env:\n          MERGE_TESTS: windows-slice\n        run: python merge/test_merge.py\n"
+            + "      - name: Merge launcher fixture suite (merge.cmd)\n"
+            + f"        if: {launch}\n        run: python merge/test_cmd.py\n")
+
+
+class MergeMatrixFixture(unittest.TestCase):
+    """The green control for the merge matrix. merge_matrix_fixture is the job as checks.yml must hold it: the checkers that read the
+    merge shape accept it, and each step runs in the legs MergeMatrixSteps expects. The expected legs repeat MergeMatrixSteps on
+    purpose: the fixture is held to the same legs, and a shared helper would change the named messages of the real-file cases."""
+
+    def setUp(self):
+        self.text = merge_matrix_fixture()
+        self.steps = all_jobs(self.text)[MERGE_JOB]["steps"]
+
+    def only(self, cmd):
+        """The one step of the fixture that runs `cmd`."""
+        found = [st for st in self.steps if key(st) == cmd]
+        self.assertEqual(len(found), 1, f"the fixture has {len(found)} steps that run {cmd!r}, want 1")
+        return found[0]
+
+    def uses(self, prefix):
+        """The one step of the fixture that uses an action whose name starts with `prefix`."""
+        found = [st for st in self.steps if st.get("uses", "").startswith(prefix)]
+        self.assertEqual(len(found), 1, f"the fixture has {len(found)} steps that use {prefix}, want 1")
+        return found[0]
+
+    def test_the_matrix_checker_accepts_the_job(self):
+        self.assertEqual(matrix_problems(self.text, (MERGE_JOB,)), [])
+
+    def test_the_placement_checker_names_no_merge_suite_problem(self):
+        self.assertEqual([p for p in placement_problems(self.text) if "merge/test_" in p], [])
+
+    def test_the_hardening_checker_accepts_the_job(self):
+        self.assertEqual(hardening_problems(self.text), [])
+
+    def test_the_full_step_runs_in_each_full_leg_and_in_no_slice_leg(self):
+        full, flags = self.only(MERGE_CMD), merge_flags(full="true")
+        self.assertEqual(legs_running(step_if(full), "pull_request", flags, MERGE_LEGS), MERGE_LEGS)
+        self.assertEqual(legs_running(step_if(full), "push", flags, MERGE_LEGS), MERGE_LEGS)
+        self.assertEqual(legs_running(step_if(full), "pull_request", merge_flags(full="false"), SLICE_ONLY), [])
+
+    def test_the_slice_step_runs_on_the_slice_leg_of_a_pr_only(self):
+        slice_ = self.only(SLICE)
+        self.assertEqual(legs_running(step_if(slice_), "pull_request", merge_flags(full="false"), SLICE_ONLY), SLICE_ONLY)
+        self.assertEqual(legs_running(step_if(slice_), "pull_request", merge_flags(full="true"), MERGE_LEGS), [])
+        self.assertEqual(legs_running(step_if(slice_), "push", merge_flags(full="false"), SLICE_ONLY), [])
+        self.assertEqual(legs_running(step_if(slice_), "pull_request", merge_flags(merge="false", full="false"), SLICE_ONLY), [])
+
+    def test_each_launcher_runs_in_one_leg_of_each_run(self):
+        for cmd in LAUNCHERS:
+            with self.subTest(suite=cmd):
+                st = self.only(cmd)
+                self.assertEqual(legs_running(step_if(st), "pull_request", merge_flags(full="true"), MERGE_LEGS), ["1/5"])
+                self.assertEqual(legs_running(step_if(st), "pull_request", merge_flags(full="false"), SLICE_ONLY), SLICE_ONLY)
+                self.assertEqual(legs_running(step_if(st), "push", merge_flags(full="true"), MERGE_LEGS), ["1/5"])
+
+    def test_the_checkout_and_setup_run_in_every_leg_while_the_merge_flag_is_on(self):
+        for prefix in ("actions/checkout@", "actions/setup-python@"):
+            with self.subTest(step=prefix):
+                st = self.uses(prefix)
+                self.assertEqual(legs_running(step_if(st), "pull_request", merge_flags(full="true"), MERGE_LEGS), MERGE_LEGS)
+                self.assertEqual(legs_running(step_if(st), "pull_request", merge_flags(full="false"), SLICE_ONLY), SLICE_ONLY)
+                self.assertEqual(legs_running(step_if(st), "pull_request", merge_flags(merge="false", full="false"), SLICE_ONLY), [])
+
+
 class WindowsMatrix(unittest.TestCase):
     """Each sharded suite is one matrix job (matrix_problems): named once, with its legs read from the scope list, no literal
     shard value on a step, and no leftover shard job (placement_problems)."""
