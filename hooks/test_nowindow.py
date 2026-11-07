@@ -115,6 +115,12 @@ class HelperContract(unittest.TestCase):
         self.assertIs(rec.call_args.kwargs["stdin"], subprocess.DEVNULL)
         self.assertNotIn("input", rec.call_args.kwargs)
 
+    def test_posix_check_output_keeps_input_none(self):
+        rec = self.recorder("check_output")
+        with on_platform(False):
+            self.h.check_output(["x"], input=None)
+        self.assertEqual(rec.call_args.kwargs, {"input": None})
+
     def test_posix_sets_no_creationflags_key(self):
         for name in WRAPPERS:
             with self.subTest(wrapper=name):

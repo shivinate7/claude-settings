@@ -49,6 +49,6 @@ def check_call(*args, **kwargs):
 
 
 def check_output(*args, **kwargs):
-    if "input" in kwargs and kwargs["input"] is None:
-        del kwargs["input"]  # check_output turns input=None into "", which subprocess refuses beside a stdin
+    if (sys.platform == "win32" or os.name == "nt") and "input" in kwargs and kwargs["input"] is None:
+        del kwargs["input"]  # check_output turns input=None into "", which subprocess refuses beside _flags' stdin
     return subprocess.check_output(*args, **_flags(kwargs))
