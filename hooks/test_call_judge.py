@@ -52,8 +52,13 @@ Interface the hook must match:
   set or update whose data has non-empty `options`, and never otherwise, never on AskUserQuestion or Agent. question_form.WIDENS_KEY
   is the one home of the mark's key, "widens", and WIDENING_RULE contains it. The cases read both with load_file_module, never a
   copy, and a missing name fails its checks with a named cause, never a crash.
-- settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` runs call_judge.py with a timeout
-  above the longest model call (60 s). No `prompt` or `agent` hook is left on any of the three tools.
+- settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` runs call_judge.py with a timeout that covers
+  two question tries and two `claude -p` starts (QUESTION_TIMEOUT + QUESTION_RETRY_TIMEOUT + 10). No `prompt` or `agent`
+  hook is left on any of the three tools.
+- A timeout retry (owner ask ask-mw6pwif5wv, 2026-11-07 12:09 CST: a timed-out question gets one retry): a question (a box,
+  or a page write with units) whose first try fails with decision_watch.MODEL_TIMEOUT_ERROR makes a second call, capped at
+  QUESTION_RETRY_TIMEOUT. Any other model error makes one call and the Unvetted refusal. An Agent spawn makes one call.
+  The cases are in the timeout-retry section.
 - Past rulings (spec past-rulings): a judged AskUserQuestion or waiting-page item write also carries the decision
   records and the `roadmap` step rulings that question_form.past_rulings finds, and an eighth item that refuses a
   question a standing ruling already decides. Each case builds its own real git repo (make_repo), and a fixture
@@ -179,10 +184,18 @@ def _fake_run(argv, **kwargs):
     prompt = kwargs.get("input") or b""
     prompt = prompt.decode("utf-8", "replace") if isinstance(prompt, bytes) else str(prompt)
     with open(os.environ["CJ_RECORD"], "a", encoding="utf-8") as f:
-        f.write(json.dumps({"argv": list(argv), "prompt": prompt}) + "\n")
-    if os.environ.get("CJ_MODEL_FAIL"):
+        f.write(json.dumps({"argv": list(argv), "prompt": prompt, "timeout": kwargs.get("timeout")}) + "\n")
+    answer = os.environ["CJ_ANSWER"]
+    if os.environ.get("CJ_SCRIPT"):  # one scripted reply per call, in order; the last reply repeats
+        with open(os.environ["CJ_RECORD"], encoding="utf-8") as f:
+            number = sum(1 for line in f if line.strip())
+        steps = json.loads(os.environ["CJ_SCRIPT"])
+        answer = steps[min(number, len(steps)) - 1]
+    if answer == "TIMEOUT":  # the real subprocess timeout, which invoke_model turns into MODEL_TIMEOUT_ERROR
+        raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+    if os.environ.get("CJ_MODEL_FAIL") or answer == "EXIT1":
         return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stub model failure")
-    return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"result": os.environ["CJ_ANSWER"]}), stderr="")
+    return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"result": answer}), stderr="")
 
 
 _real_popen = subprocess.Popen
@@ -266,7 +279,7 @@ def write_pass(cfg, session, body):
         f.write(body if isinstance(body, str) else json.dumps(body))
 
 
-def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
+def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, script=None):
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
@@ -281,6 +294,8 @@ def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
                 "CJ_RECORD": os.path.join(base, "calls.jsonl"), "CJ_ANSWER": answer})
     if model_fail:
         env["CJ_MODEL_FAIL"] = "1"
+    if script is not None:  # one scripted reply per model call, in order (see STUB_SITE)
+        env["CJ_SCRIPT"] = json.dumps(script)
     proc = subprocess.run([sys.executable, HOOK], input=stdin_text, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=env, timeout=120)
     return Run(proc, base)
@@ -1230,7 +1245,12 @@ def case_settings_row():
     matcher = set((entry.get("matcher") or "").split("|"))
     check("settings: its matcher is Agent, AskUserQuestion and ArtifactData",
           matcher == {"Agent", "AskUserQuestion", "ArtifactData"}, entry.get("matcher"))
-    check("settings: its timeout exceeds the longest model call (60 s)", hook.get("timeout", 0) > 60, hook)
+    # Owner ask ask-mw6pwif5wv (2026-11-07 12:09 CST): a question gets two tries, so the timeout must cover both tries and
+    # two `claude -p` starts. This replaces the check of one 60 s call.
+    first, retry = call_judge_value("QUESTION_TIMEOUT"), call_judge_value("QUESTION_RETRY_TIMEOUT")
+    needed = first + retry + 10 if isinstance(first, int) and isinstance(retry, int) else None
+    check("settings: its timeout covers two question tries and two claude starts (QUESTION_TIMEOUT + QUESTION_RETRY_TIMEOUT + 10)",
+          needed is not None and needed <= hook.get("timeout", 0), (needed, hook.get("timeout"), first, retry))
     empty = os.path.join(ROOT, "empty-config")
     os.makedirs(empty, exist_ok=True)
     proc = subprocess.run(["sh", "-c", hook["command"]], input="{}", capture_output=True, text=True,
@@ -1238,6 +1258,86 @@ def case_settings_row():
     errs = [line for line in proc.stderr.splitlines() if line.strip()]
     check("settings: with the script missing the launcher exits 0 with one stderr line, never a block",
           proc.returncode == 0 and proc.stdout == "" and len(errs) == 1, (proc.returncode, proc.stderr[-160:]))
+
+
+# ------------------------------------------------------------------ a timeout gets one retry (owner ask ask-mw6pwif5wv)
+#
+# Owner ask ask-mw6pwif5wv (2026-11-07 12:09 CST): a question whose model call times out gets one retry, at a shorter
+# cap. Only a timeout retries. Any other model error refuses the question with the Unvetted remedy after one call, and
+# an Agent spawn makes one call and fails open. The timeout text is decision_watch.MODEL_TIMEOUT_ERROR, read from its
+# home and never copied here. The caps are read from hooks/call_judge.py: a missing one fails its checks, never crashes.
+TIMEOUT_REPLY, EXIT_REPLY = "TIMEOUT", "EXIT1"  # scripted replies: the model call times out, or exits 1
+RETRY_MARK = "RETRYMARK-6b1a"
+RETRY_FLAG = ('{"ok": false, "reason": "item 7: no option is marked as the pick, so the owner has nothing to take. '
+              + RETRY_MARK + '"}')
+
+
+def call_judge_value(name):
+    """A module constant of hooks/call_judge.py, read at test time, or None when the module has no such name."""
+    return getattr(load_file_module(HOOK, "call_judge_retry_probe"), name, None)
+
+
+def retry_surfaces():
+    """The two questions a timeout retry runs on: the chat box, and a waiting-page item write."""
+    return (("the chat box", question_input()), ("a waiting-page item write", page_input("set", good_page_item())))
+
+
+def case_timeout_retries_once_then_allows():
+    first, retry = call_judge_value("QUESTION_TIMEOUT"), call_judge_value("QUESTION_RETRY_TIMEOUT")
+    for label, inp in retry_surfaces():
+        r = run_hook(inp, script=[TIMEOUT_REPLY, ALLOW])
+        check("retry, %s: a timeout on try 1 is retried, so two model calls in all" % label, len(r.calls) == 2, detail(r))
+        check("retry, %s: try 1 is capped at QUESTION_TIMEOUT" % label,
+              first is not None and len(r.calls) >= 1 and r.calls[0].get("timeout") == first, detail(r))
+        check("retry, %s: try 2 is capped at QUESTION_RETRY_TIMEOUT" % label,
+              retry is not None and len(r.calls) >= 2 and r.calls[1].get("timeout") == retry, detail(r))
+        check("retry, %s: an ok answer on try 2 allows: exit 0, empty stdout, no deny" % label,
+              r.code == 0 and r.out == "", detail(r))
+        check("retry, %s: the allowed call carries no Unvetted text" % label,
+              "Unvetted" not in r.out + r.err + r.log, detail(r))
+
+
+def case_timeout_twice_refuses_unvetted():
+    import decision_watch  # the one home of the timeout text (hooks/decision_watch.py)
+    retry = call_judge_value("QUESTION_RETRY_TIMEOUT")
+    for label, inp in retry_surfaces():
+        r = run_hook(inp, script=[TIMEOUT_REPLY, TIMEOUT_REPLY])
+        check("retry twice, %s: two timeouts make exactly two model calls, no third" % label, len(r.calls) == 2, detail(r))
+        check("retry twice, %s: try 2 is capped at QUESTION_RETRY_TIMEOUT" % label,
+              retry is not None and len(r.calls) >= 2 and r.calls[1].get("timeout") == retry, detail(r))
+        check("retry twice, %s: the question is refused, rule question-judge" % label,
+              (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("question-judge: "), detail(r))
+        check("retry twice, %s: the refusal is the Unvetted remedy" % label, "Unvetted:" in r.reason(), detail(r))
+        check("retry twice, %s: the remedy names the timeout, decision_watch.MODEL_TIMEOUT_ERROR" % label,
+              decision_watch.MODEL_TIMEOUT_ERROR in r.reason(), detail(r))
+
+
+def case_timeout_then_flag_denies():
+    retry = call_judge_value("QUESTION_RETRY_TIMEOUT")
+    r = run_hook(question_input(), script=[TIMEOUT_REPLY, RETRY_FLAG])
+    check("retry flag: a timeout then a flag makes two model calls", len(r.calls) == 2, detail(r))
+    check("retry flag: try 2 is capped at QUESTION_RETRY_TIMEOUT",
+          retry is not None and len(r.calls) >= 2 and r.calls[1].get("timeout") == retry, detail(r))
+    check("retry flag: the flag on try 2 is a deny, rule question-judge",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("question-judge: "), detail(r))
+    check("retry flag: the deny carries the verdict's reason", RETRY_MARK in r.reason(), detail(r))
+    check("retry flag: the deny is the verdict, not the Unvetted remedy", "Unvetted:" not in r.reason(), detail(r))
+
+
+def case_model_error_is_not_retried():
+    r = run_hook(question_input(), script=[EXIT_REPLY, ALLOW])
+    check("retry error: a model error that is not a timeout makes one model call", len(r.calls) == 1, detail(r))
+    check("retry error: that error refuses the question with the Unvetted remedy",
+          (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted:" in r.reason(), detail(r))
+
+
+def case_spawn_timeout_is_not_retried():
+    import decision_watch  # the one home of the timeout text (hooks/decision_watch.py)
+    r = run_hook(spawn_input("builder", model="sonnet"), script=[TIMEOUT_REPLY, ALLOW])
+    check("retry spawn: an Agent spawn that times out makes one model call, no retry", len(r.calls) == 1, detail(r))
+    check("retry spawn: the timeout fails open, exit 0 and no deny", r.code == 0 and r.out == "", detail(r))
+    check("retry spawn: the fail-open line names the timeout",
+          "call judge failed open" in r.err and decision_watch.MODEL_TIMEOUT_ERROR in r.err, detail(r))
 
 
 # ------------------------------------------------------------------ past rulings (spec past-rulings)
@@ -1401,7 +1501,8 @@ def case_past_ruling_cost():
 #
 # When the model review cannot run (a model error, or a decisions folder or roadmap ref that cannot be read), a question
 # is refused once, and its remedy adds an `Unvetted: <reason>` line. A question that already carries the line gets one
-# model attempt. If that attempt fails, the question passes, because the line tells the owner no check ran.
+# model attempt, or two when the first times out (the timeout retry). If the last attempt fails, the question passes,
+# because the line tells the owner no check ran.
 # The closed page items notice alone never triggers it. docs/debts/*.md records reach the candidates, one line each.
 UNVETTED_LINE = "Unvetted: the model review could not run, so the owner reads this question unchecked."
 DEBT_SLUG = "settled-question-unchecked"
@@ -1543,7 +1644,10 @@ def main():
                  case_widening_set_holds_rule_once, case_widening_batch_holds_rule_once,
                  case_widening_absent_without_options, case_widening_refusal_names_the_option,
                  case_widening_fair_option_passes_code_path, case_widening_rule_names_the_mark,
-                 case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
+                 case_fail_open, case_settings_row, case_timeout_retries_once_then_allows,
+                 case_timeout_twice_refuses_unvetted, case_timeout_then_flag_denies,
+                 case_model_error_is_not_retried, case_spawn_timeout_is_not_retried,
+                 case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
                  case_past_ruling_cost, case_unvetted_marker, case_unvetted_page_marker,
