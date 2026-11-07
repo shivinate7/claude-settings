@@ -150,6 +150,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
     - A step named in prose without the word "step".
     - A lane archived in the UI counts as open until a later `get_session` or `list_sessions` read shows it archived. Remedy: read `list_sessions` first.
     - A session whose home repo is the work's repo, such as a q_max-home session with q_max-only lanes, is never checked, since the home repo is filtered out. This is the incident's own repo shape for such a session.
+    - A prose step (`as step X`, `Step: X`) that another open lane already carries is skipped as a reference, so a step sent to the wrong lane in prose is not asked. The `Lane brief:` marker form still asks.
   - Cost: one transcript read per lane `create_session`. A `send_message` that names a step reads the transcript once; a marker brief reads it twice (rule `lane-one-topic`, then this rule). A step-naming `send_message` also reads the roadmap extras file and may start one git process for the home repo. No file written, no timer.
   - Not landed yet.
   - Tests: family `lane-one-topic` in `hooks/test_guard.py`.

@@ -193,6 +193,9 @@
 - off-line-fork-reads-pre-cut: a branch cut from a later-merged PR branch makes the silent-undo window flag a deliberate removal (lint/check_silent_undo.py)
 - old-before-was-flags-history: the history rule flags the word old followed later by was and a colon in one block, so a plain description fails as history (lint/hook_catalog.py)
 - one-term-per-meaning-unchecked: no check reads the 'one term per meaning' clause of output-write-in-ste (CLAUDE.md, lint/rule_mechanisms.json)
+- overlap-hyphen-step-word: a hyphenated word after `new step` or `as step`, or on a `Step:` line, counts as a slug, so `New step re-run ...` can ask beside a same-topic sibling; `New step: <slug>` is missed. Decision: session-tiers.
+- overlap-remedy-lacks-exact: the lacks= assert on the old remedy phrase rejects only that exact phrase. Decision: session-tiers.
+- overlap-send-cost-untested: lane-start-overlap's send_message cost claim (one transcript read, two for a marker brief, the roadmap extras read, up to one git start) has no cost test; lane_cost_check covers create_session only. Decision: session-tiers.
 - override-agent-text-unmeasured: no check shows whether a session-sent message reading exactly `override` fires the prompt hook and grants an override. Decision: owner-override
 - override-once-not-bound: a one-act override lifts the next refusal within 10 minutes, whatever it is (owner 15:34: not a safety hole). Decision: owner-override
 - override-removal-unreminded: nothing reminds an agent to remove a raised agent-cap file early; only expiry reverts it (hooks/config_watch.py)
