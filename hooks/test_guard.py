@@ -97,7 +97,8 @@ FAMILIES = {
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
-    "merge": "merge into main, draft pull requests and the merge guard",
+    "merge": "merge into main and the merge guard",
+    "draft-pr": "a pull request opened without --draft is refused; a ready mark asks unless the pull request is the batch's integration PR (its head or its label), or the session is no lane",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
@@ -461,6 +462,18 @@ GHRUNBLOCK = os.path.join(ROOT, "ghrunblock")    # pull request 2's workflow `ci
 GHRUNNONE = os.path.join(ROOT, "ghrunnone")      # pull request 2's workflow `ci-checks` is queued, and it has no check rows at all
 GHRUNDONE = os.path.join(ROOT, "ghrundone")      # pull request 2's workflow finished, and its required check passed
 GHRUNIGNORED = os.path.join(ROOT, "ghrunignored")  # pull request 2's only running workflow is `sync`, which STAMPIGNORE ignores
+# The draft-pr rule (owner ruling 2026-11-07 13:20 CST, coordinator ruling 2026-11-07 14:12 CST): a fake pull request
+# tool per head and label, read by one REST call of the pull request. The two literals stand for
+# shared_names.BATCH_LABEL and shared_names.INTEGRATION_BRANCH_PREFIX, which this base does not have: a test that
+# imports them would crash here, not turn red. A lane's own head is `lane/<slug>` (shared_names.lane_head_refs).
+PR_LANE_HEAD = "lane/pr-ready-lane"
+PR_BATCH_HEAD = "batch-57"
+PR_BATCH_LABEL = "batch"
+GHREADYLANE = os.path.join(ROOT, "ghreadylane")    # a lane's pull request: its own head, no label
+GHREADYCOUNT = os.path.join(ROOT, "ghreadycount")  # the same, counted: one line per gh call
+GHREADYBATCH = os.path.join(ROOT, "ghreadybatch")  # an older batch branch's pull request
+GHREADYLABEL = os.path.join(ROOT, "ghreadylabel")  # a lane's pull request, the batch label among two labels
+DRAFT_CALLS = "calls.log"  # the counted fake's log, beside its state (GHREADYCOUNT)
 
 
 def batch_other(*checks, runs=None):
@@ -1050,8 +1063,11 @@ else:
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
-                 count_file=None, compares=None):
+                 count_file=None, compares=None, head_ref="feat", labels=()):
     """Put a stand-in for the pull request tool in its own folder on PATH.
+
+    `head_ref` is the head ref of the pull request, and `labels` its label names: a read of the pull
+    request answers both. A case that names neither keeps the defaults, `feat` and no label.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
@@ -1101,7 +1117,8 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     # what _verify_fake_gh_delay reads. `broken` answers every call with text that is not JSON.
     state = {
         "pr": {"state": "open", "merged": False, "draft": False, "body": None, "mergeable": True, "mergeable_state": "clean",
-               "merge_commit_sha": "e" * 40, "head": {"ref": "feat", "sha": "abc1234"}, "base": {"ref": base}},
+               "merge_commit_sha": "e" * 40, "head": {"ref": head_ref, "sha": "abc1234"}, "base": {"ref": base},
+               "labels": [{"name": name} for name in labels]},
         "number": 12,
         "checks": checks if checks is not None else [{"name": "checks", "bucket": "pass", "link": ""}],
         "statuses": statuses if statuses is not None else [],
@@ -1286,6 +1303,10 @@ def build_fixtures():
     make_fake_gh(GHRUNNONE, "main", others=batch_other(runs=[{"name": "ci-checks", "status": "queued", "conclusion": None}]))
     make_fake_gh(GHRUNDONE, "main", others=batch_other(("checks", "pass"), runs=[{"name": "ci-checks", "status": "completed", "conclusion": "success"}]))
     make_fake_gh(GHRUNIGNORED, "main", others=batch_other(("checks", "pass"), runs=[{"name": "sync", "status": "in_progress", "conclusion": None}]))
+    make_fake_gh(GHREADYLANE, "main", head_ref=PR_LANE_HEAD)
+    make_fake_gh(GHREADYCOUNT, "main", head_ref=PR_LANE_HEAD, count_file=os.path.join(GHREADYCOUNT, DRAFT_CALLS))
+    make_fake_gh(GHREADYBATCH, "main", head_ref=PR_BATCH_HEAD)
+    make_fake_gh(GHREADYLABEL, "main", head_ref=PR_LANE_HEAD, labels=["ci", PR_BATCH_LABEL])
     # merge.py's shared_deadline splits one budget across the read's calls (c53: four on REST: the pull request, the check
     # runs, the commit statuses, the workflow runs), so a delay only a little past the per-call figure that used to be the
     # cutoff no longer exhausts it. 20s per call outruns the whole shared budget on its own, whichever call absorbs the
@@ -8885,6 +8906,7 @@ add("merge: a call of the merge tool on a green head is allowed", "allow",
 # request stays a draft. Only the batch's integration pull request goes ready, so CI runs once per
 # batch (owner ruling 2026-10-13). A `gh pr create` without `--draft` (or `-d`) is refused, and the
 # refusal names `--draft` and the integration pull request. It never names going ready for a lane.
+FAMILY = "draft-pr"
 
 DRAFT_REMEDY = ("--draft", "integration PR")
 DRAFT_LACKS = ("ready after review",)
@@ -8899,7 +8921,8 @@ sh("draft-pr: a bash -c wrapper without --draft is refused",
    carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 sh("draft-pr: --draft is allowed", "gh pr create --draft --title x", "allow", cwd=NOGIT)
 sh("draft-pr: -d is allowed", "gh pr create -d -t x", "allow", cwd=NOGIT)
-sh("draft-pr: marking a pull request ready is allowed", "gh pr ready 12", "allow", cwd=NOGIT)
+# A ready mark of a lane's pull request asks, in a lane session (owner ruling 2026-11-07 13:20 CST, coordinator ruling
+# 2026-11-07 14:12 CST; debt pr-ready-unguarded). Its cases need the lane session fixtures, so they sit in section 5e-3.
 sh("draft-pr: viewing a pull request is allowed", "gh pr view 12", "allow", cwd=NOGIT)
 sh("draft-pr: listing pull requests is allowed", "gh pr list", "allow", cwd=NOGIT)
 # Each is refused, or allowed, as the owner ruled.
@@ -8933,6 +8956,7 @@ add("draft-pr: MCP create with draft true is allowed", "allow",
 # The `merge-checks` guard rule. A merge made outside the merge tool is refused while the head has
 # a check or a workflow run pending or red, and when that read could not run. Every case names the
 # fake `gh` it runs against; MERGECFG lets a mutant copy of the guard find the merge tool.
+FAMILY = "merge"
 
 GREEN_ON = GHMAIN + os.pathsep + PY_PATH
 for _fake, _word, _label in (
@@ -9825,6 +9849,106 @@ for _trust_tool in TRUST_TOOLS:
                _trust_tool, role_path("untagged-then-lane"))
 trust_allow("an unrelated remote tool (list_sessions) in a lane session allows", LIST_SESSIONS,
             role_path("lane"))
+
+
+# =========================================================================== 5e-3. the integration pull request
+#
+# Rule draft-pr (decision draft-until-reviewed; debt pr-ready-unguarded). A ready mark of a pull request, `gh pr ready
+# <N>` or the MCP update_pull_request call with draft false, ASKS the owner in a lane session. It is allowed when (1)
+# the pull request carries the batch label, (2) its head ref starts with `batch-` (an older batch branch), or (3) the
+# session carries no cs-build:lane tag. A failed head read asks in a lane session. Owner ruling 2026-11-07 13:20 CST
+# and coordinator ruling 2026-11-07 14:12 CST: the batch's integration pull request goes ready, a lane's pull request
+# stays draft.
+#
+# Each allow has an ask beside it: the same pull request in a lane session asks, so the session alone does not allow.
+# An allow that holds is then the head's, the label's or the session's own doing. The session is this run's own record
+# (the lane and untagged transcripts, through ROLE_ENV), never the real one. Every case runs against a fake pull request
+# tool, so no case reaches a real gh.
+# Limit: a REST PATCH with draft false is no ready mark here (REST takes no draft; ready is the GraphQL mutation
+# markPullRequestReadyForReview), so no case judges it.
+FAMILY = "draft-pr"
+DRAFT_PR_RULE = "draft-pr"
+PR_LANE = role_path("lane")
+PR_UNTAGGED = role_path("untagged")
+MCP_UPDATE = "mcp__github__update_pull_request"
+MCP_READY = {"owner": "y", "repo": "x", "pullNumber": 12, "draft": False}  # the MCP form of a ready mark
+BASH_READY = "gh pr ready 12"
+
+
+def ready_case(name, expected, fake, transcript, tool="Bash", **tool_input):
+    """One ready-mark case, judged in the session `transcript` names, against the fake pull request tool at `fake`.
+    An ask names its rule and the integration PR; an allow names neither."""
+    ask = expected == "ask"
+    add("draft-pr: " + name, expected, rule=DRAFT_PR_RULE if ask else None, tool=tool, cwd=NOGIT,
+        env_path=fake + os.pathsep + PY_PATH, env=dict(ROLE_ENV), transcript=transcript,
+        carries=("integration PR",) if ask else (), **tool_input)
+
+
+# The ask. A lane's pull request asks, by either form; a read that fails in a lane session asks too.
+ready_case("marking a lane's pull request ready asks the owner, in a lane session", "ask", GHREADYLANE, PR_LANE,
+           command=BASH_READY)
+ready_case("an MCP update with draft false on a lane's pull request asks the owner, in a lane session", "ask",
+           GHREADYLANE, PR_LANE, tool=MCP_UPDATE, **MCP_READY)
+ready_case("a failed head read asks, marking a lane's pull request ready", "ask", GHBROKEN, PR_LANE,
+           command=BASH_READY)
+ready_case("a failed head read asks, an MCP update with draft false", "ask", GHBROKEN, PR_LANE, tool=MCP_UPDATE,
+           **MCP_READY)
+
+# The allow. Each one names the head, the label or the session that lets it through.
+ready_case("a batch-57 head is allowed, marking ready", "allow", GHREADYBATCH, PR_LANE, command=BASH_READY)
+ready_case("a batch-57 head is allowed, an MCP update with draft false", "allow", GHREADYBATCH, PR_LANE,
+           tool=MCP_UPDATE, **MCP_READY)
+ready_case("a lane head with the batch label is allowed, marking ready", "allow", GHREADYLABEL, PR_LANE,
+           command=BASH_READY)
+ready_case("a lane head with the batch label is allowed, an MCP update with draft false", "allow", GHREADYLABEL,
+           PR_LANE, tool=MCP_UPDATE, **MCP_READY)
+ready_case("a lane head in a session with no cs-build:lane tag is allowed, marking ready", "allow", GHREADYLANE,
+           PR_UNTAGGED, command=BASH_READY)
+ready_case("a lane head in a session with no cs-build:lane tag is allowed, an MCP update with draft false", "allow",
+           GHREADYLANE, PR_UNTAGGED, tool=MCP_UPDATE, **MCP_READY)
+ready_case("--undo is allowed on a lane's pull request", "allow", GHREADYLANE, PR_LANE,
+           command=BASH_READY + " --undo")
+ready_case("gh pr ready -h is allowed", "allow", GHREADYLANE, PR_LANE, command="gh pr ready -h")
+ready_case("an MCP update with no draft key is allowed", "allow", GHREADYLANE, PR_LANE, tool=MCP_UPDATE,
+           owner="y", repo="x", pullNumber=12)
+ready_case("an MCP update with draft true is allowed", "allow", GHREADYLANE, PR_LANE, tool=MCP_UPDATE,
+           owner="y", repo="x", pullNumber=12, draft=True)
+
+
+def ready_counted(command, fake, transcript=PR_LANE):
+    """decide() on one Bash command, in the lane session, against the counted fake at `fake`: (decision, reason)."""
+    return decide({"raw": None, "tool": "Bash", "cwd": NOGIT, "process_cwd": NOGIT, "session": None,
+                   "env_path": fake + os.pathsep + PY_PATH, "config": None, "agent_id": None, "agent_type": None,
+                   "temp": None, "load": None, "env": dict(ROLE_ENV), "tool_input": {"command": command},
+                   "transcript": transcript, "event": None, "stop_active": False, "no_root": False,
+                   "max_seconds": None, "guard": None})
+
+
+def ready_one_read_case():
+    """A numbered `gh pr ready` makes one gh call, and it is the REST read of pulls/12: the head and the labels."""
+    gh_calls_taken(GHREADYCOUNT, DRAFT_CALLS)
+    ready_counted(BASH_READY, GHREADYCOUNT)
+    calls = gh_calls_taken(GHREADYCOUNT, DRAFT_CALLS)
+    if len(calls) != 1 or "pulls/12" not in calls[0]:
+        return False, "one gh call, the pulls/12 read, wanted; %d seen: %r" % (len(calls), calls)
+    return True, "one gh call, the pulls/12 read"
+
+
+def ready_view_no_read_case():
+    """A `gh pr view` is no ready mark: allowed, and it makes no gh call."""
+    gh_calls_taken(GHREADYCOUNT, DRAFT_CALLS)
+    decision, reason = ready_counted("gh pr view 12", GHREADYCOUNT)
+    calls = gh_calls_taken(GHREADYCOUNT, DRAFT_CALLS)
+    if decision != "allow" or reason:
+        return False, "a view was %s (%r), not an allow" % (decision, reason[:90])
+    if calls:
+        return False, "a view made %d gh call(s): %r" % (len(calls), calls)
+    return True, "allowed, and no gh call"
+
+
+# The counted checks read no lazy fixture. They register further down, once LOG_CHECKS_EXTRA exists.
+FIXTURELESS_CHECKS.add(ready_one_read_case)
+FIXTURELESS_CHECKS.add(ready_view_no_read_case)
 
 
 # =========================================================================== 5g. archive of a lane
@@ -13403,9 +13527,10 @@ def archive_counted_gh():
     return folder
 
 
-def gh_calls_taken(folder):
-    """The lines the counted fake at `folder` logged since its log was last taken. Taking the log clears it."""
-    path = os.path.join(folder, ARCHIVE_CALLS)
+def gh_calls_taken(folder, log=ARCHIVE_CALLS):
+    """The lines the counted fake at `folder` logged since its log was last taken. Taking the log clears it.
+    `log` names the file beside its state: each counted fake names its own."""
+    path = os.path.join(folder, log)
     if not os.path.exists(path):
         return []
     with open(path, encoding="utf-8") as handle:
@@ -13476,6 +13601,13 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a non-lane archive makes no
                          archive_non_lane_no_read_case))
 LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no file in the session's folders",
                          archive_writes_nothing_case))
+
+# draft-pr: log checks. Registration takes the family in force, so the family is set for these two lines only.
+_family_before = FAMILY
+FAMILY = "draft-pr"
+LOG_CHECKS_EXTRA.append(("draft-pr: a numbered gh pr ready makes one REST read of its pull request", ready_one_read_case))
+LOG_CHECKS_EXTRA.append(("draft-pr: a gh pr view makes no gh call", ready_view_no_read_case))
+FAMILY = _family_before
 
 
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,
