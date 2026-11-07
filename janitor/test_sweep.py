@@ -36,7 +36,7 @@ import threading
 import time
 import types
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -47,6 +47,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import guard  # noqa: E402
 import sweep  # noqa: E402
+import check_record_slugs  # noqa: E402  the notes grammar and its Seen window (lint/check_record_slugs.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
 VCS = "g" + "it"  # assembled so this file cannot itself look like the command it tests
@@ -9006,6 +9007,265 @@ class OwnAgentLockTests(unittest.TestCase):
                 decision = sweep.decide_worktree(root, entry)
             self.assertTrue(read.called, "the ancestor read was never made")
             self.assertEqual(decision["action"], "keep", "reaped on an unreadable ancestor: %s" % decision["reason"])
+
+
+# ------------------------------------------------------------------ the notes' expiry (decision notes-sightings-expiry)
+
+EXPIRY_TODAY = "2026-11-07"  # the date these cases pin with FIXED_TODAY, as the check's cases do
+FAR_PAST_DAYS = 3650  # an expired note's Seen, far past any window the decision allows: expired whatever the window is
+NOTES = os.path.join("debts", "notes.md")  # a repo with no layout extras keeps its notes here (lint/layout.json, legacy)
+NOTES_HEAD = "# Notes: findings too unlikely to hit to be debts\n"
+
+
+def expiry_day(offset):
+    """The ISO date `offset` days from EXPIRY_TODAY. A negative offset is in the past."""
+    return (datetime.fromisoformat(EXPIRY_TODAY) + timedelta(days=offset)).date().isoformat()
+
+
+def git_stamp(day):
+    """A git date for `day` at noon UTC, so no zone moves it to a neighbouring day."""
+    return day + "T12:00:00+00:00"
+
+
+def note(slug, seen=None, fix="Fix: step:alpha-beta"):
+    """One notes line: `- slug: a gap.`, its Seen field when `seen` is a date (one sighting), then the Fix field."""
+    field = " Seen: %s x1." % seen if seen else ""
+    return "- %s: a gap.%s %s\n" % (slug, field, fix)
+
+
+def dated_commit(where, message, author, committer):
+    env = dict(os.environ, GIT_AUTHOR_DATE=author, GIT_COMMITTER_DATE=committer)
+    done = subprocess.run([VCS, "-C", where, *IDENT, "commit", "-q", "-m", message],
+                          capture_output=True, text=True, timeout=30, env=env)
+    require(done.returncode == 0, "fixture setup failed: commit %r in %r failed: %s"
+            % (message, where, done.stderr.strip()))
+
+
+def expiry_repo(folder, commits, on="feature"):
+    """A repo whose notes file starts on main. A bare origin holds main, with its HEAD on main, so main is the default
+    branch. Each `(lines, author date, committer date)` in `commits` appends `lines` to the notes file in one commit,
+    on `on`: a feature branch, pushed to origin, or main itself. Returns `folder`."""
+    make_repo(folder, {NOTES: NOTES_HEAD})
+    give_remote(folder)
+    run_vcs(folder + "-origin.git", "symbolic-ref", "HEAD", "refs/heads/main")
+    run_vcs(folder, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    if on != "main":
+        run_vcs(folder, "checkout", "-q", "-b", on)
+    for lines, author, committer in commits:
+        with open(os.path.join(folder, NOTES), "a", encoding="utf-8") as handle:
+            handle.write(lines)
+        run_vcs(folder, "add", "-A")
+        dated_commit(folder, "notes", author, committer)
+    if on != "main":
+        pushed = run_vcs(folder, "push", "-q", "origin", on)
+        require(pushed.returncode == 0, "fixture setup failed: push of %s failed: %s" % (on, pushed.stderr.strip()))
+    return folder
+
+
+class ExpireNotesTests(unittest.TestCase):
+    """`sweep.py --root <repo> --expire-notes` previews each note whose last sighting is past the Seen window, and with
+    --confirm deletes those lines from the checkout's notes file. Every fixture is a real repo. Every run is the real
+    command line, in a child process, with HOME, the config dir and the run log inside this case's folder."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.run_folder = _test_temp.run_folder()  # test-temp-standard: one run folder per run (lint/_test_temp.py)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.run_folder, ignore_errors=True)
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="expire_", dir=self.run_folder)
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.home = os.path.join(self.base, "home")
+        os.makedirs(self.home)
+
+    def window(self):
+        days = getattr(check_record_slugs, "SEEN_EXPIRY_DAYS", None)
+        self.assertIsInstance(days, int, "lint/check_record_slugs.py has no SEEN_EXPIRY_DAYS, so the expiry is not built")
+        return days
+
+    def expire(self, repo, *flags):
+        env = dict(os.environ, HOME=self.home, USERPROFILE=self.home,
+                   CLAUDE_CONFIG_DIR=os.path.join(self.home, ".claude"),
+                   JANITOR_RUN_LOG=os.path.join(self.base, "run.jsonl"), FIXED_TODAY=EXPIRY_TODAY)
+        done = subprocess.run([sys.executable, os.path.join(HERE, "sweep.py"), "--root", repo, "--expire-notes", *flags],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300, env=env)
+        return done.returncode, done.stdout + done.stderr
+
+    def notes(self, repo):
+        with open(os.path.join(repo, NOTES), encoding="utf-8") as handle:
+            return handle.read()
+
+    def repo(self, name, commits, on="feature"):
+        return expiry_repo(os.path.join(self.base, name), commits, on=on)
+
+    def test_preview_lists_the_expired_note_and_leaves_the_file_unchanged(self):
+        old = expiry_day(-FAR_PAST_DAYS)
+        repo = self.repo("repo", [
+            (note("old-step", old), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY)),
+            (note("fresh-step", expiry_day(-1)), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY)),
+        ])
+        before = self.notes(repo)
+        self.assertIn("- old-step:", before, "fixture: the expired note is not in the file")
+        rc, out = self.expire(repo)
+        self.assertEqual(rc, 0, "--expire-notes did not preview (not built?): %s" % out)
+        self.assertIn("old-step", out, out)
+        self.assertNotIn("fresh-step", out, out)
+        self.assertEqual(self.notes(repo), before, "the preview changed the notes file")
+
+    def test_confirm_deletes_the_expired_line_and_commits_and_pushes_nothing(self):
+        old = expiry_day(-FAR_PAST_DAYS)
+        repo = self.repo("repo", [
+            (note("old-step", old), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY)),
+            (note("fresh-step", expiry_day(-1)), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY)),
+        ])
+        origin = repo + "-origin.git"
+        head = run_vcs(repo, "rev-parse", "HEAD").stdout.strip()
+        remote = run_vcs(origin, "rev-parse", "refs/heads/feature").stdout.strip()
+        self.assertTrue(head and remote, "fixture: no HEAD, or no feature branch on origin")
+        rc, out = self.expire(repo, "--confirm")
+        self.assertEqual(rc, 0, "--expire-notes --confirm failed (not built?): %s" % out)
+        text = self.notes(repo)
+        self.assertNotIn("- old-step:", text, "the expired line is still in the notes file")
+        self.assertIn("- fresh-step:", text, "a fresh line was deleted")
+        self.assertEqual(run_vcs(repo, "rev-parse", "HEAD").stdout.strip(), head, "--confirm committed")
+        self.assertEqual(run_vcs(origin, "rev-parse", "refs/heads/feature").stdout.strip(), remote,
+                         "--confirm pushed to origin")
+        self.assertEqual(run_vcs(repo, "status", "--porcelain").stdout.split(), ["M", "debts/notes.md"],
+                         "the deletion is not the one change left in the checkout")
+        # The decision's cost: this mode writes no run log, so the only file it writes is the notes file.
+        self.assertFalse(os.path.exists(os.path.join(self.base, "run.jsonl")), "--expire-notes --confirm wrote a run log")
+
+    def test_confirm_removes_no_other_branch(self):
+        # Inferred from "the sweep runs it when asked": the expiry is its own mode, not a full sweep. A full sweep with
+        # --confirm would reap this branch, which holds nothing the default branch lacks.
+        old = expiry_day(-FAR_PAST_DAYS)
+        repo = self.repo("repo", [
+            (note("old-step", old), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY)),
+        ])
+        run_vcs(repo, "branch", "spare", "main")
+        rc, out = self.expire(repo)
+        self.assertEqual(rc, 0, "--expire-notes did not preview (not built?): %s" % out)
+        rc, out = self.expire(repo, "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(run_vcs(repo, "show-ref", "--verify", "refs/heads/spare").returncode, 0,
+                         "--expire-notes --confirm removed a branch")
+
+    def test_a_line_without_seen_takes_the_author_date_of_its_commit(self):
+        old = expiry_day(-FAR_PAST_DAYS)
+        repo = self.repo("repo", [
+            # The author date is old and the commit date is today: the author date decides, so it expires.
+            (note("author-old"), git_stamp(old), git_stamp(EXPIRY_TODAY)),
+            # The reverse: the commit date is old, the author date is today, so the line is kept.
+            (note("author-fresh"), git_stamp(EXPIRY_TODAY), git_stamp(old)),
+        ])
+        self.assertIn("- author-old:", self.notes(repo), "fixture: the line without Seen is not in the file")
+        rc, out = self.expire(repo)
+        self.assertEqual(rc, 0, "--expire-notes did not preview (not built?): %s" % out)
+        self.assertIn("author-old", out, out)
+        self.assertNotIn("author-fresh", out, out)
+
+    def test_a_seen_field_overrides_the_commit_date(self):
+        old = expiry_day(-FAR_PAST_DAYS)
+        repo = self.repo("repo", [
+            # Seen is fresh and the commit is old: kept.
+            (note("seen-fresh", expiry_day(-1)), git_stamp(old), git_stamp(old)),
+            # Seen is old and the commit is today: expired.
+            (note("seen-old", old), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY)),
+        ])
+        rc, out = self.expire(repo)
+        self.assertEqual(rc, 0, "--expire-notes did not preview (not built?): %s" % out)
+        self.assertIn("seen-old", out, out)
+        self.assertNotIn("seen-fresh", out, out)
+
+    def test_the_step_none_and_already_fixed_forms_all_expire(self):
+        # Every note expires, the step form too: the step stays on the roadmap, and git keeps the line.
+        old = expiry_day(-FAR_PAST_DAYS)
+        repo = self.repo("repo", [
+            (note("step-old", old, "Fix: step:alpha-beta"), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY)),
+            (note("none-old", old, "Fix: none — owner decides. Until: %s" % expiry_day(6)),
+             git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY)),
+            (note("fixed-old", old, "Fix: already fixed on main 1a2b3c4"), git_stamp(EXPIRY_TODAY),
+             git_stamp(EXPIRY_TODAY)),
+        ])
+        rc, out = self.expire(repo)
+        self.assertEqual(rc, 0, "--expire-notes did not preview (not built?): %s" % out)
+        for slug in ("step-old", "none-old", "fixed-old"):
+            with self.subTest(slug=slug):
+                self.assertIn(slug, out, out)
+
+    def test_a_note_seen_exactly_the_window_ago_is_kept_and_one_day_more_expires(self):
+        window = self.window()
+        repo = self.repo("repo", [
+            (note("at-window", expiry_day(-window)), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY)),
+            (note("past-window", expiry_day(-(window + 1))), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY)),
+        ])
+        rc, out = self.expire(repo)
+        self.assertEqual(rc, 0, "--expire-notes did not preview (not built?): %s" % out)
+        self.assertIn("past-window", out, out)
+        self.assertNotIn("at-window", out, out)
+
+    def test_confirm_refuses_on_the_default_branch(self):
+        old = expiry_day(-FAR_PAST_DAYS)
+        repo = self.repo("repo", [(note("old-main", old), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY))], on="main")
+        before = self.notes(repo)
+        rc, out = self.expire(repo)  # the preview runs on the default branch
+        self.assertEqual(rc, 0, "--expire-notes did not preview (not built?): %s" % out)
+        self.assertIn("old-main", out, out)
+        rc, out = self.expire(repo, "--confirm")
+        self.assertNotEqual(rc, 0, "--confirm ran on the default branch: %s" % out)
+        self.assertIn("default", out.lower(), "the refusal does not say why: %s" % out)
+        self.assertEqual(self.notes(repo), before, "--confirm changed the notes file on the default branch")
+
+    def test_confirm_refuses_when_the_notes_file_has_uncommitted_changes(self):
+        old = expiry_day(-FAR_PAST_DAYS)
+        repo = self.repo("repo", [(note("old-dirty", old), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY))])
+        with open(os.path.join(repo, NOTES), "a", encoding="utf-8") as handle:
+            handle.write(note("typed-now"))  # uncommitted, with no Seen field
+        before = self.notes(repo)
+        rc, out = self.expire(repo)  # the preview reads the dirty file
+        self.assertEqual(rc, 0, "--expire-notes did not preview (not built?): %s" % out)
+        self.assertIn("old-dirty", out, out)
+        rc, out = self.expire(repo, "--confirm")
+        self.assertNotEqual(rc, 0, "--confirm ran on a dirty notes file: %s" % out)
+        self.assertTrue(any(word in out.lower() for word in ("uncommitted", "dirty", "changes")),
+                        "the refusal does not say why: %s" % out)
+        self.assertEqual(self.notes(repo), before, "--confirm changed a dirty notes file")
+
+    def test_an_uncommitted_line_without_seen_counts_as_seen_today(self):
+        old = expiry_day(-FAR_PAST_DAYS)
+        repo = self.repo("repo", [(note("old-committed", old), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY))])
+        with open(os.path.join(repo, NOTES), "a", encoding="utf-8") as handle:
+            handle.write(note("typed-now"))
+        rc, out = self.expire(repo)
+        self.assertEqual(rc, 0, "--expire-notes did not preview (not built?): %s" % out)
+        self.assertIn("old-committed", out, out)
+        self.assertNotIn("typed-now", out, "a line not yet committed was judged expired: %s" % out)
+
+    def test_a_line_whose_blame_commit_is_a_shallow_boundary_is_unknown_and_stays(self):
+        # The line was last touched in a commit the shallow clone does not hold. Its blame lands on the boundary commit.
+        old = expiry_day(-FAR_PAST_DAYS)
+        origin_repo = self.repo("repo", [
+            (note("shallow-blame"), git_stamp(old), git_stamp(old)),
+            (note("shallow-other", expiry_day(-1)), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY)),
+        ])
+        clone = os.path.join(self.base, "clone")
+        cloned = subprocess.run([VCS, "clone", "-q", "--depth", "1", "--branch", "feature",
+                                 "file://" + origin_repo + "-origin.git", clone],
+                                capture_output=True, text=True, timeout=120)
+        require(cloned.returncode == 0, "fixture setup failed: the shallow clone failed: %s" % cloned.stderr.strip())
+        shallow = run_vcs(clone, "rev-parse", "--is-shallow-repository").stdout.strip()
+        require(shallow == "true", "fixture setup failed: the clone is not shallow: %r" % shallow)
+        rc, out = self.expire(clone)
+        self.assertEqual(rc, 0, "--expire-notes did not preview (not built?): %s" % out)
+        self.assertIn("UNKNOWN", out, "a line with no true date is not reported UNKNOWN: %s" % out)
+        for line in out.splitlines():
+            if "shallow-blame" in line:
+                self.assertIn("UNKNOWN", line, "a line with no true date is listed as known: %s" % line)
+        self.expire(clone, "--confirm")
+        self.assertIn("- shallow-blame:", self.notes(clone), "an UNKNOWN line was deleted")
 
 
 if __name__ == "__main__":
