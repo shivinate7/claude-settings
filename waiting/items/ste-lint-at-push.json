@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-07T23:36:00Z",
+  "context": "Goal: a found gap gets a guard, not a note (your words, 2026-11-07 13:20-13:25 CST).\nProblem (rule): your ruling of 2026-10-22 10:10 CDT, in record ste-guard-fixes-not-nags (\"No STE hook runs on a write; CI carries the lint\"), may cover a lint at push time too.\nBased on (measured): PR #1653 pushed four sentences over 30 words. CI found them only after the push, which cost one more fix check (n=1).\nBased on (measured): the push-time lint costs 1.2 s on each push that changes Markdown in the lint's scope, and starts nothing otherwise (n=1).\nBased on (ruling): ste-guard-fixes-not-nags protects this outcome: no refusal and no process start on each Write or Edit. That still holds, because the lint runs only at push.\nDeparts from: ste-guard-fixes-not-nags, where CI alone carries the lint \u2014 a push that breaks the lint is refused before it leaves, under a new record ste-lint-at-push. A lint crash reads unknown and lets the push go.",
+  "home": "lane lint-before-record-push (session_013NEJKzXyKNARtJsbz3Q1R2)",
+  "id": "ste-lint-at-push",
+  "kind": "decision",
+  "lane": "lint-before-record-push",
+  "n": 377,
+  "options": [
+    {
+      "gain": "Prose errors stop before the push, with no extra review round.",
+      "key": "a",
+      "label": "Allow the push-time lint (recommended)",
+      "lose": "About 1.2 s on each push that changes Markdown."
+    },
+    {
+      "gain": "Your ruling stands unchanged, and pushes cost no extra time.",
+      "key": "b",
+      "label": "Keep CI only, and drop the lane",
+      "lose": "An over-long sentence still costs one extra fix check now and then."
+    }
+  ],
+  "owner": "lane lint-before-record-push (session_013NEJKzXyKNARtJsbz3Q1R2)",
+  "rank": 2,
+  "ref": "record ste-guard-fixes-not-nags; step lint-before-record-push; PR #1653",
+  "short": "Plain-English lint at push time, or CI only",
+  "status": "open",
+  "title": "May a push that breaks the plain-English lint be refused before it leaves?",
+  "why": "Your ruling of 2026-10-22 may cover a lint at push time too. The lane keeps building, and only its merge waits for your word."
+}
