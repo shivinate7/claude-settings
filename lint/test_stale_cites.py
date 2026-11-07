@@ -48,6 +48,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  removes a fixture tree, read-only git objects included (testing/tracked_tree.py)
+import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 
 RUN_FOLDER = _test_temp.run_folder()
 atexit.register(tracked_tree.rm_tree, RUN_FOLDER)
@@ -772,16 +773,22 @@ class ReadAtHeadTests(StaleCase):
 
 
 class UnknownTests(StaleCase):
-    """A base the repo cannot resolve is unknown, not a finding: the check exits 0 and says so."""
+    """A base a shallow clone cannot resolve is unknown, not a finding: the check exits 0 and says so. A base that
+    does not resolve in a full clone is a read that could not run (UnreadableReadTests)."""
 
-    def test_an_unresolvable_base_prints_unknown_and_exits_zero(self):
+    def test_an_unresolvable_base_in_a_depth_one_clone_prints_unknown_and_exits_zero(self):
         def change(repo):
             move(repo, "hooks/lib.mjs", MOVED)
             commit(repo)
         rng = self.make_range(base_files(), change)
-        rc, out = self.run_check(rng, base="1" * 40)
+        clone = os.path.join(rng.case, "shallow")
+        self.assertEqual(shallow_clone.make(rng.repo, clone, rng.head), "", "scope: the depth-1 clone was made")
+        self.assertTrue(shallow_clone.facts(clone, rng.head)["shallow"], "scope: the clone is shallow")
+        self.assertFalse(has_object(clone, rng.base), "scope: the base is cut from the clone")
+        rc, out = self.run_check(rng._replace(repo=clone))
         self.assertEqual(rc, 0, out)
-        self.assertTrue(any(line.startswith("stale-cites: unknown") for line in out.splitlines()), out)
+        self.assertTrue(unknown_lines(out), out)
+        self.assertIn("fetch-depth", out, "the shallow clone's unknown line does not name fetch-depth\n" + out)
 
     def test_step_with_an_unresolvable_base_exits_zero(self):
         def change(repo):
@@ -1154,6 +1161,15 @@ class UnreadableReadTests(StaleCase):
         self.assert_read_failed(rc, out, "git diff")
         self.assertNotIn("fetch-depth", out, "a missing head was blamed on a shallow clone of the base\n" + out)
 
+    def test_an_unresolvable_base_in_a_full_clone_exits_two_and_names_it(self):
+        rng = self.moved_lib(cited=True)
+        self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is not shallow")
+        self.assertFalse(has_object(rng.repo, "nosuchbase"), "scope: the base does not resolve")
+        self.assertTrue(has_object(rng.repo, "HEAD"), "scope: the head resolves")
+        rc, out = self.run_check(rng, spec="nosuchbase...HEAD")
+        self.assert_read_failed(rc, out, "nosuchbase")
+        self.assertNotIn("fetch-depth", out, "a base missing from a full clone was blamed on a shallow clone\n" + out)
+
     def test_a_two_dot_range_with_a_resolving_head_flags_the_stale_cite_and_passes_when_clean(self):
         rng = self.moved_lib(cited=True)
         rc, out = self.run_check(rng, spec="%s..%s" % (rng.base, rng.head))
@@ -1169,6 +1185,35 @@ class UnreadableReadTests(StaleCase):
         os.mkdir(os.path.join(rng.repo, ".ste-lint-exclude"))  # a folder under the file's name: open() cannot read it
         rc, out = self.run_check(rng)
         self.assert_read_failed(rc, out, ".ste-lint-exclude")
+
+    def assert_only_adds_a_page(self, rng):
+        """The range adds one Markdown page and removes, renames and changes nothing else. A case asserts this before
+        it reads the result, so an add-only case has the add-only range it names."""
+        self.assertEqual(git(rng.repo, "diff", "--name-status", "-M", rng.base, rng.head).split(),
+                         ["A", "docs/added.md"], "scope: the range does not only add one page")
+
+    def add_only_range(self, unreadable):
+        """A range that adds one page with no cite and no route word. `.ste-lint-exclude` is a folder when `unreadable`
+        (open() cannot read it), and a file that leaves out nothing otherwise."""
+        def change(repo):
+            write(repo, "docs/added.md", "# Added\n\n- a plain note\n")
+            commit(repo)
+        rng = self.make_range(base_files(), change)
+        if unreadable:
+            os.mkdir(os.path.join(rng.repo, ".ste-lint-exclude"))
+        else:
+            write(rng.repo, ".ste-lint-exclude", "# no excludes\n")
+        self.assert_only_adds_a_page(rng)
+        return rng
+
+    def test_an_add_only_range_whose_exclude_file_cannot_be_read_exits_two_and_names_it(self):
+        rng = self.add_only_range(unreadable=True)
+        self.assertTrue(os.path.isdir(os.path.join(rng.repo, ".ste-lint-exclude")), "scope: the exclude is a folder")
+        rc, out = self.run_check(rng)
+        self.assert_read_failed(rc, out, ".ste-lint-exclude")
+
+    def test_an_add_only_range_with_a_readable_exclude_file_exits_zero(self):
+        self.assert_passes(self.add_only_range(unreadable=False))
 
     def test_no_exclude_file_is_read_whole(self):
         self.assert_healthy_moved_lib()
