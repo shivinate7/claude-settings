@@ -2691,7 +2691,11 @@ class ClaimSurvivesUnknown(Env):
             if claimed and mode == "check":  # the base check prove() makes after the claim push
                 return 0, "UNKNOWN: the stamp could not read origin/main"
             return real(wt, cfgrel, mode, base)
-        with unittest.mock.patch.object(merge, "node_stamp", check_unknown):
+        real_mkstemp = tempfile.mkstemp  # stamp_stop writes its full output to a log: this run's folder, never the system temp dir
+        def mkstemp_in_run_folder(**k):
+            k.setdefault("dir", run_folder())
+            return real_mkstemp(**k)
+        with unittest.mock.patch.object(merge, "node_stamp", check_unknown), unittest.mock.patch.object(tempfile, "mkstemp", mkstemp_in_run_folder):
             rc, out = self.run_merge("7", "--confirm")
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
         self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
