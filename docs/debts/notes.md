@@ -1487,3 +1487,6 @@
 - prove-judge-all-unknown-rate: an all-failed run prints false alarms 0/N (0.0%) next to its unknown count. Decision: claims-carry-backing (the claim-backing record).
 - prove-judge-one-error-line: one first error line is attached to every unknown, whatever its cause. Decision: claims-carry-backing (the claim-backing record).
 - prove-judge-no-json-unknown: in the first real run, 4 rows came back unknown because the model result carried no JSON verdict; the group is not named. Decision: claims-carry-backing (the claim-backing record).
+- prove-judge-excerpt-bound-bytes: the named-excerpt bound is 40 rows of 200 characters, not bytes. A 4-byte character gives about 800 B per row (the excerpt cut, lint/stale_cites.py:675-676). Decision: claims-carry-backing (the claim-backing record).
+- prove-judge-read-before-size-check: `read_backing` (merge/merge.py:2459) reads the whole file before the 256 KB size check (merge/merge.py:2504). That is bounded by repo file size, once per path per prompt build. Decision: claims-carry-backing (the claim-backing record).
+- prove-judge-unknown-narrates-tools: 10 of the 34 scored rows came back unknown because the model narrated tool use ("I'll check whether the file..."), not a verdict. Candidate step: prompt wording that says no tools are available. Decision: claims-carry-backing (the claim-backing record).
