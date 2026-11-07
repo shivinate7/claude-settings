@@ -425,15 +425,18 @@ def _heads_of_git_push(args, output, folder, ci_wake, budget):
         branch = branch[len("refs/heads/"):] if branch.startswith("refs/heads/") else branch
         why = None
         if sha is None:
+            # The remote-tracking ref is read first: when it names a commit, the name is a branch whatever else holds
+            # it, so the tag and local-branch reads are skipped (1 git process, else at most 3).
             try:
-                has_tag = bool(ci_wake.commit_read("refs/tags/" + branch, folder, budget.next_timeout()))
-                has_branch = bool(ci_wake.commit_read("refs/heads/" + branch, folder, budget.next_timeout()))
                 if ":" not in remote:
                     sha = ci_wake.commit_read("refs/remotes/%s/%s" % (remote, branch), folder, budget.next_timeout())
+                if not sha:
+                    has_tag = bool(ci_wake.commit_read("refs/tags/" + branch, folder, budget.next_timeout()))
+                    has_branch = bool(ci_wake.commit_read("refs/heads/" + branch, folder, budget.next_timeout()))
             except ci_wake.Unknown as unknown:
                 heads.append((None, branch, str(unknown)))
                 continue
-            if _reads_as_tag(branch, branch in bare, has_tag, has_branch or bool(sha)):
+            if not sha and _reads_as_tag(branch, branch in bare, has_tag, has_branch):
                 continue
         if not sha:
             # commit_read gives "" when no remote-tracking ref names a commit; a head left out here would pass the
