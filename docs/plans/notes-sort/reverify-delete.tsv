@@ -1,0 +1,19 @@
+slug	verdict	size	where	reason
+dropped-bloat-phrases-silent	delete	n/a	lint/ste_lint.py:BLOAT	The omission is the ruling in decision plain-prose-lint: a lint rule refuses or does not exist.
+git-env-set-untested-forms	delete	n/a	hooks/test_guard.py:8812-8830	The backtick escape, heredoc apostrophe and group openers are all pinned by cases.
+glued-subshell-unread	delete	n/a	hooks/guard_core.py:_command_starts	(rm -rf .) now denies; the live cause is the assignment prefix, already tracked as guard-substitution-in-token.
+guard-log-install-skew	delete	n/a	lint/guard_log_report.py:parse_line	parse_line reads five- and six-field lines; skew needs an old install copy, already noted.
+guard-log-off-silent	delete	n/a	lint/guard_log_report.py:4	No STE logger remains to go silent.
+guard-old-install-mixes-once	delete	n/a	install.sh:716-733	Main stages guard files in guard.d/<id>/ then flips (625c20d55); the one-time mix is an old-install upgrade no main code can change.
+guard-split-sibling-mutant-case	delete	n/a	hooks/test_guard.py:_load_guard_module	A copied guard.py resolves its sibling modules from the mutant folder (probe).
+haiku-stop-no-reply-uncounted	delete	n/a	hooks/reply_judge.py:12	By design: the docstring counts only Stops that carry a reply.
+heredoc-run-other-path	delete	n/a	hooks/guard_core.py:_runs_written_file	The named piped shape now denies.
+heredoc-script-then-run	delete	n/a	hooks/guard_core.py:_runs_written_file	Direct write-then-run forms now deny; the residual shapes are deliberate indirection.
+home-cwd-mutant-fragment	delete	n/a	hooks/mutate_guard.py:1289-1338	The mutants now name specific cases, not the bare fragment.
+in-throwaway-reads-paths-only	delete	n/a	hooks/guard.py:in_throwaway	Reads --git-dir via _git_dir_target; merge, rebase, cherry-pick and pull need the work-tree under temp; tests test_guard.py:6523, :6549.
+lane-slug-gh-m-flag-passes	delete	n/a	hooks/guard.py:SHORT_FLAGS	gh pr create -m is --milestone, never a message; the pass is by design.
+lane-slug-header-count-shift	delete	n/a	hooks/guard.py:heredoc_offsets	10 end-to-end shapes all deny and are pinned at test_guard.py:10462-10468.
+liveness-windows-arm-unproven	delete	n/a	hooks/test_guard.py:process_start_ms_case	The case runs unstubbed on windows-latest in checks-windows.
+local-time-line-cost-unmeasured	delete	n/a	hooks/local_time.py:UserPromptSubmit line	Measured: the line is 45 bytes per prompt and the --agent JSON 128, a fixed format with no growth path.
+merge-text-allows-untested	delete	n/a	hooks/test_guard.py:9524	Each merge-text allow row now runs beside a state that refuses or asks a real merge, so each can fail.
+plain-diff-model-error-note	delete	n/a	mods/plain-diff/hooks/lib.mjs:modelFailNote	Has an `r instanceof Error` branch; modelFailNote(new Error('boom')) prints "No note: boom".

@@ -1,0 +1,111 @@
+slug	verdict	size	where	reason
+agent-brief-text-copy-drifts	keep	rare-and-harmless	hooks/agent_brief.py:COMMON	Wording differs slightly, but the cap and the report order agree in CLAUDE.md, agents/*.md and COMMON.
+bare-words-shares-env-list	keep	rare-and-harmless	hooks/guard_core.py:ENV_PATTERN_COMMANDS	Both consumers want the same meaning; the list changes only when a search tool is added.
+builder-fstring-path-unread	keep	rare-and-harmless	hooks/guard_frozen.py:_py_paths	The builder-diff backstop refuses the resulting test diff (decision builders-cannot-edit-tests).
+builder-patch-format-unread	keep	rare-and-harmless	hooks/guard.py:builder_shell_test_hit	Ordinary builder commands, but diff_refusal and judge_stop refuse the test diff with an undo route.
+builder-path-forms-unread	keep	rare-and-harmless	hooks/guard_frozen.py:_shell_write_hit	The same commit/push/stop diff check catches the result.
+catalog-mode-detect-flags	keep	rare-and-harmless	lint/hook_catalog.py:mode_key	No script is registered twice with a positional arg or -x, so it cannot occur on main.
+cites-lack-gloss-unchecked	keep	owner-decides	lint/report_guard.py:bare_cite	Enforcing on records needs a baseline or a rewrite; scope is the owner's call.
+cmd-c-quote-count-bash-reader	keep	needs-the-mac	hooks/guard_core.py:nested_script	Reader disagreement confirmed; the Windows delete rule could not run on Linux (unknown, needs a Windows run).
+debt-decision-link-unchecked	keep	owner-decides	docs/debts	No lint reads the Decision line; what "names its finding" means is the owner's call.
+debts-no-check-reads-parts	keep	rare-and-harmless	lint/check_record_slugs.py	Partly stale: three checks read the parts, and 120 of 121 debt files carry all four; only unstarted-guard-held.md lacks Where.
+discards-output-slow-path	keep	rare-and-harmless	hooks/guard.py:discards_output	Measured quadratic: 74 µs on a real message, 11 s only at 2000 quoted redirects.
+drops-cite-forms-unchecked	keep	rare-and-harmless	hooks/guard.py:cited_record_path	Each form is unusual and the harm is one path in a message.
+drops-mixed-paragraph-exempt	keep	rare-and-harmless	hooks/guard.py:cited_record_path	Reproduced; the only effect is one path cite in history, and check_silent_undo.py already hints it.
+drops-reads-msg-unlike-git	keep	rare-and-harmless	hooks/guard.py:message_texts	Reproduced; a false refusal only, and a one-line retry passes.
+drops-stdin-message-unread	keep	rare-and-harmless	hooks/guard.py:message_sources	Narrower than written: heredoc -F - is read; only piped stdin is unread, costing one path cite.
+drops-whole-token-no-mutant	keep	rare-and-harmless	hooks/mutate_guard.py	No fullmatch mutant, but existing deny cases go red on that mutant.
+dw-bare-stop-row-blind	keep	rare-and-harmless	lint/test_settings_matcher.py:script_names	All 8 live Stop rows are quoted, so a re-add would copy them.
+dw-busy-stop-skipped	keep	owner-decides	mods/decision-watch/hooks/register.mjs:turn.complete	Ruled in decision decision-watch-mod-limits ("One judge runs at a time").
+dw-log-keeps-model-text	keep	rare-and-harmless	mods/decision-watch/hooks/register.mjs:shadow	The log is local and holds a short summary of config files.
+dw-log-write-failures-silent	keep	rare-and-harmless	mods/decision-watch/hooks/register.mjs:log	Deliberate; verdicts still toast, so a lost line loses only a diagnostic.
+dw-notice-lead-space-lost	keep	rare-and-harmless	mods/decision-watch/hooks/register.mjs:shadow	All three notice texts start with a letter, and the toast uses the unfolded text.
+dw-slash-cache-hit-reads-clean	keep	rare-and-harmless	mods/decision-watch/hooks/register.mjs:judge	Documented in the mod README; /dw is owner-run.
+dw-slot-timers-unmeasured	keep	needs-the-mac	mods/decision-watch/hooks/register.mjs:dwRun	Whether the host kills the child is desktop-app behaviour.
+env-flat-crash-allows	keep	owner-decides	hooks/guard.py:main	A crash allows by owner ruling in decision guard-hooks-fail-closed.
+env-grep-long-abbrev-unpinned	keep	rare-and-harmless	hooks/guard_env.py:_pattern_words	Reproduced; Claude writes -e or --regexp, so the abbreviated form is rare.
+env-split-string-wsl-only	keep	rare-and-harmless	hooks/guard_core.py:nested_script	Reproduced; Claude never writes env -S as a wrapper.
+git-env-glued-block	keep	owner-decides	hooks/guard_kill.py:_open_script_blocks	Ruled out of scope in decision guard-guards-mistakes-only (2026-10-17 09:07 CDT).
+git-env-lower-case-fold	keep	rare-and-harmless	hooks/guard_kill.py:_assigned_var	Pinned by tests; effect is a false refusal on a lower-case prefix only.
+git-env-set-indirect-forms	keep	owner-decides	hooks/guard_kill.py:git_env_command_hit	Recorded as a named safety hole in decision git-env-set-refused.
+git-env-warn-session-start	keep	rare-and-harmless	hooks/session_start.sh:112-133	Warns once at start by design (outcomes-mechanize-rules); a direct GIT_DIR set is refused.
+guard-glob-three-tools	keep	rare-and-harmless	lint/rule_audit.py:345	Three one-line globs change no outcome; a shared helper is not worth a lane.
+guard-heredoc-os-system	keep	owner-decides	hooks/guard_shared_tree.py	Confirmed; reading git discards in python strings is a new scope call with false-alarm cost.
+guard-log-lines-lost	keep	rare-and-harmless	hooks/guard_core.py:record	Appends unlocked after 2 s by design so no line is dropped.
+guard-log-one-reader-gaps	keep	rare-and-harmless	lint/test_guard_log_report.py:reads_guard_log	No other reader exists outside parse_line.
+guard-log-session-id-fence	keep	rare-and-harmless	lint/guard_log_report.py:render	Session ids are Claude Code UUIDs, so Claude cannot write a breaking one.
+guard-log-tool-field-tab	keep	rare-and-harmless	hooks/guard_core.py:record	Callers pass the hook tool_name, an identifier.
+guard-msg-blank-segment-split	keep	rare-and-harmless	hooks/guard_core.py:_without_message_values	Only a false alarm, needing a separator, an interpreter word and a refusable body line.
+guard-realpath-after-flip	keep	rare-and-harmless	hooks/guard.py:303	The window opens only when installing from a different clone, once.
+guard-redirect-paren-heredoc	keep	rare-and-harmless	hooks/guard_kill.py	The live forms (a redirect before kill) are shapes Claude does not write.
+guard-split-ignores-backslash	keep	rare-and-harmless	hooks/guard.py:background_commands	Feeds ask-alone only; a miscount at worst turns a refusal into an ask, and split_segments still denies.
+guard-split-mutant-needs-git	keep	rare-and-harmless	hooks/mutate_guard.py:1213	CI runs mutate_guard.py inside the checkout.
+guard-timing-case-flaky	keep	rare-and-harmless	hooks/test_guard.py:rm_var_slow_case	Measured 0.35-0.41 s against a 2.0 s bound; no observed flake.
+guard-wrapper-lists-closed	keep	rare-and-harmless	hooks/guard_core.py:COMMAND_WRAPPERS	Only scheduler wrappers before a kill pass; Claude has no reason to write them (guard-guards-mistakes-only).
+haiku-counter-files-not-purged	keep	rare-and-harmless	hooks/reply_judge.py:count_this_stop	A few bytes each; the same no-cleanup is accepted for state/.
+haiku-counter-lost-updates	keep	rare-and-harmless	hooks/reply_judge.py:count_this_stop	Stop-only hook, so one session's Stops are serial; a lost update errs toward judging.
+haiku-session-key-copied	keep	rare-and-harmless	hooks/reply_judge.py:223	The two copies key separate stores, so drift breaks nothing.
+handoff-pointer-swept-compact	keep	rare-and-harmless	hooks/precompact_handoff.py:sweep	The effect is a wrong handoff named, the same fallback find_newest_handoff gives.
+handoff-pointers-age-out	keep	rare-and-harmless	hooks/precompact_handoff.py:sweep	Each pointer is a tiny file, and clear deletes the pointer it uses.
+here-string-scan-quadratic	keep	rare-and-harmless	hooks/guard.py:_HERE_STRING	Only in a PowerShell call with thousands of unclosed @' lines; 13 s at 20000, under the 60 s timeout.
+impeccable-piped-shell-body	keep	rare-and-harmless	hooks/guard.py:impeccable_command_hit	A policy guard; Claude does not write the allowed forms by mistake.
+impeccable-python-body	keep	rare-and-harmless	hooks/guard.py:impeccable_command_hit	Docstring still says python, node, perl and ruby bodies are unread; running impeccable from such a body is not a normal-work form.
+inbox-partial-write-fence	keep	rare-and-harmless	hooks/local_time.py:save_message	One f.write of heading plus fence; an unclosed fence needs a full disk.
+inbox-page-note-key-after-write	keep	rare-and-harmless	hooks/local_time.py:page_note	Key appended after save_message; failure costs one repeated note.
+inbox-page-note-item-newline	keep	rare-and-harmless	hooks/local_time.py:page_note_text	Item inserted raw; needs a newline in an item id, which Claude writes as a slug.
+inbox-page-note-other-session	keep	owner-decides	hooks/local_time.py:page_note	No session filter; a fix needs a new answers field on the page.
+inbox-path-drop-silent	keep	rare-and-harmless	hooks/local_time.py:capture	inbox_paths returns None only for an id failing [\w.-]+, which real session ids never do.
+inbox-unreadable-drops-ids	keep	rare-and-harmless	hooks/precompact_handoff.py:inbox_note	Catches Exception and returns ""; needs a corrupt inbox.
+index-row-drop-no-finding	keep	rare-and-harmless	lint/hook_catalog.py:collect_records	Skips non-.md names; renaming a record to non-.md is not a normal act.
+install-early-exit-unlogged	keep	rare-and-harmless	install.sh:take_install_lock	Lock timeout exits before the start line; ERROR still prints; needs a 60 s lock hold.
+install-hook-path-from-checkout	keep	rare-and-harmless	install.ps1:post-merge hook text	Copies from the pulling checkout; hit only with a linked worktree on main.
+install-lock-stale-by-age	keep	rare-and-harmless	install.sh:take_install_lock	Age-only stale test; needs a dead or 10-minute run; marked deliberate at :272.
+install-lock-trap-no-id	keep	rare-and-harmless	install.sh:finish_install	rm -f with no id check; harms only after a stale-break race.
+install-ps1-counts-store-alias	keep	rare-and-harmless	install.ps1:908	Store alias passes; matters only on Windows with no real python, where the guard refuses loudly.
+install-reader-can-die-silent	keep	rare-and-harmless	install-no-gap.test.ps1:HookReader.Loop	Throws only on a fixture error, in a Windows-only test.
+install-sh-renames-no-retry	keep	rare-and-harmless	install.sh (nine bare mv)	Failed mv leaves the skill in place; nothing lost; three log "moved" anyway.
+install-sh-retries-every-error	keep	rare-and-harmless	install.sh:mv_retry	Retries any mv error about 2.4 s; costs time only on a real failure.
+install-sh-retry-untested	keep	rare-and-harmless	hooks/test_install_src.sh:make_swap_bin	Only fail-then-succeed is untested; mv_retry matters only for Windows readers.
+install-skill-fail-exits-0	keep	owner-decides	install.ps1:821	Confirmed: failed skill install exits 0; whether the owner's PC is in copy mode is unknown and only the owner's PC shows it (fix-small if so).
+install-worktree-check-gaps	keep	rare-and-harmless	install.ps1:49	Empty catch confirmed; the try body throws only on a bad path; no pwsh here to run it.
+install-writes-in-place	keep	rare-and-harmless	install.sh:709	Only the CLAUDE.md pointer and marker are written in place, one line each; settings.json is already tmp+mv.
+janitor-loop-no-alias-skip	keep	rare-and-harmless	bin/claude-janitor:5	Only install tests and the owner call the shim; sessions run sweep.py directly.
+judgment-exits-debt-count	keep	rare-and-harmless	lint/rule_audit.py:UNMECHANIZED_EXPECTED	Re-kinding needs the row, two equality pins and an 8-word reason in one diff; cannot happen by accident.
+kept-bloat-rows-unaudited	keep	rare-and-harmless	lint/ste_lint.py:_fixable	--fix is a hand tool with no hook caller (decision ste-guard-fixes-not-nags).
+lane-slug-heredoc-untested	keep	rare-and-harmless	hooks/mutate_guard.py	Half stale: string and multi-line cases are pinned; only an apostrophe-in-comment case and a heredoc mutant are missing.
+lane-slug-lowercase-n-passes	keep	rare-and-harmless	hooks/guard.py:LANE_NUMBER	Widening would flag n1/n2 variable names in messages.
+lane-slug-piped-body-unread	keep	rare-and-harmless	hooks/guard.py:message_sources	No repo doc or tool pipes a body; heredoc bodies are read.
+lane-slug-tag-messages-unchecked	keep	rare-and-harmless	hooks/guard.py:message_texts	The repo has no tags and no tagging tooling.
+linked-nm-install-test	keep	rare-and-harmless	hooks/guard_push_delete.py:NPM_ALIASES	Named hole (c) in decision guard-linked-node-modules; Claude has no reason to run npm it.
+linked-nm-other-deletes	keep	owner-decides	hooks/guard_push_delete.py:linked_nm_hit	Named hole (e) in decision guard-linked-node-modules.
+linked-nm-other-managers	keep	owner-decides	hooks/guard_push_delete.py:linked_nm_hit	Named hole (d); the incident was npm only, so widening is the owner's scope call.
+linked-nm-shell-c-cd	keep	owner-decides	hooks/guard_push_delete.py:linked_nm_hit	Named hole (f) in decision guard-linked-node-modules.
+live-pin-first-move-gap	keep	rare-and-harmless	merge/install_from_main.sh:162	A call in the window is refused and retried by the hook's file check, never passed.
+local-time-hard-coded-dst	keep	rare-and-harmless	hooks/local_time.py:line	Matches zoneinfo America/Chicago at both 2026 transitions; breaks only if US law changes.
+marker-writeback-loses-deletion	keep	rare-and-harmless	janitor/sweep.py:_restore_cut_short	Needs a failed remove, all-" D" dirty lines, a stale lock, no live session and no process inside.
+merge-by-button-stale-page	keep	owner-decides	merge/merge.py:records rebuild	Still real; the fix is a policy choice (bot push to main, waive --check, or ban the button).
+merge-head-shared-name-slot	keep	rare-and-harmless	merge/merge.py:judge_runs	A shadowed job's failure still reads red; only a run-level red with no job rows is masked, and no workflow names collide here.
+merge-head-wait-no-remedy	keep	rare-and-harmless	merge/merge.py:judge_runs	No remedy text, but both cases fail closed and the common all-skipped case has a remedy.
+merge-notice-unrelated-number	keep	rare-and-harmless	hooks/decision_watch.py:already_named	Substring match; merged PRs carry the newest numbers, and the notice is advisory.
+mod-check-name-edges	keep	rare-and-harmless	lint/check_mod_versions.py	Cause confirmed (ls-tree without -z); mods/ holds only ASCII folder names.
+model-clip-unmeasured	keep	rare-and-harmless	hooks/decision_watch.py:PROMPT_MAX_LEN	Clips count characters, so cost is bounded; the verdict path is unaffected.
+mods-load-needs-new-session	keep	needs-the-mac	mods/plain-diff/README.md	READMEs disagree on restart vs /reload-plugins; client timing needs the owner's desktop app.
+mods-refresh-cadence-unmeasured	keep	needs-the-mac	settings.json:autoUpdate	The 10-minute cadence can only be timed on the owner's installed clients.
+mods-session-board-timer-margins	keep	rare-and-harmless	mods/session-board/session-board.test.mjs	The 100 ms slack is real but git log shows no flake fix for this test.
+moved-kind-path-forgets-numbers	keep	rare-and-harmless	actions/stamp/stamp.mjs:everTaken	This repo's stamp.json has no kinds; other repos need a folder move plus a pre-move deleted record.
+net-error-colon-http-refusal	keep	rare-and-harmless	merge/merge.py:is_net	Reproduced; the cost is 3 retries then a stop, and it needs a title of that exact form.
+no-start-lock-has-no-pid-check	keep	rare-and-harmless	janitor/sweep.py:stale_agent_lock_verdict	Fails safe: the lock and tree are kept.
+off-line-fork-reads-pre-cut	keep	rare-and-harmless	lint/check_silent_undo.py:check	Needs stacked PRs; the remedy is one Drops-lines trailer.
+one-term-per-meaning-unchecked	keep	owner-decides	lint/rule_mechanisms.json:465	The owner ruled a judgment rule may not refuse; a check for this clause is his call.
+page-excuse-trailer-only	keep	rare-and-harmless	lint/check_silent_undo.py:generated_page	merge.py always writes the Drops-lines trailer when the tool rebuilds the page.
+pin-switch-in-place-mix	keep	rare-and-harmless	merge/install_from_main.sh:switch_in_place	Used only when can_link fails; install.ps1 then copies; test case14 accepts the in-place move.
+plain-diff-4mib-unconfirmed	keep	needs-the-mac	mods/plain-diff/hooks/register.mjs:build	No file defines isStdoutTruncated or a 4 MiB limit; only the desktop host can confirm.
+plain-diff-desktop-untested	keep	needs-the-mac	mods/plain-diff/plain-diff.test.mjs:fake host	Tests use a mock host; a real pane draw needs the desktop app.
+plain-diff-env-innocent-name	keep	owner-decides	mods/plain-diff/hooks/lib.mjs:looksSecret	Confirmed; decision plain-diff-mod-limits adds rules per incident.
+plain-diff-keyvalue-misses	keep	owner-decides	mods/plain-diff/hooks/lib.mjs:SECRET_BODY	Confirmed; the all-digit skip is deliberate and the ruling prefers hiding too little.
+plain-diff-limiter-slot-early	keep	rare-and-harmless	mods/plain-diff/hooks/lib.mjs:makeLimiter	Host call timeout 20 s is under the 25 s limiter; a late slot costs at most a few haiku calls.
+plain-diff-long-line-anchor	keep	rare-and-harmless	mods/plain-diff/hooks/lib.mjs:looksSecret	A false match only hides a diff, and such lines are already too large for the model.
+plain-diff-quoted-path-label	keep	rare-and-harmless	mods/plain-diff/hooks/lib.mjs:unquote	core.quotepath=off keeps emoji names unquoted; needs a tab, quote or backslash plus an emoji in one name.
+plain-diff-secret-file-names	keep	owner-decides	mods/plain-diff/hooks/lib.mjs:isSecretPath	Confirmed; README lists these and plain-diff-mod-limits adds rules per incident.
+plain-diff-trimnote-regex	keep	rare-and-harmless	mods/plain-diff/hooks/lib.mjs:trimNote	Quadratic only on a long dash line, which haiku replies and turn text do not hold.
+pr-checks-watch-unmeasured	keep	owner-decides	hooks/guard_stream.py:waiter_verdict	Background gh pr checks --watch is allowed by owner ruling (test_guard.py:5591); API cost unmeasured.

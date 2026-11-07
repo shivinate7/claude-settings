@@ -1,0 +1,14 @@
+slug	verdict	size	where	reason
+mutant-load-unproven	fix	unsized	docs/debts/notes.md	Fix: a whole-file break control per file. Decision: mutation-report-scores-suites.
+merge-lock-expired-delete-race	fix	unsized	docs/debts/notes.md	Fix: the Mac also uses GitLock, whose leased push is compare-and-swap (merge/merge.py GhLock.acquire). Decision: none
+merge-retarget-before-merge	fix	unsized	docs/debts/notes.md	Fix: one host.pr(n) read before host.merge, revert a pushed claim through fail(), add a BaseAware case (merge/merge.py). Decision: none
+sweep-fetch-fail-wrong-cause	fix	unsized	docs/debts/notes.md	Fix: also mark reasons starting with unpushed. Decision: when-a-worktree-may-be-removed
+task-names-check-line-not-truth	fix	unsized	docs/debts/notes.md	Fix: claims-carry-backing (the claim-backing decision), part (v).
+ios-probe-subshell-arg-drops-action	fix	unsized	docs/debts/notes.md	Fix: keep a stack of the outer group at `$(` and restore it at `)` (lint/compliance_probes.py shell_words, xcodebuild_runs).
+guard-log-kolkata-needs-tzdata	fix	unsized	docs/debts/notes.md	Fix: a POSIX zone string such as "IST-5:30" (lint/test_guard_log_report.py). Step: guard-log-time-offset.
+merge-superseded-cancel-only	fix	unsized	docs/debts/notes.md	Fix: drop it only under a newest-run row of that name, as fail rows do (merge/merge.py Host.superseded).
+designer-unpushed-worktree-lost	fix	unsized	docs/debts/notes.md	Fix: SubagentStop for the designer refuses to end unless HEAD is on origin. Decision: waiting-data-in-repo (git is each artifact's home).
+silent-undo-fetch-untested	fix	unsized	docs/debts/notes.md	Fix: add a --single-branch case that fetches the base and gets a real verdict. Decision: none.
+silent-undo-push-skips-green	fix	unsized	docs/debts/notes.md	Fix: the action description in actions/silent-undo/action.yml should say so. Decision: none.
+lane-force-push-refused	fix	unsized	docs/debts/notes.md	Fix: allow that form for a session's own unmerged lane branch, or teach lanes to add the trailer before the first push.
+base-pin-interrupt-skips-ff	fix	unsized	docs/debts/notes.md	Fix: pin the base in the pre-merge names read. Decision: claims-carry-backing (the claim-backing record).

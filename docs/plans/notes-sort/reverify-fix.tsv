@@ -1,0 +1,19 @@
+slug	verdict	size	where	reason
+ask-alone-tail-test-gap	fix	small	hooks/test_guard.py:asks_alone tail cases	Behaviour is right today, but no tail case holds a quoted #, /* or lone apostrophe, as building-scanner-respects-strings requires; test-only fix.
+ask-step-hidden-in-script	fix	large	hooks/guard.py:judge_shell	git push --force inside bash -c, sh -c, eval, $( ) and backticks allows with no ask, as does a cap write inside $( ), backticks or unspaced ( ); decision guard-guards-mistakes-only names these as in-scope holes.
+cap-until-field-taught-late	fix	small	hooks/guard.py:CAP_ASK_REASON	The ask text never names _agentCapUntil; only the expiry message teaches it; add one sentence.
+cap-write-by-python-unseen	fix	small	hooks/guard.py:judge_shell rule 8	python -c, python heredoc and node -e writes of the cap key allow; interpreter_write_hit already returns the path, so one `or` closes it.
+cite-by-id-skips-merge-subject	fix	small	hooks/guard.py:cited_record_path	Calls message_texts without titles=True, so a merge subject or PR title citing a record path passes; lane-by-slug says both read the same text.
+drops-dot-slash-guard-lint	fix	small	lint/check_silent_undo.py:allowed	The guard accepts a ./ Drops-lines path but the lint compares it raw to git's path and refuses; strip a leading ./.
+env-node-env-file-prints	fix	small	hooks/guard_env.py:_env_flat	A runner with --env-file is allowed with no -e/-p/--eval/--print exclusion, so node --env-file=<env> -e prints values; decision env-file-stays-unread says "a runner prints nothing", so the narrowing needs the owner's grant.
+guard-bash-c-silent-write	fix	small	hooks/guard.py:silent_write_hit loop	bash -c 'git commit -m x >/dev/null 2>&1' and bash -c 'git push -q' allow while bare forms deny; inner_commands already unwraps bash -c.
+guard-cd-walk-extra-reading	fix	small	hooks/guard_core.py:_run_dir	In a pointer cwd, `git switch other; cd /tmp` allows because the last cd wins; dir_before_segment already gives a per-segment folder.
+guard-first-c-reads-wrong-tree	fix	small	hooks/guard_core.py:_run_dir	First -C wins, so `git -C /tmp status; git -C <pointer> switch other` allows; same per-segment fix as guard-cd-walk-extra-reading.
+guard-home-delete-literal	fix	small	hooks/guard_push_delete.py:WIDE_TARGET	rm -rf /root, rm -rf /root/* and rd /s /q C:\Users\<name> allow while $HOME denies; reuse guard_rm_var._rm_target_bad.
+guard-interp-heredoc-lone-quote	fix	large	hooks/guard_core.py:split_segments	A python body with an escaped apostrophe blinds the segment rules after it (lane-by-slug, cite-by-id, silent-write all allow); every segment rule shares the split.
+guard-shell-wrap-discard-unread	fix	small	hooks/guard.py:rule 1 loop	sh -c "git reset --hard", bash -lc "git checkout ." and eval allow while bare forms deny; sibling rules already read wrappers via inner_commands.
+guard-substitution-in-token	fix	large	hooks/guard_core.py:command_indexes	x=$(git reset --hard), backticks, echo "$(pkill -f foo)" and x=$(git push --force origin main) allow in every rule probed; the reader is shared by all rules.
+heredoc-indented-close	fix	small	hooks/guard_core.py:_walk_heredocs	.strip() closes a heredoc on an indented EOF where bash does not, giving a false shared-tree refusal.
+kill-guard-word-only	fix	small	hooks/guard_core.py:COMMAND_WRAPPERS	kill_hit catches timeout 5 pkill but not gtimeout 5 pkill or watch pkill; gtimeout is the macOS name and the stream rule already unwraps it.
+mutant-crash-audit-missing	fix	large	hooks/mutate_guard.py:run_mutant	No clean-layout control run per target; a layout crash fails the required case too and reads as a false KILLED; past layout crashes recorded at :2971 and :3081.
+perl-ruby-bodies-unread	fix	small	hooks/guard_frozen.py:writes_to	sed -i on a guarded path is refused but perl -pi -e and ruby -i -pe pass (the -i regexes at :255 and :258 name only sed); short regex plus cases.
