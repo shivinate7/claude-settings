@@ -89,8 +89,12 @@ once waits on the draft run, reads it as skipped, and prints "CI red ...: workfl
   No list comes after the deadline. A list made at the deadline after that pause is allowed.
 - A head with no real run at the deadline wakes with `CI unknown`, never red or green.
 - A real run that failed still reads red, with its own failing job names.
+- After a run is judged, the hook lists the head again, so a second real run that shows at a later list
+  is judged too (debt ci-wake-lists-runs-once).
 
 Repo rules, each pinned by a case below:
+- A GH_REPO set in the command (`export GH_REPO=o/r`, `$env:GH_REPO = ...`) names the repo of the hook's
+  own gh calls, as a command prefix does (debt ci-wake-export-gh-repo-unread).
 - Every gh call of a watch passes the PR's repo as -R, the same one each time. A watch that reads runs
   from the folder's repo finds none, and says "no run yet" for a PR whose CI passed.
 - A repo with no active workflow starts no watch: no output, exit 0, no run read. The hook asks
@@ -892,6 +896,28 @@ def case_draft_run_ending_skipped_is_no_run_yet():
     check("%s: run list read at most twice" % label, count(res, "run", "list") <= 2, why(res))
 
 
+def case_second_real_run_after_the_first_ends_is_judged():
+    """Debt ci-wake-lists-runs-once: wait_for judges the first real run and returns, so a second real run
+    that shows at a later list is never read, and the hook says green while it goes on. The control lists
+    both runs at the first list, and main judges both (it passes). The red row lists the second run (a
+    different workflow name, so judge_runs keeps both) only at the second list, after the first run has
+    ended: main says green and never reads run 932. FAST_SLEEP_LAUNCHER: the pauses cost 0.05 s."""
+    fast = dict(launcher=FAST_SLEEP_LAUNCHER, extra={"CI_WAKE_DEADLINE": "15"})
+    ready = bash("gh pr ready 12")
+    together = run(932, "codeql", "failure", [job("scan", "failure")])
+    later = run(932, "codeql", "failure", [job("scan", "failure")], appears_at_list=2,
+                unfinished_to_list=2, in_progress_reads=1)
+    res = run_hook(ready, fixture(READY, [GREEN, together]), **fast)
+    label = "two real runs listed together, the second failed (control)"
+    expect_verdict(label, res, "red", names_in=["scan"], names_out=["lint", "unit"])
+    check("%s: reads the second run (932)" % label, "932" in watched(res), why(res))
+    res = run_hook(ready, fixture(READY, [GREEN, later]), **fast)
+    label = "second real run listed at the second list, after the first ended"
+    check("%s: reads the second run (932) and lists again" % label,
+          "932" in watched(res) and count(res, "run", "list") >= 2, why(res))
+    expect_verdict(label, res, "red", names_in=["scan"], names_out=["lint", "unit"])
+
+
 # watch_run, in process, on fakes (decision ci-wait-reads-run-status). No gh runs and no wait is real.
 STATUS_READ = ["run", "view", "7", "--json", "status"]
 T0 = 1000.0   # where the fake clock starts
@@ -1437,6 +1463,26 @@ def case_folder_without_workflows_still_watches_the_pr_repo():
     expect_watch(label, res, ["902"])
 
 
+def case_exported_gh_repo_names_the_pr_repo():
+    """Debt ci-wake-export-gh-repo-unread: the hook reads GH_REPO only as a prefix of the `gh pr ready`
+    command. `export GH_REPO=o/r` (bash) and `$env:GH_REPO = "o/r"` (PowerShell) set it for gh in the shell,
+    not for the hook, so the hook's own reads go to the folder's repo, which holds no PR here, and it says
+    nothing. Controls: the prefix form, and a GH_REPO already in the hook's own environment (gh reads it for
+    every call). Both controls pass on main."""
+    fx = fixture([pr(214, repo=REPO_APP)], [in_repo(GREEN, REPO_APP)], cwd_repo=REPO_HOME,
+                 workflows=[wf(repo=REPO_APP)])
+    rows = (
+        ("GH_REPO prefix (control)", bash("GH_REPO=%s gh pr ready 214" % REPO_APP), {}),
+        ("GH_REPO in the hook's environment (control)", bash("gh pr ready 214"), {"GH_REPO": REPO_APP}),
+        ("export GH_REPO, bash", bash("export GH_REPO=%s && gh pr ready 214" % REPO_APP), {}),
+        ("$env:GH_REPO, PowerShell", powershell('$env:GH_REPO = "%s"; gh pr ready 214' % REPO_APP), {}),
+    )
+    for label, payload, env in rows:
+        res = run_hook(payload, fx, extra=dict({"CI_WAKE_DEADLINE": VERDICT_DEADLINE}, **env))
+        check("%s: the watch reads run 901 in %s" % (label, REPO_APP), "901" in watched(res), why(res))
+        expect_verdict(label, res, "green")
+
+
 def api_reads(res):
     """The words after `api` of every `gh api` call (path, then fields), in order."""
     return [" ".join(c[1:]) for c in map(GH.strip_repo, res.calls) if c[:1] == ["api"] and len(c) > 1]
@@ -1512,6 +1558,25 @@ def case_empty_selector_without_a_branch_is_unknown():
     res = run_hook(dict(bash("gh pr ready"), cwd=folder), fixture(READY, [GREEN]))
     expect_verdict("empty selector on a detached HEAD", res, "unknown")
     check("empty selector on a detached HEAD: no PR read", api_reads(res) == [], why(res))
+
+
+def case_hash_number_selector_reads_the_number_route():
+    """Row ci-wake-hash-selector-misses: read_pr tests isdigit() on the selector before a `#` is stripped, so
+    a quoted "#12" takes the branch route (head=owner:#12), finds no PR, and starts no watch. The selector is
+    quoted on purpose: an unquoted `#` starts a shell comment, so neither the hook nor gh sees a selector there.
+    Each row checks the route first, then the verdict. `gh pr ready 12` is the control and passes on main."""
+    rows = (
+        ("gh pr ready 12 (control)", "gh pr ready 12", READY, [GREEN], "repos/{owner}/{repo}/pulls/12"),
+        ('gh pr ready "#12"', 'gh pr ready "#12"', READY, [GREEN], "repos/{owner}/{repo}/pulls/12"),
+        ('gh pr ready "#12" -R o/r', 'gh pr ready "#12" -R %s' % REPO_APP, [pr(12, repo=REPO_APP)],
+         [in_repo(GREEN, REPO_APP)], "repos/%s/pulls/12" % REPO_APP),
+    )
+    for label, command, prs, runs, path in rows:
+        res = run_hook(bash(command), fixture(prs, runs), extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+        check("%s: reads the PR by number, %s" % (label, path), api_reads(res)[:1] == [path],
+              "%r; %s" % (api_reads(res), why(res)))
+        expect_verdict(label, res, "green")
+        expect_watch(label, res, ["901"])
 
 
 def load_module():
@@ -1735,6 +1800,7 @@ def main():
     case_real_run_listed_late()
     case_real_failed_run_beside_a_draft_run_is_red()
     case_draft_run_ending_skipped_is_no_run_yet()
+    case_second_real_run_after_the_first_ends_is_judged()
     case_wait_for_lists_again_until_a_real_run_shows()
     case_wait_for_lists_until_the_deadline_and_no_further()
     case_wait_for_lists_back_off_like_the_status_reads()
@@ -1751,12 +1817,14 @@ def main():
     case_attached_short_repo_flag_pins_pr_repo_on_later_calls()
     case_equals_short_repo_flag_pins_pr_repo_on_later_calls()
     case_folder_without_workflows_still_watches_the_pr_repo()
+    case_exported_gh_repo_names_the_pr_repo()
 
     # The PR read is REST: the proxy refuses GraphQL.
     case_pr_read_is_rest_for_every_selector()
     case_draft_and_missing_pr_start_no_watch_by_rest()
     case_empty_selector_without_a_branch_is_unknown()
     case_read_pr_maps_rest_fields()
+    case_hash_number_selector_reads_the_number_route()
 
     print()
     print("%d checks, %d failed" % (COUNT[0], len(FAILS)))
