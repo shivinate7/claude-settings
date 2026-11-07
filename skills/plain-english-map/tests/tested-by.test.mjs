@@ -24,7 +24,11 @@
 //   T5   scanner traps. A path only in a TS comment (T5a) or a Python docstring (T5b) fails. `//` (T5c) and `#` (T5d) inside a string,
 //        before a real import on the same line, pass. A lone quote in a comment, TS (T5e) and Python (T5f), passes. A multi-line template
 //        literal that holds the import as text fails (T5g). The same template before a real import passes (T5h).
-//   T6   a shell test fails as an unknown read (T6a). With no python3 on PATH, a Python test fails as an unknown read, and with python3 it passes (T6b).
+//   T6   a shell test loads the file when it runs it by a literal path from the root (T6a) or from its own folder (T6c, T6m), or by a
+//        variable anchor and a literal tail (T6i, T6m). A `#` in a string, a comment or heredoc with a lone quote, `$#`, and a string over
+//        two lines do not hide the call (T6e, T6g, T6h, T6l, T6o). A path only in a comment (T6d) or a heredoc body (T6f), no path (T6k),
+//        or a non-literal tail (T6n) fails as a read that does not load, not as an unknown read. A Ruby test stays an unknown read (T6j).
+//        With no python3 on PATH, a Python test fails as an unknown read, and with python3 it passes (T6b).
 //   T7   placement and form. A tested-by line under a table line (T7a), a screen line (T7b) or a home (T7c) fails. Unindented (T7d), with no
 //        backticks (T7e), or with a `;` separator (T7f), it fails. Under a map line after a decisions line (T7g), it passes.
 //        Under a backtick line in a Notes section it is an orphan and fails (T7h): a tested-by line is valid only under a Code files map line.
@@ -94,6 +98,19 @@ const mustFail = (r, ...names) => {
   assert.notEqual(r.status, 0, `the command must exit non-zero on a FAIL\n${shown(r)}`);
 };
 const mustPass = (r) => assert.match(map11(r), /^\[PASS\] MAP11\b/, `MAP11 must PASS on this map\n${shown(r)}`);
+/** MAP11 fails on `rel` and says the test does not load the file. An unknown read is a different failure, and it fails this check first. */
+const mustNotLoad = (r, rel) => {
+  mustFail(r, rel);
+  const line = map11(r);
+  assert.doesNotMatch(line, /unknown read|could not read/, `MAP11 must judge ${rel} as a read that loads nothing, not as an unknown read\n${line}`);
+  assert.match(line, /does not load/, `MAP11 must say ${rel} does not load the file\n${line}`);
+};
+/** Writes the test file `rel` of a scratch repository, marks it `git add -N`, and names it alone on the tested-by line of src/retry.py. */
+const soleTest = (dir, rel, body) => {
+  writeAt(dir, rel, body);
+  gitIn(dir, 'add', '-N', rel);
+  setTestedBy(dir, 'src/retry.py', tested(rel));
+};
 
 // ---- Cases.
 test('T1. on the clean fixture MAP11 passes, and the command exits 0', () => {
@@ -274,15 +291,13 @@ test('T5h. control: the same multi-line template literal, then a real import aft
   mustPass(check(dir));
 });
 
-test('T6a. a shell test fails MAP11 as an unknown read, and names the test', () => {
+test('T6a. a shell test that runs the file by its literal path from the repository root passes MAP11', () => {
   needFile(REL);
   const dir = scratchRepo();
-  writeAt(dir, 'src/retry_check.sh', '#!/bin/sh\npython3 src/retry.py\n');
-  gitIn(dir, 'add', '-N', 'src/retry_check.sh');
-  setTestedBy(dir, 'src/retry.py', tested('src/retry_check.sh'));
-  const r = check(dir);
-  mustFail(r, 'src/retry_check.sh');
-  assert.match(map11(r), /unknown|could not read/i, `the shell test must fail as an unknown read\n${map11(r)}`);
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\npython3 src/retry.py\n');
+  // The scope first: the shell test runs the file by the path from the root, and the file is the only line that names it.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^python3 src\/retry\.py$/m, 'the shell test must run src/retry.py by its root path');
+  mustPass(check(dir));
 });
 
 test('T6b. with no python3 on PATH, a Python test fails MAP11 as an unknown read that names it; with python3 on PATH it passes', POSIX_ONLY, () => {
@@ -300,6 +315,125 @@ test('T6b. with no python3 on PATH, a Python test fails MAP11 as an unknown read
   assert.match(line, /^\[FAIL\] MAP11\b/, `MAP11 must FAIL with no python3 on PATH\n${shown(r)}`);
   assert.ok(line.includes('src/retry_check.py'), `the failure must name the Python test\n${line}`);
   assert.match(line, /unknown|could not read/i, `the failure must say the read is unknown\n${line}`);
+  mustPass(check(dir));
+});
+
+test('T6c. a shell test in src/ that runs `python3 "retry.py"` passes: the word is the path from the test folder, and quotes are removed', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\npython3 "retry.py"\n');
+  // The scope first: `retry.py` names the file only from the test's folder src/, so the root must hold no retry.py.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^python3 "retry\.py"$/m, 'the shell test must run "retry.py" in quotes');
+  assert.equal(existsSync(join(dir, 'retry.py')), false, 'the root must hold no retry.py');
+  mustPass(check(dir));
+});
+
+test('T6d. a shell test that names the file only in a comment does not load it: MAP11 fails as a read that does not load', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\n# runs src/retry.py later\necho ok\n');
+  // The scope first: the path sits in a comment line, and no line outside a comment names it.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^# runs src\/retry\.py later$/m, 'the path must sit in a comment');
+  assert.doesNotMatch(readAt(dir, 'src/retry_check.sh').split('\n').filter((l) => !l.startsWith('#')).join('\n'), /retry\.py/, 'no line outside a comment may name the file');
+  mustNotLoad(check(dir), 'src/retry_check.sh');
+});
+
+test('T6e. a shell test with `echo "#"; python3 src/retry.py` passes: a # inside a string is no comment, so the call after it loads the file', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\necho "#"; python3 src/retry.py\n');
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^echo "#"; python3 src\/retry\.py$/m, 'the # must sit in a string before the call');
+  mustPass(check(dir));
+});
+
+test('T6f. a shell test that names the file only in a quoted heredoc body does not load it: MAP11 fails as a read that does not load', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', "#!/bin/sh\ncat <<'EOF'\npython3 src/retry.py\nEOF\n");
+  // The scope first: the path is the body of a heredoc, and no line after its end runs it.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /<<'EOF'\npython3 src\/retry\.py\nEOF\n/, 'the path must be the body of a quoted heredoc');
+  mustNotLoad(check(dir), 'src/retry_check.sh');
+});
+
+test('T6g. a shell test with a heredoc that holds a lone quote, then `python3 src/retry.py` after its end, passes', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', "#!/bin/sh\ncat <<EOF\ndon't\nEOF\npython3 src/retry.py\n");
+  assert.match(readAt(dir, 'src/retry_check.sh'), /<<EOF\ndon't\nEOF\npython3 src\/retry\.py\n/, 'the lone quote must sit in a heredoc body, before the call');
+  mustPass(check(dir));
+});
+
+test('T6h. a shell test with a comment that holds a lone quote, then `python3 src/retry.py`, passes', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', "#!/bin/sh\n# don't\npython3 src/retry.py\n");
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^# don't\npython3 src\/retry\.py$/m, 'the lone quote must sit in a comment, on the line before the call');
+  mustPass(check(dir));
+});
+
+test('T6i. a shell test with `python3 "$ROOT/src/retry.py"` passes: a variable anchor, then a literal tail that resolves from the root', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\npython3 "$ROOT/src/retry.py"\n');
+  // The scope first: the tail resolves from the root only. src/src/retry.py must not exist, or the pass says nothing about the root.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^python3 "\$ROOT\/src\/retry\.py"$/m, 'the shell test must run the file through $ROOT');
+  assert.equal(existsSync(join(dir, 'src', 'src', 'retry.py')), false, 'src/src/retry.py must not exist');
+  mustPass(check(dir));
+});
+
+test('T6j. control: a Ruby test that names the file in a string still fails MAP11 as an unknown read: the shell reader does not cover Ruby', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.rb', 'system("python3 src/retry.py")\n');
+  // The scope first: the path sits in a string, so a reader that took any string would pass this test.
+  assert.match(readAt(dir, 'src/retry_check.rb'), /system\("python3 src\/retry\.py"\)/, 'the Ruby test must name the file in a string');
+  const r = check(dir);
+  mustFail(r, 'src/retry_check.rb');
+  assert.match(map11(r), /unknown read: could not read src\/retry_check\.rb/, `MAP11 must judge the Ruby test as an unknown read\n${map11(r)}`);
+});
+
+test('T6k. a shell test that names no file does not load it: MAP11 fails as a read that does not load', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\necho ok\n');
+  // The scope first: no line of the test names the file or its name.
+  assert.doesNotMatch(readAt(dir, 'src/retry_check.sh'), /retry/, 'the shell test must name no retry file');
+  mustNotLoad(check(dir), 'src/retry_check.sh');
+});
+
+test('T6l. a shell test with `[ $# -eq 0 ] && python3 src/retry.py` passes: $# is a parameter count, not a comment, so the call after it loads the file', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\n[ $# -eq 0 ] && python3 src/retry.py\n');
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^\[ \$# -eq 0 \] && python3 src\/retry\.py$/m, 'the $# must sit before the call');
+  mustPass(check(dir));
+});
+
+test('T6m. a shell test in src/ with `python3 "${here}/retry.py"` passes: a variable anchor, then a literal tail that resolves from the test folder', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\npython3 "${here}/retry.py"\n');
+  // The scope first: the tail resolves from the test folder src/ only, so the root must hold no retry.py.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^python3 "\$\{here\}\/retry\.py"$/m, 'the shell test must run the file through ${here}');
+  assert.equal(existsSync(join(dir, 'retry.py')), false, 'the root must hold no retry.py');
+  mustPass(check(dir));
+});
+
+test('T6n. a shell test with `python3 "$ROOT/$NAME"` does not load the file: a variable tail is not a literal path, so MAP11 fails as a read that does not load', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\npython3 "$ROOT/$NAME"\n');
+  // The scope first: no literal retry name is in the test, so only a variable tail could reach the file.
+  assert.doesNotMatch(readAt(dir, 'src/retry_check.sh'), /retry/, 'the shell test must name no retry file literally');
+  mustNotLoad(check(dir), 'src/retry_check.sh');
+});
+
+test('T6o. a shell test with a double-quoted string over two lines, its second line starting with #, then `; python3 src/retry.py`, passes: the # is inside the string', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\necho "one\n# two"; python3 src/retry.py\n');
+  // The scope first: the second line starts with #, and that # sits inside the string opened on the line before.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^echo "one\n# two"; python3 src\/retry\.py$/m, 'the # must start a line inside a string that began on the line before');
   mustPass(check(dir));
 });
 
