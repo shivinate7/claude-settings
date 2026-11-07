@@ -723,6 +723,18 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertTrue(any(SUITE in line and "FAIL" in line for line in out.splitlines()), "the refusal does not name the red suite: " + out)
         self.assertEqual(pass_lines(out), [], out)
 
+    def test_an_unreadable_base_config_refuses_the_lane_and_is_not_read_as_no_laneTests(self):
+        """The base's config is read with git show, and lane_tests_profile reads a config it cannot read as one that names no laneTests.
+        Here origin/main holds a config git reads but that does not parse. The lane is refused, and no suite runs. Every git-show shape
+        tried for a missing or unreadable path exits non-zero only when the path is absent, so this is the unreadable shape the case can build."""
+        self.lane_fixture(listed=[SUITE], suites={SUITE: "fail"}, laneTests=None, config_text="{not json\n")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertNotEqual(rc, 0, "an unreadable base config read as a repo with no laneTests: " + out)
+        self.assertEqual(pass_lines(out), [], out)
+        self.assertIn("stamp.json", out, "the refusal does not name the unreadable config: " + out)
+        self.assertEqual(self.suite_names(), [], "a suite ran on an unreadable base config: " + out)
+
     def test_every_red_selected_suite_is_named_and_a_green_one_is_not(self):
         listed = [SUITE, OTHER_SUITE, THIRD_SUITE]
         self.lane_fixture(listed=listed, suites={SUITE: "fail", OTHER_SUITE: "fail", THIRD_SUITE: "pass"})
