@@ -113,6 +113,24 @@ def repo_skills(repo_root):
     }
 
 
+def nested_files(repo_root, manifest_dirs):
+    """Files in a subfolder of a landed folder, repo-relative. land_dir lands only the top-level
+    files of a landed folder, so these never reach ~/.claude. Reads the disk, so a file a lane has
+    not committed yet is refused too. `skills` is excepted (land_skills_dir links each skill folder
+    whole); __pycache__ is a build leftover, not a shipped file."""
+    found = []
+    for sub in manifest_dirs:
+        if sub in KNOWN_MANIFEST_ONLY_PARTIAL_FREEZE:
+            continue
+        base = os.path.join(repo_root, *sub.split("/"))
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+            if dirpath != base:
+                for name in filenames:
+                    found.append(os.path.relpath(os.path.join(dirpath, name), repo_root).replace(os.sep, "/"))
+    return sorted(found)
+
+
 def check_install_sh(text, manifest_dirs):
     if "landed-dirs.txt" not in text:
         fail("install.sh: no reference to landed-dirs.txt found; it must read the manifest")
@@ -200,6 +218,13 @@ def main():
                     % sorted(extra)
                 )
             fail("; ".join(detail))
+
+    nested = nested_files(REPO_ROOT, manifest_dirs)
+    if nested:
+        fail(
+            "file(s) in a subfolder of a landed folder never reach ~/.claude (land_dir lands only "
+            "top-level files): %s" % ", ".join(nested)
+        )
 
     check_install_sh(read(INSTALL_SH_PATH), manifest_dirs)
     check_install_ps1(read(INSTALL_PS1_PATH))
