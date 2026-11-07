@@ -2197,9 +2197,9 @@ NOT_GRANTS = ("Ok, I'll look at the merge conflict after lunch.", "Is the merge 
 
 
 def case_grant_without_a_grant_word_blocks():
-    """Note grant-no-word-miss. A grant that names an act and no grant word ("ok to merge", "you can merge",
-    "fine to merge", "merge away") sat in chat with no home. The grant list is the only trigger, so no check
-    flags it. Red today: each row has no grant word and no item."""
+    """Each WORDLESS_GRANTS row names an act and grants it with no grant word ("ok to merge", "you can merge",
+    "fine to merge", "merge away"). With no item, each row must block and name its message. The grant list is
+    the only trigger that flags it."""
     for text in WORDLESS_GRANTS:  # one check per row, so a row that is not blocked prints one FAIL line
         p = homed(new_cfg(), "grant-wordless", (), text=text)
         reason = block_reason(p)
