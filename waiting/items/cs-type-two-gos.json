@@ -1,6 +1,6 @@
 {
   "added": "2026-11-07T19:32:00Z",
-  "context": "Goal: batch-runner merges under the coordinator's standing grant, and a lane's lease push to its own branch, run with no stop.\nWhy you: auto mode accepts a settings.json change only on words you type in the acting session. A page answer cannot grant it (decision relayed-grant-read-from-page, the settings exception), so item 352 is replaced by this task.\nDeparts from: main's autoMode.allow \u2014 adds \"runner-merge-allow\" (batch-runner merges under the coordinator's standing grant) and \"Own Branch Lease Push\" (a --force-with-lease --force-if-includes push to a branch the session pushed earlier; never --force, -f, +refspec, the default branch, archive/, roadmap, merge-lock, --mirror, --all, or a delete).\nSteps: open the first link and type the first line below. Open the second link and type the second line. Then press Done here.\n\nIn lane relayed-yes-allow:\ngo runner-merge-allow: allow batch-runner merges under the coordinator's standing grant\n\nIn lane lease-push-c-and-d:\ngo: add the \"Own Branch Lease Push\" entry to settings.json autoMode.allow, as drafted in lane lease-push-c-and-d",
+  "context": "Goal: cloud sessions stop to ask far less, for acts you already granted: batch-runner merges, a lane's lease push to its own branch, cancelling its own CI run, and deleting its own check-in.\nWhy you: auto mode accepts a settings.json change only on words you type in the acting session. A page answer cannot grant it (decision relayed-grant-read-from-page, the settings exception). This replaces item 352.\nBased on (ruling): you granted these acts on items 257 a (the sha form of a lease push) and 278 c and d (cancel own CI run, delete own check-in), and at 13:16 CST said sessions can and should add auto-mode allow lines for themselves (decision auto-mode-owner-acts). So no new question: only the typed go.\nBased on (measured): docs/debts/notes.md: a lease push to a lane's own branch was refused 11 times on Nov 2-4.\nDeparts from: main's autoMode.allow \u2014 adds \"runner-merge-allow\"; \"Own Branch Lease Push\" (a --force-with-lease push, sha form or --force-if-includes, to a branch the session pushed earlier; never --force, -f, +refspec, the default branch, archive/, roadmap, merge-lock, --mirror, --all, or a delete); a cancel of the session's own branch's CI run; and delete_trigger on its own check-in.\nStill refused, not asked: a bare --force-with-lease, rule edits, agents interrupting or creating sessions, a merge onto red main, and a remote branch delete with no archive.\nSteps: in the first link, type the first two lines, one at a time. In the second link, type the third line. Then press Done here.\n\nIn lane relayed-yes-allow:\ngo runner-merge-allow: allow batch-runner merges under the coordinator's standing grant\ngo auto-mode-middle-ground: allow the sha-form lease push to my own branch, cancel of my own branch's CI run, and delete_trigger on my own check-in (items 257 a, 278 c and d)\n\nIn lane lease-push-c-and-d:\ngo: add the \"Own Branch Lease Push\" entry to settings.json autoMode.allow, as drafted in lane lease-push-c-and-d",
   "home": "lanes relayed-yes-allow and lease-push-c-and-d",
   "id": "cs-type-two-gos",
   "kind": "task",
@@ -17,9 +17,9 @@
   "n": 353,
   "owner": "coordinator",
   "rank": 1,
-  "ref": "item 352; item 350; step lease-push-c-and-d",
-  "short": "Type 2 gos in 2 lanes",
+  "ref": "item 352; item 350; items 257 and 278; steps lease-push-c-and-d and auto-mode-middle-ground",
+  "short": "Type 3 gos in 2 lanes",
   "status": "open",
-  "title": "Type two go lines, one in each of two lane chats",
-  "why": "Each adds one auto-mode allow entry to settings.json. A settings change needs words you type in the acting session's own chat."
+  "title": "Type three go lines in two lane chats",
+  "why": "Each adds auto-mode allow entries to settings.json for acts you already granted. A settings change needs words you type in the acting session's own chat."
 }

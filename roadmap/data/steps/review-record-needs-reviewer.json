@@ -1,0 +1,10 @@
+{
+  "title": "A review record carries a reviewer ref that the merge tool checks",
+  "phase": "now",
+  "status": "todo",
+  "order": 0.9,
+  "owner": "coordinator",
+  "why": "Lane pr-state-is-on-the-pr, 13:35 CST Nov 7: today a lane can mint its own review record with `merge --review-record`.",
+  "note": "Starts after pr-state-is-on-the-pr part 2 merges. The record must carry a reviewer ref (the reviewing agent or session), and merge refuses a record without one, or one whose ref is the lane itself. Done: a red test where a lane-minted record with no reviewer ref merges, then green.",
+  "updatedAt": "2026-11-07T13:40:00-06:00"
+}

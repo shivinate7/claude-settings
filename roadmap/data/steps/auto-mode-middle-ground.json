@@ -4,7 +4,7 @@
   "status": "doing",
   "order": 103.3565,
   "why": "Cloud sessions stop to ask, or are refused, far more often than the owner's desktop bypass mode.",
-  "note": "Folded into lane relayed-yes-allow (coordinator, 13:40 CST Nov 7): one owner go, item 350.\nOwner ask ask-mw5av97rcg (12:20 CST): \"a better middle ground\". List the acts most often asked about or refused (guard.log, refusal notes), then propose allow lines for the safe ones. The list goes to the owner for approval, because it changes what auto mode allows.",
-  "updatedAt": "2026-11-07T13:30:00-06:00",
+  "note": "13:40 CST Nov 7: the lane's three acts (sha-form lease push to own branch, cancel own CI run, delete own check-in) already have the owner's grant (items 257 a, 278 c and d; 13:16 CST chat). Triage folded them into item 353 as a typed go line, not a new question. Drafts: branches lease-sha-form-hint and own-branch-lease-push-tests.\nFolded into lane relayed-yes-allow (coordinator, 13:40 CST Nov 7): one owner go, item 350.\nOwner ask ask-mw5av97rcg (12:20 CST): \"a better middle ground\". List the acts most often asked about or refused (guard.log, refusal notes), then propose allow lines for the safe ones. The list goes to the owner for approval, because it changes what auto mode allows.",
+  "updatedAt": "2026-11-07T13:40:00-06:00",
   "lane": "session_013NEJKzw6Mmu5eviHC3vobt"
 }
