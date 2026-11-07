@@ -1528,6 +1528,26 @@ def set_override_context(session_id, agent_id, cwd=None) -> None:
     _override_cwd = cwd if isinstance(cwd, str) else ""
 
 
+_on_allow = []
+
+
+def on_allow(step) -> None:
+    """Queue STEP to run once the call is allowed: when judge() returns, or when an owner override
+    lifts a refusal. A call that any rule refuses runs nothing."""
+    _on_allow.append(step)
+
+
+def run_on_allow() -> None:
+    """Run each queued step, once. A step that fails is dropped: it never fails the call."""
+    steps = list(_on_allow)
+    del _on_allow[:]
+    for step in steps:
+        try:
+            step()
+        except Exception:
+            pass
+
+
 def set_override_veto(veto) -> None:
     """Register the test judge() builds for this call: veto() is true when the call holds an act no
     override lifts. Until it is set, no refusal is liftable."""
@@ -1562,6 +1582,7 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
         if lifted:
             record(tool, lifted, rule, matched + " step " + step if step else matched)
             if lifted in override.LIFTS:
+                run_on_allow()
                 sys.exit(0)
     record(tool, decision, rule, matched)
     try:  # the line the owner types to lift this refusal, or the words that none does; last in the reason

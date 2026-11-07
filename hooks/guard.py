@@ -4687,22 +4687,33 @@ def session_home_record(payload, primary: str):
 
 
 def _session_lived(payload, tool: str, where: str, folder: str) -> bool:
-    """True when this call is a write or a mutating call whose cwd, `cd` move or write target sits
-    inside FOLDER: the session worked there, so the folder was its home and no mere visit."""
+    """True when this call is a write or a mutating call that acts inside FOLDER: the session worked
+    there, so the folder was its home and no mere visit. A write tool counts by its cwd or a target
+    inside FOLDER. A shell call counts by a git verb of SESSION_HOME_GIT_VERBS that runs inside
+    FOLDER, by a shell write whose target resolves inside it from any cwd, or by a shell write whose
+    cwd or `cd` move is inside it."""
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
         return False
+
+    def inside(path) -> bool:
+        return path_is_inside(path, folder) is True
+
     try:
         if tool in WRITE_TOOLS:
-            return (path_is_inside(os.path.realpath(where), folder) is True or any(
-                path_is_inside(_resolved(target, where), folder) is True
-                for target in write_targets(tool_input)))
+            return (inside(os.path.realpath(where))
+                    or any(inside(_resolved(target, where)) for target in write_targets(tool_input)))
         if tool in SHELL_TOOLS:
             command = str(tool_input.get("command", "") or "")
-            if not SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", strip_heredoc_bodies(command))):
+            stripped = strip_heredoc_bodies(command)
+            if "git" in stripped and session_home_git_hit(stripped, where, lambda at, _from: inside(at)):
+                return True
+            if not SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", stripped)):
                 return False
-            return path_is_inside(os.path.realpath(where), folder) is True or any(
-                path_is_inside(move, folder) is True for move in _cd_targets(tool, command, where))
+            return (inside(os.path.realpath(where))
+                    or any(inside(move) for move in _cd_targets(tool, command, where))
+                    or bool(_shell_write_hit(stripped, where, lambda target, at: inside(_resolved(target, at)),
+                                             follow_cd=True)))
     except Exception:
         return False
     return False
@@ -4719,8 +4730,9 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
     """Write the session's record from a lane call, only when it is missing or different. The
     session's own ExitWorktree deletes it. An agent call does neither. A sibling file
     `<record>.lived` marks a lane the session wrote in, so the record file itself stays the one path
-    every reader expects. A call from the primary drops a record that is not marked: that lane was a
-    visit."""
+    every reader expects. The mark is written only once the call is allowed (`guard_core.on_allow`),
+    so a call that any rule refuses marks nothing. A call from the primary drops a record that is not
+    marked: that lane was a visit."""
     if not isinstance(payload, dict) or payload.get("agent_id") or tool == CREATE_SESSION_TOOL:
         # create_session reaches the guard for rules lane-effort-pin and agent-model-floor; it keeps no record
         return
@@ -4744,16 +4756,17 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
                 _remove_quietly(lived)
             return
         if not lane and held and os.path.isdir(held):
+            if os.path.exists(lived):
+                return
             if _session_lived(payload, tool, where, held):
-                if not os.path.exists(lived):
-                    _mark_lived(lived)
+                guard_core.on_allow(lambda: _mark_lived(lived))
                 return
             tool_input = payload.get("tool_input")
             command = str(tool_input.get("command", "") or "") if isinstance(tool_input, dict) else ""
             # A `cd` from the primary into the held folder is the way back home, so it keeps the
             # record (`_cd_home_exempt` reads it in the same call).
-            if os.path.exists(lived) or (tool in SHELL_TOOLS and any(
-                    path_is_inside(move, held) is True for move in _cd_targets(tool, command, where))):
+            if tool in SHELL_TOOLS and any(
+                    path_is_inside(move, held) is True for move in _cd_targets(tool, command, where)):
                 return
             os.remove(record)   # the session came back to the primary: that lane was a visit
             return
@@ -4773,7 +4786,7 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
                 _remove_quietly(temp)
                 raise
         if not os.path.exists(lived) and _session_lived(payload, tool, where, lane):
-            _mark_lived(lived)
+            guard_core.on_allow(lambda: _mark_lived(lived))
     except Exception:
         pass  # an unwritable record means no refusal later, never a failed call
 
@@ -5172,6 +5185,7 @@ def main() -> None:
         pass  # a guard_core without the setter has no override: every refusal stands
     try:
         judge(payload)
+        guard_core.run_on_allow()  # judge returns only for an allowed call
     except SystemExit:
         raise
     except Exception as exc:
