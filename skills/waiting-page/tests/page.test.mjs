@@ -8013,3 +8013,17 @@ test("usage: a usage write the store refuses does not stop the press it counts, 
   assert.equal(saved, true, "a refused usage write stopped the answer from being saved");
   assert.doesNotMatch(await page.locator("#barStatus").textContent(), /Not saved/, "a refused usage write showed Not saved in the bar");
 });
+
+// The remembered Status view is restored on open, and that restore is no press: only the switch after it counts.
+test("usage: a saved Changes view is restored on Status open with no view write, and a switch from it writes view-rec once", async (t) => {
+  const page = await open(t, { clock: USAGE_AT, pageHtml: mergedPage(), storage: { "rm-view": JSON.stringify({ v: "log", p: null }) } }); if (!page) return;
+  await page.click("#tabStatus");
+  await landed(page, "status-tab", 1);
+  assert.equal(await page.locator("#v-log").isVisible(), true, "the remembered Changes view is not the one shown on open");
+  assert.deepEqual(await usageOf(page, "status-tab"), [counted("status-tab", 1)], "opening Status did not write status-tab once, with n 1");
+  await page.click("#vt-rec");
+  await landed(page, "view-rec", 1);
+  const views = (await usageSince(page)).filter((u) => u.key.startsWith("view-"));
+  assert.deepEqual(views.filter((u) => u.key !== "view-rec"), [], "opening Status on a remembered view wrote a view counter");
+  assert.deepEqual(await usageOf(page, "view-rec"), [counted("view-rec", 1)], "switching to Records did not write view-rec once, with n 1");
+});
