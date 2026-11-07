@@ -15,8 +15,9 @@ the one home of this grammar (FIX_BODY, NONE_REASONS, parse_fix); lint/report_gu
     Fix: none -- <reason>   or "none —"; the reason is one of NONE_REASONS
     Fix: already fixed on main <sha>   a hex sha of 7 to 40 digits (with or without the "none --" lead)
 Three more rules read the notes file (coordinator rulings 2026-11-07 13:58 and 13:59 CST):
-  Ratchet: when the branch touches the notes file, the bullets with no valid Fix at HEAD may not outnumber those on
-    origin/main. Both counts are read live; the total prints. A HEAD with none to count never reads origin/main.
+  Ratchet: when the branch touches the notes file, the bullets with no valid Fix at HEAD may not outnumber those at
+    the merge base of origin/main and HEAD. Both counts are read live; the total prints. A HEAD with none to count
+    reads no base.
   Until: a `Fix: none` line the branch adds or edits carries `Until: YYYY-MM-DD`, today or later and no more than
     UNTIL_CAP_DAYS (30) from today. A step or already-fixed line needs no date. Today is FIXED_TODAY (ISO), else the clock.
   Upkeep: expired_notes lists the `Fix: none` lines whose Until is past, for skills/roadmap/build.py.
@@ -322,14 +323,17 @@ def unfixed_notes(root, ref):
 
 def notes_ratchet(root, files, moved, base="origin/main"):
     """(path, head count, base count) when the branch touches the notes file, else None. The count of bullets with no
-    valid Fix at HEAD may not exceed the count at `base`; both are read live, with no stored baseline. A HEAD with
-    none to count never reads the base. Raises Unknown when git cannot say."""
+    valid Fix at HEAD may not exceed the count at the merge base of `base` and HEAD, so a branch forked before main
+    lowered its count is not blamed for it. Both are read live, with no stored baseline. A HEAD with none to count
+    reads no base. Raises Unknown when git cannot say."""
     notes = layout.candidates(root, "debt-notes")
     touched = set(files) | {p for _status, old, new in moved for p in (old, new)}
     if not touched & set(notes):
         return None
     head = unfixed_notes(root, "HEAD")
-    return notes[0], head, (unfixed_notes(root, base) if head else 0)
+    if not head:
+        return notes[0], 0, 0
+    return notes[0], head, unfixed_notes(root, git_text(root, "merge-base", base, "HEAD").strip())
 
 
 def fix_failures(root, entries):
@@ -434,7 +438,7 @@ def main(args):
     if ratchet:
         path, head, base = ratchet
         grown = head > base
-        print("check_record_slugs: %s: notes with no valid Fix: %d now, %d on origin/main%s: %s"
+        print("check_record_slugs: %s: notes with no valid Fix: %d now, %d at the merge base%s: %s"
               % ("FAIL" if grown else "ok", head, base, " (the count may not grow)" if grown else "", path))
     return 1 if bad or feel or unfixed or dated or grown else 0
 
