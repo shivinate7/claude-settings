@@ -3242,6 +3242,20 @@ for _name, _command in (
     ("a commit message in double quotes names a reset", VCS + ' commit -m "never run ' + VCS + ' reset --hard"'),
 ):
     sh("substitution: shared tree, %s allowed" % _name, _command, "allow", cwd=NOGIT)
+# HASH. An unquoted `#` opens a comment only at a word start. After a letter, a slash, a brace, a dollar
+# sign or an escaped space it is text, so the `$( )` that follows still runs. A reader that takes every
+# `#` as a comment lets each of these through.
+for _name, _command in (
+    ("a hash in a dollar brace array length", "echo ${#arr[@]} $(" + VCS + " reset --hard)"),
+    ("a hash after a letter", "echo a#$(" + VCS + " reset --hard)"),
+    ("a dollar hash", "echo $# $(" + VCS + " reset --hard)"),
+    ("a hash in a URL fragment", "curl https://x/#$(" + VCS + " reset --hard)"),
+    ("an escaped space before a hash", "echo a\\ #$(" + VCS + " reset --hard)"),
+):
+    sh("substitution: shared tree, %s denies" % _name, _command, "deny", "shared-tree", cwd=NOGIT)
+# ALLOW control: a hash at a word start is a real comment, so the `$( )` after it is text.
+sh("substitution: shared tree, a hash at a word start allowed", "echo hi #$(" + VCS + " reset --hard)",
+   "allow", cwd=NOGIT)
 
 
 # ============================================================ 1. branch delete / worktree remove/prune
