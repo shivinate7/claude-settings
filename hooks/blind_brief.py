@@ -57,7 +57,8 @@ BLIND_KIND_ONLY = re.compile(r"^" + re.escape(KIND_HEADER) + r"\s*blind\s*$", re
 # Leading markdown marks a model writes before a header: list dashes and stars, heading hashes, quote marks.
 LEADING_MARKS = re.compile(r"^[\s>*#-]+")
 LANE_LINE = re.compile(r"^" + re.escape(DESIGNER_HEADER) + r"\s*[A-Za-z0-9][\w-]*-blind-[1-9][0-9]*\s*$")
-BLIND_COUNT = re.compile(r"^" + re.escape(COUNT_HEADER) + r"\s*(.*?)\s*$", re.I | re.M)
+# Leading marks and bold are read as in KIND_LINE and LEADING_MARKS: `- Blind designers: 2`, `**Blind designers:** 2`.
+BLIND_COUNT = re.compile(r"^[ \t>*#-]*" + re.escape(COUNT_HEADER) + r"\**\s*(.*?)\s*\**\s*$", re.I | re.M)
 # The kind header before the rename. kind_of never reads it; the spawn hook refuses it and names KIND_HEADER.
 OLD_KIND_LINE = re.compile(r"^lane\s+kind\s*:", re.I)
 OWNER_NONE = re.compile(r"^none,\s*owner:\s*\"[^\"]*\w[^\"]*\"$", re.I)
