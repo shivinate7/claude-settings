@@ -26802,6 +26802,17 @@ EXPLORE_MARKER = "Audit:"
 UNSET_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": None}
 EMPTY_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": ""}
 SONNET_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"}
+# A Workflow agent() call takes CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL first, then its own model, then
+# CLAUDE_CODE_SUBAGENT_MODEL, then the parent's model (Claude Code 2.1.42, read from the minified code). Each dict
+# names every one of these keys, so a run never inherits the runner's: line 74 sets the subagent model for all runs.
+WF_UNSET = dict(UNSET_DEFAULT, CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL=None,
+                CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL_FORCE=None, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=None)
+WF_WORKFLOW_SONNET = dict(WF_UNSET, CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="sonnet")
+WF_SUBAGENT_SONNET = dict(WF_UNSET, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+# The CLI reads "inherit" as the parent's model in CLAUDE_CODE_SUBAGENT_MODEL, and as unset in the Workflow variable.
+INHERIT_SUBAGENT = dict(WF_UNSET, CLAUDE_CODE_SUBAGENT_MODEL="inherit")
+INHERIT_SUBAGENT_MIXED = dict(WF_UNSET, CLAUDE_CODE_SUBAGENT_MODEL="Inherit")
+WF_WORKFLOW_INHERIT = dict(WF_UNSET, CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="inherit")
 
 ROLE_TABLE_HEAD = "# Agent model cap\n\n| Point | Model | Effort |\n|---|---|---|\n"
 ROLE_TABLE_TEST_AUTHOR_HAIKU = ROLE_TABLE_HEAD + "| test-author | haiku | xhigh |\n"
@@ -27021,13 +27032,15 @@ role_model_allow("role-model: builder on opus with Round 3 of 3 is allowed (stan
 # Opus ceiling (agent-model-cap) and the role row (agent-role-model). The Audit: marker counts on the brief's first line
 # only. Failure classes: a false allow (an above-row agent() call in a script passes); a false deny (a comment, a string
 # or a template literal hides the brief or the model, or the marker is read past line 1).
-def workflow_refuse(name, script, rule="agent-model-cap", carries=(), lacks=()):
-    """A Workflow script whose agent() call is above its role's row: denied under `rule`."""
-    add(name, "deny", rule, tool="Workflow", config=ROLE_REAL_CFG, carries=carries, lacks=lacks, script=script)
+def workflow_refuse(name, script, rule="agent-model-cap", carries=(), lacks=(), env=None):
+    """A Workflow script whose agent() call is denied under `rule`: above its role's row, or with no model and no
+    default. `env` is the guard's model variables for this case (WF_UNSET and kin), None for the runner's."""
+    add(name, "deny", rule, tool="Workflow", config=ROLE_REAL_CFG, carries=carries, lacks=lacks, env=env,
+        script=script)
 
 
-def workflow_allow(name, script):
-    add(name, "allow", tool="Workflow", config=ROLE_REAL_CFG, script=script)
+def workflow_allow(name, script, env=None):
+    add(name, "allow", tool="Workflow", config=ROLE_REAL_CFG, env=env, script=script)
 
 
 workflow_refuse("role-model: Workflow builder on opus with no round line is denied under agent-model-cap",
@@ -27128,7 +27141,47 @@ def workflow_opus_override_check():
         return False, why
     return True, "refused with no override, allowed under the typed override, refused again once spent"
 
+# ---- I: a Workflow agent() with no model. A Workflow ignores the agentType's frontmatter `model:`, so the pin in
+# agents/test-author.md does not reach it: with both variables unset the spawn runs on the parent's model, which is
+# Opus in a lane (decision agent-model-cap). spawn_inputs skips a call that names no model, so main allows it.
+WF_NO_MODEL_SCRIPT = _step_flow("'Write the failing cases.'", "agentType: 'test-author'")
+WF_ABOVE_ROW_SCRIPT = _step_flow("'Write the failing cases.'", "agentType: 'test-author', model: 'sonnet'")
+WF_NO_MODEL_CARRIES = "name the role's model"
+workflow_refuse("role-model: Workflow test-author with no model is denied when both defaults are unset",
+                WF_NO_MODEL_SCRIPT, rule=ROLE_RULE, carries=(WF_NO_MODEL_CARRIES, "model: 'haiku'"),
+                lacks=ROLE_LACKS, env=WF_UNSET)
+workflow_refuse("role-model: Workflow with no agentType and no model is denied when both defaults are unset",
+                _step_flow("'Find the file.'", ""), rule=ROLE_RULE, carries=WF_NO_MODEL_CARRIES, lacks=ROLE_LACKS,
+                env=WF_UNSET)
+workflow_refuse("role-model: Workflow builder with no model is denied when both defaults are unset",
+                _step_flow("'Fix the failing case.'", "agentType: 'builder'"), rule=ROLE_RULE,
+                carries=(WF_NO_MODEL_CARRIES, "model: 'sonnet'"), lacks=ROLE_LACKS, env=WF_UNSET)
+workflow_refuse("role-model: Workflow test-author with no model is denied when CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL is inherit",
+                WF_NO_MODEL_SCRIPT, rule=ROLE_RULE, carries=WF_NO_MODEL_CARRIES, lacks=ROLE_LACKS,
+                env=WF_WORKFLOW_INHERIT)
+# Plan's row is opus, and a no-model Agent Plan is allowed through its file's pin. The Workflow allow follows that.
+workflow_allow("role-model: Workflow Plan with no model is allowed when both defaults are unset (Plan's row is opus)",
+               _step_flow("'Plan the change.'", "agentType: 'Plan'"), env=WF_UNSET)
+# The Workflow variable, or the subagent variable alone, names the model the spawn runs on.
+workflow_allow("role-model: Workflow test-author with no model is allowed when CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL is sonnet",
+               WF_NO_MODEL_SCRIPT, env=WF_WORKFLOW_SONNET)
+workflow_allow("role-model: Workflow test-author with no model is allowed when only CLAUDE_CODE_SUBAGENT_MODEL is sonnet",
+               WF_NO_MODEL_SCRIPT, env=WF_SUBAGENT_SONNET)
+workflow_allow("role-model: Workflow test-author on haiku is allowed when both defaults are unset",
+               _step_flow("'Write the failing cases.'", "agentType: 'test-author', model: 'haiku'"), env=WF_UNSET)
+# A spread can hide the model, so spawn_inputs skips the call as unread and it is allowed, as it is today.
+workflow_allow("role-model: Workflow test-author with a spread and no literal model is skipped, and allowed",
+               "const opts = {};\n"
+               "await agent(`Write the failing cases.`, {...opts, agentType: 'test-author'});", env=WF_UNSET)
+
+
 # ---- D: no model, and no `model:` pin in the role's agent file. The guard's default env decides it.
+# "inherit" in CLAUDE_CODE_SUBAGENT_MODEL names the parent's model, not a model the default can pass, so a spawn with
+# no model is denied, in any letter case.
+role_model_refuse("role-model: builder with no model is denied when the default is inherit",
+          "builder", None, "Fix the failing case.", carries=("name the role's model",), env=INHERIT_SUBAGENT)
+role_model_refuse("role-model: builder with no model is denied when the default is Inherit, in mixed case",
+          "builder", None, "Fix the failing case.", carries=("name the role's model",), env=INHERIT_SUBAGENT_MIXED)
 role_model_refuse("role-model: builder with no model is denied when the default is unset",
           "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
 role_model_refuse("role-model: general-purpose with no model is denied when the default is unset",
@@ -27190,22 +27243,24 @@ def role_override_lift_check():
     return True, "refused by its row, lifted by one override, refused again once it was spent"
 
 
-def role_override_no_model_check():
+def role_override_no_model_check(tool="Agent", no_model=ROLE_OV_NO_MODEL, above_row=ROLE_OV_TEST_AUTHOR,
+                                 env=ROLE_OV_UNSET, suffix="ov-no-model"):
     """The no-model refusal stays never-lifted: under an override it is still refused and spends none, so the
-    override that follows still lifts a test-author on sonnet."""
-    config, session = role_config("ov-no-model", REPO), "role-ov-no-model"
+    override that follows still lifts a test-author on sonnet. `tool`, the two spawns' tool inputs and `env` let a
+    Workflow run the same story."""
+    config, session = role_config(suffix, REPO), "role-" + suffix
 
-    def call(seconds, spawn, env=None):
-        return ov_call("Agent", dict(spawn), NOGIT, config, session, seconds, env=env)
+    def call(seconds, spawn):
+        return ov_call(tool, dict(spawn), NOGIT, config, session, seconds, env=env)
 
-    ok, why = ov_story([("no model, no override", lambda: call(0, ROLE_OV_NO_MODEL, ROLE_OV_UNSET), "deny", ROLE_RULE)])
+    ok, why = ov_story([("no model, no override", lambda: call(0, no_model), "deny", ROLE_RULE)])
     if not ok:
         return False, why
     note = ov_type(config, session, "override")
     ok, why = ov_story([
-        ("no model, under the override", lambda: call(60, ROLE_OV_NO_MODEL, ROLE_OV_UNSET), "deny", ROLE_RULE),
+        ("no model, under the override", lambda: call(60, no_model), "deny", ROLE_RULE),
         ("test-author on sonnet, the override not spent by the no-model refusal",
-         lambda: call(120, ROLE_OV_TEST_AUTHOR), "allow", ROLE_RULE),
+         lambda: call(120, above_row), "allow", ROLE_RULE),
     ], note)
     if not ok:
         return False, why
@@ -27257,6 +27312,9 @@ ROLE_OVERRIDE_CHECKS = (
      role_override_lift_check),
     ("role-model: the no-model refusal stays under an owner override, and spends none",
      role_override_no_model_check),
+    ("role-model: the no-model refusal stays under an owner override in a Workflow, and spends none",
+     lambda: role_override_no_model_check("Workflow", {"script": WF_NO_MODEL_SCRIPT},
+                                          {"script": WF_ABOVE_ROW_SCRIPT}, WF_UNSET, "ov-wf-no-model")),
     ("role-model: opus 2h lifts an Explore on opus with no Audit: marker (item 137)", role_opus_explore_lift_check),
     ("role-model: opus test-authors 2h lifts a test-author on opus, and no builder", role_opus_role_lift_check),
     ("role-model: the typed override lifts a Workflow builder on opus with a variable brief, once",
