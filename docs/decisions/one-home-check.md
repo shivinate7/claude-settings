@@ -32,6 +32,25 @@ The plan offered two child paths: (a) the child CI checks out claude-settings at
   each pin `actions/ste-lint` in `.github/workflows/checks.yml`. None pins `actions/claude-md-cites`.
 - So the child check runs inside the ste-lint step. A pin bump by Renovate brings it in.
 
+## Measured
+
+Paraphrase pass, `python3 lint/find_copies.py --measure lint/paraphrase_labelled.json`, run once on
+2026-11-07. Model `sonnet`, effort `high`. Sample: 51 labelled cases, 29 paraphrase and 22 distinct.
+
+- Precision 1.00: 25 of 25 flagged cases were paraphrases. No false positive.
+- Recall 0.86: 25 of 29 paraphrases were flagged. Missed: p11, p26, p27, p28.
+- Precision was not under 0.9, so no second prompt was tried. There is one run.
+- Limits. The prompt was written after the set was read, so both figures lean high. 22 distinct cases
+  is a small base for a precision claim. The set measures the model alone. The lexical pre-filter (3
+  shared word stems) runs before it in `--paraphrase`: offline it passes 25 of 29 paraphrase cases
+  (misses p16, p20, p25, p27) and 5 of 22 distinct cases. Precision on a real child repo is unmeasured.
+- Cost per run: `--paraphrase` starts three processes, python, `git ls-files` and one `claude -p`;
+  `--measure` starts two, python and one `claude -p`. Each run reads the tracked `*.md` files
+  (`--paraphrase` only), makes at most one model call, and writes no file. `invoke_model` makes and
+  removes one temp folder for the call. A run with no candidate line starts no `claude`.
+- Where it runs: skill `compliance-check`, as a report-only step. Never in CI or ste-lint: CI has no
+  model key.
+
 ## Status
 
 Building, lane `one-home-check`. The parts, their homes and the measured counts land here as each
