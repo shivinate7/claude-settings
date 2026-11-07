@@ -2679,9 +2679,9 @@ def _known_defects_base_entries(repo: str, list_path: str, base: str):
 
 def known_defects_main(argv) -> int:
     """Replay the planted defects of a list (`.github/known-defects.json`) against a repository's HEAD. One line per defect:
-    `CAUGHT`, `MISS` or `UNKNOWN`. Exit 1 when any defect is MISS or UNKNOWN (decision ci-unknown-is-red). A defect that
-    needs a failed install is not run and reads UNKNOWN (`run_known_defects` says which defects need which install). A missing list file
-    prints one UNKNOWN line that names its path and exits 1; an empty list exits 0 (with `--base`, only when REF's list names
+    `CAUGHT`, `MISS` or `UNKNOWN`. Exit 1 when any defect is MISS or UNKNOWN (decision ci-unknown-is-red). A failed install
+    holds no defect back: each runs, and one whose catcher could not resolve a module reads UNKNOWN (`run_known_defects`
+    says how). A missing list file prints one UNKNOWN line that names its path and exits 1; an empty list exits 0 (with `--base`, only when REF's list names
     no entry); a list or a profile that cannot be read exits 2.
     `--profile` or `--profile-file` is required: the checkout gets the profile's install, as `--changed` does.
     With `--base REF` the head list is also compared with the list at REF (decision mutation-ci-report-and-replay): each id
