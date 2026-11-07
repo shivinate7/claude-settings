@@ -31,6 +31,7 @@
   "pick": "c",
   "rank": 3,
   "ref": "claude-settings #1177; decision test-practices",
+  "reply": "Answered in chat at 13:00 CST, with none of the options: P5 never meant to ban timed waits. A timed test is allowed, and catching a hung test is a good reason for one. A test whose verdict depends on speed uses a synthetic clock, so machine load cannot change it. Lane cs-revive-unfinished rewrites decision test-practices P5 in #1177. Step time-pinned-tests-go now converts speed-dependent waits to a synthetic clock and keeps hang guards.",
   "short": "Test hang guards: keep the ban and convert the 252 limits?",
   "status": "closed",
   "title": "May a test keep a wait limit that only stops a hung test (a hang guard)?",

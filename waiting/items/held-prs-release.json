@@ -1,7 +1,7 @@
 {
   "added": "2026-11-07T19:10:00Z",
   "context": "Goal: no PR waits forever.\nProblem (cannot undo): runner 8 holds 10 claude-settings PRs as held after review round 3 (decision hold-unsafe-after-round-3), with no hold reason recorded. The ten: #1099 (refuse a lane commit that undoes its own earlier work), #1141 (local triage tier proof, likely replaced by #1378), #1143 (refuse a push to an agent's own worktree branch), #1147 and #1177 (timing tests; your 13:00 CST ruling covers #1177), #1166 (merge -C flag), #1170 (parked-line id guard), #1179 (removed CLI flag cites), #1181 (design-branch delete guard), #1186 (guards read interpreter strings only at shell spots).\nBased on (read): runner 8's held list, 13:09 CST; the idle-PR audit found most of these reviewed and 1,100-1,900 commits behind main.\nDeparts from: main, where the held PRs sit parked \u2014 a sends each back to a revive lane for a fresh round-1 review on top of main.\nMeanwhile the lanes stop all work on these ten.",
-  "home": "step pr-backlog-clear; runner 8",
+  "home": "step pr-backlog-clear; revive lanes",
   "id": "held-prs-release",
   "kind": "decision",
   "n": 348,
@@ -29,8 +29,9 @@
   "pick": "a",
   "rank": 1,
   "ref": "step pr-backlog-clear",
+  "reply": "a, saved 13:12 CST. Sent to the coordinator: all ten held PRs go back to the revive lanes, each catches up with main and gets a fresh round-1 review, then batches alone or closes if out of date.",
   "short": "10 held PRs: release, one by one, or close",
-  "status": "open",
+  "status": "closed",
   "title": "Release the ten held claude-settings PRs to the revive lanes?",
   "why": "Only you can release a PR held after review round 3, and none of the ten has a recorded hold reason."
 }
