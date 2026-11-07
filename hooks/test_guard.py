@@ -5236,6 +5236,36 @@ sh("heredoc: r2-hd a hash inside double quotes, then a source heredoc with a kil
 sh("heredoc: r2-hd a lone apostrophe in the body of a source heredoc, then a kill, denies",
    "source <(cat <<\\EOF\necho don't\npkill -f node\nEOF\n)", "deny", "machine-wide-kill", cwd=PROJ)
 
+# A LONE QUOTE IN AN INTERPRETER BODY LEAKS PAST ITS CLOSER (guard-interp-heredoc-lone-quote). An interpreter
+# heredoc keeps its body in view, and _split_reading walks that body as shell text. A quote the shell reads as
+# open hides every line after it, so a kill after the closer goes unjudged. Each form has a control: the same
+# body with an `echo ok` tail, which stays allowed. The label names the quote form that leaks.
+LEAK_FORMS = (
+    ("python, quoted delimiter, body print('it\\'s')", "python3 - <<'PY'\nprint('it\\'s')\nPY"),
+    ("python, unquoted delimiter, body print('it\\'s')", "python3 - <<PY\nprint('it\\'s')\nPY"),
+    ("python, body print('''it's''') with a lone ' in a triple quote", "python3 - <<'PY'\nprint('''it's''')\nPY"),
+    ("python, body with # and /* and // inside a string, quote \\'",
+     "python3 - <<'PY'\nprint('# it\\'s /* // ')\nPY"),
+    ("node, body console.log('it\\'s')", "node - <<'JS'\nconsole.log('it\\'s')\nJS"),
+    ("node, JSX body <p>Don't</p>, a lone ' in text", "node - <<'JS'\nconst el = <p>Don't</p>;\nJS"),
+    ("bash, body echo 'it\\'s'", "bash <<'SH'\necho 'it\\'s'\nSH"),
+    ("python body print('it\\'s'), then a clean second heredoc", "python3 - <<'PY'\nprint('it\\'s')\nPY\n"
+     "cat <<'EOF' > notes.txt\nhello\nEOF"),
+    ("cat writes x.py with print('it\\'s'), then python3 x.py", "cat <<'EOF' > x.py\nprint('it\\'s')\nEOF\n"
+     "python3 x.py"),
+)
+for _label, _head in LEAK_FORMS:
+    sh("heredoc: lone-quote leak, %s, a kill after the closer denies" % _label,
+       _head + "\npkill -f node", "deny", "machine-wide-kill", cwd=PROJ)
+    sh("heredoc: lone-quote leak control, %s, an echo ok tail is allowed" % _label,
+       _head + "\necho ok", "allow", cwd=PROJ)
+# Green on main, kept so a change to the walk cannot lose them: a bash body's lone apostrophe, and a node
+# multi-line template literal, each with the kill in view.
+sh("heredoc: a bash heredoc whose body holds echo don't, then a kill in the body, still denies",
+   "bash <<'SH'\necho don't\npkill -f node\nSH", "deny", "machine-wide-kill", cwd=PROJ)
+sh("heredoc: a node multi-line template literal, then a kill after the closer, still denies",
+   "node <<'JS'\nconst s = `\nline\n`;\nJS\npkill -f node", "deny", "machine-wide-kill", cwd=PROJ)
+
 # A shell runs each body, and its header is one a reader can misread: a delimiter it cannot read (`'EOF-1'`,
 # `\EOF`), or a shorter word that a stray line closes on (`EOF-1` as `EOF`, `"E"OF` as `E`).
 R3_KILL = "pkill -f node"
@@ -6363,6 +6393,13 @@ sh("silent-write: discarding a write command output denies, stdout alone",
    cwd=NOGIT)
 sh("silent-write: both streams discarded together",
    VCS + " commit -q -m x >/dev/null 2>&1", "deny", "silent-write", cwd=NOGIT)
+# A LONE QUOTE IN A PYTHON BODY LEAKS PAST ITS CLOSER, so a silenced write after it goes unjudged
+# (guard-interp-heredoc-lone-quote). The control is the same body with an `echo ok` tail.
+sh("silent-write: a python body print('it\\'s') leaks its quote, then a silenced commit denies",
+   "python3 - <<'PY'\nprint('it\\'s')\nPY\n" + VCS + " commit -q -m x >/dev/null", "deny", "silent-write",
+   cwd=NOGIT)
+sh("silent-write: the same python body with an echo ok tail, the lone-quote control, is allowed",
+   "python3 - <<'PY'\nprint('it\\'s')\nPY\necho ok", "allow", cwd=NOGIT)
 # The backslash-semicolon control: `\;` is text, so this is one commit with a silenced redirect.
 # A repo cwd is needed, so this uses the default.
 sh("silent-write: a backslash before ; then a silenced commit redirect denies, default cwd",
@@ -10194,6 +10231,19 @@ sh("cite-by-id: a lone quote pair, then a -m $(cat heredoc commit that cites a r
 sh("cite-by-id: a lone quote pair, then a -F - commit with a clean body is allowed",
    LONE_PAIR + VCS + " commit -F - <<'EOF'\ntitle\n\nclean body\nEOF", "allow", cwd=NOGIT,
    config=MERGECFG)
+
+# A LONE QUOTE IN A PYTHON BODY LEAKS PAST ITS CLOSER, so a commit after it goes unjudged
+# (guard-interp-heredoc-lone-quote). Each deny has a control: the same body with an `echo ok` tail.
+sh("cite-by-id: a python body print('it\\'s') leaks its quote, then a commit that cites a record denies",
+   "python3 - <<'PY'\nprint('it\\'s')\nPY\n" + VCS + ' commit -m "fix, per ' + CITE + '"', "deny",
+   "cite-by-id", cwd=NOGIT, config=MERGECFG)
+sh("cite-by-id: the same python body with an echo ok tail, the lone-quote control, is allowed",
+   "python3 - <<'PY'\nprint('it\\'s')\nPY\necho ok", "allow", cwd=NOGIT, config=MERGECFG)
+sh("lane-by-slug: a python body print('it\\'s') leaks its quote, then a commit naming lane (N16) denies",
+   "python3 - <<'PY'\nprint('it\\'s')\nPY\n" + VCS + ' commit -m "fix flaky test (N16)"', "deny",
+   "lane-by-slug", cwd=NOGIT, config=MERGECFG)
+sh("lane-by-slug: the same python body with an echo ok tail, the lone-quote control, is allowed",
+   "python3 - <<'PY'\nprint('it\\'s')\nPY\necho ok", "allow", cwd=NOGIT, config=MERGECFG)
 
 # The Drops-lines trailer (owner ruling 2026-10-12): the one place a record path may stand in a
 # commit message is `Drops-lines: <path> -- <reason>`, the shape lint/check_silent_undo.py reads
