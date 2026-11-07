@@ -20,7 +20,9 @@ the fixture the case writes. No real gh runs, no network is reached and no clock
 cases run in process with a fake clock.
 
 Cost, proved by the stand-in's call log: a turn with no push, and a Stop with stop_hook_active, make no
-gh call. A push reads at most 2 gh calls for its head: the PR read and the run list.
+gh call. A push reads at most 2 gh calls for its head: the PR read and the run list. A bare-name push with no ref
+line starts at most 1 git process when its remote-tracking ref names the head, else 3 per name (the tag, the local
+branch and the remote-tracking ref); a git stand-in's call log counts them.
 
 A red case fails on an assertion on the old code, where the guard blocks nothing. A control passes on
 the old code and on the new.
@@ -31,6 +33,7 @@ Run it from the repository root:
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -68,6 +71,7 @@ PUSH_UNKNOWN_NOTE = "Push-CI guard: UNKNOWN, the check did not run"  # the note 
 REMOTE_URL = "https://github.com/shivinate7/claude-settings.git"  # a push to a URL updates no remote-tracking ref
 REMOTE_LINE = "To %s\n" % REMOTE_URL  # the header git prints for a push; it names no ref
 TAG = "v1.0"  # a short-name tag: a push names it without `refs/tags/`
+FEAT = "feat"  # a bare name a push gives with no ref line: a branch, a tag or both, by the case
 UNNAMED_HEAD_TEXT = "no remote-tracking ref names the pushed head"  # the reason a head no read named gives
 READ_FAILED_WORDS = ("git", "read", "rev-parse", "timed out")  # words a reason names a failed read with
 
@@ -155,11 +159,12 @@ GIT_IDENTITY = {"GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.inv
                 "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid"}
 
 
-def git_commit(folder, remote_branch=BRANCH, on_branch=None, detach=False):
+def git_commit(folder, remote_branch=BRANCH, on_branch=None, detach=False, tag=None):
     """Make `folder` a git repo with one empty commit. -> the full hash. Local git only.
     on_branch: the local branch the commit lands on, made from the current HEAD when it is new (None keeps the
     default branch). remote_branch: the branch whose remote-tracking ref is set to the commit (None sets none).
-    detach: HEAD is left detached at the commit, so no branch is checked out."""
+    detach: HEAD is left detached at the commit, so no branch is checked out. tag: a local tag of that name at the
+    commit (None makes none)."""
     env = dict(os.environ, **GIT_IDENTITY)
 
     def run_git(*args):
@@ -171,11 +176,36 @@ def git_commit(folder, remote_branch=BRANCH, on_branch=None, detach=False):
         run_git("checkout", "-q", "-B", on_branch)
     run_git("commit", "-q", "--allow-empty", "-m", "x")
     head = run_git("rev-parse", "HEAD")
+    if tag:
+        run_git("tag", tag)
     if remote_branch:
         run_git("update-ref", "refs/remotes/origin/" + remote_branch, head)
     if detach:
         run_git("checkout", "-q", "--detach")
     return head
+
+
+def git_stand_in(folder):
+    """A `git` stand-in that leads PATH for one case. Each call appends its argv to a log, then runs the real git, so
+    the log holds one line per git process a guard starts. A POSIX launcher, as the gh stand-in's is.
+    -> (bin_dir, log)."""
+    real = shutil.which("git")
+    bin_dir = os.path.join(folder, "git-bin")
+    os.makedirs(bin_dir)
+    log = os.path.join(folder, "git.log")
+    launcher = os.path.join(bin_dir, "git")
+    with open(launcher, "w", encoding="utf-8", newline="\n") as f:
+        f.write('#!/bin/sh\necho "$*" >> "%s"\nexec "%s" "$@"\n' % (log, real))
+    os.chmod(launcher, 0o755)
+    return bin_dir, log
+
+
+def git_calls(log):
+    """The argv of each git process the stand-in logged, one string per call. [] when none ran."""
+    if not os.path.exists(log):
+        return []
+    with open(log, encoding="utf-8") as f:
+        return f.read().splitlines()
 
 
 class StepClock:
@@ -556,6 +586,89 @@ class PushCheckTests(unittest.TestCase):
                 self.assertIsNone(decision, "a URL push with %s: the report that holds the unknown line was blocked"
                                   % label)
 
+    # A bare name with no ref line (`git push origin feat`) is a branch, a tag or both, by what the clone holds. Each
+    # case builds its refs in a real repo and runs the Stop hook, as the cases above do.
+
+    def test_bare_name_with_a_local_branch_and_its_remote_ref_names_the_head(self):
+        # Green on the old code. The mutant of _reads_as_tag that reads any bare name as a tag drops this push, so it
+        # goes red here.
+        folder = self.case_folder()
+        head = git_commit(folder, remote_branch=FEAT, on_branch=FEAT)
+        steps = push("", command="git push origin %s" % FEAT)
+        fixture_ = answers(prs=[pr_entry(branch=FEAT, sha=head)],
+                           runs=[run_entry(None, sha=head, status="in_progress")])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less bare-name push was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a bare-name push of a branch with a remote-tracking ref passed with no CI "
+                         "line: the name was read as a tag")
+        self.assertIn("CI running on " + head[:7], reason, "the bare-name push's branch head is not named running")
+
+    def test_bare_name_with_only_a_remote_tracking_ref_reads_as_a_branch(self):
+        # Green on the old code. The local branch is gone: only origin/feat names a commit, so the name is a branch and
+        # its head is read. The mutant that reads any bare name as a tag drops this push, so it goes red here.
+        folder = self.case_folder()
+        head = git_commit(folder, remote_branch=FEAT)
+        steps = push("", command="git push origin %s" % FEAT)
+        fixture_ = answers(prs=[pr_entry(branch=FEAT, sha=head)],
+                           runs=[run_entry(None, sha=head, status="in_progress")])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less bare-name push was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a bare-name push with only a remote-tracking ref passed with no CI line: "
+                         "the name was read as a tag")
+        self.assertIn("CI running on " + head[:7], reason, "the bare-name push's head is not named running")
+
+    def test_bare_name_with_a_tag_and_a_local_branch_reads_the_branch_unknown(self):
+        # Green on the old code. The tag sits on an older commit. The branch has no remote-tracking ref, so its head is
+        # unnamed and the name reads unknown: the branch is checked, never dropped for the tag. The mutant that reads a
+        # bare name as a tag whenever a tag has it drops this push, so it goes red here.
+        folder = self.case_folder()
+        git_commit(folder, remote_branch=None, tag=FEAT)
+        git_commit(folder, remote_branch=None, on_branch=FEAT)
+        steps = push("", command="git push origin %s" % FEAT)
+        fixture_ = answers(prs=[pr_entry(branch=FEAT)], runs=[PENDING])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less bare-name push was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a bare-name push of a tag and a local branch of one name passed with no "
+                         "CI line: the branch was dropped for the tag")
+        self.assertIn("CI unknown on " + FEAT, reason,
+                      "the bare-name push is not named unknown on %s: %s" % (FEAT, reason))
+        decision, _, _ = self.stop(turn("> **Done** BUILT abc123\n> **Next** CI unknown on %s" % FEAT, steps),
+                                   fixture_, folder=folder)
+        self.assertIsNone(decision, "a report that holds the unknown line on %s was blocked" % FEAT)
+
+    def test_bare_name_with_a_tag_and_a_branch_with_its_remote_ref_names_the_branch_head(self):
+        # Green on the old code. The tag sits on an older commit than the branch's head, so the head named must be the
+        # branch's own. The mutant that reads a bare name as a tag whenever a tag has it drops this push.
+        folder = self.case_folder()
+        git_commit(folder, remote_branch=None, tag=FEAT)
+        head = git_commit(folder, remote_branch=FEAT, on_branch=FEAT)
+        steps = push("", command="git push origin %s" % FEAT)
+        fixture_ = answers(prs=[pr_entry(branch=FEAT, sha=head)],
+                           runs=[run_entry(None, sha=head, status="in_progress")])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less bare-name push was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a bare-name push of a tag and a branch with its remote ref passed with no "
+                         "CI line: the name was read as a tag")
+        self.assertIn("CI running on " + head[:7], reason, "the bare-name push's branch head is not named running")
+
+    def test_bare_name_with_only_a_local_tag_reads_as_a_tag(self):
+        # Green on the old code. With no branch of the name, a local tag makes the name a tag, so it names no head and
+        # no CI line is due. A mutant that never reads a name as a tag goes red here; `bare or has_tag` does not, since
+        # the bare name is a tag either way.
+        folder = self.case_folder()
+        git_commit(folder, remote_branch=None, tag=FEAT)
+        steps = push(REMOTE_LINE, command="git push origin %s" % FEAT)
+        fixture_ = answers(prs=[pr_entry(branch=FEAT)], runs=[PENDING])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less bare-name push of a tag was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+        self.assertIsNone(decision, "a bare-name push of a local tag was blocked for CI, though the name is a tag: "
+                          + reason)
+
     def test_green_run_on_ready_pr_passes(self):
         decision, reason, _ = self.stop(turn(REPORT, push(push_out(HEAD7))),
                                         answers(prs=[pr_entry()], runs=[GREEN]))
@@ -653,6 +766,47 @@ class PushCheckTests(unittest.TestCase):
                                             answers(prs=[pr_entry()], runs=[PENDING]))
         self.assertGreaterEqual(len(calls), 1, "a push with a pending run read no CI: %s" % calls)
         self.assertLessEqual(len(calls), 2, "a push read more than two gh calls for its head: %s" % calls)
+
+    def bare_push_git_reads(self, folder, fixture_):
+        """-> (states, git calls) of a bare-name push, `git push origin feat`, with no ref line, read in process by
+        report_guard.push_ci_states. The git stand-in leads PATH, so each git process the read starts is one
+        log line."""
+        bin_dir, log = git_stand_in(folder)
+        fixture_path = os.path.join(folder, "fixture.json")
+        with open(fixture_path, "w", encoding="utf-8") as f:
+            json.dump(fixture_, f)
+        env = {"PATH": os.pathsep.join((bin_dir, os.environ["PATH"])), "GH_STUB_FIXTURE": fixture_path,
+               "GH_STUB_LOG": os.path.join(folder, "gh.log")}
+        records = turn(REPORT, push("", command="git push origin %s" % FEAT))[1:]
+        budget = ci_wake.Budget(total=20, per_read=8, clock=StepClock([0.0]))  # a fixed clock: no read runs out
+        with mock.patch.dict(os.environ, env):
+            states = report_guard.push_ci_states(records, {"cwd": folder}, budget=budget)
+        return states, git_calls(log)
+
+    @unittest.skipIf(os.name == "nt", "the git stand-in is a POSIX launcher; no Windows run is made here")
+    def test_bare_name_push_reads_git_within_the_cost_bound(self):
+        # The cost line (decision push-report-names-ci): one git process when the remote-tracking ref names the head,
+        # and at most 3 per name otherwise (the tag, the local branch, the remote-tracking ref). The first row is red on
+        # the old code, which reads 3. The other two rows are its green control: they read 3 and pass.
+        cases = (
+            ("the remote-tracking ref names the head", 1, lambda folder: git_commit(folder, remote_branch=FEAT),
+             lambda head: [head[:7]]),
+            ("a local branch with no remote-tracking ref", 3,
+             lambda folder: git_commit(folder, remote_branch=None, on_branch=FEAT), lambda head: [FEAT]),
+            ("no ref of the name", 3, lambda folder: git_commit(folder, remote_branch=None), lambda head: []),
+        )
+        for label, bound, setup, names_of in cases:
+            with self.subTest(case=label):
+                folder = self.case_folder()
+                head = setup(folder)
+                fixture_ = answers(prs=[pr_entry(branch=FEAT, sha=head)],
+                                   runs=[run_entry(None, sha=head, status="in_progress")])
+                states, calls = self.bare_push_git_reads(folder, fixture_)
+                self.assertEqual([name for name, _, _ in states], names_of(head),
+                                 "scope: the push did not name what %s names: %s" % (label, states))
+                self.assertGreaterEqual(len(calls), 1, "scope: the git stand-in counted no process for %s" % label)
+                self.assertLessEqual(len(calls), bound, "a bare-name push, %s, started %d git processes, past the cost "
+                                     "bound of %d: %s" % (label, len(calls), bound, calls))
 
 
 class BudgetTests(unittest.TestCase):
