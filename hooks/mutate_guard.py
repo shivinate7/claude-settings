@@ -1997,6 +1997,28 @@ MUTATIONS = [
      '    if at >= until or (role is not None',
      '    if at > until or (role is not None',
      "override", 'opus override: `opus 2h` lets an Opus spawn through'),
+    # THE VETO AND THE TAKE (decision owner-override). never_lifted names the acts an override may not lift, and
+    # override.take reads the one-act override. A mutant that lifts a never-lifted act, or reads no override, must go red.
+    ("never-lifted: a shell kill of pid 1 is liftable, so an override reaches it",
+     'or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))',
+     'or False',
+     "guard", 'override: a kill of pid 1 ends with the no-override line'),
+    ("never-lifted: a write of the frozen config settings is liftable, so an override reaches it",
+     'if (is_frozen(target, cwd) or (role and role_write_hit',
+     'if (False or (role and role_write_hit',
+     "guard", 'override: a write of the config settings ends with the no-override line'),
+    ("never-lifted: the no-model refusal is liftable, so an owner override lifts it",
+     'or role_model_check(tool, tool_input)[1].startswith(ROLE_NO_MODEL_MATCH)',
+     'or False',
+     "guard", 'role-model: the no-model refusal stays under an owner override, and spends none'),
+    ("take: a one-act override is never read, so no refusal is lifted",
+     'return _take_override(session_id, agent_id, at) or opus or step',
+     'return opus or step',
+     "override", 'override: a one-act override lets through'),
+    ("veto: refuse() takes an override even when the veto holds, so a never-lifted act is lifted",
+     '    vetoed = _vetoed()\n',
+     '    vetoed = False\n',
+     "guard", 'override: a kill of pid 0, 1 or -1 stays refused under a one-act override'),
     # THE OVERRIDE LINE (step c80, hooks/override.py and refuse() in hooks/guard_core.py). A refusal ends with
     # the line the owner types, or with the sentence that no override lifts it.
     ("override line: a vetoed refusal offers an override that cannot lift it",
