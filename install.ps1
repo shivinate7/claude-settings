@@ -953,15 +953,17 @@ function Resolve-Failures {
         foreach ($d in @($FailedSkills.Keys)) {
             $s = $FailedSkills[$d]
             $FailedSkills.Remove($d)
+            $had = [bool](Get-Item -LiteralPath $d -Force -ErrorAction SilentlyContinue)
             $r = Install-Dir $s.Src $d $s.Old $s.Keep
             if ($r -eq 'failed') { $FailedSkills[$d] = $s; continue }
             $LandedList.Add(@{ Rel = $s.Rel; Dest = $d })
+            if ($s.Keep -and $had) { Log "existing $d moved to $($s.Old)" }
             if ($r -eq 'copied') { $script:AgentCopied = $true; Log "copied $d (symlink not permitted)" } else { Log "linked $d -> $($s.Src)" }
         }
     }
     foreach ($d in @($FailedFiles.Keys)) { $StillFailed[$d] = $FailedFiles[$d]; Log "could not replace $d after retries; it is not this install's version" }
     $FailedFiles.Clear()
-    foreach ($d in @($FailedSkills.Keys)) { $StillFailed[$d] = $FailedSkills[$d].Src; $FailedSubs['skills'] = $true; Log "could not replace $d after retries; it is not this install's version" }
+    foreach ($d in @($FailedSkills.Keys)) { $StillFailed[$d] = $FailedSkills[$d].Src; $FailedSubs['skills'] = $true; Log "could not replace $d after retries; Install-Dir logged its state above" }
     $FailedSkills.Clear()
 }
 Resolve-Failures
