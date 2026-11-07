@@ -20,7 +20,7 @@ except ImportError:  # same fallback as _nowindow above: no read, so a PPID-1 pi
 
 from guard_core import (
     QUOTE_MARKS,
-    ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
+    ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS, PRINTING_COMMANDS,
     POWERSHELL_CALL, PowerShellScript, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
     _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, inline_script,
     resolve_command, segment_tokens, split_segments,
@@ -705,12 +705,15 @@ def _open_script_blocks(tokens):
     """Split each glued script block or paren group (`{$env:X=1}`, `&{...}`, `($env:X=1)`) into
     its opener and its body, after any token: `if (...) {...}`, `ForEach-Object {...}`,
     `try {...}`. A token that starts inside quotes (`'{$env:X=1}'`, `tokens.quoted`) is text and
-    stays whole. Known ceiling: an unquoted block passed as a plain argument (`Write-Host {...}`)
-    is read as code too, a false deny, the safe side."""
+    stays whole, and so does a glued block handed to a printing cmdlet (`Write-Host {...}`), which
+    prints the block and never runs it. Known ceiling: an unquoted block passed as an argument to
+    any other command, or spaced from its braces (`Write-Host { ... }`), is read as code too, a
+    false deny, the safe side."""
     quoted = getattr(tokens, "quoted", ())
     out = []
     for i, tok in enumerate(tokens):
-        if i in quoted:
+        if i in quoted or (tok[:1] == "{" and i and i - 1 not in quoted
+                           and basename(tokens[i - 1]).lower() in PRINTING_COMMANDS):
             out.append(tok)
             continue
         while (opens := _PS_BLOCK_OPEN.match(tok)) and len(tok) > opens.end():
@@ -722,8 +725,13 @@ def _open_script_blocks(tokens):
         out.append(head)
         for part in rest:
             out.append("{")
-            if part.rstrip("})"):   # a `{` that ends its token leaves no empty piece behind
-                out.append(part.rstrip("})"))
+            # Text after the block's own `}` (`try{...}catch`) is its keyword, not part of the body.
+            body = part.split("}", 1)[0].rstrip(")")
+            if body:   # a `{` that ends its token leaves no empty piece behind
+                out.append(body)
+            tail = part.partition("}")[2].rstrip("})")
+            if tail:
+                out.append(tail)
     return out
 
 
@@ -990,8 +998,6 @@ def git_env_command_hit(raw: str, stripped: str) -> str:
 
 GIT_ENV_REASON = (
     "a shell that sets the git location variables points every child git at another tree. "
-    "Measured in q_max on 2026-10-14: a test's child `git init` inherited them and wrote "
-    "core.worktree into the shared config, and every checkout read the wrong tree. "
     "Remedy: pass the repo path with `git -C <dir>`, or scrub every GIT_* name from the child's "
     "own environment. "
     "(decision git-env-set-refused, no command sets a git location variable)"

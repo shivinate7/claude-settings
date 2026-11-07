@@ -8,7 +8,8 @@ import os
 import re
 
 from guard_core import (
-    DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
+    DURATION, PLAYWRIGHT_PS_SHELLS, PRINTING_COMMANDS, PowerShellScript, _absolute, _pwsh_script,
+    _skip_assignments_and_keywords, basename,
     bare_words, command_indexes, inline_script, inner_commands, resolve_command, segment_tokens,
     split_segments,
 )
@@ -225,8 +226,10 @@ def waiter_verdict(segments, background: bool) -> str:
         if index is None:
             continue
         word = basename(tokens[index]).lower()
-        # A PowerShell loop keeps its sleep in a `{ ... }` block inside the same segment.
-        for at in sorted({index, *(i + 1 for i, t in enumerate(tokens[:-1]) if t == "{")}):
+        # A PowerShell loop keeps its sleep in a `{ ... }` block inside the same segment. A printing
+        # command (`echo {sleep}`) shows its block and never runs it.
+        blocks = () if word in PRINTING_COMMANDS else (i + 1 for i, t in enumerate(tokens[:-1]) if t == "{")
+        for at in sorted({index, *blocks}):
             if basename(tokens[at]).lower() in WAITER_COMMANDS:
                 sleeps.append((tokens[at], sleep_seconds(tokens, at)))
         if word in WAITER_COMMANDS:

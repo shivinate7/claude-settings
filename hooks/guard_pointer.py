@@ -33,10 +33,14 @@ from guard_core import (
 #
 #   fires   `checkout <branch>` and `switch <branch>`, including the `-` shorthand
 #           `checkout -b|-B|--orphan <name>` and `switch -c|-C|--orphan <name>`
-#           `checkout --detach` and `switch --detach|-d`, which leave no branch named at all
+#           `checkout --detach` and `switch --detach|-d`, which leave no branch named at all,
+#           except a detach to local `main` (below)
 #   passes  a move whose one target is `main`. That call RESTORES the invariant this rule
 #           protects, and it is how a checkout left on a branch gets repaired. A deny there would
 #           wall off the only repair, which is the "fix the cause" failure in miniature.
+#   passes  `checkout --detach main` and `switch --detach|-d main`: HEAD lands on local main's commit,
+#           which `hooks/session_start.sh` counts as on main. A detach to `origin/main` or any
+#           other ref stays refused.
 #   passes  `switch -C main origin/main` and `checkout -B main origin/main`, from any branch: the reset
 #           leaves HEAD on `main`. It passes only when one `git merge-base --is-ancestor main
 #           origin/main` read exits 0 (local `main` is an ancestor), so it drops no local commit.
@@ -205,6 +209,9 @@ def head_move_target(subcommand: str, args) -> str:
             continue
         plain.append(arg)
     matched = " ".join(args).strip()
+    if detached and not new_branch and plain == [PROTECTED_BASE]:
+        # HEAD lands on local main's commit, which session_start counts as on main.
+        return ""
     if new_branch or detached:
         return matched
     if len(plain) != 1:

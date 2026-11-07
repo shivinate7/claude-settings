@@ -391,6 +391,8 @@ WRAPPER_VALUE_FLAGS["timeout"] = TIMEOUT_FLAGS_WITH_VALUE
 # do sleep 1; done` allowed the sleep, because the segment `do sleep 1` resolved to `do` as its
 # command word. Skip a keyword the same way a wrapper is skipped, so every rule that reads a
 # command word sees the command inside the block, never the keyword that opens it.
+# Commands that print a `{ ... }` argument and never run it, in PowerShell and in POSIX shells.
+PRINTING_COMMANDS = ("write-host", "write-output", "write-verbose", "write-debug", "echo")
 LOOP_KEYWORDS = {"do", "then", "else", "elif", "while", "until", "if", "{", "(", "$("}
 
 
