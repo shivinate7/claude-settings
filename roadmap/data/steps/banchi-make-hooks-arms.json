@@ -3,9 +3,9 @@
   "order": 264.0,
   "why": "Owner ask ask-mw6vybwdb8 part 1, 14:58 CST Nov 7. `make hooks` sets core.hooksPath, then its loop runs `git config --worktree --unset-all core.hooksPath` on each worktree. With extensions.worktreeConfig off (any fresh clone), --worktree writes the shared .git/config, so the loop clears the value it just set, yet prints \"hooks armed\". Reproduced 2026-11-03 and on banchi main affcbb7.",
   "note": "Fix the cause in the recipe: turn on extensions.worktreeConfig before the loop, or skip the unset for the main worktree. The final check reads `git config core.hooksPath` and fails when it is not the armed path. Red then green in githooks-selftest (fresh clone, worktreeConfig off). The report says when the cloud setup script's workaround can go. Repo banchi; main moves by PR only.",
-  "updatedAt": "2026-11-07T14:59:00-06:00",
-  "lane": "",
+  "updatedAt": "2026-11-07T15:01:00-06:00",
+  "lane": "session_013NEJL3qfm8njFEZCifnfDr",
   "owner": "coordinator",
   "phase": "now",
-  "status": "todo"
+  "status": "doing"
 }
