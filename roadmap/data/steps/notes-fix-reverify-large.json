@@ -1,0 +1,11 @@
+{
+  "title": "Fix the 5 guard rows from the kept-notes re-check, env-node-env-file-prints among them",
+  "phase": "now",
+  "status": "doing",
+  "order": 1.21,
+  "owner": "coordinator",
+  "why": "Coordinator, 14:23 CST Nov 7, from notes-keep-reverify's re-check of 146 rows.",
+  "note": "",
+  "lane": "session_013NEJL4AKgUjS1CWQvcdNwc",
+  "updatedAt": "2026-11-07T14:23:00-06:00"
+}

@@ -1,0 +1,11 @@
+{
+  "title": "Fix the 14 small rows and 13 prose-Fix notes from the kept-notes re-check",
+  "phase": "now",
+  "status": "doing",
+  "order": 1.2,
+  "owner": "coordinator",
+  "why": "Coordinator, 14:23 CST Nov 7: notes-keep-reverify re-checked 146 rows. 18 to fix, 18 to delete, 110 to keep (86 rare and harmless, 18 for the owner to decide, 6 that need the Mac).",
+  "note": "",
+  "lane": "session_013NEJKz9f8KxCfb9zS1HSNV",
+  "updatedAt": "2026-11-07T14:23:00-06:00"
+}

@@ -1,0 +1,11 @@
+{
+  "title": "q_max #970's 36 rule and spec files are redone",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.19,
+  "owner": "coordinator",
+  "why": "Coordinator, 14:22 CST Nov 7: follows qmax-stale-rulings-redo. Two q_max owner questions will come from this lane.",
+  "note": "",
+  "lane": "qmax-stale-rulings-redo",
+  "updatedAt": "2026-11-07T14:23:00-06:00"
+}
