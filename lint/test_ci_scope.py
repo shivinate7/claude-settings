@@ -108,7 +108,7 @@ def _repo_files():
     for dirpath, dirnames, filenames in os.walk(REPO):
         dirnames[:] = [d for d in dirnames if d not in (".git", "node_modules", "__pycache__")
                        and os.path.join(dirpath, d) != worktrees]
-        out += [os.path.relpath(os.path.join(dirpath, n), REPO).replace(os.sep, "/") for n in filenames]
+        out += [os.path.relpath(os.path.join(dirpath, n), REPO).replace(os.sep, "/") for n in filenames if n != ".git"]
     return out
 
 
