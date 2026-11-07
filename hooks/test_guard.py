@@ -11803,6 +11803,46 @@ sh("frozen: var2: unset clears the variable", 'D=' + _P + '; unset D; cp a "$D"'
    cwd=NOGIT)
 sh("frozen: var2: single quotes do not expand", 'D=' + _P + "; cp a '$D'", "allow", cwd=NOGIT)
 
+# DEFAULT-WORD FORMS. `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` names the config dir when the variable is
+# unset or empty, and `${CLAUDE_CONFIG_DIR-...}` only when it is unset. `os.path.expandvars` reads
+# `$VAR` and `${VAR}` alone, so a braced form with a word stays literal and the write is allowed. The
+# guard reads the config dir as CLAUDE_CONFIG_DIR, else HOME/.claude. HOME_FIX stands in for the home
+# folder, so its .claude is the frozen dir when the variable is unset or empty.
+HOME_FIX = os.path.join(ROOT, "home")
+# USERPROFILE too: on Windows expanduser reads it, not HOME.
+HOME_ONLY = {"HOME": HOME_FIX, "USERPROFILE": HOME_FIX}          # CLAUDE_CONFIG_DIR is CFG
+UNSET = {"CLAUDE_CONFIG_DIR": None, "HOME": HOME_FIX, "USERPROFILE": HOME_FIX}   # not set
+EMPTY = {"CLAUDE_CONFIG_DIR": "", "HOME": HOME_FIX, "USERPROFILE": HOME_FIX}     # set, empty
+DEFAULT_WORD = "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+NO_COLON_WORD = "${CLAUDE_CONFIG_DIR-$HOME/.claude}"
+# Green controls: the forms that are refused today. The plain `${VAR}` reads the config dir, and a
+# literal `$HOME/.claude` reads HOME/.claude once HOME is HOME_FIX. The red cases differ only in the word.
+sh("frozen: default-word: control, ${CLAUDE_CONFIG_DIR} with it set, a write to hooks/guard.py, is refused",
+   'printf x > "${CLAUDE_CONFIG_DIR}/hooks/guard.py"', "deny", "frozen-path", cwd=NOGIT, env=HOME_ONLY)
+sh("frozen: default-word: control, a literal $HOME/.claude with CLAUDE_CONFIG_DIR unset, is refused",
+   'printf x > "$HOME/.claude/hooks/guard.py"', "deny", "frozen-path", cwd=NOGIT, env=UNSET)
+for _rel in ("hooks/guard.py", "CLAUDE.md"):
+    for _state, _env in (("set", HOME_ONLY), ("unset", UNSET), ("empty", EMPTY)):
+        sh("frozen: default-word: :- with CLAUDE_CONFIG_DIR %s, a write to %s, is refused" % (_state, _rel),
+           'printf x > "%s/%s"' % (DEFAULT_WORD, _rel), "deny", "frozen-path", cwd=NOGIT, env=_env)
+    sh("frozen: default-word: - with CLAUDE_CONFIG_DIR set, a write to %s, is refused" % _rel,
+       'printf x > "%s/%s"' % (NO_COLON_WORD, _rel), "deny", "frozen-path", cwd=NOGIT, env=HOME_ONLY)
+# An empty variable is set, so the `-` word does not replace it: the target keeps the empty value.
+sh("frozen: default-word: - with CLAUDE_CONFIG_DIR empty keeps the empty value, /hooks/guard.py is allowed",
+   'printf x > "${CLAUDE_CONFIG_DIR-/tmp/elsewhere}/hooks/guard.py"', "allow", cwd=NOGIT, env=EMPTY)
+sh("frozen: default-word: - with CLAUDE_CONFIG_DIR empty does not take the frozen word, allowed",
+   'printf x > "${CLAUDE_CONFIG_DIR-$HOME/.claude}/hooks/guard.py"', "allow", cwd=NOGIT, env=EMPTY)
+# Today's verdicts, recorded as expected. :+ with the variable set names a relative folder, which no
+# frozen path sits under. :? names the config dir when set, and stays allowed today: a residual gap
+# that frozen-path-resolves-shell-vars does not list by name.
+sh("frozen: default-word: :+ with CLAUDE_CONFIG_DIR set keeps today's verdict, allowed",
+   'printf x > "${CLAUDE_CONFIG_DIR:+x}/hooks/guard.py"', "allow", cwd=NOGIT, env=HOME_ONLY)
+sh("frozen: default-word: :? with CLAUDE_CONFIG_DIR set keeps today's verdict, allowed (residual gap)",
+   'printf x > "${CLAUDE_CONFIG_DIR:?}/hooks/guard.py"', "allow", cwd=NOGIT, env=HOME_ONLY)
+# False alarm: a default folder outside the frozen set, with the variable unset, stays allowed.
+sh("frozen: default-word: a non-frozen :- default with CLAUDE_CONFIG_DIR unset is allowed",
+   'printf x > "${CLAUDE_CONFIG_DIR:-/tmp/x}/notes.md"', "allow", cwd=NOGIT, env=UNSET)
+
 # A TOKEN IN THE COMMAND LIFTS NOTHING. `DESTRUCTIVE_OK=1` and `GIT_DISCARD_OK=1` are plain env
 # assignments that the guard does not read. The one lift is the owner override (family
 # `override`): the owner types it as a prompt, and the guard reads it from a state file.
@@ -13351,6 +13391,26 @@ sh("builder-test: shell pathlib write to a test under Path.cwd() is refused",
 sh("builder-test: shell open-write to a test under os.getcwd() is refused",
    "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'x.py'), 'w').write('x')\nEOF",
    "deny", rule=BT, carries=("test-author",), **BR)
+# A CWD PREFIX JOINED BY `+`. `_py_paths` reads `/` and `os.path.join`, not a string sum, so a test
+# written as `os.getcwd() + '/tests/...'` reads as no path at all. The join and `/` forms above stay as
+# they are; these two are the same shape spelled with `+`.
+sh("builder-test: shell open-write to a test under os.getcwd() + a string is refused",
+   "python3 - <<'EOF'\nimport os\nopen(os.getcwd() + '/tests/test_x.py', 'w').write('x')\nEOF",
+   "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell open-write to a test under str(Path.cwd()) + a string is refused",
+   "python3 - <<'EOF'\nfrom pathlib import Path\nopen(str(Path.cwd()) + '/tests/x.py', 'w').write('x')\nEOF",
+   "deny", rule=BT, carries=("test-author",), **BR)
+# False alarms. A test path under a made temp folder is no test of this checkout. A product file under
+# the working folder is a builder's to write. A read of a test is no write.
+sh("builder-test: shell open-write to tests/x.py under tempfile.mkdtemp() + a string is allowed",
+   "python3 - <<'EOF'\nimport tempfile\ntmpdir = tempfile.mkdtemp()\nopen(tmpdir + '/tests/x.py', 'w').write('x')\nEOF",
+   "allow", **BR)
+sh("builder-test: shell open-write of src/app.py under os.getcwd() + a string is allowed",
+   "python3 - <<'EOF'\nimport os\nopen(os.getcwd() + '/src/app.py', 'w').write('x')\nEOF",
+   "allow", **BR)
+sh("builder-test: shell read of tests/test_x.py under os.getcwd() + a string is allowed",
+   "python3 - <<'EOF'\nimport os\nprint(open(os.getcwd() + '/tests/test_x.py').read())\nEOF",
+   "allow", **BR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
