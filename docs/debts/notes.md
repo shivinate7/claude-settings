@@ -56,6 +56,7 @@
 - expired-delete-net-error-stops: the expired-lock delete in GhLock.acquire runs once, so a network error or rate limit stops the run with NetStop (merge/merge.py)
 - fb-inbox-append-race: concurrent ab appends to the feedback inbox on Windows lost 406 of 8000 lines in a stress test (hooks/local_time.py)
 - frozen-path-ansi-c-quote: echo ok > $'<frozen path>' is allowed at top level and in bash -c, sh -c and eval; the check does not decode $'...' (hooks/guard.py)
+- frozen-perl-switch-arg-ends-scan: `perl -I lib -pi -e ... <frozen>` and `ruby -r json -pi -e ... <frozen>` are allowed, because the in-place scan stops at the first switch argument (hooks/guard_frozen.py _perl_ruby_in_place). Main allows them too.
 - guard-exit-7-unprobed: exit 7 under onFailure block was never probed; a timeout was measured to refuse the call (guard wrappers)
 - guard-own-errors-fail-open: guard and rm_prompt_answer exit 0 on their own internal errors (guard scripts)
 - guard-remedy-needs-bash: guard remedy names sh install.sh, which Bash cannot run while the guard is missing (guard wrappers)
@@ -205,6 +206,7 @@
 - plain-diff-secret-file-names: terraform.tfstate, .kube/config, wp-config.php and AuthKey_*.p8 are not caught by name (mods/plain-diff isSecretPath)
 - plain-diff-trimnote-regex: trimNote table-row regex is quadratic on absurd input and was not re-timed after round 3 (mods/plain-diff hooks/lib.mjs)
 - pointer-detach-false-alarm: the pointer guard refuses checkout --detach main though session_start counts that state as on main (hooks/guard_pointer.py)
+- pointer-failed-cd-and-refuses: from the pointer checkout, `cd missing && git switch x` is refused, though the switch never runs after the failed cd. Harmless: the command fails anyway (hooks/guard_core.py dir_before_segment).
 - ponytail-why-every-session: ponytail@ponytail is on in settings.json since PR #96 (ba7a11b3, Sep 22), and its SessionStart hook has printed "PONYTAIL MODE ACTIVE" since its first release (Jun 12), so neither is new. With no pin, every session took upstream releases: v5.0.0 rebuilt rules (Oct 8), v5.3.0 band and board hooks (Oct 16), v5.3.3 (Oct 29). Which change the owner saw is unknown. The owner's custom copies of its skills are in neither claude-settings nor claude-sharables git history; look in ~/.claude/skills and ~/.claude/backups/skills on each machine. Turned off Nov 1 (settings.json)
 - pr-checks-watch-unmeasured: gh pr checks --watch is allowed in background with unmeasured API cost; wrapped and captured gh run watch forms are unread (hooks/guard_stream.py)
 - printf-quote-walk-bandaid: walk_quotes reads a quote inside $( ) as the outer string's own; discards_output cuts and rereads to cover it (hooks/guard_core.py, hooks/guard.py)
