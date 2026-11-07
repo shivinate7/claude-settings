@@ -20,7 +20,7 @@ Read form. The guard does not judge Read. It returns early for Read and Grep. Th
 
 The printed refusal names no file. It names the shape of the access (`ENV_REDIRECT_REASON`, `ENV_VARIABLE_REASON`, `ENV_RUNNER_REASON`, `ENV_CONTENTS_REASON`, `ENV_DEPTH_REASON`, `ENV_TOOL_REASON`) and a remedy (`ENV_ADVICE`). The log holds the file name, for a person to read.
 
-Known false alarms: debt `env-file-rule-false-alarms` (the env-file false-alarm debt). The guard refuses `ag -f` and `ack -f`, where `-f` is a boolean flag, `grep -r --exclude=.env`, and `rg -t py .env`. All four are safe. None reads a file's contents.
+Known false alarms: none open. The guard allows `ag -f` and `ack -f` (a boolean flag), the values of `grep --exclude` and `--exclude-dir`, the values of `rg -t` and `-T`, a `jq`, `gojq` or `yq` program word such as `.envs`, and `cd`, `pushd` and `mkdir` on an env-prefixed folder. None reads a file's contents. It still refuses `git add` and `cat` on such a folder, on purpose: the guard cannot tell a folder from a file, and a file inside may hold the secrets. `--include`, `-g`, `--glob` and `--exclude-from` stay judged, since each can name the file.
 
 Why: the user's own secrets must not enter the session. `.envrc` is in the scope for the same reason. The guard stops Claude's mistakes, not an attacker's form (`guard-guards-mistakes-only`, a guard stops mistakes, not an attacker).
 
