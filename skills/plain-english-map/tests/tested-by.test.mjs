@@ -44,14 +44,15 @@
 //        a join from another module (T10k, T10v, T10x), a join in a comment, docstring or string (T10l).
 //   T11  known places the rule's list does not name yet. Loads, red on the old code: a JS folder from `path.dirname(fileURLToPath(import.meta.url))`
 //        (`url.fileURLToPath` too), `import.meta.dirname`, `path.dirname(import.meta.filename)`, `path.dirname(__filename)`,
-//        `fileURLToPath(new URL('.', import.meta.url))`, or a bare `dirname` from 'node:path' (T11a to T11f, T11t); a file, from
+//        `fileURLToPath(new URL('.', import.meta.url))`, or a bare `dirname` from 'node:path' (T11a to T11f, T11t); a relative URL literal
+//        on the file's own URL, `fileURLToPath(new URL('../src', import.meta.url))` (T11x); a file, from
 //        `fileURLToPath(import.meta.url)` (T11j); a Python folder from `os.path.normpath` (T11l), `Path(__file__).resolve().parents[1]`
 //        (T11m) or `Path(__file__).parents[1]` (T11u). The repo pairs read this repository's own files through readFacts: the loads fact of
 //        skills/waiting-page/tests/page.test.mjs names its page (T11v), and that of lint/test_stale_cites.py names bin/ste-changed (T11w).
 //        T11n is a control, green on main: realpath and abspath already keep a known place.
 //        Not a load, a FAIL, green on the old code and the guard of the allow side: the twins of those forms with an anchor that is shadowed
 //        (T11g), a temp folder (T11h, T11p, T11r), a foreign function (T11i), a function-local name (T11k), a parameter (T11o),
-//        a name bound twice (T11q), or a place outside the repository (T11s).
+//        a name bound twice (T11q), a place outside the repository (T11s), a URL on another base (T11y), or a `file:` scheme (T11z).
 //   C0   control, green on the old code: the import reader MAP11 uses reads the fixture's imports the way these cases assume.
 
 import { test } from 'node:test';
@@ -850,13 +851,14 @@ def test_wait():
 });
 
 // ---- T11. Known places the rule's list does not name yet. A JS folder is `path.dirname(fileURLToPath(import.meta.url))` (`url.fileURLToPath`
-// too), `path.dirname(import.meta.filename)`, `path.dirname(__filename)`, `import.meta.dirname`, or `fileURLToPath(new URL('.', import.meta.url))`.
+// too), `path.dirname(import.meta.filename)`, `path.dirname(__filename)`, `import.meta.dirname`, `fileURLToPath(new URL('.', import.meta.url))`,
+// or `fileURLToPath(new URL('<literal>', import.meta.url))` with a relative literal, which is that literal from the file's folder (T11x).
 // A Python folder is `os.path.normpath(...)` of a known place, and `Path(__file__).resolve().parents[n]` with a literal n.
 // A file (`__filename`, `import.meta.filename`, `fileURLToPath(import.meta.url)`) is a place too: a join from it resolves from the file's
 // path, so two `..` reach the folder above the test's folder (T11j). Python's `__file__` is a file place that a join does not take (py-facts.py
 // `place`), which is the difference Input Needed names.
-// Each allow case (T11g to T11i, T11k, T11o to T11s) is the twin of a should-name form, with the anchor unbound, shadowed, rebound, a temp
-// folder, a foreign function, a function-local name, or outside the repository.
+// Each allow case (T11g to T11i, T11k, T11o to T11s, T11y, T11z) is the twin of a should-name form, with the anchor unbound, shadowed, rebound,
+// a temp folder, a foreign function, a function-local name, outside the repository, on another URL base (T11y), or a `file:` scheme (T11z).
 // Assumed, Input Needed: the decision's list of known places names none of these forms, so the decision must name them before the builder
 // merges. Until then a strict reading turns each should-name case to FAIL.
 
@@ -1226,4 +1228,53 @@ test("T11w. repo pair, read in place: lint/test_stale_cites.py sets ROOT = os.pa
   const [got] = readFacts([{ file: repoTest, op: 'loads' }], ROOT, { tracked });
   assert.equal(got.ok, true, `the loads fact of ${repoTest} must read: ${got.reason ?? 'no reason given'}`);
   assert.ok(got.value.named.includes('bin/ste-changed'), `${repoTest} loads bin/ste-changed, so the fact must name it; it names ${JSON.stringify(got.value.named)}`);
+});
+
+// T11x to T11z. The JS URL form: `fileURLToPath(new URL('<literal>', import.meta.url))` is the literal resolved from the file's folder, so a
+// join from it lands on the folder the literal names (T11x). A URL on another base (T11y), or a `file:` scheme, which is an absolute URL, is no such place (T11z).
+test("T11x. const SRC = fileURLToPath(new URL('../src', import.meta.url)), a relative URL literal on the file's own URL, then path.join(SRC, 'home.ts') loads src/home.ts: MAP11 passes", () => {
+  needFile(REL);
+  const testFile = 'tests/url_literal.spec.ts';
+  const text = `import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const SRC = fileURLToPath(new URL('../src', import.meta.url));
+
+export const page = path.join(SRC, 'home.ts');
+`;
+  assert.match(text, /^const SRC = fileURLToPath\(new URL\('\.\.\/src', import\.meta\.url\)\);$/m, 'the test must hold the relative URL literal on import.meta.url');
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['../src', 'home.ts']);
+  mustLoad(check(dir), testFile, 'src/home.ts', "the anchor is fileURLToPath of new URL('../src', import.meta.url), a relative literal from the file's folder");
+});
+
+test("T11y. const SRC = fileURLToPath(new URL('../src', pathToFileURL(process.cwd()))): the URL's base is no import.meta.url, so SRC is no known place and path.join(SRC, 'home.ts') names nothing: MAP11 fails and names the page, the test and the file", () => {
+  needFile(REL);
+  const testFile = 'tests/url_other_base.spec.ts';
+  const text = `import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const SRC = fileURLToPath(new URL('../src', pathToFileURL(process.cwd())));
+
+export const page = path.join(SRC, 'home.ts');
+`;
+  // The scope first: the URL is built on a base that is no import.meta.url, so the verdict is about that base.
+  assert.match(text, /new URL\('\.\.\/src', pathToFileURL\(process\.cwd\(\)\)\)/, 'the test must build the URL on pathToFileURL(process.cwd())');
+  assert.doesNotMatch(text, /import\.meta\.url/, 'the test must not read import.meta.url');
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['../src', 'home.ts']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/home.ts', 'the base of the URL is no import.meta.url, so the anchor is no known place and the join is no load');
+});
+
+test("T11z. const SRC = fileURLToPath(new URL('file:/../../src', import.meta.url)): a file: scheme makes an absolute URL, which is /src on disk and no place of the repository, so path.join(SRC, 'home.ts') names nothing: MAP11 fails and names the page, the test and the file", () => {
+  needFile(REL);
+  const testFile = 'tests/url_file_literal.spec.ts';
+  const text = `import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const SRC = fileURLToPath(new URL('file:/../../src', import.meta.url));
+
+export const page = path.join(SRC, 'home.ts');
+`;
+  assert.match(text, /new URL\('file:\/\.\.\/\.\.\/src', import\.meta\.url\)/, 'the test must hold the file: literal on import.meta.url');
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['file:/../../src', 'home.ts']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/home.ts', 'a file: literal is an absolute URL, so the anchor is no place of the repository and the join is no load');
 });
