@@ -887,6 +887,35 @@ class Stale(unittest.TestCase):
         got, _, _ = self.prune_out(designs, items)
         self.assertEqual(got, {}, "closed items' mockups stay on OUT")
 
+    def test_prune_keeps_a_parked_items_mockup_because_an_unpark_reopens_it(self):
+        designs = {"parked-look": "<p>parked</p>", "closed-look": "<p>closed</p>"}
+        parked = look_item(45, "closed", designs=["parked-look"], options=["parked-look"],
+                           lastAnswer={"act": "park", "note": "Parked for later.", "at": "2026-11-06T18:00:00Z"})
+        items = [parked, look_item(46, "closed", designs=["closed-look"], options=["closed-look"])]
+        got, _, _ = self.prune_out(designs, items)
+        self.assertNotIn("closed-look", got, "control: a closed item that is not parked kept its mockup on OUT, so the prune did not run")
+        self.assertEqual(got.get("parked-look"), "<p>parked</p>",
+                         "a parked item's mockup was pruned from OUT, but Unpark reopens the item and its mockups must stay")
+
+    def test_prune_names_a_closed_items_mockup_by_designs_and_an_open_items_mockup_by_option(self):
+        designs = {"closed-by-designs-only": "<p>a</p>", "open-by-option-only": "<p>b</p>"}
+        items = [look_item(47, "closed", designs=["closed-by-designs-only"], options=()),  # names its mockup only in designs
+                 look_item(48, "open", designs=None, options=["open-by-option-only"])]  # names its mockup only in options
+        got, _, _ = self.prune_out(designs, items)
+        self.assertEqual(got.get("open-by-option-only"), "<p>b</p>",
+                         "an open item's mockup, named only by its option's design, was pruned from OUT")
+        self.assertNotIn("closed-by-designs-only", got, "a closed item's mockup, named only by its designs[].slug, stays on OUT")
+
+    def test_prune_counts_an_item_with_no_status_key_as_open(self):
+        designs = {"statusless-look": "<p>statusless</p>", "closed-look": "<p>closed</p>"}
+        statusless = look_item(49, "open", designs=["statusless-look"], options=["statusless-look"])
+        del statusless["status"]  # the page holds this item with no status key: the reader takes it as open
+        items = [statusless, look_item(50, "closed", designs=["closed-look"], options=["closed-look"])]
+        got, _, _ = self.prune_out(designs, items)
+        self.assertNotIn("closed-look", got, "control: a closed item's mockup stayed on OUT, so the prune did not run")
+        self.assertEqual(got.get("statusless-look"), "<p>statusless</p>",
+                         "an item with no status key was taken as closed, and its mockup was pruned from OUT")
+
     # Single-page mode with --items <file or folder>: one wait line per open item with a `waits` field, after the verdict line.
 
     def gh_env(self, answers):
