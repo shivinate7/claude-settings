@@ -1950,9 +1950,11 @@ def builder_test_path(path: str, cwd: str) -> bool:
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
     """The test path a builder's shell command writes, else ''. Two readings: the plain forms (a
     redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
-    python or node script a heredoc body or `-c` / `-e` holds, on the raw command."""
+    python or node script a heredoc body or `-c` / `-e` holds, on the raw command. The raw reading
+    also covers a script file the command runs (`python3 f`, `./f`, `bash f`, `source f`), read up to
+    MESSAGE_FILE_MAX bytes, one level deep: a script that writes a test path is no way round the check."""
     return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True)
-            or interpreter_write_hit(raw, cwd, builder_test_path))
+            or interpreter_write_hit(raw, cwd, builder_test_path, MESSAGE_FILE_MAX))
 
 
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:

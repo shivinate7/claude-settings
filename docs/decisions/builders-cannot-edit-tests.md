@@ -62,10 +62,10 @@ The payload must carry an `agent_id`. The main session, reviewers, Explore, and 
 
 The shell check does not replace the act. The act stays a test path in the builder's change. The shell check flags common mistake forms first. The diff log at commit, push and stop catches every other form. Recovery stays allowed: `git checkout -- <test>` and `git restore` are not read as writes.
 
-- Reads: a redirect, `tee`, `sed -i` or `cp` onto a test path (`_shell_write_hit`, with `command_position`). It also reads a python or node heredoc body, or a `-c` or `-e` script, that opens a test path for write (`interpreter_write_hit`). Both use the Edit path's predicate (`builder_test_path`).
+- Reads: a redirect, `tee`, `sed -i` or `cp` onto a test path (`_shell_write_hit`, with `command_position`). It also reads a python or node heredoc body, or a `-c` or `-e` script, that opens a test path for write (`interpreter_write_hit`). It also reads a script file the command runs, one level deep: `python3 f`, `node f`, `bash f`, `source f`, `. f`, and `./f` with a `#!` line, judged as that runner reads it. A file the same command writes from a heredoc is judged by its body, never the disk copy. A test file the command runs is not read, as running tests is builder work. All use the Edit path's predicate (`builder_test_path`).
 - Basis: named incident, 2026-11-01. In lane `refusal-cite-reach`, a builder changed `lint/test_rule_audit.py` through a python heredoc. It then restored the file with `git show HEAD:... > file`.
 - Landed: 2026-11-02.
-- Cost: no process, no file, no timer. The scan runs inside the guard hook that already runs for a builder's shell call. `ast` is imported only when a python body is read. A refusal writes its one guard.log line, as every refusal does. A scan error in the python or node reader is no hit. Any other scan error ends the judge: the guard logs `guard-crash` and allows the call.
+- Cost: no process, no file, no timer. The scan runs inside the guard hook that already runs for a builder's shell call. `ast` is imported only when a python body is read. A refusal writes its one guard.log line, as every refusal does. A script file read costs one stat and at most `MESSAGE_FILE_MAX` bytes (64 KiB) per builder shell call that names a script; a file that is missing, unreadable or over that cap is not read and gives no hit, and is never cut short. A scan error in the python or node reader is no hit. Any other scan error ends the judge: the guard logs `guard-crash` and allows the call.
 
 Kind: process
 Home: hooks/guard.py

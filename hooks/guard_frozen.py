@@ -8,8 +8,8 @@ import re
 
 import guard_core
 from guard_core import (
-    REDIRECT, SCRIPT_HEADERS, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally,
-    basename, dir_before_segment, interpreter_bodies, norm, resolve_command, segment_tokens, split_segments,
+    REDIRECT, SCRIPT_HEADERS, _WRITE_TARGET, _expanded, _plain_words, _resolved,
+    _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, dir_before_segment, interpreter_bodies, norm, resolve_command, segment_tokens, split_segments,
     strip_heredoc_bodies,
 )
 from guard_env import _quoted_words, _substitutions, script_spots
@@ -1022,22 +1022,25 @@ def _inline_scripts(command: str):
             yield found[0], str(tokens[found[1]]), number, segments, ends
 
 
-def interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
+def interpreter_write_hit(raw: str, cwd: str, predicate, file_cap: int = 0) -> str:
     """Return the path a python or node script in `raw` writes that `predicate(path, cwd)` accepts, else ''.
     Read: the body of each heredoc fed to python or node, quoted or not, and each `python -c` and
     `node -e` script. A script that only reads a path, or names it in a string, hits nothing.
+    With `file_cap` above 0 it also reads the file a segment runs (`_script_file_hit`).
     A crash of the scan reads as no hit: it must never skip the rules after it."""
     try:
-        return _interpreter_write_hit(raw, cwd, predicate)
+        return _interpreter_write_hit(raw, cwd, predicate, file_cap)
     except Exception:
         return ""
 
 
-def _interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
+def _interpreter_write_hit(raw: str, cwd: str, predicate, file_cap: int = 0) -> str:
+    written = set()
     if "<<" in raw:
         seen = set()
         for reading in (False, True):   # bash's own walk, and the one where a contraction's `'` is text
             for _quote, body, header in _split_heredocs(raw, reading)[1]:
+                written.update(_plain_words(_WRITE_TARGET.findall(header)))
                 if (header, body) in seen:
                     continue
                 seen.add((header, body))
@@ -1049,12 +1052,118 @@ def _interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
                     continue
                 if hit:
                     return hit
+        # A file the same command writes from a heredoc and then runs: its body is the script, never the disk copy.
+        for lang, body, _quote in interpreter_bodies(raw):
+            hit = (_py_hit if lang == "py" else _js_hit)(body, cwd, predicate) if lang in ("py", "js") else ""
+            if hit:
+                return hit
     if any(flag in raw for flag in _INLINE_FLAG_WORDS):
         for kind, script, number, segments, ends in _inline_scripts(raw):
             at = dir_before_segment(segments, number, cwd, ends) or cwd
             hit = (_py_hit if kind == "py" else _js_hit)(script, at, predicate)
             if hit:
                 return hit
+    return _script_file_hit(raw, cwd, predicate, file_cap, written) if file_cap > 0 else ""
+
+
+# The flags that take a value of their own, so the word after one is no script: `python -W ignore f`,
+# `node -r mod f`, `bash -o pipefail f`.
+_SCRIPT_VALUE_FLAGS = {
+    "py": ("-W", "-X", "-Q"),
+    "js": ("-r", "--require", "--import", "--loader", "--experimental-loader", "-C", "--conditions"),
+    "sh": ("-o", "-O", "--rcfile", "--init-file"),
+}
+# A flag that makes the next words code or a module, not a file: this reading then finds no script.
+_SCRIPT_NOT_FILE = {
+    "py": re.compile(r"^-[A-Za-z]*[cm]$"),
+    "js": re.compile(r"^(?:-[ep]{1,2}|--eval|--print|-i|--interactive|--test)$"),
+    "sh": re.compile(r"^-[A-Za-z]*[cs]$"),
+}
+_SHEBANG_KINDS = (("py", _PY_COMMAND), ("js", _NODE_COMMAND), ("sh", re.compile(r"^(?:ba|z|da|k)?sh$")))
+
+
+def _kind_of(name: str) -> str:
+    """The reading a command word gives its file: "py", "js" or "sh", else ''."""
+    return next((kind for kind, found in _SHEBANG_KINDS if found.match(name)), "")
+
+
+def _script_operand(tokens, index: int, kind: str) -> str:
+    """The file word a `kind` command at `tokens[index]` runs, else ''."""
+    at = index + 1
+    while at < len(tokens):
+        word = tokens[at]
+        if word == "--":
+            return tokens[at + 1] if at + 1 < len(tokens) else ""
+        if word == "-" or _SCRIPT_NOT_FILE[kind].match(word):
+            return ""
+        if not word.startswith("-"):
+            return word
+        at += 2 if word in _SCRIPT_VALUE_FLAGS[kind] else 1
+    return ""
+
+
+def _shebang_kind(text: str) -> str:
+    """The reading a file's `#!` line asks for (`#!/usr/bin/env python3`), else ''."""
+    first = text.split("\n", 1)[0]
+    if not first.startswith("#!"):
+        return ""
+    words = first[2:].split()
+    if words and basename(words[0]) == "env":
+        words = [word for word in words[1:] if not word.startswith("-") and "=" not in word][:1]
+    return _kind_of(basename(words[0])) if words else ""
+
+
+def _script_file_hit(raw: str, cwd: str, predicate, file_cap: int, written) -> str:
+    """The path that a script file a segment of `raw` runs writes, else ''. A segment runs a file as
+    `python3 f`, `node f`, `bash f`, `source f`, `. f`, or `./f` with a `#!` line; the file is read from the
+    folder the shell is in then, one level only. A file the same command writes is no disk copy (`written`:
+    its heredoc body is judged instead). A file that `predicate` accepts as a path is not read: running a
+    test is builder work. A file that is missing, no regular file, unreadable or over `file_cap` bytes is
+    not read and gives no hit, never a cut-short read: half a script can parse as another one."""
+    ends = []
+    segments = split_segments(_strip_heredoc_bodies_unconditionally(raw), ends)
+    for number, segment in enumerate(segments):
+        tokens = segment_tokens(segment)
+        index = resolve_command(tokens) if tokens else None
+        if index is None:
+            continue
+        command = basename(tokens[index])
+        if command in ("source", "."):
+            kind, operand = "sh", tokens[index + 1] if index + 1 < len(tokens) else ""
+        elif _kind_of(command):
+            kind = _kind_of(command)
+            operand = _script_operand(tokens, index, kind)
+        elif "/" in tokens[index]:
+            kind, operand = "", tokens[index]   # run as the command itself: its `#!` line says which reading
+        else:
+            continue
+        if not operand or operand.startswith("-"):
+            continue
+        if _plain_words([operand])[0] in written:
+            continue
+        at = dir_before_segment(segments, number, cwd, ends) or cwd
+        path = _expanded(operand, at)
+        if predicate(path, at):
+            continue
+        try:
+            if not os.path.isfile(path) or os.path.getsize(path) > file_cap:
+                continue
+            with open(path, "rb") as handle:
+                text = handle.read(file_cap).decode("utf-8", errors="replace")
+        except OSError:
+            continue
+        kind = kind or _shebang_kind(text)
+        if kind == "py":
+            hit = _py_hit(text, at, predicate)
+        elif kind == "js":
+            hit = _js_hit(text, at, predicate)
+        elif kind == "sh":
+            hit = _shell_write_hit(strip_heredoc_bodies(text), at, predicate, follow_cd=True,
+                                   command_position=True)
+        else:
+            continue
+        if hit:
+            return hit
     return ""
 
 
