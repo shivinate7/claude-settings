@@ -1585,8 +1585,8 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
 # A send_message or SendMessage whose message carries a Goal line and a Problem (<stake>) line is an owner question. It
 # gets the past-ruling check, the one home lint/report_guard.py past_ruling_problem, before it is sent, whoever the target
 # is: the page writer is not special. Any other send makes no model call and starts no subprocess.
-SEND_MCP, SEND_BUILTIN = "mcp__claude-code-remote__send_message", "SendMessage"
-SEND_TOOLS = (SEND_MCP, SEND_BUILTIN)
+from shared_names import SEND_TOOLS  # noqa: E402  the one home of the send tool names (hooks/shared_names.py)
+SEND_MCP, SEND_BUILTIN = SEND_TOOLS
 SEND_TARGET = "session_lane07"  # a lane, not the page writer: a send with the form is judged all the same
 REPORT_GUARD = os.path.join(REPO, "lint", "report_guard.py")
 # The two page items of 2026-11-07, verbatim. Inline on purpose: a test run reads no file outside the repo.

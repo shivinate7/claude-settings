@@ -467,7 +467,8 @@ class SendMessageJudge(unittest.TestCase):
 
 # An owner question sent by either send tool is judged before it is sent (hooks/call_judge.py, the send path). The one
 # command hook that runs call_judge.py must match both tool names, or the send goes out unchecked.
-SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+from shared_names import SEND_TOOLS  # noqa: E402  the one home of the send tool names (hooks/shared_names.py)
 
 
 class OwnerQuestionSendMatcher(unittest.TestCase):
