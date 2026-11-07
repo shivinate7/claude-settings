@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-07T20:31:00Z",
+  "context": "Goal: sessions stop each other only when that is safe and meant.\nProblem (rule): auto mode refused `mcp__claude-code-remote__interrupt_session` from a record-writer agent in lane roles-follow-ruling (2026-11-01 22:25 CST). The call was stray: the brief asked for no interrupt, so nothing was lost.\nBased on (ruling): decision auto-mode-owner-acts keeps `priority: now`, which interrupts the target's running turn, out of \"Owner Session Message\". Asked because the interrupt_session tool itself is named in no ruling.\nDeparts from: main, where auto mode refuses interrupt_session. Option a adds an allow entry.",
+  "home": "docs/debts/notes.md, note interrupt-session-refused",
+  "id": "interrupt-session-allow",
+  "kind": "decision",
+  "n": 371,
+  "options": [
+    {
+      "gain": "A coordinator can stop a lane that has gone off track without asking you.",
+      "key": "a",
+      "label": "Allow interrupt_session for a session that started the target",
+      "lose": "A stray interrupt, like the one on 2026-11-01, would go through and cut a lane's turn."
+    },
+    {
+      "gain": "No session cuts another's turn by mistake. It matches the decision that keeps `priority: now` out.",
+      "key": "b",
+      "label": "Keep it refused; the note closes with this ruling (recommended)",
+      "lose": "You stop a stuck lane yourself."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "b",
+  "rank": 3,
+  "ref": "decision auto-mode-owner-acts; note interrupt-session-refused",
+  "reply": "Dropped: decision report-guard-refusal-right (2026-11-01) already rules that when auto mode rightly refuses a stray agent call such as interrupt_session, the refusal stays and no allow-tool question is filed. The note interrupt-session-refused closes under that decision.",
+  "short": "interrupt_session: allow, or keep refused",
+  "status": "closed",
+  "title": "Should auto mode allow a session to interrupt another session?",
+  "why": "Kept note interrupt-session-refused asks you to say whether to allow the tool. The coordinator asked for it at 14:32 CST."
+}

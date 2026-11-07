@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-07T20:38:00Z",
+  "context": "Goal: every guard rule is tied to its test, so a cull or audit can find it.\nProblem (rule): lint/rule_mechanisms.json keys its rows on CLAUDE.md rule anchors. 72 guard rule ids have no row, and no anchor fits them.\nBased on (read): decision cull-rules says prose leaves only with proof, and the rule-map row names a test.\nBased on (read): lint/rule_mechanisms.json rows are keyed by CLAUDE.md anchors only (lane read, 14:38 CST).\nDeparts from: main, where 72 guard rule ids have no row \u2014 option a adds a guards section keyed by guard rule id.",
+  "home": "lane notes-fix-merge-ci (session_013NEJL17gMWcgUJ44gi3ZRs)",
+  "id": "guard-untied-from-rule-map",
+  "kind": "decision",
+  "lane": "notes-fix-merge-ci",
+  "n": 372,
+  "options": [
+    {
+      "gain": "Each guard rule is findable and pinned to its test, and a new guard rule with no row turns the audit red.",
+      "key": "a",
+      "label": "A guards section keyed by guard rule id, each row naming its test; lint/test_rule_audit.py requires a row for each id the guard emits (recommended)",
+      "lose": "One lane of work, and 72 rows to fill."
+    },
+    {
+      "gain": "The map keeps one key.",
+      "key": "b",
+      "label": "One row per CLAUDE.md anchor that lists its guard ids",
+      "lose": "Many guard ids fit no anchor, so they stay untied."
+    },
+    {
+      "gain": "Least work.",
+      "key": "c",
+      "label": "An exempt list, with a reason per id",
+      "lose": "Guards stay untied, and the list goes stale."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 3,
+  "ref": "note guard-untied-from-rule-map; decision cull-rules",
+  "short": "Guard rules in the rule map: own section, anchor rows, or exempt list",
+  "status": "open",
+  "title": "Where should the rule map tie each guard rule to its test?",
+  "why": "Lane notes-fix-merge-ci (session_013NEJL17gMWcgUJ44gi3ZRs) found 72 guard rule ids with no row in the rule map (the note said 3). The map's shape needs your pick."
+}
