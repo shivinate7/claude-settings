@@ -17,7 +17,8 @@
 //   - a join whose anchor is a string literal reads that literal as its first piece (T10e), and `posixpath.dirname` counts as
 //     `os.path.dirname` (T10m). The rule's list of known anchors names neither. Both are Assumed, and Input Needed: a strict reading turns each to FAIL.
 //   - the known places of T11 (the ESM and Python forms below) are the brief's direction. The rule's list names none of them, so the
-//     decision must name them before the builder merges, or a strict reading turns each should-name case to FAIL.
+//     decision must name them before the builder merges, or a strict reading turns each should-name case to FAIL. A file is a place too
+//     (T11j). Python's `os.path.join(__file__, ...)` names nothing today, so the two languages differ there. Input Needed.
 //
 // Cases:
 //   T1   the clean fixture passes. T1b: no tested-by line at all passes. T1c, T1d: full size, 40 tests on one line, all pass; one that does not load the file fails.
@@ -42,11 +43,14 @@
 //        file from the real place (T10h, T10q), a name or a starred piece (T10f, T10j), an absolute piece (T10i), an array join (T10g),
 //        a join from another module (T10k, T10v, T10x), a join in a comment, docstring or string (T10l).
 //   T11  known places the rule's list does not name yet. Loads, red on the old code: a JS folder from `path.dirname(fileURLToPath(import.meta.url))`
-//        (`url.fileURLToPath` too), `import.meta.dirname`, `path.dirname(import.meta.filename)`, `path.dirname(__filename)` or
-//        `fileURLToPath(new URL('.', import.meta.url))` (T11a to T11f); a Python folder from `os.path.normpath` (T11l) or
-//        `Path(__file__).resolve().parents[1]` (T11m). T11n is a control, green on main: realpath and abspath already keep a known place.
+//        (`url.fileURLToPath` too), `import.meta.dirname`, `path.dirname(import.meta.filename)`, `path.dirname(__filename)`,
+//        `fileURLToPath(new URL('.', import.meta.url))`, or a bare `dirname` from 'node:path' (T11a to T11f, T11t); a file, from
+//        `fileURLToPath(import.meta.url)` (T11j); a Python folder from `os.path.normpath` (T11l), `Path(__file__).resolve().parents[1]`
+//        (T11m) or `Path(__file__).parents[1]` (T11u). The repo pairs read this repository's own files through readFacts: the loads fact of
+//        skills/waiting-page/tests/page.test.mjs names its page (T11v), and that of lint/test_stale_cites.py names bin/ste-changed (T11w).
+//        T11n is a control, green on main: realpath and abspath already keep a known place.
 //        Not a load, a FAIL, green on the old code and the guard of the allow side: the twins of those forms with an anchor that is shadowed
-//        (T11g), a temp folder (T11h, T11p, T11r), a foreign function (T11i), a file (T11j), a function-local name (T11k), a parameter (T11o),
+//        (T11g), a temp folder (T11h, T11p, T11r), a foreign function (T11i), a function-local name (T11k), a parameter (T11o),
 //        a name bound twice (T11q), or a place outside the repository (T11s).
 //   C0   control, green on the old code: the import reader MAP11 uses reads the fixture's imports the way these cases assume.
 
@@ -55,7 +59,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, join, posix } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { FIXTURE, POSIX_ONLY, SKILL, gitIn, needFile, run, scratchRepo, tmpFolder } from './helpers.mjs';
+import { FIXTURE, POSIX_ONLY, ROOT, SKILL, gitIn, needFile, run, scratchRepo, tmpFolder } from './helpers.mjs';
 
 const REL = 'scripts/map-check.mjs';
 const CHECK = join(SKILL, 'scripts', 'map-check.mjs');
@@ -848,10 +852,11 @@ def test_wait():
 // ---- T11. Known places the rule's list does not name yet. A JS folder is `path.dirname(fileURLToPath(import.meta.url))` (`url.fileURLToPath`
 // too), `path.dirname(import.meta.filename)`, `path.dirname(__filename)`, `import.meta.dirname`, or `fileURLToPath(new URL('.', import.meta.url))`.
 // A Python folder is `os.path.normpath(...)` of a known place, and `Path(__file__).resolve().parents[n]` with a literal n.
-// A file (`__filename`, `import.meta.filename`, `fileURLToPath(import.meta.url)`) names a place only through its dirname: a join from the
-// file itself names nothing, as a join from `__file__` names nothing in py-facts.py (`place` keeps the kind `file`, which a join does not take).
-// Each allow case (T11g to T11k, T11o to T11s) is the twin of a should-name form, with the anchor unbound, shadowed, rebound, a temp folder,
-// a foreign function, a function-local name, or outside the repository.
+// A file (`__filename`, `import.meta.filename`, `fileURLToPath(import.meta.url)`) is a place too: a join from it resolves from the file's
+// path, so two `..` reach the folder above the test's folder (T11j). Python's `__file__` is a file place that a join does not take (py-facts.py
+// `place`), which is the difference Input Needed names.
+// Each allow case (T11g to T11i, T11k, T11o to T11s) is the twin of a should-name form, with the anchor unbound, shadowed, rebound, a temp
+// folder, a foreign function, a function-local name, or outside the repository.
 // Assumed, Input Needed: the decision's list of known places names none of these forms, so the decision must name them before the builder
 // merges. Until then a strict reading turns each should-name case to FAIL.
 
@@ -993,7 +998,7 @@ export const page = path.join(HERE, '..', 'src', 'home.ts');
   mustNotLoad(check(dir), CORE, testFile, 'src/home.ts', 'a dirname imported from another module is no path dirname, so the join is no load');
 });
 
-test("T11j. FILE = fileURLToPath(import.meta.url) is the file, not a folder: path.join(FILE, '..', '..', 'src', 'home.ts') names nothing, since a file is no join anchor: MAP11 fails and names the page, the test and the file", () => {
+test("T11j. const FILE = fileURLToPath(import.meta.url), the test's own file: path.join(FILE, '..', '..', 'src', 'home.ts') loads src/home.ts, since two '..' from the file reach the root: MAP11 passes", () => {
   needFile(REL);
   const testFile = 'tests/file_anchor.spec.ts';
   const text = `import path from 'node:path';
@@ -1005,7 +1010,7 @@ export const page = path.join(FILE, '..', '..', 'src', 'home.ts');
 `;
   assert.match(text, /^const FILE = fileURLToPath\(import\.meta\.url\);$/m, 'the test must bind FILE to the file path');
   const dir = pieceCase(testFile, text, 'src/home.ts', ['..', 'src', 'home.ts']);
-  mustNotLoad(check(dir), CORE, testFile, 'src/home.ts', 'a file is no folder, so a join from it is no load');
+  mustLoad(check(dir), testFile, 'src/home.ts', 'the anchor is the file itself, and a join from it resolves from its path');
 });
 
 test("T11k. HERE = path.dirname(fileURLToPath(import.meta.url)) bound inside a function, not at module level: the name is no module-level const, so path.join(HERE, '..', 'src', 'home.ts') names nothing: MAP11 fails and names the page, the test and the file", () => {
@@ -1157,4 +1162,68 @@ def test_wait():
   assert.match(text, /^ROOT = Path\(__file__\)\.parents\[2\]$/m, 'the test must bind ROOT to parents[2] of the file');
   const dir = pieceCase(testFile, text, 'src/retry.py', ['src', 'retry.py']);
   mustNotLoad(check(dir), CORE, testFile, 'src/retry.py', 'parents[2] of tests/x.py is above the repository, so the chain is no load');
+});
+
+test("T11t. the positive twin of T11i: import { dirname, join } from 'node:path', then const HERE = dirname(fileURLToPath(import.meta.url)) and join(HERE, '..', 'src', 'home.ts') loads src/home.ts: MAP11 passes", () => {
+  needFile(REL);
+  const testFile = 'tests/here_bare.spec.ts';
+  const text = `import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+export const page = join(HERE, '..', 'src', 'home.ts');
+`;
+  assert.match(text, /^import \{ dirname, join \} from 'node:path';$/m, "the test must import dirname and join from 'node:path'");
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['..', 'src', 'home.ts']);
+  mustLoad(check(dir), testFile, 'src/home.ts', 'a bare dirname and join imported from node:path');
+});
+
+test('T11u. the positive twin of T11s: ROOT = Path(__file__).parents[1] at module level, then ROOT / "src" / "retry.py" loads src/retry.py: MAP11 passes', () => {
+  needFile(REL);
+  const testFile = 'tests/parents_plain.py';
+  const text = `from pathlib import Path
+
+ROOT = Path(__file__).parents[1]
+
+
+def test_wait():
+    path = ROOT / "src" / "retry.py"
+    assert path.is_file()
+`;
+  assert.match(text, /^ROOT = Path\(__file__\)\.parents\[1\]$/m, 'the test must bind ROOT to parents[1] of the file');
+  const dir = pieceCase(testFile, text, 'src/retry.py', ['src', 'retry.py']);
+  mustLoad(check(dir), testFile, 'src/retry.py', 'the anchor is a module-level name bound to Path(__file__).parents[1]');
+});
+
+// The repo pairs read this repository's own files, so they need its tracked list (`git ls-files`). They are the real examples of the two
+// gaps, read in place: the case goes red when the repo's own code keeps the form the gap is about, and the reader names nothing for it.
+test("T11v. repo pair, read in place: skills/waiting-page/tests/page.test.mjs builds its page path as path.join(HERE, '..', 'page.html') with HERE = path.dirname(fileURLToPath(import.meta.url)), so the loads fact of this repo names skills/waiting-page/page.html", async () => {
+  needFile('scripts/lib/fact-readers.mjs');
+  const repoTest = 'skills/waiting-page/tests/page.test.mjs';
+  // The scope first: the repo file must hold the form, or the case proves nothing about it.
+  const text = readFileSync(join(ROOT, repoTest), 'utf8');
+  assert.match(text, /^const HERE = path\.dirname\(fileURLToPath\(import\.meta\.url\)\);$/m, `${repoTest} must hold the dirname form`);
+  assert.match(text, /path\.join\(HERE, "\.\.", "page\.html"\)/, `${repoTest} must join HERE with ".." and "page.html"`);
+  const { readFacts } = await import(pathToFileURL(join(SKILL, 'scripts', 'lib', 'fact-readers.mjs')).href);
+  const tracked = gitIn(ROOT, 'ls-files').split('\n').filter((l) => l !== '');
+  assert.ok(tracked.includes('skills/waiting-page/page.html'), 'skills/waiting-page/page.html must be tracked, or the pair names nothing to find');
+  const [got] = readFacts([{ file: repoTest, op: 'loads' }], ROOT, { tracked });
+  assert.equal(got.ok, true, `the loads fact of ${repoTest} must read: ${got.reason ?? 'no reason given'}`);
+  assert.ok(got.value.named.includes('skills/waiting-page/page.html'), `${repoTest} loads skills/waiting-page/page.html, so the fact must name it; it names ${JSON.stringify(got.value.named)}`);
+});
+
+test("T11w. repo pair, read in place: lint/test_stale_cites.py sets ROOT = os.path.normpath(os.path.join(HERE, '..')) and joins bin/ste-changed from it, so the loads fact of this repo names bin/ste-changed", async () => {
+  needFile('scripts/lib/fact-readers.mjs');
+  const repoTest = 'lint/test_stale_cites.py';
+  // The scope first: the repo file must hold the normpath form and the join from ROOT, or the case proves nothing about it.
+  const text = readFileSync(join(ROOT, repoTest), 'utf8');
+  assert.match(text, /^ROOT = os\.path\.normpath\(os\.path\.join\(HERE, "\.\."\)\)$/m, `${repoTest} must hold the normpath form`);
+  assert.match(text, /os\.path\.join\(ROOT, "bin", "ste-changed"\)/, `${repoTest} must join bin/ste-changed from ROOT`);
+  const { readFacts } = await import(pathToFileURL(join(SKILL, 'scripts', 'lib', 'fact-readers.mjs')).href);
+  const tracked = gitIn(ROOT, 'ls-files').split('\n').filter((l) => l !== '');
+  assert.ok(tracked.includes('bin/ste-changed'), 'bin/ste-changed must be tracked, or the pair names nothing to find');
+  const [got] = readFacts([{ file: repoTest, op: 'loads' }], ROOT, { tracked });
+  assert.equal(got.ok, true, `the loads fact of ${repoTest} must read: ${got.reason ?? 'no reason given'}`);
+  assert.ok(got.value.named.includes('bin/ste-changed'), `${repoTest} loads bin/ste-changed, so the fact must name it; it names ${JSON.stringify(got.value.named)}`);
 });
