@@ -34,6 +34,7 @@ STEP = {"title": "t", "status": "todo", "phase": "cleanup", "order": 1, "note": 
 CONFLICT = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> 1234567 (other)\n"
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
 _NO_LANE = object()  # item(): the default, which leaves the row's lane key out
+_ABSENT = object()  # commit_step(): a field set to this is left out of the step file
 # get_session's status_bucket as list_sessions returns it: the SESSION_STATUS_BUCKET_* enum names, measured on real rows.
 BUCKET_COMPLETED = "SESSION_STATUS_BUCKET_COMPLETED"
 BUCKET_REVIEW_READY = "SESSION_STATUS_BUCKET_REVIEW_READY"
@@ -567,8 +568,8 @@ class UpkeepFixture(Fixture):
         self.use_origin(self.SLUG)
 
     def commit_step(self, sid, **fields):
-        """Write a step on the record branch and commit it, where a build from main reads it."""
-        self.write_step(sid, dict(STEP, **fields))
+        """Write a step on the record branch and commit it, where a build from main reads it. A field set to _ABSENT is left out."""
+        self.write_step(sid, {k: v for k, v in dict(STEP, **fields).items() if v is not _ABSENT})
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "step " + sid)
 
@@ -647,6 +648,12 @@ class UpkeepFixture(Fixture):
         info = build_info(page)
         self.assertIn("stalled", info, "the page has no stalled block")
         return info["stalled"]
+
+    def ready_block(self, page):
+        """The page's ready block. Fails with a named cause when the page has none."""
+        info = build_info(page)
+        self.assertIn("ready", info, "the page has no ready block")
+        return info["ready"]
 
     def land(self, sid, pr, **fields):
         """Write the step on the record branch, then land it on main as a merged PR's commit with a Step: trailer.
@@ -1155,6 +1162,300 @@ class StalledItem(UpkeepFixture):
         self.assertEqual(self.code, 0, "a known read with no stalled item exits 0")
 
 
+class ReadyNotStarted(UpkeepFixture):
+    """The ready-not-started view (plan: stalled steps, Part 2). A todo or ready step in phase now is listed in the
+    page's ready block when no live lane holds it (no cs-step session, no open pull on its id or lane/<id>), it has
+    no valid `paused` field, and no open waiting-page item homed to it has a lane. Its age is whole hours from its
+    updatedAt to the live read, or None. The build prints `ready not started: <id> (<age>h)` per step, or one
+    `ready not started: <why>` when the read is unknown. Ready lines never change the exit code."""
+
+    def setUp(self):
+        super().setUp()
+        self.read_at = iso_ago(5)  # the live read; the fixture's ages are counted back from it
+
+    def before(self, minutes):
+        """An ISO UTC time `minutes` before the live read."""
+        at = datetime.datetime.fromisoformat(self.read_at.replace("Z", "+00:00"))
+        return (at - datetime.timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def ready_step(self, sid, order, **fields):
+        """Commit a todo step in phase now, last updated 3 h 10 min before the live read, so its age is 3 whichever
+        way the hours round. Fields override those defaults."""
+        git(self.repo, "checkout", "-q", "roadmap")
+        step = dict(status="todo", phase="now", order=order, updatedAt=self.before(190))
+        step.update(fields)
+        self.commit_step(sid, **step)
+
+    def known_read(self, sessions=(), pulls=(), items=()):
+        """A live file read at self.read_at, with its sessions and items lists, so the read is known."""
+        self.publish(sessions=list(sessions), pulls=list(pulls), items=list(items), read_at=self.read_at)
+
+    def ready_ids(self, ready):
+        """The listed ids, in order. The steps must be a list before any id is read, so an unknown None fails by name."""
+        self.assertIsNotNone(ready.get("steps"), "the read is unknown (%s), so no steps are listed" % ready.get("why"))
+        return [s["id"] for s in ready["steps"]]
+
+    def ready_lines(self, out):
+        return re.findall(r"^ready not started: .*$", out, re.M)
+
+    def assert_unknown(self, live_args, prefix):
+        """A build from main with `live_args`: the ready block is unknown, lists no steps, and prints its why as one line."""
+        page, out = self.build_from_main(*live_args, expect=(0,))
+        ready = self.ready_block(page)
+        why = str(ready.get("why"))
+        self.assertTrue(why.startswith(prefix), "the why reads %r, not %r" % (why, prefix))
+        self.assertIsNone(ready.get("steps"), "an unknown read lists no steps, never []")
+        self.assertEqual(self.ready_lines(out), ["ready not started: %s" % why], "the unknown read prints one line")
+
+    def test_todo_step_in_phase_now_with_no_lane_is_listed(self):
+        self.ready_step("c2", order=2)
+        self.known_read()
+        page, _ = self.build_from_main("--live", str(self.live))
+        ready = self.ready_block(page)
+        self.assertIsNone(ready.get("why"), "a known read has no why")
+        self.assertEqual(self.ready_ids(ready), ["c2"], "the todo step in phase now is listed")
+        self.assertEqual(self.code, 0, "a ready step alone does not stall the build")
+
+    def test_ready_status_step_is_listed(self):
+        self.ready_step("c2", order=2, status="ready")
+        self.known_read()
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.ready_ids(self.ready_block(page)), ["c2"], "a step with status ready is listed")
+
+    def test_listed_steps_are_in_step_order_not_commit_order(self):
+        self.ready_step("c3", order=3)  # committed first, but later in step order
+        self.ready_step("c2", order=2)
+        self.known_read()
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.ready_ids(self.ready_block(page)), ["c2", "c3"], "listed by step order")
+
+    def test_every_ready_step_is_listed_in_order_at_full_size(self):
+        git(self.repo, "checkout", "-q", "roadmap")
+        for n in range(1, 26):
+            self.write_step("r%02d" % n, dict(STEP, status="todo", phase="now", order=n, updatedAt=self.before(190)))
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "25 ready steps")
+        self.known_read()
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.ready_ids(self.ready_block(page)), ["r%02d" % n for n in range(1, 26)],
+                         "all 25 ready steps are listed, in step order")
+
+    def test_no_ready_step_reads_an_empty_list_not_unknown(self):
+        self.known_read()  # the fixture's c1 is in phase cleanup, so nothing is ready
+        page, _ = self.build_from_main("--live", str(self.live))
+        ready = self.ready_block(page)
+        self.assertIsNone(ready.get("why"), "a known read has no why")
+        self.assertEqual(self.ready_ids(ready), [], "zero ready steps is an empty list")
+
+    def test_open_pull_on_the_step_id_or_its_lane_branch_excludes_it(self):
+        self.ready_step("c2", order=2)
+        self.ready_step("c3", order=3)  # control: no pull names it
+        for branch in ("c2", "lane/c2"):
+            with self.subTest(branch=branch):
+                self.known_read(pulls=[{"number": 7, "title": "Lane c2", "branch": branch}])
+                page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))  # the todo-with-open-PR line exits 1
+                self.assertEqual(self.ready_ids(self.ready_block(page)), ["c3"], "an open pull on %s holds c2 back" % branch)
+
+    def test_cs_step_session_excludes_the_step(self):
+        self.ready_step("c2", order=2)
+        self.ready_step("c3", order=3)  # control
+        self.known_read(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c2")])
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.ready_ids(self.ready_block(page)), ["c3"], "a live cs-step:c2 session holds c2 back")
+
+    def test_cs_topic_session_does_not_exclude_the_step(self):
+        self.ready_step("c2", order=2)
+        self.ready_step("c3", order=3)
+        self.known_read(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-topic:c2")])
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.ready_ids(self.ready_block(page)), ["c2", "c3"], "a cs-topic tag never holds a step back")
+
+    def test_valid_paused_excludes_the_step_and_a_wrong_shaped_one_keeps_it(self):
+        self.ready_step("c3", order=3)  # control
+        self.ready_step("c2", order=2, paused=StalledStep.PAUSE)
+        self.known_read()
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.ready_ids(self.ready_block(page)), ["c3"], "a valid pause excludes c2")
+        bad = {
+            "empty why": dict(StalledStep.PAUSE, why=""),
+            "decides not in the set": dict(StalledStep.PAUSE, decides="boss"),
+            "at with no zone": dict(StalledStep.PAUSE, at="2026-11-06T11:00:00"),
+        }
+        for name, paused in bad.items():
+            with self.subTest(name):
+                self.ready_step("c2", order=2, paused=paused)
+                self.known_read()
+                page, _ = self.build_from_main("--live", str(self.live))
+                self.assertEqual(self.ready_ids(self.ready_block(page)), ["c2", "c3"], "a wrong-shaped pause keeps c2 listed")
+
+    def test_open_unanswered_item_homed_to_the_step_excludes_it(self):
+        self.ready_step("c2", order=2)
+        self.ready_step("c3", order=3)  # control
+        for home in ("step c2", "STEP c2", "c2"):
+            with self.subTest(home=home):
+                self.known_read(items=[self.item(4, home=home, status="open", lane=None)])
+                page, _ = self.build_from_main("--live", str(self.live))
+                self.assertEqual(self.ready_ids(self.ready_block(page)), ["c3"], "an open item with no lane holds c2 back")
+
+    def test_an_item_with_a_lane_or_a_closed_item_does_not_exclude_the_step(self):
+        self.ready_step("c2", order=2)
+        self.ready_step("c3", order=3)
+        cases = {
+            # an open item on a lane with no live work is a stalled item, so the build exits 1
+            "open with a lane": (self.item(4, home="step c2", status="open", lane="batch-runner"), (0, 1)),
+            "closed with no lane": (self.item(4, home="step c2", status="closed", lane=None), (0,)),
+        }
+        for name, (row, expect) in cases.items():
+            with self.subTest(name):
+                self.known_read(items=[row])
+                page, _ = self.build_from_main("--live", str(self.live), expect=expect)
+                self.assertEqual(self.ready_ids(self.ready_block(page)), ["c2", "c3"], "%s does not hold c2 back" % name)
+
+    def test_doing_or_active_step_is_not_listed(self):
+        self.ready_step("c3", order=3)  # control
+        for status in ("doing", "active"):
+            with self.subTest(status=status):
+                self.ready_step("c2", order=2, status=status)
+                self.known_read()
+                # a lane-less doing or active step is stalled, so the build exits 1
+                page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))
+                self.assertEqual(self.ready_ids(self.ready_block(page)), ["c3"], "stalled covers %s steps" % status)
+
+    def test_phase_other_than_now_and_done_steps_are_not_listed(self):
+        self.ready_step("c3", order=3)  # control
+        for label, fields in (("phase next", {"phase": "next"}), ("done", {"status": "done"})):
+            with self.subTest(label):
+                self.ready_step("c2", order=2, **fields)
+                self.known_read()
+                page, _ = self.build_from_main("--live", str(self.live))
+                self.assertEqual(self.ready_ids(self.ready_block(page)), ["c3"], "a %s step is not listed" % label)
+
+    def test_unknown_read_lists_no_steps_and_prints_one_unknown_line(self):
+        self.ready_step("c2", order=2)  # ready on its own, so a None can only come from the read
+        with self.subTest("no --live file"):
+            self.assert_unknown((), "unknown (no --live file")
+        cases = {
+            "readAt two hours old": (dict(sessions=[], items=[], read_at=iso_ago(120)), "unknown (the live file was read "),
+            "no sessions list": (dict(sessions=None, items=[]), "unknown (the live file has no sessions list"),
+            "no items list": (dict(sessions=[], items=None), "unknown (the live file has no items list"),
+            "open row with no lane key": (dict(sessions=[], items=[self.item(4, home="step c9", status="open")]),
+                                          "unknown (an open items row has no lane key"),
+        }
+        for name, (live, prefix) in cases.items():
+            with self.subTest(name):
+                self.publish(**dict({"read_at": self.read_at}, **live))
+                self.assert_unknown(("--live", str(self.live)), prefix)
+
+    def test_closed_row_with_no_lane_key_does_not_make_the_read_unknown(self):
+        self.ready_step("c2", order=2)
+        self.known_read(items=[self.item(4, home="step c2", status="closed")])
+        page, _ = self.build_from_main("--live", str(self.live))
+        ready = self.ready_block(page)
+        self.assertIsNone(ready.get("why"), "only an open row with no lane key reads the items unknown")
+        self.assertEqual(self.ready_ids(ready), ["c2"])
+
+    def test_age_is_whole_hours_from_updated_at_to_the_live_read(self):
+        self.ready_step("c2", order=2)  # 3 h 10 min before the read: age 3
+        self.ready_step("c3", order=3, updatedAt=self.before(26 * 60 + 10))  # age 26
+        self.known_read()
+        page, _ = self.build_from_main("--live", str(self.live))
+        ready = self.ready_block(page)
+        self.assertEqual(self.ready_ids(ready), ["c2", "c3"])
+        self.assertEqual([s["age"] for s in ready["steps"]], [3, 26], "age is whole hours from updatedAt to the read")
+        self.assertTrue(all(type(s["age"]) is int for s in ready["steps"]), "an age is an int")
+
+    def test_age_is_none_when_updated_at_is_missing_or_has_no_zone(self):
+        self.ready_step("c2", order=2, updatedAt=_ABSENT)
+        self.ready_step("c3", order=3, updatedAt=self.before(190).replace("Z", ""))
+        self.known_read()
+        page, _ = self.build_from_main("--live", str(self.live))
+        ready = self.ready_block(page)
+        self.assertEqual(self.ready_ids(ready), ["c2", "c3"])
+        self.assertEqual([s["age"] for s in ready["steps"]], [None, None], "a missing or zoneless updatedAt has no age")
+
+    def test_each_listed_step_prints_its_age_or_age_unknown(self):
+        self.ready_step("c2", order=2)
+        self.ready_step("c3", order=3, updatedAt=_ABSENT)
+        self.known_read()
+        _, out = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.ready_lines(out), ["ready not started: c2 (3h)", "ready not started: c3 (age unknown)"],
+                         "one line per listed step, with its age")
+
+    def test_ready_lines_never_change_the_exit_code(self):
+        self.ready_step("c2", order=2)
+        with self.subTest("ready only"):
+            self.known_read()
+            _, out = self.build_from_main("--live", str(self.live))
+            self.assertEqual(self.ready_lines(out), ["ready not started: c2 (3h)"], "the ready line is printed")
+            self.assertEqual(self.code, 0, "a ready line alone exits 0")
+        self.ready_step("c3", order=3, status="doing")  # a lane-less doing step is stalled and exits 1
+        with self.subTest("ready beside a stalled step"):
+            self.known_read()
+            _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+            self.assertEqual(self.ready_lines(out), ["ready not started: c2 (3h)"], "the ready line is printed beside a stall")
+            self.assertEqual(self.code, 1, "the stalled step still exits 1")
+
+    def test_ready_status_step_is_not_an_unknown_status_entry_in_the_upkeep(self):
+        self.ready_step("c2", order=2, status="ready")
+        self.commit_step("c3", status="waiting", order=3)  # control: an unknown status is listed
+        self.known_read()
+        _, out = self.build_from_main("--live", str(self.live))
+        _, detail = self.row(out, StaleInProgress.ROW)
+        self.assertIn('c3 (unknown status "waiting")', detail, "control: the row lists the unknown status")
+        self.assertNotIn('c2 (unknown status "ready")', detail, "ready is a known status, so the row never lists c2")
+
+    def test_listed_steps_follow_step_order_not_the_step_id(self):
+        self.ready_step("c3", order=1)
+        self.ready_step("c1", order=2)  # c1 sorts first by id, so only the order puts c3 first
+        self.known_read()
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.ready_ids(self.ready_block(page)), ["c3", "c1"], "listed by step order")
+
+    def test_age_floors_to_whole_hours(self):
+        self.ready_step("c2", order=2, updatedAt=self.before(220))  # 3 h 40 min floors to 3; rounding would give 4
+        self.known_read()
+        page, _ = self.build_from_main("--live", str(self.live))
+        ready = self.ready_block(page)
+        self.assertEqual(self.ready_ids(ready), ["c2"])
+        self.assertEqual([s["age"] for s in ready["steps"]], [3], "the age is whole hours, rounded down")
+
+    def test_item_with_an_empty_lane_holds_the_step_back(self):
+        self.ready_step("c2", order=2)
+        self.ready_step("c3", order=3)  # control
+        self.known_read(items=[self.item(4, home="step c2", status="open", lane="")])
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.ready_ids(self.ready_block(page)), ["c3"], "an empty lane is unanswered, so it holds c2 back")
+
+    def test_steps_unknown_prints_one_unknown_ready_line(self):
+        self.on_main()
+        code, out = run_build("--repo", str(self.repo), "--record-branch", "no-such-branch", "--out", str(self.out))
+        self.assertIn(code, (0, None), out)
+        self.assertEqual(self.ready_lines(out), ["ready not started: unknown (steps unknown)"],
+                         "with no steps, the build prints one unknown ready line")
+
+
+class UntouchedInLivePhase(UpkeepFixture):
+    """The upkeep row `untouched 5 days in a live phase`: each open step in a phase that holds an active step, whose
+    updatedAt is STALE_DAYS old or more, or cannot be read. A zoneless, null or int updatedAt lists the step; it never
+    crashes the build."""
+
+    ROW = "untouched 5 days in a live phase"
+
+    def test_unreadable_updated_at_lists_the_step_and_does_not_crash(self):
+        self.commit_step("live-a", status="active", phase="build", updatedAt=iso_ago(5), order=1)  # control: fresh
+        for name, value in (("zoneless", "2026-11-01T10:00:00"), ("null", None), ("int", 1234)):
+            with self.subTest(name):
+                git(self.repo, "checkout", "-q", "roadmap")
+                self.commit_step("bad-b", status="todo", phase="build", updatedAt=value, order=2)
+                try:
+                    _, out = self.build_from_main()
+                except Exception as err:  # the crash is the defect, so it fails by name, not as an error
+                    self.fail("upkeep crashed on an updatedAt that is %s: %s: %s" % (name, type(err).__name__, err))
+                count, detail = self.row(out, self.ROW)
+                self.assertEqual((count, self.entries(detail)), (1, ["bad-b"]),
+                                 "the unreadable step is listed, and the fresh active step is not")
+
+
 class PageRulings(UpkeepFixture):
     """The upkeep row for each closed waiting-page item whose home step is open and cites the item nowhere.
     The step's note, why or ask cites an item with `item <n>` (any case, an optional #). The row reads
@@ -1655,6 +1956,14 @@ class TodoWithOpenPull(UpkeepFixture):
         self.assertEqual(len(lines), 1, out)
         self.assertRegex(lines[0], r"^unknown \(the live file was read \d+ minutes ago")
 
+    def test_ready_step_with_an_open_pull_gets_the_pair_line_like_todo(self):
+        self.commit_step("r8")  # control: a todo step with an open pull
+        self.commit_step("r9", status="ready", order=2)
+        self.publish(sessions=[], pulls=[{"number": 80, "title": "r8 lane", "branch": "r8"},
+                                         {"number": 90, "title": "r9 lane", "branch": "r9"}])
+        _, out = self.build_from_main("--live", str(self.live), expect=(1,))
+        self.assertEqual(self.pair_lines(out), ["r8 (#80)", "r9 (#90)"], "a ready step is a todo step for the pair line")
+
 
 class ReadyAndDraftRows(UpkeepFixture):
     """Two upkeep rows (spec part B). `ready todo steps` lists each todo step whose note has the sentence `Ready.`,
@@ -1689,6 +1998,13 @@ class ReadyAndDraftRows(UpkeepFixture):
         _, out = self.build_from_main()
         count, detail = self.row(out, self.READY)
         self.assertEqual((count, self.entries(detail)), (1, ["t-todo"]))
+
+    def test_ready_status_step_with_a_ready_sentence_is_listed_too(self):
+        self.commit_step("t-todo", note="Ready.", order=2)  # control: listed
+        self.commit_step("r-ready", status="ready", note="Ready.", order=3)
+        _, out = self.build_from_main()
+        count, detail = self.row(out, self.READY)
+        self.assertEqual((count, self.entries(detail)), (2, ["r-ready", "t-todo"]), "ready reads as todo in this row")
 
     def test_draft_under_twelve_hours_before_the_read_is_not_listed(self):
         # The read is 45 min old. A draft 11 h 30 m before it is 12 h 15 m before now, so a check against the
@@ -1766,6 +2082,13 @@ class BlockOnly(Fixture):
         self.assertIn("window.ROADMAP_BUILD = ", block)
         for word in ("<html", "<head", "<body", "<style"):
             self.assertNotIn(word, block, "the file is more than the data block")
+
+    def test_block_bakes_the_ready_view_unknown_without_a_live_file(self):
+        build_block = baked(self.block_from_main(), "window.ROADMAP_BUILD = ")
+        self.assertIn("ready", build_block, "the block has no ready view")
+        ready = build_block["ready"]
+        self.assertTrue(str(ready.get("why")).startswith("unknown (no --live file"), ready)
+        self.assertIsNone(ready.get("steps"), "an unknown read lists no steps, never []")
 
     def test_never_writes_roadmap_db(self):
         block = self.block_from_main()
