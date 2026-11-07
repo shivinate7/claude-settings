@@ -8865,6 +8865,18 @@ class ExpireNotesTests(unittest.TestCase):
         self.assertIn("default", out.lower(), "the refusal does not say why: %s" % out)
         self.assertEqual(self.notes(repo), before, "--confirm changed the notes file on the default branch")
 
+    def test_confirm_refuses_on_a_detached_head(self):
+        # Decision notes-sightings-expiry (lane ruling 2026-11-07 15:58 CST): --confirm refuses a detached HEAD, as it
+        # refuses the default branch. No branch would merge the deletion.
+        old = expiry_day(-FAR_PAST_DAYS)
+        repo = self.repo("repo", [(note("old-detached", old), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY))])
+        run_vcs(repo, "checkout", "-q", "--detach")
+        before = self.notes(repo)
+        rc, out = self.expire(repo, "--confirm")
+        self.assertNotEqual(rc, 0, "--confirm ran on a detached HEAD: %s" % out)
+        self.assertIn("refused", out, out)
+        self.assertEqual(self.notes(repo), before, "--confirm changed the notes file on a detached HEAD")
+
     def test_confirm_refuses_when_the_notes_file_has_uncommitted_changes(self):
         old = expiry_day(-FAR_PAST_DAYS)
         repo = self.repo("repo", [(note("old-dirty", old), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY))])
@@ -8889,6 +8901,17 @@ class ExpireNotesTests(unittest.TestCase):
         self.assertEqual(rc, 0, "--expire-notes did not preview (not built?): %s" % out)
         self.assertIn("old-committed", out, out)
         self.assertNotIn("typed-now", out, "a line not yet committed was judged expired: %s" % out)
+
+    def test_a_notes_file_absent_from_head_counts_its_lines_as_seen_today(self):
+        # Decision notes-sightings-expiry (lane ruling 2026-11-07 15:58 CST): a notes file HEAD does not hold has lines not
+        # yet committed, so each is seen today. The preview reads no UNKNOWN and exits 0.
+        folder = os.path.join(self.base, "untracked")
+        make_repo(folder, {"README.md": "# Repo\n"})
+        write(os.path.join(folder, NOTES), NOTES_HEAD + note("never-committed"))
+        rc, out = self.expire(folder)
+        self.assertEqual(rc, 0, "a notes file absent from HEAD was not read as seen today: %s" % out)
+        self.assertIn("notes expired: 0, UNKNOWN (no true date, kept): 0", out, out)
+        self.assertNotIn("never-committed", out, out)
 
     def test_a_line_whose_blame_commit_is_a_shallow_boundary_is_unknown_and_stays(self):
         # The line was last touched in a commit the shallow clone does not hold. Its blame lands on the boundary commit.
