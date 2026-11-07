@@ -1272,5 +1272,22 @@ need "status during the run names slot 2 for this pid, with Duo 2's UDID" status
 need "status during the run does not name slot 1 for this pid" no_status_slot1
 end_case "95 duo run granted slot 1, then Duo 2 found booted by the rescan: holds slot 2 during the run, named in status with Duo 2's UDID"
 
+# Cases 96 and 97: hinge get prints an angle. 0.0 is a closed fold, so the run runs no close. 180.0 is open, so the run closes
+# it before xcodebuild, and one stderr line names the change. The closed word is case 93.
+no_fold_line() { ! grep -Fq fold "$work/run.err"; }
+fresh; booted "iPhone Duo" $DUO1; run STUB_POSTURE=0.0
+need "destination is the booted Duo" dest_is "$DUO1"
+need "exit code" rc_is 0
+need "the fold is not closed: no hinge close" no_call "hinge -d $DUO1 close"
+need "stderr has no fold line" no_fold_line
+end_case "96 hinge get prints 0.0: a closed fold, so no close and no fold line"
+
+fresh; booted "iPhone Duo" $DUO1; run STUB_POSTURE=180.0
+need "destination is the booted Duo" dest_is "$DUO1"
+need "exit code" rc_is 0
+need "the fold is closed before xcodebuild" in_order "hinge -d $DUO1 close" xcodebuild
+need "one stderr line names fold 180.0 -> closed" names_once "fold 180.0 -> closed"
+end_case "97 hinge get prints 180.0: close runs before xcodebuild, and one stderr line names fold 180.0 -> closed"
+
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
