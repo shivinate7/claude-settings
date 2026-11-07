@@ -1465,7 +1465,7 @@
 - lint-near-bash-cap: cloud `./bin/verdict ./bin/ci-job checks --lint` took 514-547 s over 4 runs on 2026-11-06, near the 600 s cap of one Bash tool call that `merge --lane-lint` runs under. Lane windows-local-lint.
 - stale005-wrapped-middle-row: a wrapped claim with only a middle row edited is not examined (lint/stale_cites.py:679-681 on `prose-truth-stale005-r2b`). Decision: claims-carry-backing (the claim-backing record).
 - stale005-unpunctuated-block: an unpunctuated block reads as one sentence (lint/stale_cites.py:616-643 on `prose-truth-stale005-r2b`). Decision: claims-carry-backing (the claim-backing record).
-- costtests-pin-not-exact: the CostTests pin at lint/test_stale_cites.py:846-848 (on `prose-truth-stale005-r2b`) checks len == 3 and a subset, not the exact set. Decision: claims-carry-backing (the claim-backing record).
+- costtests-pin-not-exact: the CostTests pin at lint/test_stale_cites.py:850-852 checks len == 3 and a subset, not the exact set. Decision: claims-carry-backing (the claim-backing record).
 - state-files-unpruned: nothing prunes per-session files in `state/` (route-flags and others). Decision: claims-carry-backing (the claim-backing record).
 - layer-a-weak-check-passes: until the reply judge (`hooks/reply_judge.py`) part (v)(b) lands, a measured premise that names a weak check passes layer (a). Example: the 2026-11-06 trailer hand-off that cited check_red_run. Decision: claims-carry-backing (the claim-backing record, part (v)).
 - refusal-note-route-docstring: the docstring at hooks/test_refusal_note_route.py:22 still says key `note`. Decision: claims-carry-backing (the claim-backing record).
@@ -1475,7 +1475,7 @@
 - refusal-cite-by-tool-not-act: a refusal cite counts by tool name, not act, and `403` matches "PR #403" (lint/report_guard.py:1070-1076, :1282, :1315-1331). Decision: claims-carry-backing (the claim-backing record, part (v)).
 - refusals-file-blank-line-untested: no test has a blank line in the refusals file (lint/report_guard.py:1142). Decision: claims-carry-backing (the claim-backing record, part (v)).
 - report-section-ends-at-labels-only: report_section ends an item only at a report label (lint/report_guard.py:641-660). Decision: claims-carry-backing (the claim-backing record).
-- stale-cites-p-diff-textconv-128: the stale_cites `-p` diff exits 128 when a textconv tool is missing, read as a wrong "base does not resolve" (lint/stale_cites.py:260; message at :1109). Decision: claims-carry-backing (the claim-backing record).
+- stale-cites-p-diff-textconv-128: the stale_cites `-p` diff exits 128 when a textconv tool is missing, read as a wrong "base does not resolve" (lint/stale_cites.py:314; message at :1393). Decision: claims-carry-backing (the claim-backing record).
 - stale005-report-share-one-try: the try at lint/stale_cites.py:1020 wraps both STALE005 (:1021) and the report (:1022-1023); only the report's except at :1023 catches. Decision: claims-carry-backing (the claim-backing record).
 - route-rows-fallback-drops-elsewhere-act: the other-surface fallback in route_rows_block runs only when no cited id has a row on this surface. With ids [X here, W elsewhere only], W's act is dropped, a missed flag only (hooks/reply_judge.py:174-179). Decision: claims-carry-backing (the claim-backing record).
 - route-rows-fallback-untested: no case pins that, in the fallback, the other surface's row is not carried and its alternates are not read (hooks/test_reply_judge.py). Decision: claims-carry-backing (the claim-backing record).

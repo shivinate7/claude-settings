@@ -27,6 +27,7 @@ to L4. The slugs replace the numbers.
 | `value-cites` | A cited value that the pull request changed | Planned. Next free code when built. |
 | `cited-by-report` | A report of the checks that hold each rule | Built on main (the Report step of decision `stale-cites-at-merge`) |
 | Route-claim check (no slug yet) | A changed line that states a capability by route with no backing (STALE005) | Planned (decision `claims-carry-backing`, the route-row record) |
+| `cite-line-drift-check` | A Markdown cite whose cited lines the range moved, changed or removed (STALE006) | Built on the `cite-line-drift-check` branch, not on main. Report only. |
 | Records-only lane for value cites (no slug yet) | The GLOSSARY.md row "value cite" | Planned |
 
 ### stale-names-bound (built on main)
