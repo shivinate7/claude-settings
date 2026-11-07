@@ -1,0 +1,11 @@
+{
+  "title": "The guard refuses a git write joined by ';' after a cd",
+  "phase": "now",
+  "status": "doing",
+  "order": 266.9,
+  "owner": "coordinator",
+  "lane": "session_013NEJL1Eaa8LA5StpPbWgvA",
+  "why": "Runner 9's incident at 16:15 CST Nov 7: a git write ran after a cd joined by ';'. If the cd fails, the write still runs, in the wrong checkout.",
+  "note": "Also checks whether the merge tool removed runner 9's scratch worktree. Done check: the ';' form is red on main and refused; the '&&' form still passes. The guard's verdict changes, so this is a build lane.",
+  "updatedAt": "2026-11-07T16:18:00-06:00"
+}
