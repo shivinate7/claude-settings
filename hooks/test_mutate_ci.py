@@ -206,6 +206,39 @@ ORACLE_SUITE = ("import os\n"
 ROOT_LOCK, APP_LOCK = "requirements.lock", "app/deps.lock"  # committed, so their hashes are the cache keys
 LOCK_TEXT = "kb-oracle==1.0\n"
 FAILING_INSTALL = [PY, "-c", "import sys\nsys.exit(3)"]  # exits 3 with no output: a failed install
+PASSING_INSTALL = [PY, "-c", "pass"]  # exits 0 and writes nothing: an install that succeeds
+
+
+def add_catcher(path):
+    """A suite that loads `add` from `path` (joined onto the suite's folder) and asserts add(1, 2) is 3. Green on the clean
+    copy; a plant that turns add into a subtraction prints a FAIL line."""
+    return ("import os\n"
+            "import runpy\n"
+            "import sys\n\n"
+            "HERE = os.path.dirname(os.path.abspath(__file__))\n"
+            "ns = runpy.run_path(os.path.join(HERE, *%r))\n"
+            "if ns['add'](1, 2) != 3:\n"
+            "    print('FAIL: add(1, 2) is not 3')\n"
+            "    sys.exit(1)\n"
+            "print('ok')\n") % (tuple(path),)
+
+
+def mixed_profile(a, b, c):
+    """A profile of parts a (code ^x/), b (code ^y/) and c (no regex), each with its own lockfile and the install given."""
+    return {"parts": {"a": {"install": a, "lockfile": "a/deps.lock", "code": r"^x/"},
+                      "b": {"install": b, "lockfile": "b/deps.lock", "code": r"^y/"},
+                      "c": {"install": c, "lockfile": "c/deps.lock"}}}
+
+
+MIXED_FILES = {"x/1.py": CALC_BASE, "y/1.py": CALC_BASE, "test_x.py": add_catcher(("x", "1.py")),
+               "a/deps.lock": LOCK_TEXT, "b/deps.lock": LOCK_TEXT, "c/deps.lock": LOCK_TEXT}
+
+
+def mixed_defect_run(installs):
+    """`--known-defects` of one planted defect in x/1.py, against mixed_profile with `installs` = (a, b, c)."""
+    repo = defect_repo(extra_files=MIXED_FILES)
+    defects = [defect("kb-mix", "return a + b", "return a - b", "test_x.py", file="x/1.py")]
+    return known_run(defects, repo, profile=mixed_profile(*installs))
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -921,6 +954,56 @@ class KnownDefectsTests(unittest.TestCase):
         self.assertEqual(len(lines), 2, "one UNKNOWN line per defect:\n" + out)
         for line in lines:
             self.assertIn("node_modules", line, "the UNKNOWN reason must name the link path: " + line)
+        self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
+
+    def test_a_code_regex_that_does_not_compile_is_a_bad_profile_exit_2_with_one_error_line(self):
+        repo = defect_repo()
+        profile = {"install": None, "code": "([unclosed"}
+        code, out, err = known_run([defect("kb-re", "return a + b", "return a - b", "test_calc.py")], repo, profile=profile)
+        self.assertEqual(code, 2, "a code regex that does not compile is a bad profile: exit %d\n%s%s" % (code, out, err))
+        self.assertNotIn("Traceback", err, "a bad code regex prints one ERROR line, never a traceback:\n" + err)
+        lines = out.strip().splitlines()
+        self.assertEqual(len(lines), 1, "one error line and no other output:\n" + out + err)
+        self.assertTrue(lines[0].startswith("ERROR "), "the one line is an ERROR line: " + lines[0])
+        self.assertIn("code of the profile is no regex", lines[0], "the error names the bad key: " + lines[0])
+
+    def test_a_code_not_exclusion_leaves_a_selftest_to_the_part_whose_tests_regex_claims_it(self):
+        repo = defect_repo(extra_files={"scripts/x_selftest.py": CALC_BASE,
+                                        "harness/tests/t1_x.py": add_catcher(("..", "..", "scripts", "x_selftest.py")),
+                                        APP_LOCK: LOCK_TEXT, ROOT_LOCK: LOCK_TEXT})
+        profile = {"parts": {
+            "ts": {"install": FAILING_INSTALL, "lockfile": APP_LOCK, "code": r"^scripts/.*\.py$",
+                   "code_not": r"^scripts/[^/]*selftest\.py$", "tests": r"^app/tests/unit/[^/]+\.unit\.ts$"},
+            "py": {"install": PASSING_INSTALL, "lockfile": ROOT_LOCK, "code": r"^(?!harness/tests/).*\.py$",
+                   "code_not": r"^scripts/[^/]*selftest\.py$", "tests": r"^harness/tests/(t\d+_[^/]*|t7/[^/]+)\.py$"}}}
+        defects = [defect("kb-selftest", "return a + b", "return a - b", "harness/tests/t1_x.py",
+                          file="scripts/x_selftest.py")]
+        code, out, err = known_run(defects, repo, profile=profile)
+        self.assertEqual(verdicts_of(out), {"kb-selftest": "CAUGHT"},
+                         "ts's code_not excludes scripts/x_selftest.py, so only py, whose tests regex claims the catcher, "
+                         "needs an install: with ts failed, the defect runs and reads CAUGHT\n" + out + err)
+        self.assertEqual(code, 0, "all defects caught must exit 0: exit %d\n%s%s" % (code, out, err))
+
+    def test_a_part_with_no_regex_makes_every_defect_need_its_install_so_a_failed_part_b_reads_unknown(self):
+        # Ruling of 2026-11-07 15:01 CST: when any part has no regex, every defect needs every install. Part c has no
+        # regex, so the defect in x/1.py needs a, b and c. Part b's install failed, and the defect must not run.
+        code, out, err = mixed_defect_run((PASSING_INSTALL, FAILING_INSTALL, PASSING_INSTALL))
+        self.assertEqual(verdicts_of(out), {"kb-mix": "UNKNOWN"},
+                         "with a part that has no regex, every defect needs every install, so part b's failed install "
+                         "makes the defect UNKNOWN\n" + out + err)
+        lines = [text for text in out.splitlines() if text.startswith("UNKNOWN kb-mix")]
+        self.assertEqual(len(lines), 1, "one UNKNOWN line for kb-mix:\n" + out)
+        self.assertIn("part b", lines[0], "the UNKNOWN reason must name part b's install: " + lines[0])
+        self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
+
+    def test_a_failed_install_of_the_part_with_no_regex_reads_the_defect_unknown_naming_that_part(self):
+        # The case as briefed. The head already needs c for x/1.py, so it reads UNKNOWN here too: green on the head.
+        code, out, err = mixed_defect_run((PASSING_INSTALL, PASSING_INSTALL, FAILING_INSTALL))
+        self.assertEqual(verdicts_of(out), {"kb-mix": "UNKNOWN"},
+                         "part c has no regex, so the defect in x/1.py needs c's install, which failed\n" + out + err)
+        lines = [text for text in out.splitlines() if text.startswith("UNKNOWN kb-mix")]
+        self.assertEqual(len(lines), 1, "one UNKNOWN line for kb-mix:\n" + out)
+        self.assertIn("part c", lines[0], "the UNKNOWN reason must name part c's install: " + lines[0])
         self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
 
 
