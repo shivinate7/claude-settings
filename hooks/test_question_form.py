@@ -49,7 +49,6 @@ import io
 import json
 import os
 import re
-import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -61,8 +60,6 @@ RUN_FOLDER = tcj.ROOT
 os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(RUN_FOLDER, "config")
 check, FAILED = tcj.check, tcj.FAILED
 
-import feedback_guard  # noqa: E402  waiting_copy: the branch and folder of the waiting copy, as its readers resolve them
-import layout  # noqa: E402  lint/layout.py, the one home of a layout path
 import guard  # noqa: E402
 import reply_judge  # noqa: E402  the reply judge's instructions, which carry the widening sentence
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
@@ -440,67 +437,18 @@ def case_batch():
             (FORM_RULE, "Problem"))
 
 
-# ------------------------------------------------------------------ a str_replace on a stored item, judged by its status and kind
-
-def stored_item(repo, doc_id):
-    """(branch, folder, data) of the waiting copy's item `doc_id` in `repo`. The branch and folder come from
-    feedback_guard.waiting_copy, and git reads the item on origin/<branch>, as the copy's filing check reads it.
-    `data` is None when the repo holds no copy or no item for the doc."""
-    branch, folder = feedback_guard.waiting_copy(layout, repo)
-    try:
-        text = tcj.git(repo, "show", "refs/remotes/origin/%s:%s/items/%s.json" % (branch, folder, doc_id)).stdout
-    except subprocess.CalledProcessError:
-        return branch, folder, None
-    return branch, folder, json.loads(text)
-
-
-def page_at(name, repo, op, entry, want):
-    """page() for the waiting copy in `repo`: item_hit gets the repo as its cwd, and the guard judges that repo's write."""
-    verdict("page item_hit: " + name, call("item_hit", op, entry, repo), want)
-    verdict("page guard: " + name, guard_hit(op, entry, repo), want)
-
+# ------------------------------------------------------------------ a str_replace that says an item is being reworked
 
 def text_edit(new):
     """A str_replace on a context line of item DOC that adds `new`. It carries no status or kind."""
     return {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Context.", "new_str": new}
 
 
-def case_text_rules_judge_the_stored_item():
-    # Row text-rules-str-replace-unseen (the notes file): item_hit runs key_named_hit and reworked_hit on new_str with no
-    # stored status or kind, so a str_replace that adds a key or "being reworked" to a closed decision, a task or a note
-    # is refused. The stored item is read from the waiting copy: a closed decision, a task and a note pass both text
-    # rules. An open decision keeps the refusal, and so does a copy with no item for the doc (the empty state) and a
-    # repo with no readable copy, since an unreadable copy keeps today's refusal.
-    reworked, keyed = "The lane is being reworked.", "Pick option e2 for the lane."
-    stored = {"closed": {"kind": "decision", "status": "closed"},
-              "task": {"kind": "task", "status": "open"},
-              "note": {"kind": "note", "status": "open"},
-              "open": {"kind": "decision", "status": "open"}}
-    kinds = {"closed": "a closed decision", "task": "a task", "note": "a note", "open": "an open decision"}
-    repos = {state: tcj.make_repo("nfp-" + state, items={DOC: data}) for state, data in stored.items()}
-    repos["empty"] = tcj.make_repo("nfp-empty", items={"other-doc": stored["open"]})
-    repos["nocopy"] = tcj.make_repo("nfp-nocopy")
-    # Scope before subject (P7): each repo's copy resolves, and holds its item as written, before any verdict on it.
-    for state, data in stored.items():
-        branch, folder, got = stored_item(repos[state], DOC)
-        check("the copy of %s reads back its item" % kinds[state], got == data,
-              "want %r at %s on %s, got %r" % (data, folder, branch, got))
-    branch, folder, got = stored_item(repos["empty"], DOC)
-    check("the copy with no item for the doc reads back no item", got is None, "got %r at %s on %s" % (got, folder, branch))
-    check("the repo with no copy reads back no item", stored_item(repos["nocopy"], DOC)[2] is None)
-    for state in ("closed", "task", "note"):
-        page_at("a str_replace that adds 'being reworked' to %s passes" % kinds[state], repos[state], "str_replace",
-                text_edit(reworked), None)
-        page_at("a str_replace that adds option e2 to %s passes" % kinds[state], repos[state], "str_replace",
-                text_edit(keyed), None)
-    page_at("a str_replace that adds 'being reworked' to an open decision stays refused", repos["open"],
-            "str_replace", text_edit(reworked), ("rework-off-page", "being reworked"))
-    page_at("a str_replace that adds option e2 to an open decision stays refused", repos["open"],
-            "str_replace", text_edit(keyed), ("option-letter-keys", "option e2"))
-    page_at("a str_replace that adds 'being reworked' to a copy with no item for the doc stays refused",
-            repos["empty"], "str_replace", text_edit(reworked), ("rework-off-page", "being reworked"))
-    page_at("a str_replace that adds 'being reworked' with no readable copy stays refused", repos["nocopy"],
-            "str_replace", text_edit(reworked), ("rework-off-page", "being reworked"))
+def case_str_replace_rework_is_refused():
+    # Rule rework-off-page judges every kind of item, since a str_replace carries no status or kind (decision
+    # rework-leaves-page). Main refuses a rework line on any item, and the refusal stays.
+    page("a str_replace that adds 'being reworked' is refused as rework-off-page", "str_replace",
+         text_edit("The lane is being reworked."), ("rework-off-page", "being reworked"))
 
 
 # ------------------------------------------------------------------ chat only
@@ -1023,6 +971,13 @@ def case_powershell_bash_forms():
                      ("a backslash line end", "git push origin \\\nmain")):
         page("a PowerShell command with %s is refused as a bash operator" % name, "set",
              entry_of(ps_task(ps)), ("command-in-item", "bash operator"))
+    # A backslash that ends the string, with no line after it, is a path or an argument: each passes.
+    for name, ps in (("cd to a backslash", "cd \\"), ("Set-Location to a backslash", "Set-Location \\"),
+                     ("dir of a backslash", "dir \\")):
+        page("a PowerShell command, %s, passes" % name, "set", entry_of(ps_task(ps)), None)
+    # A backslash with a line after it is a continuation, and refuses.
+    page("a PowerShell dir with a continuation backslash and a line after it is refused as a bash operator", "set",
+         entry_of(ps_task("dir \\\n-Force")), ("command-in-item", "bash operator"))
     for name, ps in (("a Select-Object pipe", "Get-ChildItem | Select-Object -First 5"),
                      ("a PowerShell variable assignment", '$env:FOO = "1"; git push'),
                      ("a PowerShell if test", "if (Test-Path x) { git push }"),
@@ -1602,7 +1557,7 @@ def main():
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
-                 case_press_link_label_is_a_string, case_text_rules_judge_the_stored_item,
+                 case_press_link_label_is_a_string, case_str_replace_rework_is_refused,
                  case_powershell_bash_forms, case_step_shell_programs_partial,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable):
         try:
