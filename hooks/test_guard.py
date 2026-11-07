@@ -12226,6 +12226,18 @@ for _folder in ('"`cat f`/fixture.json"', "~+/fixture.json"):
        "printf '%s' '" + cap_settings(compact=True) + "' > " + _folder,
        "allow", cwd=NOGIT)
 
+# A `~N` FOLDER IS A DIRECTORY-STACK ENTRY (cap-dirstack-entry). `~1` names the entry at index 1 of the shell's
+# directory stack, and `~+1` names the same kind of entry counted from the top. The shell reads either when the write
+# runs, so the folder is a possible settings place and the write asks. The control pins that a non-settings name in
+# the `~1` folder stays allowed.
+CAP_DIRSTACK_FOLDERS = ("~1/settings.json", "~+1/settings.json")
+for _folder in CAP_DIRSTACK_FOLDERS:
+    sh("cap: a shell write of an opus model to " + _folder + " asks",
+       "printf '%s' '" + cap_settings(compact=True) + "' > " + _folder,
+       "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("cap: a shell write of an opus model to ~1/fixture.json beside a non-settings name is allowed",
+   "printf '%s' '" + cap_settings(compact=True) + "' > ~1/fixture.json", "allow", cwd=NOGIT)
+
 # THE EDIT LIST IS READ WHOLE, not the first 200 edits: the lift after 200 no-op edits still asks. This
 # case pins that boundary, so a count bound cannot come back unseen.
 CAP_NOOP_EDITS = [{"old_string": "line %d" % index, "new_string": "row %d" % index}
@@ -24190,18 +24202,25 @@ def ov_veto_setter_raises_case(label, command, cwd, rule, extra=None):
     return case
 
 
+def _veto_log_bash_rows(folder):
+    """The guard.log lines of the Bash calls in one run folder, split on tabs, or None when guard.log is not written."""
+    try:
+        with open(os.path.join(folder, "guard.log"), encoding="utf-8") as handle:
+            rows = [line.split("\t") for line in handle.read().splitlines()]
+    except OSError:
+        return None
+    return [row for row in rows if len(row) > 3 and row[1] == "Bash"]
+
+
 def ov_veto_setter_error_logged_case(label, command, cwd, extra=None):
     """One call judged with guard_core's veto setter raising: guard.log holds a guard-crash line for this call
     that names the setter's error. The scope is read first, then the subject."""
     def case():
         materialize(cwd)
         folder, _run = _veto_setter_raising_run(label, command, cwd, extra or {})
-        try:
-            with open(os.path.join(folder, "guard.log"), encoding="utf-8") as handle:
-                rows = [line.split("\t") for line in handle.read().splitlines()]
-        except OSError:
+        own = _veto_log_bash_rows(folder)
+        if own is None:
             return False, "guard.log is not written with the setter raising"
-        own = [row for row in rows if len(row) > 3 and row[1] == "Bash"]
         if not own:
             return False, "guard.log holds no line for this call with the setter raising"
         crashes = [row for row in own if row[3] == "guard-crash" and any(VETO_RAISED in cell for cell in row)]
@@ -24215,6 +24234,53 @@ LOG_CHECKS_EXTRA.append(("override: a kill still denies with guard_core's veto s
                          ov_veto_setter_raises_case("kill-raise", "pkill -f node", NOGIT, "machine-wide-kill")))
 LOG_CHECKS_EXTRA.append(("override: guard.log names a RuntimeError from guard_core's veto setter, not passed silently",
                          ov_veto_setter_error_logged_case("kill-log", "pkill -f node", NOGIT)))
+
+# A MISSING VETO SETTER LEAVES ONE LINE (override-veto-setter-missing-logged). veto_override passes on AttributeError, so
+# a guard_core that predates the setter writes nothing to guard.log. The kill is still denied, but the log does not say the
+# guard judged without its override check. The missing-setter run must log one guard-crash line for the call, and the line
+# must name the missing setter. The control pins that a guard_core with the setter writes no guard-crash line for the call.
+
+
+def ov_veto_setter_missing_logged_case(label, command, cwd, extra=None):
+    """One call judged with guard_core's veto setter gone: guard.log holds one guard-crash line for this call, and the
+    line names the missing setter. The scope is read first (this call's lines), then the subject (the crash line)."""
+    def case():
+        materialize(cwd)
+        _veto_setter_runs(label, command, cwd, extra or {})
+        own = _veto_log_bash_rows(os.path.join(ROOT, "vetoset-%s-gone" % label))
+        if own is None:
+            return False, "guard.log is not written with the setter gone"
+        if not own:
+            return False, "guard.log holds no line for this call with the setter gone"
+        crashes = [row for row in own if row[3] == "guard-crash"]
+        if len(crashes) != 1:
+            return False, "want one guard-crash line for this call with the setter gone, found %d" % len(crashes)
+        if "set_override_veto" not in "\t".join(crashes[0]):
+            return False, "the guard-crash line does not name the missing setter: %r" % "\t".join(crashes[0])[-120:]
+        return True, "guard.log holds one guard-crash line for this call that names the missing setter"
+    return case
+
+
+def ov_veto_setter_present_no_crash_case(label, command, cwd, extra=None):
+    """The control: with guard_core's veto setter present, guard.log holds a line for this call and no guard-crash line."""
+    def case():
+        materialize(cwd)
+        _veto_setter_runs(label, command, cwd, extra or {})
+        own = _veto_log_bash_rows(os.path.join(ROOT, "vetoset-%s-present" % label))
+        if own is None:
+            return False, "guard.log is not written with the setter present"
+        if not own:
+            return False, "guard.log holds no line for this call with the setter present"
+        if any(row[3] == "guard-crash" for row in own):
+            return False, "a guard-crash line for this call with the setter present"
+        return True, "guard.log holds no guard-crash line for this call with the setter present"
+    return case
+
+
+LOG_CHECKS_EXTRA.append(("override: a missing guard_core veto setter logs one guard-crash line that names set_override_veto",
+                         ov_veto_setter_missing_logged_case("kill-missing", "pkill -f node", NOGIT)))
+LOG_CHECKS_EXTRA.append(("override: with guard_core's veto setter present, guard.log holds no guard-crash line for the kill",
+                         ov_veto_setter_present_no_crash_case("kill-missing", "pkill -f node", NOGIT)))
 
 
 # pkill and killall are refused by guard_kill through refuse(), which an override lifts. The settings.json
