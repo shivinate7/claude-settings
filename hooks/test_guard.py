@@ -14979,19 +14979,21 @@ def logged_builder_case(label):
     return case
 
 
-def refused_push_and_stop_case(label):
+def refused_push_and_stop_case(label, commit=False, env_path=None):
     """A builder's own commit holds a test change. Push and the first stop are each denied, and each denial
-    writes a builder-diff line. The commit check is left out: the row names push and stop only."""
+    writes a builder-diff line. The commit check is left out unless `commit`: then it runs first and is denied
+    too. `env_path` is the PATH the guard runs with (a git stand-in, see make_failing_git)."""
     def case():
         out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label), os.path.join(DIFFROOT, label),
-                                  "builder", "bld1", commit=False)
+                                  "builder", "bld1", commit=commit, env_path=env_path)
         decisions = [decision for decision, _reason in _guard_answers(out)]
         denied = [r for r in rows if len(r) > 3 and r[2] == "deny" and r[3] == BDIFF]
-        if decisions != ["deny", "deny"]:
-            return False, "expected a deny at push and at the first stop, got %r" % decisions
-        if len(denied) != 2:
-            return False, "expected two builder-diff deny lines, got %d" % len(denied)
-        return True, "denied at push and at the first stop; two builder-diff deny lines"
+        where = "commit, push and the first stop" if commit else "push and the first stop"
+        if decisions != ["deny"] * (3 if commit else 2):
+            return False, "expected a deny at %s, got %r" % (where, decisions)
+        if len(denied) != len(decisions):
+            return False, "expected %d builder-diff deny lines, got %d" % (len(decisions), len(denied))
+        return True, "denied at %s; a builder-diff deny line each" % where
     return case
 
 
@@ -15108,11 +15110,13 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's first stop with a test cha
 # Every label in this block carries the token `own-test-commit`, so MUTATE_ONLY="own-test-commit" runs it.
 GITFAIL_ONCE = os.path.join(ROOT, "gitfail-once")    # a git stand-in: fails one diff read per guard run
 GITFAIL_EVERY = os.path.join(ROOT, "gitfail-every")  # a git stand-in: fails every diff read
+GITFAIL_CHERRY = os.path.join(ROOT, "gitfail-cherry")  # a git stand-in: fails every `git cherry` the guard makes
 
 
-def make_failing_git(folder, every):
+def make_failing_git(folder, every, verb=None):
     """A `git` stand-in for the guard's PATH. It fails the guard's diff read (a call with `diff` and `--name-only`,
-    the one diff_violation makes) and runs every other call on the real git, by its absolute path. `every` fails
+    the one diff_violation makes) and runs every other call on the real git, by its absolute path. `verb`, when
+    given, names the git subcommand that fails instead (`cherry`: the replay check, held_as_replay). `every` fails
     each such call. Otherwise each guard run fails its first, so the commit, push and stop runs each meet one
     failure: one marker per parent pid. Each failure is logged by parent pid in failures.log, which the checkers
     read as their scope. A failed read reaches the same unread route as a timed-out one (git_names returns None
@@ -15120,15 +15124,18 @@ def make_failing_git(folder, every):
     times out."""
     os.makedirs(folder, exist_ok=True)
     log = os.path.join(folder, "failures.log")
-    fail = 'echo "$PPID" >> "%s"; echo "git stand-in: diff read failed" >&2; exit 1' % log
+    what = "diff read" if verb is None else verb + " call"
+    fail = 'echo "$PPID" >> "%s"; echo "git stand-in: %s failed" >&2; exit 1' % (log, what)
     if every:
         body = "    %s\n" % fail
     else:
         marker = os.path.join(folder, "marker-$PPID")
         body = '    if [ ! -e "%s" ]; then : > "%s"; %s; fi\n' % (marker, marker, fail)
-    script = ("#!/bin/sh\n"
+    match = '*" diff "*--name-only*' if verb is None else '*" %s "*' % verb
+    script = ('#!/bin/sh\n'
               'case " $* " in\n'
-              '  *" diff "*--name-only*)\n' + body + "  ;;\n"
+              '  %s)\n' % match
+              + body + "  ;;\n"
               "esac\n"
               'exec "%s" "$@"\n' % os.path.join(GIT_PATH, VCS))
     path = os.path.join(folder, VCS)
@@ -15175,6 +15182,7 @@ _bd_rebased_product = diff_repo("bd-rebased-product", _rebased_onto_moved_main("
 if os.name != "nt":   # the stand-ins are POSIX shell scripts; CreateProcess does not run them (see make_blind_git)
     make_failing_git(GITFAIL_ONCE, every=False)
     make_failing_git(GITFAIL_EVERY, every=True)
+    make_failing_git(GITFAIL_CHERRY, every=True, verb="cherry")
 
 
 def unread_read_failed_once_case():
@@ -15224,6 +15232,164 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit, a test commit rebased
 LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit control, a product commit rebased onto a moved main: "
                          "allowed at commit, push and stop with no builder-diff line",
                          clean_builder_case("bd-rebased-product")))
+
+
+# ---- the own-test-commit gap, more shapes. A `git cherry` that fails leaves a replayed commit unread, so a
+# builder's test change must still be refused. A rebase drops a test commit that main already holds: its patch
+# stays in HEAD, and the builder's later product commit must be allowed. A timed-out read on SubagentStop must
+# not wait past the hook's own budget, or the host kills the guard before it logs.
+def _rebased_product_then_test_edit(w):
+    """A builder's own product commit, rebased onto a moved main: the commit is replayed, so its original sha is
+    lost from HEAD and `git cherry` reads it. A test edit is then left in the working tree."""
+    _rebased_onto_moved_main("src/app.py", "x = 2\n")(w)
+    write(os.path.join(w, TEST_A), "pass\n")
+
+
+def _own_test_commit_main_takes_too(w):
+    """A builder's own test commit, then main takes the same patch, then the builder rebases onto main. Git drops
+    the commit as already applied: HEAD no longer reaches it, and HEAD still holds its patch (`git cherry` reads it
+    `-`). The builder then commits a product file, which is the only change it made."""
+    main = w + "-main"
+    write(os.path.join(w, TEST_A), "pass\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "own test change")
+    own = run_vcs(w, "rev-parse", "HEAD").stdout.strip()
+    write(os.path.join(main, TEST_A), "pass\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main takes the same test change")
+    _must(w, *IDENT, "rebase", "-q", "main")
+    # Scope: the rebase must drop the commit, or the case proves nothing about a dropped one.
+    reached = run_vcs(w, "merge-base", "--is-ancestor", own, "HEAD").returncode == 0
+    held = ("- " + own) in run_vcs(w, "cherry", "HEAD", own).stdout.splitlines()
+    if reached or not held:
+        sys.exit("fixture setup failed: the rebase in %r did not drop %s as already applied" % (w, own))
+    _product_commit(w)
+
+
+diff_repo("bd-rebased-wt-test", _rebased_product_then_test_edit)
+diff_repo("bd-dropped-test-commit", _own_test_commit_main_takes_too)
+
+
+def refused_with_cherry_failing_case(label, commit=False):
+    """refused_push_and_stop_case with `git cherry` failing on every call the guard makes. The replay check cannot
+    read the rebased commit, so the builder's test change must still be refused: each guard run that reaches the
+    replay check is denied. The stand-in must fail in each of those runs, or the case did not run."""
+    def case():
+        if os.name == "nt":
+            return SKIP, NO_STAND_IN
+        _clear_stand_in(GITFAIL_CHERRY)
+        ok, message = refused_push_and_stop_case(label, commit=commit,
+                                                 env_path=GITFAIL_CHERRY + os.pathsep + GIT_PATH)()
+        runs = 3 if commit else 2
+        if len(_stand_in_failures(GITFAIL_CHERRY)) < runs:  # scope: a failed cherry in each guard run
+            return False, "the stand-in failed a cherry in fewer than %d guard runs, so the case did not run" % runs
+        return ok, message
+    return case
+
+
+def dropped_test_commit_case():
+    """A test commit that main already holds, which a rebase dropped. The builder's later product commit is allowed
+    silently at commit, push and stop. The kept test path is logged as noted and never refused, so the check fails
+    only on a builder-diff deny line."""
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-bd-dropped-test-commit"),
+                              os.path.join(DIFFROOT, "bd-dropped-test-commit"), "builder", "bld1")
+    denied = [r for r in rows if len(r) > 3 and r[2] == "deny" and r[3] == BDIFF]
+    if out or denied:
+        return False, ("expected silent allows and no builder-diff deny, got %r and %d deny line(s)"
+                       % (out[:60], len(denied)))
+    return True, "allowed silently at commit, push and stop; no builder-diff deny line"
+
+
+def _subagent_stop_budget():
+    """The guard's SubagentStop timeout in seconds, read from the repo's settings.json (the hook whose command runs
+    hooks/guard.py). The number has one home there, so this case cannot drift from the hook."""
+    with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
+        entries = json.load(handle)["hooks"]["SubagentStop"]
+    for entry in entries:
+        for hook in entry.get("hooks", []):
+            if "hooks/guard.py" in hook.get("command", ""):
+                return hook["timeout"]
+    sys.exit("fixture setup failed: no SubagentStop guard hook in settings.json")
+
+
+def _stop_reads_run(reflog_times_out):
+    """One builder SubagentStop judged in-process by judge_stop, with every git call answering at once (rc 128)
+    except the reflog read, which times out when `reflog_times_out`. The guard has no timeout knob, so no clock runs:
+    a timed-out call returns at once, and the caller sums the timeouts requested, which is the wait a real call
+    would take. Returns (the timeouts requested, the reflog reads made, the guard.log rows)."""
+    import importlib.util
+    import _nowindow
+    folder = os.path.join(ROOT, "stop-budget-" + ("timeout" if reflog_times_out else "fast"))
+    os.makedirs(folder, exist_ok=True)
+    log = os.path.join(folder, "guard.log")
+    if os.path.exists(log):
+        os.remove(log)
+    waits, reflogs = [], []
+
+    def fake_run(cmd, **kwargs):
+        if "reflog" in cmd:
+            reflogs.append(cmd)
+            if reflog_times_out:
+                waits.append(kwargs.get("timeout"))
+                raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+        return subprocess.CompletedProcess(cmd, 128, "", "")
+
+    spec = importlib.util.spec_from_file_location("guard_stop_budget_under_test", GUARD)
+    guard_mod = importlib.util.module_from_spec(spec)
+    payload = {"hook_event_name": "SubagentStop", "agent_id": "bld1", "agent_type": "builder",
+               "cwd": os.path.join(folder, "no-worktree")}
+    with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": folder}), mock.patch.object(_nowindow, "run", fake_run):
+        spec.loader.exec_module(guard_mod)
+        guard_mod.judge_stop(payload)
+    text = open(log, encoding="utf-8").read() if os.path.exists(log) else ""
+    return waits, reflogs, [line.split("\t") for line in text.splitlines() if line.strip()]
+
+
+def stop_read_timeout_case():
+    """A builder's SubagentStop whose reflog read times out. The host kills the hook at its SubagentStop budget, so
+    the guard must wait less than that and still log role-diff-unread. A timed-out read that is retried waits its
+    10 s, then the longer retry timeout: 25 s, past a 20 s budget, and the guard is killed with no line."""
+    budget = _subagent_stop_budget()
+    waits, reflogs, rows = _stop_reads_run(reflog_times_out=True)
+    if not reflogs:  # scope: the guard reached its reflog read on the SubagentStop path
+        return False, "the guard made no reflog read on the SubagentStop path, so the case did not run"
+    unread = [r for r in rows if len(r) > 3 and r[1] == "SubagentStop" and r[2] == "noted" and r[3] == "role-diff-unread"]
+    if sum(waits) >= budget:
+        return False, ("a SubagentStop waited %d s on timed-out git reads, past its %d s hook budget: the host can "
+                       "stop the guard before it logs" % (sum(waits), budget))
+    if not unread:
+        return False, "expected a role-diff-unread line on SubagentStop, found none"
+    return True, ("a timed-out read on SubagentStop waited %d s, under its %d s budget, and logged role-diff-unread"
+                  % (sum(waits), budget))
+
+
+def stop_read_fast_case():
+    """Control for stop_read_timeout_case: the same SubagentStop with the reflog read answering at once. The guard
+    waits for no timeout, and logs role-diff-unread for the unread read."""
+    waits, reflogs, rows = _stop_reads_run(reflog_times_out=False)
+    if not reflogs:  # scope: the guard reached its reflog read on the SubagentStop path
+        return False, "the guard made no reflog read on the SubagentStop path, so the case did not run"
+    unread = [r for r in rows if len(r) > 3 and r[1] == "SubagentStop" and r[2] == "noted" and r[3] == "role-diff-unread"]
+    if waits:
+        return False, "a read that answers at once should time out nowhere, got %r" % waits
+    if not unread:
+        return False, "expected a role-diff-unread line on SubagentStop, found none"
+    return True, "a read that answers at once waits for no timeout and logs role-diff-unread"
+
+
+LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit, a builder's test change is refused at push and the first stop "
+                         "when git cherry fails on a replayed commit",
+                         refused_with_cherry_failing_case("bd-rebased-own-test")))
+LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit, a builder's test edit in the working tree is refused at commit, "
+                         "push and the first stop when git cherry fails on a replayed commit",
+                         refused_with_cherry_failing_case("bd-rebased-wt-test", commit=True)))
+LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit, a test commit that main already holds is dropped by a rebase: "
+                         "the builder's later product commit is allowed silently at commit, push and stop",
+                         dropped_test_commit_case))
+LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit, a SubagentStop whose reflog read times out waits less than "
+                         "its hook budget and logs role-diff-unread", stop_read_timeout_case))
+LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit control, a SubagentStop whose reads answer at once waits for no "
+                         "timeout and logs role-diff-unread", stop_read_fast_case))
 
 
 # =========================================================================== failing open
