@@ -1801,12 +1801,9 @@ WORKFLOW_RUN_PREFIX = re.compile(r"^\s*(?:-\s+)?run:\s*")
 WORKFLOW_RUN_BLOCK = re.compile(r"^(\s*)(?:-\s+)?run:\s*[|>][+-]?\s*$")
 
 
-# A quoted word that opens with one of these holds a command line; one that opens with any other word is an argument.
+# A shell and its `-c` flag (`-c`, `-ec`, `-xec`): the quoted word after them is a command line of its own.
 WORKFLOW_SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 WORKFLOW_SHELL_C = re.compile(r"^-[a-z]*c$")
-WORKFLOW_COMMAND_WORDS = (WORKFLOW_INTERPRETERS | set(WORKFLOW_WRAPPERS) | WORKFLOW_SHELLS
-                          | {"npx", "sudo", "time", "pytest", "py.test", "jest", "vitest", "mocha", "playwright",
-                             "karma"})
 
 
 def workflow_command_tests(command: str) -> set:
@@ -1824,7 +1821,10 @@ def workflow_command_tests(command: str) -> set:
         except ValueError:
             tokens = [tok.strip("\"'") for tok in segment.split()]
         while tokens:
-            if re.match(r"^\w+=", tokens[0]) or tokens[0] in ("npx", "sudo", "time"):
+            # A spaced word that is the last one left is a quoted command line (`"CI=1 pytest tests/"`), not an
+            # assignment that prefixes a command (`FOO="a b" pytest`).
+            if (re.match(r"^\w+=", tokens[0]) and not (len(tokens) == 1 and re.search(r"\s", tokens[0]))) or (
+                    tokens[0] in ("npx", "sudo", "time")):
                 tokens.pop(0)
             elif workflow_unwrap(tokens) != tokens:
                 tokens = workflow_unwrap(tokens)
@@ -1838,13 +1838,14 @@ def workflow_command_tests(command: str) -> set:
             args = tokens[1:] if runner else ([] if script is None else [tokens[1 + script]])
         else:
             args = tokens if runner else tokens[:1]
-        # A quoted word with a space is read two ways. It holds a whole command when it is the script of a shell
-        # `-c` (`bash -c "pytest tests/x"`) or starts with a command word (a YAML-quoted run value, `"pytest tests/"`):
-        # that is read as a command line of its own, each level dropping one quote, so the recursion ends. Any other
-        # spaced word (`'tests/a b/test_x.py'`, `echo 'tests passed'`) is an argument: a path if it names one, else none.
+        # A quoted word with a space holds a whole command line when it sits where the command goes (a YAML-quoted
+        # run value `"go test ./..."`, `timeout 5 "yarn jest tests/"`) or is the script of a shell `-c`
+        # (`bash -c "pytest tests/x"`), whatever its first word. It is read as a line of its own, each level dropping
+        # one quote, so the recursion ends. A spaced word anywhere else is an argument, never a command: a path if
+        # it names one (`'tests/a b/test_x.py'`), else none (`echo "python tests/x.py failed"`, `tr ' '`).
         commands = [tok for at, tok in enumerate(tokens) if re.search(r"\s", tok) and (
-            (at >= 2 and WORKFLOW_SHELL_C.match(tokens[at - 1]) and os.path.basename(tokens[at - 2]) in WORKFLOW_SHELLS)
-            or tok.split()[0] in WORKFLOW_COMMAND_WORDS)]
+            at == 0
+            or (at >= 2 and WORKFLOW_SHELL_C.match(tokens[at - 1]) and os.path.basename(tokens[at - 2]) in WORKFLOW_SHELLS))]
         found.update(workflow_path(tok) for tok in args if tok not in commands and is_test_rel(workflow_path(tok)))
         for tok in commands:
             found |= workflow_command_tests(tok)
