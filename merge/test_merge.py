@@ -1086,19 +1086,22 @@ class Guards(Env):
         self.assertFalse(self.host.merged)
         self.assertIn("id: pending", self.show("feat", "docs/decisions/second.md"))
 
-    def test_a_code_the_base_gains_during_the_wait_that_the_branch_also_adds_drops_the_merge(self):
+    def feat_adds_ste900(self):
         o = self.other
         sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
-        put(os.path.join(o, "lint/ste_lint.py"), STE900_HOME)  # the branch adds STE900 before the claim
+        put(os.path.join(o, "lint/ste_lint.py"), STE900_HOME)  # the branch adds STE900
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "feat: a rule"); sh(o, "git", "push", "-q", "origin", "feat")
 
-        def main_takes_the_code():
-            sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
-            put(os.path.join(o, "lint/ste_lint.py"), STE900_HOME)  # main gains the same code in the wait
-            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main: the same rule"); sh(o, "git", "push", "-q", "origin", "main")
+    def main_gains_ste900(self):
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, "lint/ste_lint.py"), STE900_HOME)  # main gains the same code
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main: the same rule"); sh(o, "git", "push", "-q", "origin", "main")
 
+    def test_a_code_the_base_gains_during_the_wait_that_the_branch_also_adds_drops_the_merge(self):
+        self.feat_adds_ste900()
         self.host.merged = False
-        self.host.on_wait = main_takes_the_code
+        self.host.on_wait = self.main_gains_ste900
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
         self.assertIn("lint codes collide", out)
@@ -1108,15 +1111,10 @@ class Guards(Env):
         self.assertFalse(self.lock_ref())
 
     def test_preview_refuses_a_branch_whose_lint_code_the_base_gained(self):
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
-        put(os.path.join(o, "lint/ste_lint.py"), STE900_HOME)  # the branch adds STE900
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "feat: a rule"); sh(o, "git", "push", "-q", "origin", "feat")
-        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
-        put(os.path.join(o, "lint/ste_lint.py"), STE900_HOME)  # main gains the same code before the preview
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main: the same rule"); sh(o, "git", "push", "-q", "origin", "main")
+        self.feat_adds_ste900()
+        self.main_gains_ste900()
         rc, out = self.run_merge("7")
-        self.assertEqual(rc, 1, out)
+        self.assertEqual(rc, 1, "a preview of a branch whose STE900 the base gained did not refuse\n" + out)
         self.assertIn("BLOCKED", out)
         self.assertIn("lint codes collide", out)
         self.assertIn("STE900", out)
