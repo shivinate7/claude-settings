@@ -131,7 +131,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
+    ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_owner_index, last_reply, page_writer_id, peer_sender,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 
@@ -561,6 +561,17 @@ def agent_pin(role):
         if key.strip() == "model":
             return value.strip()
     return ""
+
+
+def spawn_window(records, upto=None):
+    """The records whose spawns back a Done model name: those after the last owner message. A task
+    notice is a human record to is_last_human, so anchoring there drops the turn's earlier spawns.
+    No owner message (a lane's input is peer messages and notices) leaves the whole transcript.
+    `upto` stops the search at that index, for a re-check bound to an earlier anchor."""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import shared_names
+    owner = last_owner_index(records if upto is None else records[:upto + 1], shared_names.MACHINE_TAGS)
+    return records if owner is None else records[owner + 1:]
 
 
 def spawn_models(records):
@@ -1540,7 +1551,7 @@ def rewrite_problems(hook):
         if idx >= len(records):
             return []
         text = last_reply(hook)
-        spawned = spawn_models(records[idx + 1:])
+        spawned = spawn_models(spawn_window(records, idx))
         reasons = []
         models = done_models_problem(text, spawned)
         if models:
@@ -2003,7 +2014,7 @@ def main():
         reasons.append(
             "Report-shape guard: each Done line must say BUILT, RECORDED, or OTHER. BUILT and "
             "RECORDED must also name a PR or commit. This one does not: " + repr(item) + ".")
-    spawned = spawn_models(after)
+    spawned = spawn_models(spawn_window(records))
     models = done_models_problem(text, spawned) if shape_ok else ""
     if models:
         reasons.append(MODELS_REASON + models + ".")

@@ -87,6 +87,16 @@ def owner_text(rec, notice_tags=()):
     return text
 
 
+def last_owner_index(records, notice_tags=()):
+    """Index of the last user record that owner_text reads as the owner's own words, or None.
+    Unlike is_last_human, a machine notice (a task-notification) does not count."""
+    idx = None
+    for i, rec in enumerate(records):
+        if rec.get("type") == "user" and owner_text(rec, notice_tags) is not None:
+            idx = i
+    return idx
+
+
 def tool_uses(rec):
     msg = rec.get("message") or {}
     content = msg.get("content")
