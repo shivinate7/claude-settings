@@ -585,11 +585,12 @@ def defined_line(text, name):
     return min((n.lineno for n in ast.walk(tree) if isinstance(n, kinds) and n.name == name), default=0)
 
 
-def cited_excerpt(cite, text, limit=40):
+def cited_excerpt(cite, text, limit=40, row_chars=None):
     """The numbered lines of a backing file's `text` that `cite` points at, at most `limit`: a `read path:N` or
     `path:N-M` gives those lines, a `test path::name` gives the lines from where `name` is defined, and any other
     cite with a backing path gives the top of the file. A cite with no backing path gives None. A prose judge sends
-    this beside the line, so the model reads what the line cites."""
+    this beside the line, so the model reads what the line cites. With `row_chars`, each row is cut to that many
+    characters with the cut marker (cut_row); a row is whole otherwise."""
     kind, rest = cite_kind(cite)
     if backing_path(kind, rest) is None:
         return None
@@ -607,7 +608,8 @@ def cited_excerpt(cite, text, limit=40):
         first = line or 1
     first = max(first, 1)
     last = min(max(last, first), first + limit - 1, len(rows))
-    return "\n".join("%d: %s" % (n, rows[n - 1]) for n in range(first, last + 1))
+    cut = (lambda row: cut_row(row, row_chars)) if row_chars else (lambda row: row)
+    return "\n".join("%d: %s" % (n, cut(rows[n - 1])) for n in range(first, last + 1))
 
 
 def backed_lines(texts, changed):
@@ -644,6 +646,11 @@ NAMED_MAX_BYTES = 256 * 1024  # a named file larger than this is skipped, never 
 NAMED_ROW_CHARS = 200  # an excerpt row longer than this is cut, with a marker
 
 
+def cut_row(row, chars=NAMED_ROW_CHARS):
+    """`row` whole when it is at most `chars` characters, else its first `chars` characters and a marker that says where it was cut. The one cut marker of a prose judge prompt."""
+    return row if len(row) <= chars else row[:chars] + " [row cut at %d characters]" % chars
+
+
 def named_too_large(text):
     """True when `text` is over NAMED_MAX_BYTES (UTF-8), so named_excerpt skips it. Exactly NAMED_MAX_BYTES is not too large."""
     return len(text) > NAMED_MAX_BYTES or (len(text) * 4 > NAMED_MAX_BYTES and len(text.encode("utf-8", "replace")) > NAMED_MAX_BYTES)
@@ -671,10 +678,7 @@ def named_excerpt(names, text, around=3, limit=40):
     for n in shown:
         if last is not None and n != last + 1:
             out.append("...")
-        row = rows[n - 1]
-        if len(row) > NAMED_ROW_CHARS:
-            row = row[:NAMED_ROW_CHARS] + " [row cut at %d characters]" % NAMED_ROW_CHARS
-        out.append("%d: %s" % (n, row))
+        out.append("%d: %s" % (n, cut_row(rows[n - 1])))
         last = n
     if len(ordered) > limit:
         out.append("[more lines left out at the %d-row cap]" % limit)

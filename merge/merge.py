@@ -2543,54 +2543,93 @@ PROSE_JUDGE_INTRO = (
 PROSE_JUDGE_REPLY = ("Each line below is labelled `<path>:<N>`. Give each one verdict, with that label's path and line number. "
                      'Reply with JSON only: {"verdicts":[{"path":"<path>","line":<number>,"verdict":"holds|stale|unbacked","why":"<one short sentence>"}]}')
 
-def prose_judge_row_block(row, body):
-    """-> (the prompt text of one selected line `row` = (path, number, text, cites), [(named path, names)]). The text is the line's `<path>:<N>:`
-    label, the line, and each cite as written with the text it points at. The list holds each backticked path the line names but does not cite,
-    with the names it gives; the call shows one excerpt per such path, not one per line. `body(path)` is the text of a file or None."""
+PROSE_JUDGE_LINE_CHARS = 2000  # a line over one call's budget on its own is cut to this many characters, and its cited rows to NAMED_ROW_CHARS, so its call fits
+
+def prose_judge_named_entry(p, names, body, memo):
+    """The prompt text of the excerpt of named path `p` for `names`: the rows around the names, a one-line note when the file is over 256 KB, or None when the
+    file is missing or holds no name. Kept in `memo`, so lines that give the same names build it once. An excerpt is at most 40 rows of 200 characters."""
+    import stale_cites
+    key = ("named", p, tuple(names))
+    if key not in memo:
+        got = body(p)
+        if got and stale_cites.named_too_large(got):
+            memo[key] = f"  named path: {p} skipped for size (over 256 KB), no excerpt shown"
+        else:
+            shown = stale_cites.named_excerpt(names, got) if got else None
+            memo[key] = None if shown is None else (
+                f"  named path: {p}\n  lines of {p} around the names the line gives:\n" + "\n".join("    " + r for r in shown.split("\n")))
+    return memo[key]
+
+def prose_judge_row_block(row, body, memo, tight=False):
+    """-> (head, entries) for one selected line `row` = (path, number, text, cites), built once per line and kept in `memo`. `head` is the line's `<path>:<N>:`
+    label, the line, and each cite as written with the text it points at. `entries` is [(key, text)]: the excerpt of each backticked path the line names but
+    does not cite, with the windows around the names this line gives (prose_judge_named_entry). `body(path)` is the text of a file or None.
+    `tight` cuts the line to PROSE_JUDGE_LINE_CHARS and each cited row to NAMED_ROW_CHARS, for a line that is over one call's budget alone."""
     import stale_cites
     path, number, text, cites = row
-    parts = [f"{path}:{number}:", f"Line {number}: {text}"]
+    memo_key = ("row", path, number, tight)
+    if memo_key in memo:
+        return memo[memo_key]
+    parts = [f"{path}:{number}:", f"Line {number}: {stale_cites.cut_row(text, PROSE_JUDGE_LINE_CHARS) if tight else text}"]
     for cite in cites:
         backing = stale_cites.backing_path(*stale_cites.cite_kind(cite))
         got = body(backing) if backing else None
-        shown = stale_cites.cited_excerpt(cite, got) if got is not None else None
+        shown = stale_cites.cited_excerpt(cite, got, row_chars=stale_cites.NAMED_ROW_CHARS if tight else None) if got is not None else None
         if shown is None:
             shown = "(the cited file cannot be read)"
         parts.append(f"  cite: ({cite})\n  cited text of {backing}:\n" + "\n".join("    " + r for r in shown.split("\n")))
     cited = {stale_cites.backing_path(*stale_cites.cite_kind(c)) for c in cites}
     paths, names = stale_cites.named_in_code_spans(text)
-    return "\n".join(parts), [(p, names) for p in paths if p not in cited and names]
+    entries = []
+    for p in paths:
+        entry = None if p in cited or not names else prose_judge_named_entry(p, names, body, memo)
+        if entry:
+            entries.append(((p, entry), entry))
+    memo[memo_key] = (plain_text("\n".join(parts)), entries)
+    return memo[memo_key]
+
+def prose_judge_pieces(state, row, block):
+    """-> (pieces, shown): the prompt pieces that line `row` adds to a call in `state` = {"file": the file of the last line, "seen": {entry key: label of the line
+    that showed it}}, and the entry keys this line shows first. A `File:` header opens a run of one file. An excerpt that another line of the call already shows is
+    a one-line note naming that line, so a call holds each window once. The state is not changed here; prose_judge_take does that."""
+    head, entries = block
+    label = f"{row[0]}:{row[1]}"
+    pieces = [f"File: {row[0]}"] if row[0] != state["file"] else []
+    pieces.append(head)
+    shown = {}
+    for key, entry in entries:
+        first = state["seen"].get(key) or shown.get(key)
+        if first:
+            pieces.append(f"  named path: {key[0]}: the same lines as shown under {first}")
+        else:
+            pieces.append(entry)
+            shown[key] = label
+    return [plain_text(x) for x in pieces], shown
+
+def prose_judge_take(state, row, shown):
+    """Record in `state` that line `row` is in the call, and the entry keys it showed."""
+    state["file"] = row[0]
+    state["seen"].update(shown)
+
+def prose_judge_new_state():
+    return {"file": None, "seen": {}}
+
+PROSE_JUDGE_HEADER = "\n".join((PROSE_JUDGE_INTRO, PROSE_JUDGE_REPLY))
+
+def prose_judge_bytes(pieces):
+    """UTF-8 bytes `pieces` add to a prompt: each piece and the newline before it."""
+    return sum(len(x.encode("utf-8")) + 1 for x in pieces)
 
 def prose_judge_prompt_of(rows, body, memo):
-    """The prompt for `rows`, each (path, number, text, cites): the lines under a `File:` header per run of one file, then the excerpt of each
-    named path once, in first-named order. `memo` keeps each row's block and each path's excerpt across calls, so packing builds each once.
-    A named file over 256 KB is skipped with a one-line note. An excerpt is at most 40 rows of 200 characters."""
-    import stale_cites
-    parts, last, named = [PROSE_JUDGE_INTRO, PROSE_JUDGE_REPLY], None, {}
+    """The prompt for `rows`, each (path, number, text, cites): the lines under a `File:` header per run of one file, each followed by the excerpt of each
+    named path with the windows around the names that line gives. An excerpt that an earlier line of the prompt already shows is a note naming that line.
+    `memo` keeps each line's block, so each is built once. A named file over 256 KB is skipped with a one-line note."""
+    state, parts = prose_judge_new_state(), [PROSE_JUDGE_HEADER]
     for row in rows:
-        key = ("row", row[0], row[1])
-        if key not in memo:
-            memo[key] = prose_judge_row_block(row, body)
-        block, wants = memo[key]
-        if row[0] != last:
-            parts.append(f"File: {row[0]}")
-            last = row[0]
-        parts.append(block)
-        for p, names in wants:
-            named[p] = list(dict.fromkeys(named.get(p, []) + names))
-    for p, names in named.items():
-        key = ("named", p, tuple(names))
-        if key not in memo:
-            got = body(p)
-            if got and stale_cites.named_too_large(got):
-                memo[key] = f"  named path: {p} skipped for size (over 256 KB), no excerpt shown"
-            else:
-                shown = stale_cites.named_excerpt(names, got) if got else None
-                memo[key] = None if shown is None else (
-                    f"  named path: {p}\n  lines of {p} around the names the lines give:\n" + "\n".join("    " + r for r in shown.split("\n")))
-        if memo[key]:
-            parts.append(memo[key])
-    return plain_text("\n".join(parts))
+        pieces, shown = prose_judge_pieces(state, row, prose_judge_row_block(row, body, memo))
+        prose_judge_take(state, row, shown)
+        parts += pieces
+    return "\n".join(parts)
 
 def prose_judge_body(wt, read=None):
     """-> `body(path)`: the text of a file at `wt` through `read` (read_backing by default), each file read once per body."""
@@ -2606,27 +2645,44 @@ def prose_judge_prompt(wt, path, by_line, read=None):
     """The prompt for one prose file: each selected line labelled `<path>:<N>`, with each cite as written and the text it points at.
     `read(wt, backing)` fetches a backing file's text, read_backing by default; lint/prove_route_judge.py passes a reader that goes through git at a rev.
     A line also gets an excerpt of each backticked path it names but does not cite: the lines within 3 of each line that holds another backticked
-    name or number of the line. Each path is read once per prompt build. prose_judge_pack builds the prompt of many files the same way."""
+    name or number of that line. Each path is read once per prompt build. prose_judge_pack builds the prompt of many files the same way."""
     rows = [(path, number, text, tuple(cites)) for number, (text, cites) in sorted(by_line.items())]
     return prose_judge_prompt_of(rows, prose_judge_body(wt, read), {})
 
+def prose_judge_alone(row, body, memo, room):
+    """-> the pieces of line `row`, which is over one call's budget alone, at most `room` UTF-8 bytes: the line cut to PROSE_JUDGE_LINE_CHARS and each cited row
+    cut to NAMED_ROW_CHARS, both with stale_cites.cut_row's marker. When that is still over `room` (many cites), the pieces are one text cut at the byte room, with the same marker."""
+    pieces, _ = prose_judge_pieces(prose_judge_new_state(), row, prose_judge_row_block(row, body, memo, tight=True))
+    if prose_judge_bytes(pieces) <= room:
+        return pieces
+    marker = " [row cut at %d characters]"
+    kept = "\n".join(pieces).encode("utf-8")[:max(room - 1 - len((marker % 10 ** 9).encode("utf-8")), 0)].decode("utf-8", "ignore")
+    return [kept + marker % len(kept)]
+
 def prose_judge_pack(wt, picked):
     """-> (jobs, past): the selected lines of `picked` ({path: {line: (text, cites)}}) packed in stable order (path, then line) into at most
-    PROSE_JUDGE_MAX_CALLS calls. A call takes lines while its built prompt, excerpts included, stays at most PROSE_JUDGE_CALL_BYTES (UTF-8); a file
-    splits across calls at a line boundary, and a line over the budget on its own gets a call of its own. A job is (paths, [(path, line)], prompt).
+    PROSE_JUDGE_MAX_CALLS calls. A call takes lines while its prompt, excerpts included, stays at most PROSE_JUDGE_CALL_BYTES (UTF-8); a file
+    splits across calls at a line boundary. A line over the budget on its own is cut (prose_judge_alone) and gets a call of its own, so no call is over the
+    budget. Each line's block is built once, and its bytes are added to the call's running size. A job is (paths, [(path, line)], prompt).
     `past` counts the lines that fit no call."""
     rows = [(path, number, text, tuple(cites)) for path, by_line in sorted(picked.items()) for number, (text, cites) in sorted(by_line.items())]
     body, memo, jobs, i = prose_judge_body(wt), {}, [], 0
     while i < len(rows) and len(jobs) < PROSE_JUDGE_MAX_CALLS:
-        take, prompt = [rows[i]], prose_judge_prompt_of([rows[i]], body, memo)
-        i += 1
-        while i < len(rows):
-            more = prose_judge_prompt_of(take + [rows[i]], body, memo)
-            if len(more.encode("utf-8")) > PROSE_JUDGE_CALL_BYTES:
-                break
-            take, prompt = take + [rows[i]], more
+        state, take, parts, alone = prose_judge_new_state(), [], [PROSE_JUDGE_HEADER], False
+        size = len(PROSE_JUDGE_HEADER.encode("utf-8"))
+        while i < len(rows) and not alone:
+            row = rows[i]
+            pieces, shown = prose_judge_pieces(state, row, prose_judge_row_block(row, body, memo))
+            if size + prose_judge_bytes(pieces) > PROSE_JUDGE_CALL_BYTES:
+                if take:
+                    break
+                pieces, shown, alone = prose_judge_alone(row, body, memo, PROSE_JUDGE_CALL_BYTES - size), {}, True
+            prose_judge_take(state, row, shown)
+            take.append(row)
+            parts += pieces
+            size += prose_judge_bytes(pieces)
             i += 1
-        jobs.append((tuple(dict.fromkeys(r[0] for r in take)), [(r[0], r[1]) for r in take], prompt))
+        jobs.append((tuple(dict.fromkeys(r[0] for r in take)), [(r[0], r[1]) for r in take], "\n".join(parts)))
     return jobs, len(rows) - i
 
 def prose_judge_row(n, path, number, word, why):
