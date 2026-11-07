@@ -18746,6 +18746,15 @@ def spawn_lines(tool_id, agent_id, tool_name="Agent", split_result=False, **spaw
                 {"type": "tool_result", "tool_use_id": tool_id, "content": blocks}]}})]
 
 
+def spawn_refused_lines(tool_id, **spawn):
+    """The assistant line that spawns an agent, then the user line that refuses it: an error result, as plain text, that
+    names no agentId. A refused spawn never starts, so it is no target."""
+    refused = json.dumps({"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tool_id, "is_error": True,
+         "content": "Agent spawn refused: the call was not started."}]}})
+    return [role_use(tool_id, "Agent", spawn), refused]
+
+
 RESUME_SPAWN_LINES = (
     spawn_lines("r1", RESUME_SONNET, subagent_type="builder", model="sonnet", name="fixer", prompt="Fix the scan.")
     + spawn_lines("r2", RESUME_OPUS, subagent_type="builder", model="opus", name="opusfix", prompt="Fix the scan.")
@@ -18773,6 +18782,17 @@ RESUME_SPAWN_LINES = (
     # A sonnet builder whose agentId sits in the second text block of its result.
     + spawn_lines("r14", RESUME_BLOCK, split_result=True, subagent_type="builder", model="sonnet", name="blockfix",
                   prompt="Fix the scan.")
+    # A sonnet builder that ran, then a newer opus spawn of the same name that was refused: the refused spawn is no target.
+    + spawn_lines("r15", "a9a8b7c6d5e4f3a21", subagent_type="builder", model="sonnet", name="refusedfix",
+                  prompt="Fix the scan.")
+    + spawn_refused_lines("r16", subagent_type="builder", model="opus", name="refusedfix", prompt="Fix the scan.")
+    # The reverse: an opus builder that ran, then a newer sonnet spawn of the same name that was refused.
+    + spawn_lines("r17", "a1f2e3d4c5b6a7980", subagent_type="builder", model="opus", name="refusedrev",
+                  prompt="Fix the scan.")
+    + spawn_refused_lines("r18", subagent_type="builder", model="sonnet", name="refusedrev", prompt="Fix the scan.")
+    # A haiku reviewer, whose round-3 remedy names sonnet and not the Opus ceiling.
+    + spawn_lines("r19", "a0c1d2e3f4a5b6c7d", subagent_type="reviewer", model="haiku", name="haikurev",
+                  prompt="Check the diff.")
 )
 RESUME_LONG_LINES = (
     [json.dumps({"type": "user", "message": {"role": "user", "content": "filler line %d" % n}}) for n in range(400)]
@@ -18792,10 +18812,10 @@ def write_resume_transcripts():
 lazy_fixture([RESUME_SPAWNS, RESUME_LONG, RESUME_EMPTY, RESUME_UNREADABLE], write_resume_transcripts)
 
 
-def resume_refuse(name, to, message, transcript=RESUME_SPAWNS, env=None, carries=RESUME_REMEDY):
-    """A SendMessage the guard refuses under roles-third-round-steps-up. The reason names a fresh Opus spawn."""
+def resume_refuse(name, to, message, transcript=RESUME_SPAWNS, env=None, carries=RESUME_REMEDY, lacks=()):
+    """A SendMessage the guard refuses under roles-third-round-steps-up. The reason names a fresh spawn."""
     add("step-up-resume: " + name, "deny", STEP_UP, tool="SendMessage", cwd=NOGIT, transcript=transcript,
-        to=to, message=message, carries=carries, env=env)
+        to=to, message=message, carries=carries, lacks=lacks, env=env)
 
 
 def resume_allow(name, to, message, transcript=RESUME_SPAWNS):
@@ -18825,6 +18845,11 @@ resume_refuse("a Round 3 of 3 message to a name spawned opus then sonnet, so the
               "duprev", RESUME_ROUND3, carries=RESUME_SHAPE_REMEDY)
 resume_refuse("a Round 3 of 3 message to a sonnet builder whose agentId is in the second text block is denied",
               RESUME_BLOCK, RESUME_ROUND3, carries=RESUME_SHAPE_REMEDY)
+# A refused spawn is no target: the sonnet spawn that ran before it is the newest real one.
+resume_refuse("a Round 3 of 3 message to a name whose newer opus spawn was refused, so the sonnet one is denied",
+              "refusedfix", RESUME_ROUND3, carries=RESUME_SHAPE_REMEDY)
+resume_refuse("a Round 3 of 3 message to a haiku reviewer is denied, and the remedy names the marker, not the Opus ceiling",
+              "haikurev", RESUME_ROUND3, carries=("Round 3 of 3",), lacks=("Opus ceiling",))
 
 # Allowed: an opus builder, a sonnet reviewer, the middle round, no marker, prose, and a target the guard cannot read.
 resume_allow("a Round 3 of 3 message to an opus builder, found by agentId, is allowed", RESUME_OPUS, RESUME_ROUND3)
@@ -18832,6 +18857,8 @@ resume_allow("a Round 3 of 3 message to a builder on the full opus id is allowed
 resume_allow("a Round 3 of 3 message to a sonnet reviewer is allowed", "checker", RESUME_ROUND3)
 resume_allow("a Round 3 of 3 message to a name spawned sonnet then opus, so the newest is opus, is allowed", "dupfwd",
              RESUME_ROUND3)
+resume_allow("a Round 3 of 3 message to a name whose newer sonnet spawn was refused, so the opus one is allowed",
+             "refusedrev", RESUME_ROUND3)
 resume_allow("a Round 2 of 3 message to a sonnet builder is allowed", "fixer", "Round 2 of 3. Continue the fix.")
 resume_allow("a message with no marker to a sonnet builder is allowed", "fixer", "Check the diff again for typos.")
 resume_allow("a Round 3 of 3 marker only in later prose on line two is allowed", "fixer",
