@@ -1746,6 +1746,15 @@ EXCLUSION_ASKS = (
     "send opus, builders and reviewers on haiku",
     "send opus, builders and reviewers out",
     "send opus, builders and reviewers excepted",
+    # Exclusion by a verb that drops them (skipping, omit, bar, ignoring, excepting, exempting), or by a clause that keeps
+    # them on their own model, leaves the two roles off the Opus grant too.
+    "opus for everything, skipping builders and reviewers",
+    "send opus, omit builders and reviewers",
+    "send opus, bar builders and reviewers",
+    "send opus, ignoring builders and reviewers",
+    "send opus, excepting builders and reviewers",
+    "send opus, exempting builders and reviewers",
+    "send opus, builders and reviewers keep their model",
 )
 
 
@@ -1772,6 +1781,9 @@ def case_opus_scope_exclusion_words_grant_no_excluded_role():
 KEPT_ON_OPUS_ASKS = (
     "send opus, builders and reviewers stay on opus",
     "send builders and reviewers to opus, leave the rest",
+    # Sending the two roles to Opus and naming the rest's model, or naming the others as staying, keeps both on Opus.
+    "builders and reviewers to opus, sonnet for the rest",
+    "opus for builders and reviewers, others stay",
 )
 
 
@@ -1782,6 +1794,22 @@ def case_opus_scope_stay_and_leave_the_rest_grant_both_roles():
         got = opus_override(cfg)
         check("opus scope: %r grants builder and reviewer, sorted" % prompt,
               got is not None and got[2] == ["builder", "reviewer"], "got %r" % (got,))
+
+
+# A plain ask that leaves builders on Opus grants the builder role alone: the reviewer keeps its own model.
+BUILDER_ON_OPUS_ASKS = (
+    "leave builders on opus",
+    "send opus, leave builders on opus",
+)
+
+
+def case_opus_scope_leave_builders_on_opus_grants_builder():
+    for prompt in BUILDER_ON_OPUS_ASKS:
+        cfg, judge, scope, exc = scope_grant(prompt, None, ScopeStub(answer=None))
+        check("opus scope: %r is judged without an error" % prompt, exc is None, "raised %r" % (exc,))
+        got = opus_override(cfg)
+        roles = None if got is None else ([got[2]] if isinstance(got[2], str) else sorted(got[2] or []))
+        check("opus scope: %r grants the builder role alone" % prompt, roles == ["builder"], "got %r" % (got,))
 
 
 def case_opus_scope_not_read_when_the_judge_says_no():
@@ -2187,6 +2215,7 @@ def main():
         case_opus_scope_two_roles_from_the_read_grant_both_sorted()
         case_opus_scope_exclusion_words_grant_no_excluded_role()
         case_opus_scope_stay_and_leave_the_rest_grant_both_roles()
+        case_opus_scope_leave_builders_on_opus_grants_builder()
         case_opus_list_role_lifts_its_roles_and_refuses_the_rest()
         case_opus_keyword_files_keep_their_bytes()
         case_opus_scope_read_sees_every_role_before_it_runs()

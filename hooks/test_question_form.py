@@ -511,7 +511,11 @@ SESSION_ONLY = ["The session merges PR #374.", "After the pick, the session merg
                 "The session merges PR #374 once the owner's approval is in.",
                 "The session merges PR #374 as he asked.",
                 "The session merges PR #374 after Shivam's OK.",
-                "The session merges PR #374 so CI reruns."]
+                "The session merges PR #374 so CI reruns.",
+                # A session clause that names a click or a press the session makes itself, with no owner in it, passes.
+                "The session merges PR #374 without a click.",
+                "The session merges PR #374 by clicking Merge in the batch tool.",
+                "The session merges PR #374 with one press."]
 # The how-text of an option labelled "Go": a split cuts the mark-ready press, so it is refused. The waiting
 # page's own button, or a past act, asks the owner for no web press: each passes, with the label "Merge the PR".
 GO_SPLIT_PRESS = [
@@ -943,6 +947,15 @@ RESTATES = [
     "Departs from: lint/stamp.py:run_stamp — keeps the lint job and does not move it",
     "Departs from: lint/stamp.py:run_stamp — nothing moves",
     "Departs from: lint/stamp.py:run_stamp — keeps the lint job and never removes it",
+    # A no-change clause after a restatement (changes nothing, removes nothing, renames nothing, drops no field, sets
+    # no new cap, the set is the same) or a value already set names no change either, so each is refused.
+    "Departs from: lint/stamp.py:run_stamp — same as main; changes nothing",
+    "Departs from: lint/stamp.py:run_stamp — unchanged; removes nothing and replaces nothing",
+    "Departs from: lint/stamp.py:run_stamp — none; renames nothing",
+    "Departs from: lint/stamp.py:run_stamp — same as today; drops no field",
+    "Departs from: lint/stamp.py:run_stamp — no change; sets no new cap",
+    "Departs from: lint/stamp.py:run_stamp — same as main; the set of fields is the same",
+    "Departs from: lint/stamp.py:run_stamp — already set to 5",
 ]
 # A line with an empty side, no separator, or nothing after the colon. Each is refused.
 MALFORMED = [
@@ -971,6 +984,8 @@ VALID_LINES = [
     "Departs from: lint/stamp.py:run_stamp — keeps the retry count and changes the timeout to 5 seconds",
     # A change side that says where a part is kept names a place, not a restatement: it passes.
     "Departs from: lint/stamp.py:run_stamp — Suspense cards are kept in Suspense",
+    # A change that adds a flag which changes nothing when set is still an added thing, so it passes.
+    "Departs from: lint/stamp.py:run_stamp — adds a no-op flag",
 ]
 DEPARTS_REFUSAL = (DEPARTS_RULE, "Departs")
 

@@ -7966,10 +7966,13 @@ sh("trim: env: a heredoc file with an env read, run by sh, denies",
 sh("trim: env: a heredoc file with no env read, checked by python3, is allowed",
    "cat > brief.md <<'EOF'\necho hi\nEOF\npython3 check.py brief.md", "allow", cwd=NOGIT)
 # A file a heredoc writes and a runner executes keeps its body in view, so the env read in it denies. Each form runs
-# the file: a shell, an interpreter with an option before the file, a runner with a value flag, a PowerShell file, or
-# a pipe into a shell. The control names the file as an argument of a checker, which runs nothing, so it is allowed.
+# the file: a shell, an interpreter with an option before the file, a runner with a value flag, a PowerShell file, a
+# pipe into a shell, an exec of its text, a shell or Python that reads it on stdin, or a timeout wrapper around it.
+# The control names the file as an argument of a checker, which runs nothing, so it is allowed.
 for _run in ("sh -o pipefail f", "node --env-file " + ENV + " f", "node --require dotenv/config f",
-             "python3 -X dev f", "powershell -ExecutionPolicy Bypass -File f", "cat f | sudo -u root bash"):
+             "python3 -X dev f", "powershell -ExecutionPolicy Bypass -File f", "cat f | sudo -u root bash",
+             "python3 -c \"exec(open('f').read())\"", "bash -s a b < f", "sh -s -- x y < f", "python3 - a b < f",
+             "timeout 1.5 ./f"):
     sh("trim: env: a heredoc file with an env read, run as %r, still denies" % _run,
        "cat > f <<'EOF'\ncat " + ENV + "\nEOF\n" + _run, "deny", "env-file", cwd=NOGIT)
 sh("trim: env: a heredoc file with an env read, named as an argument by python3 check.py, is allowed",
