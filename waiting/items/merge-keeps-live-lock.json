@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-07T19:40:00Z",
+  "context": "Goal: no live agent loses its worktree mid-task.\nProblem (risk): at merge, merge/merge.py:1984-1992 (cut_local, then remove_held_tree) frees a worktree's own agent lock once the worktree is merged and idle for 30 minutes (janitor/sweep.py:474-498 and 793-795). A quiet reviewer writes no git, so it reads as idle.\nBased on (code): janitor/sweep.py own_agent_lock_verdict.\nBased on (ruling): decision when-a-worktree-may-be-removed, line 7: no lock holds a worktree that a merge removes. Asked again because the lost-worktree incident of 2026-11-06 is the harm that line allows.\nDeparts from: main, where a merge frees an agent's own lock after 30 idle minutes. Option a keeps the lock while its agent is alive.",
+  "home": "lane worktree-unique-branch (session_013NEJL3WkjDpDX48MYiGdbs)",
+  "id": "merge-keeps-live-lock",
+  "kind": "decision",
+  "n": 357,
+  "options": [
+    {
+      "gain": "A live reviewer's worktree is safe.",
+      "key": "a",
+      "label": "A merge never frees a lock whose agent is alive; the record changes to say so (recommended)",
+      "lose": "Merged worktrees with a live agent stay until that session ends."
+    },
+    {
+      "gain": "No code change.",
+      "key": "b",
+      "label": "Keep the code, and rewrite the record to match it",
+      "lose": "A quiet live reviewer can still lose its worktree."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 1,
+  "ref": "decision when-a-worktree-may-be-removed",
+  "short": "Merge frees a live agent's worktree lock?",
+  "status": "open",
+  "title": "Should a merge ever free a worktree lock whose agent is still alive?",
+  "why": "A quiet reviewer writes no git for 30 minutes, so the merge reads its worktree as idle and can remove it mid-task."
+}
