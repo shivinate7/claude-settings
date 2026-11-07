@@ -5,12 +5,14 @@ what really happened and note a contradiction, never refuse on it:
 - hooks/refusal_note.py (PermissionDenied): a refused call that a "works" row matches.
 - lint/report_guard.py (Stop): a successful call that a "refused" row matches, and each `route_flag` the
   first hook wrote.
+lint/report_guard.py also reads a row by id for the hand-off cite: a "Why yours" line must cite `(route <id>)`.
 
 Rows file: {"rows": [{id, act, route, surface, outcome, measured, cc_version, evidence, by, pattern,
 alternates?}]}, at hooks/route_rows.json. The env GUARD_ROUTE_ROWS overrides the path, as
 GUARD_ITEM_FIELDS_PAGE does for the waiting page (hooks/question_form.py). `rows_path()` is the one home of that
 path: any other reader of the rows file (lint/stale_cites.py) calls it and keeps no copy. A missing or unreadable
-file reads as no rows: a hook that cannot read a row cannot accuse.
+file reads as no rows: a hook that cannot read a row cannot accuse. `read_rows()` keeps the two apart (None for a file that
+does not read), for the reader that must report an unread file as UNKNOWN.
 
 Cost: one file read per hook run that already runs, no process, no write. It never writes the rows file. A match
 runs each row's pattern once per call target, over at most MAX_TARGET_CHARS of it, and skips a pattern longer than
@@ -56,14 +58,21 @@ def surface():
     return "cloud" if guard_core.is_cloud() else "local"
 
 
-def load_rows():
-    """The rows in the rows file, or [] when the file or its list does not read."""
+def read_rows():
+    """The rows in the rows file, or None when the file or its list does not read. An empty list of rows is [], not
+    None: a reader that must tell "no row holds this id" from "the file never read" (the hand-off cite in
+    lint/report_guard.py) calls this one."""
     try:
         with open(rows_path(), encoding="utf-8") as handle:
             rows = json.load(handle).get("rows")
     except (OSError, ValueError, AttributeError):
-        return []
-    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+        return None
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else None
+
+
+def load_rows():
+    """The rows in the rows file, or [] when the file or its list does not read."""
+    return read_rows() or []
 
 
 def call_target(tool_name, tool_input):
