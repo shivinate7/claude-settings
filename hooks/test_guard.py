@@ -8433,6 +8433,15 @@ sh("env: heredoc-false-alarm pin: a quoted cat body with a lone apostrophe and a
    "cat > n.md <<'EOF'\nDon't cat " + ENV + " # here\nEOF", "allow", cwd=PROJ)
 sh("env: heredoc-false-alarm pin: an unquoted cat body of plain words naming an env read, allowed",
    "cat > n.md <<EOF\nthe guard refuses cat " + ENV + "\nEOF", "allow", cwd=PROJ)
+# A stdin shell or script runner reads its heredoc body as commands, so that body stays in view even when a
+# printing interpreter's body sits beside it. `cat` only prints its body, so the same shape allows.
+for _header in ("ssh host", "php", "lua", "at now", "su", "sudo", "doas"):
+    sh("env: heredoc-stdin: a print heredoc, then `%s <<'EOF'` whose body reads the env file, denies "
+       "[red on 8bba95a]" % _header,
+       "python3 - <<'PY'\nprint(1)\nPY\n" + _header + " <<'EOF'\ncat " + ENV + "\nEOF", "deny", "env-file",
+       cwd=PROJ)
+sh("env: heredoc-stdin: a print heredoc, then `cat <<'EOF'` whose body reads the env file, allowed",
+   "python3 - <<'PY'\nprint(1)\nPY\ncat <<'EOF'\ncat " + ENV + "\nEOF", "allow", cwd=PROJ)
 
 
 # The two incident commands, verbatim. The env word is written as @DOTENV@ and rebuilt from ENV, so
@@ -11441,8 +11450,8 @@ sh("frozen data: a quoted commit message naming a cat-write onto the config sett
    "[new allow: red on main, passes on d7fb2f1]",
    VCS + ' commit -m "note: cat > ' + CFG_SETTINGS + ' is refused"', "allow", cwd=NOGIT)
 sh("frozen data: a heredoc body naming a cat-write onto the config settings, fed to python, allows "
-   "[ruling of 2026-11-03: no shell spot in the body, so no write; roadmap step "
-   "agent-model-cap-string-false-alarm, Queue item 162]",
+   "[step agent-model-cap-string-false-alarm: a false-alarm fix, interpreter string data that writes no file "
+   "is not the act; incident 2026-11-02 01:16 CST]",
    "python hooks/guard.py <<'DOC'\ncat > " + CFG_SETTINGS + "\nDOC", "allow", cwd=NOGIT)
 sh("frozen shell: a python heredoc that os.system-runs a cat-write onto the config settings denies "
    "[regression pin: passes on main]",
@@ -11985,8 +11994,8 @@ chained_ask("cap data: a multi-line quoted string naming a cat-write, piped to p
    "printf '%s' 'a note\ncat > " + PROJ_LOCAL + " " + CAP_KEY + "' | python hooks/guard.py", cwd=NOGIT,
    carries=("agent-model-cap",))
 sh("cap data: a heredoc body fed to python stdin naming a cat-write allows "
-   "[ruling of 2026-11-03: no shell spot in the body, so no write; roadmap step "
-   "agent-model-cap-string-false-alarm, Queue item 162]",
+   "[step agent-model-cap-string-false-alarm: a false-alarm fix, interpreter string data that writes no file "
+   "is not the act; incident 2026-11-02 01:16 CST]",
    "python hooks/guard.py <<'PAYLOAD'\n{\"tool_input\": {\"command\": \"cat > " + PROJ_LOCAL + " "
    + CAP_KEY + "\"}}\nPAYLOAD", "allow", cwd=NOGIT)
 sh("cap data: a python heredoc that subprocess-runs a cat-write with shell=True asks "
@@ -11994,8 +12003,8 @@ sh("cap data: a python heredoc that subprocess-runs a cat-write with shell=True 
    "python3 - <<'PY'\nimport subprocess; subprocess.run('cat > " + PROJ_LOCAL + " " + CAP_KEY
    + "', shell=True)\nPY", "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
 sh("cap data: a python heredoc that only prints a cat-write allows "
-   "[ruling of 2026-11-03: no shell spot in the body, so no write; roadmap step "
-   "agent-model-cap-string-false-alarm, Queue item 162]",
+   "[step agent-model-cap-string-false-alarm: a false-alarm fix, interpreter string data that writes no file "
+   "is not the act; incident 2026-11-02 01:16 CST]",
    "python3 - <<'PY'\nprint('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\nPY", "allow", cwd=NOGIT)
 sh("cap data: a python heredoc that os.system-runs a cat-write asks [regression pin: passes on main]",
    "python3 - <<'PY'\nimport os; os.system('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\nPY",
@@ -12503,8 +12512,8 @@ sh("ask-alone: a one-command python heredoc holding a forced push asks, not deni
 sh("ask-alone: a one-command python heredoc holding a hard reset in a worktree asks, not denies",
    "python3 - <<'PY'\n" + VCS + " reset --hard\nPY", "ask", "shared-tree", cwd=GITWT)
 sh("cap data: a one-command python heredoc holding a cap write as text allows "
-   "[ruling of 2026-11-03: no shell spot in the body, so no write; roadmap step "
-   "agent-model-cap-string-false-alarm, Queue item 162]",
+   "[step agent-model-cap-string-false-alarm: a false-alarm fix, interpreter string data that writes no file "
+   "is not the act; incident 2026-11-02 01:16 CST]",
    "python3 - <<'PY'\n" + CAP_PLAIN + "\nPY", "allow", cwd=PROJ)
 sh("cap data: a one-command python heredoc whose os.system runs a cap write asks "
    "[regression pin: passes on main]",
