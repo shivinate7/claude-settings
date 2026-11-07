@@ -1144,10 +1144,10 @@ STAMP_REASON = (
 )
 
 
-def _minutes_off(then, now) -> int:
-    """Whole minutes between an instant and the clock, either way. Both are cut to the minute first, so the
-    header stamp and an ISO instant compare one way (rule message-time-matches-clock)."""
-    return abs(int((then.replace(second=0, microsecond=0) - now.replace(second=0, microsecond=0)).total_seconds() // 60))
+def _minutes_ahead(then, now) -> int:
+    """Whole minutes an instant is ahead of the clock: negative when it is behind. Both are cut to the minute
+    first, so the header stamp and an ISO instant compare one way (rule message-time-matches-clock)."""
+    return int((then.replace(second=0, microsecond=0) - now.replace(second=0, microsecond=0)).total_seconds() // 60)
 
 
 def stamp_hit(tool: str, tool_input):
@@ -1172,7 +1172,7 @@ def stamp_hit(tool: str, tool_input):
         hour, minute = int(found.group("hour")), int(found.group("minute"))
         if found.group("date"):
             stamped = datetime.fromisoformat(found.group("date")).replace(hour=hour, minute=minute, tzinfo=zone)
-            off = int((stamped - now).total_seconds() // 60)
+            off = _minutes_ahead(stamped, now)
         else:
             if hour > 23 or minute > 59:
                 return None
@@ -1195,7 +1195,7 @@ _UPDATED_AT = re.compile(r'updatedAt\\?"?\s*[:=]\s*\\?"' + _ISO_INSTANT + r'\\?"
 _STEP_FILE = re.compile(r"(?:^|/)roadmap/data/steps/[^/]+\.json$")
 WRITTEN_ITEMS = "items"  # the ArtifactData collection whose `added` is judged
 WRITTEN_REASON = (
-    "this written time ({what}) is {off} minutes off the clock, and the limit is " + str(STAMP_LIMIT_MINUTES) + ". "
+    "this written time ({what}) is {off} minutes ahead of the clock, and the limit is " + str(STAMP_LIMIT_MINUTES) + ". "
     "The time is {now}, which is {central} and {utc}: write that time, then run the call again."
 )
 
@@ -1214,7 +1214,26 @@ def _instant(found):
         return None
 
 
-def _written_texts(tool: str, tool_input: dict):
+def _document_added(entry, cwd):
+    """The `added` string of one ArtifactData write's document, or None. The document is the inline `data` (a dict,
+    or a JSON string), else the local JSON file named by `file_path`, read against `cwd` when the path is relative:
+    the one file read this rule costs, made only for a write to collection items with no inline data. A file that
+    does not read or parse holds nothing to judge."""
+    data = entry.get("data")
+    path = entry.get("file_path")
+    try:
+        if data is None and isinstance(path, str) and path:
+            with open(os.path.join(cwd, path) if cwd else path, encoding="utf-8") as handle:
+                data = json.load(handle)
+        elif isinstance(data, str):
+            data = json.loads(data)
+    except (OSError, ValueError):
+        return None
+    added = data.get("added") if isinstance(data, dict) else None
+    return added.strip() if isinstance(added, str) else None
+
+
+def _written_texts(tool: str, tool_input: dict, cwd: str = ""):
     """The text of each written value this call carries that holds an ISO instant to judge: ISO strings alone
     (an `added`), or text holding a literal `updatedAt` (a step's content, an edit's new text, a command)."""
     if tool == DATA_TOOL:
@@ -1222,15 +1241,15 @@ def _written_texts(tool: str, tool_input: dict):
         writes = [(w.get("op") or w.get("action"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)] \
             if action == "batch" else [(action, tool_input)]
         for op, entry in writes:
-            data = entry.get("data")
-            if isinstance(data, str):
-                try:
-                    data = json.loads(data)
-                except ValueError:
-                    continue
-            added = data.get("added") if isinstance(data, dict) else None
-            if op in ("set", "update") and entry.get("collection") == WRITTEN_ITEMS and isinstance(added, str):
-                yield "added " + added.strip(), added.strip()
+            if entry.get("collection") != WRITTEN_ITEMS:
+                continue
+            if op == "str_replace":  # the new text of the `added` field is the value the document ends with
+                new = entry.get("new_str")
+                added = new.strip() if entry.get("field") == "added" and isinstance(new, str) else None
+            else:
+                added = _document_added(entry, cwd) if op in ("set", "update") else None
+            if added:
+                yield "added " + added, added
         return
     if tool in WRITE_TOOLS:
         paths = [v.replace("\\", "/") for k in ("file_path", "path") if isinstance(v := tool_input.get(k), str)]
@@ -1240,24 +1259,26 @@ def _written_texts(tool: str, tool_input: dict):
             for part in parts:
                 if isinstance(part, str) and "updatedAt" in part:
                     for found in _UPDATED_AT.finditer(part):
-                        yield "updatedAt " + found.group(0), found.group(0)
+                        yield found.group(0), found.group(0)
         return
     command = tool_input.get("command")
     if tool in SHELL_TOOLS and isinstance(command, str) and "updatedAt" in command:
         for found in _UPDATED_AT.finditer(command):
-            yield "updatedAt " + found.group(0), found.group(0)
+            yield found.group(0), found.group(0)
 
 
-def written_time_hit(tool: str, tool_input):
-    """Return (matched, reason) when a written ISO instant is more than STAMP_LIMIT_MINUTES off the clock, else
-    None. Judged: `added` in an ArtifactData set, update or batch write to collection items; `updatedAt` in a
-    Write or Edit to roadmap/data/steps/<name>.json; a literal double-quoted `updatedAt` in a shell command.
-    Only an instant with an offset is read. Cost: one clock read, and only when a judged value is present; no
-    transcript, file or process. Fails open, like stamp_hit."""
+def written_time_hit(tool: str, tool_input, cwd: str = ""):
+    """Return (matched, reason) when a written ISO instant is more than STAMP_LIMIT_MINUTES ahead of the clock,
+    else None. A value behind the clock passes: a kept old value is always behind. Judged: `added` in an
+    ArtifactData set, update or batch write to collection items (the document inline or through `file_path`), and
+    the new text of a str_replace on `added`; `updatedAt` in a Write or Edit to roadmap/data/steps/<name>.json; a
+    literal double-quoted `updatedAt` in a shell command. Only an instant with an offset is read. Cost: one clock
+    read, and only when a judged value is present; one local file read, only for an items write that carries
+    `file_path` and no inline data; no transcript or process. Fails open, like stamp_hit."""
     if not isinstance(tool_input, dict):
         return None
     judged = []
-    for what, text in _written_texts(tool, tool_input):
+    for what, text in _written_texts(tool, tool_input, cwd):
         found = _ISO_FULL.search(text)
         then = _instant(found) if found else None
         if then:
@@ -1268,7 +1289,7 @@ def written_time_hit(tool: str, tool_input):
         import local_time
         now = local_time.clock().replace(second=0, microsecond=0)
         for what, then in judged:
-            off = _minutes_off(then, now)
+            off = _minutes_ahead(then, now)
             if off > STAMP_LIMIT_MINUTES:
                 return what, WRITTEN_REASON.format(
                     what=what, off=off, now=local_time.central_hhmm(now), central=local_time.central_iso(now),

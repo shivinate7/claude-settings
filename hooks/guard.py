@@ -123,12 +123,14 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        `,` or `:`, an optional date, then `HH:MM CST|CDT`, after optional markdown lead characters. The
                        refusal fires when the stamp is more than 1 minute ahead of the clock (local_time.clock); a stamp
                        behind passes. A dated stamp is an instant with its zone's offset; an undated one is a signed
-                       minute-of-day offset mod 1440. The reason prints the real time. No transcript, file or process; a missing clock module
+                       minute-of-day offset mod 1440. The reason prints the real time. No transcript or process; a missing clock module
                        passes the call. The same limit judges three written values, each an ISO instant
                        with an offset: `added` in an ArtifactData set, update or batch write to collection items;
                        `updatedAt` in a Write or Edit to roadmap/data/steps/<name>.json; a literal double-quoted
-                       `updatedAt` in a Bash command, read as text. The reason prints the time in Central and ISO. One
-                       clock read only when a judged value is present. An override lifts it.
+                       `updatedAt` in a Bash command, read as text. `added` is read inline, through `file_path` (one
+                       local file read, only for an items write with no inline data), or as a str_replace's new text.
+                       The reason prints the time in Central and ISO. One clock read only when a judged value is
+                       present. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -4905,7 +4907,7 @@ def judge(payload) -> None:
         refuse(tool, "deny", "message-time-matches-clock", stamped[1], stamped[0])
 
     # A written time off the clock: `added` in items, a step's `updatedAt`, a literal `updatedAt` in a command.
-    written = written_time_hit(tool, tool_input)
+    written = written_time_hit(tool, tool_input, cwd)
     if written:
         refuse(tool, "deny", "message-time-matches-clock", written[1], written[0])
 
