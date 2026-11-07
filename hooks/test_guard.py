@@ -22955,6 +22955,31 @@ def session_home_visit_no_lived_file_case():
     return True, "a visit with no lived act leaves no .lived file and no record"
 
 
+def session_home_lived_folder_stands_case():
+    """Rule session-home: a lane the session wrote in (its `<record>.lived` file exists) whose worktree
+    folder stands keeps the session home. The lane write marks the lane lived, so the primary Write after
+    it is judged by the folder, which stands, and is allowed."""
+    primary = sh_new_primary("lived-stands")
+    lane, _ = sh_add_lane(primary, "lane-lived-stands")
+    session = sh_session()
+    problems = []
+    got, reason = _decide_full("Bash", lane, session=session, command="echo x > f.txt")
+    if got != "allow":
+        problems.append("the lane write: want allow, got %s (%s)" % (got, reason[:120]))
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane write wrote no session record naming the lane")
+    if not os.path.exists(sh_record(primary, session) + ".lived"):
+        problems.append("the lane write left the lane unmarked: no .lived file")
+    got, reason = _decide_full("Write", primary, session=session,
+                               file_path=os.path.join(primary, "src", "app.py"), content="x")
+    if got != "allow":
+        problems.append("the primary Write with the lived lane's folder standing: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a lived lane whose worktree folder stands lets the primary Write through"
+
+
 LOG_CHECKS_EXTRA.append(("session-home: a lane commit makes the lane home, so a primary Write is refused once "
                          "the lane is removed", session_home_lane_commit_case))
 LOG_CHECKS_EXTRA.append(("session-home: a lane merge makes the lane home, so a primary Write is refused once "
@@ -22971,6 +22996,8 @@ LOG_CHECKS_EXTRA.append(("session-home: one lived lane leaves exactly one .lived
                          "ExitWorktree from the primary removes both", session_home_lived_file_count_case))
 LOG_CHECKS_EXTRA.append(("session-home: a visit with no lived act leaves no .lived file and no record",
                          session_home_visit_no_lived_file_case))
+LOG_CHECKS_EXTRA.append(("session-home: a session whose worktree folder stands, with its lane lived, writes into "
+                         "the primary checkout", session_home_lived_folder_stands_case))
 
 
 # =========================================================================== mask_script lexemes
