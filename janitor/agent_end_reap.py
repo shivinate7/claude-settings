@@ -118,10 +118,11 @@ def log(record: dict, replace_run=None, give_up_at=None):
     (a `time.monotonic` time, the hook's own clock) when that is sooner.
     REPLACE_RUN names a start row written earlier by this run; the last line is replaced only
     when it carries that run id, so another agent's row is never dropped.
-    A row drops in two ways: a write that cannot finish by the deadline raises LogWaitTimeout, and a
-    read of the log that is refused (any OSError but a missing file) skips the rewrite, so the log
-    keeps every row it holds and is never shrunk. A refused read is not retried. A failed write never
-    fails the hook (exit stays 0); it prints one line to stderr."""
+    Only the new row can drop, never a row the log holds: every failure comes before the replace.
+    A write that cannot finish by the deadline raises LogWaitTimeout. A read of the log that is
+    refused (any OSError but a missing file) skips the rewrite and is not retried. A failed folder,
+    lock-file or temp write, or a replace refused with an OSError other than PermissionError, drops
+    it too. A failed write never fails the hook (exit stays 0); it prints one line to stderr."""
     deadline = time.monotonic() + LOG_WAIT_SECONDS
     if give_up_at is not None:
         deadline = min(deadline, give_up_at)

@@ -20,8 +20,8 @@ lint/guard_log_report.py, beside this hook's folder, so the path holds from any 
   <config dir>/state/agent-end-payloads.jsonl (janitor/agent_end_reap.py `log`). A run counts when
   its run id's time (the part after the pid) falls on a window day, and it has a `started` row
   that no `done` row follows, or a row with an `error` key. A malformed row is skipped. A started
-  row can also be a done row that `log()` dropped (lock or replace timeout, or a refused read, both
-  printed to stderr). A missing file is not a failure; an unreadable one is unknown.
+  row can also be a done row that `log()` dropped (a timeout, a refused read or a failed write,
+  each printed to stderr). A missing file is not a failure; an unreadable one is unknown.
 - the daily sweep's error log, <config dir>/janitor/launchd-sweep.err.log
   (janitor/install_launchd.py `build_plist`), exists, is not empty, and was last written on a window
   day. The line names it and launchd-sweep.log, its stdout log. A missing file is not a failure.
