@@ -10876,11 +10876,18 @@ N63_SHA = "476f456c" + "0" * 32  # head of #63, the pull request that merges
 P65_SHA = "b8416ca" + "1" * 33  # head of #65, which holds N63_SHA
 Q66_SHA = "c0ffee0" + "2" * 33  # head of #66, which does not hold N63_SHA
 
-def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:00:00Z", labels=()):
+BASE_REPO, FORK_REPO = "shivinate7/claude-settings", "forker/claude-settings"  # the base repo of the fixtures, and the repo of a fork's head
+
+def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:00:00Z", labels=(), head_ref=None, fork=None):
     """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads, created_at, which the review list reads, and the
-    names of its `labels`, as GitHub lists them."""
-    return {"number": number, "draft": draft, "created_at": created_at, "base": {"ref": base}, "head": {"ref": "feat%d" % number, "sha": sha},
-            "labels": [{"name": name} for name in labels]}
+    names of its `labels`, as GitHub lists them. `head_ref` names the head branch (feat<number> by default). `fork` None gives no repo fields,
+    as before; True or False gives both repos, and True makes the head repo a fork of the base repo."""
+    pull = {"number": number, "draft": draft, "created_at": created_at, "base": {"ref": base},
+            "head": {"ref": head_ref or "feat%d" % number, "sha": sha}, "labels": [{"name": name} for name in labels]}
+    if fork is not None:
+        pull["base"]["repo"] = {"full_name": BASE_REPO}
+        pull["head"]["repo"] = {"full_name": FORK_REPO if fork else BASE_REPO}
+    return pull
 
 def batch_run(name, status="in_progress", conclusion=None):
     """A check run of a head as `pages("commits/<sha>/check-runs")` lists it. Pending unless its status is completed."""
@@ -12611,7 +12618,8 @@ class ReviewedList(ReviewEnv):
         self.assertEqual([rel for rel, _ in host.list_calls if rel.startswith("commits/")], [], "a draft's head was read")
 
     def test_a_ready_pr_line_carries_no_ci_state_and_reads_no_head(self):
-        # The line names the act only. A red head run changes nothing here: merge reads CI when it merges.
+        # The batch line names the act only and carries no CI state: merge reads CI when it merges. The coordinator's ledger design of
+        # 12:56 CST Nov 7 (record pr-ledger) sets this.
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "failure")]})
         self.assertEqual(rc, 0, out + err)
@@ -12687,6 +12695,8 @@ class ReviewedList(ReviewEnv):
 LEDGER_NOW = datetime(2026, 10, 2, 6, 0, 0, tzinfo=timezone.utc)  # the clock of every review-list case
 LEDGER_ACT = {"batch": "batch", "lane round": "lane round 2", "held": "waits on debt:await-held",
               "parked": "waits on debt:await-parked", "replaced": "waits on debt:await-replaced"}  # the act each kind's fixture gives
+
+BATCH_LABEL = "batch"  # the label of an integration pull request; merge.HOLD_LABELS holds it
 
 def ago(hours):
     """A GitHub time `hours` before LEDGER_NOW, as created_at reads it. A negative count is a time after it."""
@@ -12965,6 +12975,111 @@ class ReviewedLedger(ReviewEnv):
         for n in (8, 9, 10):
             self.assertLessEqual(reads.count(f"issues/{n}/events"), 1, reads)
         self.assertEqual([rel for rel in reads if rel.startswith("commits/")], [], "a head was read")
+
+    # Fork heads, fix checks, malformed fields, and the draft and batch-label acts. Each red fails on the line or the exit it asserts.
+
+    def test_a_fork_pull_request_whose_head_ref_is_main_never_blocks_a_pull_request_on_main(self):
+        fork = batch_pull(9, REVIEW_HEAD, head_ref="main", fork=True, created_at=ago(5))
+        pulls = [fork, batch_pull(8, REVIEW_OLD_HEAD, fork=False, created_at=ago(30))]
+        host, rc, out, err = self.ledger(pulls, [ledger_record(1, 9, 2, rounds=REVIEW_PASS)])
+        self.assertRegex(list_line(self, out, 8), r"^#8 feat8 NO NEXT ACT \d+h RED$", out)
+        self.assertRegex(list_line(self, out, 9), r"^#9 main batch 2h$", out)
+        self.assertEqual(rc, 1, out + err)
+
+    def test_an_open_record_whose_fix_check_failed_after_round_one_is_lane_round_one(self):
+        rec = ledger_record(1, 7, 3, rounds=("Round 1: reviewer, sonnet, FAIL",), fix=(fix_check_line("FAIL"),))
+        host, rc, out, err = self.ledger([batch_pull(7, REVIEW_HEAD, created_at=ago(50))], [rec])
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 lane round 1 3h", out)
+        self.assertEqual(rc, 0, out + err)
+
+    def guarded(self, pulls, comments=(), events=None):
+        """-> (rc, out, err) of `merge --reviewed`, as ledger() runs it. An uncaught exception reads as exit 1 with its traceback in err, the exit
+        Python gives it, so a case fails on the exit it asserts and not on the crash."""
+        import traceback
+        host = PullsHost(pulls, {}, comments=comments, now=LEDGER_NOW, events=events)
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            rc = self.run_merge("--reviewed", host=host, stdout=out, stderr=err)[0]
+        except SystemExit as e:
+            rc = e.code
+        except Exception:
+            rc = 1
+            err.write(traceback.format_exc())
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_a_malformed_pull_request_or_event_exits_two_and_prints_nothing(self):
+        no_created = batch_pull(7, REVIEW_HEAD, created_at=ago(4))
+        del no_created["created_at"]
+        no_sha = batch_pull(7, REVIEW_HEAD, created_at=ago(4))
+        del no_sha["head"]["sha"]
+        cases = {
+            "a pull request with no created_at": ([no_created], (), None),
+            "a pull request with no head sha": ([no_sha], (), None),
+            "a labeled event with no created_at": ([batch_pull(7, REVIEW_HEAD, created_at=ago(200), labels=("held",))],
+                                                    [waits_comment(1, 7, 2, "Waits on: debt:await-held")],
+                                                    {7: [{"event": "labeled", "label": {"name": "held"}}]}),
+            "a comment with no created_at": ([batch_pull(7, REVIEW_HEAD, created_at=ago(4))],
+                                             [{"id": 1, "issue_url": "https://api.github.com/repos/o/r/issues/7", "body": record_text(rounds=REVIEW_PASS)}],
+                                             None),
+        }
+        for name, (pulls, comments, events) in cases.items():
+            with self.subTest(malformed=name):
+                rc, out, err = self.guarded(pulls, comments, events)
+                self.assertEqual(rc, 2, out + err)
+                self.assertEqual(out.strip(), "", out)
+                self.assertNotIn("Traceback", err)
+
+    def test_a_draft_with_no_record_is_lane_round_one_inside_the_lane_round_limit(self):
+        host, rc, out, err = self.ledger([batch_pull(7, REVIEW_HEAD, draft=True, created_at=ago(inside("lane round")))])
+        self.assertEqual(list_line(self, out, 7), f"#7 feat7 lane round 1 {inside('lane round')}h", out)
+        self.assertEqual(rc, 0, out + err)
+
+    def test_a_draft_with_no_record_past_the_lane_round_limit_is_red(self):
+        host, rc, out, err = self.ledger([batch_pull(9, REVIEW_HEAD, draft=True, created_at=ago(past("lane round")))])
+        self.assertEqual(list_line(self, out, 9), f"#9 feat9 lane round 1 {past('lane round')}h RED", out)
+        self.assertEqual(rc, 1, out + err)
+
+    def test_a_draft_with_no_record_leaves_a_ready_pull_request_with_no_record_no_next_act(self):
+        pulls = [batch_pull(7, REVIEW_HEAD, draft=True, created_at=ago(2)), batch_pull(8, REVIEW_OLD_HEAD, created_at=ago(2))]
+        host, rc, out, err = self.ledger(pulls)
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 lane round 1 2h", out)
+        self.assertRegex(list_line(self, out, 8), r"^#8 feat8 NO NEXT ACT \d+h RED$", out)
+        self.assertEqual(rc, 1, out + err)
+
+    def test_control_a_ready_pull_request_with_no_record_and_no_label_is_no_next_act_and_red(self):
+        # a control: the ready rule reads the same whether or not the draft rule exists
+        host, rc, out, err = self.ledger([batch_pull(7, REVIEW_HEAD, created_at=ago(2))])
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 NO NEXT ACT \d+h RED$", out)
+        self.assertEqual(rc, 1, out + err)
+
+    def test_the_batch_label_is_one_of_the_hold_labels_read_from_the_constant(self):
+        self.assertIn(BATCH_LABEL, merge.HOLD_LABELS, "merge.HOLD_LABELS does not hold the batch label")
+
+    def test_a_pull_request_labelled_batch_inside_the_batch_limit_reads_batch_run(self):
+        # the label's event and the pull request's opening share one time, so the age reads the same whichever one the rule counts from
+        pulls = [batch_pull(7, REVIEW_HEAD, created_at=ago(inside("batch")), labels=(BATCH_LABEL,))]
+        host, rc, out, err = self.ledger(pulls, events={7: [label_event(BATCH_LABEL, inside("batch"))]})
+        self.assertEqual(list_line(self, out, 7), f"#7 feat7 batch run {inside('batch')}h", out)
+        self.assertEqual(rc, 0, out + err)
+
+    def test_a_pull_request_labelled_batch_past_the_batch_limit_is_red(self):
+        pulls = [batch_pull(9, REVIEW_HEAD, created_at=ago(past("batch")), labels=(BATCH_LABEL,))]
+        host, rc, out, err = self.ledger(pulls, events={9: [label_event(BATCH_LABEL, past("batch"))]})
+        self.assertEqual(list_line(self, out, 9), f"#9 feat9 batch run {past('batch')}h RED", out)
+        self.assertEqual(rc, 1, out + err)
+
+    def test_a_negative_net_value_gives_no_next_act_and_is_red(self):  # a debt guard: it reads the same on the code before this change
+        rec = ledger_record(1, 7, 3, rounds=REVIEW_PASS, guard="yes", net="negative")
+        host, rc, out, err = self.ledger([batch_pull(7, REVIEW_HEAD, created_at=ago(50))], [rec])
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 NO NEXT ACT \d+h RED$", out)
+        self.assertEqual(rc, 1, out + err)
+
+    def test_a_base_cycle_reads_both_pull_requests_blocked_and_neither_red(self):  # pins what the code does now: a cycle is never red
+        pulls = [batch_pull(14, REVIEW_HEAD, base="feat15", created_at=ago(40)), batch_pull(15, REVIEW_OLD_HEAD, base="feat14", created_at=ago(40))]
+        host, rc, out, err = self.ledger(pulls)
+        self.assertRegex(list_line(self, out, 14), r"^#14 feat14 blocked on #15 \d+h$", out)
+        self.assertRegex(list_line(self, out, 15), r"^#15 feat15 blocked on #14 \d+h$", out)
+        self.assertEqual(rc, 0, out + err)
 
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
