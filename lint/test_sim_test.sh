@@ -37,6 +37,8 @@
 #    load of 100 or a 1-minute load of 60 it waits, then exits 1 with no boot. The lease is released on every exit, INT and
 #    TERM too. A reuse takes the lease of the slot that boots its UDID, held for the run; it skips the load bars, and a
 #    booted device whose UDID is not in SLOT_UDID is leased as slot `other`. So `sim-lease status` names every user.
+#  - A live run renews its lease every SIM_TEST_RENEW s. A renew that finds the lease gone (`sim-lease renew` exits 1) is
+#    named once on stderr, however many renews fail, and the run goes on with its child's exit code.
 #  - Every xcodebuild call carries `-collect-test-diagnostics never`, so a failed UI test starts no simctl diagnose
 #    (up to 10 minutes). A caller's own `-collect-test-diagnostics VALUE` wins: its value stays, with no second copy.
 #  - A SpringBoard crash loop (3 new SpringBoard-*.ips reports during the run that name this run's UDID, or no device
@@ -391,6 +393,8 @@ status_at_xc_udid() { grep -E "^lease slot $1 pid $2 " "$work/status_at_xc" 2>/d
 # lease_released: the state after the run holds no lease of this tool. Exit 1 is the only pass, so a broken file fails.
 lease_released() { lease_holds "$lease_file" "$tool_pid"; [ $? -eq 1 ]; }
 no_lease_file() { [ ! -e "$lease_file" ]; }
+# drop_lease: leases.json holds no lease, as a holder finds it once its lease is gone. The next renew of the run exits 1.
+drop_lease() { printf '%s\n' '{"leases": [], "queue": []}' > "$lease_file"; }
 # set_load LINE: the load line the sysctl stub prints, as `sysctl -n vm.loadavg` prints it.
 set_load() { printf '%s\n' "$1" > "$work/loadavg"; }
 # load_polls_at_least N: the sysctl stub logs each read, so a take that waits reads the load at least N times.
@@ -1434,6 +1438,20 @@ finish_tool
 need "run A exits 0" rc_is 0
 kill "$second_pid" 2>/dev/null; wait "$second_pid" 2>/dev/null
 end_case "105 SIM_TEST_RENEW keeps run A's slot-1 lease past SIM_LEASE_MAX while its xcodebuild runs: a take for Duo 1 at second 5 is not granted"
+
+# Case 106: a renew that finds its lease gone (sim-lease renew exits 1) is named once on stderr, however many renews fail,
+# and the run exits with its child's code. The lease is dropped from leases.json once xcodebuild runs. The child then runs
+# 5 s more, about five renew periods at SIM_TEST_RENEW=1, so several renews fail. STUB_RC=7 is the child's exit code.
+fresh; ARGS=(-scheme X); start_tool SIM_TEST_RENEW=1 STUB_HANG=1 STUB_HANG_SECS=5 STUB_RC=7
+need "run is in xcodebuild" poll_for 20 test -e "$work/started"
+need "the run holds its lease when xcodebuild starts" lease_at_xc_holds
+drop_lease
+finish_tool
+need "the run exits with its child's exit code, 7" rc_is 7
+need "xcodebuild ran to its end while the renews failed" test -e "$work/xc_finished"
+need "the lost lease is named on exactly one stderr line" names_once "lease lost"
+ARGS=(-scheme X)
+end_case "106 a renew that finds its lease gone names the loss once, however many renews fail; the run exits with its child's code"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
