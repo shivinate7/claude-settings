@@ -88,6 +88,13 @@ date with no year takes the build year, or the year before if it would be in the
 not exist is skipped. When the newest claim in a note is STALE_DAYS or more days old, the entry reads
 `<step id> (<date as written>)`. The row reads the notes only, so it needs no live file.
 
+The upkeep list also prints one line per expired note (decision `notes-name-their-fix`): each bullet of the
+checkout's debt notes file whose `Fix: none` form carries an `Until: YYYY-MM-DD` before today, as
+`  expired note: <slug> (Until <date>) in <path>`. A checkout with no notes file, or no expired note, prints
+nothing. The grammar and the date (FIXED_TODAY, else the clock) come from lint/check_record_slugs.py, the one
+home; a fault reading them prints one `expired notes: unknown (<why>)` line, never silence, except a layout fault, which
+the build already warns of on stderr.
+
 Before it builds, it refuses a record branch with git conflict markers (step c72) in any file under
 SCANNED, and writes no page.
 
@@ -97,7 +104,8 @@ adds to triage's publish, already running: one more list_sessions walk (every pa
 fields (id, session_status, tags) per session in the live file it already writes. The page-ruling row adds
 one read of the waiting page's items (n, status, home) to that same publish. This script adds no git
 process, file, timer or log for it. The dated-claim row adds no git process, file, timer or log: it reads
-the notes already loaded.
+the notes already loaded. The expired-note lines add one read of the notes file: no git process, file, timer
+or log.
 The red line and the two stale-ready rows add no process, file, timer or log: they read the live file this
 script already reads. The publisher adds one field (createdAt) per pull row, from the GitHub list call it
 already makes.
@@ -1368,6 +1376,23 @@ def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
     return idle_lanes(live_work(live, steps, slug), steps, marks, slug, repo, main_branch, unread)
 
 
+def expired_note_lines(repo):
+    """One printed line per notes line whose Until date is past, from the grammar home lint/check_record_slugs.py.
+    A fault there is one `unknown` line. One read of the notes file; no git process."""
+    try:
+        sys.path.insert(0, str(LINT))
+        import check_record_slugs
+        return ["  expired note: %s (Until %s) in %s" % (slug, until, path)
+                for path, slug, until in check_record_slugs.expired_notes(str(repo), check_record_slugs.today())]
+    except Exception as err:  # a read that could not run is unknown, never a clear list
+        if type(err).__name__ == "LayoutError":  # the layout fault is already warned of on stderr; no second report
+            return []
+        return ["  expired notes: unknown (%s)" % err]
+    finally:
+        if str(LINT) in sys.path:
+            sys.path.remove(str(LINT))
+
+
 def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = open_steps(steps)
@@ -1418,6 +1443,9 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
     for label, v in rows:
         if v:
             print(f"  {label}: {', '.join(v)}")
+    if repo is not None:
+        for line in expired_note_lines(repo):
+            print(line)
 
 
 if __name__ == "__main__":

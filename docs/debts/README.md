@@ -16,7 +16,9 @@ A new debt file also has a fifth part, the Fix field: a line that starts `Fix:` 
 - `Fix: step:<slug>`, where `roadmap/data/steps/<slug>.json` exists on `origin/roadmap`.
 - `Fix: none -- <reason>` (the em dash also counts). The reason is `owner decides`, `needs the Mac`, `rare and harmless`, or `already fixed on main <sha>` (a hex sha of 7 to 40 digits).
 
-Each line a branch adds to `notes.md` carries the same field, anywhere on the line. A line whose `- <slug>:` already exists at the merge base is an edit and passes. `lint/check_record_slugs.py` checks this in CI. The Stop guard (`lint/report_guard.py`) also asks that Done name each `step:` a branch adds.
+Each line a branch adds to `notes.md` carries the same field, anywhere on the line. A line whose `- <slug>:` already exists at the merge base is an edit and passes. `lint/check_record_slugs.py` checks this in CI. The Stop guard (`lint/report_guard.py`) also asks that Done name each `step:` that the turn's own commits add.
+
+Three more rules read `notes.md`. First, the ratchet: when a branch touches the file, its count of bullets with no valid Fix may not exceed the count on origin/main, and the check prints the total. Second, a `Fix: none -- <reason>` line carries `Until: YYYY-MM-DD`, from today to 30 days out (`UNTIL_CAP_DAYS`), checked on lines the branch adds or edits only. A step line and an already-fixed line need no date. Third, the roadmap build lists each note whose date is past, one line each, in its upkeep list.
 
 A feel-fix debt also has two optional lines. A line counts when it starts with its marker at column one, or
 after an optional leading `- `:

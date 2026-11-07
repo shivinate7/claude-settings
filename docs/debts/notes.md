@@ -1,4 +1,4 @@
-# Notes: findings too unlikely to hit to be debts. Each new line names its fix: `Fix: step:<slug>`, or `Fix: none -- <reason>` (owner decides, needs the Mac, rare and harmless, already fixed on main <sha>).
+# Notes: findings too unlikely to hit to be debts. Each new line names its fix: `Fix: step:<slug>`, or `Fix: none -- <reason>. Until: YYYY-MM-DD` (30 days at most; owner decides, needs the Mac, rare and harmless, already fixed on main <sha> needs no date).
 - AskUserQuestion gain/loss rule may refuse terse real choices: check it on real questions. Decision: question-reviewer-agent-hook.
 - guard-suite-red-on-unparsed: hooks/test_guard.py is not green when hooks/guard_wsl.py is parsed and unparsed, so the report has no same-engine gold row for the guard. Cause unmeasured: find which case reads the source text. Decision: mutation-report-scores-suites.
 - hooks/guard_wsl.py plain-node form excludes only `*` and `?`, so a bracket glob passes: `wsl -e node mods/[ab]/x.test.mjs` (first-file false green). Fix: exclude `*?[]` too, with a refusal case. Decision: wsl-allow-list (WSL allow list).

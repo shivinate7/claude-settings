@@ -123,15 +123,16 @@ the session's refusals file, and the rows file (hooks/route_match.py read_rows) 
 runs on landed and unlanded turns and not on a stop_hook_active rewrite.
 
 Notes-fix step check (decision `notes-name-their-fix`): on a landed turn with a well-formed report whose Done has a
-RECORDED item, each `Fix: step:<slug>` the branch adds to the debt notes file or to a new debt file must have its
-slug in Done as a whole word (`step:<slug>` or the bare slug; a longer slug that starts with it does not count). A
-branch that adds no such line, a checkout with no notes file on disk (it starts no git process), and the none and
-already-fixed forms pass. The Fix grammar
-lives in lint/check_record_slugs.py (parse_fix, added_fixes) and is imported here, never copied; CI judges whether the
-step exists, this check judges only that Done names it. Any error fails open. Cost: git reads only, on a landed
-Stop with a RECORDED item in a checkout that holds the notes file: one name-status diff for the added files, and for
-the notes file one ls-tree and one diff (plus a merge-base, an ls-tree and a show when it adds a bullet). No file
-written, no process left running, no timer.
+RECORDED item, each `Fix: step:<slug>` that this turn's own commits add to the debt notes file or in a new debt file
+must have its slug in Done as a whole word (`step:<slug>` or the bare slug; a longer slug that starts with it does not
+count). The turn's commits are the `[branch sha] subject` lines that `git commit` printed in the turn's tool results,
+since the last human message. A line an earlier turn added is never judged again. A sha git cannot read is skipped,
+and any other error fails open. A turn with no commit line, a checkout with no notes file on disk, and the none and
+already-fixed forms pass. The Fix grammar lives in lint/check_record_slugs.py (parse_fix, commit_fixes) and is
+imported here, never copied; CI judges whether the step exists, this check judges only that Done names it. Cost: on
+a landed Stop with a RECORDED item in a checkout that holds the notes file, one git process per commit the turn
+printed (a show of that commit, limited to the notes and debt paths); none when it printed none. No file written, no
+process left running, no timer.
 """
 import datetime
 import json
@@ -944,30 +945,50 @@ def mistake_problem(text):
 
 
 NOTES_FIX_REASON = (
-    "Notes-fix guard: this branch adds a Fix that names step %s, and Done does not name it. Name each step "
-    "the branch adds in Done, so the gap has a fix somebody sees (decision notes-name-their-fix).")
+    "Notes-fix guard: a commit of this turn adds a Fix that names step %s, and Done does not name it. Name each step "
+    "the turn adds in Done, so the gap has a fix somebody sees (decision notes-name-their-fix).")
 
 
-def notes_fix_problem(text, cwd):
-    """The refusal text when Done has a RECORDED item and a `Fix: step:<slug>` the branch adds to the notes file or
-    a new debt file names a slug that Done does not, else ''. The step's existence is CI's to judge."""
+COMMIT_LINE_RE = re.compile(r"^\[[^\]\n]*\s([0-9a-f]{7,40})\]", re.M)
+
+
+def turn_commits(after):
+    """The shas of the commits the turn printed as `[branch sha] subject` in its tool results, each once, in order."""
+    shas = []
+    for rec in after:
+        for block in tool_results(rec):
+            for sha in COMMIT_LINE_RE.findall(_result_text(block.get("content"))):
+                if sha not in shas:
+                    shas.append(sha)
+    return shas
+
+
+def notes_fix_problem(text, cwd, after):
+    """The refusal text when Done has a RECORDED item and a `Fix: step:<slug>` that a commit of this turn (`after`:
+    the records since the last human message) adds names a slug that Done does not, else ''. The step's existence is
+    CI's to judge."""
     if not any("RECORDED" in DONE_KIND_RE.findall(item) for item in done_items(block_text(text, keep_indent=True))):
         return ""
-    root = repo_root(cwd)
+    shas = turn_commits(after)
+    root = repo_root(cwd) if shas else None
     if not root:
         return ""
     # A repo with no notes file keeps no notes: no git process starts for it.
     if not any(os.path.isfile(os.path.join(root, p)) for p in layout.candidates(root, "debt-notes")):
         return ""
-    import check_record_slugs  # the one home of the Fix grammar and of how the added lines are read
-    entries = check_record_slugs.added_fixes(root, check_record_slugs.added(root))
+    import check_record_slugs  # the one home of the Fix grammar and of how a commit's added lines are read
     done = report_section(text, "Done")
     missing = []
-    for _path, _label, fixes in entries:
-        for fix in fixes:
-            if fix and fix[0] == "step" and fix[1] not in missing \
-                    and not re.search(r"(?<![\w-])" + re.escape(fix[1]) + r"(?![\w-])", done):
-                missing.append(fix[1])
+    for sha in shas:
+        try:
+            entries = check_record_slugs.commit_fixes(root, sha)
+        except check_record_slugs.Unknown:  # a sha git cannot read is not judged
+            continue
+        for _path, _label, fixes in entries:
+            for fix in fixes:
+                if fix and fix[0] == "step" and fix[1] not in missing \
+                        and not re.search(r"(?<![\w-])" + re.escape(fix[1]) + r"(?![\w-])", done):
+                    missing.append(fix[1])
     return " ".join(NOTES_FIX_REASON % ("`step:%s`" % slug) for slug in missing)
 
 
@@ -2064,7 +2085,7 @@ def main():
         except Exception as exc:
             print("mistake check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
         try:
-            notes_fix = notes_fix_problem(text, hook.get("cwd"))
+            notes_fix = notes_fix_problem(text, hook.get("cwd"), after)
             if notes_fix:
                 reasons.append(notes_fix)
         except Exception as exc:
