@@ -701,6 +701,15 @@ class Ios(unittest.TestCase):
         self.assertEqual(self.grade(self.make_run("$${XCB:-xcodebuild} test -scheme X"), "test diagnostics"), "gap",
                          "the default names xcodebuild, so its test run with no flag gaps")
 
+    def test_a_recipe_prefix_on_a_parameter_default_naming_xcodebuild_gaps_in_a_makefile_recipe(self):
+        # Make strips a recipe line's `@`, `-` or `+` before the shell reads it, so a prefix is no part of the command's name.
+        for prefix in ("@", "-", "+"):
+            with self.subTest(prefix=prefix):
+                self.assertEqual(self.grade(self.make_run(prefix + "xcodebuild test -scheme X"), "test diagnostics"), "gap",
+                                 "scope: a prefixed plain xcodebuild test gaps, so the run is read")
+                self.assertEqual(self.grade(self.make_run(prefix + "$${XCB:-xcodebuild} test -scheme X"), "test diagnostics"), "gap",
+                                 "the default names xcodebuild behind the prefix, so its test run with no flag gaps")
+
     def test_account_ids_in_the_repo_are_red(self):
         repo = self.edit(self.gold(), "tools/ios-ship.json", '"repo_url"', '"team_id": "FAKE000000",\n  "repo_url"')
         self.red(repo, "account ids: partial - tools/ios-ship.json overrides team_id")
