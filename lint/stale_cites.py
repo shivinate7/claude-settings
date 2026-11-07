@@ -53,7 +53,7 @@ change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base
 
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
 2 a read that could not run (a base that names nothing in a full clone, an unreadable .ste-lint-exclude), except
-a gap in the history (a shallow clone, or a base with no merge base with the head): that prints
+a gap in the history (a shallow clone, a base with no merge base with the head, or `HEAD~1` of a root commit): that prints
 `stale-cites: unknown, ...` naming fetch-depth 0 and exits 0, so a repo that pins the ste-lint action and
 checks out shallow is not red at its pin move. A touched .py that does not parse at base or head is unknown
 the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the exit non-zero.
@@ -148,15 +148,31 @@ def head_resolves(head):
     return done.returncode == 0
 
 
-def history_gap(base):
-    """True when a failed merge-base is a gap in the history, not a base that names nothing: `base` resolves to a
-    commit (shallow clone, or no shared history), or the clone is shallow (its base sha is cut away). False for a
-    base that does not resolve in a full clone. Run only after merge-base failed, so it costs nothing otherwise."""
-    done = _nowindow.run(["git", "rev-parse", "--verify", "--quiet", base + "^{commit}"], capture_output=True)
-    if done.returncode == 0:
-        return True
+def resolves(rev):
+    """True when `rev` names a commit."""
+    done = _nowindow.run(["git", "rev-parse", "--verify", "--quiet", rev + "^{commit}"], capture_output=True)
+    return done.returncode == 0
+
+
+def cut_base(base, head):
+    """True when a base that does not resolve is a gap in the history, not a name that points at nothing: the clone is
+    shallow (its base sha is cut away), or `base` is the parent of `head` (`<head>~1`, `<head>^`) and `head` is a root
+    commit, which a first push to the default branch reads by design. Run only after a read failed."""
+    if resolves(base):
+        return False
     shallow = _nowindow.run(["git", "rev-parse", "--is-shallow-repository"], capture_output=True)
-    return shallow.stdout.strip() == b"true"
+    if shallow.stdout.strip() == b"true":
+        return True
+    if base in (head + "~1", head + "^"):
+        parents = _nowindow.run(["git", "rev-list", "--parents", "-n", "1", head], capture_output=True)
+        return len(parents.stdout.split()) == 1
+    return False
+
+
+def history_gap(base, head):
+    """True when a failed merge-base is a gap in the history: `base` resolves (no shared history with the head) or
+    `cut_base`. False for a base that names nothing in a full clone. Run only after merge-base failed."""
+    return resolves(base) or cut_base(base, head)
 
 
 def git(*args, on_fail=Unknown):
@@ -239,7 +255,7 @@ def parse_range(text):
         try:
             base = git("merge-base", left, right).decode().strip()
         except Unknown as exc:
-            if head_resolves(right) and history_gap(left):
+            if head_resolves(right) and history_gap(left, right):
                 raise BaseUnknown(str(exc))  # the head is there and the history is not: a shallow clone or an orphan base
             raise
         return [text], base, right
@@ -290,7 +306,7 @@ def read_diff(diff_args, head=None, base=None):
         out = git("diff", "-M", "--raw", "-p", "-z", "-U0", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
                   *diff_args).decode("utf-8", "replace")
     except Unknown as exc:
-        if head is None or (head_resolves(head) and (base is None or history_gap(base))):
+        if head is None or (head_resolves(head) and (base is None or cut_base(base, head))):
             raise BaseUnknown(str(exc))  # the head is there and the history is not: a shallow clone
         raise
     head, _, patch = out.partition("\0\0")
