@@ -686,6 +686,15 @@ _FED_SHELL = re.compile(
 _SHELL_FIRST = _interpreter_header(_SHELLS)
 _INTERPRETERS = _SHELLS + "|python[\\d.]*|perl|ruby|node"
 _INTERPRETER_FIRST = _interpreter_header(_INTERPRETERS)
+# Commands that run their stdin as shell lines (`ssh host <<EOF`, `at now <<EOF`, `su -c`, `sudo`), and other
+# script runners whose stdin script can call out (`php`, `lua`). A per-body reading keeps a body whose header
+# names one, as main does: only a body that a known non-shell interpreter prints, or plain data, may drop.
+_STDIN_SHELLS = "ssh|rsh|at|batch|su|sudo|doas|sg|newgrp|chroot|nsenter|busybox|toybox|rbash"
+_STDIN_SCRIPTS = "php|lua|luajit|tclsh|expect|awk|gawk|mawk|Rscript|julia|groovy|osascript|gdb|sqlite3|psql|mysql"
+_STDIN_SHELL_FIRST = re.compile(
+    r"(?<![\w.-])(?:" + _STDIN_SHELLS + r")(?:\.exe|\.cmd)?(?![\w.-])[^\n]*<<").search
+_STDIN_SCRIPT_FIRST = re.compile(
+    r"(?<![\w.-])(?:" + _STDIN_SHELLS + "|" + _STDIN_SCRIPTS + r")(?:\.exe|\.cmd)?(?![\w.-])[^\n]*<<").search
 
 
 def SHELL_HEREDOC(text: str) -> bool:
@@ -876,8 +885,10 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = F
         return cmd   # a heredoc that eval or source runs may open on a line before its header
     else:
         first = _SHELL_FIRST if shells_only else _INTERPRETER_FIRST
+        stdin_first = _STDIN_SHELL_FIRST if shells_only else _STDIN_SCRIPT_FIRST
         keep = [number for number, header in enumerate(headers)
-                if first(header) or _PIPED_SHELL(header) or _runs_written_file(text, [header], runner)]
+                if first(header) or stdin_first(header) or _PIPED_SHELL(header)
+                or _runs_written_file(text, [header], runner)]
     # bash runs each substitution of an unquoted body while it writes the body, so those stay in view as
     # lines of their own; the prose around them is data. A script body is the interpreter's own text, one
     # command (`interpreter_bodies` gives it to a rule that reads its shell spots).
