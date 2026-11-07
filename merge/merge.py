@@ -2452,6 +2452,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     raise Stop(f"ci-job exited {c} on {short}, so the lint is unknown, not a pass. {LANE_LINT_REMEDY}")
 
 PROSE_JUDGE_MAX_CALLS = 3  # model calls one merge makes; each may run MODEL_TIMEOUT s after the lock is released, so the count bounds how long the run waits before it ends. A file past it reads UNKNOWN
+PROSE_JUDGE_CALL_BYTES = 24000  # UTF-8 bytes one prose judge prompt may hold, excerpts included; the lines are packed into at most PROSE_JUDGE_MAX_CALLS calls by this budget
 PROSE_JUDGE_MAX_LINES = 20  # finding lines (stale, unbacked) one merge prints for the prose judge; the rest are one count line. UNKNOWN lines never count against it
 PROSE_JUDGE_CAUSES = ("timed out", "model error", "no readable verdict", "past the call cap", "skipped by the reply")  # the buckets of the one UNKNOWN count line, in print order; the count line carries no raw error text
 TIMED_OUT, MODEL_ERROR, NO_VERDICT, PAST_CAP, SKIPPED = PROSE_JUDGE_CAUSES
