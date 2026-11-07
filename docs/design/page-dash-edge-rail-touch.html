@@ -32,11 +32,11 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
 <body>
 <div class="sample" id="sampleBanner">Sample. No item, number, title, count or time on this page is real.</div>
 <header class="tool">
-  <h1>Waiting page, lane notes-fix-page: dashed button edges and rail row height</h1>
+  <h1>Waiting page, lane notes-fix-page: dashed button edges, rail row and chip height</h1>
   <div class="row" id="rowS"><span>State</span>
     <button data-s="both">Today and new, side by side</button>
     <button data-s="today">Today</button>
-    <button data-s="faint-edge">New: faint edge, touch rows 44</button>
+    <button data-s="faint-edge">New: faint edge, touch rows and chips 44</button>
     <button data-s="muted-edge">Muted edge</button>
     <button data-s="rows-every-pointer">Rows 44 for every pointer</button>
   </div>
@@ -54,7 +54,7 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
     <button data-p="auto">By size (390 touch, 1280 mouse)</button><button data-p="coarse">Touch</button><button data-p="fine">Mouse</button>
     <button id="labBtn">Labels on</button>
   </div>
-  <p>Deep links: <code>#s=both|today|faint-edge|muted-edge|rows-every-pointer</code>, <code>&amp;w=390|1280</code>, <code>&amp;t=both|light|dark</code>, <code>&amp;p=auto|coarse|fine</code>, <code>&amp;lab=off</code>, <code>&amp;hide=&lt;state&gt;,...</code>, <code>&amp;focus=&lt;id&gt;</code>. Focus ids: <code>#b-none-chip-sizes</code> (the edge), <code>#ov-holds</code> (a rail row).</p>
+  <p>Deep links: <code>#s=both|today|faint-edge|muted-edge|rows-every-pointer</code>, <code>&amp;w=390|1280</code>, <code>&amp;t=both|light|dark</code>, <code>&amp;p=auto|coarse|fine</code>, <code>&amp;lab=off</code>, <code>&amp;hide=&lt;state&gt;,...</code>, <code>&amp;focus=&lt;id&gt;</code>. Focus ids: <code>#b-none-chip-sizes</code> (the edge), <code>#ov-holds</code> (a rail row), <code>#c-41</code> (a rail chip).</p>
   <p>A desktop browser never matches <code>(pointer: coarse)</code>. So the Pointer control adds a harness class that mirrors the builder's touch rule. On a real touch screen the builder's rule itself applies too.</p>
 </header>
 <main id="stage"></main>
@@ -985,28 +985,33 @@ body { padding-block: 12px 16px; }
 .btn.dash { border: 1.5px dashed var(--faint); background: transparent; color: var(--muted); font-weight: 500; }
 /* 2. After line 86 of page.html (.ov-head .ct): a rail row is a 44px touch target on touch (a11y.md target size). */
 @media (pointer: coarse) { .ov-head { min-height: 44px; } }
+/* 3. After line 107 of page.html (the end of the min-width: 961px block): a rail number chip is a 44px touch target on touch. */
+@media (pointer: coarse) { .nchip, .pairchips .nchip { height: 44px; } }
 </script>
 
 <script type="text/plain" id="mutedcss">
 /* Option "Muted edge": the edge takes the label's own colour. */
 .btn.dash { border: 1.5px dashed var(--muted); background: transparent; color: var(--muted); font-weight: 500; }
 @media (pointer: coarse) { .ov-head { min-height: 44px; } }
+@media (pointer: coarse) { .nchip, .pairchips .nchip { height: 44px; } }
 </script>
 
 <script type="text/plain" id="allcss">
 /* Option "Rows 44 for every pointer": no media query. */
 .btn.dash { border: 1.5px dashed var(--faint); background: transparent; color: var(--muted); font-weight: 500; }
 .ov-head { min-height: 44px; }
+@media (pointer: coarse) { .nchip, .pairchips .nchip { height: 44px; } }
 </script>
 
 <script type="text/plain" id="simcss">
 /* Harness only: mirrors the builder's (pointer: coarse) rule, because a desktop viewer never matches it. */
 html.sim-coarse .ov-head { min-height: 44px; }
+html.sim-coarse .nchip, html.sim-coarse .pairchips .nchip { height: 44px; }
 </script>
 
 <script>
 const STATES = ["both", "today", "faint-edge", "muted-edge", "rows-every-pointer"];
-const NAME = { today: "Today", "faint-edge": "New: faint edge, touch rows 44", "muted-edge": "Muted edge", "rows-every-pointer": "Rows 44 for every pointer" };
+const NAME = { today: "Today", "faint-edge": "New: faint edge, touch rows and chips 44", "muted-edge": "Muted edge", "rows-every-pointer": "Rows 44 for every pointer" };
 const P = { s: "both", w: "390", t: "both", p: "auto", lab: "on", hide: [], focus: "" };
 function readHash() {
   Object.assign(P, { s: "both", w: "390", t: "both", p: "auto", lab: "on", hide: [], focus: "" });
@@ -1030,14 +1035,14 @@ function screen(s, touch) {
   const edge = s === "muted-edge" ? "edge in --muted" : isNew ? "edge in --faint" : "edge in --line";
   // A mouse frame of the pick keeps 32px rows, so its rail keeps the Today label.
   const rowsNew = s === "rows-every-pointer" || (isNew && touch);
-  const rows = s === "rows-every-pointer" ? "rows 44, every pointer" : rowsNew ? "rows 44 on touch" : isNew ? "rows 32 with a mouse, unchanged" : "rows 32";
-  const chip = (n, cls = "") => `<button type="button" class="nchip ${cls}"><span class="no">${n}</span><span class="nt">Sample item ${n}</span></button>`;
+  const rows = s === "rows-every-pointer" ? "rows 44, every pointer" : rowsNew ? "rows and chips 44 on touch" : isNew ? "rows and chips 32 with a mouse, unchanged" : "rows and chips 32";
+  const chip = (n, cls = "") => `<button type="button" id="c-${n}" class="nchip ${cls}"><span class="no">${n}</span><span class="nt">Sample item ${n}</span></button>`;
   const tier = (k, id, name, ct, chips, extra = "") => `<div class="ov-tier${extra}"><a class="ov-head" id="${id}" href="#tier-${k}"><span class="g ${k}" aria-hidden="true"></span>${name}<span class="ct">${ct}</span></a>${chips ? `<div class="chips-n">${chips}</div>` : ""}</div>`;
   const rail = `<aside class="rail" id="rail" aria-label="Overview" ${lab(rows, rowsNew)}>
     <div class="ov-prog"><div class="big"><b>2</b>of 9 sent</div><div class="sub"><i class="sw"></i>1 ready to send</div><div class="track" aria-hidden="true"><i class="s" style="width:22%"></i><i class="r" style="width:11%"></i></div></div>
     ${tier("holds", "ov-holds", "Blocking", 1, chip(41))}
     ${tier("due", "ov-due", "Upcoming", 2, chip(42, "ready") + chip(43))}
-    ${tier("calm", "ov-calm", "Whenever", 2, chip(44) + chip(45))}
+    ${tier("calm", "ov-calm", "Whenever", 2, `<span class="pairchips" title="Sample group">${chip(44) + chip(45)}</span>`)}
     ${tier("done", "ov-done", "Answered", 2, chip(39, "sent filed") + chip(40, "sent filed"))}
     ${tier("ruled", "ov-ruled", "Arbiter rulings", 1, "")}
     <div class="ov-tier"><a class="ov-head" id="ov-ask" href="#asks"><span class="g wait" aria-hidden="true"></span>Ask<span class="ct">1</span></a></div>

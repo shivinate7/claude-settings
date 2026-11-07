@@ -38,6 +38,13 @@ Debt `rail-row-touch-height` (rail rows 32px on touch). Rule: `a11y.md` target s
 - Option "Rows 44 for every pointer" (`#s=rows-every-pointer`, best seen at `&w=1280&p=fine`): no media query. Gain: one rule. Loss: the mouse sidebar grows 72px too, where 32px already passes the 24px floor. Hide it with "Hide Rows 44 for every pointer".
 - The builder's check, from the debt: a test in `skills/waiting-page/tests/page.test.mjs` reads each `#rail a.ov-head` height at 390 in a context with `hasTouch: true` (it matches `(pointer: coarse)` in Chromium; checked) and asserts 44 or more. A second context without touch asserts the row stays 32, so a mouse rail does not grow.
 
-## 3. Found, outside this lane
+## 3. Rail number chips on touch
 
-- Rail chips (`.nchip`, lines 89 and 104) are 32px tall on touch, at both widths. That is also under 44px on touch. No debt names them. Not drawn as a change here.
+Lane ruling (owner, 2026-11-07 13:20 CST): a found gap gets a fix in this PR, not a note. Rule: `a11y.md` target size row, 44 by 44 CSS px on touch.
+Today the rail chips (`.nchip`, line 88; `.pairchips .nchip`, line 95; the wide column form, line 104) are 32px tall at both widths, on touch too. The phone chip is 48px wide, so only the height falls short.
+
+- Pick: after line 107 (the end of the `min-width: 961px` block), `@media (pointer: coarse) { .nchip, .pairchips .nchip { height: 44px; } }`. It must come after line 104, which sets `height: 32px` at the same weight (0,2,0). Measured in the mockup: each chip is 48x44 at 390 and 206x44 in the wide column on touch, and 32px with a mouse. With touch emulated in Chromium (`hasTouch: true`), the builder's rule itself, not the harness class, gives 44. No sideways scroll at 390. Loss: the phone rail grows 12px more per chip row: 566px to 686px in the sample, rows and chips together (120px). A group frame (`.pairchips`, 4px padding) grows to 52px.
+- No width change: 48px on the phone already passes, and the wide chip fills the rail.
+- The "Rows 44 for every pointer" option keeps chips at 44 on touch only.
+- Focus: `#c-41` (`#s=today&focus=c-41` against `#s=faint-edge&focus=c-41`).
+- The builder's check: the rail-row test also reads each `#rail .nchip` height at 390 and at 1280 in the touch context and asserts 44 or more, and 32 without touch.
