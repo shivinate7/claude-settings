@@ -316,7 +316,7 @@ never runs it. There is one path: the record branch's own worktree. Never write 
    - `same`: stop. Commit nothing.
    - `changed <n>`: in the same worktree, run `git add` on the copy folder, then
      commit and push the record branch. The commit message names the count.
-   - `held item <n>: <sentence>` after the verdict line (exit 4): the copy was written; commit it as for `changed`. The page would
+   - `held item <n>: <sentence>` after the verdict line (exit 4): after `changed`, the copy was written; commit it as for `changed`. After `same`, commit nothing. The page would
      draw that item's picture wrong. Fix the item, export again, and do not republish while one is held.
    - `refused`: nothing was written. Make no commit. The reply names each find: the file, the JSON path and
      the kind, never the value. Fix the item on the page first, then run the steps again.
