@@ -6,4 +6,4 @@
 
 **Decision.** `lanes-run-no-full-ci-job` (a lane runs no full CI job; the ready checks).
 
-**Retire.** Closed when a case in `merge/test_merge.py` shows a ready mark made outside the draft step is refused, or its route text names the ready checks first, for a repo that declares `merge.readyChecks`.
+**Retire.** Closed when a case in `merge/test_merge.py` shows a ready mark made outside the draft step is refused. It is also closed when the route text names the ready checks first, for a repo that declares `merge.readyChecks`.
