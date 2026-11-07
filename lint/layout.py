@@ -29,6 +29,7 @@ import ntpath
 import os
 import posixpath
 import re
+import sys
 
 LAYOUT_FILE = "lint/layout.json"  # relative to the claude-settings root; hooks/guard.py holds the same literal
 LAYOUT_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), os.path.basename(LAYOUT_FILE))
@@ -238,13 +239,18 @@ WAITING_ROLE = "waiting-page"  # the role of the registry entry that is the repo
 ARTIFACT_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")  # a slug of 32 characters or fewer, as a record slug is (git-slug-then-claim-number)
 ROLE = re.compile(r"[a-z0-9][a-z0-9-]*")
 COLLECTION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
-WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta")  # what the waiting page's database holds
+# What the waiting page's database holds. The one home is skills/waiting-page/export_page.py COLLECTIONS, which never
+# imports lint/ (recovery must not depend on the repo it recovers). The skill folder sits at the same place relative to
+# lint/ in the repo and in a ~/.claude install.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "skills", "waiting-page"))
+import export_page  # noqa: E402
+WAITING_COLLECTIONS = export_page.COLLECTIONS
 
 
 def artifacts(root):
     """[{id, url, role, account, collections, export}] from the "artifacts" key of `root`'s extras file, in order; []
     for a repo with no extras file or no key. `collections` and `export` are filled in: the waiting-page role exports
-    the five waiting collections to the waiting-data folder of the record branch, any other role needs its own
+    the waiting collections (`WAITING_COLLECTIONS`) to the waiting-data folder of the record branch, any other role needs its own
     `collections` and exports to `artifacts/<id>/`. An entry with `"export": false` (never the waiting-page role) is held and never exported: it needs
     no collections and reads with `export` False and `collections` []. LayoutError, naming the entry by its id, for an email as account, a
     repeated id, an id over 32 characters, a url that is no artifact link, a second waiting-page role or an unsafe path."""

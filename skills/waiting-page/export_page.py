@@ -6,7 +6,7 @@ Export, the writer's step at each wake and before each republish:
     python3 ~/.claude/skills/waiting-page/export_page.py --fetched DIR --out WAITING_DIR [--page FETCHED.html]
         [--allow-empty COLLECTION]
 
-DIR holds `<collection>/<doc_id>.json` for each of the five collections, as `ArtifactData list ... out_dir=DIR`
+DIR holds `<collection>/<doc_id>.json` for each of the collections in COLLECTIONS, as `ArtifactData list ... out_dir=DIR`
 saves them; an empty collection is an empty folder. A script cannot call that tool, so the session fetches first.
 The session touches `.complete` in each collection folder after the last list page, so a fetch that stopped early
 shows: a collection with no marker is unknown. A collection that is empty now while the copy holds docs of it is
@@ -41,7 +41,7 @@ Rebuild, the recovery path. It reads only the repo copy, never the live page:
 Writes OUT_DIR/batch-NNN.json, each a JSON list of at most 50 `{op: "set", collection, doc_id, data}` entries and
 under 900,000 bytes, one entry per doc in WAITING_DIR except `page/`, and prints `batches K docs N`. The session
 sends each list as an `ArtifactData batch`. Unknown, exit 2: a missing or empty WAITING_DIR, a folder in it that is
-neither one of the five collections nor `page/`, or one doc over the byte cap.
+neither one of COLLECTIONS nor `page/`, or one doc over the byte cap.
 
 Every artifact, the step "Before you switch Claude accounts":
 
@@ -71,9 +71,10 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 import splice  # noqa: E402  the one home of the designData block's span
 
-# The same five as lint/layout.py WAITING_COLLECTIONS. A copy, because a single export and the rebuild must run with no
-# lint/ beside them: the recovery path may not depend on the repo it recovers (verification-recovery-independent-of-state).
-COLLECTIONS = ("items", "answers", "groups", "asks", "meta")
+# The one home of the waiting page's collection list. lint/layout.py imports it as WAITING_COLLECTIONS. This file never
+# imports lint/: a single export and the rebuild must run with no lint/ beside them, because the recovery path may not
+# depend on the repo it recovers (verification-recovery-independent-of-state).
+COLLECTIONS = ("items", "answers", "groups", "asks", "meta", "receipts")
 PAGE_FOLDER, DESIGN_FILE, PAGE_FILE, FILES_FOLDER = "page", "designData.json", "page.html", "files"
 MARKER = ".complete"  # the session touches it in a collection folder after the last list page
 BATCH_SIZE = 50

@@ -155,7 +155,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 - `answers/park.<id>`: the page writes it when the owner presses Send on a "Parked by you" line. Fields: `parked: true`,
   `id` (the entry's `id`), `act` (`unpark` or `drop`), `ref` and `note` (copies of the entry's), `at`. It names no item and
   counts toward none. Its key holds a dot, which an item id never holds, so it never meets an item's key. Undo and withdraw delete it, as for any answer.
-- `receipts/<id>`: written by the owning session, never by the page. Fields: `read` (ISO time the
+- `receipts/<id>`: written by the owning session. The page only deletes one, when the owner undoes the answer. Fields: `read` (ISO time the
   session read the answer) and `filed` (ISO time it moved the answer to `home`). The page shows
   them on the answered card. In a tier (an item answered on the open page), with no record the card says
   "Answered, filing pending" and the save time; with `filed`, "Answered, filed in <home>" (the item's `home`) and the
@@ -236,7 +236,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
   `n` in every items write, set or update, so the guard can match it.
   - Not written yet: the writer writes the item closed (`status: "closed"`), with the answer and its
     time in `context`. The asking session (`owner`) then files the answer to `home` ("Route and
-    close" step 1) and writes `receipts/<id>`. The writer never writes receipts.
+    close" step 1) and writes `receipts/<id>`. The writer writes no receipt.
   - Written: the writer closes the item, with the answer and its time in `context`. The owning
     session then files the answer to `home`, as "Route and close" step 1 says. Either way, every
     question and answer ends in the page's record.
@@ -295,7 +295,8 @@ never runs it. There is one path: the record branch's own worktree. Never write 
 1. Check out the record branch in its own worktree (`roadmap`; the repo's extras file may name another).
    Name the copy folder: take the path `python3 ~/.claude/lint/layout.py path <repo root> waiting-data` prints,
    and use that path inside the worktree.
-2. Fetch each of the five collections: `items`, `answers`, `groups`, `asks` and `meta`. Use
+2. Fetch each collection in `export_page.COLLECTIONS` (`skills/waiting-page/export_page.py`): `items`, `answers`, `groups`,
+   `asks`, `meta` and `receipts`. Use
    `ArtifactData list <collection>` with `out_dir` set to one new folder, and `query.limit` 1000.
    Follow `next_cursor` until it is empty. A list call that errors, or that ends with a cursor still
    pending, stops the run: touch no `.complete` file and run no export. A missed cursor page deletes docs
@@ -333,7 +334,7 @@ Each claude.ai artifact a repo holds is one entry in the `artifacts` key of its 
 (`python3 ~/.claude/lint/layout.py artifacts <repo root>` prints them). An entry has `id`, `url`, `role` and
 `account`. A role other than `waiting-page` also has `collections`, the collections to export. `id` is a slug of
 32 characters or fewer. `account` is a plain label such as `work`, never an email. The role `waiting-page` marks
-the repo's waiting page. Its default collections are the five above, and its export folder is the waiting-data
+the repo's waiting page. Its default collections are the six in `export_page.COLLECTIONS`, and its export folder is the waiting-data
 folder. Any other artifact exports to `artifacts/<id>/`. The old `waiting-page` key stays the fallback when no entry
 has that role.
 

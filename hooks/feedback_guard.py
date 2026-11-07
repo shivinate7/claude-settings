@@ -107,7 +107,7 @@ a turn end in these cases:
     meta/page get names the hook's session id or the id the remote env names (override.remote_session_id). A
     writer named there decides alone. Only when none is named does an interpreter run of export_page.py
     (EXPORT_RUN) before the write make this session the writer. A session that is not the writer, or whose
-    writer cannot be told, passes with no note: receipts and answers are not its to export. Incident: the waiting/ copy of
+    writer cannot be told, passes with no note: the page's data, receipts included, is not its to export. Incident: the waiting/ copy of
     the roadmap went stale from 06:41 to 19:04 CST on Nov 5 while the page took items 261 to 271. Harm: a lost
     or moved page then loses those items (decision waiting-data-in-repo). The reason names export_page.py and
     the waiting-page skill section "Keep a copy in the repo". A transcript that cannot be read passes. A
@@ -1190,7 +1190,7 @@ def export_check(cwd, transcript_path, session_id):
     else:
         is_writer = any(e[0] < max(w[0] for w in writes) for e in exports)
     if not is_writer:
-        return None, None  # receipts and answers are not this session's to export
+        return None, None  # the page's data, receipts included, is not this session's to export
     try:
         root = Homes(cwd)._cwd_root()
         if root is None:
