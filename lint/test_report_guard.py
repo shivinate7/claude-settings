@@ -727,10 +727,10 @@ class DoneFormatAndCiteTests(unittest.TestCase):
 
     # reports-done-format
     def test_df_red_done_without_kind_blocks(self):
-        self.assert_blocked("> **Done** fixed it in abc123\n> **Next** none", "BUILT, RECORDED, or OTHER")
+        self.assert_blocked("> **Done** fixed it in abc123\n> **Next** none", "BUILT, RECORDED or OTHER")
 
     def test_df_red_done_without_ref_blocks(self):
-        self.assert_blocked("> **Done** BUILT the guard\n> **Next** none", "BUILT, RECORDED, or OTHER")
+        self.assert_blocked("> **Done** BUILT the guard\n> **Next** none", "BUILT, RECORDED or OTHER")
 
     def test_df_red_one_bullet_lacks_ref_blocks(self):
         rows = [
@@ -833,7 +833,7 @@ class DoneFormatAndCiteTests(unittest.TestCase):
 
     def test_cite_and_done_block_once_with_both_reasons(self):
         out = self.verdict("Per D12.\n\n> **Done** BUILT guard\n> **Next** none")
-        self.assertIn("BUILT, RECORDED, or OTHER", out["reason"])
+        self.assertIn("BUILT, RECORDED or OTHER", out["reason"])
         self.assertIn("'D12'", out["reason"])
 
     def test_df_cite_quiet_on_rewrite(self):
@@ -1037,22 +1037,21 @@ class NoResendTests(unittest.TestCase):
                 out = self.verdict(reply, spawns)
                 self.assertEqual(out["decision"], "block")
                 reason = out["reason"].lower()
-                self.assertIn("post only the corrected lines", reason)
-                self.assertIn("never send the report again", reason)
+                self.assertIn("decision guard-remedy-not-to-owner", reason)
                 self.assertNotIn("send the report now", reason)
-                self.assertEqual(reason.count("post only the corrected lines"), 1)
+                self.assertEqual(reason.count("rule reports-order-of-labels"), 1)
                 self.assertIn("rule reports-order-of-labels", reason)
 
     def test_nr_missing_report_block_keeps_the_reply(self):
         out = self.verdict("All done.")
-        self.assertIn("Do not write it again.", out["reason"])
+        self.assertIn("does not end with the report", out["reason"])
         self.assertNotIn("post only the corrected lines", out["reason"].lower())
 
     def test_nr_missing_report_with_bare_cite_never_forbids_the_report(self):
         # Catches: the block asks for the report and also says never send it.
         out = self.verdict("Per D12.\n\nAll done.")
         self.assertIn("'D12'", out["reason"])
-        self.assertIn("Send the report now", out["reason"])
+        self.assertIn("does not end with the report", out["reason"])
         self.assertNotIn("never send the report again", out["reason"].lower())
 
     def test_nr_correction_only_follow_up_passes(self):
@@ -1090,14 +1089,14 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
 
     def missing_report_block(self):
         out = self.stop("All done.", False)
-        self.assertIn("Send the report now", out["reason"])
+        self.assertIn("does not end with the report", out["reason"])
 
     def test_rw_red_rewrite_without_unstarted_blocks(self):
         self.missing_report_block()
         out = self.stop("> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** merge", True)
         self.assertEqual(out["decision"], "block")
         self.assertIn("Unstarted guard", out["reason"])
-        self.assertIn("post only the corrected lines", out["reason"].lower())
+        self.assertIn("decision guard-remedy-not-to-owner", out["reason"])
         self.assertIn("rule reports-order-of-labels", out["reason"])
 
     def test_rw_red_rewrite_with_wrong_model_blocks(self):
@@ -1284,7 +1283,7 @@ class CompactionCarryTests(unittest.TestCase):
         # Catches: the rewrite after a missing-report block demands the line on a reply that is no report.
         first = self.stop(self.compacted_turn("All done."))
         self.assertIsNotNone(first, "no missing-report block on the first Stop")
-        self.assertIn("Send the report now", first["reason"])
+        self.assertIn("does not end with the report", first["reason"])
         self.assertIsNone(self.stop(self.compacted_turn("Correction: the Done line needs a PR ref."), active=True))
 
     def test_cc_green_correction_line_satisfies_a_later_report(self):
@@ -1363,7 +1362,7 @@ class CompactionCarryTests(unittest.TestCase):
     def test_cc_red_rewrite_after_missing_report_block_names_the_line(self):
         first = self.stop(self.compacted_turn("All done."))
         self.assertIsNotNone(first, "no missing-report block on the first Stop")
-        self.assertIn("Send the report now", first["reason"])
+        self.assertIn("does not end with the report", first["reason"])
         # The rewrite reads the marker the missing-report block left, and checks the Recovered line once.
         self.assertBlocksForRecovered(self.stop(self.compacted_turn(REPORT_NO_LINE), active=True))
 
@@ -1449,7 +1448,7 @@ class CompactionCarryTests(unittest.TestCase):
         # Catches: the rewrite after a missing-report block checks the Recovered line but not the Handoff gave line.
         first = self.stop(self.compacted_turn("All done."))
         self.assertIsNotNone(first, "no missing-report block on the first Stop")
-        self.assertIn("Send the report now", first["reason"])
+        self.assertIn("does not end with the report", first["reason"])
         self.assertBlocksNaming(self.stop(self.compacted_turn(report_lines("Recovered: none")), active=True),
                                 "Handoff gave")
 
@@ -1592,7 +1591,7 @@ class CompactionCarryCostTests(unittest.TestCase):
                    assistant_text("All done.")]
         out, new = self.run_hook(records)
         self.assertIsNotNone(out, "no missing-report block")
-        self.assertIn("Send the report now", out["reason"])
+        self.assertIn("does not end with the report", out["reason"])
         self.assertEqual([os.path.basename(path) for path in new], [self.sid + ".report-block"])
 
     def test_cc_cost_both_lines_pass_starts_no_process_and_writes_no_file(self):
@@ -2136,13 +2135,13 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
     def test_qm_red_unknown_writer_blocks_and_names_the_page_read(self):
         # Catches: a send to an id that no meta/page read named passing; the block says how to find the writer.
         out = self.stop([human("decide"), *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))])
-        self.assert_blocked(out, "Pick guard", "meta/page", self.PAGE, "ArtifactData get")
+        self.assert_blocked(out, "Pick guard", "the page writer is not known to this session", self.PAGE)
 
     def test_qm_red_writer_from_another_item_does_not_count(self):
         # Catches: a writer id read from a get of another item taken as the page writer.
         out = self.stop([human("decide"), *self.writer_read(self.WRITER, collection="items", doc_id="q1"),
                          *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))])
-        self.assert_blocked(out, "Pick guard", "meta/page")
+        self.assert_blocked(out, "Pick guard", "the page writer is not known to this session")
 
     def test_qm_green_newest_writer_read_names_the_writer(self):
         # Catches: the oldest meta/page read taken as the writer when a newer one names another id.
@@ -2332,7 +2331,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         for body in (self.PROMISE, self.LINKED):
             with self.subTest(body=body[0]):
                 out = self.lane(peer_msg("pick?"), assistant_text(self.reply(body)))
-                self.assert_blocked(out, "Lane pick guard", "@parent")
+                self.assert_blocked(out, "Lane pick guard", "its parent")
 
     def test_ln_red_box_or_items_write_blocks(self):
         # Catches: a lane's box or items write read as its send. Neither passes a lane.
@@ -2356,7 +2355,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         # Catches: a lane's send to a session that is neither its parent nor the writer.
         out = self.lane(peer_msg("pick?"), *self.send(session_id="session_other9"),
                         assistant_text(self.reply(self.PICK)))
-        self.assert_blocked(out, "Lane pick guard", "@parent")
+        self.assert_blocked(out, "Lane pick guard", "its parent")
 
     def test_ln_red_send_in_an_earlier_turn_blocks(self):
         # Catches: a send before the lane's last incoming message passing as this turn's send.
@@ -4077,7 +4076,7 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
     def test_model_error_refuses_once_and_an_unvetted_line_passes_without_a_call(self):
         # Each turn sends to the writer, so the question check stays quiet and only the relay's model error is tested.
         out, _ = self.stop(self.decided, RELAY, model_fail=True, to_writer=True)
-        self.assertIn("Unvetted:", self.reason(out), out)
+        self.assertIn("Unvetted guard", self.reason(out), out)
         self.assertEqual(len(self.model_calls()), 1)
         self.reset_calls()
         out, _ = self.stop(self.decided, RELAY + "\n> " + UNVETTED, model_fail=True, to_writer=True)
@@ -4101,7 +4100,7 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         # Index shape (spec, Nov 1 18:58 CST): a reason citing an id the index did not show is a model error.
         bogus = json.dumps({"ok": False, "reason": "decisions/no-such-record: already decided."})
         out, _ = self.stop(self.decided, RELAY, answer=bogus)
-        self.assertIn("Unvetted:", self.reason(out), out)
+        self.assertIn("Unvetted guard", self.reason(out), out)
 
     def test_a_relayed_question_costs_one_git_process_and_one_model_call(self):
         self.stop(self.ci, RELAY, answer=tcj.ALLOW)
@@ -4126,7 +4125,7 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         with mock.patch.dict(os.environ, {"CJ_ANSWER": tcj.ALLOW}):
             run = run_guard(REPORT_GUARD, hook)
         out = json.loads(run.stdout) if run.stdout.strip() else {}
-        self.assertIn("Unvetted:", self.reason(out), out)
+        self.assertIn("Unvetted guard", self.reason(out), out)
         self.assertIn("past-ruling", run.stderr)
 
     def test_a_stop_hook_active_rewrite_that_keeps_the_ruled_question_is_refused_again(self):
@@ -4557,8 +4556,7 @@ class PendingRefusalTests(unittest.TestCase):
                 self.assertEqual(out.get("decision"), "block")
                 self.assertIn(self.ARCHIVE, out["reason"])
                 self.assertIn("decision refusals-reach-the-owner", out["reason"], "the joined refusal lost its owner cite")
-                self.assertIn("Input Needed", out["reason"])
-                self.assertIn("notes.md", out["reason"])
+                self.assertIn("does not raise it with the owner", out["reason"])
                 self.assertEqual(self.pending_tools(), [self.ARCHIVE], "a blocked Stop cleared the entry")
 
     def test_e_allow_line_with_no_send_blocks_as_a_question(self):
