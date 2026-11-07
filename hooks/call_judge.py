@@ -49,19 +49,26 @@ the model was not shown), the question is refused with the Unvetted remedy, unle
 `Unvetted:` line. An absent source allows, with one stderr line.
 
 Verdict claim (rule `verdict-claim-needs-run`, decision claims-carry-backing): a send whose message forecasts what a
-named check, guard, hook, test or rule will or would refuse, block, deny, catch, allow or pass is refused, unless
-(a) the current turn (payload transcript_path, read by lint/_transcript.py read_turn with peers_start_turn, so a peer
-message starts a turn, and tool_uses) holds a Bash call that names a file the claim names, or (b) the claim carries a
-backing cite that lint/stale_cites.py reads (paren_cites, cite_kind, backing_path): `(test path::name)` backs it when
-`name` is defined in that file at head, `(read path)` when the path is a file the claim names or one that defines a rule
-the claim names. A claim is a check subject (check, guard, hook, test, rule, CI or a PR number) and a future or modal
-verdict verb (will, would, should, 'll, won't) that acts on it, this, that, them, the send, the change or a PR, or is
-passive. "The hook will catch OSError" is no claim. A claim that names no file, such as one that names a check only by
-pull request number, needs the cite: no run can clear it. Prose lines of a paragraph are joined before sentences are
-split. Fenced text (stale_cites.fenced_lines) and past tense pass. A send that also fails the owner-question check
-is refused once, naming both rules, and both checks run before that refusal. A send
-with no forecast word and verdict word exits before any import, transcript read or model call. The refusal goes through refuse(),
-so the owner override lifts it. A source that cannot be read allows, with one stderr line.
+named check, guard, hook, test, rule, CI, PR or source file will or would refuse, block, deny, catch, reject, flag,
+fail, allow or pass is refused, unless (a) the current turn (payload transcript_path, read by lint/_transcript.py
+read_turn with peers_start_turn, so a peer message starts a turn, and tool_uses) holds a Bash call that names a file
+the claim names, or (b) the claim carries a backing cite that lint/stale_cites.py reads (paren_cites, cite_kind,
+backing_path): `(test path::name)` backs it when `name` is defined in that file at head, `(read path)` when the path is
+a file the claim names or one that defines a rule the claim names.
+A claim is read as a sentence, not as a word search (is_verdict_claim). It is a forecast word (will, would, should,
+'ll, won't; a curly apostrophe counts), up to two of `not` and one adverb (VERDICT_ADVERBS, or a word in -ly), then a
+verdict verb that acts on it, this, that, them, the send, the change or a PR, or a passive verb. The check must be the
+verb's actor. For an active verb, a subject sits in the last three words of the clause before the forecast word, with
+no pronoun after it. For a passive verb, a subject sits in the three words after `by`. A subject is a whole word
+(check, guard, hook, test, rule, CI; "test-author" is none), `PR #n`, or a source file path. "The hook will catch
+OSError", "I will block it until the check is green" and "The merge will be blocked until CI is green" are no claims.
+A claim that names no file, such as one that names a check only by pull request number, needs the cite: no run can
+clear it. A paren group that is no cite stays in the sentence, so "The guard (hooks/guard.py)" names its file.
+Prose lines of a paragraph are joined before sentences are split. Fenced text (stale_cites.fenced_lines) and past
+tense pass. A send that also fails the owner-question check is refused once, naming both rules, and both checks run
+before that refusal. A send with no forecast word and verdict word exits before any import, transcript read or model
+call. The refusal goes through refuse(), so the owner override lifts it. A source that cannot be read allows, with one
+stderr line.
 
 Fail open. Any other model error, odd answer or unreadable input allows, with one stderr line.
 
@@ -111,16 +118,23 @@ VERDICT_CLAIM_CITE = "(decision claims-carry-backing, a forecast of a check's ve
 # The words of a verdict claim: a sentence holds one of each list. Whole words, in any case: past tense ("refused")
 # is no forecast. These lists are the one home; hooks/test_call_judge.py reads them from here.
 VERDICT_FORECAST_WORDS = ("will", "would", "should", "won't", "'ll")
-VERDICT_WORDS = ("refuse", "block", "deny", "catch", "reject", "allow", "pass", "let through")
-VERDICT_PASSIVE_WORDS = ("refused", "blocked", "denied", "caught", "rejected", "allowed", "passed", "let through")
+VERDICT_WORDS = ("refuse", "block", "deny", "catch", "reject", "flag", "fail", "allow", "pass", "let through")
+VERDICT_PASSIVE_WORDS = ("refused", "blocked", "denied", "caught", "rejected", "flagged", "failed", "allowed", "passed",
+                         "let through")
 VERDICT_SUBJECT_WORDS = ("check", "checks", "guard", "guards", "hook", "hooks", "test", "tests", "rule", "rules", "CI")
 # What the verdict verb acts on: a send, a change, a PR, or a pronoun for one. "will catch OSError" acts on an error
 # class, so it is no forecast about a verdict. A passive verb ("will be refused") needs no object.
 VERDICT_OBJECTS = r"(?:it|this|that|them|the send|the change|(?:the |a )?PRs?)\b"
+# The one adverb a forecast may carry before its verb ("will probably refuse it"); any word in -ly counts too.
+VERDICT_ADVERBS = ("probably", "still", "also", "never", "then", "definitely", "likely", "surely", "certainly", "just",
+                   "now", "again", "always", "only", "really", "even", "already", "ever", "simply", "clearly")
+# A pronoun between a subject word and the forecast word is the actor instead: "when the test passes I will pass it".
+ACTOR_PRONOUNS = ("i", "you", "we", "they", "he", "she", "it")
 VERDICT_CLAIM_REMEDY = (
-    "this message forecasts what a check will refuse, block, deny, catch, allow or pass, and the turn did not run "
-    "it. Run the check first (a command that names the file the claim names), or add a backing cite "
-    "`(test path::name)` or `(read path:line)` to a file at head, or drop the forecast.")
+    "this message forecasts what a check will refuse, block, deny, catch, flag, fail, allow or pass, and the turn did "
+    "not run it. Run the check first (a command that names the file the claim names), or add a backing cite at head: "
+    "`(test path::name)`, where the file defines that name, or `(read path:line)`, where the file is one the claim "
+    "names or the file that defines the named rule. Or drop the forecast.")
 # THE TIME BUDGET. A judged item write makes two calls, in order, so the longest path is the dedicated past-ruling
 # call (PAST_RULING_TIMEOUT, 15 s) plus the question call's 60 s plus start-up (the git read, the import of
 # lint/report_guard.py). Every other path makes one call. The settings.json PreToolUse entry for this hook carries
@@ -475,23 +489,81 @@ def _has_word(text, words):
     return re.search(_any_re(words), text, re.I) is not None
 
 
-_FORECAST = _any_re(VERDICT_FORECAST_WORDS)
-_NOT = r"(?:\s+not\b)?"
-_ACTIVE = re.compile(_FORECAST + _NOT + r"\s+(?:%s)\s+%s" % ("|".join(re.escape(w) for w in VERDICT_WORDS if " " not in w),
-                                                           VERDICT_OBJECTS), re.I)
-_LET = re.compile(_FORECAST + _NOT + r"\s+let\s+%s\s+through\b" % VERDICT_OBJECTS, re.I)
-_PASSIVE = re.compile(_FORECAST + _NOT + r"\s+(?:be|get)\s+(?:%s)\b" % "|".join(VERDICT_PASSIVE_WORDS), re.I)
-_SUBJECT = re.compile(r"(?i:%s)|\bCI\b|(?:\bPRs?\s*#?|#)\d+" % _any_re([w for w in VERDICT_SUBJECT_WORDS if w != "CI"]))
+_FORECAST = re.compile(_any_re(VERDICT_FORECAST_WORDS), re.I)
+# What follows a forecast word: up to two of `not` and an adverb, then an active verb and its object, `let OBJ
+# through`, or a passive verb. It is matched at the forecast word's end, so each forecast word of a sentence is read.
+_PREDICATE = re.compile(
+    r"(?:\s+(?:not|%s|[a-z]+ly)\b){0,2}\s+(?:(?:%s)\s+%s|let\s+%s\s+through\b|(?:be|get)\s+(?P<passive>%s)\b)" % (
+        "|".join(VERDICT_ADVERBS), "|".join(re.escape(w) for w in VERDICT_WORDS if " " not in w), VERDICT_OBJECTS,
+        VERDICT_OBJECTS, "|".join(re.escape(w) for w in VERDICT_PASSIVE_WORDS)), re.I)
+_BY = re.compile(r"\s+by\s+", re.I)
+_CLAUSE_END = re.compile(r"[,;:](?=\s|$)|\s[-–—]\s")  # a clause ends at , ; : or a spaced dash
 _LET_ANY = re.compile(r"\blet\s+(?:\w+\s+){1,2}through\b", re.I)  # "let it through": the verb split by its object
 _BULLET = re.compile(r"\s*(?:[-*+]\s|\d+[.)]\s|#|>)")
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
-CITE_GROUP = re.compile(r"\([^()]*\)")
+_SUBJECT_WORDS = {w.lower() for w in VERDICT_SUBJECT_WORDS if w != "CI"}  # CI counts only in capitals
+
+
+def _straight(text):
+    """`text` with each curly apostrophe made straight, so "won’t" reads as "won't"."""
+    return text.replace("’", "'")
+
+
+def is_path(word):
+    """True when `word` reads as a source file path (stale_cites.SOURCE, the one home): a slash, or a dot in its last
+    part. Needs lint/ on sys.path."""
+    import stale_cites
+    return ("." in word.split("/")[-1] or "/" in word) and stale_cites.SOURCE.match(word) is not None
+
+
+def _bare(token):
+    """A token cut of the marks around its word: parens, quotes, bold, end punctuation and a possessive 's."""
+    word = token.strip("()[]{}\"'`*.,:;!?")
+    return word[:-2] if word.endswith("'s") else word
+
+
+def has_subject(tokens):
+    """True when one of `tokens` names a check: a subject word (case-blind, but CI in capitals), a PR by number
+    (`PR #1516`, `PR#1516`), or a source file path. A token is compared whole, so "test-author" is no "test"."""
+    words = [_bare(t) for t in tokens]
+    for index, word in enumerate(words):
+        following = words[index + 1] if index + 1 < len(words) else ""
+        if word.lower() in _SUBJECT_WORDS or word == "CI" or is_path(word) or re.fullmatch(r"PRs?#\d+", word) \
+                or (word in ("PR", "PRs") and re.fullmatch(r"#?\d+", following)):
+            return True
+    return False
+
+
+def actor_before(prefix):
+    """True when the actor of the forecast word that ends `prefix` is a check: a subject in the last three words of
+    its clause. The words are read back from the forecast word, and a pronoun stops the read, since it is the actor."""
+    window = []
+    for token in reversed(_CLAUSE_END.split(prefix)[-1].split()[-3:]):
+        if _bare(token).lower() in ACTOR_PRONOUNS:
+            break
+        window.insert(0, token)
+    return has_subject(window)
+
+
+def actor_after_by(rest):
+    """True when a passive verb's actor is a check: `rest` opens with `by`, and a subject sits in the three words
+    after it, in the same clause."""
+    by = _BY.match(rest)
+    return bool(by) and has_subject(_CLAUSE_END.split(rest[by.end():])[0].split()[:3])
 
 
 def is_verdict_claim(sentence):
-    """A forecast about a check's verdict: a check subject (a check, guard, hook, test, rule, CI or a PR number) and a
-    future or modal verdict verb that acts on a send, a change or a PR (or is passive)."""
-    return bool(_SUBJECT.search(sentence)) and any(rx.search(sentence) for rx in (_ACTIVE, _LET, _PASSIVE))
+    """A forecast about a check's verdict, read as a sentence: a forecast word, then a verdict verb that acts on a
+    send, a change or a PR (or a passive verb), whose actor is a check. A subject word elsewhere in the sentence, as in
+    "I will block it until the check is green", is no actor. Needs lint/ on sys.path."""
+    sentence = _straight(sentence)
+    for modal in _FORECAST.finditer(sentence):
+        verb = _PREDICATE.match(sentence, modal.end())
+        if not verb:
+            continue
+        if actor_after_by(sentence[verb.end():]) if verb.group("passive") else actor_before(sentence[:modal.start()]):
+            return True
+    return False
 
 
 def prose_units(message):
@@ -517,21 +589,37 @@ def prose_units(message):
 def verdict_claims(message):
     """The sentences of `message` that forecast a verdict, outside code fences. A message with no forecast word and no
     verdict word is read by plain regex alone, so such a send imports nothing."""
-    if not isinstance(message, str) or not _has_word(message, VERDICT_FORECAST_WORDS) \
+    if not isinstance(message, str):
+        return []
+    message = _straight(message)
+    if not _has_word(message, VERDICT_FORECAST_WORDS) \
             or not (_has_word(message, VERDICT_WORDS + VERDICT_PASSIVE_WORDS) or _LET_ANY.search(message)):
         return []
     return [sentence for unit in prose_units(message) for sentence in SENTENCE_END.split(unit)
             if is_verdict_claim(sentence)]
 
 
+def strip_cites(sentence):
+    """`sentence` with each cite cut out. A cite is a paren group that stale_cites.paren_cites reads (the one cite
+    parser) and whose kind is a cite kind: a premise kind, or `test`. Any other group stays, so "The guard
+    (hooks/guard.py)" still names its file. A group is matched by its text as paren_cites gives it."""
+    import stale_cites
+    cites = set()
+    for cite in stale_cites.paren_cites(sentence):
+        kind = stale_cites.cite_kind(cite)[0]
+        if kind in stale_cites.PREMISE_KINDS or kind == "test":
+            cites.add(cite)
+    return stale_cites.PAREN_GROUP.sub(
+        lambda group: " " if group.group(1).replace("`", "").strip() in cites else group.group(0), sentence)
+
+
 def named_files(sentence):
     """The file paths a sentence names outside its cites, each cut of its `:line` or `::name` tail. A bare `#1516`
     names none."""
-    import stale_cites
     found = []
-    for word in re.split(r"[\s,;()`]+", CITE_GROUP.sub(" ", sentence)):
+    for word in re.split(r"[\s,;()`]+", strip_cites(sentence)):
         word = word.rstrip(".:")
-        if ("." in word.split("/")[-1] or "/" in word) and stale_cites.SOURCE.match(word):
+        if is_path(word):
             found.append(re.split(r"::?\d*", word, maxsplit=1)[0])
     return found
 
@@ -561,7 +649,7 @@ def cite_backs(sentence, cwd):
     it when `name` is defined in the file at head. A `read path` cite backs it when the file at head is one the claim
     names, or defines a rule the claim names."""
     import stale_cites
-    bare = CITE_GROUP.sub(" ", sentence)
+    bare = strip_cites(sentence)
     for cite in stale_cites.paren_cites(sentence):
         kind, rest = stale_cites.cite_kind(cite)
         path = stale_cites.backing_path(kind, rest)
