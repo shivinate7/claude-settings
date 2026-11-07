@@ -940,6 +940,25 @@ class OneHomeInRepoTests(unittest.TestCase):
         found, out = self.verdict_scan()
         self.assertEqual(keyed(found), [CONTROL_FINDING, ("agents/paren.md", 1, "COPY001")], out)
 
+    # Review round 2, F3: word_runs.SPANS had no re.S, so a comment that runs over two lines was read as prose, and an
+    # exception marker over two lines went unseen.
+    def test_a_two_line_comment_is_not_read_as_prose(self):
+        self.tracked({"agents/note.md": "<!-- a note on the brief\n%s -->\n" % RULE})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [CONTROL_FINDING], out)
+
+    def test_a_copy_between_two_one_line_comments_is_still_found(self):
+        self.tracked({"agents/beside.md": "<!-- a short note --> %s <!-- a second note -->\n" % RULE})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [("agents/beside.md", 1, "COPY001"), CONTROL_FINDING], out)
+
+    def test_a_two_line_exempt_marker_is_seen(self):
+        words = REASON.split()
+        marker = "<!-- exempt: brief-contents reason: %s\n%s -->" % (" ".join(words[:6]), " ".join(words[6:]))
+        self.tracked({"agents/split.md": "%s\n\n%s\n" % (marker, RULE)})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [CONTROL_FINDING], out)
+
 
 if __name__ == "__main__":
     try:
