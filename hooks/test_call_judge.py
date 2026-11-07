@@ -65,6 +65,9 @@ Interface the hook must match:
   gets the past-ruling check (lint/report_guard.py past_ruling_problem, the one home) before it is sent, whoever the
   target is. Any other send makes no model call and starts no subprocess. A refusal is rule `past-ruling` with the
   relay remedy, and an `Unvetted:` line passes a check that could not run.
+- Page item writes (ruled 14:38 CST): a judged item write gets the dedicated past-ruling call first (item 8 alone, Sonnet).
+  A refusal denies with rule past-ruling and makes no form-judge call. Otherwise the form judge (Opus) runs, and its
+  prompt carries no item 8.
 """
 import atexit
 import json
@@ -233,7 +236,14 @@ def _fake_run(argv, **kwargs):
         f.write(json.dumps({"argv": list(argv), "prompt": prompt}) + "\n")
     if os.environ.get("CJ_MODEL_FAIL"):
         return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stub model failure")
-    return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"result": os.environ["CJ_ANSWER"]}), stderr="")
+    # The dedicated past-ruling call asks item 8 alone, so only its prompt holds this text. It answers CJ_PAST_ANSWER
+    # when a case sets one, else the case's answer. CJ_PAST_FAIL makes that call fail alone.
+    answer = os.environ["CJ_ANSWER"]
+    if "Judge only item 8 below" in prompt:
+        if os.environ.get("CJ_PAST_FAIL"):
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stub past-ruling failure")
+        answer = os.environ.get("CJ_PAST_ANSWER") or answer
+    return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"result": answer}), stderr="")
 
 
 _real_popen = subprocess.Popen
@@ -323,7 +333,9 @@ def write_pass(cfg, session, body):
         f.write(body if isinstance(body, str) else json.dumps(body))
 
 
-def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
+def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, past=None, past_fail=False):
+    """One hook run. `answer` is the canned model answer. `past` is the dedicated past-ruling call's answer, and
+    `past_fail` makes only that call fail; unset, the dedicated call takes `answer`."""
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
@@ -338,9 +350,26 @@ def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
                 "CJ_RECORD": os.path.join(base, "calls.jsonl"), "CJ_ANSWER": answer})
     if model_fail:
         env["CJ_MODEL_FAIL"] = "1"
+    if past is not None:
+        env["CJ_PAST_ANSWER"] = past
+    if past_fail:
+        env["CJ_PAST_FAIL"] = "1"
     proc = subprocess.run([sys.executable, HOOK], input=stdin_text, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=env, timeout=120)
     return Run(proc, base)
+
+
+# The dedicated past-ruling call of a page item write asks item 8 alone, so its prompt carries this text (the stub
+# above reads the same text). The form judge's prompt never does.
+PAST_CALL_TEXT = "Judge only item 8 below"
+
+
+def past_calls(r):
+    return [c for c in r.calls if PAST_CALL_TEXT in c["prompt"]]
+
+
+def form_calls(r):
+    return [c for c in r.calls if PAST_CALL_TEXT not in c["prompt"]]
 
 
 def spawn_input(kind="Explore", model="haiku", session=SID_A, agent=None, brief=None):
@@ -671,22 +700,22 @@ def case_page_fixture_passes_the_form():
 
 def case_page_reject_and_accept():
     item = good_page_item()
-    r = run_hook(page_input("set", item), answer=PAGE_FLAG)
+    r = run_hook(page_input("set", item), answer=PAGE_FLAG, past=ALLOW)
     d = r.deny() or {}
     check("page: a good item the judge rejects is denied with the judge's reason", r.code == 0
           and d.get("permissionDecision") == "deny" and "plain effect" in r.reason(), detail(r))
     check("page: the deny names rule question-judge and logs one deny line",
           r.reason().startswith("question-judge: ") and r.log.count("\tdeny\tquestion-judge\t") == 1, detail(r))
-    check("page: one model call, claude-opus-5-5, no effort", len(r.calls) == 1
-          and model_of(r.calls[0]["argv"]) == QUESTION_MODEL and "--effort" not in r.calls[0]["argv"], detail(r))
-    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("page: one form-judge call, claude-opus-5-5, no effort", len(form_calls(r)) == 1
+          and model_of(form_calls(r)[0]["argv"]) == QUESTION_MODEL and "--effort" not in form_calls(r)[0]["argv"], detail(r))
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
     check("page: the model sees the item the write carries", PAGE_MARK in prompt, prompt[:160])
     check("page: the refusal ends with the override line",
           override is not None and hasattr(override, "offer")
           and r.reason().rstrip().endswith(override.offer("question-judge").strip()), r.reason()[-160:])
     ok = run_hook(page_input("set", item), answer=ALLOW)
-    check("page: the same item the judge accepts is not denied, after one model call",
-          ok.code == 0 and ok.out == "" and "\tdeny\t" not in ok.log and len(ok.calls) == 1, detail(ok))
+    check("page: the same item the judge accepts is not denied, after one form-judge call",
+          ok.code == 0 and ok.out == "" and "\tdeny\t" not in ok.log and len(form_calls(ok)) == 1, detail(ok))
 
 
 def case_page_no_model_call():
@@ -732,15 +761,15 @@ def case_page_batch_one_call():
               {"op": "update", "collection": PAGE_ITEMS, "doc_id": "p2",
                "data": {"kind": "decision", "context": second["context"], "options": second["options"]}}]
     r = run_hook(page_batch_input(writes), answer=ALLOW)
-    prompt = r.calls[0]["prompt"] if r.calls else ""
-    check("page batch: two qualifying item writes make exactly one model call, claude-opus-5-5",
-          r.code == 0 and r.out == "" and len(r.calls) == 1 and model_of(r.calls[0]["argv"]) == QUESTION_MODEL,
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
+    check("page batch: two qualifying item writes make exactly one form-judge call, claude-opus-5-5",
+          r.code == 0 and r.out == "" and len(form_calls(r)) == 1 and model_of(form_calls(r)[0]["argv"]) == QUESTION_MODEL,
           detail(r))
     check("page batch: the one prompt carries both writes", PAGE_MARK in prompt and PAGE_MARK_B in prompt,
           prompt[:160])
-    r = run_hook(page_batch_input(writes), answer=PAGE_FLAG)
+    r = run_hook(page_batch_input(writes), answer=PAGE_FLAG, past=ALLOW)
     check("page batch: a refusal of the batch is one deny line, from one call",
-          len(r.calls) == 1 and r.log.count("\tdeny\tquestion-judge\t") == 1 and (r.deny() or {}).get(
+          len(form_calls(r)) == 1 and r.log.count("\tdeny\tquestion-judge\t") == 1 and (r.deny() or {}).get(
               "permissionDecision") == "deny", detail(r))
 
 
@@ -752,7 +781,7 @@ def case_page_override():
         ("one-act override, an agent's call", agent_call, (SID_A, ONCE), False),
         ("no override", flagged, None, False),
     ):
-        r = run_hook(inp, answer=PAGE_FLAG, pass_=pass_)
+        r = run_hook(inp, answer=PAGE_FLAG, past=ALLOW, pass_=pass_)
         if lifted:
             check("page: %s lifts the refusal (no output, one override log line)" % label,
                   r.code == 0 and r.out == "" and lifted_log(r, "question-judge"), detail(r))
@@ -775,17 +804,17 @@ def case_page_str_replace_judged():
     fragment = "The change lands this week. " + PAGE_NEW
     for field in ("context", "options", "options.0.gain"):
         r = run_hook(page_input("str_replace", None, field=field, old_str=PAGE_OLD, new_str=fragment),
-                     answer=PAGE_FLAG)
+                     answer=PAGE_FLAG, past=ALLOW)
         d = r.deny() or {}
         check("page str_replace: a %s edit the judge rejects is denied, rule question-judge, one call" % field,
               r.code == 0 and d.get("permissionDecision") == "deny" and r.reason().startswith("question-judge: ")
-              and r.log.count("\tdeny\tquestion-judge\t") == 1 and len(r.calls) == 1, detail(r))
-        check("page str_replace: a %s edit is one model call, claude-opus-5-5, no effort" % field,
-              len(r.calls) == 1 and model_of(r.calls[0]["argv"]) == QUESTION_MODEL
-              and "--effort" not in r.calls[0]["argv"], detail(r))
+              and r.log.count("\tdeny\tquestion-judge\t") == 1 and len(form_calls(r)) == 1, detail(r))
+        check("page str_replace: a %s edit is one form-judge call, claude-opus-5-5, no effort" % field,
+              len(form_calls(r)) == 1 and model_of(form_calls(r)[0]["argv"]) == QUESTION_MODEL
+              and "--effort" not in form_calls(r)[0]["argv"], detail(r))
     flagged = run_hook(page_input("str_replace", None, field="context", old_str=PAGE_OLD, new_str=fragment),
-                       answer=PAGE_FLAG)
-    prompt = flagged.calls[0]["prompt"] if flagged.calls else ""
+                       answer=PAGE_FLAG, past=ALLOW)
+    prompt = form_calls(flagged)[0]["prompt"] if form_calls(flagged) else ""
     check("page str_replace: the model sees new_str and not old_str", PAGE_NEW in prompt and PAGE_OLD not in prompt,
           prompt[:200])
     sentences = re.split(r"[.\n]", prompt.lower())
@@ -796,40 +825,40 @@ def case_page_str_replace_judged():
           override is not None and hasattr(override, "offer")
           and flagged.reason().rstrip().endswith(override.offer("question-judge").strip()), flagged.reason()[-160:])
     r = run_hook(page_input("str_replace", None, field="context", old_str=PAGE_OLD, new_str=fragment),
-                 answer=PAGE_FLAG, pass_=(SID_A, TIMED))
+                 answer=PAGE_FLAG, past=ALLOW, pass_=(SID_A, TIMED))
     check("page str_replace: a timed override lifts the refusal", r.code == 0 and r.out == ""
           and lifted_log(r, "question-judge"), detail(r))
     ok = run_hook(page_input("str_replace", None, field="context", old_str=PAGE_OLD, new_str=fragment),
                   answer=ALLOW)
-    check("page str_replace: a good fragment the judge accepts is allowed, after one model call",
-          ok.code == 0 and ok.out == "" and "\tdeny\t" not in ok.log and len(ok.calls) == 1, detail(ok))
+    check("page str_replace: a good fragment the judge accepts is allowed, after one form-judge call",
+          ok.code == 0 and ok.out == "" and "\tdeny\t" not in ok.log and len(form_calls(ok)) == 1, detail(ok))
     writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item(PAGE_MARK)},
               {"op": "str_replace", "collection": PAGE_ITEMS, "doc_id": "p2", "field": "context",
                "old_str": PAGE_OLD, "new_str": fragment}]
     r = run_hook(page_batch_input(writes), answer=ALLOW)
-    prompt = r.calls[0]["prompt"] if r.calls else ""
-    check("page str_replace: a context edit joins a batch's one model call",
-          r.code == 0 and r.out == "" and len(r.calls) == 1 and model_of(r.calls[0]["argv"]) == QUESTION_MODEL
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
+    check("page str_replace: a context edit joins a batch's one form-judge call",
+          r.code == 0 and r.out == "" and len(form_calls(r)) == 1 and model_of(form_calls(r)[0]["argv"]) == QUESTION_MODEL
           and PAGE_MARK in prompt and PAGE_NEW in prompt and PAGE_OLD not in prompt, detail(r))
 
 
 def case_page_task_item_judged():
     # Coordinator follow-up after the Nov 1 11:51 CST ruling: a task item (kind task) that carries context, steps or
-    # options gets one model call after item_hit passes it, and its prompt carries the whole-unit replace rule.
+    # options gets one form-judge call after item_hit passes it, and its prompt carries the whole-unit replace rule.
     import question_form  # the one form check (hooks/question_form.py)
     bad, good = good_task_item(ITEM_99_STEP), good_task_item()
     for label, data in (("item 99's task", bad), ("the good task", good)):
         got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "t99", "data": data})
         check("task fixture: %s passes question_form.item_hit, so a refusal below is the judge's" % label,
               got == ("", ""), got)
-    r = run_hook(page_input("set", bad), answer=TASK_FLAG)
+    r = run_hook(page_input("set", bad), answer=TASK_FLAG, past=ALLOW)
     d = r.deny() or {}
-    check("task item: item 99's step is denied by the judge, rule question-judge, one model call", r.code == 0
+    check("task item: item 99's step is denied by the judge, rule question-judge, one form-judge call", r.code == 0
           and d.get("permissionDecision") == "deny" and r.reason().startswith("question-judge: ")
-          and r.log.count("\tdeny\tquestion-judge\t") == 1 and len(r.calls) == 1, detail(r))
-    check("task item: the one call is claude-opus-5-5, no effort", len(r.calls) == 1
-          and model_of(r.calls[0]["argv"]) == QUESTION_MODEL and "--effort" not in r.calls[0]["argv"], detail(r))
-    prompt = r.calls[0]["prompt"] if r.calls else ""
+          and r.log.count("\tdeny\tquestion-judge\t") == 1 and len(form_calls(r)) == 1, detail(r))
+    check("task item: the one call is claude-opus-5-5, no effort", len(form_calls(r)) == 1
+          and model_of(form_calls(r)[0]["argv"]) == QUESTION_MODEL and "--effort" not in form_calls(r)[0]["argv"], detail(r))
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
     check("task item: the prompt holds item 99's step text", ITEM_99_STEP in prompt, prompt[:200])
     # The item's own strings are cut out first, so only the prompt's words can satisfy the rule check.
     rest = prompt.replace(ITEM_99_STEP, "").replace(TASK_WHY, "").lower()
@@ -837,20 +866,20 @@ def case_page_task_item_judged():
     check("task item: the prompt holds the whole-unit rule (quote the whole line or value, show the line after the change in full)",
           any("whole" in s and any(w in s for w in ("line", "value", "unit")) for s in sentences)
           and any("full" in s and any(w in s for w in ("after", "change")) for s in sentences), rest[:300])
-    upd = run_hook(page_input("update", {"kind": "task", "steps": [ITEM_99_STEP]}), answer=TASK_FLAG)
-    check("task item: an update that carries item 99's step (kind task) is denied after one model call",
-          (upd.deny() or {}).get("permissionDecision") == "deny" and len(upd.calls) == 1
+    upd = run_hook(page_input("update", {"kind": "task", "steps": [ITEM_99_STEP]}), answer=TASK_FLAG, past=ALLOW)
+    check("task item: an update that carries item 99's step (kind task) is denied after one form-judge call",
+          (upd.deny() or {}).get("permissionDecision") == "deny" and len(form_calls(upd)) == 1
           and upd.log.count("\tdeny\tquestion-judge\t") == 1, detail(upd))
     ok = run_hook(page_input("set", good), answer=ALLOW)
-    check("task item: a good task item (its step quotes the whole line before and after) is allowed after one model call",
-          ok.code == 0 and ok.out == "" and "\tdeny\t" not in ok.log and len(ok.calls) == 1, detail(ok))
+    check("task item: a good task item (its step quotes the whole line before and after) is allowed after one form-judge call",
+          ok.code == 0 and ok.out == "" and "\tdeny\t" not in ok.log and len(form_calls(ok)) == 1, detail(ok))
     writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "t99", "data": bad},
               {"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item()}]
     batch = run_hook(page_batch_input(writes), answer=ALLOW)
-    prompt = batch.calls[0]["prompt"] if batch.calls else ""
-    check("task batch: a task item and a decision make exactly one model call, claude-opus-5-5",
-          batch.code == 0 and batch.out == "" and len(batch.calls) == 1
-          and model_of(batch.calls[0]["argv"]) == QUESTION_MODEL, detail(batch))
+    prompt = form_calls(batch)[0]["prompt"] if form_calls(batch) else ""
+    check("task batch: a task item and a decision make exactly one form-judge call, claude-opus-5-5",
+          batch.code == 0 and batch.out == "" and len(form_calls(batch)) == 1
+          and model_of(form_calls(batch)[0]["argv"]) == QUESTION_MODEL, detail(batch))
     check("task batch: the one prompt carries the task's step and the decision",
           ITEM_99_STEP in prompt and PAGE_MARK in prompt, prompt[:200])
 
@@ -861,10 +890,10 @@ def case_page_task_exempt_from_decision_items():
     # sentences that name a task are read, and together they must exempt the Goal, the Problem and the recommended
     # option, carry a negation or an only-rule, and state what a task is judged on.
     r = run_hook(page_input("set", good_task_item()), answer=ALLOW)
-    check("task exempt: a lone good task write makes one model call, claude-opus-5-5, no effort",
-          r.code == 0 and len(r.calls) == 1 and model_of(r.calls[0]["argv"]) == QUESTION_MODEL
-          and "--effort" not in r.calls[0]["argv"], detail(r))
-    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("task exempt: a lone good task write makes one form-judge call, claude-opus-5-5, no effort",
+          r.code == 0 and len(form_calls(r)) == 1 and model_of(form_calls(r)[0]["argv"]) == QUESTION_MODEL
+          and "--effort" not in form_calls(r)[0]["argv"], detail(r))
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
     # The item's own strings are cut out first, so only the prompt's words can satisfy the checks.
     rest = prompt.replace(GOOD_TASK_STEP, "").replace(TASK_WHY, "").lower()
     task = [s for s in re.split(r"[.;\n]", rest) if "task" in s]
@@ -892,12 +921,12 @@ def case_page_steps_judged():
     got = question_form.item_hit("update", {"collection": PAGE_ITEMS, "doc_id": "t99", "data": upd})
     check("task steps fixture: an update of item 99's step with no kind passes question_form.item_hit", got == ("", ""),
           got)
-    r = run_hook(page_input("update", upd), answer=TASK_FLAG)
+    r = run_hook(page_input("update", upd), answer=TASK_FLAG, past=ALLOW)
     d = r.deny() or {}
     check("task steps: an update of item 99's step with no kind is denied by the judge, rule question-judge, one call",
           r.code == 0 and d.get("permissionDecision") == "deny" and r.reason().startswith("question-judge: ")
-          and r.log.count("\tdeny\tquestion-judge\t") == 1 and len(r.calls) == 1, detail(r))
-    prompt = r.calls[0]["prompt"] if r.calls else ""
+          and r.log.count("\tdeny\tquestion-judge\t") == 1 and len(form_calls(r)) == 1, detail(r))
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
     check("task steps: the one prompt holds item 99's step text", ITEM_99_STEP in prompt, prompt[:200])
 
 
@@ -1055,9 +1084,9 @@ def case_reask_update_holds_rule_once():
           got)
     rule = none_direction_rule()
     r = run_hook(page_input("update", fixture), answer=ALLOW)
-    prompt = r.calls[0]["prompt"] if r.calls else ""
-    check("re-ask: an update with options and a lastAnswer note makes one model call, and no deny",
-          len(r.calls) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
+    check("re-ask: an update with options and a lastAnswer note makes one form-judge call, and no deny",
+          len(form_calls(r)) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
     check("re-ask: the one prompt holds NONE_DIRECTION_RULE exactly once", bool(rule) and prompt.count(rule) == 1,
           rule_detail(rule, r))
     check("re-ask: the one prompt carries the owner's note", REASK_NOTE in prompt, prompt[:200])
@@ -1068,20 +1097,20 @@ def case_reask_cheaper_note_holds_rule_once():
     # gives no deny.
     rule = none_direction_rule()
     r = run_hook(page_input("update", reask_item(PAGE_MARK, SHOW_CHEAPER_NOTE)), answer=ALLOW)
-    prompt = r.calls[0]["prompt"] if r.calls else ""
-    check("re-ask, cheaper-options note: one model call, and the model's allow is no deny",
-          len(r.calls) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
+    check("re-ask, cheaper-options note: one form-judge call, and the model's allow is no deny",
+          len(form_calls(r)) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
     check("re-ask, cheaper-options note: the one prompt holds NONE_DIRECTION_RULE exactly once",
           bool(rule) and prompt.count(rule) == 1, rule_detail(rule, r))
 
 
 def case_options_without_note_lacks_rule():
-    # Case 3: options with no lastAnswer is not a re-ask. The call still makes its one model call, so an early exit
+    # Case 3: options with no lastAnswer is not a re-ask. The call still makes its one form-judge call, so an early exit
     # cannot pass this check.
     rule = none_direction_rule()
     r = run_hook(page_input("update", {"options": good_page_item()["options"]}), answer=ALLOW)
-    prompt = r.calls[0]["prompt"] if r.calls else ""
-    check("no re-ask, options only: one model call, and no deny", len(r.calls) == 1 and r.code == 0 and r.out == ""
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
+    check("no re-ask, options only: one form-judge call, and no deny", len(form_calls(r)) == 1 and r.code == 0 and r.out == ""
           and "\tdeny\t" not in r.log, detail(r))
     check("no re-ask, options only: the prompt lacks NONE_DIRECTION_RULE", bool(rule) and prompt.count(rule) == 0,
           rule_detail(rule, r))
@@ -1092,8 +1121,8 @@ def case_blank_note_lacks_rule():
     rule = none_direction_rule()
     data = {"options": good_page_item()["options"], "lastAnswer": last_answer("  ")}
     r = run_hook(page_input("update", data), answer=ALLOW)
-    prompt = r.calls[0]["prompt"] if r.calls else ""
-    check("no re-ask, blank note: one model call, and no deny", len(r.calls) == 1 and r.code == 0 and r.out == ""
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
+    check("no re-ask, blank note: one form-judge call, and no deny", len(form_calls(r)) == 1 and r.code == 0 and r.out == ""
           and "\tdeny\t" not in r.log, detail(r))
     check("no re-ask, blank note: the prompt lacks NONE_DIRECTION_RULE", bool(rule) and prompt.count(rule) == 0,
           rule_detail(rule, r))
@@ -1104,23 +1133,23 @@ def case_context_only_note_lacks_rule():
     rule = none_direction_rule()
     data = {"context": good_page_item()["context"], "lastAnswer": last_answer(REASK_NOTE)}
     r = run_hook(page_input("update", data), answer=ALLOW)
-    prompt = r.calls[0]["prompt"] if r.calls else ""
-    check("no re-ask, context only with a note: one model call, and no deny",
-          len(r.calls) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
+    check("no re-ask, context only with a note: one form-judge call, and no deny",
+          len(form_calls(r)) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
     check("no re-ask, context only with a note: the prompt lacks NONE_DIRECTION_RULE",
           bool(rule) and prompt.count(rule) == 0, rule_detail(rule, r))
 
 
 def case_reask_batch_one_call_rule_once():
-    # Case 6: two re-asks in one batch make one model call, and the one prompt holds the rule once, not once per write.
+    # Case 6: two re-asks in one batch make one form-judge call, and the one prompt holds the rule once, not once per write.
     rule = none_direction_rule()
     writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1",
                "data": good_page_item(PAGE_MARK, lastAnswer=last_answer(REASK_NOTE))},
               {"op": "update", "collection": PAGE_ITEMS, "doc_id": "p2", "data": reask_item(PAGE_MARK_B, SHOW_CHEAPER_NOTE)}]
     r = run_hook(page_batch_input(writes), answer=ALLOW)
-    prompt = r.calls[0]["prompt"] if r.calls else ""
-    check("re-ask batch: two re-asks make one model call, claude-opus-5-5, and no deny",
-          len(r.calls) == 1 and model_of(r.calls[0]["argv"]) == QUESTION_MODEL and r.code == 0 and r.out == ""
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
+    check("re-ask batch: two re-asks make one form-judge call, claude-opus-5-5, and no deny",
+          len(form_calls(r)) == 1 and model_of(form_calls(r)[0]["argv"]) == QUESTION_MODEL and r.code == 0 and r.out == ""
           and "\tdeny\t" not in r.log, detail(r))
     check("re-ask batch: the one prompt carries both writes", PAGE_MARK in prompt and PAGE_MARK_B in prompt,
           prompt[:200])
@@ -1132,20 +1161,20 @@ def case_reask_refusal_denies():
     # Case 7: case 1's write, and the fake refuses it. The deny is question-judge, and the prompt holds the rule
     # once, so this case pins the rule's count in the prompt, apart from the deny.
     rule = none_direction_rule()
-    r = run_hook(page_input("update", reask_item(PAGE_MARK)), answer=REASK_FLAG)
+    r = run_hook(page_input("update", reask_item(PAGE_MARK)), answer=REASK_FLAG, past=ALLOW)
     d = r.deny() or {}
-    prompt = r.calls[0]["prompt"] if r.calls else ""
-    check("re-ask refusal: the judge's deny is rule question-judge, one deny line, one model call",
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
+    check("re-ask refusal: the judge's deny is rule question-judge, one deny line, one form-judge call",
           r.code == 0 and d.get("permissionDecision") == "deny" and r.reason().startswith("question-judge: ")
           and "already gives the direction" in r.reason() and r.log.count("\tdeny\tquestion-judge\t") == 1
-          and len(r.calls) == 1, detail(r))
+          and len(form_calls(r)) == 1, detail(r))
     check("re-ask refusal: the one prompt holds NONE_DIRECTION_RULE exactly once", bool(rule) and prompt.count(rule) == 1,
           rule_detail(rule, r))
 
 
 def case_picked_choice_with_note_lacks_rule():
     # A picked choice (a key) with a note is the owner choosing an option, not a "none of these" direction, so the
-    # write is no re-ask. The call still makes its one model call, so an early exit cannot pass this check.
+    # write is no re-ask. The call still makes its one form-judge call, so an early exit cannot pass this check.
     import question_form  # the one form check (hooks/question_form.py)
     fixture = reask_item(PAGE_MARK, PLAIN_NOTE, choice="a")
     got = question_form.item_hit("update", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": fixture})
@@ -1153,9 +1182,9 @@ def case_picked_choice_with_note_lacks_rule():
           got == ("", ""), got)
     rule = none_direction_rule()
     r = run_hook(page_input("update", fixture), answer=ALLOW)
-    prompt = r.calls[0]["prompt"] if r.calls else ""
-    check("picked choice with a note: one model call, and no deny",
-          len(r.calls) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
+    check("picked choice with a note: one form-judge call, and no deny",
+          len(form_calls(r)) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
     check("picked choice with a note: the prompt lacks NONE_DIRECTION_RULE", bool(rule) and prompt.count(rule) == 0,
           rule_detail(rule, r))
 
@@ -1164,9 +1193,9 @@ def case_none_choice_with_note_holds_rule_once():
     # The same write with choice none is a "none of these" re-ask, so the one prompt holds the rule once.
     rule = none_direction_rule()
     r = run_hook(page_input("update", reask_item(PAGE_MARK, PLAIN_NOTE, choice="none")), answer=ALLOW)
-    prompt = r.calls[0]["prompt"] if r.calls else ""
-    check("none choice with a note: one model call, and no deny",
-          len(r.calls) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
+    check("none choice with a note: one form-judge call, and no deny",
+          len(form_calls(r)) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
     check("none choice with a note: the one prompt holds NONE_DIRECTION_RULE exactly once",
           bool(rule) and prompt.count(rule) == 1, rule_detail(rule, r))
 
@@ -1254,26 +1283,26 @@ def no_widening_rule(prompt, template_name):
 
 
 def case_widening_set_holds_rule_once():
-    # Case 1: a set with options, none marked, makes one model call, and the one prompt holds the rule once.
+    # Case 1: a set with options, none marked, makes one form-judge call, and the one prompt holds the rule once.
     rule = widening_rule()
     r = run_hook(page_input("set", good_page_item()), answer=ALLOW)
-    check("widening set: one model call, and no deny", len(r.calls) == 1 and r.code == 0 and r.out == ""
+    check("widening set: one form-judge call, and no deny", len(form_calls(r)) == 1 and r.code == 0 and r.out == ""
           and "\tdeny\t" not in r.log, detail(r))
-    prompt = r.calls[0]["prompt"] if r.calls else ""
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
     ok, cause = rule_once(prompt, rule)
     check("widening set: the one prompt holds WIDENING_RULE exactly once, after the question-format prompt", ok, cause)
 
 
 def case_widening_batch_holds_rule_once():
-    # Case 2: two option writes in one batch make one model call, and the one prompt holds the rule exactly once.
+    # Case 2: two option writes in one batch make one form-judge call, and the one prompt holds the rule exactly once.
     rule = widening_rule()
     writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item(PAGE_MARK)},
               {"op": "update", "collection": PAGE_ITEMS, "doc_id": "p2",
                "data": {"options": good_page_item(PAGE_MARK_B)["options"]}}]
     r = run_hook(page_batch_input(writes), answer=ALLOW)
-    check("widening batch: two option writes make one model call, and no deny", len(r.calls) == 1 and r.code == 0
+    check("widening batch: two option writes make one form-judge call, and no deny", len(form_calls(r)) == 1 and r.code == 0
           and r.out == "" and "\tdeny\t" not in r.log, detail(r))
-    prompt = r.calls[0]["prompt"] if r.calls else ""
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
     check("widening batch: the one prompt carries both writes", PAGE_MARK in prompt and PAGE_MARK_B in prompt,
           prompt[:160])
     ok, cause = rule_once(prompt, rule)
@@ -1292,9 +1321,9 @@ def case_widening_absent_without_options():
         ("an Agent spawn", spawn_input("builder", model="sonnet"), "SPAWN_PROMPT"),
     ):
         r = run_hook(inp, answer=ALLOW)
-        check("widening absent: %s is judged once, and no deny" % label, len(r.calls) == 1 and r.code == 0
+        check("widening absent: %s is judged once, and no deny" % label, len(form_calls(r)) == 1 and r.code == 0
               and r.out == "" and "\tdeny\t" not in r.log, detail(r))
-        prompt = r.calls[0]["prompt"] if r.calls else ""
+        prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
         ok, cause = no_widening_rule(prompt, template)
         check("widening absent: %s gets no widening rule" % label, ok, cause)
 
@@ -1309,13 +1338,13 @@ def case_widening_refusal_names_the_option():
     got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": item})
     check("widening refusal fixture: the item passes question_form.item_hit, so a refusal below is the judge's",
           got == ("", ""), got)
-    r = run_hook(page_input("set", item), answer=WIDENING_FLAG)
+    r = run_hook(page_input("set", item), answer=WIDENING_FLAG, past=ALLOW)
     d = r.deny() or {}
     check("widening refusal: the unmarked option is denied, rule question-judge, and the reason names its key",
           r.code == 0 and d.get("permissionDecision") == "deny" and r.reason().startswith("question-judge: ")
-          and "option `b`" in r.reason() and r.log.count("\tdeny\tquestion-judge\t") == 1 and len(r.calls) == 1,
+          and "option `b`" in r.reason() and r.log.count("\tdeny\tquestion-judge\t") == 1 and len(form_calls(r)) == 1,
           detail(r))
-    prompt = r.calls[0]["prompt"] if r.calls else ""
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
     ok, cause = rule_once(prompt, rule)
     check("widening refusal: the judge's prompt holds WIDENING_RULE exactly once, after the question-format prompt",
           ok, cause)
@@ -1341,14 +1370,14 @@ def case_widening_fair_option_passes_code_path():
     hit, _writes = question_form.page_item_hit(tool_input, PAGE_REPO)
     check("fair option code path: question_form.page_item_hit does not refuse it", hit == ("", ""), hit)
     r = run_hook(page_input("set", item), answer=ALLOW)
-    check("fair option code path: one judge call and no deny from call_judge", len(r.calls) == 1 and r.code == 0
+    check("fair option code path: one judge call and no deny from call_judge", len(form_calls(r)) == 1 and r.code == 0
           and r.out == "" and "\tdeny\t" not in r.log, detail(r))
     picked = dict(item, pick="b")
     got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": picked})
     check("widening scope: the marked option, picked, is refused as uniform-pick, so the mark is read",
           got[0] == "uniform-pick", "the marked option carries no mark: question_form.WIDENS_KEY is not defined"
           if not key else got)
-    prompt = r.calls[0]["prompt"] if r.calls else ""
+    prompt = form_calls(r)[0]["prompt"] if form_calls(r) else ""
     ok, cause = rule_once(prompt, rule)
     check("fair option code path: the judge's prompt holds WIDENING_RULE exactly once, after the question-format prompt",
           ok, cause)
@@ -1498,9 +1527,10 @@ def case_past_ruling_replay_item_133():
     got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "c133", "data": item})
     check("past ruling 133 fixture: the item passes item_hit, so the model judges it", got == ("", ""), got)
     r = run_hook(page_input("set", item, doc_id="c133", cwd=CI_REPO), answer=ALLOW)
-    prompt = r.calls[0]["prompt"] if r.calls else ""
-    check("past ruling 133: the prompt holds the step c95 ruling sentence",
-          len(r.calls) == 1 and CI_STEP_SENTENCE in without_call(prompt, item), detail(r))
+    # Re-pointed (dedicated past-ruling call, page item writes): the ruling reaches the call that checks item 8.
+    prompt = past_calls(r)[0]["prompt"] if past_calls(r) else ""
+    check("past ruling 133: the dedicated call holds the step c95 ruling sentence",
+          len(past_calls(r)) == 1 and CI_STEP_SENTENCE in without_call(prompt, item), detail(r))
 
 
 def case_past_ruling_cited_passes():
@@ -1558,7 +1588,8 @@ def case_past_ruling_cost():
           len(r.calls) == 1 and r.git == 1, detail(r))
     item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
     p = run_hook(page_input("set", item, doc_id="c133", cwd=CI_REPO), answer=ALLOW)
-    check("past ruling cost: a judged page write runs one git process", len(p.calls) == 1 and p.git == 1, detail(p))
+    check("past ruling cost: a judged page write runs one git process, in its dedicated call",
+          len(past_calls(p)) == 1 and len(form_calls(p)) == 1 and p.git == 1, detail(p))
     q = run_hook(question_input(box=good_box(), cwd=BARE_REPO), answer=ALLOW)
     check("past ruling cost: a judged question with no roadmap ref runs at most one git process",
           len(q.calls) == 1 and q.git <= 1, detail(q))
@@ -1602,8 +1633,9 @@ def case_unvetted_page_marker():
           and len(r.calls) == 1, detail(r))
     marked = good_page_item(context=item["context"] + "\n" + UNVETTED_LINE)
     r = run_hook(page_input("set", marked, cwd=DECISIONS_REPO), answer=ALLOW, model_fail=True)
-    check("unvetted page: the same item with an Unvetted: line in context passes after one model attempt",
-          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, detail(r))
+    # Re-pointed: the attempt that counts is the dedicated call. The form judge is not held to one call here.
+    check("unvetted page: the same item with an Unvetted: line in context passes after one dedicated attempt",
+          r.code == 0 and r.out == "" and len(past_calls(r)) == 1 and "\tdeny\t" not in r.log, detail(r))
 
 
 def case_unvetted_not_for_closed_items():
@@ -1676,10 +1708,13 @@ def case_page_task_gets_item_8_and_is_refused():
     check("page task fixture: the task passes item_hit, so the model judges it", got == ("", ""), got)
     refuse = json.dumps({"ok": False, "reason": "decisions/%s: already decided by the keep-the-apps ruling." % APPS_SLUG})
     r = run_hook(page_input("set", task, doc_id="t8", cwd=DECISIONS_REPO), answer=refuse)
-    prompt = r.calls[0]["prompt"] if r.calls else ""
-    check("page task: the one model call carries item 8 and the ruling, and the item never exempts a task",
-          len(r.calls) == 1 and item_text(prompt, 8) != "" and "never applies to a task" not in item_text(prompt, 8).lower()
+    # Re-pointed: the refusal comes from the dedicated call, which carries item 8 and the ruling. No form call follows it.
+    prompt = past_calls(r)[0]["prompt"] if past_calls(r) else ""
+    check("page task: the one model call is the dedicated call, and it carries item 8 and the ruling",
+          len(r.calls) == 1 and len(past_calls(r)) == 1 and len(form_calls(r)) == 0 and item_text(prompt, 8) != ""
           and APPS_RULING in without_call(prompt, task), detail(r))
+    check("page task: the item never exempts a task from item 8",
+          "never applies to a task" not in item_text(prompt, 8).lower(), item_text(prompt, 8)[:200])
     check("page task: a ruled task is refused by the judge", (r.deny() or {}).get("permissionDecision") == "deny"
           and "Unvetted:" not in r.reason(), detail(r))
 
@@ -1880,6 +1915,108 @@ def case_send_model_error_refuses_as_unvetted_unless_marked():
         check(name + " with an Unvetted line: not refused", r.code == 0 and r.deny() is None, detail(r))
 
 
+# ------------------------------------------------------------------ the dedicated past-ruling call (page item writes)
+#
+# Coordinator ruling (14:38 CST): a judged page item write gets the dedicated past-ruling call first (lint/report_guard.py
+# past_ruling_problem: Sonnet, item 8 alone). A refusal denies with rule past-ruling and the relay remedy, and makes no
+# form-judge call. Otherwise the form judge runs as before, and its prompt no longer carries item 8. The measured cause:
+# in the combined Opus prompt, item 8 caught page item 371 in 1 of 3 runs (ruling report-guard-refusal-right); the
+# dedicated call caught it in 2 of 2.
+WORKTREE_PAGE_ITEM = good_page_item(
+    context="\n".join((
+        "Goal: a merge frees disk without losing a running agent's work.",
+        "Problem (risk): freeing a running agent's worktree loses its uncommitted files.",
+        BASED_READ_357,
+        DEPARTS_LINE,
+    )),
+    options=[
+        {"key": "a", "label": "Never free a running lock", "gain": "A running agent keeps its uncommitted files.",
+         "lose": "The worktree stays until the agent ends."},
+        {"key": "b", "label": "Save, then free", "gain": "The worktree goes now.",
+         "lose": "The archive ref needs cleaning later."},
+    ])
+
+
+def page_item_passes_the_form(label):
+    # Scope first: the item must pass the form, so the judge runs and a refusal below is the judge's.
+    import question_form  # the one form check (hooks/question_form.py)
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": WORKTREE_PAGE_ITEM})
+    check("page past %s: the item passes question_form.item_hit, so the judge runs" % label, got == ("", ""), got)
+
+
+def case_page_past_ruling_refuses_before_the_form_judge():
+    # Case A. A judged item write that a listed ruling settles is refused by the dedicated call: rule past-ruling, the
+    # relay remedy, and exactly one model call, which is that call. The form judge's canned answer is ok, so a form call
+    # would have allowed the write; a second call would mean the dedicated call did not stop it.
+    page_item_passes_the_form("A")
+    r = run_hook(page_input("set", WORKTREE_PAGE_ITEM, cwd=INCIDENT_REPO), answer=ALLOW, past=ruled(WORKTREE_SLUG))
+    check("page past A: exactly one model call", len(r.calls) == 1, detail(r))
+    check("page past A: the one call is the dedicated past-ruling call", len(past_calls(r)) == 1, detail(r))
+    check("page past A: the write is denied", (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+    check("page past A: the refusal rule is past-ruling", r.reason().startswith("past-ruling: "), r.reason()[:160])
+    remedy = relay_remedy()
+    check("page past A: the refusal carries the relay remedy", bool(remedy) and remedy in r.reason(),
+          "remedy %r, reason %r" % (remedy[:40], r.reason()[-160:]))
+
+
+def case_page_past_ruling_ok_then_the_form_judge_without_item_8():
+    # Case B. The dedicated call answers ok, so the form judge runs next, on Opus, and its prompt holds no item 8. Then
+    # the write is allowed. The item 8 text comes from hooks/call_judge.py at test time, never copied here.
+    page_item_passes_the_form("B")
+    item8 = guard_constant(HOOK, "PAST_RULING_ITEM")
+    check("page past B: call_judge holds the item 8 text to look for", bool(item8), "PAST_RULING_ITEM is missing")
+    r = run_hook(page_input("set", WORKTREE_PAGE_ITEM, cwd=INCIDENT_REPO), answer=ALLOW, past=ALLOW)
+    check("page past B: exactly two model calls, the dedicated call and the form judge", len(r.calls) == 2, detail(r))
+    check("page past B: the dedicated call runs first", len(r.calls) == 2 and PAST_CALL_TEXT in r.calls[0]["prompt"],
+          detail(r))
+    dedicated = past_calls(r)
+    check("page past B: the dedicated call runs on Sonnet", len(dedicated) == 1
+          and model_of(dedicated[0]["argv"]) == AGENT_MODEL, detail(r))
+    form = form_calls(r)
+    check("page past B: the form judge runs once, on Opus", len(form) == 1
+          and model_of(form[0]["argv"]) == QUESTION_MODEL, detail(r))
+    form_prompt = form[0]["prompt"] if form else ""
+    check("page past B: the form-judge prompt holds no item 8 text", bool(item8) and item8 not in form_prompt,
+          item8[:60])
+    check("page past B: the write is allowed, with no deny", r.code == 0 and r.out == "" and r.deny() is None, detail(r))
+
+
+def case_page_past_ruling_error_is_unvetted_unless_marked():
+    # Case C. A model error in the dedicated call refuses the write as Unvetted, and no form call follows. A context with
+    # an Unvetted: line passes after the attempt, and the form judge then runs (its canned answer is ok).
+    page_item_passes_the_form("C")
+    r = run_hook(page_input("set", WORKTREE_PAGE_ITEM, cwd=INCIDENT_REPO), answer=ALLOW, past_fail=True)
+    check("page past C: the dedicated call is made and fails", len(past_calls(r)) == 1, detail(r))
+    check("page past C: the write is refused as Unvetted", (r.deny() or {}).get("permissionDecision") == "deny",
+          detail(r))
+    check("page past C: no form call follows the refusal", len(form_calls(r)) == 0, detail(r))
+    marker = unvetted_marker(guard_constant(HOOK, "UNVETTED_REMEDY"))
+    check("page past C: the refusal names the Unvetted marker", bool(marker) and marker in r.reason(), detail(r))
+    marked = dict(WORKTREE_PAGE_ITEM, context=WORKTREE_PAGE_ITEM["context"] + "\n" + UNVETTED_LINE)
+    r = run_hook(page_input("set", marked, cwd=INCIDENT_REPO), answer=ALLOW, past_fail=True)
+    check("page past C: with an Unvetted: line in context, the dedicated call fails and the write is not refused",
+          len(past_calls(r)) == 1 and r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_non_item_and_non_judged_writes_make_no_model_call():
+    # Case D, a control, green today. A read, another collection, a delete, a closed item and a title-only edit make no
+    # model call, the dedicated call included. The answer would refuse any call, so a call shows as a deny. The cwd holds
+    # the rulings, so no call is not an empty repo.
+    item = good_page_item()
+    cases = (
+        ("an items get", page_input("get", None, doc_id="p1", cwd=INCIDENT_REPO)),
+        ("an items list", page_input("list", None, doc_id=None, cwd=INCIDENT_REPO)),
+        ("a receipts write", page_input("set", item, collection="receipts", doc_id="r1", cwd=INCIDENT_REPO)),
+        ("an items delete", page_input("delete", None, doc_id="p1", cwd=INCIDENT_REPO)),
+        ("a closed item", page_input("set", good_page_item(status="closed"), cwd=INCIDENT_REPO)),
+        ("a title-only update", page_input("update", {"title": "Renamed"}, cwd=INCIDENT_REPO)),
+    )
+    for label, inp in cases:
+        r = run_hook(inp, answer=ruled(WORKTREE_SLUG), past=ruled(WORKTREE_SLUG))
+        check("non-judged write (%s): no model call, dedicated call included" % label, len(r.calls) == 0, detail(r))
+        check("non-judged write (%s): not refused" % label, r.code == 0 and r.deny() is None, detail(r))
+
+
 def main():
     for case in (case_agent_refusal,case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1910,7 +2047,11 @@ def main():
                  case_question_box_with_the_same_ruling_is_refused_as_past_ruling,
                  case_send_with_a_based_on_ruling_line_is_sent,
                  case_send_without_the_form_makes_no_call_and_no_subprocess,
-                 case_send_model_error_refuses_as_unvetted_unless_marked):
+                 case_send_model_error_refuses_as_unvetted_unless_marked,
+                 case_page_past_ruling_refuses_before_the_form_judge,
+                 case_page_past_ruling_ok_then_the_form_judge_without_item_8,
+                 case_page_past_ruling_error_is_unvetted_unless_marked,
+                 case_non_item_and_non_judged_writes_make_no_model_call):
         try:
             case()
         except Exception as exc:
