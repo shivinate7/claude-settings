@@ -8745,6 +8745,14 @@ class WaitRefusalCites(unittest.TestCase):
         self.assertIn("a check is red", why)
         self.assertIn("git-never-merge-failing-ci", why, why)
 
+    def test_an_absent_required_check_refusal_carries_the_read_cite(self):
+        host = ClockedHost(lambda t: {"checks": [("pass", "")]})
+        host.required = ["checks", "needed"]  # a required check that no run reports
+        ok, why, *_ = self.wait(host, 55)
+        self.assertFalse(ok)
+        self.assertIn("no run reports the required check needed", why)  # control: the absent-required refusal is the one reached
+        self.assertIn("no-merge-during-batch-ci", why, f"the absent-required refusal carries no read cite: {why}")
+
 class FakeReadsWaitHost(merge.Host):
     """The real wait and classify. Every other read comes from `fake` (a FakeHost): the pull request, the batch, the base, the merge.
     `rows` is what the checks read returns, and `required` names the checks the wait holds on. `in_wait` is set for the wait's own reads only."""
