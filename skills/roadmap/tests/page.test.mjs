@@ -236,3 +236,122 @@ test("the phase head's bar draws no stalled or paused step as active", async (t)
   const act = await barActCells(page, "#phases .ph-head");
   assert.equal(act, 1, `the phase head's bar draws ${act} active cells for one step in progress: a stalled or paused step is drawn as active`);
 });
+
+// ---------------------------------------------------------------- stalled and paused read apart (lane nfp-stalled-kind-color)
+// The design (the hatch-and-ring option, as the notes record it): a stalled label is --bad, as the blocked label is; each bar cell is
+// its own shape. The colour is read from the page's own --bad token, so a token change moves the test with it.
+const badColour = (page) => page.evaluate(() => {
+  const p = document.createElement("span");
+  p.style.color = "var(--bad)";
+  document.body.appendChild(p);
+  const c = getComputedStyle(p).color;
+  p.remove();
+  return c;
+});
+const colourOf = (loc) => loc.evaluate((el) => getComputedStyle(el).color);
+const feedKind = (page, id) => page.locator("#side .feed li", { has: page.locator(`button[data-go="${id}"]`) }).locator(".kind");
+const logKind = (page, id) => page.locator("#days .ev", { has: page.locator(`button[data-go="${id}"]`) }).locator(".kind");
+const KIND_FIXTURE = { c1: stepOf("Step c1", "doing", 1), b2: stepOf("Step b2", "blocked", 2) };
+for (const scheme of ["light", "dark"]) {
+  test(`control: the Blocked label computes to the --bad colour in ${scheme}`, async (t) => {
+    const page = await open(t, builtPage({ steps: KIND_FIXTURE, stalled: STALLED_C1 })); if (!page) return;
+    await page.emulateMedia({ colorScheme: scheme });
+    const bad = await badColour(page);
+    assert.equal(await feedKind(page, "b2").count(), 1, "step b2 has no row in Latest changes");
+    assert.equal(await colourOf(feedKind(page, "b2")), bad, `the Blocked label is not --bad in ${scheme}: the colour probe reads wrong`);
+  });
+  test(`the Stalled label of a stalled step computes to the --bad colour in ${scheme}`, async (t) => {
+    const page = await open(t, builtPage({ steps: KIND_FIXTURE, stalled: STALLED_C1 })); if (!page) return;
+    await page.emulateMedia({ colorScheme: scheme });
+    const bad = await badColour(page);
+    for (const [where, kind] of [["Latest changes", feedKind(page, "c1")], ["Changes log", logKind(page, "c1")]]) {
+      assert.equal(await kind.count(), 1, `the ${where} has no row for stalled step c1`);
+      assert.equal(await colourOf(kind), bad, `the ${where} label of stalled step c1 is not --bad in ${scheme}`);
+    }
+  });
+}
+
+// One cell per step, in the order done, in progress, stalled, paused, blocked, to do. Three bars: the Now card, the rail's cleanup
+// button and the phase head. The fixture is a full phase of 30 steps: 1 done, a2 live (in progress), s3 stalled, p4 paused, 26 to do.
+const BARS = [["the Now card's bar", "#now .bar"], ["the rail's cleanup bar", '#rail button[data-phase="cleanup"] .bar'], ["the phase head's bar", "#phases .ph-head .bar"]];
+// c1 is named here: make_repo adds its own to-do c1 to any fixture that does not name one.
+const barFixture = () => ({
+  c1: stepOf("Step c1", "todo", 1), d1: stepOf("Step d1", "done", 1), a2: stepOf("Step a2", "doing", 2), s3: stepOf("Step s3", "doing", 3), p4: stepOf("Step p4", "doing", 4),
+  ...Object.fromEntries(Array.from({ length: 25 }, (_, i) => ["t" + (i + 5), stepOf("Step t" + (i + 5), "todo", i + 5)])),
+});
+const BAR_LIVE = { readAt: new Date().toISOString(), threads: [], pulls: [{ number: 7, title: "Step a2", branch: "a2" }], branches: [], sessions: [] };
+const STALLED_S3_P4 = { why: "", steps: [{ id: "s3", fix: "todo" }], paused: ["p4"], badPause: [], items: [], ...NO_ITEMS };
+const cellKinds = (page, scope) => page.locator(`${scope} > i`).evaluateAll((els) => els.map((e) => e.className));
+const BAR_ORDER = ["done", "act", "stl", "pzd", ...Array(26).fill("")];
+test("the bars draw a stalled and a paused step as their own cells, in the order done, in progress, stalled, paused, to do", async (t) => {
+  const page = await open(t, builtPage({ steps: barFixture(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
+  for (const [name, scope] of BARS) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    assert.deepEqual(await cellKinds(page, scope), BAR_ORDER, `${name} does not draw a stalled or paused step as its own cell, in order`);
+  }
+});
+test("a stalled cell and a paused cell look different from a to-do cell in each bar", async (t) => {
+  const page = await open(t, builtPage({ steps: barFixture(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
+  const look = (loc) => loc.evaluate((el) => { const s = getComputedStyle(el); return [s.backgroundImage, s.backgroundColor, s.boxShadow].join(" | "); });
+  for (const [name, scope] of BARS) {
+    const todo = page.locator(`${scope} > i:not([class])`);
+    const plainCount = await todo.count();
+    assert.equal(plainCount, 26, `${name} draws ${plainCount} to-do cells, not 26: a stalled or paused step is drawn as to do`);
+    const plain = await look(todo.first());
+    assert.equal(await page.locator(`${scope} > i.stl`).count(), 1, `${name} draws no stalled cell (i.stl)`);
+    assert.equal(await page.locator(`${scope} > i.pzd`).count(), 1, `${name} draws no paused cell (i.pzd)`);
+    assert.notEqual(await look(page.locator(`${scope} > i.stl`)), plain, `${name}: the stalled cell looks like a to-do cell`);
+    assert.notEqual(await look(page.locator(`${scope} > i.pzd`)), plain, `${name}: the paused cell looks like a to-do cell`);
+  }
+});
+test("control: a phase with nothing stalled or paused draws no stalled or paused cell in any bar", async (t) => {
+  const page = await open(t, builtPage({ steps: { c1: stepOf("Step c1", "todo", 1), d1: stepOf("Step d1", "done", 1), a2: stepOf("Step a2", "doing", 2) }, live: BAR_LIVE })); if (!page) return;
+  for (const [name, scope] of BARS) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    assert.deepEqual(await cellKinds(page, scope), ["done", "act", ""], `${name} draws a stalled or paused cell with none stalled or paused`);
+  }
+});
+
+// The blocked step: a phase bar draws it as blocked. The rail already does; it is the control.
+test("the Now card's bar and the phase head's bar draw a blocked step as blocked, not as to do", async (t) => {
+  const page = await open(t, builtPage({ steps: { d1: stepOf("Step d1", "done", 1), b2: stepOf("Step b2", "blocked", 2), t3: stepOf("Step t3", "todo", 3) } })); if (!page) return;
+  for (const [name, scope] of [BARS[0], BARS[2]]) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    assert.equal(await page.locator(`${scope} > i.blk`).count(), 1, `${name} draws the blocked step as to do: no blocked cell (i.blk)`);
+  }
+});
+test("control: the rail's cleanup bar draws a blocked step as blocked", async (t) => {
+  const page = await open(t, builtPage({ steps: { d1: stepOf("Step d1", "done", 1), b2: stepOf("Step b2", "blocked", 2), t3: stepOf("Step t3", "todo", 3) } })); if (!page) return;
+  assert.equal(await page.locator(BARS[1][1]).count(), 1, "the rail has no cleanup bar");
+  assert.equal(await page.locator(`${BARS[1][1]} > i.blk`).count(), 1, "the rail's cleanup bar does not draw the blocked step as blocked");
+});
+
+// The words: the rail's label, the bars' labels and the Now card's count line name the stalled and paused steps.
+test("the rail's cleanup button names its stalled and paused steps in its label", async (t) => {
+  const page = await open(t, builtPage({ steps: barFixture(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
+  const btn = page.locator('#rail button[data-phase="cleanup"]');
+  assert.equal(await btn.count(), 1, "the rail has no cleanup button");
+  assert.match((await btn.getAttribute("aria-label")) || "", /1 stalled, 1 paused/, "the rail's cleanup label does not name the stalled and paused steps");
+});
+test("the Now card's bar and the phase head's bar are role img", async (t) => {
+  const page = await open(t, builtPage({ steps: barFixture(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
+  for (const [name, scope] of [BARS[0], BARS[2]]) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    assert.equal(await page.locator(scope).getAttribute("role"), "img", `${name} has no role img`);
+  }
+});
+test("the Now card's bar and the phase head's bar have a label that names the stalled and paused steps", async (t) => {
+  const page = await open(t, builtPage({ steps: barFixture(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
+  for (const [name, scope] of [BARS[0], BARS[2]]) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    const label = (await page.locator(scope).getAttribute("aria-label")) || "";
+    assert.match(label, /1 stalled/, `${name} has no aria-label naming the stalled step: "${label}"`);
+    assert.match(label, /1 paused/, `${name} has no aria-label naming the paused step: "${label}"`);
+  }
+});
+test("the Now card's count line names the stalled and paused steps", async (t) => {
+  const page = await open(t, builtPage({ steps: barFixture(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
+  assert.ok((await page.locator("#now > div:first-child > .sub").count()) > 0, "the Plan page has no where-you-are count line (#now > div:first-child > .sub)");
+  const sub = (await page.locator("#now > div:first-child > .sub").first().textContent()).replace(/\s+/g, " ");
+  assert.match(sub, /· 1 stalled · 1 paused/, "the count line does not name the stalled and paused steps: " + sub);
+});
