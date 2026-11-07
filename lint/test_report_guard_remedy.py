@@ -17,7 +17,8 @@ Case 1a checks that no reason holds a session phrase or an order to the session.
 Case 1c checks that the first sentence names the check. Case 2 checks that each path still blocks, and that a clean
 report is not blocked. Case 3 checks that the record holds a step heading for each check name that report_guard
 passes to owner_line, and a step line under each heading. Controls pin session_wording on fact sentences, on plain
-and mid-clause orders, and on the phrase list. A judge reason that carries an order is checked at the Stop boundary:
+and mid-clause orders, on the phrase list, and on backtick spans: a span holds a fact, and an order outside a span is
+still flagged. A judge reason that carries an order is checked at the Stop boundary:
 the block still fires, the ruling id stays, and the order does not reach the owner word for word.
 
 Run it as:
@@ -49,7 +50,7 @@ FIXTURES = ("missing_report", "correction_tail", "done_format", "models", "unsta
             "recovered", "departs_unlanded", "departs_landed", "answered", "mistake", "hand_off", "refusal",
             "lane", "pick_known_writer", "rewrite_stamp", "triage_hold", "unvetted_unreadable",
             "unvetted_cited", "rewrite_model", "rewrite_unstarted", "rewrite_answered", "rewrite_recovered",
-            "recovered_no_source", "past_ruling_order")
+            "recovered_no_source", "past_ruling_order", "refusal_two_tools")
 FACT_SENTENCES = ("Pick guard: the page writer is session session_writer1 (decision guard-remedy-not-to-owner).",
                   "Names of the checks sit in the record. Keys are one option set per question.",
                   "The check reads the transcript, and a Done line holds one kind.")
@@ -67,6 +68,15 @@ PHRASE_ONLY = "The fix would reach the owner before the review."
 PHRASE_PIN = "would reach the owner"
 # The order the past-ruling judge wrote into its reason in the boundary case, which must not reach the owner.
 JUDGE_ORDER = "Drop the question and send it again."
+# Fact texts with words in backtick spans. Each span's word is in SESSION_IMPERATIVES, so a split at a comma reads the
+# span as an order. The first has a comma between spans; the second has the comma inside one span.
+TWO_TOOL_LIST = "The phrase list holds `add`, `send` and `post`."
+COMMA_IN_SPAN = "The classifier refused `Agent, Write` this session."
+# Order controls: an order outside backticks is still flagged, and the exact unit comes back. In the lone-backtick text
+# the first backtick has no close before the order; a strip that pairs it with the later backtick would hide the order.
+ORDER_AFTER_SPAN = "The classifier refused `Agent`. Write the line. It also refused `Read`."
+ORDER_AFTER_LONE_BACKTICK = "The `Agent tool was refused. Write the line. Keep `add` in view."
+ORDER_UNIT = "Write the line."
 # A step line is a bullet or a numbered item. A section ends at the next ## or ### heading.
 STEP_LINE = re.compile(r"(?m)^\s*(?:[-*+]|\d+[.)])\s+\S")
 SECTION_END = re.compile(r"(?m)^#{2,3} ")
@@ -153,6 +163,7 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
     PAGE = tcj.PAGE_URL  # the waiting page tcj.make_repo names; the same-turn writer read cites it
     LANE_ID = trg.QuestionReachesPageTests.LANE_ID  # read by lane_record below, which takes self
     ARCHIVE = "mcp__claude-code-remote__archive_session"
+    TWO_TOOLS = ("Agent", "Write")  # two refused tools; "Write" is an imperative word in SESSION_IMPERATIVES
     REFUSAL_SID = "remedy-refusal"
     PICK = ("> **Done** OTHER read the code\n> **Input Needed** Two ways:\n> A (my pick): fold the guard\n"
             "> B: add a second hook\n> **Next** wait")
@@ -171,14 +182,16 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
             handle.write(b"# bad\n\n\xff\xfe\x00 not utf-8 \x81\n")
         return repo
 
-    def refusal_repo_config(self):
-        """A config folder whose refusals file holds one refused tool that the reply does not raise."""
+    def refusal_repo_config(self, tools=(ARCHIVE,)):
+        """A config folder whose refusals file holds one row per refused tool in `tools`, none of them raised by the
+        reply."""
         cfg = tempfile.mkdtemp(dir=trg.RUN_FOLDER)
         path = os.path.join(cfg, "state", "refusals", self.REFUSAL_SID + ".jsonl")
         os.makedirs(os.path.dirname(path))
         with open(path, "w", encoding="utf-8") as handle:
-            handle.write(json.dumps({"ts": "2026-11-01T10:00:00-05:00", "tool_name": self.ARCHIVE,
-                                     "reason": "refused"}) + "\n")
+            for tool in tools:
+                handle.write(json.dumps({"ts": "2026-11-01T10:00:00-05:00", "tool_name": tool,
+                                         "reason": "refused"}) + "\n")
         return cfg
 
     def rewrite(self, name, first, again, word, clean):
@@ -240,6 +253,13 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
                                      trg.assistant_text(self.PROSE)], "refusal", clean,
                                     env={"CLAUDE_CONFIG_DIR": self.refusal_repo_config()},
                                     extra={"session_id": self.REFUSAL_SID}),
+            # Refusal of two tools: the reason lists both, and its list reads as a fact to the owner.
+            "refusal_two_tools": lambda: case(
+                [trg.human("do the task"), trg.tool_use_msg(self.TWO_TOOLS[0]), trg.tool_result_msg(),
+                 trg.tool_use_msg(self.TWO_TOOLS[1], {"file_path": "notes.md"}), trg.tool_result_msg(),
+                 trg.assistant_text(self.PROSE)], "refusal", clean,
+                env={"CLAUDE_CONFIG_DIR": self.refusal_repo_config(self.TWO_TOOLS)},
+                extra={"session_id": self.REFUSAL_SID}),
             # Lane: the lane's own get_session record, then a question with no send to the parent or the writer.
             "lane": lambda: case([*trg.QuestionReachesPageTests.lane_record(self), trg.human("decide"),
                                   trg.assistant_text(trg.RELAY)], "lane", bare, env=lane_env),
@@ -374,6 +394,32 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
         found = RG.session_wording(PHRASE_ONLY)
         self.assertIn(PHRASE_PIN, found.lower(),
                       "control: the phrase list does not catch %r: %r" % (PHRASE_PIN, found))
+
+    def test_1a_two_tool_refusal_reason_is_fact_only(self):
+        # The reason report_guard emits for two refused tools. The scope is pinned first: the pair must sit in that
+        # order, and "write" must still be an imperative word, or the case passes for the wrong reason.
+        reason = RG.refusal_reason(list(self.TWO_TOOLS))
+        self.assertIn("`Agent`, `Write`", reason, "1a scope: the two-tool list is not in the reason: %r" % reason)
+        self.assertIn("write", RG.SESSION_IMPERATIVES, "1a scope: 'write' is no longer an imperative word")
+        problem = RG.session_wording(reason)
+        self.assertEqual(problem, "", "1a the two-tool refusal reason reads as an order to the session: %r" % problem)
+
+    def test_1a_backtick_word_list_is_fact_only(self):
+        problem = RG.session_wording(TWO_TOOL_LIST)
+        self.assertEqual(problem, "", "1a a comma list of words in backticks reads as an order: %r" % problem)
+
+    def test_1a_comma_inside_backtick_span_is_fact_only(self):
+        problem = RG.session_wording(COMMA_IN_SPAN)
+        self.assertEqual(problem, "", "1a a comma inside a backtick span reads as an order: %r" % problem)
+
+    def test_1a_control_order_after_span_is_flagged_exactly(self):
+        found = RG.session_wording(ORDER_AFTER_SPAN)
+        self.assertEqual(found, ORDER_UNIT, "control: the order outside a span is not flagged as its own unit: %r"
+                         % found)
+
+    def test_1a_control_order_after_lone_backtick_is_flagged_exactly(self):
+        found = RG.session_wording(ORDER_AFTER_LONE_BACKTICK)
+        self.assertEqual(found, ORDER_UNIT, "control: an order after a lone backtick is hidden or cut: %r" % found)
 
     def test_3_record_has_a_step_heading_and_step_line_for_each_owner_line_check(self):
         # The names come from report_guard.py's own source, the one place each owner_line call is written.
