@@ -83,6 +83,7 @@ GRANT_CITE = "(decision standing-merge-grant, a pull request GitHub reads BLOCKE
 STAMP_CITE = "(decision one-shared-record-stamp, the claim runs only on the default base)"
 RECORDS_CITE = "(decision records-index-at-merge, only the merge tool rebuilds the records page, before the branch goes ready)"
 UNDO_CITE = "(decision silent-undo-check-design, a branch that silently undoes earlier work does not merge)"
+DEBT_CITE = "(decision debt-close-runs-retire, a debt closes only when its Retire check passes on the head)"
 RED_CITE = "(decision no-merge-onto-red-main, no batch merges onto a red base)"
 RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-run with it; red_base reads it back to give the re-run its own headline
 DROP_CITE = "(decision merge-deletes-batch-lanes, a batch that drops a lane by a revert of its merge does not merge)"
@@ -304,6 +305,19 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body=""):
         say("merge: " + n)
     if problems:
         raise Dropped("the branch silently undoes earlier work:\n  " + "\n  ".join(problems) + f"\nPut it back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message. {UNDO_CITE}")
+
+def debt_check(wt, base_ref, host, info):
+    """The debt-close lint (lint/check_debt_retire.py): each debt the branch closes has its Retire check run on the head.
+    A finding, red or unknown or prose, refuses. No reason flag lifts it. A cited run is judged against the PR head, never the worktree
+    HEAD: the claim commit goes on top of the PR head, and a run on the head is still the run of this PR."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    import check_debt_retire as debt
+    try:
+        found = debt.check(wt, base_ref, info["head"], pr_body=info.get("body", ""), run_state=lambda url: host.cited_run(url), isolate=True)
+    except debt.Unknown as e:
+        raise Dropped(f"the debt-close check could not read the history: {e}\n{DEBT_CITE}")
+    if found:
+        raise Dropped("the branch closes a debt without proof that its Retire check holds:\n  " + "\n  ".join(f"{f.slug} [{f.kind}]: {f.text}" for f in found) + f"\n{DEBT_CITE}")
 
 def say(*lines):
     text = "\n".join(lines)  # one line each: the preview is a list of indented lines, never one long line
@@ -784,6 +798,20 @@ class Host:
                 "state": "MERGED" if d.get("merged") else d["state"].upper(),
                 "mergeable": self.MERGEABLE[d.get("mergeable")], "merge_state": (d.get("mergeable_state") or "unknown").upper(),
                 "draft": bool(d.get("draft")), "body": d.get("body") or "", "created": d.get("created_at")}
+
+    def cited_run(self, url):
+        """-> (conclusion, head sha) of the workflow run at `url`, one read. A failed read is a Stop, never a green run."""
+        m = re.search(r"/actions/runs/(\d+)", url)
+        if not m:
+            raise Stop(f"{url} is not a workflow run URL {DEBT_CITE}")
+        c, out = self.api(f"actions/runs/{m.group(1)}")
+        try:
+            if c:
+                raise ValueError(out)
+            d = json.loads(out)
+            return d["conclusion"], d["head_sha"]
+        except (ValueError, KeyError, TypeError) as e:
+            raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
     def review_comments(self, since):
         """-> {PR number: [review record bodies, oldest first]}: one list read of the repo's issue comments updated since `since`. A body counts only
@@ -2433,6 +2461,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     try:
         try:
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""))
+            debt_check(wt, f"origin/{base}", host, info)
             refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok)
             stale, stands = holds_base(wt, f"origin/{base}", info["head"])
             current = stale and ("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " --confirm refuses it."
@@ -2549,6 +2578,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", "")))
+        debt_check(wt, base_ref, host, info)
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
         stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait)
         if stale:
@@ -2622,6 +2652,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                     stop(f"cannot fetch origin {base}, so the claim cannot be proved fresh {BASE_CITE}:\n" + out)
                 try:  # main may have moved during the wait: read the branch against the tip fetched just now
                     record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", "")))
+                    debt_check(wt, base_ref, host, info)
                 except Stop as e:
                     stop(str(e), Liftable if isinstance(e, Liftable) else Stop)
                 if not os.path.exists(os.path.join(wt, ".git")):
