@@ -10,7 +10,9 @@ Owner, 2026-11-07 12:22 CST, in chat to the coordinator. Quote:
 
 > "the fact that PRs slipped everyone's radar itself despite us having them be part of our triage/status/plans/goals/handoffs means there's a mechanical failure here and you need to solve that"
 
-Coordinator, 2026-11-07 12:56 CST. It rests on owner ruling 113 a (waiting-page item 113 a, 2026-11-01 04:26 CST, decision `pr-review-record`, a PR carries its review record on the PR): no merge message; the batch runner finds reviewed, green PRs itself. The coordinator's ruling:
+Coordinator, 2026-11-07 12:56 CST: the proposal is accepted as written (the owner asked to solve it; it can be undone).
+
+The intake rule rests on owner ruling 113 a (waiting-page item 113 a, 2026-11-01 04:26 CST, decision `pr-review-record`, a PR carries its review record on the PR): no merge message; the batch runner finds reviewed, green PRs itself. The coordinator's ruling:
 
 - Intake is record-only. A PR joins a batch only through its review record.
 - The batch runner batches from the review record, not from a message.
@@ -48,7 +50,7 @@ Each open PR gets exactly one next act. The tool reads it from GitHub alone:
 
 - Done review record for the live head: batch.
 - Review record open: lane round n.
-- Review record stale (for an old head): fix check.
+- Review record stale: a fix check when the newest review record has no Fix check line and the change is a small fix to a named finding; else lane round n (decision `pr-review-record`; rule `roles-review-cap-three`).
 - Label `held`, `parked` or `replaced`, with a waiting-page item or debt id: waits on that item or debt.
 - Based on, or stacked on, #N: blocked on #N.
 - None of these: `NO NEXT ACT` (red).
@@ -65,7 +67,7 @@ The tool prints two numbers. Each one's target is 0:
 Readers:
 
 - Batch runner, at each wake. Its queue is the ledger. The ledger replaces its private list.
-- Triage, at each roadmap publish. `skills/roadmap/build.py` prints a `stalled pr:` line for each red PR. The line is red, like a stalled step. The Stop hook in `lint/report_guard.py` holds triage until each line is disposed.
+- Triage, at each roadmap publish. `skills/roadmap/build.py` prints a `stalled pr:` line for each red PR. The line is red, like a stalled step. The Stop hook in `lint/report_guard.py` holds triage until each line is disposed. Triage disposes a `stalled pr:` line the way it disposes a stalled step (decision `stalled-steps`): it gives the PR a next act, or names it under Input Needed, which escalates it to the coordinator.
 - Coordinator and batch runner reports carry the two numbers.
 - Lane side: `lint/report_guard.py` refuses a lane's final report that claims a round PASS with no review record for the live head.
 
@@ -94,6 +96,7 @@ Per rule `outcomes-mechanize-rules`:
 
 Kind: build
 Plan: docs/decisions/pr-ledger.md#the-ruling (all)
+Plan: docs/decisions/pr-ledger.md#how-it-works (all)
 Home: merge/merge.py
 Home: lint/report_guard.py
 Home: skills/roadmap/build.py
