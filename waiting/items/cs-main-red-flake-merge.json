@@ -10,18 +10,19 @@
     {
       "gain": "About 10 waiting PRs move today; the next red names its cause.",
       "key": "a",
-      "label": "Runner 8 merges #1405 alone with --base-red-ok; the queue resumes on main's next push run (recommended)",
-      "lose": "Main merges once onto a red run whose cause is unknown."
+      "label": "Runner 8 merges #1405 alone with --base-red-ok; the queue resumes on main's next push run",
+      "lose": "Main merges once onto a red run whose cause is unknown. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
     },
     {
       "gain": "The flag keeps its narrow meaning.",
       "key": "b",
-      "label": "Hold the queue until the root cause is found and fixed",
+      "label": "Hold the queue until the root cause is found and fixed (recommended)",
       "lose": "Every claude-settings merge waits, for an unmeasured time."
     }
   ],
   "owner": "coordinator",
-  "pick": "a",
+  "pick": "b",
   "rank": 1,
   "ref": "#1405; #1308; run 42357626483",
   "short": "cs main red: merge #1405 or hold",
