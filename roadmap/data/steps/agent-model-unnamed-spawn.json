@@ -1,10 +1,10 @@
 {
   "title": "The model-per-role guard catches a spawn that names no model and inherits one above the role's cap",
   "phase": "next",
-  "status": "doing",
+  "status": "done",
   "order": 261.1,
   "owner": "coordinator",
   "why": "Incident, lane merge-runs-repo-checks, 2026-11-07 07:xx CST, relayed by the coordinator 08:25 CST: guard agent-role-model (the model-per-role check) let a test-author spawn run on Opus. The spawn named no model, so it inherited the session model. Rule roles-sonnet-is-the-ceiling caps the test-author at Sonnet.",
-  "note": "The guard refuses the spawn, or sets the role's model, when a spawn names no model and the inherited model is above the role's cap. Done check: a red test on an unnamed test-author spawn from an Opus session. The guard's verdict changes, so this is a build lane (test-author, builder, reviewer). No owner question. Related debt in #1411: ready-checks-skipped-by-mcp. Lane agent-model-unnamed-spawn (session_013NEJKz3ERqvgYKqdNUcj34) started 2026-11-07 08:27 CST.",
-  "updatedAt": "2026-11-07T14:27:00Z"
+  "note": "The guard refuses the spawn, or sets the role's model, when a spawn names no model and the inherited model is above the role's cap. Done check: a red test on an unnamed test-author spawn from an Opus session. The guard's verdict changes, so this is a build lane (test-author, builder, reviewer). No owner question. Related debt in #1411: ready-checks-skipped-by-mcp. Lane agent-model-unnamed-spawn (session_013NEJKz3ERqvgYKqdNUcj34) started 2026-11-07 08:27 CST. Closed as no defect, coordinator 08:33 CST Nov 7: the lane measured that both unnamed test-author spawns ran Haiku (resolvedModel claude-haiku-5-5 on every child event). The role pin `model: haiku` and the guard held. The Opus events were the lane's own turns. Lane archived, no PR.",
+  "updatedAt": "2026-11-07T14:33:00Z"
 }
