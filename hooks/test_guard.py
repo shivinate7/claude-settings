@@ -65,6 +65,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import precompact_handoff as ph  # noqa: E402  the one home of the handoff and flag paths
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
+import tier_fixture_test as tier_fx  # noqa: E402  the tier-file fixtures and folder key (hooks/tier_fixture_test.py)
 
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
@@ -9552,9 +9553,10 @@ LANE_TRANSCRIPT = role_path("lane")
 TRIAGE_TRANSCRIPT = role_path("triage")
 
 
-def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, **kw):
-    """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push."""
-    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, lacks=RECORD_LACKS,
+def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, lacks=(), **kw):
+    """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push. `lacks`
+    adds fragments the reason must not hold, beyond the push's own."""
+    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, lacks=RECORD_LACKS + tuple(lacks),
        transcript=transcript, env=env, cwd=cwd, **kw)
 
 
@@ -9689,6 +9691,24 @@ record_allow("a commit message that names a push to roadmap is text",
              VCS + ' commit -m "' + VCS + ' push origin roadmap"', LANE_TRANSCRIPT)
 
 
+def spawn_log_of(case, log):
+    """Decide `case` with a stand-in git that logs each spawn to `log`. Returns (kinds, lines): the count of
+    each git subcommand the guard ran, and the logged lines."""
+    if os.path.exists(log):
+        os.remove(log)
+    decide(case)
+    lines = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
+    kinds = {}
+    for line in lines:
+        words = line.split()
+        # The guard runs git as `git -C <dir> <subcommand>`, so the subcommand follows the -C pair.
+        while len(words) >= 2 and words[0] in ("-C", "-c"):
+            words = words[2:]
+        word = words[0] if words else ""
+        kinds[word] = kinds.get(word, 0) + 1
+    return kinds, lines
+
+
 def record_push_cost_case():
     """roadmap-one-writer's stated cost (session-tiers, the Cost line): per `git push` call, one
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
@@ -9711,19 +9731,7 @@ def record_push_cost_case():
                 "agent_id": None, "tool_input": {"command": command}, "transcript": transcript, "env": ROLE_ENV}
 
     def spawn_kinds(command, cwd):
-        if os.path.exists(log):
-            os.remove(log)
-        decide(case_of(command, cwd, LANE_TRANSCRIPT))
-        lines = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
-        kinds = {}
-        for line in lines:
-            words = line.split()
-            # The guard runs git as `git -C <dir> <subcommand>`, so the subcommand follows the -C pair.
-            while len(words) >= 2 and words[0] in ("-C", "-c"):
-                words = words[2:]
-            word = words[0] if words else ""
-            kinds[word] = kinds.get(word, 0) + 1
-        return kinds, lines
+        return spawn_log_of(case_of(command, cwd, LANE_TRANSCRIPT), log)
 
     for label, tail, want in (
         ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1}),
@@ -9752,6 +9760,423 @@ def record_push_cost_case():
         return False, "; ".join(problems)
     return True, "one rev-parse per push, symbolic-ref for HEAD and bare, push.default for bare only; " \
                  "the transcript is read only at the record branch"
+
+
+# =========================================================================== 5e-3. the local triage tier file
+#
+# Rule roadmap-one-writer, decision session-tiers (the tier file; its one home is hooks/session_tier.py). A local
+# triage session has no cloud record, so its transcript proves nothing. The coordinator grants the triage folder:
+# one grant file per folder, for that exact folder only (a subfolder binds nothing), valid for an hour. The guard
+# binds that grant to the session id on the session's first top-level call, and the bound file then proves the
+# triage tier to the push check. The first session that binds a grant consumes it. A bound file names one session id
+# and one tier.
+#
+# These checks write the grant and bound files in the spec's format, so each judges the guard alone. The CLI that
+# writes a grant, and the module's bind and proof functions, have their cases in hooks/test_session_tier.py. Each
+# negative check carries a control: a fresh grant, bound by a top-level call, must prove the push. The control is
+# red on main, where nothing binds, so a negative passes only where a bind really happened.
+TIER_PUSH = VCS + " push origin roadmap"
+TIER_TRIAGE = tier_fx.TRIAGE
+TIER_FRESH_AGE = tier_fx.FRESH_AGE
+TIER_STALE_AGE = tier_fx.STALE_AGE
+tier_dir = tier_fx.tier_dir
+tier_grant_file = tier_fx.grant_file
+tier_bound_file = tier_fx.bound_file
+tier_write = tier_fx.write_file
+
+
+def tier_grant(config, folder, age, crlf_bom=False):
+    """A grant for `folder`, written `age` seconds ago."""
+    tier_fx.write_grant(config, folder, age=age, crlf_bom=crlf_bom)
+
+
+def tier_bound(config, session, tier=TIER_TRIAGE, crlf_bom=False):
+    """A bound file for `session`, naming the granted folder."""
+    tier_fx.write_bound(config, session, PUSHFEAT, tier=tier, crlf_bom=crlf_bom)
+
+
+def tier_case(session, cwd, command, config, transcript=None, agent_id=None):
+    """One Bash call for decide(), as the payload of a local session carries it: a session id and no env id."""
+    return {"raw": None, "tool": "Bash", "cwd": cwd, "session": session, "env_path": None, "config": config,
+            "agent_id": agent_id, "tool_input": {"command": command}, "transcript": transcript, "env": None}
+
+
+def tier_judge(session, cwd, command, config, agent_id=None):
+    """(decision, reason) for one call of a local session. Its transcript holds no get_session record."""
+    return decide(tier_case(session, cwd, command, config, transcript=role_path("no-record"), agent_id=agent_id))
+
+
+def tier_refused_by_record(got, reason):
+    return got == "deny" and RECORD_RULE in reason
+
+
+def tier_result(problems, note):
+    if problems:
+        return False, "; ".join(problems)
+    return True, note
+
+
+def tier_control(label):
+    """The control a negative check carries: a fresh grant, bound by a top-level call, proves the push."""
+    config = os.path.join(ROOT, "tier", "control-" + label)
+    session = "tier-control-" + label
+    tier_grant(config, PUSHFEAT, TIER_FRESH_AGE)
+    tier_judge(session, PUSHFEAT, "echo ready", config)
+    got, reason = tier_judge(session, PUSHFEAT, TIER_PUSH, config)
+    if got != "allow":
+        return ["control: the fresh grant's bound push: %s, want allow (%s)" % (got, reason[:80])]
+    return []
+
+
+def tier_bind_and_push(label, crlf_bom=False, cwd=PUSHFEAT):
+    """A local session with a fresh grant: its first top-level call binds the grant, and its roadmap push is then
+    allowed. The grant is consumed. Returns the problems, empty for a pass."""
+    config = os.path.join(ROOT, "tier", label)
+    session = "tier-" + label
+    tier_grant(config, PUSHFEAT, TIER_FRESH_AGE, crlf_bom=crlf_bom)
+    problems = []
+    got, reason = tier_judge(session, cwd, "echo ready", config)
+    if got != "allow":
+        problems.append("first top-level call: %s, want allow (%s)" % (got, reason[:80]))
+    if not os.path.isfile(tier_bound_file(config, session)):
+        problems.append("first top-level call bound no file for its session")
+    if os.path.exists(tier_grant_file(config, PUSHFEAT)):
+        problems.append("first top-level call left the grant, want it consumed")
+    got, reason = tier_judge(session, PUSHFEAT, TIER_PUSH, config)
+    if got != "allow":
+        problems.append("the bound session's push to roadmap: %s, want allow (%s)" % (got, reason[:80]))
+    return problems
+
+
+def tier_bind_allow_check():
+    """roadmap-one-writer: a local triage session's first top-level call binds its fresh grant, and its roadmap push is allowed"""
+    return tier_result(tier_bind_and_push("bind-allow"), "a fresh grant binds on the first top-level call and proves the push")
+
+
+def tier_bind_crlf_check():
+    """roadmap-one-writer: a grant in CRLF lines with a BOM binds on the first top-level call, and its push is allowed"""
+    return tier_result(tier_bind_and_push("bind-crlf", crlf_bom=True),
+                       "a CRLF and BOM grant binds the same as a plain one")
+
+
+def tier_bind_spelling_check():
+    """roadmap-one-writer: a cwd spelled with a trailing separator binds the grant for its folder"""
+    return tier_result(tier_bind_and_push("bind-spelling", cwd=PUSHFEAT + os.sep),
+                       "a trailing separator on the cwd names the same folder")
+
+
+def tier_agent_call_check():
+    """roadmap-one-writer: an agent binds no grant and consumes none, and the agent's push is refused"""
+    config = os.path.join(ROOT, "tier", "agent-call")
+    session = "tier-agent-call"
+    tier_grant(config, PUSHFEAT, TIER_FRESH_AGE)
+    problems = []
+    tier_judge(session, PUSHFEAT, "echo ready", config, agent_id=SAMPLE_AGENT_ID)
+    if os.path.exists(tier_bound_file(config, session)):
+        problems.append("an agent call bound the grant to its session")
+    if not os.path.isfile(tier_grant_file(config, PUSHFEAT)):
+        problems.append("an agent call consumed the grant")
+    # The push carries the agent id too: without it, a top-level push would bind the still-fresh grant and pass.
+    got, reason = tier_judge(session, PUSHFEAT, TIER_PUSH, config, agent_id=SAMPLE_AGENT_ID)
+    if not tier_refused_by_record(got, reason):
+        problems.append("the agent's push: %s, want a roadmap-one-writer deny" % got)
+    problems += tier_control("agent-call")
+    return tier_result(problems, "an agent binds no grant and consumes none, and its push is refused")
+
+
+def tier_consumed_check():
+    """roadmap-one-writer: a session that starts after the grant was consumed binds nothing, and its push is refused"""
+    config = os.path.join(ROOT, "tier", "consumed")
+    first, later = "tier-consumed-a", "tier-consumed-b"
+    tier_grant(config, PUSHFEAT, TIER_FRESH_AGE)
+    problems = []
+    tier_judge(first, PUSHFEAT, "echo ready", config)
+    tier_judge(later, PUSHFEAT, "echo ready", config)
+    if os.path.exists(tier_bound_file(config, later)):
+        problems.append("a later session bound a grant that was consumed")
+    got, reason = tier_judge(later, PUSHFEAT, TIER_PUSH, config)
+    if not tier_refused_by_record(got, reason):
+        problems.append("the later session's push: %s, want a roadmap-one-writer deny" % got)
+    got, reason = tier_judge(first, PUSHFEAT, TIER_PUSH, config)
+    if got != "allow":
+        problems.append("the session that bound the grant: its push %s, want allow" % got)
+    return tier_result(problems, "a consumed grant binds no later session")
+
+
+def tier_outside_check():
+    """roadmap-one-writer: a session outside the granted folder binds nothing and its push is refused, for a sibling
+    folder whose name starts with the granted one's, the folder above the grant, and another checkout"""
+    sibling = os.path.join(ROOT, "pushfeat-sibling")
+    os.makedirs(sibling, exist_ok=True)
+    variants = (("a sibling folder whose name starts with the granted name", sibling),
+                ("the folder above the granted one", ROOT),
+                ("another checkout", RECROADMAP))
+    problems = []
+    for index, (label, cwd) in enumerate(variants):
+        config = os.path.join(ROOT, "tier", "outside-%d" % index)
+        session = "tier-outside-%d" % index
+        tier_grant(config, PUSHFEAT, TIER_FRESH_AGE)
+        tier_judge(session, cwd, "echo ready", config)
+        if os.path.exists(tier_bound_file(config, session)):
+            problems.append("%s: the session bound the grant" % label)
+        got, reason = tier_judge(session, cwd, TIER_PUSH, config)
+        if not tier_refused_by_record(got, reason):
+            problems.append("%s: its push %s, want a roadmap-one-writer deny" % (label, got))
+    problems += tier_control("outside")
+    return tier_result(problems, "a session outside the grant binds nothing, in three forms")
+
+
+def tier_stale_check():
+    """roadmap-one-writer: a grant older than an hour binds nothing, is deleted, and the push is refused"""
+    config = os.path.join(ROOT, "tier", "stale")
+    session = "tier-stale-0001"
+    tier_grant(config, PUSHFEAT, TIER_STALE_AGE)
+    problems = []
+    tier_judge(session, PUSHFEAT, "echo ready", config)
+    if os.path.exists(tier_bound_file(config, session)):
+        problems.append("a stale grant bound its session")
+    if os.path.exists(tier_grant_file(config, PUSHFEAT)):
+        problems.append("a stale grant was kept, want it deleted")
+    got, reason = tier_judge(session, PUSHFEAT, TIER_PUSH, config)
+    if not tier_refused_by_record(got, reason):
+        problems.append("the push after a stale grant: %s, want a roadmap-one-writer deny" % got)
+    problems += tier_control("stale")
+    return tier_result(problems, "a stale grant binds nothing and is deleted")
+
+
+def tier_subfolder_check():
+    """roadmap-one-writer: a session in a subfolder of the granted folder binds nothing, and its push is refused"""
+    granted = os.path.join(ROOT, "tier-subgrant")
+    inside = os.path.join(granted, "inside")
+    os.makedirs(inside, exist_ok=True)
+    config = os.path.join(ROOT, "tier", "subfolder")
+    session = "tier-subfolder"
+    tier_grant(config, granted, TIER_FRESH_AGE)
+    problems = []
+    tier_judge(session, inside, "echo ready", config)
+    if os.path.exists(tier_bound_file(config, session)):
+        problems.append("a subfolder of the granted folder bound the grant")
+    if not os.path.isfile(tier_grant_file(config, granted)):
+        problems.append("a subfolder of the granted folder consumed the grant")
+    got, reason = tier_judge(session, inside, TIER_PUSH, config)
+    if not tier_refused_by_record(got, reason):
+        problems.append("the subfolder session's push: %s, want a roadmap-one-writer deny" % got)
+    problems += tier_control("subfolder")
+    return tier_result(problems, "a subfolder of the granted folder binds nothing; the grant is for the exact folder")
+
+
+def tier_bound_case(label, write, want_allow, note):
+    """A bound file already written for the session: the push is allowed or refused as `want_allow` says. The
+    control is a fresh grant bound by a top-level call, so a refusal here is not a guard that never binds."""
+    config = os.path.join(ROOT, "tier", "bound-" + label)
+    session = "tier-bound-" + label
+    write(config, session)
+    problems = []
+    got, reason = tier_judge(session, PUSHFEAT, TIER_PUSH, config)
+    if want_allow and got != "allow":
+        problems.append("push: %s, want allow (%s)" % (got, reason[:80]))
+    if not want_allow and not tier_refused_by_record(got, reason):
+        problems.append("push: %s, want a roadmap-one-writer deny" % got)
+    problems += tier_control(label)
+    return tier_result(problems, note)
+
+
+def tier_bound_lane_check():
+    """roadmap-one-writer: a bound file whose tier is lane does not prove the push"""
+    return tier_bound_case("lane", lambda c, s: tier_bound(c, s, tier="lane"), False,
+                           "a bound lane tier does not prove the push")
+
+
+def tier_bound_corrupt_check():
+    """roadmap-one-writer: a corrupt bound file does not prove the push, and the guard does not crash on it"""
+    return tier_bound_case("corrupt", lambda c, s: tier_write(tier_bound_file(c, s), b"{ not json"), False,
+                           "a corrupt bound file proves nothing")
+
+
+def tier_bound_crlf_check():
+    """roadmap-one-writer: a bound triage file in CRLF lines with a BOM proves the push"""
+    return tier_bound_case("crlf", lambda c, s: tier_bound(c, s, crlf_bom=True), True,
+                           "a CRLF and BOM bound file proves the push")
+
+
+def tier_bound_agent_check():
+    """roadmap-one-writer: a bound triage file proves its session's top-level push, and never its agent's push"""
+    config = os.path.join(ROOT, "tier", "bound-agent")
+    session = "tier-bound-agent"
+    tier_bound(config, session)
+    problems = []
+    got, reason = tier_judge(session, PUSHFEAT, TIER_PUSH, config, agent_id=SAMPLE_AGENT_ID)
+    if not tier_refused_by_record(got, reason):  # the record rule's own refusal: another rule would not reach the proof
+        problems.append("an agent's push: %s, want a roadmap-one-writer deny (the bound file must not prove an agent)"
+                        % got)
+    got, reason = tier_judge(session, PUSHFEAT, TIER_PUSH, config)
+    if got != "allow":
+        problems.append("the session's own top-level push: %s, want allow (%s)" % (got, reason[:80]))
+    return tier_result(problems, "the bound file proves the top-level push and not the agent's")
+
+
+def tier_regrant_run(config, folder):
+    """The grant CLI, run as the coordinator runs it, for one folder. Returns the problems, empty for a pass."""
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = config
+    result = subprocess.run([sys.executable, os.path.join(HERE, "session_tier.py"), "grant", "triage", "--folder",
+                             folder], capture_output=True, text=True, env=env, timeout=60)
+    if result.returncode != 0:
+        return ["grant triage --folder %s: exit %d, want 0 (%s)"
+                % (os.path.basename(folder), result.returncode, result.stderr.strip()[:120])]
+    return []
+
+
+def tier_regrant_check():
+    """roadmap-one-writer: a re-grant of a folder revokes the bound files for that folder. A session bound to it is
+    refused its next push. A session that starts after the re-grant binds the new grant and is allowed. A session
+    bound to another folder keeps its bound file."""
+    config = os.path.join(ROOT, "tier", "regrant")
+    granted = PUSHFEAT
+    other = os.path.join(ROOT, "pushfeat-sibling")  # a sibling whose name starts with the granted name, not a child
+    os.makedirs(other, exist_ok=True)
+    problems = tier_regrant_run(config, granted)
+    tier_judge("tier-regrant-a", granted, "echo ready", config)     # A binds the granted folder's grant
+    problems += tier_regrant_run(config, other)
+    tier_judge("tier-regrant-c", other, "echo ready", config)       # C binds the other folder's grant
+    problems += tier_regrant_run(config, granted)                   # the re-grant of the granted folder
+    # B binds the new grant before A's push, so the grant is consumed and A can only be refused by its revoked id.
+    tier_judge("tier-regrant-b", granted, "echo ready", config)
+    if not os.path.isfile(tier_bound_file(config, "tier-regrant-b")):
+        problems.append("a session that started after the re-grant bound no file")
+    got, reason = tier_judge("tier-regrant-a", granted, TIER_PUSH, config)
+    if not tier_refused_by_record(got, reason):
+        problems.append("the revoked session's push: %s, want a roadmap-one-writer deny" % got)
+    got, reason = tier_judge("tier-regrant-b", granted, TIER_PUSH, config)
+    if got != "allow":
+        problems.append("the session bound to the new grant: its push %s, want allow (%s)" % (got, reason[:80]))
+    if not os.path.isfile(tier_bound_file(config, "tier-regrant-c")):
+        problems.append("a re-grant of one folder removed the bound file of another folder")
+    problems += tier_control("regrant")
+    return tier_result(problems, "a re-grant revokes the folder's bound files and leaves the others")
+
+
+def tier_regrant_window_check():
+    """roadmap-one-writer: a session revoked by a re-grant of its folder is refused its push, even when it calls in that
+    folder before any other session. Its revoked id stops it binding the new grant, so the next session binds it."""
+    config = os.path.join(ROOT, "tier", "regrant-window")
+    granted = PUSHFEAT
+    problems = tier_regrant_run(config, granted)
+    tier_judge("tier-window-a", granted, "echo ready", config)      # A binds the granted folder's grant
+    problems += tier_regrant_run(config, granted)                    # the re-grant of the granted folder
+    tier_judge("tier-window-a", granted, "echo ready", config)      # A calls in the folder before any other session
+    got, reason = tier_judge("tier-window-a", granted, TIER_PUSH, config)
+    if not tier_refused_by_record(got, reason):
+        problems.append("the revoked session's push after its own call: %s, want a roadmap-one-writer deny" % got)
+    tier_judge("tier-window-b", granted, "echo ready", config)      # B is the first session after A to call in it
+    if not os.path.isfile(tier_bound_file(config, "tier-window-b")):
+        problems.append("the session after the revoked one bound no file for the new grant")
+    got, reason = tier_judge("tier-window-b", granted, TIER_PUSH, config)
+    if got != "allow":
+        problems.append("the session bound to the new grant: its push %s, want allow (%s)" % (got, reason[:80]))
+    problems += tier_control("regrant-window")
+    return tier_result(problems, "a revoked session cannot rebind the re-grant, and the next session binds it")
+
+
+def spawn_counts_of(config, command, cwd, log, path, session):
+    """The git spawns one call makes, from a stand-in git on PATH, with no record in the transcript."""
+    case = tier_case(session, cwd, command, config, transcript=role_path("no-record"))
+    case["env_path"] = path
+    kinds, _lines = spawn_log_of(case, log)
+    return kinds
+
+
+def tier_cost_check():
+    """roadmap-one-writer's tier cost: a call with no grant writes nothing under the config dir, and an empty tier dir
+    is left as it is; a bind writes its bound file and adds no git spawn; a bound push spawns what a lane's push
+    spawns. The spawn counts need a POSIX stand-in git, so on Windows only the file parts run."""
+    problems = []
+    absent = os.path.join(ROOT, "tier", "cost-absent")
+    os.makedirs(absent, exist_ok=True)
+    got, reason = tier_judge("tier-cost-absent", PUSHFEAT, "echo ready", absent)
+    if got != "allow":
+        problems.append("a call with no grant: %s, want allow (%s)" % (got, reason[:80]))
+    if os.path.exists(tier_dir(absent)):
+        problems.append("a call with no grant made the tier dir")
+    empty = os.path.join(ROOT, "tier", "cost-empty")
+    os.makedirs(tier_dir(empty), exist_ok=True)
+    tier_judge("tier-cost-empty", PUSHFEAT, "echo ready", empty)
+    if os.listdir(tier_dir(empty)):
+        problems.append("a call with an empty tier dir wrote a file into it")
+    granted = os.path.join(ROOT, "tier", "cost-grant")
+    tier_grant(granted, PUSHFEAT, TIER_FRESH_AGE)
+    tier_judge("tier-cost-grant", PUSHFEAT, "echo ready", granted)
+    if not os.path.isfile(tier_bound_file(granted, "tier-cost-grant")):
+        problems.append("the bind wrote no bound file for the granted session")
+    if os.name == "nt":  # the spawn counts need a POSIX stand-in git (NO_STAND_IN)
+        return tier_result(problems, "file parts only on Windows: " + NO_STAND_IN)
+    log, path = _stand_in_git("tiercost")
+    if path is None:
+        return False, "no git on PATH"
+    plain = os.path.join(ROOT, "tier", "cost-plain")
+    os.makedirs(plain, exist_ok=True)
+    plain_kinds = spawn_counts_of(plain, "echo ready", PUSHFEAT, log, path, "tier-cost-plain")
+    bind = os.path.join(ROOT, "tier", "cost-bind")
+    tier_grant(bind, PUSHFEAT, TIER_FRESH_AGE)
+    bind_kinds = spawn_counts_of(bind, "echo ready", PUSHFEAT, log, path, "tier-cost-bind")
+    if bind_kinds != plain_kinds:
+        problems.append("the bind adds git spawns: %s, a call with no grant spawns %s"
+                        % (sorted(bind_kinds.items()), sorted(plain_kinds.items())))
+    bound = os.path.join(ROOT, "tier", "cost-pushed")
+    tier_grant(bound, PUSHFEAT, TIER_FRESH_AGE)
+    tier_judge("tier-cost-pushed", PUSHFEAT, "echo ready", bound)
+    lane_kinds = spawn_counts_of(bound, VCS + " push origin lane/foo", PUSHFEAT, log, path, "tier-cost-pushed")
+    roadmap_kinds = spawn_counts_of(bound, TIER_PUSH, PUSHFEAT, log, path, "tier-cost-pushed")
+    if roadmap_kinds != lane_kinds:
+        problems.append("a bound push to roadmap spawns %s, a lane's push to lane/foo spawns %s"
+                        % (sorted(roadmap_kinds.items()), sorted(lane_kinds.items())))
+    return tier_result(problems, "no file without a grant, no git spawn for the bind, and the bound push spawns "
+                                 "what a non-record push spawns")
+
+
+# Registered below, where LOG_CHECKS_EXTRA exists, under the merge family (the loop after BASE_COPY_COST_LABEL).
+TIER_LOG_CHECKS = (
+    ("roadmap-one-writer: a local triage session's first top-level call binds its fresh grant, "
+     "and its roadmap push is then allowed", tier_bind_allow_check),
+    ("roadmap-one-writer: a grant in CRLF lines with a BOM binds the same as a plain one", tier_bind_crlf_check),
+    ("roadmap-one-writer: a cwd spelled with a trailing separator binds the grant for its folder",
+     tier_bind_spelling_check),
+    ("roadmap-one-writer: an agent binds no grant and consumes none, and its push is refused",
+     tier_agent_call_check),
+    ("roadmap-one-writer: a session that starts after the grant was consumed binds nothing, and its push is refused",
+     tier_consumed_check),
+    ("roadmap-one-writer: a session outside the granted folder binds nothing, in three forms", tier_outside_check),
+    ("roadmap-one-writer: a session in a subfolder of the granted folder binds nothing, and its push is refused",
+     tier_subfolder_check),
+    ("roadmap-one-writer: a grant older than an hour binds nothing, is deleted, and the push is refused",
+     tier_stale_check),
+    ("roadmap-one-writer: a bound file whose tier is lane does not prove the push", tier_bound_lane_check),
+    ("roadmap-one-writer: a corrupt bound file does not prove the push, and the guard does not crash on it",
+     tier_bound_corrupt_check),
+    ("roadmap-one-writer: a bound triage file in CRLF lines with a BOM proves the push", tier_bound_crlf_check),
+    ("roadmap-one-writer: a bound triage file proves its session's top-level push, and never its agent's push",
+     tier_bound_agent_check),
+    ("roadmap-one-writer: the tier file's cost, no file without a grant, no git spawn for the bind, and the bound "
+     "push spawns what a lane's push spawns", tier_cost_check),
+    ("roadmap-one-writer: a re-grant of a folder revokes the bound files for that folder, and leaves the others",
+     tier_regrant_check),
+    ("roadmap-one-writer: a session revoked by a re-grant is refused its push, even when it calls in the folder first",
+     tier_regrant_window_check),
+)
+
+# A local push with no bound file is refused, and the refusal names the coordinator's re-grant as its remedy. It never
+# names the CLI or its tier, so a local session is not sent to run a command it cannot run. The config dir has no
+# tier dir.
+record_refuse("a local push with no bound file is refused, and the refusal names the re-grant as its remedy",
+              TIER_PUSH, role_path("no-record"), env=None, session="tier-refusal-no-grant",
+              config=os.path.join(ROOT, "tier", "refusal-no-grant"), carries=("re-grant",),
+              lacks=("session_tier.py grant", "grant triage"))
+
+# A cloud triage session (its tag in the transcript, its env id set) passes with no tier dir, as it did before the tier
+# file. Green on main: it pins the cloud path that the tier file must not break.
+record_allow("a cloud triage session with its tag in the transcript is allowed with no tier dir",
+             VCS + " push origin roadmap", TRIAGE_TRANSCRIPT, env=ROLE_ENV, session=ROLE_OWN,
+             config=os.path.join(ROOT, "tier", "cloud-no-dir"))
 
 
 # =========================================================================== 5f. the trust card in a cs-build session
@@ -13273,6 +13698,9 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+for _label, _check in TIER_LOG_CHECKS:  # the tier file (section 5e-3): the merge family, beside its record checks
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    LOG_FAMILY[_label] = "merge"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
@@ -27234,6 +27662,12 @@ WINDOWS_CHECKERS.update(LB_CHECKS)
 # override: a one-act override claimed by a rename let two Windows racers win (run 40296652083), and no
 # Linux run shows it, so the claim cases run in the Windows slice.
 WINDOWS_CHECKERS.update({ov_parallel_check, ov_take_race_check, ov_late_reader_check})
+WINDOWS_CHECKERS.update({tier_bind_allow_check, tier_bind_crlf_check, tier_bind_spelling_check,
+                         tier_agent_call_check, tier_consumed_check, tier_outside_check, tier_stale_check,
+                         tier_subfolder_check,
+                         tier_bound_lane_check, tier_bound_corrupt_check, tier_bound_crlf_check,
+                         tier_bound_agent_check, tier_cost_check, tier_regrant_check,
+                         tier_regrant_window_check})
 
 
 # --------------------------------------------------------------------------- the simulator boot rules

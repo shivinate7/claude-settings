@@ -13,6 +13,7 @@ from guard_core import (
     git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
+import session_tier  # the one home of the tier value, the tier dir and the tier file's formats
 from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
@@ -580,13 +581,14 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
 
 
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
-RECORD_WRITER_TIER = "triage"
+RECORD_WRITER_TIER = session_tier.TRIAGE_TIER
 DEFAULT_RECORD_BRANCH = "roadmap"
 RECORD_REASON = (
-    "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session's own "
-    "record does not prove it is triage. Send the step change to the triage session (list_sessions, tag "
-    "cs-build:triage, same cs-repo). If this session is triage: run get_session (no argument) alone in its "
-    "own turn, then retry. (decision session-tiers, the triage session is the only writer of the record branch)"
+    "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session cannot "
+    "prove it is triage. Send the step change to the triage session (list_sessions, tag cs-build:triage, same "
+    "cs-repo). If this is a cloud triage session: run get_session (no argument) alone in its own turn, then "
+    "retry. If this is a local triage session: ask the coordinator to re-grant the folder this session runs in, then make any "
+    "call and retry. (decision session-tiers, the triage session is the only writer of the record branch)"
 )
 
 
@@ -637,11 +639,14 @@ def _push_calls(segment: str, script: str, cwd: str):
                 yield from _push_calls(part, text, inner_cwd)
 
 
-def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb) -> str:
+def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb,
+                      session_id: str = "", agent_id: str = "") -> str:
     """Return the matched push when a segment pushes to the checkout's record branch, or to the default
-    name `roadmap`, and the own record does not prove the triage tier, else ''. `record_branch_of(root)`
+    name `roadmap`, and neither proof of the triage tier holds, else ''. The first proof is the own
+    get_session record in the transcript (a cloud session); the second is the session's bound tier file
+    (a local session, hooks/session_tier.py), which never proves an agent's call. `record_branch_of(root)`
     reads the checkout's branch (lint/layout.py); a read error means the default. `read_verb(subcommand,
-    args)` is guard.py's own test for a dry run, which moves nothing. The proof is read only after a push
+    args)` is guard.py's own test for a dry run, which moves nothing. The proofs are read only after a push
     reaches the branch."""
     for segment in split_segments(stripped):
         for args, where, overrides in _push_calls(segment, stripped, cwd):
@@ -654,7 +659,8 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
             except Exception:
                 record = DEFAULT_RECORD_BRANCH
             if {record, DEFAULT_RECORD_BRANCH} & set(push_destinations(args, where, overrides)) and (
-                    not _own_tier_proved(transcript, RECORD_WRITER_TIER)):
+                    not _own_tier_proved(transcript, RECORD_WRITER_TIER)
+                    and not session_tier.file_proved(session_id, agent_id, RECORD_WRITER_TIER)):
                 return "git push to the record branch"
     return ""
 
