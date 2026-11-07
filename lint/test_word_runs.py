@@ -5,6 +5,7 @@ word_runs.FENCE is the one home of a fence line. Each check that reads fences us
 own. A fence line indented four spaces or more under a list item is a fence too. Stdlib unittest; no file is read or
 written. Rule building-one-home-per-capability.
 """
+import re
 import unittest
 
 import compliance_probes
@@ -28,11 +29,17 @@ class FenceLineTests(unittest.TestCase):
 
 
 class OneFenceHomeTests(unittest.TestCase):
-    def test_stale_cites_and_compliance_probes_use_word_runs_fence_and_hold_none_of_their_own(self):
+    def test_stale_cites_and_compliance_probes_read_word_runs_fence_and_hold_no_fence_pattern_of_their_own(self):
         for module in (stale_cites, compliance_probes):
             with self.subTest(module=module.__name__):
-                self.assertIs(getattr(module, "FENCE", word_runs.FENCE), word_runs.FENCE,
+                # The scope first: the module exposes FENCE at all. Then the subject: that name is the one home.
+                self.assertTrue(hasattr(module, "FENCE"), "%s exposes no FENCE; alias word_runs.FENCE" % module.__name__)
+                self.assertIs(module.FENCE, word_runs.FENCE,
                               "%s holds its own FENCE regex; it must read word_runs.FENCE" % module.__name__)
+                # A fence pattern under another name is a copy too.
+                renamed = [name for name, value in vars(module).items() if isinstance(value, re.Pattern)
+                           and value is not word_runs.FENCE and any(value.match(line) for line in DEEP_FENCES)]
+                self.assertEqual(renamed, [], "%s holds a fence pattern of its own under another name" % module.__name__)
 
 
 if __name__ == "__main__":
