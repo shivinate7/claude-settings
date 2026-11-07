@@ -30,6 +30,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 RUN = _test_temp.run_folder()  # removed when the suite ends
+HOOKS_UNDER_TEST = os.environ.get("HOOKS_UNDER_TEST") or HERE  # a fixture copy of hooks/ may be scanned instead
 
 # Today's values, pinned from hooks/guard_frozen.py and hooks/guard_core.py.
 FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
@@ -352,37 +353,68 @@ def case_precompact_builds_its_digest_without_shared_names():
         done.returncode, os.path.isfile(digest), done.stderr[-160:])
 
 
-# The copies of the config dir logic (debt config-dir-copies): (module, the function that holds the copy).
-COPY_SITES = (
-    ("daily_note.py", "main"),
-    ("override.py", "_path"),
-    ("precompact_handoff.py", "config_dir"),
-    ("sim_boot_record.py", "state_dir"),
-)
+# The four hook modules that may hold a config dir copy (debt config-dir-copies). HOOKS_UNDER_TEST, when set,
+# names a fixture copy of hooks/, so the scan can be shown red on a copy outside the fallback.
+CONFIG_DIR_MODULES = ("daily_note.py", "override.py", "precompact_handoff.py", "sim_boot_record.py")
+CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
+HOME_DIRS = (".claude", "~/.claude")  # the default folder that shared_names.config_dir falls back to
 
 
-def case_config_dir_copies_read_the_shared_home():
-    """Each copy of the config dir logic is gone. Its function holds no CLAUDE_CONFIG_DIR literal of its own,
-    and the module reads shared_names.config_dir, the one home. A source scan with the ast parser."""
+def _parents(tree):
+    """Each node of `tree` mapped to its parent."""
+    return {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+
+
+def _scope(node, parents):
+    """The innermost function, or the module, that holds `node`."""
+    while not isinstance(node, (ast.FunctionDef, ast.Module)):
+        node = parents[node]
+    return node
+
+
+def _imports_shared_names(stmt):
+    return any((isinstance(node, ast.ImportFrom) and node.module == "shared_names")
+               or (isinstance(node, ast.Import) and any(alias.name == "shared_names" for alias in node.names))
+               for node in ast.walk(stmt))
+
+
+def _in_import_fallback(node, parents):
+    """True when `node` sits in the `except ImportError` branch of a try whose body imports shared_names."""
+    cur = node
+    while cur in parents:
+        cur = parents[cur]
+        if isinstance(cur, ast.ExceptHandler) and isinstance(cur.type, ast.Name) and cur.type.id == "ImportError":
+            trying = parents.get(cur)
+            if isinstance(trying, ast.Try) and any(_imports_shared_names(stmt) for stmt in trying.body):
+                return True
+    return False
+
+
+def _unguarded_copies(path):
+    """The lines of `path` where a config dir copy sits outside the import fallback. A copy reads CLAUDE_CONFIG_DIR
+    in a scope that also names the .claude default, whatever the function is called."""
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    parents = _parents(tree)
+    lines = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and node.value == CONFIG_DIR_ENV:
+            scope = _scope(node, parents)
+            names_home = any(isinstance(inner, ast.Constant) and inner.value in HOME_DIRS for inner in ast.walk(scope))
+            if names_home and not _in_import_fallback(node, parents):
+                lines.append(node.lineno)
+    return sorted(lines)
+
+
+def case_config_dir_copies_sit_only_in_the_import_fallback():
+    """A config dir copy in these four modules sits only in the `except ImportError` branch of a shared_names import:
+    the install may land a hook before shared_names.py, and the fallback keeps it running. Any other copy is a second
+    home (debt config-dir-copies). A source scan with the ast parser; the function's name does not matter."""
     problems = []
-    for module, func_name in COPY_SITES:
-        with open(os.path.join(HERE, module), encoding="utf-8") as handle:
-            tree = ast.parse(handle.read())
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == func_name:
-                literal = [inner.lineno for inner in ast.walk(node)
-                           if isinstance(inner, ast.Constant) and inner.value == "CLAUDE_CONFIG_DIR"]
-                if literal:
-                    problems.append("%s %s copies the env lookup at line %d" % (module, func_name, literal[0]))
-        reads_home = any(
-            (isinstance(node, ast.ImportFrom) and node.module == "shared_names"
-             and any(alias.name == "config_dir" for alias in node.names))
-            or (isinstance(node, ast.Attribute) and node.attr == "config_dir"
-                and isinstance(node.value, ast.Name) and node.value.id == "shared_names")
-            for node in ast.walk(tree))
-        if not reads_home:
-            problems.append("%s does not read shared_names.config_dir" % module)
-    return not problems, "; ".join(problems) or "all four read the one home"
+    for module in CONFIG_DIR_MODULES:
+        for line in _unguarded_copies(os.path.join(HOOKS_UNDER_TEST, module)):
+            problems.append("%s line %d copies the config dir outside the import fallback" % (module, line))
+    return not problems, "; ".join(problems) or "every copy sits in the import fallback"
 
 
 CASES = [
@@ -408,8 +440,8 @@ CASES = [
     ("(k) shared_names holds lane_head_refs: the bare step slug and lane/<slug>", case_lane_head_refs_pinned),
     ("(k2) build.py and the archive guard import lane_head_refs, with no copy of it or the lane/ prefix",
      case_one_home_for_lane_heads),
-    ("(l) each config dir copy reads shared_names.config_dir, with no CLAUDE_CONFIG_DIR literal of its own",
-     case_config_dir_copies_read_the_shared_home),
+    ("(l) every config dir copy in the four hook modules sits only in an ImportError fallback of shared_names",
+     case_config_dir_copies_sit_only_in_the_import_fallback),
     ("(m) sim_boot_record exits 0 with shared_names.py absent", case_sim_boot_record_exits_zero_without_shared_names),
     ("(n) precompact_handoff still writes its digest with shared_names.py absent",
      case_precompact_builds_its_digest_without_shared_names),

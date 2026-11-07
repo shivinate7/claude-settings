@@ -3740,6 +3740,25 @@ def case_guard_sidecar_in_no_git_folder_still_judges_the_stop_repo():
                  guard(cfg, sid, cwd=cwd), named=("fb-9",))
 
 
+UNCOVERED_STANDING_TEXTS = (  # standing grants, with no standing word from ACT's list
+    "approved to merge PRs whenever green, going forward",
+    "approved, merge it. Do this each time.",
+    "approved: merge all open PRs",
+)
+
+
+def case_once_home_does_not_pass_a_standing_grant_however_worded():
+    """A standing grant gets no `once:<act>` home, whatever words state the standing scope. Each text still has no
+    home. The control, a one-shot approval with the same home, passes."""
+    mod = guard_module()
+    line = "- fb-0958-1 [note] -> once:merge-prs"
+    for text in UNCOVERED_STANDING_TEXTS:
+        out = mod.problems(mod.parse(render_block(text, items=(line,))), "")
+        check("standing grant %r: a once: home does not pass it" % text, any("has no home" in s for s in out), out)
+    out = mod.problems(mod.parse(render_block("approved, merge PR 12", items=(line,))), "")
+    check("one-shot control, approved, merge PR 12: a once: home passes", out == [], out)
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -3908,6 +3927,7 @@ CASES = (
     case_closed_once_note_is_no_home_for_a_grant,
     case_guard_home_tracked_in_the_stop_repo_passes_when_the_sidecar_names_another,
     case_guard_sidecar_in_no_git_folder_still_judges_the_stop_repo,
+    case_once_home_does_not_pass_a_standing_grant_however_worded,
 )
 
 
