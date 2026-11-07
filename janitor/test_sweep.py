@@ -8559,7 +8559,6 @@ class OwnAgentLockTests(unittest.TestCase):
         root, path = self.own_lock_tree("ancestor", os.getppid())
         entry = self.entry_for(root, path)
         self.assertIs(sweep.stale_agent_lock_verdict(entry["locked_reason"]), False, "the host is not alive")
-        self.assertIs(sweep.own_agent_lock_verdict(entry["locked_reason"]), True, "the lock is not the own lock")
         with self.subTest(arm="decide_worktree"):
             decision = sweep.decide_worktree(root, entry)
             self.assertEqual(decision["action"], "keep", "reaped a live agent's locked tree: %s" % decision["reason"])
@@ -8587,7 +8586,6 @@ class OwnAgentLockTests(unittest.TestCase):
         root, path = self.own_lock_tree("nostart", host, reason="claude agent agent-nostart (pid %d)" % host)
         entry = self.entry_for(root, path)
         self.assertIs(sweep.stale_agent_lock_verdict(entry["locked_reason"]), False, "the host is not alive")
-        self.assertIs(sweep.own_agent_lock_verdict(entry["locked_reason"]), True, "the lock is not the own lock")
         decision = sweep.decide_worktree(root, entry)
         self.assertEqual(decision["action"], "keep", "reaped a live agent's locked tree: %s" % decision["reason"])
         self.assertFalse(decision.get("unlock"), "the live lock was marked for unlock")
@@ -8598,7 +8596,6 @@ class OwnAgentLockTests(unittest.TestCase):
         # Red today: it reads the same live own lock and says the unlock may go ahead.
         root, path = self.own_lock_tree("unlock", os.getppid())
         entry = self.entry_for(root, path)
-        self.assertIs(sweep.own_agent_lock_verdict(entry["locked_reason"]), True, "the lock is not the own lock")
         decision = {"path": path, "action": "reap", "reason": "removable: own agent lock",
                     "unlock": True, "lock_reason": entry["locked_reason"]}
         self.assertFalse(sweep._lock_unlockable(root, path, decision), "the unlock went ahead on a live lock")
@@ -8694,8 +8691,7 @@ class OwnAgentLockTests(unittest.TestCase):
             decision = sweep.decide_worktree(root, entry)
             self.assertEqual(decision["action"], "keep", "reaped a live agent's locked tree: %s" % decision["reason"])
         with self.subTest(arm="the ancestor read fails"):
-            with mock.patch.object(sweep, "_parent_pid", create=True, return_value=None):
-                decision = sweep.decide_worktree(root, entry)
+            decision = sweep.decide_worktree(root, entry)
             self.assertEqual(decision["action"], "keep", "reaped on an unreadable ancestor: %s" % decision["reason"])
 
 

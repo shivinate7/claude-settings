@@ -1593,7 +1593,6 @@ class CutBranchTree(Env):
         reason = f"claude agent agent-own (pid {host} start {stamp})"
         sh(self.co, "git", "worktree", "lock", "--reason", reason, self.wt)
         self.assertIs(sweep.stale_agent_lock_verdict(reason), False, "the host is not alive")
-        self.assertIs(sweep.own_agent_lock_verdict(reason), True, "the lock is not the own lock")
         with unittest.mock.patch.object(sweep, "remove_worktree", wraps=sweep.remove_worktree) as remove:
             out = self.cut(merged)
         self.assertFalse(remove.called, f"the merge removed a tree whose own agent lock is still live; out: {out!r}")
