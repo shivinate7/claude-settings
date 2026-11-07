@@ -20704,8 +20704,8 @@ def worktree_home_red_cwd_case():
     decision an-agent-outside-its-home-tree-must-stop passes a cd into it and a Write or Edit inside it.
     A Bash call run from inside the folder writes nothing outside it, so a test run, git status, a
     `git -C <red> checkout`, a relative write and a Write inside it each pass. On main worktree-home
-    refuses each Bash call, because the cwd sits outside the recorded home. Its reason also says the
-    working tree is gone, which is untrue here. Controls stay refused from that cwd: a cd into a
+    refuses each Bash call, because the cwd sits outside the recorded home. Its reason opens with "this
+    agent's own working tree is gone", which is untrue here. Controls stay refused from that cwd: a cd into a
     sibling's red-run folder or sibling checkout, rm -rf of the folder, a shell write into the home or
     the primary, and a Write into a sibling's folder. The lone cd back into the home stays allowed."""
     primary, home, sibling_home, _ = _cross_checkout_fixture(
