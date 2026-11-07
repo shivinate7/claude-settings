@@ -13283,6 +13283,86 @@ add("builder-test: continue-on-error added to an echo step with a quoted message
     "allow", tool="Edit", file_path=WF,
     old_string=LINT + "      - name: Note\n        run: echo 'tests passed'\n",
     new_string=LINT + "      - name: Note\n        continue-on-error: true\n        run: echo 'tests passed'\n", **B)
+# The reader splits a run line into shell words, so a YAML-quoted value that opens with an env assignment or a runner
+# other than pytest, and a timeout around one, hides its test run. Each step below is the only run of its test, so
+# deleting it drops that test and is refused. `go test ./...` is read through its `test` word, as main reads it.
+MISSED_RUNS = (
+    ("a YAML double-quoted pytest run behind an env assignment", '"CI=1 pytest tests/"'),
+    ("a YAML double-quoted python run behind an env assignment", '"FOO=1 python tests/x.py"'),
+    ("a YAML double-quoted yarn jest run", '"yarn jest tests/"'),
+    ("a YAML double-quoted poetry run pytest", '"poetry run pytest tests/"'),
+    ("a YAML double-quoted pnpm exec vitest run", '"pnpm exec vitest tests/"'),
+    ("a timeout around a YAML double-quoted yarn jest run", 'timeout 5 "yarn jest tests/"'),
+    ("a YAML double-quoted go test run", '"go test ./..."'),
+)
+for _name, _value in MISSED_RUNS:
+    add("builder-test: %s, deleted from checks.yml is refused" % _name, "deny", rule=BT, tool="Edit",
+        file_path=WF, old_string=LINT + "      - name: Run\n        run: %s\n" % _value, new_string=LINT,
+        carries=("test-author", "Report"), **B)
+# A control, green on the head: the shell -c clause already reads a `bash -c` script past its env assignment.
+add("builder-test: control, a bash -c run behind an env assignment in double quotes, deleted from checks.yml "
+    "is refused", "deny", rule=BT, tool="Edit", file_path=WF,
+    old_string=LINT + '      - name: Run\n        run: bash -c "FOO=1 pytest tests/"\n', new_string=LINT,
+    carries=("test-author", "Report"), **B)
+# A quoted space is one shell word. The reader read `" "` as a command word and raised, and a guard that
+# raises fails open, so a pytest run deleted beside a `tr " "` step was allowed.
+SPLIT_STEP = '      - name: Split\n        run: echo "$ITEMS" | tr " " "\\n"\n'
+add("builder-test: a pytest run deleted beside a tr step that splits on a space, from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF,
+    old_string=LINT + "      - name: Unit\n        run: pytest tests/\n" + SPLIT_STEP, new_string=LINT + SPLIT_STEP,
+    carries=("test-author", "Report"), **B)
+# A quoted message or folder that holds a test word or a test path is data, not a test run. Main reads none of these.
+FALSE_ALARMS = (
+    ('echo "python tests/x.py failed"', 'echo "python build/x.py failed"'),
+    ('echo "bash tests ok"', 'echo "bash build ok"'),
+    ('echo "node tests/x.js ran"', 'echo "node build/x.js ran"'),
+    ('mkdir -p "python tests"', 'mkdir -p "python build"'),
+    ('echo "time test done"', 'echo "time build done"'),
+)
+for _value, _edited in FALSE_ALARMS:
+    _step = "      - name: Note\n        run: %s\n" % _value
+    add("builder-test: %s, deleted from checks.yml is allowed" % _value, "allow", tool="Edit", file_path=WF,
+        old_string=LINT + _step, new_string=LINT, **B)
+    add("builder-test: %s, edited in checks.yml is allowed" % _value, "allow", tool="Edit", file_path=WF,
+        old_string=LINT + _step, new_string=LINT + "      - name: Note\n        run: %s\n" % _edited, **B)
+
+
+# The reader itself, one command per check, so a failure names the one command it reads wrong. A crash is a named
+# failure here, not an escape from the run. Each check loads the guard, so it needs no fixture.
+def _workflow_reader_check(command, want):
+    def check():
+        guard = _load_guard_module()
+        try:
+            got = guard.workflow_command_tests(command)
+        except Exception as exc:
+            return False, "workflow_command_tests(%r) raised %s: %s" % (command, type(exc).__name__, exc)
+        if got != set(want):
+            return False, "workflow_command_tests(%r) read %r, want %r" % (command, sorted(got), sorted(want))
+        return True, "workflow_command_tests(%r) reads %r" % (command, sorted(want))
+    return check
+
+
+WF_READER_CHECKS = []
+for _command in ("tr ' ' '\\n'", 'echo " "', "cut -d ' ' -f2", "awk -F ' '"):
+    WF_READER_CHECKS.append(("paths: workflow_command_tests(%r) does not raise and reads no test" % _command,
+                             _workflow_reader_check(_command, ())))
+for _command, _want in (
+        ('"CI=1 pytest tests/"', ("tests/",)),
+        ('"FOO=1 python tests/x.py"', ("tests/x.py",)),
+        ('"yarn jest tests/"', ("tests/",)),
+        ('"poetry run pytest tests/"', ("tests/",)),
+        ('"pnpm exec vitest tests/"', ("tests/",)),
+        ('timeout 5 "yarn jest tests/"', ("tests/",)),
+        ('echo "python tests/x.py failed"', ()),
+        ('echo "bash tests ok"', ()),
+        ('echo "node tests/x.js ran"', ()),
+        ('mkdir -p "python tests"', ()),
+        ('echo "time test done"', ())):
+    WF_READER_CHECKS.append(("paths: workflow_command_tests(%r) reads %r" % (_command, list(_want)),
+                             _workflow_reader_check(_command, _want)))
+# A control, green on the head: the shell -c clause reads the script past its env assignment.
+WF_READER_CHECKS.append(("paths: control, workflow_command_tests('bash -c \"FOO=1 pytest tests/\"') reads ['tests/']",
+                         _workflow_reader_check('bash -c "FOO=1 pytest tests/"', ("tests/",))))
 
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with
@@ -13834,6 +13914,12 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The workflow reader checks belong to the paths section above, which is earlier than this list, so their family is
+# set by hand, as the base-copy check's is above.
+for _label, _check in WF_READER_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    LOG_FAMILY[_label] = "paths"
+    FIXTURELESS_CHECKS.add(_check)
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
