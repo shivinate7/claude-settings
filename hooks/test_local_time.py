@@ -1727,6 +1727,37 @@ def case_opus_scope_not_read_when_the_ask_names_a_role_or_length_is_unclear():
               "read calls %d; files %r" % (len(scope.calls), ov_files(cfg)))
 
 
+# A plain ask that names builders and reviewers only to leave them out grants neither (decision owner-override). Each
+# form uses a word that NEGATIONS does not list: but, other, apart, aside, out, stay (debt
+# opus-ask-exclusion-words). The judge says yes, so the scope read alone decides which roles a grant names.
+EXCLUSION_ASKS = (
+    "send opus on everything but builders and reviewers",
+    "send opus on everything other than builders and reviewers",
+    "send opus on everything apart from builders and reviewers",
+    "send opus on everything aside from builders and reviewers",
+    "send opus, leave out builders and reviewers",
+    "send opus, builders and reviewers stay on sonnet",
+)
+
+
+def case_opus_scope_exclusion_words_grant_no_excluded_role():
+    excluded = {"builder", "reviewer"}
+    for prompt in EXCLUSION_ASKS:
+        cfg, judge, scope, exc = scope_grant(prompt, None, ScopeStub(answer=None))
+        check("opus scope: %r is judged without an error" % prompt, exc is None, "raised %r" % (exc,))
+        got = opus_override(cfg)
+        if got is None:
+            continue  # no grant at all: no excluded role is granted
+        role = got[2]
+        named = excluded if role is None else ({role} if isinstance(role, str) else set(role))  # null is every role
+        check("opus scope: %r grants no excluded role (builder, reviewer)" % prompt, not (named & excluded),
+              "granted role %r" % (role,))
+    cfg, judge, scope, _ = scope_grant("send opus on builders and reviewers", None, ScopeStub(answer=None))
+    got = opus_override(cfg)
+    check("opus scope: control, builders and reviewers named as the ones to run grants both, sorted",
+          got is not None and got[2] == ["builder", "reviewer"], "got %r" % (got,))
+
+
 def case_opus_scope_not_read_when_the_judge_says_no():
     # Guard, passes on the old build too: a judge that says no grants nothing and reads no context.
     lines = [owner_turn("builders should do the refactor next")]
@@ -2128,6 +2159,7 @@ def main():
         case_opus_scope_odd_answer_or_error_grants_every_role()
         case_opus_scope_drops_an_unknown_role_and_keeps_the_rest()
         case_opus_scope_two_roles_from_the_read_grant_both_sorted()
+        case_opus_scope_exclusion_words_grant_no_excluded_role()
         case_opus_list_role_lifts_its_roles_and_refuses_the_rest()
         case_opus_keyword_files_keep_their_bytes()
         case_opus_scope_read_sees_every_role_before_it_runs()

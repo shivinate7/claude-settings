@@ -5771,6 +5771,19 @@ add("background-end: a server named in a multi-line quoted string is data, allow
     cwd=NOGIT, command='echo "first line\nnpm run dev later"', run_in_background=True)
 add("background-end: a server named in a comment line is not run, allowed", "allow", cwd=NOGIT,
     command="# start npm run dev later\necho ready", run_in_background=True)
+# A script part after `:` or `-` names a server only when it is the script's word, not a variant of a build or a test:
+# `build:dev` is a build that ends, `test-watch-ci` a one-shot test, and a flag's value before the verb is no verb:
+# `flask --app run db upgrade` is a migration that ends (debt bg-end-false-alarms). Each passes with no note.
+add("background-end: npm run build:dev under run_in_background with no note is allowed, a build that ends",
+    "allow", cwd=NOGIT, command="npm run build:dev", run_in_background=True)
+add("background-end: npm run test-watch-ci under run_in_background with no note is allowed, a one-shot test",
+    "allow", cwd=NOGIT, command="npm run test-watch-ci", run_in_background=True)
+add("background-end: flask --app run db upgrade under run_in_background with no note is allowed, a migration that ends",
+    "allow", cwd=NOGIT, command="flask --app run db upgrade", run_in_background=True)
+# Control: a flask run that serves still needs the note.
+add("background-end: control, flask --app hello run under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="flask --app hello run", run_in_background=True)
 
 # Each starts a server or watcher that never ends on its own, and has no note: a flag before the
 # script name, a Windows executable name, a wrapper that runs the command, or a script name that serves or watches.
@@ -7926,6 +7939,21 @@ for _label, _body in (
        "cat <<EOF\n" + _body + "\nEOF", "deny", "env-file", cwd=NOGIT)
 sh("trim: env: a quoted heredoc body with an apostrophe runs no substitution, allowed",
    "cat <<'EOF'\ndon't\n$(cat " + ENV + ")\nEOF", "allow", cwd=NOGIT)
+# A file a heredoc writes is text when a checker, a reader or a pipe stage reads it as an argument: nothing runs it.
+# Its quoted body with an env read is data, and the one call (write, then run) is allowed. Each form below is a
+# runner word with the written file as its argument (debt heredoc-written-run-false-alarm).
+for _file, _run in (("brief.md", "python3 check.py brief.md"), ("cfg.json", "python3 -m json.tool cfg.json"),
+                    ("f", "sudo cat f"), ("f", "timeout 5 wc f"), ("f", "ls f | xargs wc")):
+    sh("trim: env: a quoted heredoc writes %s and %r reads it, with an env read in the body, is allowed" % (_file, _run),
+       "cat > %s <<'EOF'\ncat %s\nEOF\n%s" % (_file, ENV, _run), "allow", cwd=NOGIT)
+# Controls: a file that a shell or an interpreter runs keeps its body in view, so the env read denies,
+# and a body with no env read is allowed whatever runs it.
+sh("trim: env: a heredoc file with an env read, run by python3 as its script, denies",
+   "cat > brief.md <<'EOF'\ncat " + ENV + "\nEOF\npython3 brief.md", "deny", "env-file", cwd=NOGIT)
+sh("trim: env: a heredoc file with an env read, run by sh, denies",
+   "cat > brief.md <<'EOF'\ncat " + ENV + "\nEOF\nsh brief.md", "deny", "env-file", cwd=NOGIT)
+sh("trim: env: a heredoc file with no env read, checked by python3, is allowed",
+   "cat > brief.md <<'EOF'\necho hi\nEOF\npython3 check.py brief.md", "allow", cwd=NOGIT)
 sh("trim: env: the same assignment ahead of a non-runner still denies",
    "ADMINS='Shivam Semwal' cat --env-file=" + ENV, "deny", "env-file", cwd=NOGIT)
 add("env: Edit of the example file", "allow", tool="Edit", cwd=NOGIT,
@@ -10018,6 +10046,15 @@ step_refuse("a brief for topic colors to a lane on topic icons is refused, thoug
 # Refused: a lane with a topic gets a brief that names none. The steer names the topic, so the sender can fix it.
 step_refuse("a brief that names no topic, to a lane with a topic, is refused, and the steer names the topic",
             role_path("step-topic-lane"), "Lane brief: icon-a.", carries=TOPIC_STEER)
+# Refused, and the remedy is the fix: the brief is on topic, and its Topic line is unreadable. The reason puts the
+# Topic on the first line, and it does not send the sender to a new lane (debt brief-no-topic-wrong-steer).
+TOPIC_FIRST_LINE = ("put `Topic: <slug>.` on the first line",)
+step_refuse("a brief with no Topic, to a lane with a topic, is refused with the remedy to put Topic on the first line",
+            role_path("step-topic-lane"), "Lane brief: icon-a.", carries=TOPIC_FIRST_LINE)
+step_refuse("a brief with no Topic, to a lane with a topic, is not steered to start a new lane",
+            role_path("step-topic-lane"), "Lane brief: icon-a.", lacks=("create_session",))
+step_refuse("a brief whose Topic is in backticks, to a lane with a topic, is refused with the remedy to put Topic on the first line",
+            role_path("step-topic-lane"), "Lane brief: icon-a. Topic: `icons`.", carries=TOPIC_FIRST_LINE)
 # Refused: the match is exact. Topic icons-v2 is not topic icons, though it holds it as a substring.
 step_refuse("a brief for topic icons-v2 to a lane on topic icons is refused: a substring is not the topic",
             role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons-v2.")
@@ -24321,6 +24358,24 @@ def gs_verdict_check(name, files, spawn, want, ref=True):
     return check
 
 
+def gs_fork_check(name, record, files, refs, spawn, want):
+    """A check in a fork: its extras file names `record` as the record branch (lint/layout.py record_branch). `files`
+    hold the lane's step, and each name in `refs` is set as refs/remotes/origin/<name> at the checkout's commit. The
+    guard reads the fork's own record branch, never origin/roadmap, which is main's (debt fork-step-grants-read-roadmap)."""
+    def check():
+        tree = dict(files)
+        tree[".claude/layout-extras.json"] = json.dumps({"kinds": {}, "record-branch": record}) + "\n"
+        repo = gs_repo("fork-" + name, tree, ref=False)
+        for ref in refs:
+            made = run_vcs(repo, "update-ref", "refs/remotes/origin/" + ref, "HEAD")
+            if made.returncode != 0:
+                sys.exit("fixture setup failed in gs_fork_check: update-ref origin/%s in %r" % (ref, repo))
+        config, session = ov_config("grant-fork-" + name), "gs-payload-fork-" + name
+        problem = ov_want(*gs_spawn(config, session, repo, spawn), want, "agent-model-cap")
+        return (not problem), (problem or "%s, as wanted" % want)
+    return check
+
+
 def gs_lift_check():
     """A reviewer spawn on the lane's step, which grants reviewers, is allowed. guard.log gets one
     step-grant line that names the step and ends in the payload's session id."""
@@ -24457,6 +24512,16 @@ GS_CHECKS = (
     ("step grant: a Sonnet spawn runs no git call that names the roadmap", gs_cost_check),
     ("step grant: an unparseable bound step is logged as step-grant-unread", gs_unread_log_check),
     ("step grant: the runner's own lane id does not reach a case that sets none", gs_runner_id_check),
+    # A fork names its record branch in the extras file. Its lane's grant is read from that branch, not origin/roadmap.
+    ("step grant: a fork lane whose step grants a reviewer on the fork's own record branch is allowed",
+     gs_fork_check("own-branch", "roadmap-fork", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
+                   ("roadmap-fork",), OP_REVIEWER, "allow")),
+    ("step grant: a fork lane whose grant sits only on origin/roadmap, main's record branch, is refused",
+     gs_fork_check("main-branch", "roadmap-fork", dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])]),
+                   ("roadmap",), OP_REVIEWER, "deny")),
+    ("step grant: control for a fork, its own record branch with no grant refuses an Opus spawn",
+     gs_fork_check("own-no-grant", "roadmap-fork", dict([gs_step(GS_STEP, GS_LANE)]),
+                   ("roadmap-fork",), OP_REVIEWER, "deny")),
 )
 for _label, _check in GS_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
