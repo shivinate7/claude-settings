@@ -1509,3 +1509,7 @@
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
 - live-stream-reads-first-as-follow: `live_stream_hit` reads the word `-First` after `tail` as the follow flag `-F`, so a prose line in a `python3 -` heredoc was refused (seen 2026-11-07 by lane bg-tail-loses-verdict) (hooks/guard_stream.py)
 - test-rule-id-is-substring: the test runner matches an expected rule id as a substring of the reason, so a test that expects `check-tail` stayed green while the refusal still printed its longer old id (hooks/test_guard.py)
+- check-tail-pipe-at-line-end: a pipe at a line end with `tail` on the next line passes, and `narrated_tail_hit` has the same limit (hooks/guard_stream.py). Decision: background-check-through-verdict
+- check-tail-no-nested-read: no nested read, so `bash -c '... | tail'`, `{ ...; } | tail` and `python3 bin/ci-job ... | tail` all pass (hooks/guard_stream.py). Decision: background-check-through-verdict
+- check-tail-powershell-select: PowerShell `Select-Object -Last` and `-First` are not read as tail and head (hooks/guard_stream.py). Decision: background-check-through-verdict
+- check-tail-trailing-amp: a trailing `& echo $!` passes, while a plain `... | tail &` is already caught by `detached-launch` (hooks/guard_stream.py). Decision: background-check-through-verdict

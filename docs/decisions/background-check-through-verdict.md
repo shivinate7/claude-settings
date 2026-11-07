@@ -32,10 +32,7 @@ The rule stops a mistake Claude made in normal work (`guard-guards-mistakes-only
 
 ## Known gaps
 
-These are notes, not debts: no incident has shown either one.
-
-- PowerShell `Select-Object -First` and `-Last` do the same as `head` and `tail`. The rule does not read them.
-- A trailing `&` on a foreground `ci-job` moves it to the background, and the rule reads only `run_in_background`.
+Each gap is one line in `docs/debts/notes.md`, under this decision. The lines are `check-tail-pipe-at-line-end`, `check-tail-no-nested-read`, `check-tail-powershell-select` and `check-tail-trailing-amp`. No incident has shown any of them.
 
 Why: a merge or lane verdict is the one line the orchestrator needs. A pipe into a truncating filter hides it, and the lane must run the check again.
 

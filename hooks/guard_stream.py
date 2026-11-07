@@ -96,15 +96,17 @@ def narrating_stage(segment: str) -> str:
     return _roster_word(tokens, index)
 
 
-def _roster_word(tokens, index: int) -> str:
+def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
     """The roster spelling the command at `index` runs (`merge`, `merge.cmd`, or a script run through
-    an interpreter, `python merge.py`), else ''. The one reader of NARRATING_COMMANDS and
-    NARRATING_SCRIPT_TAILS."""
+    a runner, `python merge.py`), else ''. The one reader of NARRATING_COMMANDS and
+    NARRATING_SCRIPT_TAILS. A word carrying a script path counts, so `python3.11` and `uv run python`
+    both match. `interpreter_only` keeps the word to python, python3 or py: the check rule needs it, so
+    `grep -n x merge/merge.py` is no run of the script."""
     word = basename(tokens[index])
     if word in NARRATING_COMMANDS:
         return word
-    if word.removesuffix(".exe") not in SCRIPT_INTERPRETERS:
-        return ""   # `grep x merge/merge.py` only names the script; it does not run it
+    if interpreter_only and word.removesuffix(".exe") not in SCRIPT_INTERPRETERS:
+        return ""
     for token in tokens[index:]:
         if token.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
             return word + " " + basename(token)
@@ -170,7 +172,7 @@ def check_stage(segment: str, background: bool) -> str:
         return basename(tokens[index]) if background else ""
     if "--confirm" in tokens or not any(flag in tokens for flag in CHECK_FLAGS):
         return ""
-    return _roster_word(tokens, index)
+    return _roster_word(tokens, index, interpreter_only=True)
 
 
 def _pipeline_hit(stages, background: bool) -> str:
