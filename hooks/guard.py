@@ -118,6 +118,20 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
+  lane-start-overlap  ask. A create_session with a cs-build:lane tag, or a send_message that names a step slug for its
+                       target (the `Lane brief: <step>.` marker, or `step <slug>` with a hyphenated slug) that the target's
+                       cs-step tags do not carry, when an open lane overlaps it. Open lanes are the lane records in this
+                       session's transcript (create_session calls with their results, get_session results, list_sessions
+                       rows; the newest record of an id wins; archived or archive_session-closed ones are closed), the
+                       target excluded. Overlap: a cs-repo tag shared that is not the home repo, and the same cs-topic, or,
+                       for a step that differs from every cs-step of that lane, a shared word of the step and that lane's
+                       cs-step slugs or title slug (repo words dropped); or, on any repo, the same cs-step and cs-topic.
+                       The reason names that lane's step slug and session id. Runs after lane-effort-pin, lane-repo-tag and
+                       lane-one-topic. Fails open on any read error. It cannot see: the brief text at create time
+                       (lane-effort-pin forces the prompt to `/effort medium`), lanes started by other sessions or before a
+                       compaction unless a list_sessions or get_session result is in this transcript, home-repo-only lanes
+                       on the word clause, and step names given in prose without the word "step". A send_message to a
+                       target with no lane record passes. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -381,7 +395,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, lane_overlap_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -2493,7 +2507,7 @@ def lane_effort_hit(tool: str, tool_input) -> str:
 
 def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
     """(tags, repo) of a lane `create_session` call that carries no repo tag for the calling checkout's GitHub repo, or
-    ("", None). The repo is git_reads.github_repo of cwd, the one reading the roadmap build shares: the extras' "github"
+    ("", repo) with the repo read when a tag names it (None for any other call, or no readable repo). The repo is git_reads.github_repo of cwd, the one reading the roadmap build shares: the extras' "github"
     key first, then the origin's path. A lane tag is judged as in lane_effort_hit. With no readable repo, any full
     `cs-repo:<owner>/<name>` tag passes. One read of the repo feeds both the verdict and the deny reason."""
     tags = tool_input.get("tags")
@@ -2507,7 +2521,7 @@ def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
     # A tag is read as the roadmap reads it (repo_tag_names): exact prefix, no strip, owner/name without case.
     for tag in tags:
         if repo and repo_tag_names(tag, repo):
-            return "", None
+            return "", repo
         if not repo and isinstance(tag, str) and tag.startswith(REPO_TAG) and FULL_REPO_TAG.fullmatch(tag[len(REPO_TAG):]):
             return "", None
     return ", ".join(str(t) for t in tags), repo
@@ -4887,6 +4901,14 @@ def judge(payload) -> None:
     briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # A lane start or a step brief that overlaps an open lane (rule lane-start-overlap). After lane-one-topic's deny, and
+    # after the effort pin and repo tag above. The home repo is the one lane_repo_tag_hit read for a create_session.
+    overlap = lane_overlap_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",
+                               lambda: lane_repo if tool == CREATE_SESSION_TOOL else git_reads.github_repo(cwd)
+                               if isinstance(cwd, str) and cwd and os.path.isdir(cwd) else None)
+    if overlap:
+        refuse(tool, "ask", "lane-start-overlap", overlap[1], overlap[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)

@@ -97,3 +97,61 @@ def own_session_read(transcript, own_id, created=False):
                     except (ValueError, KeyError, TypeError):
                         continue
     return newest, tagged_after, parent
+
+
+ARCHIVED_STATUS = "SESSION_STATUS_ARCHIVED"
+
+
+def lane_records(transcript):
+    """{session id: {"tags", "title", "closed"}} of every session this transcript holds a record of: a create_session
+    call (its input tags and title, the id its result names), a get_session result (ccr.id, tags, title) and each
+    row of a list_sessions result (ccr.data). The newest record of an id wins. A record is closed when its
+    session_status is ARCHIVED, or when a successful archive_session call on the id follows it; a later record
+    opens it again. A body that does not parse is skipped. Raises OSError when the transcript cannot be opened:
+    the caller decides how that reads. Cost: one pass over the transcript, no file written."""
+    records, creates, reads, archives = {}, {}, set(), {}
+
+    def put(session, tags, title, status):
+        if isinstance(session, str) and isinstance(tags, list):
+            records[session] = {"tags": [str(t) for t in tags], "title": title if isinstance(title, str) else "",
+                                "closed": status == ARCHIVED_STATUS}
+
+    with open(transcript, encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                content = json.loads(line)["message"]["content"]
+            except (ValueError, KeyError, TypeError):
+                continue
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                kind, name = block.get("type"), str(block.get("name", ""))
+                given = block.get("input") if isinstance(block.get("input"), dict) else {}
+                if kind == "tool_use":
+                    if name.endswith("create_session") and isinstance(given.get("tags"), list):
+                        creates[block.get("id")] = (given["tags"], given.get("title"))
+                    elif name.endswith("get_session") or name.endswith("list_sessions"):
+                        reads.add(block.get("id"))
+                    elif name.endswith("archive_session") and isinstance(given.get("session_id"), str):
+                        archives[block.get("id")] = given["session_id"]
+                elif kind == "tool_result":
+                    use = block.get("tool_use_id")
+                    body = block.get("content")
+                    if isinstance(body, list):
+                        body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
+                    if use in archives:
+                        if not block.get("is_error") and archives[use] in records:
+                            records[archives[use]]["closed"] = True
+                    elif use in creates:
+                        put(_created_session_id(body), creates[use][0], creates[use][1], None)
+                    elif use in reads and isinstance(body, str):
+                        try:
+                            ccr = _record_json(body)["ccr"]
+                            rows = ccr["data"] if isinstance(ccr.get("data"), list) else [ccr]
+                            for row in (r for r in rows if isinstance(r, dict)):
+                                put(row.get("id"), row.get("tags"), row.get("title"), row.get("session_status"))
+                        except (ValueError, KeyError, TypeError, AttributeError):
+                            continue
+    return records
