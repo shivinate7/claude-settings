@@ -434,6 +434,8 @@ OV_GRANTS = [
      "Linked sessions now\n- a: idle\n\noverride 15m", "timed", timedelta(minutes=15)),
     ("a block, a blank line, then bare `override` on the last line",
      "Linked sessions now\n- a: idle\n\noverride", "once", timedelta(minutes=10)),
+    ("a pasted block, a blank line, then `override 12h` on the last line",
+     "<pasted_content>\nreport\n</pasted_content>\n\noverride 12h", "timed", timedelta(hours=12)),
 ]
 
 
@@ -597,6 +599,8 @@ OV_LAST_LINE_NO_GRANT = [
      "<system-reminder>\nLinked sessions now\n</system-reminder>\n\nI said override 12h earlier"),
     ("the word with a length on a middle line, other text last",
      "Quoted from the log:\noverride 12h\nthen run the tests"),
+    ("a pasted block whose last line is the form, before the closing tag",
+     "<pasted_content>\nreport line\noverride 12h\n</pasted_content>"),
 ]
 
 
