@@ -66,7 +66,8 @@ FULL_FILE_VERDICTS = {
 }
 
 # The `claude` the child finds first. It records each prompt, then answers each `Line N: text` from ANSWERS by the
-# text: a verdict, ERROR (exit 1), GARBAGE (a reply that is not JSON) or OMIT (the line is left out of the reply).
+# text with its whitespace collapsed to single spaces, as the script prints a multi-line span: a verdict, ERROR
+# (exit 1), GARBAGE (a reply that is not JSON) or OMIT (the line is left out of the reply).
 STUB = """#!@PYTHON@
 import json, os, re, sys
 CALLS = @CALLS@
@@ -76,7 +77,7 @@ with open(os.path.join(CALLS, "%03d.txt" % len(os.listdir(CALLS))), "w", encodin
     f.write(prompt)
 entries, error, garbage = [], False, False
 for number, text in re.findall(r"^Line (\\d+): (.*)$", prompt, re.M):
-    answer = ANSWERS.get(text.strip(), "holds")
+    answer = ANSWERS.get(" ".join(text.split()), "holds")
     error = error or answer == "ERROR"
     garbage = garbage or answer == "GARBAGE"
     if answer not in ("ERROR", "GARBAGE", "OMIT"):
@@ -217,7 +218,8 @@ class ControlTests(Base):
         self.assertEqual(len(rows), 21, "the labelled file's row count moved, and the full-file case pins its example line")
         self.assertEqual(sorted({r["label"] for r in rows}), sorted(LABELS), "the labels in the file are not the six the score maps")
         self.assertEqual(len({(r["rev"], r["file"]) for r in rows}), 11, "the rows no longer make 11 (rev, file) groups")
-        self.assertEqual(len({r["text"].strip() for r in rows}), 21, "two rows share a text, so a text cannot key a model answer")
+        self.assertEqual(len({" ".join(r["text"].split()) for r in rows}), 21,
+                         "two rows share a text once whitespace is collapsed, so a text cannot key a model answer")
         missing = [rev for rev in {r["rev"] for r in rows}
                    if subprocess.run(["git", "cat-file", "-e", rev + "^{commit}"], cwd=ROOT, capture_output=True).returncode]
         self.assertEqual(missing, [], "the labelled revs are not in this clone, so the file cannot be read at them")
@@ -402,7 +404,7 @@ class FullFileTests(Base):
         case = self.case()
         with open(LABELLED, encoding="utf-8") as f:
             rows = json.load(f)
-        answers = {r["text"].strip(): FULL_FILE_VERDICTS.get((r["file"], r["line"]), "holds") for r in rows}
+        answers = {" ".join(r["text"].split()): FULL_FILE_VERDICTS.get((r["file"], r["line"]), "holds") for r in rows}
         run = judge(case, ROOT, answers, labelled=LABELLED)
         self.assertEqual(run.lines(), ["false alarms 1/13 (7.7%), hits 3/4, unknown 0, skipped 4"],
                          "the score of the full labelled file is not the example line")
