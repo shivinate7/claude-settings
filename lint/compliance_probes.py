@@ -782,7 +782,7 @@ def xcodebuild_runs(text, make=False):
     runs = []
 
     def end(group):
-        names = [PARAM_DEFAULT.sub(r"\1", w).lstrip(MAKE_RECIPE_PREFIXES).rsplit("/", 1)[-1] for w in group]
+        names = [PARAM_DEFAULT.sub(r"\1", w.lstrip(MAKE_RECIPE_PREFIXES)).rsplit("/", 1)[-1] for w in group]
         if "xcodebuild" in names and not PRINTERS & set(names[:names.index("xcodebuild")]):
             runs.append(group[names.index("xcodebuild") + 1:])
 
