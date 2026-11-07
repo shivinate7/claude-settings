@@ -112,3 +112,34 @@ test("a stalled step carries the Stalled tag and the Doing now mark at first loa
   assert.equal(await page.locator("#s-b .tag.stl").count(), 1, "step b has no live thread, but its row carries no Stalled tag at first load");
   assert.equal(await page.locator('#now li:has(button[data-go="b"]) [role="img"][aria-label="Stalled"]').count(), 1, "step b has no Stalled mark in Doing now at first load");
 });
+
+// ---------------------------------------------------------------- the where-you-are line and Latest changes: a stalled step is not in progress
+// A stalled step's status is active, so the count and the feed read its stall state, not the raw status.
+const STALLED_C1 = { why: "", steps: [{ id: "c1", fix: "todo" }], paused: [], badPause: [], items: [], ...NO_ITEMS };
+test("the where-you-are line does not count a stalled step as in progress", async (t) => {
+  const steps = { c1: stepOf("Step c1", "doing", 1) };
+  const page = await open(t, builtPage({ steps, stalled: STALLED_C1 })); if (!page) return;
+  await assertRowReads(page, "c1", "Stalled");
+  assert.ok((await page.locator("#now > div:first-child > .sub").count()) > 0, "the Plan page has no where-you-are line (#now > div:first-child > .sub)");
+  const sub = (await page.locator("#now > div:first-child > .sub").first().textContent()).replace(/\s+/g, " ");
+  assert.doesNotMatch(sub, /in progress/, "the where-you-are line counts the stalled step as in progress: " + sub);
+});
+test("the Latest changes row of a stalled step reads Stalled, not In progress", async (t) => {
+  const steps = { c1: stepOf("Step c1", "doing", 1) };
+  const page = await open(t, builtPage({ steps, stalled: STALLED_C1 })); if (!page) return;
+  await assertRowReads(page, "c1", "Stalled");
+  const row = page.locator("#side .feed li", { has: page.locator('button[data-go="c1"]') });
+  assert.equal(await row.count(), 1, "step c1 has no row in Latest changes");
+  const kind = (await row.locator(".kind").textContent()).trim();
+  assert.doesNotMatch(kind, /In progress/, "the Latest changes row of stalled step c1 reads In progress");
+  assert.match(kind, /Stalled/, `the Latest changes row of stalled step c1 reads "${kind}", not Stalled`);
+});
+test("a live doing step still counts as in progress in the where-you-are line", async (t) => {
+  const steps = { a: stepOf("Step a", "doing", 2) };
+  // Step a has an open pull request on its branch a, which makes it a live lane.
+  const live = { readAt: new Date().toISOString(), threads: [], pulls: [{ number: 7, title: "Step a", branch: "a" }], branches: [], sessions: [] };
+  const page = await open(t, builtPage({ steps, live })); if (!page) return;
+  assert.ok((await page.locator("#now > div:first-child > .sub").count()) > 0, "the Plan page has no where-you-are line (#now > div:first-child > .sub)");
+  const sub = (await page.locator("#now > div:first-child > .sub").first().textContent()).replace(/\s+/g, " ");
+  assert.match(sub, /\b1 in progress/, "the where-you-are line does not count the live doing step as in progress: " + sub);
+});
