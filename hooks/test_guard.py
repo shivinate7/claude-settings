@@ -10384,6 +10384,54 @@ mtc_bash("a Bash updatedAt=$T from a shell variable is allowed: a variable is no
          'T=$(date -u +%Y-%m-%dT%H:%M:%SZ); echo updatedAt=$T')
 
 
+# ---- the document through file_path, and the str_replace action: `added` written two more ways
+# A set, an update or a batch entry may pass the document through `file_path`, a local JSON file, instead of `data`.
+# A str_replace edits one top-level string field in place. Both can carry `added` into collection items, so both
+# are judged. The refuse cases hold a value 10 minutes ahead (20:24Z); each pair holds the exact value (20:14Z).
+MTC_FILE_DIR = os.path.join(ROOT, "mtc")  # a folder of the run folder, for the document files below
+os.makedirs(MTC_FILE_DIR, exist_ok=True)
+
+
+def mtc_doc_file(name, added):
+    """A local JSON file holding one item document with `added`, under the run folder."""
+    path = os.path.join(MTC_FILE_DIR, name)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"id": "silent-undo-edit-pass", "added": added}, f)
+    return path
+
+
+MTC_FILE_AHEAD = mtc_doc_file("ahead.json", "2026-11-07T20:24:00Z")  # 10 minutes ahead of the clock
+MTC_FILE_EXACT = mtc_doc_file("exact.json", "2026-11-07T20:14:00Z")  # the clock itself
+
+# Refused: a set whose document comes through file_path, 10 minutes ahead. The guard reads the file, not only data.
+mtc_write("a set that passes an item through file_path with added 10 minutes ahead is refused", "deny",
+          "ArtifactData", url=MTC_ITEM_URL, action="set", collection="items",
+          doc_id="silent-undo-edit-pass", file_path=MTC_FILE_AHEAD)
+mtc_write("an update that passes an item through file_path with added 10 minutes ahead is refused", "deny",
+          "ArtifactData", url=MTC_ITEM_URL, action="update", collection="items",
+          doc_id="silent-undo-edit-pass", file_path=MTC_FILE_AHEAD)
+mtc_batch("a batch entry that passes an item through file_path with added 10 minutes ahead is refused", "deny", [
+    {"op": "set", "collection": "items", "doc_id": "silent-undo-edit-pass", "file_path": MTC_FILE_AHEAD}])
+# Passes: the same three with added at the clock itself, 20:14Z.
+mtc_write("a set that passes an item through file_path with added exactly 20:14Z is allowed", "allow",
+          "ArtifactData", url=MTC_ITEM_URL, action="set", collection="items",
+          doc_id="silent-undo-edit-pass", file_path=MTC_FILE_EXACT)
+mtc_write("an update that passes an item through file_path with added exactly 20:14Z is allowed", "allow",
+          "ArtifactData", url=MTC_ITEM_URL, action="update", collection="items",
+          doc_id="silent-undo-edit-pass", file_path=MTC_FILE_EXACT)
+mtc_batch("a batch entry that passes an item through file_path with added exactly 20:14Z is allowed", "allow", [
+    {"op": "set", "collection": "items", "doc_id": "silent-undo-edit-pass", "file_path": MTC_FILE_EXACT}])
+
+# Refused: a str_replace of the added field in items, which moves its value to 10 minutes ahead (20:24Z).
+mtc_write("a str_replace that moves added in items to 10 minutes ahead is refused", "deny", "ArtifactData",
+          url=MTC_ITEM_URL, action="str_replace", collection="items", doc_id="silent-undo-edit-pass",
+          field="added", old_str="2026-11-07T20:04:00Z", new_str="2026-11-07T20:24:00Z")
+# Passes: the same str_replace to the clock itself, 20:14Z.
+mtc_write("a str_replace that moves added in items to exactly 20:14Z is allowed", "allow", "ArtifactData",
+          url=MTC_ITEM_URL, action="str_replace", collection="items", doc_id="silent-undo-edit-pass",
+          field="added", old_str="2026-11-07T20:04:00Z", new_str="2026-11-07T20:14:00Z")
+
+
 # =========================================================================== 5d. cite by id
 FAMILY = "cite"
 #
