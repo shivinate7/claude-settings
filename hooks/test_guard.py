@@ -1771,6 +1771,13 @@ def _build_push():
         if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
             sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
 
+    # The feat destination holds the remote-tracking refs that the push cost case's forms read: feat for
+    # a HEAD or bare push, lane/foo for a refspec push or HEAD:lane/foo. A local lane/foo is the source.
+    for args in (("update-ref", "refs/remotes/origin/feat", "HEAD"),
+                 ("update-ref", "refs/remotes/origin/lane/foo", "HEAD"), ("branch", "lane/foo")):
+        if run_vcs(PUSHFEAT, *args).returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: PUSHFEAT needs git %s" % " ".join(args))
+
     # The fork names its record branch in the extras file, as lint/layout.py reads it (key record-branch).
     write(os.path.join(RECFORK, ".claude", "layout-extras.json"),
           json.dumps({"kinds": {}, "record-branch": "roadmap-fork"}) + "\n")
@@ -9697,8 +9704,9 @@ def record_push_cost_case():
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal destination
     (`origin main`, `HEAD:main`, `HEAD:<branch>`) adds no read. The conflict-markers push check
     (decision commit-refuses-conflict-markers) adds one `git diff --check` per push (a three-dot range,
-    so git finds the merge base itself), a second one only when the remote-tracking ref is missing, and
-    a `git show` only when a marker finding needs its line read. The layout and extras files
+    so git finds the merge base itself). The base is read in order: the remote-tracking ref, then the
+    upstream, then the default base, one `git rev-parse` for each ref that misses. A `git show` runs only
+    when a marker finding needs its line read. The layout and extras files
     are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The
     transcript is read only when the push reaches the record branch: a push to another branch passes
     with an unreadable transcript, and a push to the record branch with one is refused. A stand-in git
@@ -9744,6 +9752,15 @@ def record_push_cost_case():
             problems.append("a bare push: no read of push.default")
         if label == "a HEAD push" and any("push.default" in line for line in lines):
             problems.append("a HEAD push: reads push.default, which it must not")
+    # The fallback: no remote-tracking ref and no upstream, so the base is the default one. The upstream
+    # and tracking lookups miss, one rev-parse each, and the default base is found: one merge-base, one diff.
+    miss, _lines = spawn_kinds(VCS + " push origin HEAD:lane/bar", PUSHFEAT)
+    hit, _lines = spawn_kinds(VCS + " push origin HEAD:main", PUSHFEAT)
+    if miss.get("diff", 0) != 1 or miss.get("merge-base", 0) != 1 \
+            or miss.get("rev-parse", 0) - hit.get("rev-parse", 0) != 2:
+        problems.append("a push with no remote-tracking ref and no upstream: git spawns %s, want one diff, "
+                        "one merge-base and two rev-parse more than HEAD:main (%s)"
+                        % (sorted(miss.items()), sorted(hit.items())))
     unreadable = role_path("unreadable")
     for tail in ("push origin lane/foo", "push origin HEAD", "push"):
         got, _reason = decide(case_of(VCS + " " + tail, PUSHFEAT, unreadable))
