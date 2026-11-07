@@ -1140,6 +1140,37 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertEqual(out["decision"], "block")
         self.assertIn("no model named for reviewer", out["reason"])
 
+    def test_dm_red_other_item_with_a_commit_and_no_pair_blocks_the_next_excuse(self):
+        # Catches: an OTHER item that cites a commit but names no builder, test-author or record-writer pair
+        # leaves the builder unexcused, so a Next line naming the builder's pair cannot excuse it.
+        out = self.verdict(
+            "> **Done:**\n> - OTHER: Added a test, commit abc1234.\n>\n"
+            "> **Next:**\n> - Review running (builder sonnet, reviewer sonnet).\n> - Unstarted: none.",
+            [self.BUILDER, self.REVIEWER_R2])
+        self.assertIsNotNone(out, "the report passed: an OTHER item with a commit and no pair let Next excuse the builder")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_red_built_item_naming_only_a_reviewer_pair_blocks_the_next_excuse(self):
+        # Catches: a BUILT item that names only the reviewer's pair does not name the builder, so a Next line
+        # naming the builder's pair cannot excuse the builder. Only a builder, test-author or record-writer pair counts.
+        out = self.verdict(
+            "> **Done:**\n> - BUILT: x, PR #5 (reviewer sonnet)\n>\n"
+            "> **Next:**\n> - (builder sonnet) next round.\n> - Unstarted: none.",
+            [self.BUILDER, self.REVIEWER_R2])
+        self.assertIsNotNone(out, "the report passed: a BUILT item naming only a reviewer let Next excuse the builder")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_green_built_item_names_builder_reviewer_running_in_next_passes(self):
+        # Catches: the tightened gate must still pass a BUILT item that names its builder pair, so a reviewer that
+        # is running, named with its model in Next, is excused.
+        out = self.verdict(
+            "> **Done:**\n> - BUILT the guard, PR #5 (builder sonnet)\n>\n"
+            "> **Next:**\n> - Review running (reviewer sonnet).\n> - Unstarted: none.",
+            [self.BUILDER, self.REVIEWER_R2])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
 
 class UnstartedItemsTests(unittest.TestCase):
     """reports-name-unstarted-items, in report_guard.py's Stop hook."""
