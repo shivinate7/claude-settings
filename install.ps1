@@ -913,8 +913,9 @@ if (-not (Get-Command python3 -ErrorAction SilentlyContinue) -and -not (Get-Comm
 # Retries each file Install-File could not replace and each skill folder Install-Dir could not replace,
 # with a longer back-off (2, 4, 8 s), then re-reads the stamp of every copied guard.py and guard_*.py:
 # a copy that does not carry this run's id is a half install, so it is retried the same way. A file
-# or skill folder that still fails is named here and the run exits non-zero
-# at its end; the guard then fails closed and its text names this installer as the remedy.
+# or skill folder that still fails is named here and the run exits non-zero at its end. For a file
+# the guard then fails closed and its text names this installer as the remedy; a skill folder that
+# still fails is only named and sets the exit code, since no hook fails closed on one.
 # Links are skipped: a link reads the repo file, and the repo copy holds the placeholder.
 $StillFailed = [ordered]@{}
 if ($GuardStageFailed) { $StillFailed['the new guard set'] = '' }
