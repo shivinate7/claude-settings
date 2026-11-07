@@ -26,7 +26,10 @@ are the diff of old name to new name, as they would be in place. A file below th
 
 Blank lines and whitespace never count. The escape is a trailer in a commit message, one per
 path: `Drops-lines: <path> -- <reason>`. The PR body is read too: the same line in it
-excuses its path. A trailer or line with no reason excuses nothing. Each use prints
+excuses its path. A trailer or line with no reason excuses nothing. A deleted debt file is also excused by a
+`Retire-run: <slug> -- <run URL>` line in the PR body's last paragraph that the debt-close check
+(check_debt_retire.retired) accepts: a green run on the PR head or above, a Retire that holds. It needs a
+run reader (run_state); with none, or a read that fails, the finding stays. Each use prints
 `ALLOWED <path>: <reason>`. On a branch it may be on any commit of the branch. In history it is
 the commit, plus the branch it merged for a reversal.
 
@@ -593,7 +596,21 @@ def generated_page(cwd, head, paths, upstream="origin/main", tool=None):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def check(cwd, upstream, head, default=None, tool=None, pr_body=""):
+def retire_excuses(cwd, upstream, head, pr_body, run_state, paths):
+    """{debt path: reason} for deleted debts among `paths` whose `Retire-run` cite the debt-close check accepts (decision
+    debt-close-runs-retire). Fails closed: no run reader, an unreadable debt read, or a missing check excuses nothing."""
+    if run_state is None or not re.search(r"^Retire-run:", last_paragraph(pr_body), re.I | re.M | re.ASCII):
+        return {}
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import check_debt_retire  # lazy: it imports this module at its top
+        got = check_debt_retire.retired(cwd, upstream, head, pr_body, run_state, isolate=True)
+    except Exception:  # ImportError, its Unknown, any failed read: a finding stays
+        return {}
+    return {p: why for p, why in got.items() if p in paths}
+
+
+def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=None, retire_head=None):
     """(problem lines, ALLOWED notes); no problems is green. Raises Unknown. Reads only the commits
     upstream gained after the branch was cut: from where the branch's own first-parent line left
     main, up, the fork commit included. The window starts at the fork point, never at a commit time (one-second resolution)."""
@@ -626,6 +643,9 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body=""):
     page, same = generated_page(cwd, h, {p for p, _ in items if p not in ok}, upstream, tool)
     if same:
         ok = dict(ok, **{page: "the page is the generator's output for the head"})
+    open_paths = {p for p, _ in items if p not in ok}
+    if open_paths:
+        ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths), **ok)
     bad, notes = judge(items, ok)
     return bad, notes + (misplaced(cwd, "%s..%s" % (upstream, h)) if bad else [])
 

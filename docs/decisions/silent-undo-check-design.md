@@ -19,6 +19,11 @@ commit trailers of the branch and from the PR body. A bare path excuses nothing,
 nothing. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
 reason. No switch turns the check off.
 
+A deleted debt file has a second escape: a `Retire-run: <slug> -- <run URL>` in the PR body's last paragraph
+that the debt-close check accepts (decision `debt-close-runs-retire`). It excuses only that debt's path, never
+another file. With no run reader, or a read that fails, the finding stays. Cost: a Retire test may run again
+inside this scan, only when a cited debt delete is a finding.
+
 - **Body rule.** Drop fenced blocks and `<!-- -->` comments. Skip closing paragraphs that hold only the
   Claude Code attribution line. Read only the last paragraph left, with the trailer rules above.
 - **Why the body.** A repo that squashes, or writes its reasons in the PR, could not declare a dropped
