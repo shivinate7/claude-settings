@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """PreToolUse judge for an Agent spawn, an AskUserQuestion call and an ArtifactData write of a
 waiting-page item. One command hook replaces the settings.json `prompt` hook on Agent and the `agent`
-hook on AskUserQuestion: a hook of those types sees only the call's JSON and cannot read the override
-file, so no owner override reached it (decision owner-override).
+hook on AskUserQuestion. A prompt hook sees only the call's JSON. An agent hook can read files but runs
+no code, so neither runs guard_core.refuse, the one home of the owner override (decision owner-override).
 
 An AskUserQuestion box runs hooks/question_form.py chat_hit first. A hit refuses with the rule it
 names, through the same refuse(), and makes no model call; the model sees only a box that passes.
