@@ -10,11 +10,13 @@ The guard rule `two-worktrees-one-branch` refuses a git command that checks out 
 - `git checkout --ignore-other-worktrees` and `git switch --ignore-other-worktrees`, with any branch.
 - `git worktree add -f` (or `--force`) for a branch.
 
-The guard reads `git worktree list --porcelain` once, only for the `-B`, `-C` and forced-add forms (`git_reads.clone_worktrees`). It does not run for any other command. For `-B`, `-C` and a forced add, a branch that no other worktree holds passes. `--ignore-other-worktrees` is refused with any branch, because Claude has no need for it. The tree the command runs in is the `git -C <dir>` tree when the call names one, else the cwd. Only a worktree other than that tree counts. A read that fails refuses, because the act is not one Claude needs to make blind. A folder outside any clone passes, because git refuses the call there itself. A forced add reads the branch from `-b` or `-B`, else the commit-ish, else the path's last name, as git does.
+The guard reads `git worktree list --porcelain` once, only for the `-B`, `-C` and forced-add forms (`git_reads.clone_worktrees`). It does not run for any other command. For `-B`, `-C` and a forced add, a branch that no other worktree holds passes. `--ignore-other-worktrees` is refused with any branch, because Claude has no need for it. Each git call in a chain is judged on its own. Its tree is its own `git -C <dir>` tree, else the cwd after the chain's earlier `cd` steps. Only a worktree other than that tree counts. A read that fails refuses, because the act is not one Claude needs to make blind. A folder outside any clone passes, because git refuses the call there itself. A forced add reads the branch from `-b` or `-B`, else the commit-ish, else the path's last name, as git does.
 
 ## The incident
 
 On 2026-11-07, in lane override-plain-ask, a builder agent's worktree held `lane/override-plain-ask`. The lane session then ran `git checkout -B lane/override-plain-ask origin/lane/override-plain-ask` in its own worktree, and git allowed it. Each commit in one tree then moved the branch under the other tree. The other tree's files and index stayed at the old commit and showed as a staged change. A commit there would have undone the builder's fix.
+
+Three more lanes hit the same form on 2026-11-07: lint-uses-pinned-tools, notes-fix-other-1 (three times), and closure-stable-keys. Each ran `git checkout -B <b> origin/<b>` (or `-B <b> <sha>`) while another worktree held `<b>`. In closure-stable-keys, that other tree was the lane session's own.
 
 ## Harm it stops
 
