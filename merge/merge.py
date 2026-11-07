@@ -2551,6 +2551,52 @@ def draft_step(root, cfg, n, host, info):
 
 WAITS = 3  # the host.wait_checks calls in confirm, none in a loop: the head, the claim, the merge commit that heals the page
 
+PROSE_CITED = re.compile(r"(?<![\w./@+~-])(?:[\w.@+~-]+/)+[\w.@+~-]+\.\w+")  # a repo path a sentence names: a folder part and an extension
+PROSE_FILES_MAX = 40  # cited files read for one judge call
+
+def prose_judge_call(*, sentences, wt, sha):
+    """-> (findings, error) from the model judge (hooks/prose_judge.py merge_findings), one model call for all `sentences`.
+    The route rows and each repo file a sentence names are read from the blobs at `sha`, never the working files."""
+    import prose_judge  # hooks/prose_judge.py, on sys.path from the top of this file
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    import stale_cites
+    c, rows = git(wt, "show", f"{sha}:{stale_cites.ROWS_AT_HEAD}")
+    files = {}
+    for _, _, text in sentences:
+        for path in PROSE_CITED.findall(text):
+            path = posixpath.normpath(path)
+            if path not in files and len(files) < PROSE_FILES_MAX and not path.startswith(".."):
+                code, body = git(wt, "show", f"{sha}:{path}")
+                if code == 0:
+                    files[path] = body
+    return prose_judge.merge_findings(sentences, rows if c == 0 else "", files)
+
+def prose_judge_report(n, wt, base_ref, sha):
+    """Print the prose judge's lines for the PR's changed prose (decision claims-carry-backing). Report only: any failure
+    prints one unknown line, and nothing here changes the merge, the exit code, ff, afterMerge or the branch delete."""
+    pre = f"merge: #{n} prose judge: "
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+        import stale_cites
+        sentences = stale_cites.changed_sentences(f"{base_ref}...{sha}", cwd=wt)
+        if not sentences:
+            say(pre + "no changed prose to judge.")
+            return
+        findings, error = prose_judge_call(sentences=sentences, wt=wt, sha=sha)
+        if error:
+            say(pre + f"unknown ({' '.join(str(error).split())[:200]}).")
+        elif not findings:
+            say(pre + "no finding (report-only).")
+        else:
+            for f in findings:
+                say(pre + f"{f['path']}:{f['line']}: {' '.join(str(f['why']).split())}")
+    except Exception as e:
+        reason = " ".join(f"{type(e).__name__}: {e}".split())[:200]
+        try:
+            say(pre + f"unknown ({reason}).")
+        except Exception:
+            pass
+
 def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok=""):
     m = cfg.get("merge", {})
     info = info or host.pr(n)  # main read it once already, and the config came from that base. A read: acquire never waits, so the head cannot move before the lock is ours
@@ -2732,6 +2778,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             say(f"merge: #{n} the rule-file check could not run: git diff failed. Read the PR's files yourself.")
         for x in rule_files or []:
             say(f"merge: #{n} changes {x}, a rule file every session loads.")
+        prose_judge_report(n, wt, base_ref, sha)  # after the merge and outside the post-claim try: report only, it never fails the merge
         ok = True
         try:
             ff_main(root, base, commit)

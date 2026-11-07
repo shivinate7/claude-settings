@@ -140,8 +140,9 @@ class BaseUnknown(Unknown):
     """The base of the range does not resolve, as in a shallow clone. Not a finding."""
 
 
-def git(*args, on_fail=Unknown):
-    done = _nowindow.run(["git", *args], capture_output=True)
+def git(*args, on_fail=Unknown, cwd=None):
+    """Run git in `cwd` (the process folder when None); stdout bytes, or `on_fail` on a non-zero exit."""
+    done = _nowindow.run(["git", *args], capture_output=True, cwd=cwd)
     if done.returncode != 0:
         raise on_fail("git %s failed: %s" % (" ".join(args[:2]), done.stderr.decode("utf-8", "replace").strip()))
     return done.stdout
@@ -150,14 +151,14 @@ def git(*args, on_fail=Unknown):
 class BlobReader:
     """One `git cat-file --batch` process for every blob read."""
 
-    def __init__(self):
-        self.proc = None
+    def __init__(self, cwd=None):
+        self.proc, self.cwd = None, cwd
 
     def get(self, spec):
         """Bytes of the blob, or None when the object does not exist."""
         if self.proc is None:
             self.proc = _nowindow.Popen(["git", "cat-file", "--batch"], stdin=subprocess.PIPE,
-                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=self.cwd)
         self.proc.stdin.write(spec.encode("utf-8") + b"\n")
         self.proc.stdin.flush()
         header = self.proc.stdout.readline().split()
@@ -209,11 +210,11 @@ def exclude_patterns(root):
     return [glob_regex(p) for p in cleaned if p and not p.startswith("#")]
 
 
-def parse_range(text):
+def parse_range(text, cwd=None):
     """(diff arguments, base spec, head spec). A three-dot range reads base blobs at the merge base."""
     if "..." in text:
         left, right = text.split("...", 1)
-        base = git("merge-base", left, right, on_fail=BaseUnknown).decode().strip()
+        base = git("merge-base", left, right, on_fail=BaseUnknown, cwd=cwd).decode().strip()
         return [text], base, right
     if ".." in text:
         left, right = text.split("..", 1)
@@ -254,12 +255,12 @@ def added_markdown_lines(patch):
     return found
 
 
-def read_diff(diff_args):
+def read_diff(diff_args, cwd=None):
     """(removed, renamed, modified, added, lines) from one `git diff -M --raw -p -z -U0`: removed paths, {old: new},
     paths changed in place, added paths, and `added_markdown_lines`. The raw records come first, then one empty
     record, then the patch text. One start serves both, so the added lines cost no start of their own."""
     out = git("diff", "-M", "--raw", "-p", "-z", "-U0", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
-              *diff_args, on_fail=BaseUnknown).decode("utf-8", "replace")
+              *diff_args, on_fail=BaseUnknown, cwd=cwd).decode("utf-8", "replace")
     head, _, patch = out.partition("\0\0")
     tokens = head.split("\0")
     removed, renamed, modified, added = [], {}, [], []
@@ -642,6 +643,32 @@ def paragraphs(rows, fenced):
     return found
 
 
+def touched_paragraphs(rows, numbers):
+    """[(first row number, [rows])] of each paragraph of `rows` that holds a row number of the sorted list `numbers`."""
+    found = []
+    for first, block in paragraphs(rows, fenced_lines(rows)):
+        i = bisect.bisect_left(numbers, first)
+        if i < len(numbers) and numbers[i] < first + len(block):
+            found.append((first, block))
+    return found
+
+
+def sentence_spans(first, block):
+    """(text, outside, route, spans) of a paragraph: `blanked` of its text, and one (start, end, first row number, last
+    row number) per sentence. A sentence is read whole, so its first row is the row it starts on."""
+    text = "\n".join(block)
+    outside, route = blanked(text)
+    starts, offset = [], 0
+    for row in block:
+        starts.append(offset)
+        offset += len(row) + 1
+    spans = []
+    for a, b in sentences(text, outside):
+        top, bottom = (first + bisect.bisect_right(starts, x) - 1 for x in (a, b - 1))
+        spans.append((a, b, top, bottom))
+    return text, outside, route, spans
+
+
 def sentences(text, outside):
     """[(start, end)] offsets of each sentence of a paragraph, found in `outside` so that no code span or comment ends
     one, and trimmed in `text`. A sentence with nothing outside a span or comment is left out."""
@@ -696,10 +723,7 @@ class RouteClaimReader:
             blob = rng.batch.get("%s:%s" % (rng.head, path))
             rows = (blob or b"").decode("utf-8", "replace").replace("\r\n", "\n").split("\n")
             numbers = sorted(added)
-            for first, block in paragraphs(rows, fenced_lines(rows)):
-                i = bisect.bisect_left(numbers, first)
-                if i == len(numbers) or numbers[i] >= first + len(block):
-                    continue  # the range adds no line to this paragraph
+            for first, block in touched_paragraphs(rows, numbers):
                 for number, message in self.judge_paragraph(rng, first, block, set(numbers), rows_at_head):
                     found[(path, number)] = message
         if rows_changed:
@@ -709,17 +733,11 @@ class RouteClaimReader:
     def judge_paragraph(self, rng, first, block, added, rows_at_head):
         """[(first row number of the sentence, message)] for each unbacked claim sentence of the paragraph that
         holds an added row and carries no `ste-disable-line STALE005` mark."""
-        text = "\n".join(block)
-        outside, route = blanked(text)
-        starts, offset = [], 0
-        for row in block:
-            starts.append(offset)
-            offset += len(row) + 1
+        text, outside, route, spans = sentence_spans(first, block)
         out = []
-        for a, b in sentences(text, outside):
+        for a, b, top, bottom in spans:
             if not (VERB.search(outside[a:b]) and ROUTE_WORD.search(route[a:b])):
                 continue
-            top, bottom = (first + bisect.bisect_right(starts, x) - 1 for x in (a, b - 1))
             if not any(n in added for n in range(top, bottom + 1)):
                 continue
             if any("ste-disable-line" in block[n - first] and self.code in disabled(block[n - first])
@@ -1040,6 +1058,26 @@ def scan(range_text):
     finally:
         batch.close()
     return found, rng.unknowns, lines
+
+
+def changed_sentences(spec, cwd=None):
+    """[(path, first row number, text)]: each sentence of each governed Markdown paragraph that holds a line the range
+    `spec` ("base...head") adds. Selection only, no backing verdict: the merge's prose judge reads these. Git runs in
+    `cwd` (the process folder when None) and the text is read from the head blobs, never the working files."""
+    diff_args, _, head = parse_range(spec, cwd)
+    lines = read_diff(diff_args, cwd)[4]
+    excludes = exclude_patterns(cwd or ".")
+    found, batch = [], BlobReader(cwd)
+    try:
+        for path in sorted(p for p, rows in lines.items() if rows and governed(p, excludes)):
+            blob = batch.get("%s:%s" % (head, path))
+            rows = (blob or b"").decode("utf-8", "replace").replace("\r\n", "\n").split("\n")
+            for first, block in touched_paragraphs(rows, sorted(n for n, _ in lines[path])):
+                text, _, _, spans = sentence_spans(first, block)
+                found += [(path, top, text[a:b]) for a, b, top, _ in spans]
+    finally:
+        batch.close()
+    return found
 
 
 def placeholder_adjacent(line, start, end):

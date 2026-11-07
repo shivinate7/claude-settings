@@ -81,6 +81,77 @@ def refuse(payload, tool, reason):
     return 0
 
 
+MERGE_TIMEOUT = 60  # one call per merge, so it can wait longer than an edit's hook
+PROMPT_CAP = 200000  # characters, the whole merge prompt
+NOTE_ROOM = 200  # room kept for one cut note
+MERGE_HEAD = (
+    "You judge changed prose in a pull request that has just merged. Report only: nothing is refused. "
+    "Rule: claims-carry-backing (a sentence that states a capability by route, or a fact about code, must be backed: "
+    "it cites a route row id of the route rows below, or a file or test that holds the fact). "
+    "Below are the changed sentences as `path:line: text`, the route rows file, and the text of each repo file a sentence names. "
+    "Report a sentence only when the rows or the files show it is false, dead (cites a row or file that is not there) "
+    "or unbacked. When unsure, report nothing. If input was left out, a line starting `NOTE:` says so. "
+    "Reply JSON only: {\"ok\": true, \"findings\": []} when you find none, or "
+    "{\"ok\": false, \"findings\": [{\"path\": \"<path>\", \"line\": <line number>, \"why\": \"<one line>\"}]}."
+)
+
+
+def fit(label, text, room):
+    """`text` cut to at most `room` characters, with a NOTE line that names what was cut; whole when it fits."""
+    if len(text) <= room:
+        return text
+    keep = max(room - NOTE_ROOM, 0)
+    return text[:keep] + "\nNOTE: %d of %d characters of %s were cut to fit the prompt.\n" % (len(text) - keep, len(text), label)
+
+
+def merge_prompt(sentences, rows_text, files):
+    """One prompt for every changed sentence, at most PROMPT_CAP characters. The sentences get at most half the room,
+    the route rows at most a third of what is left, and the files share the rest."""
+    lines = "\n".join("%s:%s: %s" % (path, line, " ".join(str(text).split())) for path, line, text in sentences)
+    room = PROMPT_CAP - len(MERGE_HEAD) - 200  # 200: the section titles
+    body = "CHANGED SENTENCES\n" + fit("the changed sentences", lines, room // 2) + "\n"
+    room -= len(body)
+    rows = "ROUTE ROWS\n" + fit("the route rows", rows_text or "(absent)", max(room // 3, NOTE_ROOM)) + "\n"
+    room -= len(rows)
+    parts = []
+    for path in sorted(files):
+        share = max(room // (len(files) - len(parts)), NOTE_ROOM)
+        part = "FILE %s\n%s\n" % (path, fit(path, files[path], share))
+        room -= len(part)
+        parts.append(part)
+    return MERGE_HEAD + "\n" + body + rows + "".join(parts)
+
+
+def read_findings(verdict):
+    """(findings, error) from the model's answer: a list of {path, line, why}. An answer that is not that form is an
+    error with no finding, never a pass."""
+    findings = verdict.get("findings", [])
+    if not isinstance(findings, list):
+        return [], "the model's findings were not a list"
+    out = []
+    for item in findings:
+        if not (isinstance(item, dict) and isinstance(item.get("path"), str) and item["path"].strip()
+                and isinstance(item.get("line"), int) and not isinstance(item.get("line"), bool)
+                and isinstance(item.get("why"), str) and item["why"].strip()):
+            return [], "a finding of the model had no path, line and why"
+        out.append({"path": item["path"], "line": item["line"], "why": " ".join(item["why"].split())})
+    if verdict.get("ok") is False and not out:
+        return [], "the model said not ok and named no finding"
+    return out, None
+
+
+def merge_findings(sentences, rows_text, files):
+    """(findings, error) for the changed sentences of a merged pull request. One model call for all of them, none for an
+    empty list. `rows_text`: the route rows file at the merged commit. `files`: {path: text} of each repo file a sentence
+    names. A model error or an odd answer is an error return, which the merge prints as unknown."""
+    if not sentences:
+        return [], None
+    verdict, error = invoke_model(merge_prompt(sentences, rows_text, files), timeout=MERGE_TIMEOUT, shape=OK_SHAPE)
+    if error:
+        return [], " ".join(str(error).split())
+    return read_findings(verdict)
+
+
 def main():
     try:
         hook = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
