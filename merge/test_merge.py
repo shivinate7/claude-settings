@@ -12539,11 +12539,11 @@ def setUpModule():
 
 
 class ProseJudge(Env):
-    def setup_range(self, main_files, feat_files, links=None):
+    def setup_range(self, main_files, feat_files, links=None, later=None):
         """main gains `main_files` ({path: text}), so their lines are in no added line. Then feat removes the pending record
         (second.md, governed prose with no cite) and changes `feat_files`, and makes each `links` ({path: target}) a symlink to
-        target. The range is the feat changes alone, so a prose file is selected through the backing file it cites, never
-        through an added line."""
+        target. Feat then takes main's base, and `later` ({path: text}) is one more feat commit after that: the lines it adds to
+        a prose file are selected through the diff base, and a cited line through the backing file it cites."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
@@ -12560,6 +12560,13 @@ class ProseJudge(Env):
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: drop the pending record, change the backing")
         sh(o, "git", "push", "-q", "origin", "feat")
         head_takes_base(self)
+        if later:  # after the base is taken: a prose file that main and feat both add would conflict in head_takes_base's merge
+            sh(o, "git", "fetch", "-q", "origin")
+            sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+            for path, text in later.items():
+                put(os.path.join(o, path), text)
+            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: add lines to the prose")
+            sh(o, "git", "push", "-q", "origin", "feat")
 
     def run_capped(self):
         """The merge with the cap at PROSE_CAP. -> (rc, out)."""
@@ -12746,6 +12753,19 @@ class ProseJudge(Env):
         self.assertEqual(stub.prompts, [], "model calls: %d, want 0: no line cites a changed file" % len(stub.prompts))
         self.assertEqual(rc, 0, out)
         self.assertFalse(judge_lines(out, PROSE, "stale") or judge_lines(out, PROSE, "UNKNOWN"), "the report names %s with no call made" % PROSE)
+
+    def test_a_line_the_range_adds_to_governed_prose_is_judged_with_no_backing_change(self):
+        # No backing file changes and the line has no cite, so only the diff base can select it: main holds the old line,
+        # and feat adds line 5. The old line on main is in no added line, so the call must not carry it.
+        old = "# Cloud notes\n\nAn old line on main.\n"
+        self.setup_range({PROSE: old}, {}, later={PROSE: old + "\nCloud sessions run in a container.\n"})
+        stub, rc, out = self.judge(verdict_for(5, "unbacked", "no cited file backs the line"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: the range adds one prose line with no cite" % len(stub.prompts))
+        self.assertIn("File: %s" % PROSE, stub.prompts[0], "the call does not name %s" % PROSE)
+        self.assertIn("Line 5: Cloud sessions run in a container.", stub.prompts[0], "the call does not carry the line the range adds, at line 5")
+        self.assertNotIn("An old line on main", stub.prompts[0], "the call carries a line that main holds, not one the range adds")
+        self.assertTrue(judge_lines(out, "%s:5" % PROSE, "unbacked"), "the report names no unbacked line at %s:5" % PROSE)
+        self.assertEqual(rc, 0, out)
 
     def test_the_model_call_runs_after_the_merge_lock_is_released(self):
         # confirm holds the lock from acquire until the release in its finally. A model call waits up to MODEL_TIMEOUT, so it
