@@ -7214,6 +7214,23 @@ sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", c
 
 sh("delete: the home directory", "rm -fr ~", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: the home variable", "rm -rf $HOME", "deny", "destructive-delete", cwd=NOGIT)
+# guard-home-delete-literal: the home folder written out is the home folder, as `$HOME` is. The rule
+# guards the folder, so another user's home folder counts too. HOME is this run's own home, read here.
+sh("guard-home-delete-literal: the home folder written out is refused, as $HOME is",
+   "rm -rf " + HOME, "deny", "destructive-delete", cwd=NOGIT)
+sh("guard-home-delete-literal: the home folder's contents written out are refused, as $HOME/* is",
+   "rm -rf " + HOME + "/*", "deny", "destructive-delete", cwd=NOGIT)
+sh("guard-home-delete-literal: another user's home folder written out is refused",
+   "rm -rf /home/someone", "deny", "destructive-delete", cwd=NOGIT)
+sh("guard-home-delete-literal: rd /s /q of another user's home folder is refused",
+   "rd /s /q C:\\Users\\someone", "deny", "destructive-delete", cwd=NOGIT)
+sh("guard-home-delete-literal: rd /s /q of another user's home folder, PowerShell, is refused",
+   "rd /s /q C:\\Users\\someone", "deny", "destructive-delete", tool="PowerShell", cwd=NOGIT)
+# The near forms: a folder inside the home folder is no home delete, and stays allowed.
+sh("guard-home-delete-literal: a folder inside the home folder is allowed",
+   "rm -rf " + HOME + "/build", "allow", cwd=NOGIT)
+sh("guard-home-delete-literal: rd /s /q of a folder inside another user's home is allowed",
+   "rd /s /q C:\\Users\\someone\\build", "allow", cwd=NOGIT)
 sh("delete: the working directory", "rm -rf .", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: a glob", "rm -rf *", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: a drive root", "rm -rf C:/", "deny", "destructive-delete", cwd=NOGIT)
