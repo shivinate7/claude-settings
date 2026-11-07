@@ -3929,6 +3929,18 @@ sh("kill: pkill by name reaches every match", "pkill node", "deny", "machine-wid
 sh("kill: pkill with the long flag", 'pkill --full "node server.ts"', "deny", "machine-wide-kill",
    cwd=NOGIT)
 sh("kill: killall by name", "killall node", "deny", "machine-wide-kill", cwd=NOGIT)
+# kill-guard-word-only: a wrapper that runs its argument is judged by the command it runs, as `timeout`
+# is. `gtimeout` (GNU timeout under Homebrew) and `watch` run their argument, so each reads the same way.
+sh("kill-guard-word-only: gtimeout runs its argument, so gtimeout 5 pkill foo is refused",
+   "gtimeout 5 pkill foo", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill-guard-word-only: watch runs its argument, so watch pkill foo is refused",
+   "watch pkill foo", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill-guard-word-only: timeout runs its argument, so timeout 5 pkill foo is refused (parity)",
+   "timeout 5 pkill foo", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill-guard-word-only: a quoted echo of the gtimeout form calls nothing",
+   'echo "gtimeout 5 pkill foo"', "allow", cwd=NOGIT)
+sh("kill-guard-word-only: gtimeout around a command that kills nothing is allowed",
+   "gtimeout 5 ls", "allow", cwd=NOGIT)
 # Re-pointed (rule shared-trees-no-machine-wide-kill, refusal-vs-rule row machine-wide-kill): a list
 # of pids kills nothing, so `lsof -t` alone passes. Its kill is refused where it feeds one, below.
 sh("kill: lsof -t lists the pids on a port, kills nothing", "lsof -t -i :3000", "allow", cwd=NOGIT)
