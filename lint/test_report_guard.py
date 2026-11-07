@@ -4777,6 +4777,25 @@ class MistakeNamesGuardTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assert_blocked(mg_report(text))
 
+    def test_mg_red_capitalised_elision_does_not_hide_admission_blocks(self):
+        # A capitalised elision ('Cause, 'Til) opens no quote either: the admission after it still counts.
+        for text in ("I ran it 'Cause the lane was slow, and I clobbered the notes.' Nothing else.",
+                     "I waited 'Til the lanes ended, and I broke the batch.' Nothing else."):
+            with self.subTest(text=text):
+                self.assert_blocked(mg_report(text))
+
+    def test_mg_red_year_elision_does_not_hide_admission_blocks(self):
+        # A year elision ('25) opens no quote either: the admission after it still counts.
+        self.assert_blocked(mg_report("Back in '25 I broke the lanes' notes."))
+
+    def test_mg_pin_listed_elisions_do_not_hide_admission_blocks(self):
+        # Green now: 'cos, 'twas and 'nuff are listed elisions. Each text holds one and a later apostrophe.
+        for text in ("I waited 'cos the lane was slow, and I clobbered the notes.' Nothing else.",
+                     "The lane said 'twas fine, and I broke the batch.' Nothing else.",
+                     "I told them 'nuff, then I overwrote the notes.' Nothing else."):
+            with self.subTest(text=text):
+                self.assert_blocked(mg_report(text))
+
     # Green: each of these must pass.
     def test_mg_green_inbox_admission_with_fence_step_passes(self):
         self.assert_allowed(mg_report(MG_INBOX + " Queued as step:inbox-fence-check."))
