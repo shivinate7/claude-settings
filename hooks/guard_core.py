@@ -1064,14 +1064,15 @@ def shell_abs(path: str, base):
     return path
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
     real shell keeps: `cd`, `pushd`, `Set-Location` move it, a bare `cd` goes home, `cd -` goes
     back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
-    is not tracked, and a `cd` into a folder that does not exist leaves the shell where it was (a `;` runs
-    the next command there), unless an earlier `mkdir` may have made it. `ends` is what `split_segments` gave:
+    is not tracked, and a `cd` into a folder that does not exist is not trusted: the folder is unknown. With
+    `failed_cd_stays` the shell stays where it was instead (a `;` runs the next command there), unless an
+    earlier `mkdir` may have made the folder. `ends` is what `split_segments` gave:
     in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack, made = None, [], False
@@ -1101,7 +1102,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
             else:
                 where = shell_abs(move or "~", where)
                 # a folder missing now may be made by an earlier `mkdir` of the same command: then it is unknown
-                where = where if where and os.path.isdir(where) else (None if made else old)
+                where = where if where and os.path.isdir(where) else (old if failed_cd_stays and not made else None)
             prev = old
         for _ in range(marks.count(")")):
             if stack:

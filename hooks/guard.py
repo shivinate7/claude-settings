@@ -3344,7 +3344,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if not segment.strip() or not moves_head(segment):
             continue
         # each call is judged in the folder IT runs in: the cds before it, then its own -C
-        head_where = head_root(segment, dir_before_segment(head_segments, number, cwd, head_ends) or cwd)
+        head_where = head_root(segment, dir_before_segment(head_segments, number, cwd, head_ends, failed_cd_stays=True) or cwd)
         matched = pointer_head_hit(segment, head_where)
         if matched:
             refuse(tool, "deny", "pointer-head", POINTER_HEAD_REASON, matched)
