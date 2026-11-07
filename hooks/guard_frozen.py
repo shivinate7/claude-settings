@@ -1202,7 +1202,7 @@ def _fed_segments(segments, ends):
         index, chain = _walk_wrappers(tuple(words))
         xargs = next((flags for word, flags in chain if word == "xargs"), None)
         if index is not None and xargs is not None:
-            roots, back = [], number - 1
+            roots, back = [], len(out) - 1
             while back >= 0 and out_ends[back] == "|":
                 roots = _roots(out_words[back]) + roots
                 back -= 1
@@ -1257,20 +1257,22 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     when that folder cannot be told. `predicate_command` also hands `predicate` the segment's command
     name as a third argument (`''` when none). `script_data` reads the script of a `python -c` or a
     `node -e` as data, for a caller that reads its shell spots on its own (`shell_write_hit`).
-    `read_fed` also reads a path that `find`, `xargs`, a `for` list or a substitution feeds to a
-    writer. Each substitution is then judged as a command of its own, with a mark in its place in
-    the text around it, so `cp $(find tests -name x) /tmp/` is a copy out of `tests`, not a flag
-    soup. The command is then judged once more as `_fed_command` rewrites it. Only the builder test
-    check asks for it, so no other caller's verdict moves."""
-    def scan(text, fed=None):
+    `read_fed` reads what main reads, and more: a path that `find`, `xargs`, a `for` list or a
+    substitution feeds to a writer. It judges the command as it stands (`_copy_outer` aside), then
+    each substitution's inner command as a command of its own, then the command once more as
+    `_fed_command` rewrites it. It only adds refusals, except for a `cp` whose sources are built by
+    a substitution (`cp $(find tests -name x) /tmp/`): those are reads, not flags. The builder test
+    check asks for it, from rule 7c and from `never_lifted` (both call `builder_shell_test_hit`), so
+    no other caller's verdict moves."""
+    def scan(text, fed=None, copy_outer=False):
         return _shell_write_scan(text, cwd, predicate, holds, follow_cd, command_position,
-                                 predicate_command, script_data, fed)
+                                 predicate_command, script_data, fed, copy_outer)
 
     if not read_fed:
         return scan(cmd)
     texts, too_deep = _substitutions(cmd, powershell=is_powershell(cmd))
-    hit = ""
-    for text in ([cmd] if too_deep or len(texts) < 2 else [text for text, _in_message in texts]):
+    hit = scan(cmd, copy_outer=True)
+    for text, _in_message in ([] if too_deep else texts[:-1]):
         hit = hit or scan(text)
     if hit:
         return hit
@@ -1278,8 +1280,27 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     return scan(fed[0], fed[1:]) if fed else ""
 
 
+def _copy_outer(segment):
+    """A `cp` segment whose substitutions are all among its sources, as the text around them with an
+    `x` in each one's place, else the segment. A substitution in the last word, as `-t`'s value, or
+    in a flag is left in: the destination of a copy is a write, and `_copy_reads` fails closed on it."""
+    words = _quoted_words(segment)
+    index = resolve_command(tuple(words))
+    if index is None or _name(words[index]) != "cp" or is_powershell(segment):
+        return segment
+    texts, too_deep = _substitutions(segment, mark=_MARK)
+    if too_deep or len(texts) < 2:
+        return segment
+    outer = _quoted_words(texts[-1][0])
+    for at, word in enumerate(outer):
+        if _MARK in word and (at == len(outer) - 1 or word.startswith("-") or outer[at - 1].startswith("-t")
+                              or outer[at - 1] == "--target-directory"):
+            return segment
+    return type(segment)(_MARK_AT.sub("x", texts[-1][0]))
+
+
 def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, predicate_command,
-                      script_data=False, fed=None):
+                      script_data=False, fed=None, copy_outer=False):
     """`_shell_write_hit` for one text. `fed` is the (segments, ends) that `_fed_command` made of it."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     if fed:
@@ -1288,6 +1309,8 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
         cmd = _resolve_vars(cmd)
         ends = []
         segments = split_segments(cmd, ends)
+        if copy_outer:
+            segments = [_copy_outer(segment) for segment in segments]
     scans = [_scan(segment) for segment in segments]
     parsed = [[_typed(word, segment) for word in _quoted_words(segment)] for segment in segments]
     # The same words with a quoted newline kept, for a `sh -c` script read at its command positions only:
