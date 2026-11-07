@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Rule `conflict-markers` in `hooks/guard.py` refuses a commit or a push that would carry git conflict markers. Its home is `conflict_markers_hit` in `hooks/guard_merge.py`, beside the records-page check. Layer: the coordinator, 2026-11-07 03:10 CST, option b, after review round 1 found the commit-only design both missed and cried wolf.
+Rule `conflict-markers` in `hooks/guard.py` refuses a commit or a push that would carry git conflict markers. Its home is `conflict_markers_hit` in `hooks/guard_merge.py`, beside the records-page guard. Layer: the coordinator, 2026-11-07 03:10 CST, option b, after review round 1 found the commit-only design both missed and cried wolf.
 
 - The mistake: a conflict-fix step fails, and the next command in the chain still stages and commits the file (incident, lane merge-waits-required-only, 2026-11-07 02:36 CST, local only, removed by a fix commit before push).
 - The harm: markers on a pushed branch break every file they touch, and a review or a later merge may carry them on.

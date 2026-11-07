@@ -518,7 +518,7 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 # read against HEAD with `git diff --check`; an untracked file is read against /dev/null.
 # A blind commit with a push after it in the call is refused only when the files that commit covers
 # already hold a triplet, or the chain runs a conflict-making git step (merge, pull, rebase,
-# cherry-pick, stash pop or apply, am). Otherwise it is no hit, and the push check judges what is sent.
+# cherry-pick, stash pop or apply, am). Otherwise it is no hit, and the guard's push part judges what is sent.
 # A push is judged on the commits it would send, which are real when the hook runs. For each ref it
 # names, the range runs from the merge base with the remote-tracking tip of the destination, else the
 # source's upstream, else the default base, up to the local source ref (HEAD for a bare push, and for a
