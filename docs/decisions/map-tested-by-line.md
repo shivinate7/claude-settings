@@ -15,7 +15,7 @@ Lane `map-tested-by-line`, 2026-11-05. Banchi's retired `docs/map.py` held `test
   - Or it imports one `__init__.py` or `index.*` that re-exports the file (one hop).
   - Or a string in its code is the file's path, from the test's folder or the repository root. This covers a test that runs the file as a subprocess. Comments and docstrings never count (rule `building-scanner-respects-strings`).
   - A Python import of a package loads its `__init__.py`. MAP9 `uses` facts read the same way.
-  - A shell test (`.sh`, `.bash`, `.zsh`) is read through `blankShell` (`scripts/lib/source-text.mjs`), by its words: a run between blanks and `;&|()<>` outside quotes, quote marks removed, a leading `NAME=` dropped. A comment or a heredoc body yields no word. A word with a `\`, a newline or a leading `/` is skipped. A word with no `$` counts when it is the file's path. A word with one leading variable anchor (`$NAME/` or `${NAME}/`) and a tail with no further `$` counts when the tail is the path, read from the test's folder or the root. The anchor is never resolved, and a tail with a variable counts for nothing (lane orchestrator pick, 2026-11-07 14:13 CST, the same anchor rule as the path-join lane).
+  - A shell test (`.sh`, `.bash`, `.zsh`) is read through `blankShell` (`scripts/lib/source-text.mjs`), by its words: a run between blanks and `;&|()<>` outside quotes, quote marks removed, a leading `NAME=` dropped. A comment or a heredoc body yields no word. A word with a `\`, a newline or a leading `/` is skipped. A word with no `$` counts when it is the file's path. A word with one leading variable anchor (`$NAME/` or `${NAME}/`) and a tail with no further `$` counts when the tail is the path, read from the test's folder or the root. The anchor is never resolved, and a tail with a variable counts for nothing (lane orchestrator pick, 2026-11-07 14:13 CST, the same anchor rule as branch `map11-path-joins`, which reads a path built by a join).
   - A test in another language, or a run with no `python3`, is an unknown read and fails.
 - **No new config key.** The line names its tests.
 - **Format version 5.** The step from 4 to 5 changes no file. It makes an older copy of the skill refuse the map.
@@ -42,6 +42,7 @@ Debts:
 - `map-import-alias-unread` (a test that imports by a path alias, such as `@/src/y`, fails MAP11).
 - `map-tested-by-path-pieces` (a test that builds the path by `os.path.join` or `path.join` fails MAP11).
 - `map-py-base-name-match` (a test with stdlib `import queue` passes for a mapped `jobs/queue.py`; MAP9 shares the reader).
+- `map-shell-subst-in-quotes` (a shell test that runs a file inside `$(...)` in double quotes fails MAP11, a false fail).
 
 Kind: process
 Home: skills/plain-english-map/SKILL.md
