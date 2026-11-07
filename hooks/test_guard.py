@@ -13050,6 +13050,31 @@ add("builder-test: a session run with --agent builder (no agent_id) is not judge
 add("builder-test: a builder Write of a test file from no repository is refused by shape", "deny",
     rule=BT, tool="Write", file_path="src/test_app.py", carries=("test-author", "Report"),
     agent_id="bld1", agent_type="builder", cwd=NOGIT)
+# THE JOIN WITH AN UNKNOWN HEAD. A builder's script joins a folder it cannot read (a temp folder from
+# tempfile.mkdtemp(), which is in no repository) to test-looking pieces. The unknown head drops out of the
+# join, so the pieces read as a repo test path: a false alarm. A join that resolves to the working folder
+# or to a relative folder is a repo test path, and still refuses.
+sh("builder join: a temp folder from mkdtemp joined to tests is allowed",
+   "python3 - <<'EOF'\nimport os, tempfile\ntmpdir = tempfile.mkdtemp()\n"
+   "open(os.path.join(tmpdir, 'tests', 'test_x.py'), 'w').write('x')\nEOF", "allow", **B)
+sh("builder join: a temp folder from mkdtemp in python -c joined to tests is allowed",
+   "python3 -c \"import os, tempfile; t = tempfile.mkdtemp(); "
+   "open(os.path.join(t, 'tests', 'test_x.py'), 'w').write('x')\"", "allow", **B)
+sh("builder join: a literal folder outside the repository joined to tests is allowed",
+   "python3 - <<'EOF'\nimport os\nopen(os.path.join('/tmp/elsewhere', 'tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "allow", **B)
+sh("builder join: a relative folder joined to tests still refuses",
+   "python3 - <<'EOF'\nimport os\nopen(os.path.join('tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "deny", rule=BT, **B)
+sh("builder join: a relative folder held in a variable and joined to tests still refuses",
+   "python3 - <<'EOF'\nimport os\nrepo = '.'\nopen(os.path.join(repo, 'tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "deny", rule=BT, **B)
+sh("builder join: the working folder from Path.cwd() joined to tests still refuses",
+   "python3 - <<'EOF'\nfrom pathlib import Path\n(Path.cwd() / 'tests' / 'test_x.py').write_text('x')\nEOF",
+   "deny", rule=BT, **B)
+sh("builder join: the working folder from os.getcwd() joined to tests still refuses",
+   "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "deny", rule=BT, **B)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
 add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
