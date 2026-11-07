@@ -3232,7 +3232,7 @@ def reviewed_lines(h, root):
     if any(a[2] == "batch" for a in acts.values()):  # one read of the base's latest run, for the red-main text of each batch line
         verdict, detail = base_verdict(root, h, h.base)
         if verdict == "unknown":
-            raise Stop(f"{h.base}'s runs are unknown, so a batch line cannot say whether {h.base} is red: {detail}")
+            raise Stop(f"{h.base}'s runs are unknown, so a batch line cannot say whether {h.base} is red: {detail} " + REVIEW_CITE)
         if verdict == "red":
             times = [github_epoch(r.get("created_at") or r.get("run_started_at")) for r in h.red_runs if r.get("created_at") or r.get("run_started_at")]
             held = f" held by main red {hours(min(times))}h" if times else " held by main red"
