@@ -4,6 +4,7 @@ Mockup: `docs/design/page-dash-edge-rail-touch.html`. Screen: `skills/waiting-pa
 Deep links: `#s=both|today|faint-edge|muted-edge|rows-every-pointer`, `&w=390|1280`, `&t=both|light|dark`, `&p=auto|coarse|fine`, `&lab=off`, `&hide=<state>,...`, `&focus=<id>`.
 Sizes: phone 390 and wide 1280. `layout.py devices` prints `unknown` for this repo, so the sizes are the brief's 390 and the wide size of earlier waiting-page mockups. Themes: light and dark.
 Focus ids: the edge `#b-none-chip-sizes`; a rail row `#ov-holds`.
+Focus per choice: edge `#s=faint-edge&focus=b-none-chip-sizes` against `#s=muted-edge&focus=b-none-chip-sizes`; rows `#s=faint-edge&w=1280&p=fine&focus=ov-holds` against `#s=rows-every-pointer&w=1280&p=fine&focus=ov-holds` (the two row choices differ only for a mouse).
 The page CSS in the mockup is page.html's style block at 174b005c1, as written. The lane's CSS sits in `#newcss`. Where the mockup and page.html differ, page.html and these notes win.
 A desktop browser never matches `(pointer: coarse)`. The harness class `sim-coarse` mirrors the builder's rule in the frames that stand for touch. It is not for the builder.
 No departure from the existing behaviour: both changes fix a gap against `docs/design/a11y.md`, as the two debts name.
@@ -25,6 +26,7 @@ The ruling card is `--surface` 55% with `--ground` (line 722); the answered card
 - Wider reach: the base rule also draws Overturn on a ruling card (`b-over-<id>`, `buildCard` ruling branch). The mockup draws it. It passes on the ruling card in both themes.
 - One home: with the base rule at `--faint`, lines 345 to 347 repeat it. Delete line 345 (its comment, which says `.btn.dash` uses `--line` and becomes false), line 346 (`.btn.dash.pkb { border-color: var(--faint); }`) and line 347 (`.btn.dash.pkb[aria-pressed="true"]`, which repeats line 251). Then edit the last sentence of the comment at line 350 to: "This rule stays after `.btn.dash[aria-pressed="true"]`: both have the same weight, so the source order decides." Checked: `.btn.pkb[aria-disabled="true"]` (weight 0,3,0) still beats `.btn.dash` (0,2,0), and it comes after line 251 (0,3,0), so an off Drop keeps its solid `--faint` edge.
 - Option "Muted edge" (`#s=muted-edge`): the edge takes `--muted`, the label colour. Gain: 6.47 and 7.37. Loss: no precedent for an edge in `--muted`, and the edge draws as heavy as the label in dark. Hide it with "Hide Muted edge".
+- The builder's check, from the debt: a browser test reads the computed edge colour of `#b-none-<id>`, `#b-done-<id>` and `#b-park-<id>` against the card surface, and of `#b-over-<id>` against a ruling card, in light and dark, and fails under 3:1.
 - Disabled: on a blocked card `.btn:disabled` sets opacity .45, so the edge falls under 3:1. WCAG 1.4.11 exempts a disabled control. No change.
 - Forced colours: the browser draws the dashed edge in the system colour. No change.
 
