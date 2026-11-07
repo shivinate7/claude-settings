@@ -65,6 +65,11 @@ UNKNOWN_HEAD = "> **Done** BUILT abc123\n> **Next** CI unknown on HEAD"  # a pus
 UNKNOWN_BRANCH = "> **Done** BUILT abc123\n> **Next** CI unknown on %s" % BRANCH  # a push that named no head
 DONE_CLAIMS_HEAD = "> **Done** BUILT %s\n> **Next** CI running on %s" % (HEAD7, HEAD7)
 PUSH_UNKNOWN_NOTE = "Push-CI guard: UNKNOWN, the check did not run"  # the note of a push check that did not run
+REMOTE_URL = "https://github.com/shivinate7/claude-settings.git"  # a push to a URL updates no remote-tracking ref
+REMOTE_LINE = "To %s\n" % REMOTE_URL  # the header git prints for a push; it names no ref
+TAG = "v1.0"  # a short-name tag: a push names it without `refs/tags/`
+UNNAMED_HEAD_TEXT = "no remote-tracking ref names the pushed head"  # the reason a head no read named gives
+READ_FAILED_WORDS = ("git", "read", "rev-parse", "timed out")  # words a reason names a failed read with
 
 
 def pr_entry(draft=False, branch=BRANCH, sha=HEAD, number=1430):
@@ -466,6 +471,25 @@ class PushCheckTests(unittest.TestCase):
         decision, _, _ = self.stop(turn(UNKNOWN_BRANCH, steps), fixture_, folder=folder)
         self.assertIsNone(decision, "a report that holds the unknown line was blocked")
 
+    def test_short_name_tag_push_with_a_new_tag_line_needs_no_ci_line(self):
+        # `v1.0` is a tag, not a branch: the push names no head, so no CI line is due and no branch is read.
+        steps = push(REMOTE_LINE + " * [new tag]         %s -> %s\n" % (TAG, TAG), command="git push origin %s" % TAG)
+        fixture_ = answers(prs=[pr_entry()], runs=[PENDING])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a report-less turn with a tag push was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
+        self.assertIsNone(decision, "a push of tag %s with a [new tag] line was blocked for CI, though it names no "
+                          "head: %s" % (TAG, reason))
+
+    def test_short_name_tag_push_with_no_ref_line_needs_no_ci_line(self):
+        steps = push(REMOTE_LINE, command="git push origin %s" % TAG)
+        fixture_ = answers(prs=[pr_entry()], runs=[PENDING])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a report-less turn with a tag push was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
+        self.assertIsNone(decision, "a push of tag %s with no ref line was blocked for CI, though it names no head: "
+                          "%s" % (TAG, reason))
+
     # Green controls: each passes on the old code and on the new.
 
     # Coverage of the branch read of a push with no ref line (report_guard._heads_of_git_push). Each passes on the
@@ -509,6 +533,28 @@ class PushCheckTests(unittest.TestCase):
                               "HEAD: %s" % (command, reason))
                 decision, _, _ = self.stop(turn(UNKNOWN_HEAD, steps), fixture_, folder=folder)
                 self.assertIsNone(decision, "a report that holds the unknown line on HEAD was blocked")
+
+    def test_push_to_a_url_remote_reads_unknown_on_the_branch_and_blocks_once(self):
+        # A URL remote updates no remote-tracking ref, so the head is not named. Pins the intended behaviour: the
+        # branch reads unknown, the turn blocks once, and the rewrite that holds the unknown line passes. Green on
+        # the old code (coverage of report_guard._heads_of_git_push's URL branch).
+        outputs = (("no ref line", REMOTE_LINE), ("a [new branch] line",
+                                                   REMOTE_LINE + " * [new branch]      %s -> %s\n" % (BRANCH, BRANCH)))
+        for label, output in outputs:
+            with self.subTest(output=label):
+                steps = push(output, command="git push %s HEAD:%s" % (REMOTE_URL, BRANCH))
+                fixture_ = answers(prs=[pr_entry()], runs=[PENDING])
+                decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_)
+                self.assertEqual(decision, "block", "a report-less URL push with %s was not blocked (scope check)"
+                                 % label)
+                decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
+                self.assertEqual(decision, "block", "a URL push with %s passed with no CI line: its head is not named, "
+                                 "so it reads unknown" % label)
+                self.assertIn("CI unknown on " + BRANCH, reason, "a URL push with %s is not named unknown on %s: %s"
+                              % (label, BRANCH, reason))
+                decision, _, _ = self.stop(turn(UNKNOWN_BRANCH, steps), fixture_)
+                self.assertIsNone(decision, "a URL push with %s: the report that holds the unknown line was blocked"
+                                  % label)
 
     def test_green_run_on_ready_pr_passes(self):
         decision, reason, _ = self.stop(turn(REPORT, push(push_out(HEAD7))),
@@ -611,7 +657,8 @@ class PushCheckTests(unittest.TestCase):
 
 class BudgetTests(unittest.TestCase):
     """The read budget of one Stop (ci_wake.Budget): the per-read cap and the spent total, on a fake clock.
-    No real time passes. The gh reads run through the stand-in on PATH, with this case's fixture."""
+    No real time passes. The gh reads run through the stand-in on PATH, with this case's fixture. It also holds the
+    git read of a head (ci_wake.commit_of) that fails outright: git missing, or a timeout."""
 
     def setUp(self):
         self.folder = tempfile.mkdtemp(prefix="budget-", dir=trg.RUN_FOLDER)
@@ -685,6 +732,34 @@ class BudgetTests(unittest.TestCase):
         self.assertLessEqual(max(timeouts), 8,
                              "a gh read was given %s s, past the 8 s per-read cap" % max(timeouts))
         self.assertEqual(state, "pending", "the fixture's pending run did not read as pending")
+
+    def failed_head_read_reason(self, failure):
+        """The block reason of a push whose head the git read (commit_of) cannot name: `failure` is the patch that
+        makes the read fail. The push has no ref line, so the head is read from its remote-tracking ref."""
+        records = turn(REPORT, push("", command="git push origin HEAD:%s" % BRANCH))[1:]
+        budget = ci_wake.Budget(total=20, per_read=8, clock=StepClock([0.0]))
+        with failure:
+            states = report_guard.push_ci_states(records, {"cwd": self.folder}, budget=budget)
+        # Scope first: the push is read as one branch, unknown, with no head.
+        self.assertEqual([(branch, state) for branch, state, _ in states], [(BRANCH, "unknown")],
+                         "the push was not read as one unknown branch: %s" % states)
+        return report_guard.push_ci_problem(REPORT, states)
+
+    def assert_names_failed_read(self, reason):
+        self.assertNotIn(UNNAMED_HEAD_TEXT, reason, "the failed head read is reported as the ref names no head, which "
+                         "hides that the read failed: " + reason)
+        self.assertIn("CI unknown on " + BRANCH, reason, "the push is not named unknown on %s: %s" % (BRANCH, reason))
+        self.assertTrue(any(word in reason for word in READ_FAILED_WORDS),
+                        "the reason does not name a failed read (one of %s): %s" % (READ_FAILED_WORDS, reason))
+
+    def test_missing_git_on_the_head_read_names_the_failed_read(self):
+        reason = self.failed_head_read_reason(mock.patch.object(ci_wake.shutil, "which", return_value=None))
+        self.assert_names_failed_read(reason)
+
+    def test_timed_out_head_read_names_the_failed_read(self):
+        timeout = subprocess.TimeoutExpired(["git", "rev-parse"], 8)
+        reason = self.failed_head_read_reason(mock.patch.object(subprocess, "run", side_effect=timeout))
+        self.assert_names_failed_read(reason)
 
 
 if __name__ == "__main__":
