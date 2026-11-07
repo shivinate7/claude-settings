@@ -3962,6 +3962,47 @@ sh("branch-slug-no-git: worktree add of a dotted path whose last part is git is 
 sh("branch-slug-no-git: twin, worktree add of a dotted path whose last part is digit is allowed",
    VCS + " worktree add " + BSLUG_WT + "/w/fix.digit", "allow", cwd=HMMAIN)
 
+# git 2.43 reads --orphan as a flag, and the new branch is named after the path, as with a
+# plain path-only add. -d is the short form of --detach, and git takes an unambiguous prefix of a long
+# option, so --det is --detach too. Neither makes a branch, so neither is judged by its path's name.
+sh("branch-slug-no-git: worktree add --orphan of a git-named path is denied",
+   VCS + " worktree add --orphan " + BSLUG_WT + "/git-x", "deny", BSLUG, cwd=HMMAIN)
+sh("branch-slug-no-git: twin, worktree add --orphan of a digit-named path is allowed",
+   VCS + " worktree add --orphan " + BSLUG_WT + "/digit-x", "allow", cwd=HMMAIN)
+sh("branch-slug-no-git: worktree add -d of a git-named path is allowed, -d is --detach",
+   VCS + " worktree add -d " + BSLUG_WT + "/git-x", "allow", cwd=HMMAIN)
+sh("branch-slug-no-git: twin, worktree add -d of a digit-named path is allowed",
+   VCS + " worktree add -d " + BSLUG_WT + "/digit-x", "allow", cwd=HMMAIN)
+sh("branch-slug-no-git: worktree add --det of a git-named path is allowed, --det is --detach",
+   VCS + " worktree add --det " + BSLUG_WT + "/git-x", "allow", cwd=HMMAIN)
+sh("branch-slug-no-git: twin, worktree add --det of a digit-named path is allowed",
+   VCS + " worktree add --det " + BSLUG_WT + "/digit-x", "allow", cwd=HMMAIN)
+
+# git takes --mov as --move, and reads -vm as -v with -m. Each renames, so the new name is judged.
+sh("branch-slug-no-git: branch --mov to a git-named name is denied, --mov is --move",
+   VCS + " branch --mov old git-new", "deny", BSLUG, cwd=NOGIT)
+sh("branch-slug-no-git: twin, branch --mov to a digit-named name is allowed",
+   VCS + " branch --mov old digit-new", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: branch -vm to a git-named name is denied, -vm bundles -m",
+   VCS + " branch -vm old git-new", "deny", BSLUG, cwd=NOGIT)
+sh("branch-slug-no-git: twin, branch -vm to a digit-named name is allowed",
+   VCS + " branch -vm old digit-new", "allow", cwd=NOGIT)
+
+# The value-flag skip: --reason takes the next word, so the path is still the one word left and its
+# last part is judged. -f and -q take no value, so the path follows them directly.
+sh("branch-slug-no-git: worktree add --lock --reason x of a git-named path is denied",
+   VCS + " worktree add --lock --reason x " + BSLUG_WT + "/git-x", "deny", BSLUG, cwd=HMMAIN)
+sh("branch-slug-no-git: twin, worktree add --lock --reason x of a digit-named path is allowed",
+   VCS + " worktree add --lock --reason x " + BSLUG_WT + "/digit-x", "allow", cwd=HMMAIN)
+sh("branch-slug-no-git: worktree add -f of a git-named path is denied",
+   VCS + " worktree add -f " + BSLUG_WT + "/git-x", "deny", BSLUG, cwd=HMMAIN)
+sh("branch-slug-no-git: twin, worktree add -f of a digit-named path is allowed",
+   VCS + " worktree add -f " + BSLUG_WT + "/digit-x", "allow", cwd=HMMAIN)
+sh("branch-slug-no-git: worktree add -q of a git-named path is denied",
+   VCS + " worktree add -q " + BSLUG_WT + "/git-x", "deny", BSLUG, cwd=HMMAIN)
+sh("branch-slug-no-git: twin, worktree add -q of a digit-named path is allowed",
+   VCS + " worktree add -q " + BSLUG_WT + "/digit-x", "allow", cwd=HMMAIN)
+
 # The scanner cases. A quoted `#` or `don't` does not end the quote, so the act after it still counts.
 sh("branch-slug-no-git: a quoted # before a git-named switch -c is denied",
    'echo "#" && ' + VCS + " switch -c git-x", "deny", BSLUG, cwd=NOGIT)
