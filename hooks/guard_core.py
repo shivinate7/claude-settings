@@ -686,16 +686,6 @@ _FED_SHELL = re.compile(
 _SHELL_FIRST = _interpreter_header(_SHELLS)
 _INTERPRETERS = _SHELLS + "|python[\\d.]*|perl|ruby|node"
 _INTERPRETER_FIRST = _interpreter_header(_INTERPRETERS)
-# Commands that run their stdin as shell lines (`ssh host <<EOF`, `at now <<EOF`, `su -c`, `sudo`), and other
-# script runners whose stdin script can call out (`php`, `lua`). A per-body reading keeps a body whose header
-# names one, as main does: only a body that a known non-shell interpreter prints, or plain data, may drop.
-_STDIN_SHELLS = "ssh|rsh|at|batch|su|sudo|doas|sg|newgrp|chroot|nsenter|busybox|toybox|rbash"
-_STDIN_SCRIPTS = "php|lua|luajit|tclsh|expect|awk|gawk|mawk|Rscript|julia|groovy|osascript|gdb|sqlite3|psql|mysql"
-_STDIN_SHELL_FIRST = re.compile(
-    r"(?<![\w.-])(?:" + _STDIN_SHELLS + r")(?:\.exe|\.cmd)?(?![\w.-])[^\n]*<<").search
-_STDIN_SCRIPT_FIRST = re.compile(
-    r"(?<![\w.-])(?:" + _STDIN_SHELLS + "|" + _STDIN_SCRIPTS + r")(?:\.exe|\.cmd)?(?![\w.-])[^\n]*<<").search
-
 
 def SHELL_HEREDOC(text: str) -> bool:
     return bool(_SHELL_FIRST(text) or _PIPED_SHELL(text) or _FED_SHELL(text))
@@ -829,6 +819,8 @@ def _drop_heredoc_bodies(cmd: str, keep=(), walks=None) -> str:
 # keep more bodies in view, never fewer.
 _WRITE_TARGET = re.compile(r"(?:>>?\|?(?!&)|(?<![\w-])tee(?:[ \t]+-[\w-]+)*[ \t])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
 _WORDS = re.compile(r"[^\s;&|<>()\"'`]+").findall
+# The commands that print their heredoc body or write it to a file, and run nothing in it.
+_DATA_SINKS = {"cat", "tee"}
 _WRAPPERS = r"source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command|time|ssh"
 _RUNNER = re.compile(r"(?:" + _INTERPRETERS + "|" + _WRAPPERS + r")(?:\.exe|\.cmd)?").fullmatch
 # The runners that read a file as shell lines: a shell or a wrapper, never a python, perl, ruby or node.
@@ -858,14 +850,37 @@ def _runs_written_file(text: str, headers, runner=_RUNNER) -> str:
     return ""
 
 
+def _feeds_data(header: str, scripts: bool) -> bool:
+    """True when each heredoc on the header line feeds a command that only holds its body as data: a data
+    sink (`_DATA_SINKS`: `cat > n.md <<EOF`, `sudo tee n.md <<EOF`), or with `scripts` a python, node, perl or
+    ruby whose script `interpreter_bodies` reads. The command word is read at command position, as
+    `resolve_command` reads it. A heredoc piped onward, fed through xargs, or on a segment that cannot be
+    read feeds no data sink."""
+    ends = []
+    fed = False
+    for segment, end in zip(split_segments(header, ends), ends):
+        if not heredoc_heads(segment)[0]:
+            continue
+        tokens = segment_tokens(segment)
+        if end == "|" or not tokens:
+            return False
+        at, chain = _walk_wrappers(tuple(tokens))
+        word = basename(tokens[at]) if at is not None else ""
+        if any(wrapper == "xargs" for wrapper, _ in chain) or not (
+                word in _DATA_SINKS or (scripts and script_language(word))):
+            return False
+        fed = True
+    return fed
+
+
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = False) -> str:
     """Drop the body of every heredoc, and keep every header line. `shells_only` keeps a body
-    only when a shell reads it, for a rule that judges shell lines. By default one body that runs keeps
-    every body in view. With `per_body` a body stays in view only when its own header runs it: a header that
-    names an interpreter, a shell its pipe feeds, or a file it writes that a later segment runs. Then a file
-    that python, perl, ruby or node runs is no shell file under `shells_only`: it holds a script, which
-    `interpreter_bodies` gives to a rule that reads its shell spots. A caller that maps the returned lines
-    back to the command (`heredoc_offsets`) takes the default."""
+    only when a shell reads it, for a rule that judges shell lines. One body that runs keeps every body in
+    view. With `per_body` that reading drops a body whose own header only feeds it to a data sink
+    (`_feeds_data`), unless the header names a shell or an interpreter, pipes it to a shell, or writes a file
+    that a later segment runs. Under `shells_only` a python, node, perl or ruby body drops too: it holds a
+    script, which `interpreter_bodies` gives to a rule that reads its shell spots. A caller that maps the
+    returned lines back to the command (`heredoc_offsets`) takes the default."""
     if "<<" not in cmd:
         return cmd  # no heredoc: nothing to drop
     walks, bodies, unclosed = _heredoc_walks(cmd)
@@ -874,21 +889,21 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = F
     # The header test reads the command with its bodies gone: a `bash <<EOF` line inside a data body
     # is text, and no body line may make another body look run.
     text = _without_message_values(_drop_heredoc_bodies(cmd, walks=walks))
-    runner = _SHELL_RUNNER if per_body and shells_only else _RUNNER
     headers = [_without_message_values(header) for _, _, header in bodies]
-    if not per_body or walks[0] != walks[1]:
-        # With the two walks reading these headers differently, no body can be told apart from another.
-        if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(text, headers, runner):
-            return cmd  # the body may be executed, so keep it under inspection
-        keep = []
-    elif _FED_SHELL(text):
-        return cmd   # a heredoc that eval or source runs may open on a line before its header
-    else:
+    keep = []
+    # The per-body reading starts from main's whole-command test, which both its callers read before.
+    if (SHELL_HEREDOC if shells_only and not per_body else INTERPRETER_HEREDOC)(text) or _runs_written_file(
+            text, headers):
+        # The body may be executed, so keep it under inspection. With the two walks reading these headers
+        # differently, no body can be told apart from another; a heredoc that eval or source runs may open
+        # on a line before its header.
+        if not per_body or walks[0] != walks[1] or _FED_SHELL(text):
+            return cmd
         first = _SHELL_FIRST if shells_only else _INTERPRETER_FIRST
-        stdin_first = _STDIN_SHELL_FIRST if shells_only else _STDIN_SCRIPT_FIRST
+        runner = _SHELL_RUNNER if shells_only else _RUNNER
         keep = [number for number, header in enumerate(headers)
-                if first(header) or stdin_first(header) or _PIPED_SHELL(header)
-                or _runs_written_file(text, [header], runner)]
+                if first(header) or _PIPED_SHELL(header) or _runs_written_file(text, [header], runner)
+                or not _feeds_data(header, shells_only)]
     # bash runs each substitution of an unquoted body while it writes the body, so those stay in view as
     # lines of their own; the prose around them is data. A script body is the interpreter's own text, one
     # command (`interpreter_bodies` gives it to a rule that reads its shell spots).
