@@ -11815,8 +11815,8 @@ UNSET = {"CLAUDE_CONFIG_DIR": None, "HOME": HOME_FIX, "USERPROFILE": HOME_FIX}  
 EMPTY = {"CLAUDE_CONFIG_DIR": "", "HOME": HOME_FIX, "USERPROFILE": HOME_FIX}     # set, empty
 DEFAULT_WORD = "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 NO_COLON_WORD = "${CLAUDE_CONFIG_DIR-$HOME/.claude}"
-# Green controls: the forms that are refused today. The plain `${VAR}` reads the config dir, and a
-# literal `$HOME/.claude` reads HOME/.claude once HOME is HOME_FIX. The red cases differ only in the word.
+# Controls: these forms are refused. The plain `${VAR}` reads the config dir, and a literal
+# `$HOME/.claude` reads HOME/.claude once HOME is HOME_FIX. The red cases differ only in the word.
 sh("frozen: default-word: control, ${CLAUDE_CONFIG_DIR} with it set, a write to hooks/guard.py, is refused",
    'printf x > "${CLAUDE_CONFIG_DIR}/hooks/guard.py"', "deny", "frozen-path", cwd=NOGIT, env=HOME_ONLY)
 sh("frozen: default-word: control, a literal $HOME/.claude with CLAUDE_CONFIG_DIR unset, is refused",
@@ -11832,9 +11832,9 @@ sh("frozen: default-word: - with CLAUDE_CONFIG_DIR empty keeps the empty value, 
    'printf x > "${CLAUDE_CONFIG_DIR-/tmp/elsewhere}/hooks/guard.py"', "allow", cwd=NOGIT, env=EMPTY)
 sh("frozen: default-word: - with CLAUDE_CONFIG_DIR empty does not take the frozen word, allowed",
    'printf x > "${CLAUDE_CONFIG_DIR-$HOME/.claude}/hooks/guard.py"', "allow", cwd=NOGIT, env=EMPTY)
-# :+ with the variable set names a relative folder, which no frozen path sits under, so it is allowed
-# as it is today. :? with the variable set expands to the config dir, so the write is refused.
-sh("frozen: default-word: :+ with CLAUDE_CONFIG_DIR set keeps today's verdict, allowed",
+# :+ with the variable set names a relative folder, which no frozen path sits under, so it is allowed.
+# :? with the variable set expands to the config dir, so the write is refused.
+sh("frozen: default-word: :+ with CLAUDE_CONFIG_DIR set names a relative folder, allowed",
    'printf x > "${CLAUDE_CONFIG_DIR:+x}/hooks/guard.py"', "allow", cwd=NOGIT, env=HOME_ONLY)
 sh("frozen: default-word: :? with CLAUDE_CONFIG_DIR set, a write to hooks/guard.py, is refused",
    'printf x > "${CLAUDE_CONFIG_DIR:?}/hooks/guard.py"', "deny", "frozen-path", cwd=NOGIT, env=HOME_ONLY)
@@ -13390,14 +13390,22 @@ sh("builder-test: shell pathlib write to a test under Path.cwd() is refused",
 sh("builder-test: shell open-write to a test under os.getcwd() is refused",
    "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'x.py'), 'w').write('x')\nEOF",
    "deny", rule=BT, carries=("test-author",), **BR)
-# A CWD PREFIX JOINED BY `+`. `_py_paths` reads `/` and `os.path.join`, not a string sum, so a test
-# written as `os.getcwd() + '/tests/...'` reads as no path at all. The join and `/` forms above stay as
-# they are; these two are the same shape spelled with `+`.
+# A CWD PREFIX JOINED BY `+`. `_py_paths` reads a `+` of known pieces, so `os.getcwd() + '/tests/...'`
+# reads as `./tests/...`. The join and `/` forms above read the same way, and these are that shape spelled
+# with `+`.
 sh("builder-test: shell open-write to a test under os.getcwd() + a string is refused",
    "python3 - <<'EOF'\nimport os\nopen(os.getcwd() + '/tests/test_x.py', 'w').write('x')\nEOF",
    "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: shell open-write to a test under str(Path.cwd()) + a string is refused",
    "python3 - <<'EOF'\nfrom pathlib import Path\nopen(str(Path.cwd()) + '/tests/x.py', 'w').write('x')\nEOF",
+   "deny", rule=BT, carries=("test-author",), **BR)
+# A test folder joined by `+` with a part the guard cannot read is still a write under `tests/`, so it is
+# refused. `sys.argv[1]` and an f-string are both such parts.
+sh("builder-test: shell open-write to a test under os.getcwd() + a sys.argv part is refused",
+   "python3 - <<'EOF'\nimport os, sys\nopen(os.getcwd() + '/tests/' + sys.argv[1], 'w').write('x')\nEOF",
+   "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell open-write to a test under os.getcwd() + an f-string is refused",
+   "python3 - <<'EOF'\nimport os\nn = 1\nopen(os.getcwd() + '/tests/' + f'test_{n}.py', 'w').write('x')\nEOF",
    "deny", rule=BT, carries=("test-author",), **BR)
 # False alarms. A test path under a made temp folder is no test of this checkout. A product file under
 # the working folder is a builder's to write. A read of a test is no write.
