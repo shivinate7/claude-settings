@@ -101,7 +101,7 @@ FAMILIES = {
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
-    "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit is refused only when the commit covers a triplet already in the tree, a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
+    "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
     "frozen": "frozen paths",
     "model-cap": "the agent model cap",
@@ -10898,8 +10898,8 @@ records_allow("a chain that runs the generator, then add -A and commit, where th
 # THE SEAM. The hook runs BEFORE the shell chain, so it cannot see what an earlier step does to the tree.
 # A commit, or a `--continue`, is judged on the index, plus the working-tree files its adds, `commit -a`
 # or `commit <path>` cover. A blind step (one that can change the tree) before a commit gives no hit,
-# unless the commit covers a triplet already in the tree before the call. A git step in the chain that
-# makes a conflict is refused. A `git push` is judged on the net change it sends: upstream..HEAD, or the
+# unless a push follows the commit in the call and the commit covers a triplet already in the tree. A git
+# step in the chain that makes a conflict is refused. A `git push` is judged on the net change it sends: upstream..HEAD, or the
 # refspec, or HEAD's range when the refspec does not resolve. A fence does not exempt a full triplet. A
 # read that fails (no HEAD yet) is no hit.
 #
@@ -11145,14 +11145,16 @@ def _build_conflict_markers_push():
 lazy_fixture([CMK_PU, CMK_RB, CMK_MP, CMK_NF, CMK_CL, CMK_RT, CMK_CLT, CMK_SEQ, CMK_SEQB],
              _build_conflict_markers_push)
 
-# Re-pointed in round 2 (were allows): a blind step before a commit is refused when the commit covers a
-# triplet already in the tree before the call. The step may remove it, and the rule does not read what the
-# step does. The sed and the fix script both cover a file that holds the triplet before the call.
-cmk_refuse("a sed that deletes the marker lines, then add and commit, the triplet in the file before the call",
-           "sed -i '/^" + "<" * 7 + " /d;/^" + "=" * 7 + "$/d;/^" + ">" * 7 + " /d' src/app.py && "
-           + VCS + " add src/app.py && " + VCS + " commit -m x", CMK_MERGE)
-cmk_refuse("a fix script, then add -A and commit, the triplet unstaged in a tracked file",
-           "./fix.sh; " + VCS + " add -A && " + VCS + " commit -m x", CMK_AM)
+# A commit that cannot be judged, with no push after it in the call, is no hit. The sed and the fix script
+# below cover a file that holds the triplet before the call, so each one with a push after it is refused.
+CMK_SED_COMMIT = ("sed -i '/^" + "<" * 7 + " /d;/^" + "=" * 7 + "$/d;/^" + ">" * 7 + " /d' src/app.py && "
+                  + VCS + " add src/app.py && " + VCS + " commit -m x")
+CMK_FIX_COMMIT = "./fix.sh; " + VCS + " add -A && " + VCS + " commit -m x"
+cmk_allow("a sed that deletes the marker lines, then add and commit, no push", CMK_SED_COMMIT, CMK_MERGE)
+cmk_allow("a fix script, then add -A and commit, no push", CMK_FIX_COMMIT, CMK_AM)
+cmk_refuse("a sed that deletes the marker lines, then add, commit and push", CMK_SED_COMMIT + " && "
+           + VCS + " push", CMK_MERGE)
+cmk_refuse("a fix script, then add -A, commit and push", CMK_FIX_COMMIT + " && " + VCS + " push", CMK_AM)
 
 # The push check: a push is refused when a commit it would send adds a full triplet, whichever step made it.
 cmk_refuse("a push of an unpushed commit that holds a triplet", VCS + " push", CMK_PU)
@@ -11189,8 +11191,9 @@ cmk_refuse("two commits, each after an add, the second holding a triplet, then a
 
 
 # Round 2. A commit or a --continue is judged on what it covers. A blind step before a commit (one that can
-# change the tree) is refused only when the commit covers a triplet already in the tree before the call, or
-# when the chain runs a git step that makes a conflict. A push judges the net change it sends.
+# change the tree) is refused only when a push follows the commit in the call and the commit covers a
+# triplet already in the tree before the call, or when the chain runs a git step that makes a conflict. A
+# push judges the net change it sends.
 R2_DIR = os.path.join(CMKROOT, "r2")
 R2_NEW = os.path.join(R2_DIR, "new")      # new.txt untracked, holding a triplet
 R2_RB = os.path.join(R2_DIR, "rebase")    # a rebase stopped on a.txt, the triplet staged after the stop
