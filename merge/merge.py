@@ -83,7 +83,7 @@ class Dropped(Stop):
     """The silent-undo check found a dropped line."""
 
 class Unread(Dropped):
-    """A history read of a check could not run: no finding, so no refusal. After the claim push it stops as Unproven."""
+    """A read of a check could not run: no finding, so no refusal. After the claim push it stops as Unproven."""
 
 class UnreadText(str):
     """The text of a `holds_base` answer that could not be read. A caller that keeps a claim tells it from a refusal by this class."""
@@ -1410,13 +1410,13 @@ def base_stamp_config(wt, tmp, cfgrel, base_ref):
     -> a file path outside the worktree, or None when the base has no config or no stamp kinds."""
     c, listed = git(wt, "ls-tree", "--name-only", base_ref, "--", cfgrel)
     if c:  # an unreadable base is not an absent file
-        raise Stop(f"cannot read {base_ref} to look for {cfgrel} {STAMP_CFG_CITE}: {listed}")
+        raise Unread(f"cannot read {base_ref} to look for {cfgrel} {STAMP_CFG_CITE}: {listed}")
     if not listed:
         return None
     try:
         c, text = git(wt, "show", f"{base_ref}:{cfgrel}")
         if c:
-            raise Stop(f"cannot read {cfgrel} on {base_ref} {STAMP_CFG_CITE}: {text}")
+            raise Unread(f"cannot read {cfgrel} on {base_ref} {STAMP_CFG_CITE}: {text}")
         kinds = json.loads(text).get("kinds")
     except (ValueError, AttributeError) as e:
         raise Stop(f"cannot read the config {cfgrel} on {base_ref} {STAMP_CFG_CITE}: {e}")
@@ -1430,6 +1430,17 @@ def base_stamp_config(wt, tmp, cfgrel, base_ref):
 def head_claim(wt):
     """The Record-claim ids on HEAD's last commit, or ''."""
     return git(wt, "log", "-1", "--format=%(trailers:key=Record-claim,valueonly)", "HEAD")[1].strip()
+
+def claim_under_head(wt, base_ref):
+    """The sha of a claim this branch holds below its head (a merge commit sits on it), or None. A claim a later revert undid is not held."""
+    c, out = git(wt, "log", "--format=%H%x09%s%x09%(trailers:key=Record-claim,valueonly,separator=%x2C)", f"{base_ref}..HEAD")
+    for line in out.splitlines() if not c else ():
+        sha, subject, ids = (line.split("\t") + ["", ""])[:3]
+        if subject.startswith('Revert "Claim record numbers"'):
+            return None
+        if ids.strip():
+            return sha
+    return None
 
 def own_claim(wt, cfgrel, base):
     """The trailer ids when HEAD is this tool's claim and each number is still free, else None."""
@@ -1489,7 +1500,10 @@ def records_proof(wt, base_ref):
     healed = False
     try:
         if c:
-            if git(wt, "diff", "--name-only", "--diff-filter=U")[1].split() != [RECORDS_PAGE]:
+            dc, unmerged = git(wt, "diff", "--name-only", "--diff-filter=U")
+            if dc or not unmerged.split():  # the merge failed and left no conflict to name: nothing was read
+                raise Unread(f"the merge of {base_ref} could not run, so the records page cannot be proved fresh {RECORDS_CITE}: {out}")
+            if unmerged.split() != [RECORDS_PAGE]:
                 raise Stop(f"the head does not merge cleanly with {base_ref}, so the records page cannot be proved fresh {RECORDS_CITE}: {out}")
             page = os.path.join(wt, *RECORDS_PAGE.split("/"))
             if os.path.exists(page):
@@ -1760,7 +1774,8 @@ def hit_suites(root, paths, skip):
 _SMALL_MOVES = {}  # (worktree, head, base tip) -> the verdict, so the read after the wait does not repeat a proof it already holds
 
 def small_base_move(wt, base_ref, sha, before_run=None):
-    """-> (True, why the green run on sha stands) or (False, why not), for a sha that lacks the base tip T.
+    """-> (True, why the green run on sha stands) or (False, why not), for a sha that lacks the base tip T. A read that
+    could not run gives a `why` of UnreadText: no finding, so no refusal.
     It stands with no run at all when main's diff from the merge base M is empty (the merge of sha and T is sha's tree). Otherwise
     it stands only when main's paths since the merge base M share no path with the batch's (the records page aside: the
     generator proves it on the merge), the merge of sha and T is clean, the repo's ci-scope.sh turns on no job and no suite
@@ -1770,24 +1785,24 @@ def small_base_move(wt, base_ref, sha, before_run=None):
     step) and one start per hit suite; one temp output file, and one ci-job log, kept only on a failure."""
     c, tip = git(wt, "rev-parse", base_ref)
     if c:
-        return False, f"cannot read {base_ref}"
+        return False, UnreadText(f"cannot read {base_ref}")
     key = (wt, sha, tip)
     if key in _SMALL_MOVES:
         return _SMALL_MOVES[key]
     c, m = git(wt, "merge-base", sha, tip)
     if c or not m:
-        return False, "the merge base cannot be read"
+        return False, UnreadText("the merge base cannot be read")
     reads = [git(wt, "diff", "--name-only", "--no-renames", "-z", m, x) for x in (tip, sha)]  # --no-renames: a moved file names both paths
     count = git(wt, "rev-list", "--count", f"{sha}..{tip}")
     if any(c for c, _ in reads) or count[0]:
-        return False, "the paths of main or of the batch cannot be read"
+        return False, UnreadText("the paths of main or of the batch cannot be read")
     theirs, ours = ({p for p in out.split("\0") if p} for _, out in reads)
     if not theirs:  # main's tree is the merge base's: the merge of sha and tip is sha's tree, which the green run tested
         # ... only if no commit between changed a path: a pull_request run tested the merge with main as it was then, path and all
         trees = git(wt, "log", "--format=%T", f"{m}..{tip}")
         base_tree = git(wt, "rev-parse", f"{m}^{{tree}}")
         if trees[0] or base_tree[0]:
-            return False, "the trees of main's commits since the merge base cannot be read"
+            return False, UnreadText("the trees of main's commits since the merge base cannot be read")
         moved = [t for t in trees[1].split() if t != base_tree[1]]
         if moved:
             return False, f"main changed paths since the merge base and changed them back ({len(moved)} commit{'s' * (len(moved) != 1)} with another tree), so the green run tested a main that had them"
@@ -1800,7 +1815,7 @@ def small_base_move(wt, base_ref, sha, before_run=None):
         return False, "main and the batch both change " + ", ".join(shared)
     c, head = git(wt, "rev-parse", "HEAD")
     if c:
-        return False, "the worktree's HEAD cannot be read"
+        return False, UnreadText("the worktree's HEAD cannot be read")
     fd, out_file = tempfile.mkstemp(prefix="merge-scope-")
     os.close(fd)
     fd, log = tempfile.mkstemp(prefix="merge-lint-", suffix=".log")
@@ -1847,7 +1862,7 @@ def small_base_move(wt, base_ref, sha, before_run=None):
         _SMALL_MOVES[key] = verdict
         return verdict
     except (subprocess.TimeoutExpired, OSError, ValueError) as e:
-        return False, f"the proof could not run ({type(e).__name__})"
+        return False, UnreadText(f"the proof could not run ({type(e).__name__})")
     finally:
         git(wt, "merge", "--abort")
         git(wt, "reset", "--hard", "-q", head)
@@ -1869,8 +1884,9 @@ def holds_base(wt, base_ref, sha, before_run=None):
             return None, why
         tip = git(wt, "rev-parse", "--short=9", base_ref)[1]
         base = base_ref.split("/", 1)[-1]
-        return (f"{sha[:9]} does not hold {base_ref} at {tip}, so no run on it tested the current {base}. "
-                f"Merge {base} into the branch, push, and run again. The green run cannot stand: {why}. {BASE_CITE}"), None
+        text = (f"{sha[:9]} does not hold {base_ref} at {tip}, so no run on it tested the current {base}. "
+                f"Merge {base} into the branch, push, and run again. The green run cannot stand: {why}. {BASE_CITE}")
+        return (UnreadText(text) if isinstance(why, UnreadText) else text), None  # an unread `why` proves no staleness: a caller that keeps a claim reads it as unknown
     return UnreadText(f"cannot read whether {sha[:9]} holds {base_ref}, so the run cannot be proved current: git could not "
                       f"tell (an unreadable revision, or a shallow clone: run `git fetch --unshallow`). {BASE_CITE}"), None
 
@@ -2912,8 +2928,12 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             elif not resumed:
                 say("merge: nothing to claim.")
         sha = claim_sha or info["head"]
+        under = None if claim_sha or base != cfg["defaultBranch"] else claim_under_head(wt, base_ref)  # a rerun over a merge commit on its claim: the claim is kept, never reverted
+        kept = claim_sha or under
 
         def fail(why):
+            if under:  # a revert of a merge commit would undo the base's own work in the branch
+                raise Stop(f"{why}\nmerge: the claim {under[:9]} stays on {branch}, under the head {sha[:9]}, untouched. Fix the cause and run again.")
             if claim_sha:
                 if not os.path.exists(os.path.join(wt, ".git")):  # the tree is gone (swept or cleaned): the revert needs one
                     shutil.rmtree(tmp, ignore_errors=True)
@@ -2927,15 +2947,16 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             raise Stop(why)
 
         def unproven(what, detail):  # a read after the claim push could not run: the result is unknown, so the claim stays
-            if not claim_sha:  # nothing was pushed, so nothing is kept
+            if not kept:  # nothing was pushed, so nothing is kept
                 raise Stop(f"{what}\n{detail}")
-            raise Unproven(f"the result is unknown: {what}. The claim {claim_sha[:9]} stays on {branch} and nothing was reverted. Rerun merge to resume {REFUSED_CITE}.\n{detail}")
+            raise Unproven(f"the result is unknown: {what}. The claim {kept[:9]} stays on {branch} and no revert was made. Rerun merge to resume {REFUSED_CITE}.\n{detail}")
 
         def refusal_or_unknown(e, what):  # -> the text of a read GitHub refused (401, 403): a proven refusal. Any other failed read is unknown
             if isinstance(e, Stop) and HTTP_DENIED.search(str(e)):
                 return str(e)
             unproven(what, f"{type(e).__name__}: {e}")
 
+        merging = False  # true while the merge call runs: its answer is lost, not refused
         try:  # after the push only a Stop may leave. A read that could not run is unknown (Unproven); any other error reverts the claim first
             try:
                 ok, why = host.wait_checks(n, sha, m["deadlineMinutes"], info["head"] if claim_sha else None)
@@ -2956,7 +2977,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 if c:  # never check against a stale base tip
                     unproven(f"cannot fetch origin {base}, so the claim cannot be proved fresh {BASE_CITE}", out)
                 if not os.path.exists(os.path.join(wt, ".git")):  # before the reads below: on a missing tree they fail as unknown
-                    stop("the worktree is gone, so the claim cannot be proved fresh " + BASE_CITE + ".")
+                    unproven("the worktree is gone, so the claim cannot be proved fresh " + BASE_CITE, "")
                 try:  # main may have moved during the wait: read the branch against the tip fetched just now
                     record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", "")))
                     debt_check(wt, base_ref, host, info)
@@ -2966,6 +2987,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                     stop(str(e))
                 try:  # the config is the base tip's, read just after the fetch
                     stamp_cfg = base_stamp_config(wt, tmp, cfgrel, base_ref)
+                except Unread as e:
+                    unproven("the base config could not be read", str(e))
                 except Stop as e:
                     stop(str(e))
                 if claimed and not stamp_cfg:
@@ -2981,6 +3004,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 else:
                     try:  # the base moved with a record and no rebuild: the merge result would hold a stale page
                         proof = records_proof(wt, base_ref)
+                    except Unread as e:
+                        unproven("the records proof could not read the merge", str(e))
                     except Stop as e:
                         stop(str(e))
                 if proof == "healed":  # the merge commit holds the base tip, and its own checks wait next
@@ -3007,8 +3032,10 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                     ok, why = host.wait_checks(n, merged, m["deadlineMinutes"], sha)
                 except NetStop:
                     raise
-                except Stop as e:
-                    ok, why = False, str(e)
+                except Exception as e:  # the merge commit stays either way: a read that could not run is unknown, only a red check is not green
+                    ok, why = False, refusal_or_unknown(e, "a read in the wait on the merge commit failed")
+                if ok is None:
+                    unproven("the wait on the merge commit ended at its deadline with a required check pending", why)
 
                 def keep(why):  # a revert of a merge commit would undo the base's own work in the branch, so the commit stays
                     raise Stop(f"{why}\nmerge: the merge commit {merged[:9]} stays on {branch}. Fix the cause and run again.")
@@ -3032,13 +3059,16 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             if busy:
                 fail(busy)
             host.commit_message = lift_message(lifts)
+            merging = True
             commit, msg = host.merge(n, m["method"], sha)
+            merging = False
             if not commit:
                 fail("the merge was refused " + REFUSED_CITE + ":\n" + msg)
         except Stop:
             raise
         except (subprocess.TimeoutExpired, OSError, ValueError) as e:  # a read or call that could not run: the merge may or may not have gone through
-            unproven("a call after the claim push could not run", f"{type(e).__name__}: {e}")
+            unproven("a call after the claim push could not run",
+                     (f"The merge of #{n} may have landed. Check the pull request #{n} on GitHub before you rerun merge.\n" if merging else "") + f"{type(e).__name__}: {e}")
         except Exception as e:
             fail(f"unexpected {type(e).__name__} after the claim was pushed: {e}")
         say(f"merge: #{n} merged as {commit[:9]}.")
