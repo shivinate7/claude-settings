@@ -58,6 +58,7 @@ BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (never the WSL launcher)
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
 EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
@@ -68,6 +69,35 @@ KEYWORDS = {"if", "elif", "while", "until", "do", "then", "else", "!", "time"}  
 RUNNERS = {"xargs", "env", "nice", "nohup"}  # a command whose first operand is the tool it runs
 SHELLS = {None: ["bash", "-e"], "bash": ["bash", "--noprofile", "--norc", "-eo", "pipefail"], "sh": ["sh", "-e"],
           "python": ["python3"], "pwsh": ["pwsh", "-NoProfile", "-NonInteractive", "-File"]}
+
+
+def shell_argv(shell, nt=None, environ=None):
+    """The argv that runs a step's script under `shell`, or None when its shell is missing. On Windows, bash and sh
+    are Git Bash's by full path: PATH's first bash there is the System32 WSL launcher, which runs the script in Linux."""
+    argv = list(SHELLS[shell])
+    if argv[0] not in ("bash", "sh"):
+        return argv
+    nt = os.name == "nt" if nt is None else nt
+    if not nt:
+        found = shutil.which(argv[0], path=(environ or os.environ).get("PATH"))
+        return [found] + argv[1:] if found else None
+    bash = find_git_bash(nt=True, environ=environ)
+    if not bash:
+        return None
+    exe = bash if argv[0] == "bash" else os.path.join(os.path.dirname(bash), "sh.exe")
+    return [exe] + argv[1:] if os.path.isfile(exe) else None
+
+
+def slashed(path):
+    """A path as a bash script names it: Git Bash reads `C:/x/y` as a path and `C:\\x\\y` as a command name."""
+    return path.replace("\\", "/")
+
+
+def no_shell(name, nt=None):
+    """The detail of a step whose shell is missing."""
+    if os.name == "nt" if nt is None else nt:
+        return "tool missing: Git Bash (on Windows this runner never uses the WSL launcher System32\\bash.exe)"
+    return "tool missing: %s" % name
 
 
 def git(*args, cwd=None):
@@ -242,8 +272,10 @@ def plan(step, pr, values, top):
         return "unknown", "continue-on-error: this runner reads no step as allowed to fail", None, None, None
     action = known_action(step)
     if action == "zizmor":  # run.sh under the action's folder, with the step's with: paths; it needs no base
-        if not shutil.which("bash") or not shutil.which("pipx"):
-            return "unknown", "tool missing: %s" % " and ".join(t for t in ("bash", "pipx") if not shutil.which(t)), None, None, None
+        if not shell_argv(None):
+            return "unknown", no_shell("bash"), None, None, None
+        if not shutil.which("pipx"):
+            return "unknown", "tool missing: pipx", None, None, None
         path, looked = action_file(top, step, ZIZMOR_RUN)
         if not path:
             return "unknown", "no run.sh: looked for %s" % looked, None, None, None
@@ -253,18 +285,21 @@ def plan(step, pr, values, top):
             if env["ZIZMOR_PATHS"] is None:
                 return "unknown", "with: paths needs an expression this runner cannot read: %s" % step_with(step)["paths"], None, None, None
         # A missing run.sh of a local uses: must FAIL, as in CI; bash alone would exit 127 and read as a missing tool.
-        return "run", 'test -f "%s" || { echo "no run.sh at %s" >&2; exit 1; }\nbash "%s"\n' % (path, path, path), SHELLS[None], env, None
+        path = slashed(path)  # $BASH: the bash running this script, never a PATH lookup that may find the WSL launcher
+        return "run", 'test -f "%s" || { echo "no run.sh at %s" >&2; exit 1; }\n"$BASH" "%s"\n' % (path, path, path), shell_argv(None), env, None
     if action:
         if not pr:
             return "skipped", "a pull-request step: pass --base to run it", None, None, None
-        if not shutil.which("bash") or not shutil.which("python3"):
-            return "unknown", "tool missing: bash and python3", None, None, None
+        if not shell_argv(None):
+            return "unknown", no_shell("bash"), None, None, None
+        if not shutil.which("python3"):
+            return "unknown", "tool missing: python3", None, None, None
         if action == "code-check":  # the action.yml's own command
             path, looked = code_check(top, step)
             if not path:
                 return "unknown", "no code_check.py: looked for %s" % looked, None, None, None
-            return "run", 'python3 "%s" --base "%s"' % (path, values["base"]), SHELLS[None], {}, None
-        return "run", '"%s" "%s"' % (os.path.join(BIN, "ste-changed"), values["base"]), SHELLS[None], {}, None
+            return "run", 'python3 "%s" --base "%s"' % (slashed(path), values["base"]), shell_argv(None), {}, None
+        return "run", '"%s" "%s"' % (slashed(os.path.join(BIN, "ste-changed")), values["base"]), shell_argv(None), {}, None
     if step_key(step, "uses") is not None:
         return "not run locally", "an action (uses: %s); CI runs it" % step_key(step, "uses").split(" #")[0], None, None, None
     cond = condition(step_key(step, "if"), pr)
@@ -287,7 +322,9 @@ def plan(step, pr, values, top):
     shell = step_key(step, "shell")
     if shell not in SHELLS:
         return "unknown", "shell %s is not one this runner knows" % shell, None, None, None
-    argv = SHELLS[shell]
+    argv = shell_argv(shell)
+    if argv is None:
+        return "unknown", no_shell(SHELLS[shell][0]), None, None, None
     need = [argv[0]] + (commands(body) if shell in (None, "bash", "sh") else [])
     gone = sorted({w for w in need if not shutil.which(w)})
     if gone:
