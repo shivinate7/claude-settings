@@ -35,7 +35,7 @@
   "pick": "a",
   "rank": 2,
   "ref": "q_max #1089; q_max entry the-map-build-is-a-skill; step qmax-harness-copies-resolve",
-  "reply": "a, 15:06 CST: #1089 merges with the rewritten entry. Runner 9 counted it at 15:08 CST, and #1089 joins its next q_max batch, with this answer cited in the PR body.",
+  "reply": "a, 15:06 CST: #1089 merges with the rewritten entry. Runner 9 counted it at 15:08 CST, and #1089 joins its next q_max batch, with this answer cited in the PR body. Merged in q_max batch #1092 at b2b97523f, 16:49 CST (runner 9).",
   "short": "q_max #1089: merge the rewritten entry, or hold",
   "status": "closed",
   "title": "May q_max #1089 merge with its rewritten map-build entry?",
