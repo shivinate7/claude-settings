@@ -90,7 +90,7 @@ FAMILIES = {
     "session-home": "rule session-home: a session whose worktree is gone is refused a write into the primary checkout; its record and its cost",
     "pointer": "the pointer HEAD checkout",
     "hand-made-worktree": "a worktree made by hand outside the agent home folder",
-    "branch-slug-no-git": "a git act that creates a branch or worktree whose name holds git as a whole word: switch -c, checkout -b, branch <new>, worktree add -b, in Bash and PowerShell, and quoted text is not an act",
+    "branch-slug-no-git": "a git act that creates a branch or worktree whose name holds git as a whole word: switch -c, checkout -b, branch <new>, a rename to a git-named name, worktree add -b, and a worktree add of a git-named path with no -b; in Bash and PowerShell, and quoted text is not an act",
     "kill": "machine-wide kills and detached launches",
     "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
@@ -3883,16 +3883,21 @@ FAMILY = "branch-slug-no-git"
 #
 # THE NAME RULE. A git act that CREATES a branch whose name holds `git` as a whole word is denied.
 # A part of the name, split on `-`, `_`, `/` and `.`, that is exactly `git` (any case) counts; `digit`
-# and `github` do not. The acts: `switch -c|-C`, `checkout -b|-B`, `branch <new>` (not -d, -D, -m,
-# --list or a bare listing), and `worktree add -b|-B`. Claude Code's isolation check refuses an
-# agent's git command that names git twice, so such a branch could not be pushed or opened from an
-# agent's worktree.
+# and `github` do not. The acts: `switch -c|-C`, `checkout -b|-B`, `branch <new>` (not -d, -D, --list
+# or a bare listing), a rename `branch -m|-M [old] <new>` whose NEW name is git-named (the lone name of
+# a rename is the new name), `worktree add -b|-B`, and a `worktree add <path>` with no -b|-B and no
+# commit-ish, whose path's last part is git-named: git makes a branch of that name. The guard reads no
+# refs, so every path-only add counts as a creation. Claude Code's isolation check refuses an agent's
+# git command that names git twice, so such a branch could not be pushed or opened from an agent's worktree.
 #
 # EVERY RED CASE HAS A GREEN TWIN in the same cwd with only the name changed, so a red fails because
 # of this rule and not another. The command word is VCS, as elsewhere in this file. The scanner
 # cases hold quoted text, a comment and a heredoc body: data, never an act, and an act after them counts.
 BSLUG = "branch-slug-no-git"
 BSLUG_LANE = slash(os.path.join(HMMAIN, ".claude", "worktrees", "lane"))  # a folder under HMMAIN's own worktrees
+# Path-only worktree cases use absolute paths under HMMAIN's own worktrees folder. A path outside it
+# would trip the hand-made-worktree rule first, and that is a different rule.
+BSLUG_WT = slash(os.path.join(HMMAIN, ".claude", "worktrees"))
 
 # RED: each act naming a git-named branch is denied.
 sh("branch-slug-no-git: switch -c to a git-named branch is denied",
@@ -3928,6 +3933,35 @@ sh("branch-slug-no-git: worktree add -B to a git-named branch is denied",
 sh("branch-slug-no-git: twin, worktree add -B to a digit-named branch is allowed",
    VCS + " worktree add -B digit-lane " + BSLUG_LANE + " main", "allow", cwd=HMMAIN)
 
+# A rename's NEW name is its last word: `branch -m|-M [old] <new>`. A lone name is the new name too:
+# git's usage line is `(-m | -M) [<old-branch>] <new-branch>`, so `branch -m git-x` renames the
+# current branch to git-x. Only the new name counts, so `branch -m git-old newname` is allowed below.
+sh("branch-slug-no-git: renaming a branch to a git-named one is denied",
+   VCS + " branch -m old-name git-new", "deny", BSLUG, cwd=NOGIT)
+sh("branch-slug-no-git: twin, renaming a branch to a digit-named one is allowed",
+   VCS + " branch -m old-name digit-new", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: a lone rename to a git-named name is denied",
+   VCS + " branch -m git-x", "deny", BSLUG, cwd=NOGIT)
+sh("branch-slug-no-git: twin, a lone rename to a digit-named name is allowed",
+   VCS + " branch -m digit-x", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: a lone rename to git-old is denied, the lone name is the new name",
+   VCS + " branch -m git-old", "deny", BSLUG, cwd=NOGIT)
+sh("branch-slug-no-git: -M to a slash name with a git part is denied",
+   VCS + " branch -M old Fix/Git-y", "deny", BSLUG, cwd=NOGIT)
+sh("branch-slug-no-git: twin, -M to a slash name with no git part is allowed",
+   VCS + " branch -M old Fix/Digit-y", "allow", cwd=NOGIT)
+
+# A path-only `worktree add` makes a branch named after the path's last part. The guard reads no refs,
+# so a git-named last part is denied even when a branch of that name already exists.
+sh("branch-slug-no-git: worktree add of a path whose last part is git-named is denied",
+   VCS + " worktree add " + BSLUG_WT + "/git-x", "deny", BSLUG, cwd=HMMAIN)
+sh("branch-slug-no-git: twin, worktree add of a path whose last part is digit-named is allowed",
+   VCS + " worktree add " + BSLUG_WT + "/digit-x", "allow", cwd=HMMAIN)
+sh("branch-slug-no-git: worktree add of a dotted path whose last part is git is denied",
+   VCS + " worktree add " + BSLUG_WT + "/w/fix.git", "deny", BSLUG, cwd=HMMAIN)
+sh("branch-slug-no-git: twin, worktree add of a dotted path whose last part is digit is allowed",
+   VCS + " worktree add " + BSLUG_WT + "/w/fix.digit", "allow", cwd=HMMAIN)
+
 # The scanner cases. A quoted `#` or `don't` does not end the quote, so the act after it still counts.
 sh("branch-slug-no-git: a quoted # before a git-named switch -c is denied",
    'echo "#" && ' + VCS + " switch -c git-x", "deny", BSLUG, cwd=NOGIT)
@@ -3959,8 +3993,22 @@ sh("branch-slug-no-git: listing branches with a git glob is not a creation",
    VCS + " branch --list git*", "allow", cwd=NOGIT)
 sh("branch-slug-no-git: a bare branch listing is not a creation",
    VCS + " branch", "allow", cwd=NOGIT)
-sh("branch-slug-no-git: renaming a branch to a git-named one is not a creation under the brief's list",
-   VCS + " branch -m old-name git-new", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: renaming a git-named branch to a git-free name is not a creation",
+   VCS + " branch -m git-old newname", "allow", cwd=NOGIT)
+# KNOWN MISS, recorded on the notes file: a copy creates a branch, and the rule does not read it yet.
+# This case pins the miss. A fix that reads the copy must flip it to deny.
+sh("branch-slug-no-git: known miss, copying a branch to a git-named one is allowed for now",
+   VCS + " branch -c main git-copy", "allow", cwd=NOGIT)
+# A worktree add with a commit-ish checks out that commit or branch and makes no branch named after
+# the path. `--detach` makes no branch at all. `-b` names the branch, so the path's git part does not count.
+sh("branch-slug-no-git: worktree add of a git-named path with a commit-ish is allowed",
+   VCS + " worktree add " + BSLUG_WT + "/git-x main", "allow", cwd=HMMAIN)
+sh("branch-slug-no-git: worktree add --detach of a git-named path is allowed",
+   VCS + " worktree add --detach " + BSLUG_WT + "/git-x", "allow", cwd=HMMAIN)
+sh("branch-slug-no-git: worktree add of a path whose last part is git-free is allowed",
+   VCS + " worktree add " + BSLUG_WT + "/lane-x", "allow", cwd=HMMAIN)
+sh("branch-slug-no-git: worktree add -b to a git-free name with a git-named path is allowed",
+   VCS + " worktree add -b ok " + BSLUG_WT + "/git-dir", "allow", cwd=HMMAIN)
 sh("branch-slug-no-git: pushing HEAD to an existing git-named remote branch is allowed",
    VCS + " push origin HEAD:git-push-after-failed-commit", "allow", cwd=PUSHFEAT)
 sh("branch-slug-no-git: fetching a git-named branch is allowed",
