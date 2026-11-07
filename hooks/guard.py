@@ -1078,7 +1078,7 @@ CAP_ASK_REASON = (
 
 def _settings_place(path: str, cwd: str) -> bool:
     """True when a settings basename sits where Claude Code reads one: a `.claude` folder, the config
-    directory, or the working folder. The managed file is read from a place no spelling names, so its
+    directory, the working folder, or a folder only the shell can name. The managed file is read from a place no spelling names, so its
     basename alone counts. A same-named fixture in a scratch folder is none of them."""
     name = basename(path)
     if name not in SETTINGS_BASENAMES:
@@ -1087,6 +1087,10 @@ def _settings_place(path: str, cwd: str) -> bool:
         return True
     folder = path[:len(path) - len(name)].rstrip("/\\")
     if not folder or basename(folder) == ".claude":
+        return True
+    # The shell expands `$VAR`, `${VAR:-x}` and globs when the write runs, so the folder is known
+    # only then: a folder with such a character is a possible settings place.
+    if any(ch in folder for ch in "${*?["):
         return True
     here = {os.path.normcase(os.path.realpath(guard_core.config_dir()))}
     if cwd:
