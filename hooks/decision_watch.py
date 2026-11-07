@@ -661,6 +661,7 @@ def _judge_isolation():
 
 
 VERDICT_SHAPE = {"verdict": ("ALLOW", "FLAG")}
+MODEL_TIMEOUT_ERROR = "model subprocess timed out"  # the error text of a timeout: callers that tell a timeout from another failure compare to this
 
 
 class EachOf(tuple):
@@ -704,7 +705,7 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
             timeout=timeout, cwd=root, env=env,
         )
     except subprocess.TimeoutExpired:
-        return None, "model subprocess timed out"  # fixed text: never put str(exc) in the report
+        return None, MODEL_TIMEOUT_ERROR  # fixed text: never put str(exc) in the report
     except Exception as exc:
         return None, scrub("model subprocess failed to start: %s" % exc)
     finally:

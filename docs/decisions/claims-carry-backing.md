@@ -51,7 +51,7 @@ When an act contradicts a route row, the falsifier notes it: `hooks/refusal_note
 
 ## Model judge at merge
 
-`merge/merge.py` will call `invoke_model` (in `hooks/decision_watch.py`) on each line that the reverse map of `lint/stale_cites.py` selects. The reverse map (code to the prose lines that cite it) is planned. The judge is report-only until it is measured on the labelled set. No labelled set exists yet. An error from the model means UNKNOWN, never a pass.
+`merge/merge.py` will call `invoke_model` (in `hooks/decision_watch.py`) on each line that the reverse map of `lint/stale_cites.py` selects. The reverse map (code to the prose lines that cite it) is planned. The judge is report-only until it is measured on the labelled set. No labelled set exists yet. An error from the model means UNKNOWN, never a pass.  The report prints each stale or unbacked line, then one count line for every line not judged, by cause.
 
 ## Re-measure on use
 
