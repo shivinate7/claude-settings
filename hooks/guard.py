@@ -119,10 +119,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
-                       ask. A ready mark (`gh pr ready <pr>`, or the MCP update_pull_request with draft false) in a lane
-                       session, unless the pull request is the integration PR: its head ref starts with `batch-` or it
-                       carries the `batch` label (one REST read), or the session carries no cs-build:lane tag. A failed
-                       read asks. `--undo` and `-h` pass. (draft-until-reviewed, git-integration-branch-merge)
+                       ask. A ready mark (`gh pr ready <pr>`, or the MCP update_pull_request with draft false), unless
+                       the pull request is the integration PR: its head ref starts with `batch-` or it carries the
+                       `batch` label (one REST read), or the session's own get_session record is read, current and holds
+                       no cs-build:lane tag. A failed read asks. A lone `&` separates marks, each judged. `--undo` and `-h` pass. (draft-until-reviewed, git-integration-branch-merge)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under

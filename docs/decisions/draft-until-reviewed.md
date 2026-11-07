@@ -17,7 +17,7 @@ Limits:
 
 - The guard does not judge a `gh api` POST to the pulls endpoint, or `hub pull-request`. Each can open a non-draft PR.
 - The guard does not judge a REST PATCH with `draft: false` or a `gh api graphql` call. REST takes no draft field; ready is the GraphQL mutation `markPullRequestReadyForReview`, so the command and MCP forms above are the routes it reads.
-- A lane session whose own `get_session` record is unread counts as no lane, as for `load-brake`, so its ready mark passes.
+- A session is no lane only when its own newest `get_session` record is read and holds no `cs-build:lane` tag, with no `set_session_tags` call on its own id after it. This is the proof of the trust card (`session-tiers`, Trust card). An unread or unparsable record, another session's record only, no transcript, no session id, or a tag change after the read is not proven, so the ready mark asks. Coordinator ruling 2026-11-07 14:12 CST, option b: read strictly, as the trust-card precedent does.
 - A short-flag cluster such as `-dt x` is refused, a rare false alarm.
 - A pull request that turns draft during the merge wait is not stopped.
 - Unmeasured: that `ready_for_review` starts this workflow (it comes from GitHub's documented behavior), and the saving in runs.

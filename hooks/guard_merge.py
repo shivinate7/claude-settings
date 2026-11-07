@@ -319,10 +319,11 @@ def undrafted_pr_create(segment: str) -> bool:
 # ---- a ready mark of a pull request (rule draft-pr, decision draft-until-reviewed; debt pr-ready-unguarded)
 #
 # `gh pr ready <pr>` and the MCP update_pull_request call with draft false take a pull request out of draft, and CI then
-# runs on it. Only the batch's integration PR goes ready (rule git-integration-branch-merge). The mark ASKS in a lane
-# session, unless the pull request is the integration PR: its head ref starts with INTEGRATION_BRANCH_PREFIX, or it
-# carries BATCH_LABEL. A session with no cs-build:lane tag is no lane and is not asked (owner ruling 2026-11-07 13:20 CST,
-# decision cull-rules; coordinator ruling 2026-11-07 14:12 CST). Cost: one transcript read for the session; then, for a
+# runs on it. Only the batch's integration PR goes ready (rule git-integration-branch-merge). The mark ASKS, unless the
+# pull request is the integration PR: its head ref starts with INTEGRATION_BRANCH_PREFIX, or it carries BATCH_LABEL. A
+# session is no lane only when its own get_session record is read and holds no cs-build:lane tag, as the trust card
+# reads it; an unread record asks (owner ruling 2026-11-07 13:20 CST, decision cull-rules; coordinator ruling
+# 2026-11-07 14:12 CST, option b). A lone `&` separates two marks, each judged. Cost: one transcript read for the session; then, for a
 # numbered pull request, one REST read that gives the head ref and the labels together. A branch name or no selector
 # adds the pull list read, and no selector one git read. A read that fails asks.
 # Limits: a REST PATCH with draft false is no ready mark here (REST takes no draft; ready is the GraphQL mutation
@@ -369,36 +370,54 @@ def ready_call_of(segment: str):
 
 
 def ready_calls(text: str):
-    """-> [(selector, repo)], one per `gh pr ready` in `text`, a `sh -c` script included."""
+    """-> [(selector, repo)], one per `gh pr ready` in `text`, a `sh -c` script included, a lone `&` a separator."""
+    from guard_env import _ampersand_split   # the one splitter of a lone `&`, shared with hooks/ci_wake.py
     found = []
-    for segment in split_segments(text):
-        if not segment.strip():
-            continue
-        tokens = segment_tokens(segment) or []
-        script = inline_script(tokens) if tokens else ""
-        if script:
-            found += ready_calls(script)
-            continue
-        call = ready_call_of(segment)
-        if call:
-            found.append(call)
+    for whole in split_segments(text):
+        for segment in _ampersand_split(whole):
+            if not segment.strip():
+                continue
+            tokens = segment_tokens(segment) or []
+            script = inline_script(tokens) if tokens else ""
+            if script:
+                found += ready_calls(script)
+                continue
+            call = ready_call_of(segment)
+            if call:
+                found.append(call)
     return found
+
+
+def _own_tag_names(transcript):
+    """-> the casefolded tag names of the own newest get_session record, or None when that record is not current: no
+    own id, no transcript, an unread or unparsable record, a set_session_tags call on the own id after it, or any
+    error. The one read of both own_is_lane and own_proven_not_lane (rule load-brake's lane_session_hit, the trust card)."""
+    try:
+        from override import remote_session_id
+        own_id = remote_session_id()
+        if own_id is None or not isinstance(transcript, str) or not transcript:
+            return None
+        tags, tagged_after = _own_session_read(transcript, own_id)
+        if tags is None or tagged_after or not isinstance(tags, list):
+            return None
+        return [t.strip().casefold() for t in tags if isinstance(t, str)]
+    except Exception:
+        return None
 
 
 def own_is_lane(transcript) -> bool:
     """True when the session's own newest get_session record carries cs-build:lane and no other cs-build: tag, and no
     set_session_tags call follows it. No own id, no transcript, an unread record or any error is False (no lane): the
     read of rule load-brake's lane_session_hit, one home."""
-    try:
-        from override import remote_session_id
-        own_id = remote_session_id()
-        if own_id is None or not isinstance(transcript, str) or not transcript:
-            return False
-        tags, tagged_after = _own_session_read(transcript, own_id)
-        names = [t.strip().casefold() for t in tags if isinstance(t, str)] if isinstance(tags, list) else []
-    except Exception:
-        return False
-    return not tagged_after and LANE_TAG in names and not any(n.startswith(BUILD_TAG) and n != LANE_TAG for n in names)
+    names = _own_tag_names(transcript)
+    return names is not None and LANE_TAG in names and not any(n.startswith(BUILD_TAG) and n != LANE_TAG for n in names)
+
+
+def own_proven_not_lane(transcript) -> bool:
+    """True only when the own newest get_session record is read, current and holds no cs-build:lane tag, the proof the
+    trust card asks (trust_card_hit). Anything unread or unreadable is not proven (decision draft-until-reviewed)."""
+    names = _own_tag_names(transcript)
+    return names is not None and LANE_TAG not in names
 
 
 def _integration_pr(selector: str, repo: str, cwd: str) -> bool:
@@ -418,10 +437,10 @@ def _integration_pr(selector: str, repo: str, cwd: str) -> bool:
 
 
 def pr_ready_hit(selector: str, repo: str, cwd: str, transcript) -> str:
-    """Return "pull request <selector>" when a ready mark of the pull request must ask, else "". A session that is no
-    lane is not asked, and its pull request is not read. A pull request not shown to be the integration PR asks,
-    a failed read included."""
-    if not own_is_lane(transcript):
+    """Return "pull request <selector>" when a ready mark of the pull request must ask, else "". A session proven
+    no lane is not asked, and its pull request is not read. Any other session is asked unless the pull request is shown
+    to be the integration PR, a failed read included."""
+    if own_proven_not_lane(transcript):
         return ""
     try:
         if _integration_pr(selector, repo, cwd):
