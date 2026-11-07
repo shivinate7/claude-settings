@@ -8866,7 +8866,7 @@ class ExpireNotesTests(unittest.TestCase):
         self.assertEqual(self.notes(repo), before, "--confirm changed the notes file on the default branch")
 
     def test_confirm_refuses_on_a_detached_head(self):
-        # Decision notes-sightings-expiry (lane ruling 2026-11-07 15:58 CST): --confirm refuses a detached HEAD, as it
+        # Decision notes-sightings-expiry: --confirm refuses a detached HEAD, as it
         # refuses the default branch. No branch would merge the deletion.
         old = expiry_day(-FAR_PAST_DAYS)
         repo = self.repo("repo", [(note("old-detached", old), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY))])
@@ -8903,7 +8903,7 @@ class ExpireNotesTests(unittest.TestCase):
         self.assertNotIn("typed-now", out, "a line not yet committed was judged expired: %s" % out)
 
     def test_a_notes_file_absent_from_head_counts_its_lines_as_seen_today(self):
-        # Decision notes-sightings-expiry (lane ruling 2026-11-07 15:58 CST): a notes file HEAD does not hold has lines not
+        # Decision notes-sightings-expiry: a notes file HEAD does not hold has lines not
         # yet committed, so each is seen today. The preview reads no UNKNOWN and exits 0.
         folder = os.path.join(self.base, "untracked")
         make_repo(folder, {"README.md": "# Repo\n"})
