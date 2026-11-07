@@ -13500,6 +13500,33 @@ for _name, _command in SED_TEST_TARGET_REFUSED:
     sh("builder-test: sed-script-not-target control: %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **BR)
 
+# ---- a builder's shell write to a workflow file is refused, whatever the command or script says: a sed
+# script, a redirect or a perl edit. The remedy names the Edit tool, which judges the content (the
+# workflow_pairs check in role_write_hit), so a builder can still change a non-test step through it. The
+# reads, a path outside .github/workflows and the other roles keep their verdicts.
+WORKFLOW_SHELL_REFUSED = (
+    ("sed -i deletes a pytest line from checks.yml", "sed -i '/pytest/d' .github/workflows/checks.yml"),
+    ("sed -i adds --deselect to a pytest line in checks.yml",
+     "sed -i 's/pytest/pytest --deselect tests\\/test_a.py/' .github/workflows/checks.yml"),
+    ("perl -pi on ci.yml", "perl -pi -e 's/a/b/' .github/workflows/ci.yml"),
+    ("echo appends to checks.yml", "echo x >> .github/workflows/checks.yml"),
+    ("cd into .github/workflows, then sed -i on checks.yml", "cd .github/workflows && sed -i s/a/b/ checks.yml"),
+)
+for _name, _command in WORKFLOW_SHELL_REFUSED:
+    sh("builder-test: workflow shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries="Edit tool", **BR)
+WORKFLOW_SHELL_ALLOWED = (
+    ("grep reads pytest from checks.yml", "grep pytest .github/workflows/checks.yml"),
+    ("cat reads checks.yml", "cat .github/workflows/checks.yml"),
+    ("sed -i on docs/workflows/x.md, a folder outside .github", "sed -i 's/a/b/' docs/workflows/x.md"),
+)
+for _name, _command in WORKFLOW_SHELL_ALLOWED:
+    sh("builder-test: workflow shell control, %s, is allowed" % _name, _command, "allow", **BR)
+sh("builder-test: workflow shell control, test-author sed -i deletes a pytest line from checks.yml, is allowed",
+   "sed -i '/pytest/d' .github/workflows/checks.yml", "allow", **A)
+sh("builder-test: workflow shell control, main session sed -i deletes a pytest line from checks.yml, is allowed",
+   "sed -i '/pytest/d' .github/workflows/checks.yml", "allow", cwd=GITMAIN)
+
 # ---- a `.` or `./` root in a checkout whose root holds a tests folder. GITMAIN holds none (its `.`
 # case above stays allowed), so these cases get their own checkout, built on first use.
 DOTROOT = os.path.join(ROOT, "dotroot")
