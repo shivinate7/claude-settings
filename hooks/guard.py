@@ -2614,8 +2614,8 @@ ROLE_WORD = re.compile(r"[A-Za-z][A-Za-z-]*$")
 ROLE_FIRST_WORD = re.compile(r"\W*([A-Za-z]+)")
 ROLE_PARENTHETICAL = re.compile(r"\([^)]*\)")
 ROLE_DEFAULT = "general-purpose"
-# One point the owner has not ruled yet, one line to flip. A reviewer brief with a `Round N of 3` marker, N in
-# ROLE_REVIEWER_FREE_ROUNDS, may run above its row; add "1" there to let a reviewer on its first marker run above its row.
+# A reviewer brief with a `Round N of 3` marker, N in ROLE_REVIEWER_FREE_ROUNDS, may run above its row. Round 1 is ruled
+# (owner page item 359 a, 2026-11-07 14:41 CST): it runs above its row only with REVIEW_GUARD_MARKER; never add "1" here.
 # A reviewer brief with a line that starts with REVIEW_GUARD_MARKER (a guard or check diff) may run Sonnet on any round,
 # round 1 included, with no `Round N of 3` line (owner, 2026-11-07 14:41 CST, page item 359, pick a); Opus stays refused.
 # An Explore may run Sonnet, above its Haiku row, or Opus (opus_spawn_hit), only when its brief's first non-blank line carries
@@ -2838,8 +2838,17 @@ def role_model_check(tool: str, tool_input):
 
 
 def review_guard_marked(brief) -> bool:
-    """True when a line of the brief starts with REVIEW_GUARD_MARKER, case-sensitive, so mid-line text does not count."""
-    return isinstance(brief, str) and any(line.startswith(REVIEW_GUARD_MARKER) for line in brief.split("\n"))
+    """True when a line of the brief starts with REVIEW_GUARD_MARKER, case-sensitive, so mid-line text does not count.
+    A line inside a ``` fence does not count: a quoted brief or example is not the brief's own marker."""
+    if not isinstance(brief, str):
+        return False
+    fenced = False
+    for line in brief.split("\n"):
+        if line.strip().startswith("```"):
+            fenced = not fenced
+        elif not fenced and line.startswith(REVIEW_GUARD_MARKER):
+            return True
+    return False
 
 
 def role_model_one(tool_input):
