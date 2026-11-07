@@ -4668,14 +4668,40 @@ class PostedNeedsCommentUrlTests(ReplyGuardRuns, unittest.TestCase):
         out = self.assert_blocked(self.INCIDENT + "\n\nAll done.", "Report-shape guard", self.NEEDLE, landed=True)
         self.assertEqual(out["reason"].count(self.NEEDLE), 1)
 
-    def test_posted_rewrite_path_blocks_the_incident_line(self):
-        # Catches: a rewrite that keeps the claim passes, so the refusal can be routed around.
-        self.assert_blocked(self.INCIDENT, self.NEEDLE, "posted the round-1 review record on PR #1500",
-                            stop_hook_active=True)
+    def refused_then_rewrite(self, rewrite):
+        """A missing-report refusal on the first Stop, then `rewrite` as the next assistant reply on the same
+        transcript. Return the rewrite's parsed verdict, or None when it is quiet."""
+        sid = "posted-" + uuid.uuid4().hex
+        records = [human("ask the owner"), tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text("All done.")]
+        path = write_transcript(records, tempfile.mkdtemp(dir=RUN_FOLDER))
+        first = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "session_id": sid}
+        run = run_guard(REPORT_GUARD, first)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        refusal = json.loads(run.stdout) if run.stdout.strip() else {}
+        self.assertIn("Send the report now", refusal.get("reason", ""))  # scope: the marker is written
+        records.append(assistant_text(rewrite))
+        write_transcript(records, os.path.dirname(path))
+        again = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": True, "session_id": sid}
+        run = run_guard(REPORT_GUARD, again)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        return json.loads(run.stdout) if run.stdout.strip() else None
 
-    def test_posted_green_rewrite_path_passes_a_cited_line(self):
+    def test_posted_rewrite_after_missing_report_blocks_the_incident_line(self):
+        # The rewrite after a missing-report refusal is checked once, as answered is. Catches: a rewrite
+        # that keeps the claim passes, so the refusal can be routed around.
+        out = self.refused_then_rewrite(self.INCIDENT)
+        self.assertIsNotNone(out, self.INCIDENT)
+        self.assertEqual(out.get("decision"), "block", self.INCIDENT)
+        self.assertIn(self.NEEDLE, out["reason"])
+
+    def test_posted_rewrite_with_no_prior_refusal_stays_quiet(self):
+        # Catches: a rewrite with no missing-report refusal before it is refused. Green on the old code too.
+        self.assert_allowed(self.INCIDENT, stop_hook_active=True)
+
+    def test_posted_green_rewrite_after_missing_report_passes_a_cited_line(self):
         # Catches: the rewrite check refuses a line that cites its comment URL.
-        self.assert_allowed(self.CITED, stop_hook_active=True)
+        self.assertIsNone(self.refused_then_rewrite(self.CITED))
 
     # Cost: regex only. The probe is builtins.open, the pattern AnsweredNeedsSourceTests uses, plus subprocess.Popen
     # and subprocess.run recorded, so a process start inside the check is counted.
