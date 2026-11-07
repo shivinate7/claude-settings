@@ -238,7 +238,9 @@ def _mutates_as_command(command: str, words) -> bool:
 
 # An in-place editor on the segment. `sed` takes `-i` (alone or with a suffix) or `--in-place`; `perl`
 # takes `-i` as the last letter of a cluster of flags that take no value (`-pi`, `-0777pi.bak`).
-_SED_IN_PLACE = r"\bsed\b[^\n;|&]*(?:-i\b|--in-place)[^\n;|&]*"
+# A flag starts a word (`(?<!\S)`), so `--in-place` inside a quoted pattern is text. A cluster is `-Ei`, `-ni`,
+# `-ibak`: letters that take no value, then `i`. `e`, `f` and `l` take one, so `-ei` is a script, not `-i`.
+_SED_IN_PLACE = r"\bsed\b[^\n;|&]*(?<!\S)(?:-[A-Za-dg-km-z]*i|--in-place)[^\n;|&]*"
 _PERL_IN_PLACE = r"\bperl\b[^\n;|&]*\s-[0-9aCcFlnpsStTuUvwW]*i[^\n;|&]*"
 
 
@@ -660,6 +662,10 @@ def _roots(words) -> list:
                 break
             roots.append(word)
         return roots or ["."]
+    if name == "git":
+        listed = _git_listing_roots(args)
+        if listed is not None:
+            return listed
     grep = name in _GREP_COMMANDS
     roots, skip, flags_over, has_pattern = [], False, False, False
     for word in args:
@@ -683,6 +689,33 @@ def _roots(words) -> list:
         else:
             roots.append(word)
     return roots[1:] if grep and not has_pattern else roots
+
+
+_GIT_LIST_FLAGS = frozenset(("--files-with-matches", "--name-only", "--files-without-match"))
+
+
+def _git_listing_roots(args):
+    """The roots of a `git ls-files` or `git grep -l` segment, which print tracked paths: its pathspecs
+    (for `grep`, the words after the pattern), else `.`, the whole checkout, read as a `.` root is
+    (`_dot_roots`). A `-C DIR` before the command is its folder. None for any other `git` command, and
+    for a `git grep` that prints matching lines, not paths."""
+    folder, at = ".", 0
+    while at < len(args) and args[at].startswith("-"):
+        if args[at] in ("-C", "-c") and at + 1 < len(args):
+            folder = args[at + 1] if args[at] == "-C" else folder
+            at += 1
+        at += 1
+    if at >= len(args) or args[at] not in ("ls-files", "grep"):
+        return None
+    rest = args[at + 1:]
+    if args[at] == "ls-files":
+        roots = [word for word in rest if not word.startswith("-")]
+    else:
+        if not any(word in _GIT_LIST_FLAGS or re.fullmatch(r"-[A-Za-z0-9]*[lL][A-Za-z0-9]*", word)
+                   for word in rest):
+            return None
+        roots = _roots(["grep"] + rest)
+    return roots or [folder]
 
 
 def _piped_into(ends, parsed, at):
@@ -976,8 +1009,10 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
         if linked:
             return linked
         data = set() if closed else _copy_reads(raw, predicate, cwd, bool(fed), command_position)
+        scripts = {}
         if command_position and not closed:
-            data = data | _sed_script_words(raw)   # the builder test check only: a script names no file
+            scripts = _sed_script_words(raw)   # the builder test check only: a script names no file but w, W, e
+            data = data | set(scripts)
         if kinds[number] in ("printer", "message"):
             last = number
             while last + 1 < len(kinds) and ends[last] == "|":
@@ -992,6 +1027,9 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
             if index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
                 shown.append('""')
+                for target in scripts.get(index, ()):   # a sed script's w, W or e names a file or command
+                    words.append(target)
+                    shown.append(target)
             elif index and re.fullmatch(_DESCRIPTOR, word) and _is_redirect(raw[index - 1]):
                 # Never judged as a path. `dup` stays in the text so `2> PATH` is not read as `> PATH`.
                 # The raw word is unquoted: a quoted "&1" is a file and is judged.
@@ -1008,23 +1046,97 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 continue
             if not word or word in (">", ">>"):
                 continue
+            if follow_cd and word == '""':
+                continue   # the data placeholder is no path, though `cd tests` makes it one in that folder
             if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(words) if command_position else ())):
-                return word
+                return _from_cwd(word, at, cwd) if follow_cd else word
     return ""
+
+
+def _from_cwd(word, at, cwd):
+    """`word` as a path from `cwd` when the segment ran in a folder `at` that a `cd` moved to, so the
+    matched path a refusal logs names its test folder (`tests/test_a.py`, not `./test_a.py`)."""
+    if at == cwd or not cwd or os.path.isabs(word) or word.startswith(("~", "$")):
+        return word
+    full = os.path.normpath(os.path.join(at, word))
+    inside = os.path.normpath(cwd)
+    return os.path.relpath(full, inside).replace(os.sep, "/") if full.startswith(inside + os.sep) else full
 
 
 _SED_TAKES_VALUE = "efl"   # the sed short flags that take a value: a script, a script file, a width
 
 
+def _sed_past(script, at, delimiter, parts):
+    """The index after `parts` closing `delimiter`s in `script` from `at`; a backslash escapes the next
+    character. The regex and the replacement of `s` are two parts, the sets of `y` are two."""
+    while at < len(script) and parts:
+        if script[at] == "\\":
+            at += 1
+        elif script[at] == delimiter:
+            parts -= 1
+        at += 1
+    return at
+
+
+def _sed_script_targets(script):
+    """The files and commands that one sed script word names for writing or running: the rest of the
+    line after a `w` or `W` command (a file), an `e` command (a command), and the `w` flag of `s` (a
+    file). Every other word of a script is text. Walks the script as sed reads it: an address
+    (`3`, `$`, `/re/`, a regex in other delimiters) is skipped, so are the regex and replacement of `s` and the sets
+    of `y`, and the text of `a`, `i`, `c`, `r`, `R` and a label runs to the line's end."""
+    targets, at, size = [], 0, len(script)
+
+    def line_end(start):
+        end = script.find("\n", start)
+        return size if end < 0 else end
+
+    while at < size:
+        char = script[at]
+        if char in " \t\n;{}!0123456789$,~+IM":
+            at += 1
+        elif char == "#":
+            at = line_end(at)
+        elif char in "/\\":
+            delimiter = script[at + 1:at + 2] if char == "\\" else char
+            at = _sed_past(script, at + (2 if char == "\\" else 1), delimiter, 1)
+        elif char in "wWe":
+            end = line_end(at + 1)
+            target = script[at + 1:end].strip()
+            if target:
+                targets.extend(target.split() if char == "e" else [target])   # `e` runs a command
+            at = end
+        elif char in "sy":
+            delimiter = script[at + 1:at + 2]
+            if not delimiter or delimiter in "\n\\":
+                break
+            at = _sed_past(script, at + 2, delimiter, 2)
+            while char == "s" and at < size and script[at] not in ";\n}":
+                if script[at] == "w":
+                    end = line_end(at + 1)
+                    target = script[at + 1:end].strip()
+                    if target:
+                        targets.append(target)
+                    at = end
+                    break
+                at += 1
+        elif char in "aicrR:btT":
+            at = line_end(at)
+        else:
+            at += 1
+    return targets
+
+
 def _sed_script_words(raw):
-    """The indexes of the words of an in-place `sed` segment that are not files it writes: its script
-    (the first operand, or the value of each `-e` and `--expression`) and the value of `-f`, `--file`
-    and `-l`. A script is text, so `s/N/tests\\/a.py/` names no test. Empty when the segment is no
+    """{index: names} for the words of an in-place `sed` segment that are not files it writes: its
+    script (the first operand, or the value of each `-e` and `--expression`) and the value of `-f`,
+    `--file` and `-l`. A script is text, so `s/N/tests\\/a.py/` names no test. `names` are the files
+    and commands the script's `w`, `W`, `e` and `s///w` name (`_sed_script_targets`), judged as words
+    of the segment: `sed -i 'w tests/a.py' src/app.py` writes tests/a.py. Empty when the segment is no
     `sed -i` or `sed --in-place`."""
     index = resolve_command(tuple(raw))
     if index is None or _name(raw[index]) != "sed":
-        return set()
-    skip, in_place, scripted, operands, flags_over = set(), False, False, [], False
+        return {}
+    skip, scripts, in_place, scripted, operands, flags_over = set(), {}, False, False, [], False
     at = index + 1
     while at < len(raw):
         word = _unquoted(raw[at])
@@ -1033,15 +1145,15 @@ def _sed_script_words(raw):
         elif word == "--":
             flags_over = True
         elif word.startswith("--"):
-            flag, glued, _value = word.partition("=")
+            flag, glued, value = word.partition("=")
             in_place = in_place or flag == "--in-place"
             if flag in ("--expression", "--file", "--line-length"):
                 scripted = scripted or flag != "--line-length"
-                if glued:
-                    skip.add(at)
-                else:
-                    skip.add(at + 1)
-                    at += 1
+                where = at if glued else at + 1
+                skip.add(where)
+                if flag == "--expression":
+                    scripts[where] = value if glued else _unquoted(raw[where]) if where < len(raw) else ""
+                at = at if glued else at + 1
         else:
             for place, letter in enumerate(word[1:], 1):
                 if letter == "i":
@@ -1049,18 +1161,20 @@ def _sed_script_words(raw):
                     break   # the rest of the cluster is the backup suffix
                 if letter in _SED_TAKES_VALUE:
                     scripted = scripted or letter != "l"
-                    if place < len(word) - 1:
-                        skip.add(at)   # the value is glued on: `-es/a/b/`
-                    else:
-                        skip.add(at + 1)
-                        at += 1
+                    glued = place < len(word) - 1
+                    where = at if glued else at + 1
+                    skip.add(where)
+                    if letter == "e":
+                        scripts[where] = word[place + 1:] if glued else _unquoted(raw[where]) if where < len(raw) else ""
+                    at = at if glued else at + 1
                     break
         at += 1
     if not in_place:
-        return set()
+        return {}
     if not scripted and operands:
         skip.add(operands[0])
-    return skip
+        scripts[operands[0]] = _unquoted(raw[operands[0]])
+    return {where: _sed_script_targets(scripts.get(where, "")) for where in skip}
 
 
 def _segment_command(words):
