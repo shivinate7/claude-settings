@@ -1,0 +1,11 @@
+{
+  "title": "Fix the six round-2 findings on #1617's lint-code check",
+  "phase": "next",
+  "status": "todo",
+  "order": 267.3,
+  "owner": "coordinator",
+  "lane": "session_013NEJL2GctUCgksFKSWZykD",
+  "why": "Round 2 of PR #1617's review left six findings (lane lint-codes-unique, 16:31 CST Nov 7). Each is a note on that branch (docs/debts/notes.md, lint-codes-*) that names its fix.",
+  "note": "Waits on #1617. (1) Pin the cost at 15 git starts. (2) A STALE row needs the table's column gap. (3) Compare a duplicate count against the larger of the tip's and the fork's count. (4) Read the other MAP forms. (5) Call codes_check at the merge tool's pre-claim site. (6) Add decision record lint-codes-unique and cite it by id in CODES_CITE. Filed as todo, not ready: the fixes are not built, and ready means a PR waits on the runner.",
+  "updatedAt": "2026-11-07T16:32:00-06:00"
+}
