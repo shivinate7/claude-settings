@@ -1,0 +1,11 @@
+{
+  "title": "A relayed merge yes binds to the PR head at relay time",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.98,
+  "owner": "coordinator",
+  "why": "Coordinator, 13:55 CST Nov 7. Follows #1433.",
+  "note": "Starts after #1433 merges.",
+  "lane": "session_013NEJKzw6Mmu5eviHC3vobt",
+  "updatedAt": "2026-11-07T13:55:00-06:00"
+}
