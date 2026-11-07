@@ -1026,6 +1026,31 @@ class GuardClosure(unittest.TestCase):
         self.assertNotIn("skills/waiting-page/page.html", paths | loads)
         self.assertEqual(unfollowed, [])
 
+    # Two named loads must not share a key: a key is the scope and the load's source, so each collision shape is a fixture.
+    def test_two_same_named_methods_in_two_classes_key_apart(self):
+        # Scope first: the probe's two loads are the multi-literal join under ROOT, a named load (lint/rule_mechanisms.json).
+        tracked = set(_repo_files())
+        self.assertIn("lint/rule_mechanisms.json", tracked, "scope: lint/rule_mechanisms.json is not a repo file")
+        src = ('import os\nROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))\n'
+               'class First:\n    def load(self):\n        return os.path.join(ROOT, "lint", "rule_mechanisms.json")\n'
+               'class Second:\n    def load(self):\n        return os.path.join(ROOT, "lint", "rule_mechanisms.json")\n')
+        _, _, _, unfollowed = _refs("lint/zz_probe.py", ast.parse(src), tracked)
+        keys = [key for key, _ in unfollowed]
+        self.assertEqual(len(keys), 2, f"the two loads are not both named: {keys}")
+        self.assertEqual(len(set(keys)), 2, f"two loads share a key: {keys}")
+        self.assertEqual({key.split(":")[0] for key in keys}, {"First.load", "Second.load"}, f"the scope is not qualified: {keys}")
+
+    def test_two_loads_of_one_source_in_one_function_key_apart(self):
+        # The probe's loads take a path parameter, which no literal names, so both are named.
+        tracked = set(_repo_files())
+        src = ('import importlib.util\n\ndef load(path):\n'
+               '    a = importlib.util.spec_from_file_location("x", path)\n'
+               '    b = importlib.util.spec_from_file_location("y", path)\n    return a, b\n')
+        _, _, _, unfollowed = _refs("lint/zz_probe.py", ast.parse(src), tracked)
+        keys = [key for key, _ in unfollowed]
+        self.assertEqual(len(keys), 2, f"the two loads are not both named: {keys}")
+        self.assertEqual(len(set(keys)), 2, f"two loads share a key: {keys}")
+
 
 @unittest.skipUnless(BASH, "bash not on PATH")
 class MutationReport(unittest.TestCase):
