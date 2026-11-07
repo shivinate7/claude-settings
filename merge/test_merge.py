@@ -317,6 +317,13 @@ class Env(unittest.TestCase):
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "rival"); sh(o, "git", "push", "-q", "origin", "feat")
         return sh(o, "git", "rev-parse", "HEAD")
 
+    def main_moves(self):
+        """A person pushes a commit to main that touches no path a batch touches, from the second clone."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, "elsewhere.txt"), "main moved\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
+
     def hook(self, fn_script):
         p = os.path.join(self.t, "hook.sh")
         put(p, fn_script)
@@ -1056,12 +1063,6 @@ class Guards(Env):
         self.assertEqual(rc, 1)
         self.assertIn("cannot fetch origin main", out)
         self.assertFalse(self.host.merged)
-
-    def main_moves(self):
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
-        put(os.path.join(o, "elsewhere.txt"), "main moved\n")
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
 
     def test_a_head_without_the_base_tip_is_refused_before_any_claim(self):  # merge-needs-current-base
         self.main_moves()
@@ -2695,13 +2696,6 @@ class ClaimSurvivesUnknown(Env):
         rc, out = self.run_merge("7", "--confirm")
         self.host.on_wait = None  # the rerun waits on its own terms, not on this read
         return rc, out, (claimed[0] if claimed else None)
-
-    def main_moves(self):
-        """A person pushes a commit to main that touches no path the batch touches, from the second clone."""
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
-        put(os.path.join(o, "elsewhere.txt"), "main moved\n")
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
 
     def merge_main_onto_feat(self):
         """main moves and the branch merges it, as a healed records page leaves the branch: the head is a merge commit on top of the claim. -> the head."""
