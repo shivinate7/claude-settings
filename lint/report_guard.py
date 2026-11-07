@@ -1538,9 +1538,9 @@ def review_claims(text):
 
 def _gh_json(args, cwd):
     """The parsed JSON of one `gh api` read, or raises: a failed or unparseable read is never an answer."""
-    import subprocess
-    run = subprocess.run(["gh", "api", *args], cwd=cwd or None, capture_output=True, text=True,
-                         timeout=REVIEW_READ_TIMEOUT)
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+    run = _nowindow.run(["gh", "api", *args], cwd=cwd or None, capture_output=True, text=True,
+                        timeout=REVIEW_READ_TIMEOUT)
     if run.returncode:
         raise RuntimeError("gh api exited %d" % run.returncode)
     return json.loads(run.stdout)
