@@ -22,9 +22,12 @@ Choices pinned here:
 - The refusal names itself "Hand-off guard" and its remedy line starts "Remedy:". It ends with the output rule
   id, not the waiting-page rule.
 - A capability reason ("can't", "cannot", "refuse", "refuses", "refused", "unable to", "denied", "forbidden", "no
-  access", "isn't" or "not allowed", "isn't" or "not permitted", "unavailable", "403", "blocked", "not available")
-  passes with a route cite whose row is refused or asks, a refusal of this session, or "(measured <date>, <check and
-  result>)". A measured premise with no date is refused, and the refusal names the missing date.
+  access", "isn't" or "not allowed", "isn't" or "not permitted", "unavailable", "403", "blocked", "not available",
+  "could not", "couldn't" with either apostrophe, "rejected", "401") passes with a route cite whose row is refused or
+  asks, a refusal of this session, or "(measured <date>, <check and result>)". A measured premise with no date is
+  refused, and the refusal names the missing date.
+- A capability word in a reason that gives no capability ("rejected by review", "needs your review", "could not be
+  simpler") needs no cite.
 - "blocked" or "not available" followed by "until" is a dependency, not a capability. With no other verb it passes.
 - A choice, login or safety-kept reason ("your choice", "your call", "needs your login", "sign in as you", "a safety
   rule ... stays yours", "the safety rules keep") needs no cite, even with a capability verb on the line.
@@ -76,10 +79,22 @@ ASKS_CITE = WHY % " (route r-asks)"
 UNLABELLED = "I can't push from here (route r-missing)."
 TOOL_CITE = "Why yours: I can't push from here, since `%s` was refused this session." % TOOL
 # Pick Q1 (b): a capability reason needs a cite (a route row that is refused or asks, a refusal of this session, or a
-# measured premise with a date). A reason with no capability verb needs none.
+# measured premise with a date). A reason with no capability verb needs none. "could not", "couldn't" (either
+# apostrophe), "rejected" and "401" are capability verbs too.
 CAPABILITY_REASONS = ("I can't push from here", "I cannot push from here", "the remote refuses the push",
-                      "the push is blocked here", "a push is not available here")
+                      "the push is blocked here", "a push is not available here",
+                      "I could not push from here", "I couldn't push from here", "I couldn’t push from here",
+                      "the remote rejected the push", "the API returned 401")
 CAPABILITY_LINE = "Why yours: %s, since check_red_run showed the trailer needs the owner."
+# Lines whose word looks like a capability verb and gives no capability reason. Each passes with no cite, so a widened
+# verb must not take them for one.
+FALSE_ALARM_LINES = (
+    "Why yours: the PR was rejected by review, so pick the form.",
+    "Why yours: PR #401 needs your review.",
+    "Why yours: the fix could not be simpler.",
+)
+# The choice phrases of CHOICE_RE in lint/report_guard.py, copied so the scope check does not import the product module.
+CHOICE_WORDS = ("your choice", "your call", "your login", "sign in as you", "stays yours", "safety rules keep")
 CHOICE_LINES = ("Why yours: this needs your login.", "Why yours: this is your choice.",
                 "Why yours: the safety rules keep this for you.")
 # Each choice probe holds a base capability verb, so it reads red on a base that lacks the matching exemption.
@@ -507,6 +522,20 @@ class HandOffTests(unittest.TestCase):
                     with self.subTest(line=line, shape=shape, landed=landed):
                         out = self.stop(make(line), landed=landed)
                         self.assert_passes(out, "a choice reason with no cite (%r, %s, landed %s)"
+                                           % (line, shape, landed))
+
+    def test_hd_green_a_false_alarm_capability_word_passes(self):
+        # Catches: a capability verb widened too far (rejected, 401, could not) refusing a Why yours line that gives no
+        # capability reason. Each line passes on main, so it is the green control beside the red cases.
+        for line in FALSE_ALARM_LINES:
+            self.assertFalse(any(word in line.lower() for word in CHOICE_WORDS),
+                             "scope: %r holds a choice phrase, so it is not a capability-word case" % line)
+        for line in FALSE_ALARM_LINES:
+            for shape, make in SHAPES.items():
+                for landed in (False, True):
+                    with self.subTest(line=line, shape=shape, landed=landed):
+                        out = self.stop(make(line), landed=landed)
+                        self.assert_passes(out, "a false alarm with no cite (%r, %s, landed %s)"
                                            % (line, shape, landed))
 
     def test_hd_red_a_measured_premise_with_a_date_passes(self):
