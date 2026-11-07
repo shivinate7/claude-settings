@@ -10,7 +10,9 @@ Run with:
     python3 lint/test_rule_audit.py -v
 """
 import ast
+import contextlib
 import glob
+import io
 import json
 import os
 import re
@@ -22,6 +24,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rule_audit  # noqa: E402
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 
 # .mjs fixtures must be listable: form 1 names node:test, form 2 names LIST_TESTS (see rule_audit).
 NODE_TEST = 'import { test } from "node:test";\n'
@@ -740,6 +743,105 @@ class EmittedRuleIdsTests(unittest.TestCase):
         ids = self.ids_of(self.files())
         self.assertIn("main-rule", ids)
         self.assertNotIn("watch-rule", ids)
+
+
+# ------------------------------------------------------------ module-level rule names
+# A guard may write its id through a module-level constant (`TIMEOUT_LOG_RULE = "judge-timeout"`),
+# so the reader resolves a Name rule argument against the file's own top-level string assignment.
+
+# The ids emitted_rule_ids() listed before this change (at ab5b48cbe). A new id may join the list;
+# an id on this list may not drop unless its rule is removed.
+LISTED_BEFORE = (
+    "agent-model-cap", "agent-model-floor", "agent-role-model", "agent-role-model-unread", "ask-alone",
+    "author-diff", "background-end", "bare-merge", "builder-diff", "builder-test-edit", "cite-by-id",
+    "command-in-item", "config-edit", "designer-diff", "designer-scope", "destructive-delete",
+    "detached-launch", "draft-pr", "env-file", "force-push", "frozen-path", "gh-login-switch",
+    "git-env-set", "guard-crash", "hand-made-worktree", "handoff-unread", "impeccable-review-only",
+    "item-field-rendered", "lane-by-slug", "lane-closes-after-records", "lane-effort-pin",
+    "lane-one-topic", "lane-repo-tag", "linked-node-modules", "live-stream", "ln-over-directory",
+    "load-brake", "machine-wide-kill", "merge-checks", "merge-role-proof", "mockup-home",
+    "option-letter-keys", "other-checkout", "owner-judge", "page-item-design", "page-stale",
+    "playwright-browsers-path", "playwright-install", "pointer-head", "port-question", "press-link",
+    "push-main", "push-stray-branch", "question-departs", "question-form", "record-writer-scope",
+    "records-page", "rework-off-page", "rm-after-cd", "rm-var-unguarded", "roadmap-one-writer",
+    "role-diff-main-checkout", "role-diff-unread", "role-diff-unresolved", "roles-third-round-steps-up",
+    "session-home", "shared-tree", "silent-write", "simulator-boot-bypass", "simulator-boot-cap",
+    "simulator-boot-lease", "simulator-boot-route", "simulator-boot-twin", "subject-unread",
+    "task-names-check", "test-author-scope", "trust-card-in-build", "uniform-pick", "waiter",
+    "worktree-home", "writer-diff", "wsl-allow-list",
+)
+
+RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
+
+
+class ModuleLevelRuleNameTests(unittest.TestCase):
+    """`guard_rule_names(text, path)` resolves a Name rule argument to its module-level string assignment."""
+
+    ids = staticmethod(rule_audit.guard_rule_names)
+
+    def test_a_module_level_string_name_lists_its_id(self):
+        self.assertEqual(self.ids('R = "x-rule"\nrecord(t, "d", R, m)\n'), {"x-rule"},
+                         "a rule passed as a module-level name is not listed")
+
+    def test_a_keyword_name_lists_its_id(self):
+        src = ('REFUSE_RULE = "x-rule"\nASK_RULE = "y-rule"\n'
+               'refuse(tool, "deny", rule=REFUSE_RULE, reason=R, matched=m)\n'
+               'ask_command(rule=ASK_RULE, reason=R)\n')
+        self.assertEqual(self.ids(src), {"x-rule", "y-rule"},
+                         "a rule passed as rule= through a module-level name is not listed")
+
+    def test_a_name_with_no_module_level_string_names_nothing_and_does_not_raise(self):
+        cases = {
+            "a function parameter": 'def f(rule):\n    record(t, "d", rule, m)\n',
+            "a local": 'def f():\n    R = "local-rule"\n    refuse(t, "deny", R, REASON, m)\n',
+            "a name shown only in a comment or a string": (
+                '# R = "ghost-rule"\nNOTE = \'R = "ghost-rule"\'\nrecord(t, "d", R, m)\n'),
+        }
+        for label, src in cases.items():
+            with self.subTest(label):
+                found = self.ids(src)  # a raise here is an error, not a pass
+                self.assertEqual(found, set(), "%s names an id with no module-level assignment" % label)
+
+    def test_a_name_assigned_twice_at_module_level_is_refused_at_its_call(self):
+        src = 'R = "one-rule"\nR = "two-rule"\nrecord(t, "d", R, m)\n'
+        with self.assertRaises(ValueError) as cm:
+            self.ids(src, "hooks/x.py")
+        self.assertIn("hooks/x.py:3", str(cm.exception),
+                      "a name assigned twice is not refused with the call's path:line")
+
+    def test_a_name_assigned_a_non_string_at_module_level_is_refused_at_its_call(self):
+        src = 'R = 5\nrecord(t, "d", R, m)\n'
+        with self.assertRaises(ValueError) as cm:
+            self.ids(src, "hooks/x.py")
+        self.assertIn("hooks/x.py:2", str(cm.exception),
+                      "a name assigned a non-string is not refused with the call's path:line")
+
+    def test_the_real_all_rules_listing_has_the_id_call_judge_writes(self):
+        sys.path.insert(0, os.path.join(rule_audit.ROOT, "hooks"))
+        import call_judge  # read from the module, never copied here
+        import guard_log_report
+        rule = call_judge.TIMEOUT_LOG_RULE
+        self.assertIsInstance(rule, str)
+        log = os.path.join(tempfile.mkdtemp(dir=RUN_FOLDER), "guard.log")
+        open(log, "w").close()  # an empty log: every listed id shows with zero counts
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            guard_log_report.main(["--all-rules", "--days", "all", "--log", log])
+        listed = {line.split("|")[1].strip() for line in out.getvalue().splitlines() if line.startswith("| ")}
+        self.assertIn(rule, listed, "the --all-rules listing has no row for the id call_judge writes to guard.log")
+
+    def test_every_id_listed_before_this_change_is_still_listed(self):
+        missing = sorted(set(LISTED_BEFORE) - rule_audit.emitted_rule_ids())
+        self.assertEqual(missing, [], "an id the --all-rules listing held before no longer lists")
 
 
 # ------------------------------------------------------------ refusal cites
