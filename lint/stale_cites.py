@@ -2,7 +2,7 @@
 """The stale-prose merge check. Standard library only.
 
     python3 lint/stale_cites.py --range <base>...<head>
-    python3 lint/stale_cites.py --tree [REV]
+    python3 lint/stale_cites.py --tree [REV] [--only PATH ...] [--any-top]
 
 Refuses a range that leaves a tracked Markdown line naming a name the range removed.
   STALE001  the line names a path the range deleted or renamed, and the path is absent at head.
@@ -46,10 +46,20 @@ change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base
   STALE003  the line names `<folder>/.../<file.ext>` that is no tracked file (or folder) at REV, as written or
             from the folder of the Markdown file. One tracked file with the same name elsewhere is named as a
             hint. A cite with a placeholder character, no extension, no folder part, or a first segment that is
-            no tracked top folder is no path cite, so it never fires.
+            no tracked top folder is no path cite, so it never fires, unless --any-top is given. A `~` first segment
+            (a home path) never fires, with or without it.
+  A `<name>:<path>` run, a name of letters, digits, `_` or `-` and a colon touching the path, is a cite of another
+  checkout's file or of a ref. It is never read, never fires and never anchors, with or without --any-top. A colon
+  followed by a space (`Note: hooks/x.py`) is prose, so that path is read.
   STALE004  the line anchors `path:N` or `path:N-M` on a tracked file, and N is below 1, M is below N, or the
             last number is past the file's last line. A dead path gives STALE003 only.
---tree and --range are exclusive.
+--only PATH (repeatable, --tree only) reads only the named tracked Markdown files. The tracked files, the folders,
+the top folders and the did-you-mean hint still come from the whole tree, so a cite resolves as in a full run. A named
+path that is no tracked Markdown file this check reads at REV (absent, not .md, untracked, or left out above) is a read
+that could not run: `stale-cites: UNKNOWN, ...`, exit 2.
+--any-top (--tree only) lets STALE003 fire on a file cite whose first segment is no tracked top folder, such as
+`harness/x.mjs`. A cite with a placeholder, a URL, an absolute path or a `~` path still never fires.
+--tree and --range are exclusive. --only and --any-top need --tree.
 
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
 2 a read that could not run, except a base that does not resolve (a shallow clone): that prints
@@ -85,7 +95,8 @@ then takes its Home line) and the mechanisms file once. The decisions folder is 
 `candidates(root, "decisions")` that holds a file. A changed RULE_FILES file adds its base and head blobs and the
 mechanisms file to that read. Its list of changed files comes from the diff the run already read, with no git start.
 A --tree run starts one python3, then git rev-parse, ls-tree and one cat-file --batch. It reads each tracked .md
-once, and each file a line anchor names once more, even when that file is a .md. It writes no file and prints no report.
+once (only the named ones under --only, with the same starts), and each file a line anchor names once more, even when
+that file is a .md. --any-top adds no start. It writes no file and prints no report.
 """
 import argparse
 import ast
@@ -1140,12 +1151,21 @@ def placeholder_adjacent(line, start, end):
     return bool(before and before in "${") or bool(after and after in "?<{[$") or (after == "*" and before != "*")
 
 
+SIBLING_PREFIX = re.compile(r"(?<![\w./@+~-])[A-Za-z0-9_-]+:\Z")  # `name:` touching the run, the name a whole run
+
+
+def sibling_cite(line, start):
+    """True when the run at `start` follows `<name>:` with no space: a file of another checkout, or a ref."""
+    return bool(SIBLING_PREFIX.search(line, 0, start))
+
+
 def line_count(data):
     return data.count(b"\n") + (1 if data and not data.endswith(b"\n") else 0)
 
 
-def scan_tree(rev):
-    """(found, unknowns) for every tracked Markdown line at rev: STALE003 dead path cites, STALE004 bad anchors."""
+def scan_tree(rev, only=(), any_top=False):
+    """(found, unknowns) for every tracked Markdown line at rev, or only the `only` files: STALE003 dead path cites,
+    STALE004 bad anchors. `any_top` also reads a cite whose first segment is no tracked top folder."""
     found = {}
     entries = tracked_entries(rev)
     files = {p for _, p in entries}
@@ -1155,6 +1175,11 @@ def scan_tree(rev):
     for p in sorted(files):
         by_name.setdefault(p.rsplit("/", 1)[-1], []).append(p)
     mds = markdown_files(entries, exclude_patterns("."))
+    if only:
+        unread = [p for p in only if p not in mds]
+        if unread:
+            raise Unknown("--only names no tracked Markdown file this check reads at %s: %s" % (rev, ", ".join(unread)))
+        mds = [p for p in mds if p in set(only)]
     batch = BlobReader()
     counts = {}  # tracked file -> its line count, read once
 
@@ -1173,8 +1198,11 @@ def scan_tree(rev):
                 off = disabled(line) if "ste-disable-line" in line else set()
                 for run in RUN_RE.finditer(line):
                     cite = run.group(0).rstrip(".-")
-                    if not FILE_CITE.match(cite) or cite.split("/", 1)[0] not in tops \
-                            or placeholder_adjacent(line, run.start(), run.end()):
+                    top = cite.split("/", 1)[0]
+                    if not FILE_CITE.match(cite) or placeholder_adjacent(line, run.start(), run.end()) \
+                            or sibling_cite(line, run.start()):
+                        continue
+                    if top not in tops and not (any_top and top != "~"):
                         continue
                     home = next((c for c in (cite, posixpath.normpath(posixpath.join(folder, cite)))
                                  if c in files or c in folders), None)
@@ -1204,11 +1232,17 @@ def main(argv):
     mode.add_argument("--range", help="base...head, as the ste-lint step diffs")
     mode.add_argument("--tree", nargs="?", const="HEAD", metavar="REV",
                       help="every tracked Markdown line at REV (default HEAD): dead paths, bad line anchors")
+    parser.add_argument("--only", action="append", default=[], metavar="PATH",
+                        help="with --tree: read only this tracked Markdown file (repeatable)")
+    parser.add_argument("--any-top", action="store_true",
+                        help="with --tree: STALE003 also fires on a cite under no tracked top folder")
     args = parser.parse_args(argv)
+    if (args.only or args.any_top) and not args.tree:
+        parser.error("--only and --any-top need --tree")
     try:
         root = git("rev-parse", "--show-toplevel").decode().strip()
         os.chdir(root)
-        found, unknowns, lines = scan(args.range) if args.range else (*scan_tree(args.tree), [])
+        found, unknowns, lines = scan(args.range) if args.range else (*scan_tree(args.tree, args.only, args.any_top), [])
     except BaseUnknown as exc:
         print("stale-cites: unknown, the base of %s does not resolve (%s). Check out with fetch-depth 0 "
               "(actions/checkout) so the range has history. Nothing was checked." % (args.range, exc))
