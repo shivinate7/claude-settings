@@ -244,8 +244,13 @@ def _waiting_collections():
     imports lint/ (recovery must not depend on the repo it recovers). The skill folder sits at the same place relative to
     lint/ in the repo and in a ~/.claude install. Lazy: guard.py imports this module on every tool call, and a fixture
     may copy lint/ without the skill."""
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "skills", "waiting-page"))
-    import export_page
+    folder = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "skills", "waiting-page")
+    sys.path.insert(0, folder)
+    try:
+        import export_page
+    except ImportError as e:
+        raise LayoutError("the waiting page's collection list cannot be read: export_page.py is missing from %s (%s)"
+                          % (os.path.normpath(folder), e)) from e
     return export_page.COLLECTIONS
 
 

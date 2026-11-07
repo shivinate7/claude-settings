@@ -1180,7 +1180,11 @@ def export_check(cwd, transcript_path, session_id):
         import layout
     except (OSError, TypeError, ValueError, ImportError):
         return None, None  # no transcript to read (a hook run with none is normal), or no layout
-    writes, exports, results = _scan_transcript(records, layout.WAITING_COLLECTIONS)
+    try:
+        collections = layout.WAITING_COLLECTIONS
+    except layout.LayoutError as e:
+        return None, FAIL_OPEN_EXPORT % (" ".join(str(e).split()) or type(e).__name__)
+    writes, exports, results = _scan_transcript(records, collections)
     writes = [w for w in writes if w[1] in results and not results[w[1]][0]]
     if not writes:
         return None, None  # nothing is read from the repo before a write is found
