@@ -1,10 +1,10 @@
 {
   "title": "The merge-time prose judge prints one UNKNOWN count line and only real findings",
   "phase": "next",
-  "status": "todo",
+  "status": "doing",
   "order": 260.8,
   "owner": "coordinator",
   "why": "Batch runner 8, batch 49 (#1397), 2026-11-07 02:57 CST, relayed by the coordinator 03:01 CST: the merge-time prose judge (report-only, from #1358) printed about 270 lines on a 5-lane batch. Most were UNKNOWN: the model subprocess timed out, gave no JSON verdict, or ran past the call cap. Two more were 'unbacked' on docs/debts/notes.md lines 1482-1483. The verdict was not affected, but a reader learns to scroll past noise (verification-cry-wolf-guard-is-spent).",
-  "note": "Collapse the UNKNOWNs to one count line, raise or size the timeout and call cap to the batch, and print only real findings. Done check: a test on a 5-lane fixture prints at most one UNKNOWN summary line. The check's output changes, so this is a build lane (test-author, builder, reviewer). No owner question.",
-  "updatedAt": "2026-11-07T09:01:00Z"
+  "note": "Collapse the UNKNOWNs to one count line, raise or size the timeout and call cap to the batch, and print only real findings. Done check: a test on a 5-lane fixture prints at most one UNKNOWN summary line. The check's output changes, so this is a build lane (test-author, builder, reviewer). No owner question. Lane prose-judge-batch-noise started 2026-11-07 03:06 CST (coordinator).",
+  "updatedAt": "2026-11-07T09:06:00Z"
 }

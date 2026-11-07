@@ -15,7 +15,7 @@
       "slug": "3d-phone-b"
     }
   ],
-  "home": "docs/design/3d-browser-dummy-notes.md",
+  "home": "coordinator starts a follow-up lane on step 3d-browser-dummy",
   "id": "3d-dummy-phone",
   "kind": "decision",
   "n": 292,
@@ -37,7 +37,7 @@
       "lose": "It covers the scene until you close it."
     }
   ],
-  "owner": "lane 3d-browser-dummy (session_013NEJL1q9hiKz6bhqxDi1ik)",
+  "owner": "coordinator",
   "pick": "a",
   "rank": 4,
   "ref": "step 3d-browser-dummy",
