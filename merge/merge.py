@@ -716,6 +716,7 @@ class Host:
     def __init__(self, required="protection", base="main", minute=60, now=time.time, pause=time.sleep, ignore=None, repo=None, cwd=None):
         self.required, self.base, self.minute, self.now, self.pause = required, base, minute, now, pause
         self.repo = repo  # OWNER/NAME, or None for the repo of the working directory
+        self.take_base = None  # confirm sets it to the base it read under the lock; merge compares the base it reads just before the PUT with it
         self.cwd = cwd    # where `gh` runs, so it names the repo of that directory
         self.ignore = ignore or {}  # check name -> reason, from ignore_checks()
         self.warned = set()  # (check name, link) already warned about, so a poll loop prints each line once
@@ -1347,7 +1348,7 @@ class Host:
         say(f"merge: merging #{n} ...")  # the merge call can block
         # The old `gh pr merge` (no --admin) refused a BLOCKED or BEHIND pull request itself. The REST PUT does not: a token that may bypass branch
         # protection merges it. So read the pull request right before the PUT; blocked or behind is a proven refusal, and no PUT is sent. Clean, unstable and the rest go on.
-        taken = self.base  # the base the take read (pr() sets self.base); the PUT would land on whatever base the PR has now
+        taken = self.take_base or self.base  # confirm sets take_base to the base it read under the lock; with none, the last pr() read. The PUT lands on whatever base the PR has now
         p = self.pr(n)
         if p["base"] != taken:
             return None, f"#{n} base changed from {taken} to {p['base']} after the take, so its checks and lock were for the old base. No merge call was sent."
@@ -2854,6 +2855,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         refuse_bad_pr(info)
         if info["base"] != base:
             raise Stop(f"the base of #{n} changed from {base} to {info['base']} while the lock was taken {BASE_CITE}. Nothing was claimed or pushed.")
+        host.take_base = base
         if info["draft"]:  # it turned draft after the first read: the records step, never a merge
             return draft_step(root, cfg, n, host, info)
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
