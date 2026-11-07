@@ -769,6 +769,28 @@ def mutate_family(*shards):
     return mutate_doc(*(mutate_job(name, shard) for name, shard in zip(names, shards)))
 
 
+def family_names(text):
+    """The mutate family's job names, as checks.yml names them: MUTATE_JOB, then its -b, -c and any later shard."""
+    return [n for n in all_jobs(text) if MUTATE_FAMILY.fullmatch(n)]
+
+
+def scope_loop_problems(text, names):
+    """The scope loop: job_check_problems for each named job. A job the flag table does not list takes the family's
+    flag, since every shard of the family skips on the guard flag."""
+    jobs = all_jobs(text)
+    problems = []
+    for name in names:
+        if name not in jobs:
+            problems.append(f"no job named {name}")
+            continue
+        problems += job_check_problems(name, jobs[name], FLAG_OF.get(name, FLAG_OF[MUTATE_JOB]))
+    return problems
+
+
+# A scope condition with no push branch: on push, with every flag false, it reads false, so the job skips push.
+SKIPS_PUSH = "${{ needs.scope.outputs.guard == 'true' || github.event_name == 'pull_request' }}"
+
+
 def shoot_problems(text):
     """The shoot suite runs in SHOOT_JOB on Linux and in no other job. Every step of that job carries the scope condition,
     and the suite's own step carries the scope condition alone, so no step can skip the suite and read green. No other
@@ -908,12 +930,21 @@ class WindowsSplit(unittest.TestCase):
 
     def test_scope_job_checks_every_other_job(self):
         self.assertEqual(scope_problems(self.text), [])
-        # The guard and mutate jobs skip on the
-        # guard flag. Named failure: a cut job runs or never runs on push, schedule and dispatch.
-        jobs = all_jobs(self.text)
-        for name in (GUARD_JOB, MUTATE_JOB, MUTATE_JOB + "-b", MUTATE_JOB + "-c"):
-            self.assertTrue(name in jobs, f"no job named {name}")
-            self.assertEqual(job_check_problems(name, jobs[name], FLAG_OF[name]), [])
+        # The guard job, then every job of the mutate family as checks.yml names it, so a shard past -c is scope-checked too.
+        # The guard and mutate jobs skip on the guard flag. Named failure: a cut job runs or never runs on push, schedule
+        # and dispatch. The family must still hold the three shards the design names.
+        family = family_names(self.text)
+        self.assertTrue({MUTATE_JOB, MUTATE_JOB + "-b", MUTATE_JOB + "-c"} <= set(family), f"the mutate family is {family}")
+        self.assertEqual(scope_loop_problems(self.text, [GUARD_JOB] + family), [])
+
+    def test_a_shard_past_the_third_is_scope_checked(self):
+        # Control: the real file's family passes the loop.
+        self.assertEqual(scope_loop_problems(self.text, family_names(self.text)), [])
+        # Named failure: a 4th shard that skips push goes unchecked when the loop reads only the three named jobs.
+        four = self.text + "\n" + mutate_job(MUTATE_JOB + "-d", "4/4", step_cond=SKIPS_PUSH)
+        problems = scope_loop_problems(four, family_names(four))
+        self.assertTrue(any(p.startswith(f"{MUTATE_JOB}-d: scope condition skips on push") for p in problems),
+                        "the 4th shard that skips push is not reported, got %r" % problems)
 
     def test_the_check_form_sees_its_defects(self):
         scope_condition = "needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'"

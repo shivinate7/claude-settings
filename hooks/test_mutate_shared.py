@@ -23,6 +23,9 @@ its own root, the folder beside its hooks/.
 
 The fifth part pins the shard split: with MUTATE_SHARD=i/n, `run_mutants` runs only entries[i-1::n], so each
 mutant runs in exactly one shard. Each shard prints its slice size, and a malformed or empty shard exits 1.
+
+The sixth part pins the environment a suite gets: `run_suite_file` passes the caller's environment minus the
+mutation test's own variables, and a shard value must not reach a suite.
 """
 import collections
 import contextlib
@@ -564,6 +567,32 @@ class ShardSplitTests(unittest.TestCase):
         wrong = [entry[0] for entry in mutate_guard.MUTATIONS if ran[id(entry)] != 1]
         self.assertEqual(len(wrong), 0, "%d mutants do not run exactly once with no shard, first: %r"
                          % (len(wrong), wrong[:3]))
+
+
+ENV_SUITE = ('import os\n'
+             'print("KEEP seen: %s" % ("KEEP" in os.environ))\n'
+             'print("MUTATE_SHARD seen: %s" % ("MUTATE_SHARD" in os.environ))\n')
+
+
+class SuiteEnvTests(unittest.TestCase):
+    """`run_suite_file` runs each suite with the caller's environment, minus the mutation test's own variables. A shard
+    value must not reach a suite: a suite run in a shard would read MUTATE_SHARD and could change its own cases."""
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+        write_files(self.run, {"print_env.py": ENV_SUITE})
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ["MUTATE_SHARD"] = "1/3"
+        os.environ["KEEP"] = "1"
+
+    def test_a_suite_run_gets_no_shard_value(self):
+        output, _seconds = mutate_shared.run_suite_file(self.run, "print_env.py", 60,
+                                                        classify=lambda code, out, timed_out: out)
+        self.assertIn("KEEP seen: True", output, "the control: the suite did not read the caller's environment")
+        self.assertIn("MUTATE_SHARD seen: False", output, "a suite run by run_suite_file got MUTATE_SHARD")
 
 
 if __name__ == "__main__":
