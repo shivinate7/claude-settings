@@ -27727,6 +27727,40 @@ role_model_refuse("role-model: reviewer on sonnet with Guard or check: yesterday
                   "reviewer", "sonnet", "Check the docs diff.\nGuard or check: yesterday")
 role_model_refuse("role-model: reviewer on sonnet with Guard or check: yes-ish is denied",
                   "reviewer", "sonnet", "Check the docs diff.\nGuard or check: yes-ish")
+# The marker ends at the end of the line, a space, a tab, a carriage return or a full stop. A comma, a colon or a semicolon
+# after yes is none of those, so a brief line that starts with one lifts nothing, alone or after another line.
+REVIEW_GUARD_PUNCTUATED = tuple(REVIEW_GUARD_MARKER + mark for mark in (",", ":", ";"))
+
+
+def review_guard_forms_check():
+    """guard.review_guard_marked is False for each punctuated form, at the start of a brief line, with text after it, and as a
+    line below another line. The forms are built from REVIEW_GUARD_MARKER, so this file holds no copy of the marker."""
+    guard = _load_guard_module()
+    marked = getattr(guard, "review_guard_marked", None)
+    if marked is None:
+        return False, "guard.py has no review_guard_marked(brief) yet"
+    wrong = []
+    for form in REVIEW_GUARD_PUNCTUATED:
+        for brief in (form, form + " the diff edits the guard.", "Check the docs diff.\n" + form):
+            try:
+                got = marked(brief)
+            except Exception as exc:
+                return False, "review_guard_marked(%r) raised %r" % (brief, exc)
+            if got is not False:
+                wrong.append("review_guard_marked(%r) is %r, want False" % (brief, got))
+    if wrong:
+        return False, "; ".join(wrong)
+    return True, "review_guard_marked is False for the %d punctuated guard forms" % len(REVIEW_GUARD_PUNCTUATED)
+
+
+LOG_CHECKS_EXTRA.append(("role-model: review_guard_marked is False for a guard line with a comma, colon or semicolon after yes",
+                         review_guard_forms_check))
+FIXTURELESS_CHECKS.add(review_guard_forms_check)
+for _punct_form in REVIEW_GUARD_PUNCTUATED:
+    role_model_refuse("role-model: reviewer on sonnet whose only brief line is %r is denied" % _punct_form,
+                      "reviewer", "sonnet", _punct_form)
+    role_model_refuse("role-model: reviewer on sonnet whose line below a docs line is %r is denied" % _punct_form,
+                      "reviewer", "sonnet", "Check the docs diff.\n" + _punct_form)
 role_model_allow("role-model: reviewer on sonnet with Guard or check: yes alone on its line is allowed",
                  "reviewer", "sonnet", "Check the guard diff.\n" + REVIEW_GUARD_MARKER)
 role_model_allow("role-model: reviewer on sonnet with Guard or check: yes and a trailing space is allowed",
