@@ -270,6 +270,10 @@ class Env(unittest.TestCase):
         self.host = FakeHost(self.co, self.other)
         self.lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)  # a retry pause is a no-op: a test never sleeps
         self.addCleanup(lambda: os.environ.pop("MERGE_TEST_HOOK", None))
+        # No case starts a real model: a PR that adds governed prose reaches the judge seam, so every Env case stubs it silent.
+        # ProseJudge.stub_judge patches over this one. Its cleanup is registered later, so it unwinds first (LIFO) and its stub wins.
+        judge = unittest.mock.patch.object(merge, "prose_judge_call", lambda *, sentences, wt, sha: ([], None))
+        judge.start(); self.addCleanup(judge.stop)
 
     def run_merge(self, *args, host=None, lock=None, stdout=None, stderr=None):
         """-> (rc, stdout + stderr). Pass a StringIO as stderr to read the error stream on its own afterwards."""
