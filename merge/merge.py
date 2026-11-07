@@ -2468,9 +2468,11 @@ def read_backing(wt, backing):
     except OSError:
         return None
 
-def prose_judge_prompt(wt, path, by_line):
-    """The prompt for one prose file: each selected line numbered as in the file, with each cite as written and the text it points at."""
+def prose_judge_prompt(wt, path, by_line, read=None):
+    """The prompt for one prose file: each selected line numbered as in the file, with each cite as written and the text it points at.
+    `read(wt, backing)` fetches a backing file's text, read_backing by default; lint/prove_route_judge.py passes a reader that goes through git at a rev."""
     import stale_cites
+    read = read or read_backing
     parts = [
         "You judge lines of a Markdown file against the files they cite. For each numbered line below, say whether the line still holds "
         "against the text it cites (holds), the cited text now says otherwise (stale), or the line states a fact with no cite that backs it (unbacked). "
@@ -2482,7 +2484,7 @@ def prose_judge_prompt(wt, path, by_line):
         parts.append(f"Line {number}: {text}")
         for cite in cites:
             backing = stale_cites.backing_path(*stale_cites.cite_kind(cite))
-            body = read_backing(wt, backing) if backing else None
+            body = read(wt, backing) if backing else None
             shown = stale_cites.cited_excerpt(cite, body) if body is not None else None
             if shown is None:
                 shown = "(the cited file cannot be read)"
