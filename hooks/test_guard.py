@@ -11778,6 +11778,22 @@ sh("frozen: a redirect onto the global CLAUDE.md", "echo x > " + CFG_CLAUDEMD, "
    "frozen-path", cwd=NOGIT)
 sh("frozen: a redirect onto a config hook", "cat template.py > " + CFG_HOOK, "deny", "frozen-path",
    cwd=NOGIT)
+# perl-ruby-bodies-unread: an interpreter that edits its file in place writes it as `sed -i` does.
+sh("perl-ruby-bodies-unread: perl -pi -e on a config hook is refused, as sed -i is",
+   "perl -pi -e 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("perl-ruby-bodies-unread: ruby -i -pe on a config hook is refused, as sed -i is",
+   "ruby -i -pe 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("perl-ruby-bodies-unread: a perl heredoc body that writes a config hook is refused",
+   "perl <<'EOF'\nopen(F, '>', '" + CFG_HOOK + "');\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("perl-ruby-bodies-unread: a ruby heredoc body that writes a config hook is refused",
+   "ruby <<'EOF'\nFile.write('" + CFG_HOOK + "', 'x')\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("perl-ruby-bodies-unread: sed -i on a config hook is refused (parity)",
+   "sed -i s/a/b/ " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+# The near forms: a read of a frozen file, and an in-place edit of a file that is not frozen, stay allowed.
+sh("perl-ruby-bodies-unread: perl -ne reads a config hook and writes nothing, allowed",
+   "perl -ne 'print' " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("perl-ruby-bodies-unread: perl -pi -e on a file that is not frozen is allowed",
+   "perl -pi -e 's/a/b/' notes.txt", "allow", cwd=NOGIT)
 sh("config-edit: rm of a project settings file is allowed", "rm " + PROJ_SETTINGS, "allow",
    cwd=NOGIT)
 sh("config-edit: mv of a project settings file is allowed",
