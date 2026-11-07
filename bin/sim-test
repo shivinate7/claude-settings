@@ -39,7 +39,7 @@
 # the lock, if still held, is freed, on every exit, INT and TERM too. A live holder renews its lease: every SIM_TEST_RENEW
 # seconds (default 60; text that is not whole seconds, or 0, counts as the default) the watch loop runs `sim-lease renew
 # --pid $$`, while the child or the hold runs, so SIM_LEASE_MAX counts the silence since the last renew and a lease never
-# expires under a live run (coordinator pick, 2026-11-07). A failed renew is ignored. The take runs in the background and
+# expires under a live run (coordinator pick, 2026-11-07). A renew that exits 1 means the lease is lost: one stderr line, once, and the run goes on. Any other failed renew is ignored. The take runs in the background and
 # this tool waits on it, so INT and TERM act at once. After the grant of an own-boot take it reads the booted list again, under
 # the lock, and reruns the reuse, cross-role and cap checks before the boot: a simulator a dead holder left booted is
 # reused or refused. A reused device of the slot just granted keeps that lease; one of another slot gets the lease given back and the `--reuse` lease of its own slot. A boot that fails shuts nothing down; a TERM during the boot still
@@ -372,13 +372,19 @@ fi
 timed_out=
 run_start=$SECONDS
 last_renew=$SECONDS
+lease_lost=
 # The child ends the watch; a hold with no child ends it at its deadline.
 while [ -n "$hold$child" ]; do
   if [ -n "$child" ]; then kill -0 "$child" 2>/dev/null || break; fi
   if [ $((SECONDS - last_renew)) -ge $((10#$RENEW)) ]; then
     # A live holder stamps its lease again, so a lease past SIM_LEASE_MAX means a silent holder, not a long run.
     last_renew=$SECONDS
-    "$(dirname "$0")/sim-lease" renew --pid $$ > /dev/null 2>&1 || true
+    "$(dirname "$0")/sim-lease" renew --pid $$ > /dev/null 2>&1
+    renew_rc=$?
+    if [ "$renew_rc" -eq 1 ] && [ -z "$lease_lost" ]; then
+      lease_lost=1
+      echo "sim-test: lease lost: sim-lease renew found no lease for pid $$ on $udid; another run may take the device." >&2
+    fi
   fi
   if [ -z "$hold" ] && [ $((SECONDS - run_start)) -ge "$MAX_RUN" ]; then
     if [ -n "$booted_by_me" ]; then fate="shut down"; else fate="left running"; fi
