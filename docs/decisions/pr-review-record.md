@@ -50,13 +50,13 @@ CI: read live by merge --reviewed
 A change is done when one of these holds (rule `roles-review-cap-three`):
 
 - round 1 or 2 is its last round, that round is PASS or a fix check PASSes after its FAIL, and the last `design-reviewer` line (across all rounds) is PASS or absent;
-- round 3 is done (no FAIL line at round 3), and Guard or check is `no`;
-- round 3 is done (no FAIL line at round 3), Guard or check is `yes`, and Net value is zero or positive;
+- round 3 is done (no FAIL or PARTIAL line at round 3), and Guard or check is `no`;
+- round 3 is done (no FAIL or PARTIAL line at round 3), Guard or check is `yes`, and Net value is zero or positive;
 - Kind is `delete-only`, Guard or check is `no`, and round 1 is done;
 - Kind is `docs-only`, with zero rounds, unless the change is a record that files an owner ruling. That change posts `Kind: normal` with one round (decision `docs-only-prs-skip-review`).
 
-- A last `design-reviewer` line of FAIL or PARTIAL keeps a record open on the PASS rule. The `delete-only` done rule stays done. Round 3 stays done unless a round 3 line is FAIL, a design FAIL included. The reason names the design failure.
-- A round 3 FAIL holds the change, so the record is open (owner item 356 a). Otherwise, when Guard or check is `yes`, Net value decides done, even after a round 3 PASS: `not owed` is open, and `negative` holds the change (record `hold-unsafe-after-round-3`).
+- A last `design-reviewer` line of FAIL or PARTIAL keeps a record open on the PASS rule. The `delete-only` done rule stays done. Round 3 stays done unless a round 3 line is FAIL or PARTIAL, a design line included. The reason names the design failure.
+- A round 3 FAIL or PARTIAL holds the change, so the record is open (owner items 356 a and 362 b, relayed by the coordinator). A passing fix check clears a round-3 hold (owner item 363 b, relayed by the coordinator), and then the round-3 done rules apply. Otherwise, when Guard or check is `yes`, Net value decides done, even after a round 3 PASS: `not owed` is open, and `negative` holds the change (record `hold-unsafe-after-round-3`).
 - A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open unless a fix check PASSes. The rule owes rounds 2 and 3 when round 1 finds a safety hole.
 - `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
 
@@ -80,9 +80,9 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
 - One fix check per record. A second fix needs the next round's record first: a FAIL counts as that round, and the record that carries it has no Fix check line. A WIDE starts a new lane at round 1. `--fix-check` refuses unless its reviewed head equals the Head of the newest earlier record on the PR and that record has no Fix check line.
-- Open, four switches. Each is one module constant in `merge/merge.py`, set to its default. Their code lands in a builder lane, so the tool does not enforce them yet.
-  - `ROUND3_PARTIAL_HOLDS = False`. Open question Q3: does a round-3 PARTIAL hold like a FAIL? True makes a Round 3 PARTIAL line hold, so round 3 is not done.
-  - `FIX_PASS_CLEARS_ROUND3_HOLD = False`. Open question Q4: does a fix check PASS after a round-3 FAIL clear the hold? False: the hold stands. True: the record follows the round-3 done rules, so guard `no` is done and guard `yes` needs net value zero or positive.
+- Four switches. Each is one module constant in `merge/merge.py`, set to its default. Their code lands in a builder lane, so the tool does not enforce them yet.
+  - `ROUND3_PARTIAL_HOLDS = True`. Q3 is answered by owner page item 362 b, relayed by the coordinator (saved 2026-11-07 14:41 CST, not the owner's typed words): a round-3 PARTIAL holds the change too. False: only a FAIL line at round 3 holds.
+  - `FIX_PASS_CLEARS_ROUND3_HOLD = True`. Q4 is answered by owner page item 363 b, relayed by the coordinator (same time, not the owner's typed words): a fix check that passes clears a round-3 hold. Then the round-3 done rules apply: guard `no` is done, and guard `yes` needs net value zero or positive. False: the hold stands.
   - `ROUND3_DESIGN_FAIL_HOLDS = True`. Question Q5, does a design-reviewer FAIL in round 3 hold? Answered: the coordinator picked a at 14:15 CST, so it holds. This is the coordinator's pick, not the owner's words. False: only a reviewer FAIL line in round 3 holds.
   - `FIX_FAIL_AFTER_ROUND3_HOLDS = True`. The coordinator agreed at 14:15 CST that a fix check FAIL after round 3 holds. This is the coordinator's agreement, not the owner's words. False: a fix FAIL after round 3 reads open with the fix-failed why.
 
@@ -91,7 +91,7 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 The coordinator answered both at 23:14. Process-only.
 
 - Q1. Should preview or confirm refuse a PR with no valid record? Pick a: no refusal now. Ruling 113 a names discovery only (rule `outcomes-grant-covers-named-act`). Not taken: confirm refuses an integration PR when a lane tip has no done record. Also not taken: preview prints a review line only.
-- Q2. Which wins when a decision record and rule `roles-review-cap-three` disagree? Pick a: the rule outranks a decision record. Round 3 counts as done unless it FAILs: a round-3 FAIL holds the change (owner item 356 a, relayed by the coordinator). Not taken: a final PASS is always needed. Record `standing-merge-grant` says so now.
+- Q2. Which wins when a decision record and rule `roles-review-cap-three` disagree? Pick a: the rule outranks a decision record. Round 3 counts as done unless it FAILs or is PARTIAL: a round-3 FAIL or PARTIAL holds the change (owner items 356 a and 362 b, relayed by the coordinator). A passing fix check clears that hold (item 363 b). Not taken: a final PASS is always needed. Record `standing-merge-grant` says so now.
 
 Kind: process
 Home: merge/merge.py
