@@ -243,6 +243,7 @@ Other tools, in `judge` order:
                        (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
+                       Carve-out: mid-merge a test-author may write a file that is still unmerged.
   env-file, frozen-path, config-edit, agent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
                        fields of a call before any ask.
@@ -1576,6 +1577,7 @@ BUILDER_TEST_REASON = (
 AUTHOR_SCOPE_REASON = (
     "A test-author changes only tests and test config. Report the needed product change in your "
     "report. The orchestrator assigns it to a builder."
+    " Mid-merge, a test-author may resolve a conflicted file."
 )
 WRITER_SCOPE_REASON = (
     "A record-writer changes only Markdown (*.md) files. Report the needed change to any other "
@@ -1966,6 +1968,31 @@ def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
             or interpreter_write_hit(raw, cwd, builder_test_path))
 
 
+def merge_conflict_target(full: str) -> bool:
+    """True when `full` is an unmerged index entry of a merge in progress in its own repository, as the
+    path resolves through symlinks (the spelled name alone never qualifies). Git runs in the target's
+    repository, not the call's cwd. A cherry-pick or rebase has no MERGE_HEAD. Any git failure is False."""
+    try:
+        root = os.path.dirname(norm(os.path.normpath(full)))
+        while root and not os.path.exists(os.path.join(root, ".git")):
+            if root == os.path.dirname(root):
+                return False
+            root = os.path.dirname(root)
+        merging = guard_core._git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+        if merging is None or merging.returncode != 0:
+            return False
+        rel = os.path.relpath(os.path.realpath(full), os.path.realpath(root))
+        if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+            return False
+        unmerged = git_names(root, "ls-files", "-u", "-z")
+        if unmerged is None:
+            return False
+        want = os.path.normcase(norm(rel))
+        return any(os.path.normcase(norm(entry.split("\t", 1)[-1])) == want for entry in unmerged)
+    except (OSError, ValueError):
+        return False
+
+
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
     """The early warning for a write tool call: the target path a role may not change, else ''.
 
@@ -1988,7 +2015,10 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         # Another session's scratchpad is neither this one's nor "outside a repository".
         if in_any_session_scratchpad(full):
             return target
-        return "" if repo_rel(target, cwd, outside=False) is None else target
+        if repo_rel(target, cwd, outside=False) is None:
+            return ""
+        # A merge conflict in a product file: a test-author resolves the whole mixed merge.
+        return "" if role == AUTHOR_ROLE and merge_conflict_target(full) else target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
     if builder_test_path(target, cwd):
@@ -2281,7 +2311,7 @@ def builder_diff_reason() -> str:
         "Undo it: restore each test file you changed to its text at HEAD, and delete each test file "
         "you added. If a commit of yours holds the change, stop and report it. "
         "If a merge is in progress and the refusal is about a test conflict, run `git merge --abort` "
-        "and report the conflict to the orchestrator; a test-author resolves it. "
+        "and report the conflict to the orchestrator; a test-author resolves the whole merge, product files too. "
         "This refusal is final: never write the files another way. (decision builders-cannot-edit-tests)"
     )
 
