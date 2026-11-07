@@ -1271,6 +1271,55 @@ class Stale(unittest.TestCase):
                 self.assertNotIn("Traceback", r.stdout + r.stderr)
                 self.assert_page_word(r, "current", 0)
 
+    def test_a_closed_item_with_waits_and_a_kept_answer_is_not_named(self):
+        # SKILL.md, "Route and close": while an item has `waits`, steps 2 to 4 never delete answers/<id>, so the kept answer
+        # is legitimate whatever the `waits` value. A closed item is never polled, so no gh call is made for it.
+        for label, waits in (("a run", {"repo": REPO, "run": RUN}), ("a PR", {"repo": REPO, "pr": PR}), ("a malformed value", "soon")):
+            with self.subTest(label):
+                self.assert_not_named_in_both_shapes([decision_item(364, "waits-closed", waits=waits)],
+                                                     [("waits-closed", answer_for("waits-closed", 364))],
+                                                     "waits-closed", "a closed item with waits (%s) and a kept answer" % label)
+
+    def test_an_items_folder_with_no_complete_marker_prints_one_unknown_kept_answer_line_and_no_item_line(self):
+        # The items list may be cut short, so a closed status in it is not proof: one unknown line, and no item line.
+        current, _ = self.current_and_behind()
+        items = self.docs_folder({INCIDENT_ID: INCIDENT}, "items")
+        os.remove(os.path.join(items, ".complete"))
+        answer_shapes = (("list file", self.list_file([INCIDENT_ANSWER], "answers")),
+                         ("folder of <id>.json files", self.docs_folder({INCIDENT_ID: INCIDENT_ANSWER}, "answers")))
+        for label, answers in answer_shapes:
+            with self.subTest(label):
+                r = self.items_run(current, items, {}, answers=answers)
+                unknown = [line for line in kept_lines(r.stdout) if line.startswith("kept-answer: unknown")]
+                self.assertEqual(len(unknown), 1, "want one kept-answer: unknown line for an items folder with no marker, got %d:\n%s"
+                                 % (len(unknown), r.stdout + r.stderr))
+                named = [line for line in kept_lines(r.stdout) if not line.startswith("kept-answer: unknown")]
+                self.assertEqual(named, [], "an items folder with no marker still names an item:\n" + r.stdout)
+                self.assert_page_word(r, "current", 0)
+
+    def test_pin_an_answers_folder_with_no_complete_marker_prints_one_unknown_kept_answer_line(self):
+        # Pin: passes on 3d78e1a25. The answers folder's missing marker already reads unknown, and this keeps it so.
+        current, _ = self.current_and_behind()
+        items = self.items_file([INCIDENT])
+        answers = self.docs_folder({INCIDENT_ID: INCIDENT_ANSWER}, "answers")
+        os.remove(os.path.join(answers, ".complete"))
+        r = self.items_run(current, items, {}, answers=answers)
+        kept = kept_lines(r.stdout)
+        self.assertEqual(len(kept), 1, "want exactly one kept-answer line for an answers folder with no marker, got %d:\n%s"
+                         % (len(kept), r.stdout + r.stderr))
+        self.assertTrue(kept[0].startswith("kept-answer: unknown"), "the one kept-answer line is not the unknown line:\n" + kept[0])
+        self.assert_page_word(r, "current", 0)
+
+    def test_an_items_folder_doc_with_no_id_field_is_matched_by_its_file_name_and_still_flagged(self):
+        # export_page.docs_in keys each folder doc by its file name without .json, so the file name is the doc id.
+        current, _ = self.current_and_behind()
+        no_id = {key: value for key, value in INCIDENT.items() if key != "id"}
+        items = self.docs_folder({INCIDENT_ID: no_id}, "items")
+        answers = self.docs_folder({INCIDENT_ID: INCIDENT_ANSWER}, "answers")
+        r = self.items_run(current, items, {}, answers=answers)
+        self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+        self.assert_page_word(r, "current", 0)
+
 
 # Fixtures for the --items cases: a repo, a run that ended completed/failure, and the PR that run checked.
 REPO, RUN, PR = "shivinate7/q_max", "41861801325", 1011
