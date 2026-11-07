@@ -43,7 +43,7 @@ ROOT = os.path.normpath(os.path.join(HERE, ".."))
 SCRIPT = os.environ.get("PROVE_ROUTE_JUDGE_UNDER_TEST") or os.path.join(HERE, "prove_route_judge.py")
 LABELLED = os.path.join(HERE, "route_claims_labelled.json")
 LABELS = ("TRUE", "STALE", "PARTLY_STALE", "HALF", "UNKNOWN", "HISTORY")
-HOLDS_LABELS = ("TRUE",)  # this test's own reading of the labels that score, for its expected lines
+HOLDS_LABELS = ("TRUE",)  # this test's own reading of the labels that score, for the pinned judge call groups
 FLAGGED_LABELS = ("STALE", "PARTLY_STALE", "HALF")
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "hooks"))
@@ -230,6 +230,14 @@ class ControlTests(Base):
         missing = [rev for rev in {r["rev"] for r in rows}
                    if subprocess.run(["git", "cat-file", "-e", rev + "^{commit}"], cwd=ROOT, capture_output=True).returncode]
         self.assertEqual(missing, [], "the labelled revs are not in this clone, so the file cannot be read at them")
+
+    def test_labelled_file_has_its_pinned_row_count(self):
+        self.assertEqual(len(labelled_rows()), 38, "the labelled file's row count moved: pin it here if the change is on purpose")
+
+    def test_labelled_file_has_its_pinned_judge_call_groups(self):
+        groups = {(r["rev"], r["file"]) for r in scored_rows(labelled_rows())}
+        self.assertEqual(len(groups), 23, "the scored (rev, file) groups moved, so the judge calls per run moved: "
+                                          "pin it here if the change is on purpose")
 
     def test_stub_claude_answers_the_real_invoke_model(self):
         case = self.case()
@@ -441,18 +449,6 @@ def scored_rows(rows):
     return [r for r in rows if r["label"] in HOLDS_LABELS + FLAGGED_LABELS and r.get("rev")]
 
 
-def expected_line(rows, alarms, hits, unbacked, unknown=0, error=None):
-    """The verdict line for the labelled `rows` with these counts. The denominators come from the rows' labels, so the
-    line keeps its exact format as the file grows; the numerators are the counts the test's answers make."""
-    scored = scored_rows(rows)
-    holds = [r for r in scored if r["label"] in HOLDS_LABELS]
-    flagged = [r for r in scored if r["label"] in FLAGGED_LABELS]
-    unknown_text = "%d (model error: %s)" % (unknown, error) if unknown and error else str(unknown)
-    return "false alarms %d/%d (%.1f%%), hits %d/%d, unbacked %d/%d, unknown %s, skipped %d" % (
-        alarms, len(holds), 100.0 * alarms / len(holds), hits, len(flagged), unbacked, len(scored), unknown_text,
-        len(rows) - len(scored))
-
-
 def full_file_run(case, answer_for):
     """Run the script on the whole labelled file, each row answered by answer_for(row). -> Run."""
     answers = {" ".join(r["text"].split()): answer_for(r) for r in labelled_rows()}
@@ -460,28 +456,24 @@ def full_file_run(case, answer_for):
 
 
 class FullFileTests(Base):
+    # The pinned lines and call count. Adding or removing a row changes them, on purpose.
     def test_full_labelled_file_gives_the_example_line(self):
-        rows = labelled_rows()
         run = full_file_run(self.case(), lambda r: FULL_FILE_VERDICTS.get((r["file"], r["line"]), "holds"))
-        self.assertEqual(run.lines(), [expected_line(rows, alarms=1, hits=3, unbacked=5)],
-                         "the score of the full labelled file is not the example line")
+        self.assertEqual(run.lines(), ["false alarms 1/13 (7.7%), hits 3/21, unbacked 5/34, unknown 0, skipped 4"],
+                         "the score of the full labelled file is not the pinned line")
         self.assertEqual(run.code, 0, "the full labelled file's run must exit 0")
-        self.assertEqual(len(run.calls), len({(r["rev"], r["file"]) for r in scored_rows(rows)}),
-                         "the full labelled file must make one judge call per scored (rev, file) group")
+        self.assertEqual(len(run.calls), 23, "the full labelled file must make one judge call per scored (rev, file) group")
 
     def test_judge_that_says_unbacked_to_every_line_scores_no_false_alarm(self):
-        rows = labelled_rows()
         run = full_file_run(self.case(), lambda r: "unbacked")
-        self.assertEqual(run.lines(), [expected_line(rows, alarms=0, hits=0, unbacked=len(scored_rows(rows)))],
-                         "a judge that says unbacked to every line must score 0 false alarms and 0 hits, "
-                         "with every scored row unbacked")
+        self.assertEqual(run.lines(), ["false alarms 0/13 (0.0%), hits 0/21, unbacked 34/34, unknown 0, skipped 4"],
+                         "a judge that says unbacked to every line must score 0 false alarms and 0 hits, with 34 unbacked")
         self.assertEqual(run.code, 0, "the every-line-unbacked run must exit 0")
 
     def test_model_error_carries_its_first_line_on_the_unknown_count(self):
-        rows = labelled_rows()
         run = full_file_run(self.case(), lambda r: "ERROR")
-        self.assertEqual(run.lines(), [expected_line(rows, alarms=0, hits=0, unbacked=0, unknown=len(scored_rows(rows)),
-                                                    error="model exited 1: stub: the model failed")],
+        self.assertEqual(run.lines(), ["false alarms 0/13 (0.0%), hits 0/21, unbacked 0/34, unknown 34 (model error: "
+                                       "model exited 1: stub: the model failed), skipped 4"],
                          "every row whose model call failed must be UNKNOWN, and the count must carry the call's first error line")
         self.assertNotIn("second line of stderr", run.out,
                          "the verdict line carries the error's second line, not only its first")
