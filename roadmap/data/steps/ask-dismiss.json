@@ -1,9 +1,9 @@
 {
   "title": "An answered ask on the waiting page can be dismissed",
   "phase": "now",
-  "status": "done",
+  "status": "doing",
   "order": 103.39,
   "why": "Your ask, 11:22 CST Nov 6: there is no way to dismiss a completed ask. Answered asks stay on the page for good, so old ones bury new ones.",
-  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): lane live.\nNov 6 11:33 CST (triage): done means each answered ask has a Dismiss press next to its reply box (step ask-reply-back); a press writes `dismissed` on asks/<id>, the page hides dismissed asks, and the writer never rewrites a dismissed ask. The coordinator starts the lane; it touches a screen, so it gets a designer and a design reviewer. Landed on main in batch 49 (#1397, merge ebc810f56, Nov 7 02:57 CST) as #1308.",
-  "updatedAt": "2026-11-07T09:04:00Z"
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): lane live.\nNov 6 11:33 CST (triage): done means each answered ask has a Dismiss press next to its reply box (step ask-reply-back); a press writes `dismissed` on asks/<id>, the page hides dismissed asks, and the writer never rewrites a dismissed ask. The coordinator starts the lane; it touches a screen, so it gets a designer and a design reviewer. Landed on main in batch 49 (#1397, merge ebc810f56, Nov 7 02:57 CST) as #1308. Reopened 2026-11-07 04:12 CST (coordinator): main is red at ebc810f56. Job checks-shoot failed twice on the #1308 dismiss-focus test in skills/waiting-page/tests/page.test.mjs. Fix lane dismiss-focus-main-red (session_013NEJL1EXcFMANVWL3GyqrZ). Runner 8 holds all merges until main is green.",
+  "updatedAt": "2026-11-07T10:12:00Z"
 }
