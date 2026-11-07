@@ -21,7 +21,7 @@ Known limits:
 - The check reads that a run is claimed, not that it ran. A reviewer re-runs a claim only when the claim is in doubt (`roles-each-layer-proves-once`).
 - A pure rename of a test file reads as a delete and an add, so it needs `Red-run: none: <reason>`.
 - A branch that merged a newer main carries main's commits in the range. The push check leaves out the default base's commits, and the CLI still judges them under `--base`.
-- The push check reads the unpushed range only. A commit pushed before the rule landed, or by a tool call the guard does not read (a script, `sh -c`), is judged by CI alone.
+- The push check reads the unpushed range only. A commit pushed before the rule landed, or by a tool call the guard does not read (a script, `sh -c`), is judged by CI alone. It reads no branch that `--all`, `--mirror` or `--tags` with no refspec sends. A repo whose default base cannot be read gets no push-time hit, so CI judges its commits.
 - A lane begun before the check landed escapes for its commits from before that, unless it is rebased.
 - Conflict-resolution lines in a merge commit are not judged.
 - Mutation tests are not test paths, so they need no trailer.
@@ -32,7 +32,7 @@ Risk kind: likely risk, per `building-guard-needs-incident`. Test-author work ad
 
 Cost: no long-lived process, no log, no timer. One python process per run, once per pull request run and once per test-author push. It starts these git children. One `git log --numstat` reads the range and each commit's test files. When a non-revert commit with test lines and no trailer turns up, one `ls-tree` reads the head's tree, and when the head holds the check, one `ls-tree` per such commit reads its parent. A range with no such commit costs the `log` alone.
 
-Push-time cost (item 9): one more `git log` per `git push` the guard reads, with the same shape as above, and nothing else when the range holds no gap. A push that carries a gap costs more: the `ls-tree` reads, the default base's reads once (`git symbolic-ref` and `git rev-parse` per candidate, shared with the conflict check when it needed them), and a second `git log` without the default base's commits. The hook imports `check_red_run` at the first push that reaches it, which starts no process and loads no second `guard`; the import measured 0.4 ms (2026-11-07, one run). No log, timer or long-lived process. `record_push_cost_case` in `hooks/test_guard.py` pins the spawn counts.
+Push-time cost (item 9): one more `git log` per `git push` the guard reads, with the same shape as above, and nothing else when the range holds no gap. A push that carries a gap costs more: the `ls-tree` reads, the default base's reads once (`git symbolic-ref` and `git rev-parse` per candidate, shared with the conflict check when it needed them), and a second `git log` without the default base's commits. The hook imports `check_red_run` at the first push that reaches it, which starts no process and loads no second `guard`; the import measured 0.4 ms (2026-11-07, one run). No log, timer or long-lived process. `record_push_cost_case` in `hooks/test_guard.py` pins the no-gap spawn counts.
 
 Kind: process
 Home: lint/check_red_run.py
