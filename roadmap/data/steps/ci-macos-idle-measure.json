@@ -1,11 +1,11 @@
 {
-  "title": "Measure the idle macOS runner minutes that docs-only PRs spend, over 2 weeks",
+  "title": "Measure the idle macOS runner minutes that docs-only PRs spent over the past 14 days",
   "phase": "next",
-  "status": "todo",
+  "status": "doing",
   "order": 262.0,
   "owner": "coordinator",
   "why": "Lane notes-fix-merge-ci, 14:38 CST: checks-macos-b starts an idle macOS runner on docs-only PRs. Decision ci-job-caps says that cost is unmeasured. Skipping the job with a job-level if would break the all-jobs-passed rollup, which fails a skipped job.",
-  "note": "Measure first, then ask: count docs-only PR runs and their idle macOS minutes over 2 weeks, from GitHub's run data. Then file a page question with the numbers: let the rollup accept a skipped scoped job (a widening of a shared check, never the pick), or keep as is. Taken without a page question, because a measure can be undone and needs no owner word (parallelism-keep-going). Note checks-macos-b-idle-runner keeps `Fix: none` until then. Cost: GitHub API reads, once.",
-  "updatedAt": "2026-11-07T14:39:00-06:00",
-  "lane": ""
+  "note": "Measure first, then ask: count docs-only PR runs and their idle macOS minutes from the past 14 days of Actions history (coordinator 14:41 CST). Then file a page question with the numbers: let the rollup accept a skipped scoped job (a widening of a shared check, never the pick), or keep as is. Taken without a page question, because a measure can be undone and needs no owner word (parallelism-keep-going). Note checks-macos-b-idle-runner keeps `Fix: none` until then. Cost: GitHub API reads, once.",
+  "updatedAt": "2026-11-07T14:40:00-06:00",
+  "lane": "session_013NEJL2B6FrRWBCF8RWpq8y"
 }
