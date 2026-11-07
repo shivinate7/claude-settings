@@ -7,7 +7,7 @@ question-form holds the ruling; rule `style-question-form` holds the text.
     item_hit(op, entry, cwd) -> (rule, matched)   one waiting-page write: set, update or str_replace
 
 ("", "") is a pass. hooks/call_judge.py calls chat_hit and page_item_hit; hooks/guard.py data_tool_hit calls
-page_item_hit, which filters the ArtifactData writes by collection and url and then calls item_hit; a write to another page gets only the check for an option keyed none. Nothing here writes a file. The only processes it starts are the one git read of past_rulings, for a caller that makes a model call anyway, and one git read of a stored item (stored_item), for a str_replace that a text rule would refuse.
+page_item_hit, which filters the ArtifactData writes by collection and url and then calls item_hit; a write to another page gets only the check for an option keyed none. Nothing here writes a file. The only process it starts is the one git read of past_rulings, for a caller that makes a model call anyway.
 
     past_rulings(text, repo_root) -> (candidates, unknown)   the decision, debt and step rulings the judge reads
     key_overlap(reply, earlier)   -> clashing option keys     lint/report_guard.py rule question-keys
@@ -407,14 +407,15 @@ COMMAND_VERB = re.compile(_RUN_VERB + r"[^.\n]{0,40}\bcommands?\b(?!\s+below)"
 # (_ps_bash_form), so PowerShell text that only looks like one passes: a pipe to a Unix-only program
 # (PowerShell has `Sort-Object`, `Tee-Object` and `more`, so those are left out), a leading `NAME=value`
 # before a command, a `[ ... ]` test after a statement start or `if`, and a backslash that ends a line
-# after a space (a `C:\repo\` path ends in no space before its backslash).
+# after a space with a line after it (a `C:\repo\` path ends in no space before its backslash, and a
+# lone backslash argument ends the text: `cd \`).
 COMMAND_SHELLS = ("powershell", "mac")
 PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
 PS_BASH_FORMS = re.compile(
     r"\|[ \t]*(?:head|tail|grep|xargs|sed|awk|cut|wc|uniq|tr|tac)(?![\w-])"
     r"|(?:^|;)[ \t]*[A-Za-z_][A-Za-z0-9_]*=\S*[ \t]+[A-Za-z./]"
     r"|(?:^|[;(]|\b(?:if|elif|while|until)\b)[ \t]*\[[ \t]+[^\]\n]*[ \t]\]"
-    r"|[ \t]\\[ \t]*$", re.M | re.I)
+    r"|[ \t]\\[ \t]*\r?\n[ \t]*\S", re.M | re.I)
 # A shell line in a step's backtick span or fence, read by guard_core's quote-aware reader. A span
 # with a chain (an operator, or two lines) is a shell line when one segment plainly runs a command:
 # its command word, after any `VAR=value`, `env`, `time`, `sudo` or `$(` prefix, is in SHELL_PROGRAMS,
@@ -922,27 +923,6 @@ def form_str_replace_hit(entry):
     return PASS
 
 
-def stored_item(cwd, doc_id):
-    """The stored waiting item `doc_id` of the repo at `cwd`, as origin/<record branch> holds it, else None
-    (no repo, no copy, no such item, or a read that failed). The branch and folder come from
-    feedback_guard.waiting_copy, the one home of that resolution. One git process, started only for a
-    str_replace that a text rule would refuse. Never fetches."""
-    root = _git_root_of(cwd)
-    if not root or not isinstance(doc_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]+", doc_id):
-        return None
-    try:
-        import feedback_guard
-        import _nowindow  # the one home of a no-window child start
-        branch, folder = feedback_guard.waiting_copy(_layout(), root)
-        run = _nowindow.run(["git", "--literal-pathspecs", "-C", root, "show",
-                             "refs/remotes/origin/%s:%s/items/%s.json" % (branch, folder, doc_id)],
-                            capture_output=True, encoding="utf-8", errors="replace", timeout=STEP_GIT_TIMEOUT)
-        data = json.loads(run.stdout) if run.returncode == 0 else None
-    except Exception:
-        return None
-    return data if isinstance(data, dict) else None
-
-
 def item_hit(op, entry, cwd=""):
     """(rule, matched) for one write of a waiting item that a rule refuses, else ("", "")."""
     data = _write_data(entry, cwd)
@@ -962,14 +942,14 @@ def item_hit(op, entry, cwd=""):
         hit = form_str_replace_hit(entry)
         if hit[0]:
             return hit
-        # The edit carries no status or kind, so the two text rules judge the text it adds, in any field. A
-        # hit stands only for an open decision: the stored item is read once, and one that cannot be read
-        # keeps the refusal.
+        # The stored item is unseen, so the two text rules judge the text this edit adds, in any field.
         new = [str(entry.get("new_str") or "")]
-        for rule, found in (("option-letter-keys", key_named_hit(new)), ("rework-off-page", reworked_hit(new))):
-            if found:
-                stored = stored_item(cwd, entry.get("doc_id"))
-                return PASS if stored is not None and not _open_decision(stored) else (rule, found)
+        hit = key_named_hit(new)
+        if hit:
+            return "option-letter-keys", hit
+        hit = reworked_hit(new)
+        if hit:
+            return "rework-off-page", hit
         return PASS
     hit = port_item_hit(op, data)
     if hit:
