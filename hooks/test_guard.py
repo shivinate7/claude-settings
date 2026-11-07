@@ -3641,10 +3641,15 @@ sh("pointer: checkout -B main onto origin/main passes, from a checkout on main",
    VCS + " checkout -B main origin/main", "allow", cwd=PTRMAIN, config=PTRCFG)
 sh("pointer: switch -C main onto origin/main passes, from a checkout off main",
    VCS + " switch -C main origin/main", "allow", cwd=PTROFF, config=PTROFFCFG)
-# Near misses, refused: a detach names no branch, so the exemption for main does not reach it, and a
-# reset onto any other branch is a new branch.
-sh("pointer: switch --detach main detaches, so it is refused", VCS + " switch --detach main", "deny",
-   "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+# A detach to `main` passes for switch as for checkout: HEAD lands on main's commit, which counts as on main.
+# Near misses, refused: a detach to a remote-tracking ref, which is not local main, and a reset onto any other
+# branch is a new branch.
+sh("pointer: switch --detach main lands on main's commit, so it passes", VCS + " switch --detach main", "allow",
+   cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: switch -d main lands on main's commit, so it passes", VCS + " switch -d main", "allow",
+   cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: switch --detach origin/main is not the main exemption, so it is refused",
+   VCS + " switch --detach origin/main", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
 sh("pointer: switch -C of another branch onto origin/main is refused", VCS + " switch -C somebranch origin/main",
    "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
 # The reset is a move to main only when it drops nothing, and only origin/main can say so. Local main
