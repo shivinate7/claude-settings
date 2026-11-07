@@ -252,7 +252,7 @@ class CiWake(Quiet):
                 self.assertEqual(result[2], payload.encode("utf-8"))
 
     def test_undo_reaches_python_and_python_decides(self):
-        # The row finds the phrase and leaves flags to ci_wake.ready_call, the one home of that parse.
+        # The row finds the phrase and leaves flags to guard_merge.ready_call, the one home of that parse.
         command = "gh pr ready --undo 12"
         self.assert_watch(command, "Bash", want=False)
         self.assert_reaches_python(run_row(self.command(), self.script, self.payload(command)), self.script)
