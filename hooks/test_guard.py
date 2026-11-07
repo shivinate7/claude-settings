@@ -18711,9 +18711,10 @@ add("floor step-up: Workflow reviewer Round 3 on opus is denied under agent-mode
 
 # ---- SendMessage to a spawned agent (rule roles-third-round-steps-up, decision agent-model-cap). A resumed agent keeps
 # the model its spawn gave it, so a `Round 3 of 3` message to a builder on sonnet asks for a third try on the wrong
-# model. The target is found in the session transcript: the Agent spawn whose tool_result names the agentId, or whose
-# input `name` equals `to`. Its model is the spawn's model, else the env default. A target no spawn holds, a transcript
-# that cannot be read and a cross-session target pass, because the guard cannot read the model.
+# model. The target is found in the session transcript: the Agent or Task spawn whose tool_result names the agentId, or
+# whose input `name` equals `to`. The newest such spawn wins. Its model is the spawn's model, else the env default, and
+# `inherit` reads as unset. A target no spawn holds, a transcript that cannot be read and a cross-session target pass,
+# because the guard cannot read the model.
 FAMILY = "step-up-resume"
 RESUME_DIR = os.path.join(ROOT, "resume")
 RESUME_SPAWNS = os.path.join(RESUME_DIR, "spawns.jsonl")
@@ -18726,14 +18727,23 @@ RESUME_OPUS = "a5e0d9c8b7a6f5e4d"     # agentId of the opus builder named opusfi
 RESUME_PINLESS = "a1b2c3d4e5f60718a"  # agentId of a builder spawned with no model, named pinless
 RESUME_GHOST = "a0000000000000000"    # an agentId that no spawn in these transcripts holds
 RESUME_ROUND3 = "Round 3 of 3. Finish the fix."
-RESUME_REMEDY = ("fresh", "model opus")  # the remedy names a fresh Opus spawn: a resume keeps the old model
+RESUME_BLOCK = "a8f9a0b1c2d3e4f5a"  # agentId named in the second text block of a sonnet builder's result
+RESUME_REMEDY = ("fresh", "model opus", "Round 3 of 3")  # a fresh Opus spawn, whose brief carries the round-3 marker
+# The lookup cases below pin which spawn is found, so they check only the decision and the fresh Opus remedy. The
+# round-3 marker in the brief is pinned by the cases that use RESUME_REMEDY.
+RESUME_SHAPE_REMEDY = ("fresh", "model opus")
 
 
-def spawn_lines(tool_id, agent_id, **spawn):
-    """The assistant line that spawns an agent, then the user line whose tool_result names its agentId."""
-    return [role_use(tool_id, "Agent", spawn),
-            role_result(tool_id, "Async agent launched.\nagentId: %s (use SendMessage with to: '%s' to continue this "
-                                 "agent)" % (agent_id, agent_id))]
+def spawn_lines(tool_id, agent_id, tool_name="Agent", split_result=False, **spawn):
+    """The assistant line that spawns an agent, then the user line whose tool_result names its agentId. A split result
+    puts the agentId line in its second text block, so a reader of the first block alone finds no agentId."""
+    agent_line = "agentId: %s (use SendMessage with to: '%s' to continue this agent)" % (agent_id, agent_id)
+    if not split_result:
+        return [role_use(tool_id, tool_name, spawn), role_result(tool_id, "Async agent launched.\n" + agent_line)]
+    blocks = [{"type": "text", "text": "Async agent launched."}, {"type": "text", "text": agent_line}]
+    return [role_use(tool_id, tool_name, spawn),
+            json.dumps({"type": "user", "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": tool_id, "content": blocks}]}})]
 
 
 RESUME_SPAWN_LINES = (
@@ -18746,6 +18756,22 @@ RESUME_SPAWN_LINES = (
     + spawn_lines("r5", RESUME_PINLESS, subagent_type="builder", name="pinless", prompt="Fix the scan.")
     # A sonnet builder whose name is a session id: only the cross-session skip keeps it from being found.
     + spawn_lines("r7", "a4e3d2c1b0a9f8e7d", subagent_type="builder", model="sonnet", name=ROLE_OTHER,
+                  prompt="Fix the scan.")
+    # A builder spawned with model inherit: inherit reads as unset, so the env default stands in for it.
+    + spawn_lines("r8", "a8b7c6d5e4f3a2b10", subagent_type="builder", model="inherit", name="inheritfix",
+                  prompt="Fix the scan.")
+    # A sonnet builder spawned through the Task tool, which spawns a target as Agent does.
+    + spawn_lines("r9", "a2b1c0d9e8f7a6b5c", tool_name="Task", subagent_type="builder", model="sonnet",
+                  name="taskfix", prompt="Fix the scan.")
+    # One name spawned twice. The newest spawn is the target, so the forward order ends on opus and the reverse on sonnet.
+    + spawn_lines("r10", "a4b5c6d7e8f9a0b1c", subagent_type="builder", model="sonnet", name="dupfwd",
+                  prompt="Fix the scan.")
+    + spawn_lines("r11", "a5c6d7e8f9a0b1c2d", subagent_type="builder", model="opus", name="dupfwd", prompt="Fix the scan.")
+    + spawn_lines("r12", "a6d7e8f9a0b1c2d3e", subagent_type="builder", model="opus", name="duprev", prompt="Fix the scan.")
+    + spawn_lines("r13", "a7e8f9a0b1c2d3e4f", subagent_type="builder", model="sonnet", name="duprev",
+                  prompt="Fix the scan.")
+    # A sonnet builder whose agentId sits in the second text block of its result.
+    + spawn_lines("r14", RESUME_BLOCK, split_result=True, subagent_type="builder", model="sonnet", name="blockfix",
                   prompt="Fix the scan.")
 )
 RESUME_LONG_LINES = (
@@ -18766,10 +18792,10 @@ def write_resume_transcripts():
 lazy_fixture([RESUME_SPAWNS, RESUME_LONG, RESUME_EMPTY, RESUME_UNREADABLE], write_resume_transcripts)
 
 
-def resume_refuse(name, to, message, transcript=RESUME_SPAWNS):
+def resume_refuse(name, to, message, transcript=RESUME_SPAWNS, env=None, carries=RESUME_REMEDY):
     """A SendMessage the guard refuses under roles-third-round-steps-up. The reason names a fresh Opus spawn."""
     add("step-up-resume: " + name, "deny", STEP_UP, tool="SendMessage", cwd=NOGIT, transcript=transcript,
-        to=to, message=message, carries=RESUME_REMEDY)
+        to=to, message=message, carries=carries, env=env)
 
 
 def resume_allow(name, to, message, transcript=RESUME_SPAWNS):
@@ -18791,11 +18817,21 @@ resume_refuse("a Round 3 of 3 message to a builder with no model, which runs the
               "pinless", RESUME_ROUND3)
 resume_refuse("a Round 3 of 3 message to a sonnet builder at the end of a long transcript is denied", "longfix",
               RESUME_ROUND3, transcript=RESUME_LONG)
+resume_refuse("a Round 3 of 3 message to a builder spawned with model inherit, env default sonnet, is denied",
+              "inheritfix", RESUME_ROUND3, env={"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"}, carries=RESUME_SHAPE_REMEDY)
+resume_refuse("a Round 3 of 3 message to a sonnet builder spawned through the Task tool is denied", "taskfix",
+              RESUME_ROUND3, carries=RESUME_SHAPE_REMEDY)
+resume_refuse("a Round 3 of 3 message to a name spawned opus then sonnet, so the newest is sonnet, is denied",
+              "duprev", RESUME_ROUND3, carries=RESUME_SHAPE_REMEDY)
+resume_refuse("a Round 3 of 3 message to a sonnet builder whose agentId is in the second text block is denied",
+              RESUME_BLOCK, RESUME_ROUND3, carries=RESUME_SHAPE_REMEDY)
 
 # Allowed: an opus builder, a sonnet reviewer, the middle round, no marker, prose, and a target the guard cannot read.
 resume_allow("a Round 3 of 3 message to an opus builder, found by agentId, is allowed", RESUME_OPUS, RESUME_ROUND3)
 resume_allow("a Round 3 of 3 message to a builder on the full opus id is allowed", "fullopus", RESUME_ROUND3)
 resume_allow("a Round 3 of 3 message to a sonnet reviewer is allowed", "checker", RESUME_ROUND3)
+resume_allow("a Round 3 of 3 message to a name spawned sonnet then opus, so the newest is opus, is allowed", "dupfwd",
+             RESUME_ROUND3)
 resume_allow("a Round 2 of 3 message to a sonnet builder is allowed", "fixer", "Round 2 of 3. Continue the fix.")
 resume_allow("a message with no marker to a sonnet builder is allowed", "fixer", "Check the diff again for typos.")
 resume_allow("a Round 3 of 3 marker only in later prose on line two is allowed", "fixer",
@@ -26914,14 +26950,14 @@ EMPTY_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": ""}
 SONNET_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"}
 # A Workflow agent() call takes CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL first, then its own model, then
 # CLAUDE_CODE_SUBAGENT_MODEL, then the parent's model (Claude Code 2.1.42, read from the minified code). Each dict
-# names every one of these keys, so a run never inherits the runner's: line 74 sets the subagent model for all runs.
+# names every one of these keys, so a run never inherits the runner's: line 74 sets the agent model for all runs.
 WF_UNSET = dict(UNSET_DEFAULT, CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL=None,
                 CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL_FORCE=None, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=None)
 WF_WORKFLOW_SONNET = dict(WF_UNSET, CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="sonnet")
-WF_SUBAGENT_SONNET = dict(WF_UNSET, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+WF_AGENT_SONNET = dict(WF_UNSET, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
 # The CLI reads "inherit" as the parent's model in CLAUDE_CODE_SUBAGENT_MODEL, and as unset in the Workflow variable.
-INHERIT_SUBAGENT = dict(WF_UNSET, CLAUDE_CODE_SUBAGENT_MODEL="inherit")
-INHERIT_SUBAGENT_MIXED = dict(WF_UNSET, CLAUDE_CODE_SUBAGENT_MODEL="Inherit")
+INHERIT_AGENT = dict(WF_UNSET, CLAUDE_CODE_SUBAGENT_MODEL="inherit")
+INHERIT_AGENT_MIXED = dict(WF_UNSET, CLAUDE_CODE_SUBAGENT_MODEL="Inherit")
 WF_WORKFLOW_INHERIT = dict(WF_UNSET, CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="inherit")
 
 ROLE_TABLE_HEAD = "# Agent model cap\n\n| Point | Model | Effort |\n|---|---|---|\n"
@@ -27302,11 +27338,11 @@ WF_ABOVE_THEN_NO_MODEL = (
 # Plan's row is opus, and a no-model Agent Plan is allowed through its file's pin. The Workflow allow follows that.
 workflow_allow("role-model: Workflow Plan with no model is allowed when both defaults are unset (Plan's row is opus)",
                _step_flow("'Plan the change.'", "agentType: 'Plan'"), env=WF_UNSET)
-# The Workflow variable, or the subagent variable alone, names the model the spawn runs on.
+# The Workflow variable, or CLAUDE_CODE_SUBAGENT_MODEL alone, names the model the spawn runs on.
 workflow_allow("role-model: Workflow test-author with no model is allowed when CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL is sonnet",
                WF_NO_MODEL_SCRIPT, env=WF_WORKFLOW_SONNET)
 workflow_allow("role-model: Workflow test-author with no model is allowed when only CLAUDE_CODE_SUBAGENT_MODEL is sonnet",
-               WF_NO_MODEL_SCRIPT, env=WF_SUBAGENT_SONNET)
+               WF_NO_MODEL_SCRIPT, env=WF_AGENT_SONNET)
 workflow_allow("role-model: Workflow test-author on haiku is allowed when both defaults are unset",
                _step_flow("'Write the failing cases.'", "agentType: 'test-author', model: 'haiku'"), env=WF_UNSET)
 # A spread can hide the model, so spawn_inputs skips the call as unread and it is allowed, as it is today.
@@ -27319,9 +27355,9 @@ workflow_allow("role-model: Workflow test-author with a spread and no literal mo
 # "inherit" in CLAUDE_CODE_SUBAGENT_MODEL names the parent's model, not a model the default can pass, so a spawn with
 # no model is denied, in any letter case.
 role_model_refuse("role-model: builder with no model is denied when the default is inherit",
-          "builder", None, "Fix the failing case.", carries=("name the role's model",), env=INHERIT_SUBAGENT)
+          "builder", None, "Fix the failing case.", carries=("name the role's model",), env=INHERIT_AGENT)
 role_model_refuse("role-model: builder with no model is denied when the default is Inherit, in mixed case",
-          "builder", None, "Fix the failing case.", carries=("name the role's model",), env=INHERIT_SUBAGENT_MIXED)
+          "builder", None, "Fix the failing case.", carries=("name the role's model",), env=INHERIT_AGENT_MIXED)
 role_model_refuse("role-model: builder with no model is denied when the default is unset",
           "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
 role_model_refuse("role-model: general-purpose with no model is denied when the default is unset",

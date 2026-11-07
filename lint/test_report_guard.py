@@ -889,7 +889,7 @@ def assert_no_model_block(case, out):
     case.assertNotIn("Model-name guard", reason, "the model-name check blocked: " + reason)
 
 
-def subagent_env(model):
+def agent_env(model):
     """This process's environment with CLAUDE_CODE_SUBAGENT_MODEL set to `model`, or unset for None."""
     env = dict(os.environ)
     if model is None:
@@ -948,7 +948,7 @@ class DoneNamesModelsTests(unittest.TestCase):
                     assistant_text(reply)]
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
-        env = subagent_env(env_model)
+        env = agent_env(env_model)
         run = run_guard(REPORT_GUARD, hook, env=env)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
@@ -1056,7 +1056,7 @@ class DoneNamesModelsTests(unittest.TestCase):
             assistant_text(NAMED_REPORT % "reviewer haiku")]
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
-        _, reads = run_spawn_reads(hook, subagent_env("sonnet"))
+        _, reads = run_spawn_reads(hook, agent_env("sonnet"))
         self.assertTrue(reads, "the probe saw no spawn_models call")
         self.assertNotIn(len(records), reads, "the guard read the whole transcript for spawn models")
 
@@ -1252,7 +1252,7 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": active,
                 "session_id": self.sid}
-        run = run_guard(REPORT_GUARD, hook, env=subagent_env(env_model))
+        run = run_guard(REPORT_GUARD, hook, env=agent_env(env_model))
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
@@ -1386,7 +1386,7 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": True,
                 "session_id": self.sid}
-        _, reads = run_spawn_reads(hook, subagent_env("sonnet"))
+        _, reads = run_spawn_reads(hook, agent_env("sonnet"))
         self.assertTrue(reads, "the probe saw no spawn_models call")
         self.assertNotIn(len(records), reads, "the rewrite read the whole transcript for spawn models")
 
