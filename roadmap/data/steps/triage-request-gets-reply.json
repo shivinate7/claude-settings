@@ -1,0 +1,10 @@
+{
+  "title": "Each step request a lane sends to triage gets a reply in the same turn",
+  "phase": "next",
+  "status": "todo",
+  "order": 269.5,
+  "owner": "coordinator",
+  "why": "Incident, 2026-11-07: lane lane-runs-tests-for-set sent triage a step request at 14:52 CST. Triage filed the step but never replied, so the lane waited about 3 hours, until the coordinator asked at 17:47 CST.",
+  "note": "A Stop check for triage: each cross-session message received in the turn that names a step slug needs a send_message to its sender before the turn ends. Cost: one read of the turn's transcript at Stop. Done check: a red test on a turn that files a requested step and sends no reply.",
+  "updatedAt": "2026-11-07T17:47:00-06:00"
+}
