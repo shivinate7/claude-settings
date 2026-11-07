@@ -4237,7 +4237,9 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # A shell command with none of these can write no named file, so it spends no git read here. A
 # redirect onto a stream (`2>&1`) or the null device writes no checkout, so it is dropped first.
 SHELL_QUIET_REDIRECT = re.compile(r"\d*>>?[ \t]*(?:&[0-9-]|/dev/null\b)")
-SHELL_WRITE_HINT = re.compile(r">|" + MUTATING_COMMAND + r"|\bsed\b")
+SHELL_WRITE_HINT = re.compile(
+    r">|" + MUTATING_COMMAND + r"|\bsed\b|\bperl\b|\bgit\b[^\n;|&]*\b(?:restore|checkout)\b"
+    r"|\bfind\b[^\n;|&]*\s-(?:delete|exec|execdir|ok|okdir)\b")
 
 
 def _owning_checkout(path: str, roots) -> str:
