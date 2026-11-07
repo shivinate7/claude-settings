@@ -183,11 +183,55 @@ const readTs = (req, text, files) => {
   }
 };
 
+// ---- a shell file: the words of its code that name a tracked file ----
+
+const SHELL_WORD_END = /[\s;&|()<>]/;
+
+// The tracked files that a word of a shell file's code names, from the file's folder or the repository root. Comments and heredoc bodies
+// yield no word. A word is a run between blanks and `;&|()<>` outside quotes, so a quoted string with a blank is one word, and its
+// quote marks are removed. A leading `NAME=` is dropped. A word with a `\`, a newline or a leading `/` is skipped. A word with no `$`
+// must equal the path. A word with one leading variable anchor (`$NAME/` or `${NAME}/`) and a tail with no `$` counts when the tail
+// equals the path: the anchor is never resolved, so the tail is read from the folder and the root alike.
+const shellWords = (text) => {
+  const bare = blankShell(text);
+  const code = blankShell(text, { keepStrings: true });
+  const words = [];
+  let word = null;
+  let quote = null;
+  const flush = () => { if (word !== null) words.push(word); word = null; };
+  for (let i = 0; i < bare.length; i++) {
+    const c = bare[i];
+    if (quote) {
+      if (c === quote) quote = null; else word += code[i];
+      continue;
+    }
+    if (c === '\\' && i + 1 < bare.length) { word = (word ?? '') + code[i] + code[i + 1]; i++; continue; }
+    if (c === "'" || c === '"') { quote = c; word ??= ''; continue; }
+    if (SHELL_WORD_END.test(c)) { flush(); continue; }
+    word = (word ?? '') + code[i];
+  }
+  flush();
+  return words.map((w) => w.replace(/^[A-Za-z_][A-Za-z0-9_]*=/, '')).filter((w) => w && !/[\\\n]/.test(w) && !w.startsWith('/'));
+};
+
+const shellLoads = (req, text, files) => {
+  const folder = path.posix.dirname(req.file);
+  const out = new Set();
+  for (const w of shellWords(text)) {
+    const anchored = /^\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})\/(.+)$/.exec(w);
+    const s = anchored ? anchored[1] : w;
+    if (s.includes('$')) continue;
+    for (const c of [path.posix.normalize(path.posix.join(folder, s)), path.posix.normalize(s)]) if (c !== req.file && files.has(c)) out.add(c);
+  }
+  return good(req, { imports: [], named: [...out].sort() });
+};
+
 // ---- any other extension: a line regex over the text with comments and strings blanked ----
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const readRegex = (req, text) => {
+const readRegex = (req, text, files) => {
+  if (req.op === 'loads' && SHELL_EXT.test(req.file)) return shellLoads(req, text, files);
   if (req.op === 'uses' || req.op === 'loads') return fail(req, `a ${req.op} fact is read for Python and JavaScript files, and ${req.file} is neither`);
   // The blanked text keeps every offset, so a match there names the same span of the original, where a string value is still text.
   // A shell file has its own scanner (blankShell): a string may span lines, `#` opens a comment only at the start of a word, and a heredoc body is text.
@@ -233,7 +277,7 @@ export const readFacts = (requests, root, { tracked = [] } = {}) => {
     let text;
     try { text = readFileSync(path.join(root, req.file), 'utf8'); } catch (e) { results[i] = fail(req, `${req.file} cannot be read: ${e.code ?? e.message}`); return; }
     try {
-      results[i] = req.file.endsWith('.json') ? readJson(req, text) : TS_EXT.test(req.file) ? readTs(req, text, files) : readRegex(req, text);
+      results[i] = req.file.endsWith('.json') ? readJson(req, text) : TS_EXT.test(req.file) ? readTs(req, text, files) : readRegex(req, text, files);
     } catch (e) {
       results[i] = fail(req, `${req.file} could not be read: ${e.message}`);
     }
