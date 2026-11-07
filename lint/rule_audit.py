@@ -475,27 +475,52 @@ def _local_wrappers(tree) -> set:
     return out
 
 
-def _logged_entry(entry, bindings: dict, path: str, root: str) -> str:
-    """The id one LOGGED_RULES entry names. A Name is a constant this file binds once, to a string literal. An
-    Attribute `module.NAME` is that kind of constant in the module-level code of hooks/module.py or
-    lint/module.py under root. Anything else raises ValueError naming `path:line`: an id that cannot be
-    read would hide from a never-fired cull."""
+def _module_constant(module: str, attr: str, where: str, root: str):
+    """The value nodes bound to `attr` at module level in hooks/module.py or lint/module.py under root."""
+    sources = [os.path.join(root, folder, module + ".py") for folder in ("hooks", "lint")]
+    source = next((s for s in sources if os.path.isfile(s)), None)
+    if source is None:
+        raise ValueError(f"{where}: LOGGED_RULES entry {module}.{attr} names a module that is not under hooks/ or lint/")
+    return _module_bindings(ast.parse(read(source))).get(attr, [])
+
+
+def _logged_entry(entry, bindings: dict, path: str, root: str) -> set:
+    """The ids one LOGGED_RULES entry names. A Name is a constant this file binds once, to a string literal. An
+    Attribute `module.NAME`, or the string "module.NAME", is that kind of constant in the module-level code of
+    hooks/module.py or lint/module.py under root. A starred Name `*NAME` unpacks a tuple this file binds once; each
+    of its elements is a string literal (an id) or an entry of these kinds. Anything else raises ValueError naming `path:line`: an id that
+    cannot be read would hide from a never-fired cull."""
     where = f"{path}:{entry.lineno}"
+    if isinstance(entry, ast.Starred):
+        found = bindings.get(entry.value.id, []) if isinstance(entry.value, ast.Name) else []
+        if len(found) != 1 or not isinstance(found[0], ast.Tuple):
+            raise ValueError(f"{where}: LOGGED_RULES starred entry is not a name bound once to a tuple at "
+                             "module level, so its ids cannot be listed")
+        ids = set()
+        for element in found[0].elts:
+            if isinstance(element, ast.Constant):  # a string literal in the unpacked tuple is itself an id
+                if not isinstance(element.value, str):
+                    raise ValueError(f"{where}: LOGGED_RULES starred tuple holds a non-string, so its ids "
+                                     "cannot be listed")
+                ids.add(element.value)
+            else:
+                ids |= _logged_entry(element, bindings, path, root)
+        return ids
     if isinstance(entry, ast.Name):
         name, found = entry.id, bindings.get(entry.id, [])
     elif isinstance(entry, ast.Attribute) and isinstance(entry.value, ast.Name):
         name = f"{entry.value.id}.{entry.attr}"
-        sources = [os.path.join(root, folder, entry.value.id + ".py") for folder in ("hooks", "lint")]
-        source = next((s for s in sources if os.path.isfile(s)), None)
-        if source is None:
-            raise ValueError(f"{where}: LOGGED_RULES entry {name} names a module that is not under hooks/ or lint/")
-        found = _module_bindings(ast.parse(read(source))).get(entry.attr, [])
+        found = _module_constant(entry.value.id, entry.attr, where, root)
+    elif isinstance(entry, ast.Constant) and isinstance(entry.value, str) and entry.value.count(".") == 1:
+        name = entry.value
+        found = _module_constant(*name.split("."), where, root)
     else:
-        raise ValueError(f"{where}: LOGGED_RULES takes a constant name or module.NAME, so the id can be listed")
+        raise ValueError(f"{where}: LOGGED_RULES takes a constant name, module.NAME, a \"module.NAME\" string or "
+                         "a starred tuple name, so the id can be listed")
     if len(found) != 1 or not (isinstance(found[0], ast.Constant) and isinstance(found[0].value, str)):
         raise ValueError(f"{where}: LOGGED_RULES entry {name} is not bound once to a string literal "
                          "at module level, so the id cannot be listed")
-    return found[0].value
+    return {found[0].value}
 
 
 def guard_rule_names(text: str, path: str = "<source>", root: str = ROOT):
@@ -503,7 +528,7 @@ def guard_rule_names(text: str, path: str = "<source>", root: str = ROOT):
     that shows a call names nothing. Four shapes write an id: a string literal in refuse() or
     record() (third argument) or ask_command() (first), by position or as `rule=`; the table in
     diff_rule(); the `code, why = {...}` role-scope table; and a module-level `LOGGED_RULES = (...)` tuple, which
-    lists each entry's string (see `_logged_entry`). A writer that logs ids through variables declares that tuple.
+    lists each entry's string (see `_logged_entry`; plain or annotated assignment). A writer that logs ids through variables declares that tuple.
     A Name in that argument position
     lists the string its module-level `NAME = "..."` holds (a module constant, such as call_judge's
     TIMEOUT_LOG_RULE). A bare call to a local wrapper of those names (see `_local_wrappers`) names no id. A Name with no module-level binding in this file (a parameter, a local, or one
@@ -515,10 +540,12 @@ def guard_rule_names(text: str, path: str = "<source>", root: str = ROOT):
     wrappers = _local_wrappers(tree)
     ids = set()
     for node in tree.body:  # LOGGED_RULES is module-level: only the tuple a writer declares counts
-        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "LOGGED_RULES" for t in node.targets):
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
+        if any(getattr(t, "id", "") == "LOGGED_RULES" for t in targets) and node.value is not None:
             if not isinstance(node.value, ast.Tuple):
                 raise ValueError(f"{path}:{node.lineno}: LOGGED_RULES is not a tuple, so its ids cannot be listed")
-            ids |= {_logged_entry(e, bindings, path, root) for e in node.value.elts}
+            for e in node.value.elts:
+                ids |= _logged_entry(e, bindings, path, root)
     for node, shadow in _scoped_nodes(tree):
         if isinstance(node, ast.Call):
             name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
