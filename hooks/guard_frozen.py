@@ -3,6 +3,7 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import functools
 import os
 import re
 
@@ -662,64 +663,15 @@ def _segment_command(words):
 
 def frozen_shell_hit(cmd: str, cwd: str) -> str:
     """Return the frozen (config-dir) path a shell command writes to, else ''.
-    A quoted python heredoc body is a script, not shell lines: `interpreter_write_hit` reads its own
-    writes, `_py_run_texts` reads the command lines it runs, and the shell scan sees the command without
-    the body, so a word in a string of the script is not read as a write."""
-    scripts = _py_script_bodies(cmd)
-    for text in [_without_bodies(cmd, scripts)] + [t for body in scripts for t in _py_run_texts(body)]:
-        hit = _shell_write_hit(text, cwd, is_frozen, _holds_frozen)
-        if hit:
-            return hit
-    return interpreter_write_hit(cmd, cwd, is_frozen)
-
-
-def _py_script_bodies(cmd: str):
-    """The bodies of the quoted heredocs fed to python in `cmd` that `ast` can parse. An unquoted body
-    stays shell text (bash expands it first), and so does a body `ast` cannot read."""
-    import ast
-    import textwrap
-    if "<<" not in cmd:
-        return []
-    bodies = []
-    for reading in (False, True):
-        for quote, body, header in _split_heredocs(cmd, reading)[1]:
-            if not quote or not body.strip() or body in bodies or not _PY_HEADER.search(header):
-                continue
-            try:
-                ast.parse(textwrap.dedent(body))
-            except (SyntaxError, ValueError):
-                continue
-            bodies.append(body)
-    return bodies
-
-
-def _without_bodies(cmd: str, bodies) -> str:
-    for body in bodies:
-        cmd = cmd.replace("\n" + body + "\n", "\n", 1)
-    return cmd
-
-
-_PY_RUN_NAMES = ("system", "popen", "run", "call", "check_call", "check_output", "Popen")
-
-
-def _py_run_texts(body: str):
-    """One command line per call a script makes to run a program (`os.system`, `subprocess.run`, ...):
-    the string constants of its arguments, joined by spaces. `subprocess.run(["cp", "a", "b"])` reads
-    `cp a b`, so the shell scan judges what the script runs."""
-    import ast
-    import textwrap
-    out = []
-    for node in ast.walk(ast.parse(textwrap.dedent(body))):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
-        if name in _PY_RUN_NAMES:
-            strings = [n.value for arg in node.args for n in ast.walk(arg)
-                       if isinstance(n, ast.Constant) and isinstance(n.value, str)]
-            if strings:
-                out.append(" ".join(strings))
-    return out
+    A quoted python heredoc body that runs nothing is a script, not shell lines: `interpreter_write_hit`
+    reads its own writes and the shell scan sees the command without the body, so a word in a string of
+    the script is not read as a write. A body that can run a program stays in the shell scan. A scan
+    that fails reads the whole command, so a failure refuses where it would have allowed."""
+    try:
+        text = _without_bodies(cmd, _inert_python_bodies(cmd))
+    except Exception:
+        text = cmd
+    return _shell_write_hit(text, cwd, is_frozen, _holds_frozen) or interpreter_write_hit(cmd, cwd, is_frozen)
 
 
 def project_config_shell_hit(cmd: str, cwd: str) -> str:
@@ -856,12 +808,21 @@ def _py_written(tree, env_at):
     return [(call, expression) for call, expression in out if expression is not None]
 
 
-def _py_hit(body: str, cwd: str, predicate) -> str:
+@functools.lru_cache(maxsize=32)
+def _py_parse(body: str):
+    """The `ast` tree of a script body, or None when `ast` cannot read it. The one parse of a body:
+    the cache lets the shell scan and the interpreter scan read the same tree."""
     import ast
     import textwrap
     try:
-        tree = ast.parse(textwrap.dedent(body))
+        return ast.parse(textwrap.dedent(body))
     except (SyntaxError, ValueError):
+        return None
+
+
+def _py_hit(body: str, cwd: str, predicate) -> str:
+    tree = _py_parse(body)
+    if tree is None:
         # Unparsable (a shell variable in an unquoted body, a Python 2 line): a literal path the
         # predicate accepts, beside a write call in the same body, counts.
         if _PY_WRITE_CALL.search(body):
@@ -876,6 +837,77 @@ def _py_hit(body: str, cwd: str, predicate) -> str:
             if predicate(path, cwd):
                 return path
     return ""
+
+
+_PY_RUN_MODULES = ("subprocess", "asyncio", "pty")
+_PY_RUN_BUILTINS = ("exec", "eval", "__import__")
+# A heredoc header that sends the body's output onward: a pipe, a redirect to a file, a substitution.
+_ONWARD = re.compile(r"<<[^|>]*(?:\||>(?!&))|\$\(|`|<\(")
+
+
+def _py_runs(tree) -> bool:
+    """True when a script can run a program: any use of `os` but `os.path`, `subprocess`, `asyncio`,
+    `pty`, `exec`, `eval` or `__import__`, however it is imported or renamed."""
+    import ast
+    nodes = list(ast.walk(tree))
+    path_bases = {id(node.value) for node in nodes if isinstance(node, ast.Attribute) and node.attr == "path"}
+    for node in nodes:
+        if isinstance(node, ast.Name):
+            if node.id in _PY_RUN_MODULES or node.id in _PY_RUN_BUILTINS or (node.id == "os" and id(node) not in path_bases):
+                return True
+        elif isinstance(node, ast.Import):
+            if any(alias.name.split(".")[0] in _PY_RUN_MODULES or (alias.name == "os" and alias.asname)
+                   for alias in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom):
+            if (node.module or "").split(".")[0] in _PY_RUN_MODULES or node.module == "os":
+                return True
+    return False
+
+
+def _py_writes_file_named_in(tree, text: str) -> bool:
+    """True when a script writes a file whose name `text` mentions: a later segment may run it."""
+    env_at = _py_env_at(tree)
+    for call, expression in _py_written(tree, env_at):
+        for path in _py_paths(expression, env_at(call)):
+            name = path.rstrip("/").rsplit("/", 1)[-1]
+            if name and name in text:
+                return True
+    return False
+
+
+def _heredoc_bodies(raw: str):
+    """(quote, body, header) of each heredoc of `raw`, once, read both ways bash can read it: its own
+    walk, and the one where a contraction's `'` is text. The one walk the scans of a script share."""
+    seen = set()
+    for reading in (False, True):
+        for quote, body, header in _split_heredocs(raw, reading)[1]:
+            if (header, body) not in seen:
+                seen.add((header, body))
+                yield quote, body, header
+
+
+def _inert_python_bodies(cmd: str):
+    """The quoted heredoc bodies fed to python in `cmd` that the shell scan may leave out: `ast` reads
+    them, and they cannot run a program, send their output onward, or write a file that a later part
+    of the command names. A body that fails any of these stays in the shell scan, and so does an
+    unquoted body (bash expands it first) or one `ast` cannot read."""
+    if "<<" not in cmd:
+        return []
+    scripts = []
+    for quote, body, header in _heredoc_bodies(cmd):
+        tree = _py_parse(body) if quote and body.strip() and _PY_HEADER.search(header) else None
+        if tree is not None:
+            scripts.append((body, header, tree))
+    outside = _without_bodies(cmd, [body for body, _header, _tree in scripts])
+    return [body for body, header, tree in scripts
+            if not (_py_runs(tree) or _ONWARD.search(header) or _py_writes_file_named_in(tree, outside))]
+
+
+def _without_bodies(cmd: str, bodies) -> str:
+    for body in bodies:
+        cmd = cmd.replace("\n" + body + "\n", "\n", 1)
+    return cmd
 
 
 _JS_STR = r"""(?:'([^'\n]*)'|"([^"\n]*)"|`([^`$]*)`|([A-Za-z_$][\w$]*)|path\s*\.\s*(?:join|resolve)\s*\(([^()]*)\))"""
@@ -949,20 +981,15 @@ def interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
 
 def _interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
     if "<<" in raw:
-        seen = set()
-        for reading in (False, True):   # bash's own walk, and the one where a contraction's `'` is text
-            for _quote, body, header in _split_heredocs(raw, reading)[1]:
-                if (header, body) in seen:
-                    continue
-                seen.add((header, body))
-                if _PY_HEADER.search(header):
-                    hit = _py_hit(body, cwd, predicate)
-                elif _NODE_HEADER.search(header):
-                    hit = _js_hit(body, cwd, predicate)
-                else:
-                    continue
-                if hit:
-                    return hit
+        for _quote, body, header in _heredoc_bodies(raw):
+            if _PY_HEADER.search(header):
+                hit = _py_hit(body, cwd, predicate)
+            elif _NODE_HEADER.search(header):
+                hit = _js_hit(body, cwd, predicate)
+            else:
+                continue
+            if hit:
+                return hit
     if any(flag in raw for flag in _INLINE_FLAG_WORDS):
         for kind, script, number, segments, ends in _inline_scripts(raw):
             at = dir_before_segment(segments, number, cwd, ends) or cwd
