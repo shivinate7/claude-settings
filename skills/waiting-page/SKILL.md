@@ -139,7 +139,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 - `groups/<slug>`: `title` and `why`. `why` is one sentence on how the items of the group connect.
   Write the record in the same step that sets `group` on the second item.
 - `answers/<id>`: the page writes it when the owner presses Send. Fields: `item`, `n`, `at` (ISO
-  time), `note`, and `choice` (a decision) or `done: true` (a task), and `session` (copied from the item's `owner` id, absent when `owner` names none, never on a park answer). A task answer may instead be
+  time), `note`, and `choice` (a decision) or `done: true` (a task), and `session` (copied from the item's `owner` id, absent when `owner` names none, never on a park answer; an item's `owner` names at most one session id, and the page copies the first). A task answer may instead be
   a note with no `done`. A pick that stands writes `choice` equal to `pick`, with the note
   `accepted pick`. A tap on the starred option is an ordinary pick, with no such note. On a `multi` item `choice` is a
   list of option keys, in rank order when `ranked` and in option order otherwise. A stood pick writes the whole `pick` list in that order. "None of these" writes
@@ -433,7 +433,7 @@ A save on the page sends a comment to Claude when the page allows it. The commen
 sessions that watch the page. Only the owning session reads, routes and closes its items, except that the writer closes an item on a park answer. On a `lane` item, the park branch has it tell first. It reads
 the answers at each wake, and at the start of each turn while it has an item open (the writer also
 while `meta/page.parked` is not empty): `ArtifactData list answers`. That read is the fallback when no wake comes. A peer session never
-relays an answer's text. It sends only the page URL, the item id and the act, and the receiver checks the answer itself (decision relayed-grant-read-from-page). A session skips an answer whose `session` names another session; the receiver of a relayed grant still reads the answer itself. An answer typed in the chat counts the same. A chat answer to an open item: the
+relays an answer's text. It sends only the page URL, the item id and the act, and the receiver checks the answer itself (decision relayed-grant-read-from-page). The page-note capture saves no note from an answer whose `session` names another session. A session still reads every answer as this passage says. The receiver of a relayed grant reads the answer itself. An answer typed in the chat counts the same. A chat answer to an open item: the
 writer adds the answer and its time to the item's `context`, and the writer closes it. Nothing is
 written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
 The writer also sets `lastAnswer` from the chat answer, with the time the owner gave it.
@@ -443,6 +443,8 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   `meta/page`, or from the `Watch:` line of the project-ops role handoff
   (`templates/role-handoff.md`), which names the watch for its successor. A session that inherits
   items also rewrites each item's `owner` to itself: `owner` is the session that reads the answer.
+  It also rewrites `session` to its own id on each answer of those items still in `answers/`, since
+  the page-note capture saves no note from an answer whose `session` names another session.
   It stops watching (`ArtifactComments` action `watch` with `on: false` and the page URL) when it
   has no open item and is not the writer, and at step 1 of a project-ops rotation.
 - The owner can Undo a Send for 8 seconds, and Undo deletes the answers. Wait 10 seconds after an
