@@ -19153,7 +19153,8 @@ add("lane-repo-tag: a denied lane names the expected repo tag in its reason", "d
 # the new step shared with that lane's step slug or title slug. Words split on - and _, casefolded, and the words of
 # the shared repo's name are dropped. Home-only overlap is never checked, except an exact re-start (the same step and
 # the same topic on the home repo), which is asked. A closed lane (archived, or archive_session with a success result)
-# overlaps nothing. The reason names the overlapping lane's step slug and its session id.
+# overlaps nothing. A lane whose step slug is identical to the new step is skipped by the word clause: only the topic
+# decides it. The reason names the overlapping lane's step slug and its session id.
 _OUTER_FAMILY = FAMILY
 FAMILY = "lane-one-topic"
 
@@ -19199,11 +19200,17 @@ start_ask("topic only: a new step sharing no word, on the same topic and q_max, 
           role_path("start-map-only"),
           ["cs-build:lane", START_HOME, START_QMAX, "cs-step:qmax-font-swap", "cs-topic:plain-english-map"],
           "lane: qmax-font-swap", carries=("qmax-map-format-skew", START_MAP_ID))
-# Asked: the word clause alone. The same step on q_max under other topics: the new step's words are the lane's own.
-start_ask("word only: the same step on q_max under another topic is asked",
+# Allowed: the same step slug on q_max under another topic. An identical step is an intentional split by topic, so the
+# word clause skips that lane and only the topic decides it.
+start_allow("the same step on q_max under another topic is allowed: an identical step is a split by topic",
+            role_path("start-shard"),
+            ["cs-build:lane", START_HOME, START_QMAX, "cs-step:qmax-browser-shard", "cs-topic:shard-plan"],
+            "lane: qmax-browser-shard")
+# Asked: the word clause alone. A new step that differs from the lane's step, and shares its words browser and shard.
+start_ask("word only: a new step sharing words with the open lane's step, on q_max under another topic, is asked",
           role_path("start-shard"),
-          ["cs-build:lane", START_HOME, START_QMAX, "cs-step:qmax-browser-shard", "cs-topic:shard-plan"],
-          "lane: qmax-browser-shard", carries=("qmax-browser-shard", START_SHARD_ID))
+          ["cs-build:lane", START_HOME, START_QMAX, "cs-step:qmax-browser-shard-two", "cs-topic:shard-two-plan"],
+          "lane: qmax-browser-shard-two", carries=("qmax-browser-shard", START_SHARD_ID))
 # Asked: the incident. A marker brief names a new step to the lane qmax-verify-report-fixes, and the word map overlaps
 # the lane qmax-map-format-skew on q_max. The brief's topic matches the target, so lane-one-topic passes it.
 send_ask("incident, a marker brief naming a new step to an open lane is asked, not denied",
