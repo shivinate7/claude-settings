@@ -8142,6 +8142,18 @@ test("the bars draw a stalled and a paused step as their own cells, in the order
     assert.deepEqual(await wCellKinds(page, scope), W_ORDER, `${name} does not draw a stalled or paused step as its own cell, in order`);
   }
 });
+// barsBlocked: a done step and a blocked step in place of two to-do steps, so all six kinds show in one phase of 30 cells.
+const barsBlocked = () => ({ ...barsStalled(), ...stepsOf([["t29", "cleanup", 29, "done"], ["t30", "cleanup", 30, "blocked"]]) });
+const barsBlockedPage = () => withStalled(phasePage(barsBlocked()), STALLED);
+const W_ORDER_BLK = ["done", "act", "act", "stl", "stl", "stl", "pzd", "blk", ...Array(22).fill("")];
+test("the bars draw a blocked step after a stalled and a paused one, in the order done, in progress, stalled, paused, blocked, to do", async (t) => {
+  const page = await open(t, { pageHtml: barsBlockedPage() }); if (!page) return;
+  await openStatus(page);
+  for (const [name, scope] of BARS_W) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    assert.deepEqual(await wCellKinds(page, scope), W_ORDER_BLK, `${name} does not draw the blocked step after the paused one, in order`);
+  }
+});
 test("a stalled cell and a paused cell look different from a to-do cell in each bar", async (t) => {
   const page = await open(t, { pageHtml: barsPage() }); if (!page) return;
   await openStatus(page);

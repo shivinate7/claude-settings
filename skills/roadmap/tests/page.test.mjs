@@ -290,6 +290,15 @@ test("the bars draw a stalled and a paused step as their own cells, in the order
     assert.deepEqual(await cellKinds(page, scope), BAR_ORDER, `${name} does not draw a stalled or paused step as its own cell, in order`);
   }
 });
+// A blocked step is drawn after the paused cell, so the order holds on all three bars with a blocked step among the others.
+const barFixtureBlocked = () => ({ ...barFixture(), t5: stepOf("Step t5", "blocked", 5) });
+test("the bars draw a blocked step after a stalled and a paused one, in the order done, in progress, stalled, paused, blocked, to do", async (t) => {
+  const page = await open(t, builtPage({ steps: barFixtureBlocked(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
+  for (const [name, scope] of BARS) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    assert.deepEqual(await cellKinds(page, scope), ["done", "act", "stl", "pzd", "blk", ...Array(25).fill("")], `${name} does not draw the blocked step after the paused one, in order`);
+  }
+});
 test("a stalled cell and a paused cell look different from a to-do cell in each bar", async (t) => {
   const page = await open(t, builtPage({ steps: barFixture(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
   const look = (loc) => loc.evaluate((el) => { const s = getComputedStyle(el); return [s.backgroundImage, s.backgroundColor, s.boxShadow].join(" | "); });
