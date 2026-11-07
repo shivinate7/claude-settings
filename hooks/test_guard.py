@@ -8546,7 +8546,7 @@ FLAG_FALSE_ALARM_ALLOW = (
     "jq -L dir " + ENV + " f.yaml",
     "rg -T " + ENV + " K",
 )
-FLAG_FALSE_ALARM_DENY = (
+FLAG_FALSE_ALARM_REFUSE = (
     "cat " + ENV,
     "jq . " + ENV,
     "grep x " + ENV,
@@ -8578,7 +8578,7 @@ FLAG_FALSE_ALARM_DENY = (
 )
 for _cmd in FLAG_FALSE_ALARM_ALLOW:
     sh("env: flag-false-alarm: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
-for _cmd in FLAG_FALSE_ALARM_DENY:
+for _cmd in FLAG_FALSE_ALARM_REFUSE:
     sh("env: flag-false-alarm: still refused, " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
 
 
