@@ -1,16 +1,10 @@
 {
-  "title": "Each open PR carries its state on GitHub, and a sweep names the ones without",
+  "title": "One ledger gives each open PR one next act, and reports two numbers",
   "phase": "now",
   "status": "todo",
   "order": 0.0,
   "owner": "coordinator",
   "why": "Owner ask, 12:17 CST Nov 7: \"How many PRs are sitting idle that haven't merged because you lost track ... mechanize this better, this is an obvious gap.\" Measured by the coordinator at 12:24 CST: 36 open claude-settings PRs and 16 q_max PRs are named in neither its handoff nor runner 8's queue; #1371 (git mailbox, round 3 PASS Nov 6) is one.",
-  "note": "Waits on step pr-tracking-root-cause for its mechanism. Each open PR carries a state on GitHub (for example queue, held, parked, replaced), each state with an age limit. Done check: red when a PR's state is older than its limit (queued with no batch after one cycle; held or parked with no page item or debt), and red on a PR with no state; a label alone is not the test. Each coordinator and batch-runner report gives two numbers, gold 0: the longest wait from passed review to merge, and the count of open PRs with no next act. Also: a session's report lists an on-merge PR that has waited longer than one batch cycle under Deviations, never under Next.",
-  "updatedAt": "2026-11-07T18:29:00Z",
-  "paused": {
-    "why": "Waits on step pr-tracking-root-cause for its mechanism.",
-    "decides": "coordinator",
-    "at": "2026-11-07T12:42:00-06:00",
-    "by": "triage"
-  }
+  "note": "Mechanism from step pr-tracking-root-cause (record pr-ledger, accepted 12:56 CST Nov 7): one ledger in merge.py gives each open PR exactly one next act and its owner, with an age. It replaces private queues, review verdicts sent only by message, holds with no age, and the open-PR-is-progress test in stalled-steps and build.py. Done check: red on a fixture with an open PR that has no next act, or a next act older than its limit (queued with no batch after one cycle; held with no page item or debt); green when every open PR has a current act. Each coordinator and batch-runner report gives two numbers, gold 0: the longest wait from passed review to merge, and the count of open PRs with no next act. A session's report lists an on-merge PR that has waited longer than one batch cycle under Deviations, never under Next.",
+  "updatedAt": "2026-11-07T18:45:00Z"
 }

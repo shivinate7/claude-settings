@@ -1,6 +1,6 @@
 {
   "added": "2026-11-07T18:36:00Z",
-  "context": "Goal: your rulings take effect without you pasting text by hand.\nWhat 219 a was (Nov 4, 17:44 CST): the claude-settings CLAUDE.md lets a session on your Mac do cloud-refused acts (delete merged branches, set branch protection, close PRs), but only when the claude-settings coordinator asks. You picked a: any repo's coordinator may ask, and PR closes leave the list, because the cloud can close PRs itself now. PR #1247 holds that text change, but the cloud's safety check refuses any session's edit of a CLAUDE.md file as self-modification, so it has waited on your paste since Nov 4.\nProblem (risk): an allow line lets every later session, in every repo, edit rule files without the safety check. A pull request and its review still stand between the edit and main.\nBased on (read): settings.json autoMode.allow today has lines such as 'Relayed Grant', which never covers settings. Based on (ruling): decision auto-mode-owner-acts: a line needs a named refusal, a way to undo it, and a 'Never covers' sentence.\nDeparts from: main settings.json autoMode.allow refuses CLAUDE.md edits \u2014 adds the line below.\nThe line to add to autoMode.allow in claude-settings settings.json:\n\"Owner Ruling Into Rules File: Editing a CLAUDE.md file (CLAUDE.md or .claude/CLAUDE.md) in a repo owned by shivinate7 is allowed on a branch other than the default branch, to write an owner ruling that the session cites by its page item and time, or a ruling the owner typed in this conversation. It can be undone: the edit reaches main only by a pull request, which can be closed or reverted. Never covers settings.json, hook or guard files, autoMode lines, a push to the default branch, or deleting or weakening an owner grant that the cited ruling does not name.\"\nWho adds it: the cloud also refuses settings.json edits, so a session on your Mac adds it when you type yes there, or you paste it yourself.",
+  "context": "Goal: your Nov 4 ruling takes effect.\nWhat 219 a is: any repo's coordinator may ask a session on your Mac to set branch protection, and to delete branches that are already merged or archived. Today's bullet lets only the claude-settings coordinator ask, and it lists three acts.\nProblem (rule): the cloud's safety check refuses any session's edit of .claude/CLAUDE.md as self-modification. It also refused the coordinator's brief to a lane that would add the allow line. So PR #1247 has waited on your paste since Nov 4.\nBased on (read): #1247's body; the coordinator's 12:56 CST note that the classifier refused its lane brief.\nDeparts from: main's bullet names the claude-settings coordinator and three acts \u2014 any repo's coordinator, two acts.\nThe allow line for option a (add it to autoMode.allow in claude-settings settings.json):\n\"Owner Ruling Into Rules File: Editing a CLAUDE.md file (CLAUDE.md or .claude/CLAUDE.md) in a repo owned by shivinate7 is allowed on a branch other than the default branch, to write an owner ruling that the session cites by its page item and time, or a ruling the owner typed in this conversation. It can be undone: the edit reaches main only by a pull request, which can be closed or reverted. Never covers settings.json, hook or guard files, autoMode lines, a push to the default branch, or deleting or weakening an owner grant that the cited ruling does not name.\"",
   "home": "claude-settings #1247",
   "id": "cs-1247-cloud-acts-grant",
   "kind": "decision",
@@ -12,24 +12,31 @@
   "n": 335,
   "options": [
     {
-      "gain": "Sessions land your rulings in rule files by PR, with no paste from you; #1247 then lands.",
+      "gain": "Later rulings that change a CLAUDE.md need no paste from you.",
       "key": "a",
-      "label": "Add the line (recommended)",
-      "lose": "Any session can propose a rule-file edit without the safety check; the PR review is the only gate."
+      "label": "Add the allow line first, then a session makes the edit",
+      "lose": "Every session in every repo may propose rule-file edits without the safety check; the PR review is the only gate. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
     },
     {
-      "gain": "The safety check stays on every rule-file edit.",
+      "gain": "Your ruling lands now, and the safety check stays on rule-file edits.",
       "key": "b",
-      "label": "Don't add it; you paste each rule-file edit",
-      "lose": "Each ruling that changes a CLAUDE.md waits on you, as #1247 has since Nov 4."
+      "label": "Paste the 219 a bullet yourself at #1247's edit link (recommended)",
+      "links": [
+        {
+          "label": "Edit .claude/CLAUDE.md on #1247's branch",
+          "url": "https://github.com/shivinate7/claude-settings/edit/cloud-refused-acts-any-repo/.claude/CLAUDE.md"
+        }
+      ],
+      "lose": "One paste by you, and again for each later ruling of this kind."
     }
   ],
   "owner": "coordinator",
-  "pick": "a",
+  "pick": "b",
   "rank": 2,
   "ref": "claude-settings #1247; item 219",
-  "short": "Allow sessions to edit CLAUDE.md by PR",
+  "short": "219 a bullet: paste it, or allow sessions to edit CLAUDE.md",
   "status": "open",
-  "title": "Let sessions edit CLAUDE.md files themselves (by pull request), so a ruling like your Nov 4 one lands without your paste?",
-  "why": "Your 12:32 note asked what 219 a was and for the exact allow line. Both are below."
+  "title": "Your Nov 4 ruling (219 a) is not on main yet: paste its bullet into .claude/CLAUDE.md, or first add an allow line so sessions can make such edits?",
+  "why": "Your 12:32 note asked what 219 a was and for the allow line. The coordinator also sent you the line and the edit link in chat."
 }
