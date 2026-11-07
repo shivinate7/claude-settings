@@ -944,8 +944,10 @@ def case_the_at_once_relist_judges_the_newest_run_of_a_name():
 
 
 def case_failed_re_list_keeps_the_judged_verdict():
-    """A red run is judged, and then the at-once re-list is refused (HTTP 403). The judged run is the answer:
-    the hook says red with its failing jobs, not `CI unknown`. Control: the same run with no refusal."""
+    """A red run is judged, then the at-once re-list is refused (HTTP 403). The hook still says red with its failing
+    jobs. A red line states a failure the hook read, and no run the refused list could have shown undoes it. A green
+    line would claim the whole head passed, so a green run reads unknown instead (the case after this one).
+    Control: the same run with no refusal."""
     res = run_hook(bash("gh pr ready 12"), fixture(READY, [RED]), extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
     expect_verdict("red run, no refusal (control)", res, "red", names_in=["unit", "e2e"], names_out=["lint"])
     res = run_hook(bash("gh pr ready 12"), fixture(READY, [RED], list_error_from=2),
