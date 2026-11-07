@@ -475,6 +475,17 @@ def case_widening_reasons_pinned_per_hit():
     box_only = tcj.run_hook(tcj.question_input(box=item376_box()), answer=tcj.ALLOW).reason()
     check("reasons: the box only-alternative hit says to drop the question and names its matched text",
           ONLY_SAYS in box_only and ONLY_HIT in box_only, box_only[:200])
+    # The page label hit: a Recommended option that widens, with the pick on the plain option. It prints the words
+    # of the box label hit (CHAT_WIDENS_REASON), not the pick's.
+    label = page_item(options=copy.deepcopy(REC_OPTIONS), pick="b")
+    check("reasons: the page label hit's matched text is 'recommended option widens'",
+          call("item_hit", "set", entry_of(label)) == ("uniform-pick", "recommended option widens"),
+          call("item_hit", "set", entry_of(label)))
+    label_said = printed_reason({"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC, "data": label})
+    check("reasons: the page label hit prints the box label hit's reason words", MAIN_CHAT_REASON in label_said,
+          label_said[:200])
+    check("reasons: the page label hit does not print the pick reason", MAIN_PICK_REASON not in label_said,
+          label_said[:200])
 
 
 def case_recommended_widening_is_refused_unchanged():
