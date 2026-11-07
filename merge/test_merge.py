@@ -8267,6 +8267,15 @@ class RecordsRebuild(RecordsEnv):
         self.assertNotEqual(rc, 0, out)
         self.assertEqual(self.head(), before, "pushed on a refusal")
 
+    def test_the_draft_preview_of_a_claim_head_with_ready_checks_says_run_the_draft_first(self):
+        block = dict(CONFIG["merge"], readyChecks=["check invariants"])
+        put_base_config(self, json.dumps(dict(CONFIG, merge=block)))  # the config first: a merge after the claim would hide its trailer
+        self.claim_head()
+        out = self.draft_preview()
+        claim = self.preview_line(out, "claim")
+        self.assertIn("already claimed (D-002)", claim, out)  # precondition: the head holds the claim
+        self.assertIn("--confirm` on the draft first", claim, out)
+
     def test_prepare_a_pushed_page_with_a_refused_ready_does_not_read_as_a_failure(self):
         # The real host's ready() always returns (False, why), so every draft step ends here. The push worked, so no line says "could not".
         self.kinds_off()
