@@ -1366,7 +1366,7 @@ def export_check(cwd, transcript_path, session_id):
         if not wrote:
             return None, None
         newest = max(wrote)
-        waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
+        waiting = [e for e in layout.artifacts(root, exports=False) if e["role"] == layout.WAITING_ROLE]
         if _cleared(exports, results, newest, waiting[0]["id"] if waiting else ""):
             return None, None
         branch, folder = waiting_copy(layout, root)

@@ -633,19 +633,24 @@ def _owner_home(home):
     return None if found in ("", "~") else found
 
 
+def _design_folder(root):
+    """The design folder of `root`, relative, with `/` separators. A bad "rolled-out" mark reads the legacy place, which
+    for design is the layout's, so the mockup home reads under any mark. The one home of that fallback."""
+    try:
+        return path(root, "design")
+    except RolledOutMarkError:
+        return legacy("design")
+
+
 def mockup_homes(root):
     """The folders a mockup may sit in, as a tuple of paths: the repo's design folder inside the checkout. Reads no
-    file and starts no process. A bad "rolled-out" mark reads the legacy place, which for design is the layout's."""
-    try:
-        where = path(root, "design")
-    except RolledOutMarkError:
-        where = legacy("design")
-    return (os.path.join(root, *where.split("/")),)
+    file and starts no process."""
+    return (os.path.join(root, *_design_folder(root).split("/")),)
 
 
 def mockup_home_words(root):
     """The mockup home as a sentence shows it, with no absolute path."""
-    return "%s/<file>, committed to git" % path(root, "design")
+    return "%s/<file>, committed to git" % _design_folder(root)
 
 
 def _flavour(*texts):
