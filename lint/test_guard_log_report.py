@@ -1515,6 +1515,120 @@ class EmittedRuleReaderTests(unittest.TestCase):
         self.assertEqual(emitted_guard_rules(src), {"alpha-judged", "beta-judged", "fallback-rule"})
 
 
+# ------------------------------------------------------------ the rule id each hook logs, exactly
+# A guard.log line carries the rule id as its fourth tab field. Each case drives one hook in-process, with the model
+# call patched and CLAUDE_CONFIG_DIR at a folder of its own, then reads that field exactly. A substring, or the
+# decision field, would pass a line that names the wrong id.
+
+def guard_log_rows(config):
+    """The guard.log lines of `config`, each as its tab fields. No file is no line."""
+    try:
+        with open(os.path.join(config, "guard.log"), encoding="utf-8") as handle:
+            return [line.rstrip("\n").split("\t") for line in handle]
+    except OSError:
+        return []
+
+
+def stdin_of(payload):
+    """A stdin that reads as the hooks read it: text for json.load, and a .buffer for sys.stdin.buffer.read()."""
+    return io.TextIOWrapper(io.BytesIO(json.dumps(payload).encode("utf-8")), encoding="utf-8")
+
+
+def reply_reason(rule):
+    """A reply judge's reason that names one rule id, as the model writes it."""
+    return "The reply breaks %s, so the owner gets a rewrite." % rule
+
+
+class ExactGuardLogRuleTests(unittest.TestCase):
+    """The rule id each hook writes to guard.log, read from that line's own rule field."""
+
+    def config(self):
+        folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        return folder
+
+    def logged(self, config, decision):
+        return [row[3] for row in guard_log_rows(config) if len(row) >= 4 and row[2] == decision]
+
+    def reply_rules_logged(self, rule):
+        import decision_watch
+        import reply_judge
+        config = self.config()
+        payload = {"session_id": "sess-reply", "last_assistant_message": "A finished reply for the owner."}
+        verdict = {"ok": False, "reason": reply_reason(rule)}
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}), \
+                mock.patch.object(decision_watch, "invoke_model", return_value=(verdict, None)), \
+                mock.patch("sys.stdin", stdin_of(payload)), contextlib.redirect_stdout(io.StringIO()):
+            reply_judge.main()
+        return self.logged(config, "noted")
+
+    def test_an_owner_override_reason_logs_the_owner_override_rule(self):
+        if HOOKS_DIR not in sys.path:
+            sys.path.insert(0, HOOKS_DIR)
+        import override
+        config = self.config()
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
+            override.grant("sess-owner", "override, fix the widget", datetime.now(timezone.utc))
+        self.assertEqual(self.logged(config, "override-reason"), ["owner-override"])
+
+    def test_a_past_ruling_cite_logs_the_past_ruling_rule(self):
+        if HOOKS_DIR not in sys.path:
+            sys.path.insert(0, HOOKS_DIR)
+        import call_judge
+        import question_form
+        config = self.config()
+        payload = {"tool_name": "AskUserQuestion", "tool_input": {"questions": []}, "session_id": "sess-past",
+                   "cwd": config}
+        verdict = {"ok": False, "reason": "decisions/apps-keep-access: the owner already ruled this."}
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}), \
+                mock.patch.object(question_form, "chat_hit", return_value=("", "")), \
+                mock.patch.object(question_form, "chat_units", return_value=[("", "the question")]), \
+                mock.patch.object(call_judge, "past_ruling_context",
+                                  return_value=("", ["decisions/apps-keep-access"], [])), \
+                mock.patch.object(call_judge, "invoke_model", return_value=(verdict, None)), \
+                mock.patch("sys.stdin", stdin_of(payload)), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):  # the refusal exits after it logs
+                call_judge.main()
+        self.assertEqual(self.logged(config, "deny"), ["past-ruling"])
+
+    def test_a_prose_refusal_logs_the_prose_judge_rule(self):
+        if HOOKS_DIR not in sys.path:
+            sys.path.insert(0, HOOKS_DIR)
+        import prose_judge
+        config = self.config()
+        payload = {"tool_name": "Edit",
+                   "tool_input": {"file_path": "docs/decisions/a-record.md", "old_string": "x", "new_string": "y"},
+                   "session_id": "sess-prose", "cwd": config}
+        verdict = {"ok": False, "reason": "the edit breaks the record's rules."}
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}), \
+                mock.patch.object(prose_judge, "invoke_model", return_value=(verdict, None)), \
+                mock.patch("sys.stdin", stdin_of(payload)), contextlib.redirect_stdout(io.StringIO()):
+            prose_judge.main()
+        self.assertEqual(self.logged(config, "deny"), ["prose-judge"])
+
+    def test_output_never_paste_passing_output_is_logged_by_its_own_id(self):
+        self.assertEqual(self.reply_rules_logged("output-never-paste-passing-output"),
+                         ["output-never-paste-passing-output"])
+
+    def test_output_start_with_point_is_logged_by_its_own_id(self):
+        self.assertEqual(self.reply_rules_logged("output-start-with-point"), ["output-start-with-point"])
+
+    def test_questions_go_to_owner_is_logged_by_its_own_id(self):
+        self.assertEqual(self.reply_rules_logged("questions-go-to-owner"), ["questions-go-to-owner"])
+
+    def test_style_cut_narration_is_logged_by_its_own_id(self):
+        self.assertEqual(self.reply_rules_logged("style-cut-narration"), ["style-cut-narration"])
+
+    def test_style_limits_kept_silently_is_logged_by_its_own_id(self):
+        self.assertEqual(self.reply_rules_logged("style-limits-kept-silently"), ["style-limits-kept-silently"])
+
+    def test_style_question_form_is_logged_by_its_own_id(self):
+        self.assertEqual(self.reply_rules_logged("style-question-form"), ["style-question-form"])
+
+    def test_style_table_gold_column_is_logged_by_its_own_id(self):
+        self.assertEqual(self.reply_rules_logged("style-table-gold-column"), ["style-table-gold-column"])
+
+
 def run_cli(argv):
     """Run main(argv); return (exit code, stdout, stderr). A refused flag exits 2 and is a result."""
     out, err = io.StringIO(), io.StringIO()
