@@ -886,9 +886,9 @@ class CostTests(StaleCase):
         self.assertTrue(listing, commands)
         self.assertIn("docs/decisions", listing[0], commands)
 
-    def test_a_lone_touched_mjs_starts_four_git_processes_with_the_reports_ls_tree_and_prints_no_unknown_line(self):
+    def test_a_lone_touched_mjs_starts_five_git_processes_with_the_reports_ls_tree_and_cat_file_and_prints_no_unknown_line(self):
         """Guards the code-only pin: the report's backing scan reuses the reads home_report already makes (the decisions
-        ls-tree and cat-file), so this range starts no git process beyond the pinned four. The exact pin stays."""
+        ls-tree and cat-file), so this range starts no git process beyond the pinned five. The exact pin stays."""
         def change(repo):
             write(repo, "hooks/lib.mjs", LIB + "export const more = 1;\n")
             commit(repo)
@@ -896,8 +896,9 @@ class CostTests(StaleCase):
         rc, out, subs = self.run_traced(rng)
         self.assertEqual(rc, 0, out)
         self.assertEqual(unknown_lines(out), [], out)
-        # The three starts of the check, plus the one ls-tree the report's Home half adds for a changed code file.
-        self.assertEqual(sorted(subs), ["diff", "ls-tree", "merge-base", "rev-parse"], subs)
+        # The three starts of the check, the one ls-tree the report's Home half adds for a changed code file, and the
+        # one cat-file the drift report opens to read the tracked Markdown at head, since the changed file is not Python.
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "ls-tree", "merge-base", "rev-parse"], subs)
 
     def test_a_range_that_removes_a_path_starts_at_most_five_git_processes(self):
         def change(repo):
