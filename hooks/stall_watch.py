@@ -526,7 +526,7 @@ def stop():
                     continue  # its stall crossed before the previous Stop, which listed it
                 rows.append("%s: no output for %ds: %s%s" % (job, idle, path, until))
         if rows:
-            head = "Background shells still running and quiet: stop it or tell the owner."
+            head = "Background shells still running and quiet: tell the owner, and leave the command running."
             if "| until: " in "".join(rows):
                 head += " Say whether each until condition is met."
             text = "\n".join([head] + rows)  # reason reaches the model and continues the turn; systemMessage shows the owner
