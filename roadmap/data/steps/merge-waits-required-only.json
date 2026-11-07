@@ -1,11 +1,11 @@
 {
   "title": "Merge tool waits only on the required check",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.37,
   "why": "A browser run dispatched on a PR head no longer holds a merge for up to 240 min.",
-  "note": "Coordinator 13:10 CST Nov 6, from q_max #1037's reviewer: merge/merge.py wait_checks waits on every pending check on the head. Fix: wait only on all-jobs-passed and name the checks it skipped. It changes the merge tool's wait, so it batches alone, after F1 and F3 with the other guard-file steps. No owner question.",
-  "updatedAt": "2026-11-06T19:20:00Z",
+  "note": "Coordinator 13:10 CST Nov 6, from q_max #1037's reviewer: merge/merge.py wait_checks waits on every pending check on the head. Fix: wait only on all-jobs-passed and name the checks it skipped. It changes the merge tool's wait, so it batches alone, after F1 and F3 with the other guard-file steps. No owner question. Coordinator 21:38 CST: hold lifted after F1 and F3 merged; lane started 21:07 CST.",
+  "updatedAt": "2026-11-07T03:38:00Z",
   "paused": {
     "why": "Waits on the held guard steps F1 and F3 to merge.",
     "decides": "coordinator",
