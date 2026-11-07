@@ -17,7 +17,7 @@ writes, so a session cannot grant itself an override. It is valid only while now
   nothing on this route (an intended "off" must never become a grant). A later line starting with the word grants
   nothing, except the last non-blank line when the prompt's start is no override word: a status block the app puts
   before the owner's words does not hide it. That line grants only as the bare word, `off` or a length, with no
-  reason and no Opus word. Machine blocks are stripped first (BLOCKS); pasted text is never the owner's word.
+  reason and no Opus word. Machine blocks are stripped first (BLOCKS); the owner never types pasted text.
   A plain ask (`yes override that`, `override that for 15 minutes please`) writes the same file when a model judges the
   prompt to be the owner's own present request to override a refusal (grant_override_ask, call_judge.override_ask). Cost:
   one model call, only for an owner prompt that holds the whole word `override` outside backtick code spans and
