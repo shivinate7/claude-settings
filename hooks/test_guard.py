@@ -18843,6 +18843,89 @@ add("ceiling: Task on sonnet is allowed", "allow", tool="Task", prompt="x", mode
 sh("ceiling: a shell command that only names a spawn on opus is not a spawn",
    "echo spawn the agent with model opus", "allow", cwd=NOGIT)
 
+# ---- Brief claims need a probe (rule brief-claim-has-probe). A brief to a builder or a test-author that claims what
+# main, origin/main or "today" passes, allows, accepts or refuses for an input is refused, unless the brief carries
+# the probe that showed it: a command line and its result line. A claim written from memory of main is the mistake
+# this stops. Selector: MUTATE_ONLY=brief-claim: runs these cases alone. Each deny is red on a guard that lets the
+# claim through. Each allow is a control the rule must leave alone.
+BRIEF_PROBE = "brief-claim-has-probe"
+REPRO_TEST_AUTHOR = ("Round 1 passed but found that the fix adds false alarms that main does not have.\n"
+                     "Move `adHocKey: ...` and `globalHotkey: Ctrl+Alt+2` to the passing list: main passes both.\n"
+                     "Also main passes `password: none for guests and visitors`.")
+add("brief-claim: test-author brief that says main passes two inputs, with no probe, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt=REPRO_TEST_AUTHOR, subagent_type="test-author")
+add("brief-claim: builder brief that says main passes a password input, with no probe, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Make these green; main passes `password: none for the guest`.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief that says origin/main accepts an input, with no command, is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Make the failing case green. origin/main accepts `user: root` as a valid name.",
+    subagent_type="builder", model="sonnet", carries=(("probe", "command"),))
+add("brief-claim: test-author brief that says today main refuses an input, with no command, is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Write the case. Today main refuses `port: 0`, so the new case expects a refusal.",
+    subagent_type="test-author")
+add("brief-claim: test-author brief that says today the guard refuses an input, with no main named, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Write the case. Today it refuses `password: none for the guest`.",
+    subagent_type="test-author")
+add("brief-claim: builder brief that says main allows an input, with no probe, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep the scan as it is. main allows `port: 0`.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief with a main claim and a result line but no command is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep the scan as it is.\nmain allows `port: 0`.\nPASS",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief with a main claim and a command but no result line is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Keep the scan as it is.\nmain allows `port: 0`.\n`python3 hooks/probe_main.py 'port: 0'`",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: test-author brief whose probe is for another input does not show the claim, and is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="main refuses `password: none for the guest`.\n```\n$ python3 hooks/probe_main.py 'port: 0'\nrefused\n```",
+    subagent_type="test-author")
+LONG_BRIEF = "\n".join("Keep the export scan narrow. Line %d of the brief." % n for n in range(1, 30))
+add("brief-claim: builder brief with the claim on line 30 of a long brief, with no probe, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt=LONG_BRIEF + "\nNote: main refuses `password: none for the guest`.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief with a lone quote and an unmatched backtick around a main claim is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Don't skip the scan. Main refuses `password: none for the guest, and the guest passes.\nMake these green.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief with a main refusal and a fenced git show probe with its result is allowed",
+    "allow", tool="Agent",
+    prompt="Make these green. Main refuses `password: none for the guest`.\n```\n"
+           "$ git show origin/main:hooks/guard.py | python3 -I - 'password: none for the guest'\n"
+           "origin_main RRRR\n```",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: test-author brief with a main refusal and an inline python3 probe with its refused line is allowed",
+    "allow", tool="Agent",
+    prompt="Main refuses `globalHotkey: Ctrl+Alt+2`.\n"
+           "`python3 hooks/probe_main.py 'globalHotkey: Ctrl+Alt+2'`\nrefused",
+    subagent_type="test-author")
+add("brief-claim: builder brief with origin/main passes an input and a PASS result line is allowed",
+    "allow", tool="Agent",
+    prompt="origin/main passes `user: root`.\n$ python3 hooks/probe_main.py 'user: root'\nPASS",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief with no claim about main is allowed",
+    "allow", tool="Agent",
+    prompt="Make these green. The guard must refuse `password: none for the guest` for every role.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: reviewer brief with the main claim is allowed (out of scope)",
+    "allow", tool="Agent", prompt="Check the diff. Main passes `password: none for the guest`, so the fix is wrong.",
+    subagent_type="reviewer")
+add("brief-claim: Explore brief with the main claim is allowed (out of scope)",
+    "allow", tool="Agent",
+    prompt="Find where the guest password rule lives. Main passes `password: none for the guest`.",
+    subagent_type="Explore")
+add("brief-claim: designer brief with the main claim is allowed (out of scope)",
+    "allow", tool="Agent", prompt="Draw the mockup. Main passes `password: none for the guest`.",
+    subagent_type="designer")
+add("brief-claim: main and today as plain words are allowed",
+    "allow", tool="Agent",
+    prompt="The main point of this lane is the probe rule. The main branch is the base. Today the lane starts on it.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: an empty brief is allowed", "allow", tool="Agent", prompt="", subagent_type="builder",
+    model="sonnet")
+
 
 def _flow(model, role=None):
     spec = "model: '%s'" % model + (", agentType: '%s'" % role if role else "")
