@@ -8,6 +8,8 @@ The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
+PinnedSettings: --step runs each named step in the claude-settings tree the workflow pins (one distinct 40-hex sha on its
+`<owner>/claude-settings/actions/<name>@<ref>` uses: lines); two pins, a ref that is no sha, or an unfetchable sha is unknown.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -1369,6 +1371,226 @@ class WindowsShell(unittest.TestCase):
     def test_off_windows_the_shell_is_path_bash(self):
         self.assertEqual(self.ci_job.shell_argv(None, nt=False), [shutil.which("bash"), "-e"])
         self.assertEqual(self.ci_job.shell_argv("python", nt=False), ["python3"])
+
+
+PIN_USES = "shivinate7/claude-settings/actions/code-check@%s"  # a pin: any owner's claude-settings action, at a ref
+READ_PINNED = 'test "$(cat "$CLAUDE_SETTINGS_DIR/marker")" = pinned'
+READ_LOCAL = 'test "$(cat "$CLAUDE_SETTINGS_DIR/marker")" = local'
+ABSENT_SHA = "deadbeef" * 5  # forty hex digits that neither the fixture clone nor its origin holds
+CODE_CHECK_STUB = "import pathlib\npathlib.Path('pinned-code-check.txt').write_text('pinned\\n')\n"
+
+
+def fixture_git(cwd, *args):
+    """A git command in a fixture repo, its stdout stripped. A failing fixture command raises: it is an error, not a red."""
+    done = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, env=ENV, check=True)
+    return done.stdout.strip()
+
+
+def fixture_rc(cwd, *args):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, env=ENV).returncode
+
+
+def fixture_commit(cwd, files, message):
+    """Write each file (relative path -> text), commit them all, and return the new HEAD sha."""
+    for rel, text in files.items():
+        path = os.path.join(cwd, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+    fixture_git(cwd, "add", "-A")
+    fixture_git(cwd, "commit", "-q", "-m", message)
+    return fixture_git(cwd, "rev-parse", "HEAD")
+
+
+def line_of(lines, name):
+    """The verdict line of the step `name`, or None."""
+    for ln in lines:
+        rest = ln.split(None, 1)
+        if len(rest) == 2 and rest[1].startswith(name + ":"):
+            return ln
+    return None
+
+
+class PinnedSettings(Job):
+    """`--step` runs each named step in the claude-settings tree the workflow pins. The fixture: `origin` holds commit A
+    (marker `pinned`), and the clone's HEAD is commit B (marker `local`). CLAUDE_SETTINGS_DIR is set by each run to a decoy
+    that holds `local`, so a step that is not given the pinned tree reads what main reads."""
+
+    def setUp(self):
+        super().setUp()
+        self.fixture = tempfile.mkdtemp(prefix="pinned_", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.fixture, True)
+        self.decoy = os.path.join(self.fixture, "decoy")
+        os.makedirs(self.decoy)
+        with open(os.path.join(self.decoy, "marker"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("local\n")
+
+    def settings(self, *, fetch_only=False, extra=None):
+        """Build the fixture clone. Without fetch_only the clone is cloned from origin and holds A; with it the clone has
+        its own history, so A is absent until ci-job fetches it. Scope first (P7): each marker reads what the case needs."""
+        origin = os.path.join(self.fixture, "origin")
+        self.clone = os.path.join(self.fixture, "clone")
+        os.makedirs(origin)
+        fixture_git(origin, "init", "-q", "-b", "main")
+        self.sha_a = fixture_commit(origin, {"marker": "pinned\n", **(extra or {})}, "pinned")
+        if fetch_only:
+            os.makedirs(self.clone)
+            fixture_git(self.clone, "init", "-q", "-b", "main")
+            fixture_git(self.clone, "remote", "add", "origin", origin)
+        else:
+            fixture_git(self.fixture, "clone", "-q", origin, self.clone)
+        self.sha_b = fixture_commit(self.clone, {"marker": "local\n"}, "local")
+        self.assertEqual(fixture_git(origin, "show", self.sha_a + ":marker"), "pinned")
+        self.assertEqual(fixture_git(self.clone, "show", "HEAD:marker"), "local")
+        absent = fixture_rc(self.clone, "cat-file", "-e", self.sha_a + "^{commit}") != 0
+        self.assertEqual(absent, fetch_only, "the clone holds pin A" if fetch_only else "the clone lacks pin A")
+        return self.clone
+
+    def run_pinned(self, *steps, args=()):
+        """One ci-job run of the job: the fixture clone is the pin's source, and the decoy is the caller's own value."""
+        argv, env = self.job_call(*steps, args=args)
+        env = {k: v for k, v in env.items() if k not in ("CLAUDE_SETTINGS_DIR", "CI_JOB_SETTINGS_CLONE")}
+        env.update(CLAUDE_SETTINGS_DIR=self.decoy, CI_JOB_SETTINGS_CLONE=self.clone)
+        done = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, env=env, timeout=120)
+        lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
+        return done.returncode, lines, done.stdout + done.stderr
+
+    @staticmethod
+    def verdict_of(lines, name):
+        line = line_of(lines, name)
+        return line.split()[0] if line else None
+
+    def test_a_step_reads_the_pinned_tree_and_its_twin_reads_the_local_one(self):
+        self.settings()
+        rc, lines, out = self.run_pinned(
+            step("pin", uses=PIN_USES % self.sha_a),
+            step("read pinned marker", READ_PINNED),
+            step("read local marker", READ_LOCAL),
+            args=("--step", "read pinned marker", "--step", "read local marker"))
+        self.assertEqual(self.verdict_of(lines, "read pinned marker"), "PASS",
+                         "the pinned step failed: it did not read the pinned tree\n" + out)
+        self.assertEqual(self.verdict_of(lines, "read local marker"), "FAIL",
+                         "the local twin passed: the step read the local tree, not the pinned one\n" + out)
+
+    def test_one_real_pin_past_repeats_comments_and_run_text_still_pins_the_tree(self):
+        self.settings()
+        rc, lines, out = self.run_pinned(
+            step("pin", uses=PIN_USES % self.sha_a + " # v1"),
+            step("repeat", uses=PIN_USES % self.sha_a),
+            "      # - uses: shivinate7/claude-settings/actions/zizmor@%s\n" % self.sha_b,
+            step("notes", 'echo "# uses: shivinate7/claude-settings/actions/code-check@%s"\necho "don\'t stop"' % self.sha_b),
+            step("read pinned marker", READ_PINNED),
+            args=("--step", "read pinned marker"))
+        self.assertEqual(self.verdict_of(lines, "read pinned marker"), "PASS",
+                         "the scan counted something other than one real pin: " + str(line_of(lines, "read pinned marker"))
+                         + "\n" + out)
+
+    def test_two_distinct_pins_make_every_named_step_unknown_and_run_none(self):
+        self.settings()
+        rc, lines, out = self.run_pinned(
+            step("pin a", uses=PIN_USES % self.sha_a),
+            step("pin b", uses=PIN_USES % self.sha_b),
+            step("one", "echo one > one.txt"),
+            step("two", "echo two > two.txt"),
+            args=("--step", "one", "--step", "two"))
+        self.assertEqual((rc, self.verdict_of(lines, "one"), self.verdict_of(lines, "two")), (2, "unknown", "unknown"),
+                         "two distinct pins must make each named step unknown, exit 2:\n" + out)
+        self.assertIn("pin", (line_of(lines, "one") or "").lower(), "the unknown line must name the pins: " + out)
+        for name in ("one.txt", "two.txt"):
+            self.assertFalse(os.path.exists(os.path.join(self.root, name)), "a step ran under two pins: " + name)
+
+    def test_a_pin_ref_that_is_not_a_sha_is_unknown(self):
+        self.settings()
+        rc, lines, out = self.run_pinned(
+            step("pin", uses=PIN_USES % "main"),
+            step("write", "echo ran > ran.txt"),
+            args=("--step", "write"))
+        self.assertEqual((rc, self.verdict_of(lines, "write")), (2, "unknown"),
+                         "a pin on @main must make the named step unknown, exit 2:\n" + out)
+        line = line_of(lines, "write") or ""
+        self.assertTrue("main" in line or "sha" in line.lower(), "the unknown line must name the ref: " + line)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "ran.txt")), "a step ran under a ref pin")
+
+    def test_a_pin_sha_that_neither_clone_nor_origin_has_is_unknown(self):
+        self.settings()
+        rc, lines, out = self.run_pinned(
+            step("pin", uses=PIN_USES % ABSENT_SHA),
+            step("write", "echo ran > ran.txt"),
+            args=("--step", "write"))
+        self.assertEqual((rc, self.verdict_of(lines, "write")), (2, "unknown"),
+                         "a pin that cannot be fetched must make the named step unknown, exit 2:\n" + out)
+        line = line_of(lines, "write") or ""
+        self.assertTrue("fetch" in line.lower() or ABSENT_SHA in line, "the unknown line must name the fetch: " + line)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "ran.txt")), "a step ran under an unfetchable pin")
+
+    def test_no_pin_leaves_the_settings_dir_as_the_caller_set_it(self):  # P2 green control: main passes this too
+        self.settings()
+        rc, lines, out = self.run_pinned(
+            step("plain", 'test "$CLAUDE_SETTINGS_DIR" = "%s"' % self.decoy),
+            args=("--step", "plain"))
+        self.assertEqual((rc, self.verdict_of(lines, "plain")), (0, "PASS"),
+                         "with no pin, ci-job must not change CLAUDE_SETTINGS_DIR:\n" + out)
+
+    def test_a_plain_run_with_a_pin_leaves_the_settings_dir_alone(self):  # control: --step alone pins, not a plain run
+        self.settings()
+        rc, lines, out = self.run_pinned(
+            step("pin", uses=PIN_USES % self.sha_a),
+            step("plain", 'test "$CLAUDE_SETTINGS_DIR" = "%s"' % self.decoy))
+        self.assertEqual(self.verdict_of(lines, "plain"), "PASS",
+                         "a plain run must not set CLAUDE_SETTINGS_DIR to the pinned tree:\n" + out)
+
+    def test_the_pinned_tree_is_gone_after_the_run(self):
+        self.settings()
+        rc, lines, out = self.run_pinned(
+            step("pin", uses=PIN_USES % self.sha_a),
+            step("record", 'echo "$CLAUDE_SETTINGS_DIR" > seen.txt\n' + READ_PINNED),
+            args=("--step", "record"))
+        seen_file = os.path.join(self.root, "seen.txt")
+        seen = open(seen_file, encoding="utf-8").read().strip() if os.path.isfile(seen_file) else ""
+        marker = os.path.join(seen, "marker") if seen else ""
+        held = open(marker, encoding="utf-8").read().strip() if os.path.isfile(marker) else None
+        self.assertEqual(held, "pinned", "the step did not run in a pinned tree (CLAUDE_SETTINGS_DIR held %r):\n%s"
+                         % (held, out))
+        self.assertFalse(os.path.exists(seen), "the pinned tree is still on disk after the run: " + seen)
+        listed = fixture_git(self.clone, "worktree", "list", "--porcelain")
+        self.assertEqual(sum(1 for ln in listed.splitlines() if ln.startswith("worktree ")), 1,
+                         "the clone still lists a worktree after the run:\n" + listed)
+
+    def test_a_step_env_settings_dir_wins_over_the_pin(self):
+        self.settings()
+        rc, lines, out = self.run_pinned(
+            step("pin", uses=PIN_USES % self.sha_a),
+            step("own env", 'test "$CLAUDE_SETTINGS_DIR" = own-env-x', env={"CLAUDE_SETTINGS_DIR": "own-env-x"}),
+            step("no env", READ_PINNED),
+            args=("--step", "own env", "--step", "no env"))
+        self.assertEqual(self.verdict_of(lines, "own env"), "PASS",
+                         "a step's own env: CLAUDE_SETTINGS_DIR was replaced:\n" + out)
+        self.assertEqual(self.verdict_of(lines, "no env"), "PASS",
+                         "a step without env: did not read the pinned tree:\n" + out)
+
+    def test_a_remote_code_check_runs_from_the_pinned_tree_only(self):
+        self.settings(extra={"actions/code-check/code_check.py": CODE_CHECK_STUB})
+        rc, lines, out = self.run_pinned(
+            step("code check", uses=PIN_USES % self.sha_a),
+            args=("--base", "origin/main", "--step", "code check"))
+        line = line_of(lines, "code check") or ""
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "pinned-code-check.txt")),
+                        "the pinned code_check.py did not run: " + line + "\n" + out)
+        found = re.search(r"\(code_check\.py: (.+)\)$", line)
+        self.assertTrue(found, "the verdict line does not name the code_check.py it ran: " + line)
+        local = os.path.join(CHECKOUT, "actions", "code-check", "code_check.py")
+        self.assertNotEqual(os.path.realpath(found.group(1)), os.path.realpath(local),
+                            "code_check.py ran from the local copy, not the pinned tree: " + line)
+
+    def test_a_pin_missing_from_the_clone_is_fetched_from_its_origin(self):
+        self.settings(fetch_only=True)
+        rc, lines, out = self.run_pinned(
+            step("pin", uses=PIN_USES % self.sha_a),
+            step("read pinned marker", READ_PINNED),
+            args=("--step", "read pinned marker"))
+        self.assertEqual(self.verdict_of(lines, "read pinned marker"), "PASS",
+                         "the pin was not fetched from its origin and read: " + str(line_of(lines, "read pinned marker"))
+                         + "\n" + out)
 
 
 if __name__ == "__main__":
