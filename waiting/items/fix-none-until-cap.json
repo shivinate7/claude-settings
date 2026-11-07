@@ -4,6 +4,11 @@
   "home": "coordinator; step notes-name-their-fix",
   "id": "fix-none-until-cap",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-07T20:41:09.600Z",
+    "choice": "b",
+    "note": ""
+  },
   "n": 360,
   "options": [
     {
@@ -29,8 +34,9 @@
   "pick": "a",
   "rank": 1,
   "ref": "item 355; item 358; step notes-name-their-fix",
+  "reply": "b, 14:41 CST: a `Fix: none` note is looked at again after 14 days. Routed to the coordinator; step notes-name-their-fix holds it.",
   "short": "Cap on a `Fix: none` note's review date",
-  "status": "open",
+  "status": "closed",
   "title": "How long may a `Fix: none` note wait before it is looked at again?",
   "why": "From your 355 note: the best-practices agent's finding, sent by the coordinator at 13:58 CST."
 }

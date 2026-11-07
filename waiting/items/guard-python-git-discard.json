@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-07T20:25:00Z",
+  "context": "Goal: the shared-tree guard stops destructive git that Claude runs by mistake.\nProblem (risk): a Python heredoc with os.system(\"git reset --hard ...\") or subprocess.run([\"git\",\"reset\",\"--hard\"]) passes the guard. The bash forms are refused.\nBased on (code): hooks/guard_shared_tree.py reads no Python body (probed on main 174b005c1).\nBased on (ruling): decision guard-guards-mistakes-only: a guard stops forms Claude could write by mistake. Asked because whether Claude runs git through Python by mistake is a judgment call.\nDeparts from: main reads no Python body for git discards. Option a adds that read.",
+  "home": "lane notes-keep-reverify",
+  "id": "guard-python-git-discard",
+  "kind": "decision",
+  "lane": "notes-keep-reverify",
+  "lastAnswer": {
+    "at": "2026-11-07T20:41:09.600Z",
+    "choice": "none",
+    "note": "i feel like maybe we went down this way and then reverted? is that true or no "
+  },
+  "n": 366,
+  "options": [
+    {
+      "gain": "Closes the hole.",
+      "key": "a",
+      "label": "Read git discard calls in Python heredoc strings",
+      "lose": "False alarms on Python text that only mentions those commands."
+    },
+    {
+      "gain": "No false alarms.",
+      "key": "b",
+      "label": "Keep the gap; Claude rarely runs git through Python (recommended)",
+      "lose": "The hole stays."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "b",
+  "rank": 2,
+  "ref": "decision guard-guards-mistakes-only; rule shared-trees-no-destructive-git",
+  "reply": "14:41 CST: asked lane notes-keep-reverify to check the git history for a past Python-heredoc read in the shared-tree guard that was reverted. Its answer comes back here.",
+  "short": "Shared-tree guard: read git reset inside Python, or keep the gap",
+  "status": "open",
+  "title": "Should the shared-tree guard read git discards inside Python code?",
+  "why": "Lane notes-keep-reverify, from kept note guard-heredoc-os-system."
+}

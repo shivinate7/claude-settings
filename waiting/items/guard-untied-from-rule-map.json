@@ -6,9 +6,9 @@
   "kind": "decision",
   "lane": "notes-fix-merge-ci",
   "lastAnswer": {
-    "at": "2026-11-07T20:41:00Z",
+    "at": "2026-11-07T20:41:09.600Z",
     "choice": "a",
-    "note": "taken by triage under parallelism-keep-going"
+    "note": ""
   },
   "n": 372,
   "options": [
@@ -35,7 +35,7 @@
   "pick": "a",
   "rank": 3,
   "ref": "note guard-untied-from-rule-map; decision cull-rules",
-  "reply": "Taken without your word, 14:41 CST: a, a guards section keyed by guard rule id, each row naming its test, with lint/test_rule_audit.py requiring a row per id the guard emits. It can be undone and needs no owner pick (rule parallelism-keep-going). Lane notes-fix-merge-ci builds it.",
+  "reply": "a, 14:41 CST, matching the pick triage took at 14:41 CST: a guards section keyed by guard rule id. Lane notes-fix-merge-ci builds it.",
   "short": "Guard rules in the rule map: own section, anchor rows, or exempt list",
   "status": "closed",
   "title": "Where should the rule map tie each guard rule to its test?",

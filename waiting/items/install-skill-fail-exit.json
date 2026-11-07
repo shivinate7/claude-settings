@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-07T20:25:00Z",
+  "context": "Goal: a failed install is never reported as success.\nProblem (risk): in install.ps1, a failed skill install sets only $AgentFailed and is never retried, so the script exits 0 (install.ps1 line 821; the exit reads $StillFailed). It bites in copy mode, and install-manifest-prunes.md line 14 put your PC in copy mode on 2026-11-01.\nBased on (code): install.ps1, Install-Dir and Resolve-Failures.\nDeparts from: main exits 0 on a failed skill copy. Option a exits non-zero.",
+  "home": "lane notes-keep-reverify",
+  "id": "install-skill-fail-exit",
+  "kind": "decision",
+  "lane": "notes-keep-reverify",
+  "lastAnswer": {
+    "at": "2026-11-07T20:41:09.600Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 368,
+  "options": [
+    {
+      "gain": "A failed skill copy shows as a failure.",
+      "key": "a",
+      "label": "Add skills to Resolve-Failures, in a small fix lane (recommended)",
+      "lose": "One small lane."
+    },
+    {
+      "gain": "No work.",
+      "key": "b",
+      "label": "Keep",
+      "lose": "A stale skill on your PC with no warning."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 2,
+  "ref": "install.ps1",
+  "reply": "a, 14:41 CST: install.ps1 fails when a skill copy fails, in a small fix lane. Relayed to lane notes-keep-reverify; this closes on its done report.",
+  "short": "install.ps1: exit non-zero on a failed skill copy",
+  "status": "open",
+  "title": "Should install.ps1 fail when a skill copy fails?",
+  "why": "Lane notes-keep-reverify, from kept note install-skill-fail-exits-0. It bites on your PC."
+}

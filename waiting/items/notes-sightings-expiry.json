@@ -4,6 +4,14 @@
   "home": "coordinator; step notes-backlog-review",
   "id": "notes-sightings-expiry",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-07T20:41:09.600Z",
+    "choice": [
+      "a",
+      "b"
+    ],
+    "note": ""
+  },
   "multi": true,
   "n": 358,
   "options": [
@@ -33,8 +41,9 @@
   ],
   "rank": 1,
   "ref": "item 355; rule roles-findings-are-debts-or-notes",
+  "reply": "a and b, 14:41 CST: sightings and expiry, plus one debt-fix lane per batch (not c, the debt-only batch). Routed to the coordinator; step notes-backlog-review holds it.",
   "short": "Notes backlog: pick sightings and expiry, a paydown lane per batch, or both",
-  "status": "open",
+  "status": "closed",
   "title": "How should the notes and debts backlog stop growing?",
   "why": "From your 355 note: the best-practices agent's finding, sent by the coordinator at 13:47 CST."
 }

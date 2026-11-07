@@ -4,6 +4,12 @@
   "home": "lane notes-fix-large-1",
   "id": "silent-undo-edit-pass",
   "kind": "decision",
+  "lane": "notes-fix-large-1",
+  "lastAnswer": {
+    "at": "2026-11-07T20:41:09.600Z",
+    "choice": "none",
+    "note": "i lean C is it as risky as you describe it?"
+  },
   "n": 364,
   "options": [
     {
@@ -29,6 +35,7 @@
   "pick": "a",
   "rank": 1,
   "ref": "decision silent-undo-check-design; step notes-fix-large-1",
+  "reply": "14:41 CST: asked lane notes-fix-large-1 to measure how risky c (advisory lines) is: how often an advisory line is read, against the hole in a. Its answer comes back here.",
   "short": "Silent-undo check: pass reworded lines, or keep the false alarm",
   "status": "open",
   "title": "May the silent-undo check let a reworded line pass, at the cost of one small hole?",

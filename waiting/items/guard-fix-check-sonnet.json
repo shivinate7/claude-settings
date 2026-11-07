@@ -4,6 +4,12 @@
   "home": "step guard-fix-check-sonnet (lane session_013NEJKz9HoqeRzdjbw9Fnga)",
   "id": "guard-fix-check-sonnet",
   "kind": "decision",
+  "lane": "guard-fix-check-sonnet",
+  "lastAnswer": {
+    "at": "2026-11-07T20:44:58.216Z",
+    "choice": "a",
+    "note": "are you gonna split the agent into two to solve this or jut add it in prose"
+  },
   "n": 351,
   "options": [
     {
@@ -23,6 +29,7 @@
   "pick": "a",
   "rank": 2,
   "ref": "item 279 option c",
+  "reply": "a, 14:44 CST. Your question: no split. The fix check is the same reviewer agent; only the model the orchestrator passes at spawn changes. Today agents/reviewer.md line 73 says \"The orchestrator spawns it on haiku\". The lane rewrites that sentence to Sonnet for guard and check PRs, and adds the row to the model-per-role table (agent-model-cap). Lane guard-fix-check-sonnet builds it; this closes on its done report.",
   "short": "Guard fix checks: Sonnet or Haiku?",
   "status": "open",
   "title": "Should the fix check on a guard or check PR run on Sonnet instead of Haiku?",

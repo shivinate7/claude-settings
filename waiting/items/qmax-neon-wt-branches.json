@@ -4,6 +4,11 @@
   "home": "q_max debt filed by lane qmax-browser-main-red",
   "id": "qmax-neon-wt-branches",
   "kind": "task",
+  "lane": "coordinator",
+  "lastAnswer": {
+    "at": "2026-11-07T20:41:09.600Z",
+    "note": "I'm pretty sure you can do this"
+  },
   "links": [
     {
       "label": "Neon console",
@@ -14,6 +19,7 @@
   "owner": "coordinator",
   "rank": 2,
   "ref": "item 332; step qmax-browser-main-red",
+  "reply": "14:41 CST: you handed this back. Read as your yes to the exact act: delete q_max's 611 `wt-` Neon branches, and only those. Sent to the coordinator for a q_max session with the Neon key. This closes when that session reports the count deleted.",
   "short": "Delete 611 leftover wt- Neon branches",
   "status": "open",
   "title": "Delete q_max's leftover `wt-` Neon branches",

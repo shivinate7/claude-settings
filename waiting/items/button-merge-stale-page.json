@@ -1,0 +1,43 @@
+{
+  "added": "2026-11-07T20:25:00Z",
+  "context": "Goal: main stays green and the records page stays current.\nProblem (rule): a merge by GitHub's button or by auto-merge skips merge.py's records rebuild. The page goes stale, and --check turns main red. No hook refuses either.\nBased on (record): docs/decisions/no-merge-during-batch-ci.md lines 33-35.\nDeparts from: main, where a button merge can leave the page stale. Each option closes that gap a different way.",
+  "home": "lane notes-keep-reverify",
+  "id": "button-merge-stale-page",
+  "kind": "decision",
+  "lane": "notes-keep-reverify",
+  "lastAnswer": {
+    "at": "2026-11-07T20:41:09.600Z",
+    "choice": "none",
+    "note": "is B the best option?"
+  },
+  "n": 369,
+  "options": [
+    {
+      "gain": "Claude cannot cause a stale page.",
+      "key": "a",
+      "label": "A hook refuses enable_pr_auto_merge, and the decision says the button is yours only (recommended)",
+      "lose": "You lose auto-merge."
+    },
+    {
+      "gain": "Any merge path works.",
+      "key": "b",
+      "label": "A bot push rebuilds the page on main after any merge",
+      "lose": "A bot writes to main."
+    },
+    {
+      "gain": "Main stays green.",
+      "key": "c",
+      "label": "Waive --check on runs that are not from a PR",
+      "lose": "A stale page goes unnoticed."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 2,
+  "ref": "decision no-merge-during-batch-ci",
+  "reply": "14:41 CST: asked lane notes-keep-reverify to weigh b (a bot rebuilds the page on main after any merge) against a, with what each costs. Its answer comes back here.",
+  "short": "Button merge: refuse auto-merge, bot rebuild, or waive the check",
+  "status": "open",
+  "title": "How should a merge by GitHub's button stop leaving the records page stale?",
+  "why": "Lane notes-keep-reverify, from kept note merge-by-button-stale-page."
+}

@@ -4,6 +4,15 @@
   "home": "coordinator; step review-rounds-rework",
   "id": "review-rounds-rework-picks",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-07T20:41:09.600Z",
+    "choice": [
+      "a",
+      "b",
+      "c"
+    ],
+    "note": ""
+  },
   "multi": true,
   "n": 359,
   "options": [
@@ -34,8 +43,9 @@
   ],
   "rank": 1,
   "ref": "item 356; item 351; rules agent-model-cap and roles-review-cap-three",
+  "reply": "a, b and c, 14:41 CST. Routed to the coordinator; step review-rounds-rework holds it.",
   "short": "Review rounds: Sonnet round 1 on guards, skip round 3, blocker-only FAIL",
-  "status": "open",
+  "status": "closed",
   "title": "Which changes to the review rounds' models and prompts do you want?",
   "why": "Your 356 note, 13:41 CST: \"should we also consider reworking our 3 round program in terms of what models they use what prompts etc?\" A read-only audit agent (Explore, Sonnet) measured 859 PRs."
 }

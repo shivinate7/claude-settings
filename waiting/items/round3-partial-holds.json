@@ -4,6 +4,12 @@
   "home": "lane review-fix-check-round (PR #1440)",
   "id": "round3-partial-holds",
   "kind": "decision",
+  "lane": "review-fix-check-round",
+  "lastAnswer": {
+    "at": "2026-11-07T20:41:09.600Z",
+    "choice": "b",
+    "note": ""
+  },
   "n": 362,
   "options": [
     {
@@ -23,6 +29,7 @@
   "pick": "b",
   "rank": 1,
   "ref": "item 356; PR #1440",
+  "reply": "b, 14:41 CST: a round-3 PARTIAL holds too. Relayed to lane review-fix-check-round (PR #1440); this closes on its done report.",
   "short": "Round-3 PARTIAL: hold, or old rules",
   "status": "open",
   "title": "Does a round-3 PARTIAL hold the change too, like a FAIL?",

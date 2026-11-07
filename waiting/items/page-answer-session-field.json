@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-07T20:25:00Z",
+  "context": "Goal: each session reads only its own page answers.\nProblem (goal): hooks/local_time.py page_note has no session filter, so a session can pick up a page note meant for another. A fix needs a new session field in the page's answers.\nBased on (code): skills/waiting-page/SKILL.md: an answer holds only item, n, at, note, and choice or done.\nDeparts from: main, where answers carry no session. Option a adds a session field.",
+  "home": "lane notes-keep-reverify",
+  "id": "page-answer-session-field",
+  "kind": "decision",
+  "lane": "notes-keep-reverify",
+  "lastAnswer": {
+    "at": "2026-11-07T20:41:09.600Z",
+    "choice": "none",
+    "note": "is there something already building a guard here?"
+  },
+  "n": 367,
+  "options": [
+    {
+      "gain": "No session picks up another's note.",
+      "key": "a",
+      "label": "Add a session field to answers and filter on it",
+      "lose": "A page and skill change."
+    },
+    {
+      "gain": "No change.",
+      "key": "b",
+      "label": "Keep; items are keyed per repo, and a stray note costs one extra read (recommended)",
+      "lose": "A rare misread note."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "b",
+  "rank": 2,
+  "ref": "skill waiting-page",
+  "reply": "14:41 CST: asked lane notes-keep-reverify to name any step or PR that already guards which session reads an answer. Its answer comes back here.",
+  "short": "Page answers: add a session field, or keep",
+  "status": "open",
+  "title": "Should page answers carry a session, so a session reads only its own?",
+  "why": "Lane notes-keep-reverify, from kept note inbox-page-note-other-session."
+}

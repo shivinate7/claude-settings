@@ -4,6 +4,12 @@
   "home": "lane review-fix-check-round (PR #1440)",
   "id": "round3-fixcheck-clears",
   "kind": "decision",
+  "lane": "review-fix-check-round",
+  "lastAnswer": {
+    "at": "2026-11-07T20:41:09.600Z",
+    "choice": "b",
+    "note": ""
+  },
   "n": 363,
   "options": [
     {
@@ -23,6 +29,7 @@
   "pick": "b",
   "rank": 1,
   "ref": "item 356; PR #1440",
+  "reply": "b, 14:41 CST: a passing fix check clears the hold. Relayed to lane review-fix-check-round (PR #1440); this closes on its done report.",
   "short": "Round-3 hold: a fix check clears it, or a new lane",
   "status": "open",
   "title": "After a round-3 FAIL, does a passing fix check clear the hold?",
