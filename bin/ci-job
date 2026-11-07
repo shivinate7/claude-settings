@@ -43,8 +43,9 @@
 # A tool is missing when a line's command is not on PATH, or the step exits 127.
 # --step NAME (repeatable) runs only the steps with those names, of any kind, each as a plain run (never with --lint, which
 # picks steps by kind: that pair is a usage error, exit 2). Every other step is left out and prints nothing. A name no step
-# of the job has prints one `unknown` line, and when any name is missing no step runs: exit 2. The merge's ready gate runs
-# its declared merge.readyChecks this way. Exit codes as below.
+# of the job has prints one `unknown` line, and when any name is missing no step runs: exit 2. A named step that does not
+# run (an action, a false if:) is also one `unknown` line, never a pass. The merge's ready checks run its declared
+# merge.readyChecks this way. Exit codes as below.
 # --plan prints each step's verdict-to-be and runs nothing. Output of each run: $VERDICT_LOG, else one new
 # temp log per call, named on the last line. Exit: 1 if a step fails, else 2 if one is unknown, else 0.
 # CI checks out with fetch-depth: 0. When the job's checkout step says so and the clone is shallow, ci-job first
@@ -432,6 +433,8 @@ def main(argv):
             continue
         state, detail, shell, env, cwd = planned[n - 1] or plan(step, bool(base), values, top)
         if state != "run":
+            if wanted and state != "unknown":  # a named step that did not run proved nothing: never a pass
+                state, detail = "unknown", "--step named it, but it did not run (%s): %s" % (state, detail)
             print("%-15s %s: %s" % (state, name, detail))
             tally["unknown"] += state == "unknown"
             blocker = blocker or (name if kind[n - 1] == "install" and state == "unknown" else None)
